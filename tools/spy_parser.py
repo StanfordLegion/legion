@@ -39,7 +39,7 @@ index_subspace_pat      = re.compile(prefix+"Index Subspace (?P<pid>[0-9a-f]+) (
 field_space_pat         = re.compile(prefix+"Field Space (?P<uid>[0-9]+)")
 field_space_name_pat    = re.compile(prefix+"Field Space Name (?P<uid>[0-9]+) (?P<name>[-\w ]+)")
 field_create_pat        = re.compile(prefix+"Field Creation (?P<uid>[0-9]+) (?P<fid>[0-9]+)")
-field_name_pat          = re.compile(prefix+"Field Name (?P<uid>[0-9]+) (?P<fid>[0-9]+) (?P<name>[-\w ]+)")
+field_name_pat          = re.compile(prefix+"Field Name (?P<uid>[0-9]+) (?P<fid>[0-9]+) (?P<name>[-\w. ]+)")
 region_pat              = re.compile(prefix+"Region (?P<iid>[0-9a-f]+) (?P<fid>[0-9]+) (?P<tid>[0-9]+)")
 region_name_pat         = re.compile(prefix+"Logical Region Name (?P<iid>[0-9a-f]+) (?P<fid>[0-9]+) (?P<tid>[0-9]+) (?P<name>[-\w ]+)")
 partition_name_pat      = re.compile(prefix+"Logical Partition Name (?P<iid>[0-9a-f]+) (?P<fid>[0-9]+) (?P<tid>[0-9]+) (?P<name>[-\w ]+)")
@@ -87,7 +87,7 @@ copy_event_pat          = re.compile(prefix+"Copy Events (?P<srcman>[0-9a-f]+) (
 copy_field_pat          = re.compile(prefix+"Copy Field (?P<startid>[0-9a-f]+) (?P<startgen>[0-9]+) (?P<termid>[0-9a-f]+) (?P<termgen>[0-9]+) (?P<fid>[0-9]+)")
 
 # Logger calls for physical instance usage 
-physical_inst_pat       = re.compile(prefix+"Physical Instance (?P<iid>[0-9a-f]+) (?P<mid>[0-9a-f]+) (?P<index>[0-9a-f]+) (?P<field>[0-9]+) (?P<tid>[0-9]+)")
+physical_inst_pat       = re.compile(prefix+"Physical Instance (?P<iid>[0-9a-f]+) (?P<mid>[0-9a-f]+) (?P<index>[0-9a-f]+) (?P<field>[0-9]+) (?P<tid>[0-9]+) (?P<blocking>[0-9]+)")
 physical_reduc_pat      = re.compile(prefix+"Reduction Instance (?P<iid>[0-9a-f]+) (?P<mid>[0-9a-f]+) (?P<index>[0-9a-f]+) (?P<field>[0-9]+) (?P<tid>[0-9]+) (?P<fold>[0-1]) (?P<indirect>[0-9]+)")
 inst_field_pat          = re.compile(prefix+"Instance Field (?P<iid>[0-9a-f]+) (?P<fid>[0-9]+)")
 op_user_pat             = re.compile(prefix+"Op Instance User (?P<uid>[0-9]+) (?P<idx>[0-9]+) (?P<iid>[0-9a-f]+)")
@@ -293,7 +293,7 @@ def parse_log_line(line, state):
     # Physical instance usage
     m = physical_inst_pat.match(line)
     if m <> None:
-        if state.add_physical_instance(int(m.group('iid'),16), int(m.group('mid'),16), int(m.group('index'),16), int(m.group('field')), int(m.group('tid'))):
+        if state.add_physical_instance(int(m.group('iid'),16), int(m.group('mid'),16), int(m.group('index'),16), int(m.group('field')), int(m.group('tid')), int(m.group('blocking'))):
             return True
     m = physical_reduc_pat.match(line)
     if m <> None:

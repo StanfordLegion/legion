@@ -37,9 +37,9 @@ import "regent"
 local cpennant
 do
   local root_dir = arg[0]:match(".*/") or "./"
-  local runtime_dir = root_dir .. "../../runtime"
-  local legion_dir = root_dir .. "../../runtime/legion"
-  local mapper_dir = root_dir .. "../../runtime/mappers"
+  local runtime_dir = root_dir .. "../../runtime/"
+  local legion_dir = runtime_dir .. "legion/"
+  local mapper_dir = runtime_dir .. "mappers/"
   local pennant_cc = root_dir .. "pennant.cc"
   local pennant_so = os.tmpname() .. ".so" -- root_dir .. "pennant.so"
   local cxx = os.getenv('CXX') or 'c++'
@@ -307,8 +307,7 @@ function _t1() end -- seems like I need this to break up the statements
 task init_pointers(rz : region(zone), rpp : region(point), rpg : region(point),
                    rs : region(side(rz, rpp, rpg, rs)))
 where
-  reads(rs.{mapsp1, mapsp2}),
-  writes(rs.{mapsp1, mapsp2})
+  reads writes(rs.{mapsp1, mapsp2})
 do
   for s in rs do
     s.mapsp1 = dynamic_cast(ptr(point, rpp, rpg), s.mapsp1)
@@ -626,8 +625,8 @@ task sum_point_mass(rz : region(zone), rpp : region(point), rpg : region(point),
                     rs : region(side(rz, rpp, rpg, rs)),
                     use_foreign : bool, enable : bool)
 where
-  reads(rz.{zareap, zrp}, rpp.pmaswt, rs.{mapsz, mapsp1, mapss3, smf}),
-  writes(rpp.pmaswt),
+  reads(rz.{zareap, zrp}, rs.{mapsz, mapsp1, mapss3, smf}),
+  reads writes(rpp.pmaswt),
   reduces+(rpg.pmaswt)
 do
   if not enable then return end
@@ -1031,8 +1030,8 @@ task sum_point_force(rz : region(zone), rpp : region(point), rpg : region(point)
                      rs : region(side(rz, rpp, rpg, rs)),
                      use_foreign : bool, enable : bool)
 where
-  reads(rz.znump, rpp.pf, rs.{mapsz, mapsp1, mapss3, sfq, sft}),
-  writes(rpp.pf),
+  reads(rz.znump, rs.{mapsz, mapsp1, mapss3, sfq, sft}),
+  reads writes(rpp.pf),
   reduces+(rpg.pf.{x, y})
 do
   if not enable then return end
@@ -1062,8 +1061,8 @@ end
 task apply_boundary_conditions(rp : region(point),
                                enable : bool)
 where
-  reads(rp.{pu0, pf, has_bcx, has_bcy}),
-  writes(rp.{pu0, pf})
+  reads(rp.{has_bcx, has_bcy}),
+  reads writes(rp.{pu0, pf})
 do
   if not enable then return end
 
@@ -1388,8 +1387,7 @@ task simulate(rz_all : region(zone), rz_all_p : partition(disjoint, rz_all),
               rs_all_p : partition(disjoint, rs_all),
               conf : config)
 where
-  reads(rz_all, rp_all_private, rp_all_ghost, rs_all),
-  writes(rz_all, rp_all_private, rp_all_ghost, rs_all),
+  reads writes(rz_all, rp_all_private, rp_all_ghost, rs_all),
   rp_all_private * rp_all_ghost
 do
   var alfa = conf.alfa
@@ -1645,8 +1643,7 @@ task initialize(rz_all : region(zone), rz_all_p : partition(disjoint, rz_all),
                 rs_all_p : partition(disjoint, rs_all),
                 conf : config)
 where
-  reads(rz_all, rp_all_private, rp_all_ghost, rs_all),
-  writes(rz_all, rp_all_private, rp_all_ghost, rs_all),
+  reads writes(rz_all, rp_all_private, rp_all_ghost, rs_all),
   rp_all_private * rp_all_ghost
 do
   var einit = conf.einit
@@ -1976,6 +1973,25 @@ terra read_config()
        end
      end)]
 
+  -- Allow command-line overrides of any file input setting
+  [config_fields_input:map(function(field)
+       if field.is_linked_field then
+         return quote end
+       else
+         if field.linked_field then
+           return quote end
+         else
+           return quote
+	     var argval = get_optional_arg([ "-" .. field.field])
+	     if argval ~= nil then
+	       c.sscanf(&(argval[0]), [get_type_specifier(field.type, true)],
+                        [explode_array(field.type, `(&(conf.[field.field])))])
+	     end
+           end
+         end
+       end
+     end)]
+
   -- Configure and run mesh generator.
   var meshtype : fixed_string
   if [extract(fixed_string)](items, nitems, "meshtype", &meshtype) < 1 then
@@ -2007,9 +2023,23 @@ terra read_config()
        end
      end)]
 
+  -- report mesh size in bytes
+  do
+    var zone_size = terralib.sizeof(zone)
+    var point_size = terralib.sizeof(point)
+    var side_size = [ terralib.sizeof(side(wild,wild,wild,wild)) ]
+    c.printf("Mesh memory usage:\n")
+    c.printf("  Zones  : %9lld * %4d bytes = %11lld bytes\n", conf.nz, zone_size, conf.nz * zone_size)
+    c.printf("  Points : %9lld * %4d bytes = %11lld bytes\n", conf.np, point_size, conf.np * point_size)
+    c.printf("  Sides  : %9lld * %4d bytes = %11lld bytes\n", conf.ns, side_size, conf.ns * side_size)
+    var total = ((conf.nz * zone_size) + (conf.np * point_size) + (conf.ns * side_size))
+    c.printf("  Total                             %11lld bytes\n", total)
+  end
+
   return conf
 end
 end
+read_config:compile()
 
 --
 -- Mesh Generator
@@ -2104,28 +2134,6 @@ terra read_input(runtime : c.legion_runtime_t,
     zonespancolors, &zonespancolors_size,
     &nspans_zones,
     &nspans_points)
-
-  -- Allocate all the mesh data in regions
-  do
-    var rz_ispace = c.legion_physical_region_get_logical_region(rz_physical[0]).index_space
-    var rz_alloc = c.legion_index_allocator_create(runtime, ctx, rz_ispace)
-    regentlib.assert(c.legion_index_allocator_alloc(rz_alloc, conf.nz).value == 0, "rz_alloc returned non-zero pointer")
-    c.legion_index_allocator_destroy(rz_alloc)
-  end
-
-  do
-    var rp_ispace = c.legion_physical_region_get_logical_region(rp_physical[0]).index_space
-    var rp_alloc = c.legion_index_allocator_create(runtime, ctx, rp_ispace)
-    regentlib.assert(c.legion_index_allocator_alloc(rp_alloc, conf.np).value == 0, "rp_alloc returned non-zero pointere")
-    c.legion_index_allocator_destroy(rp_alloc)
-  end
-
-  do
-    var rs_ispace = c.legion_physical_region_get_logical_region(rs_physical[0]).index_space
-    var rs_alloc = c.legion_index_allocator_create(runtime, ctx, rs_ispace)
-    regentlib.assert(c.legion_index_allocator_alloc(rs_alloc, conf.ns).value == 0, "rs_alloc returned non-zero pointer")
-    c.legion_index_allocator_destroy(rs_alloc)
-  end
 
   -- Write mesh data into regions
   do
@@ -2539,6 +2547,10 @@ task test()
   var rz_all = region(ispace(ptr, conf.nz), zone)
   var rp_all = region(ispace(ptr, conf.np), point)
   var rs_all = region(ispace(ptr, conf.ns), side(wild, wild, wild, wild))
+
+  new(ptr(zone, rz_all), conf.nz)
+  new(ptr(point, rp_all), conf.np)
+  new(ptr(side(wild, wild, wild, wild), rs_all), conf.ns)
 
   var colorings = read_input(
     __runtime(), __context(),

@@ -192,11 +192,11 @@ namespace Realm {
 #ifdef DEADLOCK_TRACE
       void add_thread(const pthread_t *thread);
 #endif
+      static void realm_backtrace(int signal);
 
     public:
       MachineImpl *machine;
 
-      Processor::TaskIDTable task_table;
       std::map<ReductionOpID, const ReductionOpUntyped *> reduce_op_table;
 
 #ifdef NODE_LOGGING

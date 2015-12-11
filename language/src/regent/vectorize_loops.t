@@ -18,6 +18,7 @@
 --
 
 local ast = require("regent/ast")
+local data = require("regent/data")
 local log = require("regent/log")
 local std = require("regent/std")
 local symbol_table = require("regent/symbol_table")
@@ -246,6 +247,7 @@ function flip_types.expr(cx, simd_width, symbol, node)
       new_node.fn = ast.typed.expr.Function {
         expr_type = flip_types.type(simd_width, node.fn.expr_type),
         value = flip_types.type(simd_width, node.fn.value),
+        options = node.options,
         span = node.span,
       }
     end
@@ -461,7 +463,7 @@ function collect_bounds(node)
     local value_type = std.as_read(node.value.expr_type)
     if std.is_bounded_type(value_type) then
       value_type:bounds():map(function(bound)
-        bounds:insert(std.newtuple(bound, node.field_name))
+        bounds:insert(data.newtuple(bound, node.field_name))
       end)
     end
     bounds:insertall(collect_bounds(node.value))
@@ -547,6 +549,13 @@ function check_vectorizability.stat(cx, node)
       if cx:lookup_expr_type(lh) == S and cx:lookup_expr_type(rh) == V then
         cx:report_error_when_demanded(node, error_prefix ..
           "an assignment of a non-scalar expression to a scalar expression")
+        return false
+      end
+
+      -- TODO: we could accept statements with no loop carrying dependence
+      if cx:lookup_expr_type(lh) == S then
+        cx:report_error_when_demanded(node, error_prefix ..
+          "an assignment to a scalar expression")
         return false
       end
 
@@ -804,6 +813,10 @@ function check_vectorizability.expr(cx, node)
       cx:report_error_when_demanded(node,
         error_prefix .. "a function reference")
 
+    elseif node:is(ast.typed.expr.RawValue) then
+      cx:report_error_when_demanded(node,
+        error_prefix .. "a raw operator")
+
     else
       assert(false, "unexpected node type " .. tostring(node:type()))
     end
@@ -907,6 +920,10 @@ function vectorize_loops.stat_repeat(node)
   return node { block = vectorize_loops.block(node.block) }
 end
 
+function vectorize_loops.stat_must_epoch(node)
+  return node { block = vectorize_loops.block(node.block) }
+end
+
 function vectorize_loops.stat_block(node)
   return node { block = vectorize_loops.block(node.block) }
 end
@@ -930,6 +947,9 @@ function vectorize_loops.stat(node)
 
   elseif node:is(ast.typed.stat.Repeat) then
     return vectorize_loops.stat_repeat(node)
+
+  elseif node:is(ast.typed.stat.MustEpoch) then
+    return vectorize_loops.stat_must_epoch(node)
 
   elseif node:is(ast.typed.stat.Block) then
     return vectorize_loops.stat_block(node)

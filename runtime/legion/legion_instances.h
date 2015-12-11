@@ -201,7 +201,7 @@ namespace LegionRuntime {
       void set_descriptor(FieldDataDescriptor &desc, unsigned fid_idx) const;
     public:
       virtual DistributedID send_manager(AddressSpaceID target); 
-      static void handle_send_manager(Runtime *runtime, 
+      static void handle_send_manager(Internal *runtime, 
                                       AddressSpaceID source,
                                       Deserializer &derez);
     public:
@@ -266,7 +266,7 @@ namespace LegionRuntime {
     public:
       virtual DistributedID send_manager(AddressSpaceID target); 
     public:
-      static void handle_send_manager(Runtime *runtime,
+      static void handle_send_manager(Internal *runtime,
                                       AddressSpaceID source,
                                       Deserializer &derez);
     public:

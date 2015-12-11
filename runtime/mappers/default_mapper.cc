@@ -520,6 +520,17 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void DefaultMapper::post_map_task(Task *task)
+    //--------------------------------------------------------------------------
+    {
+      log_mapper.spew("Post map task in default mapper for task %s "
+                      "(ID %lld) for processor " IDFMT "",
+                      task->variants->name,
+                      task->get_unique_task_id(), local_proc.id);
+      // Do nothing for now
+    }
+
+    //--------------------------------------------------------------------------
     bool DefaultMapper::map_copy(Copy *copy)
     //--------------------------------------------------------------------------
     {
@@ -543,10 +554,15 @@ namespace LegionRuntime {
         }
         else
         {
-          assert(copy->src_requirements[idx].current_instances.size() == 1);
-          Memory target = 
-            (copy->src_requirements[idx].current_instances.begin())->first;
-          copy->src_requirements[idx].target_ranking.push_back(target);
+          // There is only one choice anyway, so let the runtime find
+          // it. Currently, the runtime will fail to notify the mapper
+          // of existing instances for reduction copies, so this
+          // assertion may fail spuriously.
+
+          // assert(copy->src_requirements[idx].current_instances.size() == 1);
+          // Memory target =
+          //   (copy->src_requirements[idx].current_instances.begin())->first;
+          // copy->src_requirements[idx].target_ranking.push_back(target);
         }
         copy->dst_requirements[idx].virtual_map = false;
         copy->dst_requirements[idx].early_map = false;
@@ -559,10 +575,15 @@ namespace LegionRuntime {
         }
         else
         {
-          assert(copy->dst_requirements[idx].current_instances.size() == 1);
-          Memory target = 
-            (copy->dst_requirements[idx].current_instances.begin())->first;
-          copy->dst_requirements[idx].target_ranking.push_back(target);
+          // There is only one choice anyway, so let the runtime find
+          // it. Currently, the runtime will fail to notify the mapper
+          // of existing instances for reduction copies, so this
+          // assertion may fail spuriously.
+
+          // assert(copy->dst_requirements[idx].current_instances.size() == 1);
+          // Memory target =
+          //   (copy->dst_requirements[idx].current_instances.begin())->first;
+          // copy->dst_requirements[idx].target_ranking.push_back(target);
         }
         if (local_kind == Processor::LOC_PROC)
         {
@@ -732,17 +753,38 @@ namespace LegionRuntime {
       {
         // Pick the global memory
         Memory global = machine_interface.find_global_memory();
-        assert(global.exists());
+        if (!global.exists())
+        {
+          bool found = false;
+          std::vector<Memory> stack;
+          machine_interface.find_memory_stack(local_proc, stack,
+              local_proc.kind() == Processor::LOC_PROC);
+          // If there is no global memory, try finding RDMA memory
+          for (unsigned idx = 0; idx < stack.size() && !found; ++idx)
+            if (stack[idx].kind() == Memory::REGDMA_MEM)
+            {
+              global = stack[idx];
+              found = true;
+            }
+          // If failed, try using system memory
+          for (unsigned idx = 0; idx < stack.size() && !found; ++idx)
+            if (stack[idx].kind() == Memory::SYSTEM_MEM)
+            {
+              global = stack[idx];
+              found = true;
+            }
+          assert(true);
+        }
         to_create.push_back(global);
         // Only make one new instance
         create_one = true;
-        blocking_factor = 1;
+        blocking_factor = max_blocking_factor; // 1
       }
       else
       {
         to_reuse.insert(current_instances.begin(),current_instances.end());
         create_one = false;
-        blocking_factor = 1;
+        blocking_factor = max_blocking_factor; // 1
       }
       // Don't make any composite instances since they're 
       // not fully supported yet

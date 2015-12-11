@@ -50,6 +50,10 @@ inline void makecontext_wrap(ucontext_t *u, void (*fn)(), int args, ...) { makec
 #endif
 #endif
 
+#ifdef REALM_USE_HWLOC
+#include <hwloc.h>
+#endif
+
 #include <string.h>
 #include <stdlib.h>
 #include <string>
@@ -59,6 +63,9 @@ inline void makecontext_wrap(ucontext_t *u, void (*fn)(), int args, ...) { makec
 // needed for scanning Linux's /sys
 #include <dirent.h>
 #include <stdio.h>
+#ifdef REALM_USE_HWLOC
+#include <hwloc/linux.h>
+#endif
 #endif
 
 #define CHECK_PTHREAD(cmd) do { \
@@ -818,7 +825,10 @@ namespace Realm {
       ThreadLocal::current_host_thread = ThreadLocal::current_thread;
       ThreadLocal::current_thread = switch_to;
 
-      int ret = swapcontext(&host_ctx, &switch_to->ctx);
+#ifndef NDEBUG
+      int ret =
+#endif
+	swapcontext(&host_ctx, &switch_to->ctx);
 
       // if we return with a value of 0, that means we were (eventually) given control
       //  back, as we hoped
@@ -841,7 +851,10 @@ namespace Realm {
 	ThreadLocal::current_thread = switch_to;
 
 	// a switch between two user contexts - nice and simple
-	int ret = swapcontext(&switch_from->ctx, &switch_to->ctx);
+#ifndef NDEBUG
+	int ret =
+#endif
+	  swapcontext(&switch_from->ctx, &switch_to->ctx);
 	assert(ret == 0);
 
 	assert(switch_from->running == false);
@@ -853,7 +866,10 @@ namespace Realm {
 	ThreadLocal::current_thread = ThreadLocal::current_host_thread;
 	ThreadLocal::current_host_thread = 0;
 
-	int ret = swapcontext(&switch_from->ctx, ThreadLocal::host_context);
+#ifndef NDEBUG
+	int ret =
+#endif
+	  swapcontext(&switch_from->ctx, ThreadLocal::host_context);
 	assert(ret == 0);
 
 	// if we get control back
@@ -997,7 +1013,86 @@ namespace Realm {
     return cm;
   }
 
+  // proc with the same physical core share everything (ALU,FPU,LDST)
+  void update_ht_sharing(std::map<std::pair<int, int>, std::set<CoreMap::Proc *> > ht_sets)
+  {
+    for(std::map<std::pair<int, int>, std::set<CoreMap::Proc *> >::const_iterator it = ht_sets.begin();
+        it != ht_sets.end();
+        it++) {
+      const std::set<CoreMap::Proc *>& ht = it->second;
+      if(ht.size() == 1) continue;  // singleton set - no sharing
+
+      // all pairs dependencies
+      for(std::set<CoreMap::Proc *>::const_iterator it1 = ht.begin(); it1 != ht.end(); it1++) {
+        for(std::set<CoreMap::Proc *>::const_iterator it2 = ht.begin(); it2 != ht.end(); it2++) {
+          if(it1 != it2) {
+            CoreMap::Proc *p = *it1;
+            p->shares_alu.insert(*it2);
+            p->shares_fpu.insert(*it2);
+            p->shares_ldst.insert(*it2);
+          }
+        }
+      }
+    }
+  }
+
+  // bulldozer siblings share fpu
+  void update_bd_sharing(std::map<int, std::set<CoreMap::Proc *> > bd_sets)
+  {
+    for(std::map<int, std::set<CoreMap::Proc *> >::const_iterator it = bd_sets.begin();
+        it != bd_sets.end();
+        it++) {
+      const std::set<CoreMap::Proc *>& bd = it->second;
+
+      for(std::set<CoreMap::Proc *>::const_iterator it1 = bd.begin(); it1 != bd.end(); it1++) {
+        for(std::set<CoreMap::Proc *>::const_iterator it2 = bd.begin(); it2 != bd.end(); it2++) {
+          if(it1 != it2) {
+            CoreMap::Proc *p = *it1;
+            p->shares_fpu.insert(*it2);
+          }
+        }
+      }
+    }
+  }
+
 #ifdef __linux__
+#ifdef REALM_USE_HWLOC
+  // find bulldozer cpus that share fpu
+  static int get_bd_sibling_id(int cpu_id, int core_id) {
+    char str[1024];
+    sprintf(str, "/sys/devices/system/cpu/cpu%d/topology/thread_siblings", cpu_id);
+    FILE *f = fopen(str, "r");
+    if(!f) {
+      std::cout << "can't read '" << str << "' - skipping";
+    }
+    hwloc_bitmap_t set = hwloc_bitmap_alloc();
+    hwloc_linux_parse_cpumap_file(f, set);
+
+    fclose(f);
+
+    hwloc_bitmap_clr(set, cpu_id);
+    int siblingid = hwloc_bitmap_first(set);
+
+    sprintf(str, "/sys/devices/system/cpu/cpu%d/topology/core_id", siblingid);
+    f = fopen(str, "r");
+    if(!f) {
+      std::cout << "can't read '" << str << "' - skipping";
+    }
+    int sib_core_id;
+    int count = fscanf(f, "%d", &sib_core_id);
+    fclose(f);
+    if(count != 1) {
+      std::cout << "can't find core id in '" << str << "' - skipping";
+    }
+    if (sib_core_id != core_id) {
+      return siblingid;
+    } else {
+      return -1;
+    }
+  }
+
+#else
+
   static CoreMap *extract_core_map_from_linux_sys(void)
   {
     cpu_set_t cset;
@@ -1077,25 +1172,67 @@ namespace Realm {
     }
     closedir(nd);
 
-    // proc with the same physical core share everything (ALU,FPU,LDST)
-    for(std::map<std::pair<int, int>, std::set<CoreMap::Proc *> >::const_iterator it = ht_sets.begin();
-	it != ht_sets.end();
-	it++) {
-      const std::set<CoreMap::Proc *>& ht = it->second;
-      if(ht.size() == 1) continue;  // singleton set - no sharing
+    update_ht_sharing(ht_sets);
 
-      // all pairs dependencies
-      for(std::set<CoreMap::Proc *>::const_iterator it1 = ht.begin(); it1 != ht.end(); it1++)
-	for(std::set<CoreMap::Proc *>::const_iterator it2 = ht.begin(); it2 != ht.end(); it2++)
-	  if(it1 != it2) {
-	    CoreMap::Proc *p = *it1;
-	    p->shares_alu.insert(*it2);
-	    p->shares_fpu.insert(*it2);
-	    p->shares_ldst.insert(*it2);
-	  }
+    // all done!
+    return cm;
+  }
+#endif
+#endif
+
+#ifdef REALM_USE_HWLOC
+  static CoreMap *extract_core_map_from_hwloc(void)
+  {
+    CoreMap *cm = new CoreMap;
+
+    // hyperthreading sets are cores with the same node ID and physical core ID
+    std::map<std::pair<int, int>, std::set<CoreMap::Proc *> > ht_sets;
+    // bulldozer specific sets
+    std::map<int, std::set<CoreMap::Proc *> > bd_sets;
+
+    hwloc_topology_t topology;
+    hwloc_topology_init(&topology);
+    hwloc_topology_load(topology);
+
+    hwloc_obj_t obj = NULL;
+    int cpu_id, node_id, core_id;
+    while ((obj = hwloc_get_next_obj_by_type(topology, HWLOC_OBJ_CORE, obj)) != NULL) {
+      if(obj->online_cpuset && obj->allowed_cpuset) {
+        cpu_id = hwloc_bitmap_first(obj->cpuset);
+        while(cpu_id != -1) {
+
+          node_id = hwloc_bitmap_first(obj->nodeset);
+          core_id = obj->os_index;
+
+          CoreMap::Proc *p = new CoreMap::Proc;
+
+          p->id = cpu_id;
+          p->domain = node_id;
+          p->kernel_proc_ids.insert(cpu_id);
+
+          cm->all_procs[cpu_id] = p;
+          cm->by_domain[node_id][cpu_id] = p;
+
+          // add to HT sets to deal with in a bit
+          ht_sets[std::make_pair(node_id, core_id)].insert(p);
+
+#ifdef __linux__
+          // add bulldozer sets
+          int bd_sib_id = get_bd_sibling_id(cpu_id, core_id);
+          if (bd_sib_id != -1) {
+            bd_sets[bd_sib_id].insert(p);
+            bd_sets[cpu_id].insert(p);
+          }
+#endif
+
+          cpu_id = hwloc_bitmap_next(obj->cpuset, cpu_id);
+        }
+      }
     }
+    hwloc_topology_destroy(topology);
 
-    // TODO: some sort of hack for Bulldozer's (i.e. Titan's) FP clusters
+    update_ht_sharing(ht_sets);
+    update_bd_sharing(bd_sets);
 
     // all done!
     return cm;
@@ -1139,14 +1276,20 @@ namespace Realm {
       }
     }
 
-    // 2) (COMING SOON) extracted from hwloc information
-
+    // 2) extracted from hwloc information
+#ifdef REALM_USE_HWLOC
+    {
+      CoreMap *cm = extract_core_map_from_hwloc();
+      if(cm) return cm;
+    }
+#else
     // 3) extracted from Linux's /sys
 #ifdef __linux__
     {
       CoreMap *cm = extract_core_map_from_linux_sys();
       if(cm) return cm;
     }
+#endif
 #endif
 
     // 4) as a final fallback a single-core synthetic map

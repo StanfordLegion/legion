@@ -2856,7 +2856,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     /*static*/ void MaterializedView::handle_send_materialized_view(
-                   Runtime *runtime, Deserializer &derez, AddressSpaceID source)
+                  Internal *runtime, Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez); 
@@ -2896,7 +2896,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void MaterializedView::handle_send_update(Runtime *runtime,
+    /*static*/ void MaterializedView::handle_send_update(Internal *runtime,
                                      Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -2929,7 +2929,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void MaterializedView::handle_make_persistent(Runtime *runtime,
+    /*static*/ void MaterializedView::handle_make_persistent(Internal *runtime,
                                      Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -2965,8 +2965,8 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void MaterializedView::handle_unmake_persistent(Runtime *runtime,
-                                     Deserializer &derez, AddressSpaceID source)
+    /*static*/ void MaterializedView::handle_unmake_persistent(
+                  Internal *runtime, Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
@@ -3458,7 +3458,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void DeferredView::handle_deferred_update(Runtime *runtime,
+    /*static*/ void DeferredView::handle_deferred_update(Internal *runtime,
                                      Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -3759,7 +3759,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void CompositeView::handle_send_composite_view(Runtime *runtime,
+    /*static*/ void CompositeView::handle_send_composite_view(Internal *runtime,
                                      Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -5462,7 +5462,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void FillView::handle_send_fill_view(Runtime *runtime,
+    /*static*/ void FillView::handle_send_fill_view(Internal *runtime,
                                      Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -7027,7 +7027,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void ReductionView::handle_send_reduction_view(Runtime *runtime,
+    /*static*/ void ReductionView::handle_send_reduction_view(Internal *runtime,
                                      Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -7059,7 +7059,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void ReductionView::handle_send_update(Runtime *runtime,
+    /*static*/ void ReductionView::handle_send_update(Internal *runtime,
                                      Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {

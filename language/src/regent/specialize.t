@@ -15,6 +15,7 @@
 -- Legion Specialization Pass
 
 local ast = require("regent/ast")
+local data = require("regent/data")
 local log = require("regent/log")
 local std = require("regent/std")
 local symbol_table = require("regent/symbol_table")
@@ -52,7 +53,7 @@ local function guess_type_for_literal(value)
   end
 end
 
-function convert_lua_value(cx, node, value)
+local function convert_lua_value(cx, node, value)
   if type(value) == "number" or type(value) == "boolean" then
     local expr_type = guess_type_for_literal(value)
     return ast.specialized.expr.Constant {
@@ -186,6 +187,7 @@ local function get_num_accessed_fields(node)
 
   elseif node:is(ast.unspecialized.expr.New) then
     if get_num_accessed_fields(node.pointer_type_expr) > 1 then return false end
+    if get_num_accessed_fields(node.extent) > 1 then return false end
     return 1
 
   elseif node:is(ast.unspecialized.expr.Null) then
@@ -208,16 +210,65 @@ local function get_num_accessed_fields(node)
     return 1
 
   elseif node:is(ast.unspecialized.expr.Region) then
+    if get_num_accessed_fields(node.ispace) > 1 then return false end
     if get_num_accessed_fields(node.fspace_type_expr) > 1 then return false end
-    if get_num_accessed_fields(node.size) > 1 then return false end
     return 1
 
   elseif node:is(ast.unspecialized.expr.Partition) then
-    if get_num_accessed_fields(node.disjointness_expr) > 1 then return false end
-    if get_num_accessed_fields(node.region_type_expr) > 1 then return false end
+    if get_num_accessed_fields(node.disjointness) > 1 then return false end
+    if get_num_accessed_fields(node.region) > 1 then return false end
+    return 1
+
+  elseif node:is(ast.unspecialized.expr.PartitionEqual) then
+    if get_num_accessed_fields(node.region) > 1 then return false end
+    if get_num_accessed_fields(node.colors) > 1 then return false end
+    return 1
+
+  elseif node:is(ast.unspecialized.expr.PartitionByField) then
+    if get_num_accessed_fields(node.region) > 1 then return false end
+    if get_num_accessed_fields(node.colors) > 1 then return false end
+    return 1
+
+  elseif node:is(ast.unspecialized.expr.Image) then
+    if get_num_accessed_fields(node.parent) > 1 then return false end
+    if get_num_accessed_fields(node.partition) > 1 then return false end
+    if get_num_accessed_fields(node.region) > 1 then return false end
+    return 1
+
+  elseif node:is(ast.unspecialized.expr.Preimage) then
+    if get_num_accessed_fields(node.parent) > 1 then return false end
+    if get_num_accessed_fields(node.partition) > 1 then return false end
+    if get_num_accessed_fields(node.region) > 1 then return false end
     return 1
 
   elseif node:is(ast.unspecialized.expr.CrossProduct) then
+    return 1
+
+  elseif node:is(ast.unspecialized.expr.ListDuplicatePartition) then
+    return 1
+
+  elseif node:is(ast.unspecialized.expr.ListCrossProduct) then
+    return 1
+
+  elseif node:is(ast.unspecialized.expr.ListPhaseBarriers) then
+    return 1
+
+  elseif node:is(ast.unspecialized.expr.ListInvert) then
+    return 1
+
+  elseif node:is(ast.unspecialized.expr.ListRange) then
+    return 1
+
+  elseif node:is(ast.unspecialized.expr.PhaseBarrier) then
+    return 1
+
+  elseif node:is(ast.unspecialized.expr.Advance) then
+    return 1
+
+  elseif node:is(ast.unspecialized.expr.Copy) then
+    return 1
+
+  elseif node:is(ast.unspecialized.expr.Fill) then
     return 1
 
   elseif node:is(ast.unspecialized.expr.Unary) then
@@ -232,7 +283,7 @@ local function get_num_accessed_fields(node)
     return 1
 
   else
-    assert(false, "unreachable")
+    assert(false, "unexpected node type " .. tostring(node.node_type))
   end
 end
 
@@ -270,7 +321,7 @@ local function has_all_valid_field_accesses(node)
      node:is(ast.unspecialized.stat.Reduce) then
 
     local valid = true
-    std.zip(node.lhs, node.rhs):map(function(pair)
+    data.zip(node.lhs, node.rhs):map(function(pair)
       if valid then
         local lh, rh = unpack(pair)
         local num_accessed_fields_lh = get_num_accessed_fields(lh)
@@ -292,6 +343,226 @@ local function has_all_valid_field_accesses(node)
     return valid
   else
     assert(false, "unreachable")
+  end
+end
+
+function specialize.region_field(cx, node)
+  return ast.specialized.region.Field {
+    field_name = node.field_name,
+    fields = specialize.region_fields(cx, node.fields),
+    span = node.span,
+  }
+end
+
+function specialize.region_fields(cx, node)
+  return node and node:map(
+    function(field) return specialize.region_field(cx, field) end)
+end
+
+function specialize.region_root(cx, node)
+  local region = cx.env:lookup(node, node.region_name)
+  return ast.specialized.region.Root {
+    symbol = region,
+    fields = specialize.region_fields(cx, node.fields),
+    span = node.span,
+  }
+end
+
+function specialize.expr_region_root(cx, node)
+  return ast.specialized.expr.RegionRoot {
+    region = specialize.expr(cx, node.region),
+    fields = specialize.region_fields(cx, node.fields),
+    options = node.options,
+    span = node.span,
+  }
+end
+
+function specialize.region_bare(cx, node)
+  local region = cx.env:lookup(node, node.region_name)
+  return ast.specialized.region.Bare {
+    symbol = region,
+    span = node.span,
+  }
+end
+
+function specialize.regions(cx, node)
+  return node:map(
+    function(region) return specialize.region_root(cx, region) end)
+end
+
+function specialize.condition_variable(cx, node)
+  local symbol = cx.env:lookup(node, node.name)
+  return ast.specialized.ConditionVariable {
+    symbol = symbol,
+    span = node.span,
+  }
+end
+
+function specialize.condition_variables(cx, node)
+  return node:map(
+    function(variable) return specialize.condition_variable(cx, variable) end)
+end
+
+function specialize.privilege_kind(cx, node)
+  if node:is(ast.unspecialized.privilege_kind.Reads) then
+    return ast.specialized.privilege_kind.Reads(node)
+  elseif node:is(ast.unspecialized.privilege_kind.Writes) then
+    return ast.specialized.privilege_kind.Writes(node)
+  elseif node:is(ast.unspecialized.privilege_kind.Reduces) then
+    return ast.specialized.privilege_kind.Reduces(node)
+  else
+    assert(false, "unexpected node type " .. tostring(node:type()))
+  end
+end
+
+function specialize.privilege_kinds(cx, node)
+  return node:map(
+    function(privilege) return specialize.privilege_kind(cx, privilege) end)
+end
+
+function specialize.privilege(cx, node)
+  return ast.specialized.Privilege {
+    privileges = specialize.privilege_kinds(cx, node.privileges),
+    regions = specialize.regions(cx, node.regions),
+    span = node.span,
+  }
+end
+
+function specialize.privileges(cx, node)
+  return node:map(
+    function(privilege) return specialize.privilege(cx, privilege) end)
+end
+
+function specialize.coherence_kind(cx, node)
+  if node:is(ast.unspecialized.coherence_kind.Exclusive) then
+    return ast.specialized.coherence_kind.Exclusive(node)
+  elseif node:is(ast.unspecialized.coherence_kind.Atomic) then
+    return ast.specialized.coherence_kind.Atomic(node)
+  elseif node:is(ast.unspecialized.coherence_kind.Simultaneous) then
+    return ast.specialized.coherence_kind.Simultaneous(node)
+  elseif node:is(ast.unspecialized.coherence_kind.Relaxed) then
+    return ast.specialized.coherence_kind.Relaxed(node)
+  else
+    assert(false, "unexpected node type " .. tostring(node:type()))
+  end
+end
+
+function specialize.coherence_kinds(cx, node)
+  return node:map(
+    function(coherence) return specialize.coherence_kind(cx, coherence) end)
+end
+
+function specialize.coherence(cx, node)
+  return ast.specialized.Coherence {
+    coherence_modes = specialize.coherence_kinds(cx, node.coherence_modes),
+    regions = specialize.regions(cx, node.regions),
+    span = node.span,
+  }
+end
+
+function specialize.coherence_modes(cx, node)
+  return node:map(
+    function(coherence) return specialize.coherence(cx, coherence) end)
+end
+
+function specialize.flag_kind(cx, node)
+  if node:is(ast.unspecialized.flag_kind.NoAccessFlag) then
+    return ast.specialized.flag_kind.NoAccessFlag(node)
+  else
+    assert(false, "unexpected node type " .. tostring(node:type()))
+  end
+end
+
+function specialize.flag_kinds(cx, node)
+  return node:map(function(flag) return specialize.flag_kind(cx, flag) end)
+end
+
+function specialize.flag(cx, node)
+  return ast.specialized.Flag {
+    flags = specialize.flag_kinds(cx, node.flags),
+    regions = specialize.regions(cx, node.regions),
+    span = node.span,
+  }
+end
+
+function specialize.flags(cx, node)
+  return node:map(function(flag) return specialize.flag(cx, flag) end)
+end
+
+function specialize.condition_kind(cx, node)
+  if node:is(ast.unspecialized.condition_kind.Arrives) then
+    return ast.specialized.condition_kind.Arrives(node)
+  elseif node:is(ast.unspecialized.condition_kind.Awaits) then
+    return ast.specialized.condition_kind.Awaits(node)
+  else
+    assert(false, "unexpected node type " .. tostring(node:type()))
+  end
+end
+
+function specialize.condition_kinds(cx, node)
+  return node:map(
+    function(condition) return specialize.condition_kind(cx, condition) end)
+end
+
+function specialize.condition(cx, node)
+  return ast.specialized.Condition {
+    conditions = specialize.condition_kinds(cx, node.conditions),
+    variables = specialize.condition_variables(cx, node.variables),
+    span = node.span,
+  }
+end
+
+function specialize.expr_condition(cx, node)
+  return ast.specialized.expr.Condition {
+    conditions = specialize.condition_kinds(cx, node.conditions),
+    values = node.values:map(
+      function(value) return specialize.expr(cx, value) end),
+    options = node.options,
+    span = node.span,
+  }
+end
+
+function specialize.conditions(cx, node)
+  return node:map(
+    function(condition) return specialize.condition(cx, condition) end)
+end
+
+function specialize.expr_conditions(cx, node)
+  return node:map(
+    function(condition) return specialize.expr_condition(cx, condition) end)
+end
+
+function specialize.constraint_kind(cx, node)
+  if node:is(ast.unspecialized.constraint_kind.Subregion) then
+    return ast.specialized.constraint_kind.Subregion(node)
+  elseif node:is(ast.unspecialized.constraint_kind.Disjointness) then
+    return ast.specialized.constraint_kind.Disjointness(node)
+  else
+    assert(false, "unexpected node type " .. tostring(node:type()))
+  end
+end
+
+function specialize.constraint(cx, node)
+  return ast.specialized.Constraint {
+    lhs = specialize.region_bare(cx, node.lhs),
+    op = specialize.constraint_kind(cx, node.op),
+    rhs = specialize.region_bare(cx, node.rhs),
+    span = node.span,
+  }
+end
+
+function specialize.constraints(cx, node)
+  return node:map(
+    function(constraint) return specialize.constraint(cx, constraint) end)
+end
+
+function specialize.disjointness_kind(cx, node)
+  if node:is(ast.unspecialized.disjointness_kind.Aliased) then
+    return std.aliased
+  elseif node:is(ast.unspecialized.disjointness_kind.Disjoint) then
+    return std.disjoint
+  else
+    assert(false, "unexpected node type " .. tostring(node:type()))
   end
 end
 
@@ -505,6 +776,7 @@ function specialize.expr_new(cx, node)
   }
   return ast.specialized.expr.New {
     pointer_type = pointer_type,
+    extent = node.extent and specialize.expr(cx, node.extent),
     region = region,
     options = node.options,
     span = node.span,
@@ -544,16 +816,10 @@ end
 
 function specialize.expr_ispace(cx, node)
   local index_type = node.index_type_expr(cx.env:env())
-  if not std.is_index_type(index_type) then
-    log.error(node, "type mismatch in argument 1: expected an index type but got " .. tostring(index_type))
-  end
-
-  local expr_type = std.ispace(index_type)
   return ast.specialized.expr.Ispace {
     index_type = index_type,
     extent = specialize.expr(cx, node.extent),
     start = node.start and specialize.expr(cx, node.start),
-    expr_type = expr_type,
     options = node.options,
     span = node.span,
   }
@@ -561,70 +827,166 @@ end
 
 function specialize.expr_region(cx, node)
   local ispace = specialize.expr(cx, node.ispace)
-  local ispace_symbol
-  if ispace:is(ast.specialized.expr.ID) then
-    ispace_symbol = ispace.value
-  else
-    ispace_symbol = terralib.newsymbol()
-  end
   local fspace_type = node.fspace_type_expr(cx.env:env())
-  local expr_type = std.region(ispace_symbol, fspace_type)
   return ast.specialized.expr.Region {
     ispace = ispace,
-    ispace_symbol = ispace_symbol,
     fspace_type = fspace_type,
-    expr_type = expr_type,
     options = node.options,
     span = node.span,
   }
 end
 
 function specialize.expr_partition(cx, node)
-  local disjointness = node.disjointness_expr(cx.env:env())
-  local region_type = node.region_type_expr(cx.env:env())
-  -- Hack: Need to do this type checking early because otherwise we
-  -- can't construct a type here.
-  if disjointness ~= std.disjoint and disjointness ~= std.aliased then
-    log.error(node, "type mismatch in argument 1: expected disjoint or aliased but got " ..
-                tostring(disjointness))
-  end
-  local expr_type = std.partition(disjointness, region_type)
-  local region = ast.specialized.expr.ID {
-    value = expr_type.parent_region_symbol,
+  return ast.specialized.expr.Partition {
+    disjointness = specialize.disjointness_kind(cx, node.disjointness),
+    region = specialize.expr(cx, node.region),
+    coloring = specialize.expr(cx, node.coloring),
     options = node.options,
     span = node.span,
   }
-  return ast.specialized.expr.Partition {
-    disjointness = disjointness,
-    region = region,
-    coloring = specialize.expr(cx, node.coloring),
-    expr_type = expr_type,
+end
+
+function specialize.expr_partition_equal(cx, node)
+  return ast.specialized.expr.PartitionEqual {
+    region = specialize.expr(cx, node.region),
+    colors = specialize.expr(cx, node.colors),
+    options = node.options,
+    span = node.span,
+  }
+end
+
+function specialize.expr_partition_by_field(cx, node)
+  return ast.specialized.expr.PartitionByField {
+    region = specialize.expr_region_root(cx, node.region),
+    colors = specialize.expr(cx, node.colors),
+    options = node.options,
+    span = node.span,
+  }
+end
+
+function specialize.expr_image(cx, node)
+  return ast.specialized.expr.Image {
+    parent = specialize.expr(cx, node.parent),
+    partition = specialize.expr(cx, node.partition),
+    region = specialize.expr_region_root(cx, node.region),
+    options = node.options,
+    span = node.span,
+  }
+end
+
+function specialize.expr_preimage(cx, node)
+  return ast.specialized.expr.Preimage {
+    parent = specialize.expr(cx, node.parent),
+    partition = specialize.expr(cx, node.partition),
+    region = specialize.expr_region_root(cx, node.region),
     options = node.options,
     span = node.span,
   }
 end
 
 function specialize.expr_cross_product(cx, node)
-  local arg_types = node.arg_type_exprs:map(
-    function(arg_type_expr) return arg_type_expr(cx.env:env()) end)
-  -- Hack: Need to do this type checking early because otherwise we
-  -- can't construct a type here.
-  if #arg_types < 2 then
-    log.error(node, "cross product expected at least 2 arguments, got " ..
-                tostring(#arg_types))
-  end
-  local expr_type = std.cross_product(unpack(arg_types))
-  local args = expr_type.partition_symbols:map(
-    function(partition)
-      return ast.specialized.expr.ID {
-        value = partition,
-        options = node.options,
-        span = node.span,
-      }
-  end)
   return ast.specialized.expr.CrossProduct {
-    args = args,
-    expr_type = expr_type,
+    args = node.args:map(
+      function(arg) return specialize.expr(cx, arg) end),
+    options = node.options,
+    span = node.span,
+  }
+end
+
+function specialize.expr_list_duplicate_partition(cx, node)
+  return ast.specialized.expr.ListDuplicatePartition {
+    partition = specialize.expr(cx, node.partition),
+    indices = specialize.expr(cx, node.indices),
+    options = node.options,
+    span = node.span,
+  }
+end
+
+function specialize.expr_list_cross_product(cx, node)
+  return ast.specialized.expr.ListCrossProduct {
+    lhs = specialize.expr(cx, node.lhs),
+    rhs = specialize.expr(cx, node.rhs),
+    options = node.options,
+    span = node.span,
+  }
+end
+
+function specialize.expr_list_phase_barriers(cx, node)
+  return ast.specialized.expr.ListPhaseBarriers {
+    product = specialize.expr(cx, node.product),
+    options = node.options,
+    span = node.span,
+  }
+end
+
+function specialize.expr_list_invert(cx, node)
+  return ast.specialized.expr.ListInvert {
+    rhs = specialize.expr(cx, node.rhs),
+    product = specialize.expr(cx, node.product),
+    barriers = specialize.expr(cx, node.barriers),
+    options = node.options,
+    span = node.span,
+  }
+end
+
+function specialize.expr_list_range(cx, node)
+  return ast.specialized.expr.ListRange {
+    start = specialize.expr(cx, node.start),
+    stop = specialize.expr(cx, node.stop),
+    options = node.options,
+    span = node.span,
+  }
+end
+
+function specialize.expr_phase_barrier(cx, node)
+  return ast.specialized.expr.PhaseBarrier {
+    value = specialize.expr(cx, node.value),
+    options = node.options,
+    span = node.span,
+  }
+end
+
+function specialize.expr_advance(cx, node)
+  return ast.specialized.expr.Advance {
+    value = specialize.expr(cx, node.value),
+    options = node.options,
+    span = node.span,
+  }
+end
+
+function specialize.expr_copy(cx, node)
+  return ast.specialized.expr.Copy {
+    src = specialize.expr_region_root(cx, node.src),
+    dst = specialize.expr_region_root(cx, node.dst),
+    op = node.op,
+    conditions = specialize.expr_conditions(cx, node.conditions),
+    options = node.options,
+    span = node.span,
+  }
+end
+
+function specialize.expr_fill(cx, node)
+  return ast.specialized.expr.Fill {
+    dst = specialize.expr_region_root(cx, node.dst),
+    value = specialize.expr(cx, node.value),
+    conditions = specialize.expr_conditions(cx, node.conditions),
+    options = node.options,
+    span = node.span,
+  }
+end
+
+function specialize.expr_allocate_scratch_fields(cx, node)
+  return ast.specialized.expr.AllocateScratchFields {
+    region = specialize.expr_region_root(cx, node.region),
+    options = node.options,
+    span = node.span,
+  }
+end
+
+function specialize.expr_with_scratch_fields(cx, node)
+  return ast.specialized.expr.WithScratchFields {
+    region = specialize.expr_region_root(cx, node.region),
+    field_ids = specialize.expr(cx, node.field_ids),
     options = node.options,
     span = node.span,
   }
@@ -721,8 +1083,53 @@ function specialize.expr(cx, node)
   elseif node:is(ast.unspecialized.expr.Partition) then
     return specialize.expr_partition(cx, node)
 
+  elseif node:is(ast.unspecialized.expr.PartitionEqual) then
+    return specialize.expr_partition_equal(cx, node)
+
+  elseif node:is(ast.unspecialized.expr.PartitionByField) then
+    return specialize.expr_partition_by_field(cx, node)
+
+  elseif node:is(ast.unspecialized.expr.Image) then
+    return specialize.expr_image(cx, node)
+
+  elseif node:is(ast.unspecialized.expr.Preimage) then
+    return specialize.expr_preimage(cx, node)
+
   elseif node:is(ast.unspecialized.expr.CrossProduct) then
     return specialize.expr_cross_product(cx, node)
+
+  elseif node:is(ast.unspecialized.expr.ListDuplicatePartition) then
+    return specialize.expr_list_duplicate_partition(cx, node)
+
+  elseif node:is(ast.unspecialized.expr.ListCrossProduct) then
+    return specialize.expr_list_cross_product(cx, node)
+
+  elseif node:is(ast.unspecialized.expr.ListPhaseBarriers) then
+    return specialize.expr_list_phase_barriers(cx, node)
+
+  elseif node:is(ast.unspecialized.expr.ListInvert) then
+    return specialize.expr_list_invert(cx, node)
+
+  elseif node:is(ast.unspecialized.expr.ListRange) then
+    return specialize.expr_list_range(cx, node)
+
+  elseif node:is(ast.unspecialized.expr.PhaseBarrier) then
+    return specialize.expr_phase_barrier(cx, node)
+
+  elseif node:is(ast.unspecialized.expr.Advance) then
+    return specialize.expr_advance(cx, node)
+
+  elseif node:is(ast.unspecialized.expr.Copy) then
+    return specialize.expr_copy(cx, node)
+
+  elseif node:is(ast.unspecialized.expr.Fill) then
+    return specialize.expr_fill(cx, node)
+
+  elseif node:is(ast.unspecialized.expr.AllocateScratchFields) then
+    return specialize.expr_allocate_scratch_fields(cx, node)
+
+  elseif node:is(ast.unspecialized.expr.WithScratchFields) then
+    return specialize.expr_with_scratch_fields(cx, node)
 
   elseif node:is(ast.unspecialized.expr.Unary) then
     return specialize.expr_unary(cx, node)
@@ -838,6 +1245,15 @@ function specialize.stat_repeat(cx, node)
   }
 end
 
+function specialize.stat_must_epoch(cx, node)
+  local cx = cx:new_local_scope()
+  return ast.specialized.stat.MustEpoch {
+    block = specialize.block(cx, node.block),
+    options = node.options,
+    span = node.span,
+  }
+end
+
 function specialize.stat_block(cx, node)
   local cx = cx:new_local_scope()
   return ast.specialized.stat.Block {
@@ -926,7 +1342,7 @@ function specialize.stat_assignment_or_stat_reduce(cx, node)
   local flattened_lhs = terralib.newlist()
   local flattened_rhs = terralib.newlist()
 
-  std.zip(node.lhs, node.rhs):map(function(pair)
+  data.zip(node.lhs, node.rhs):map(function(pair)
     local lh, rh = unpack(pair)
     local num_accessed_fields =
       join_num_accessed_fields(get_num_accessed_fields(lh),
@@ -946,7 +1362,7 @@ function specialize.stat_assignment_or_stat_reduce(cx, node)
       span = node.span,
     }
 
-  else -- if node:is(ast.unspecialized.stat.Reduce)
+  elseif node:is(ast.unspecialized.stat.Reduce) then
     return ast.specialized.stat.Reduce {
       lhs = flattened_lhs,
       rhs = flattened_rhs,
@@ -954,6 +1370,8 @@ function specialize.stat_assignment_or_stat_reduce(cx, node)
       options = node.options,
       span = node.span,
     }
+  else
+    assert(false)
   end
 end
 
@@ -980,6 +1398,9 @@ function specialize.stat(cx, node)
 
   elseif node:is(ast.unspecialized.stat.Repeat) then
     return specialize.stat_repeat(cx, node)
+
+  elseif node:is(ast.unspecialized.stat.MustEpoch) then
+    return specialize.stat_must_epoch(cx, node)
 
   elseif node:is(ast.unspecialized.stat.Block) then
     return specialize.stat_block(cx, node)
@@ -1010,60 +1431,6 @@ function specialize.stat(cx, node)
   end
 end
 
-function specialize.privilege_region_field(cx, node)
-  local prefix = std.newtuple(node.field_name)
-  local fields = specialize.privilege_region_fields(cx, node.fields)
-  return fields:map(
-    function(field) return prefix .. field end)
-end
-
-function specialize.privilege_region_fields(cx, node)
-  if not node then
-    return terralib.newlist({std.newtuple()})
-  end
-  local fields = node:map(
-    function(field) return specialize.privilege_region_field(cx, field) end)
-  local result = terralib.newlist()
-  for _, f in ipairs(fields) do
-    result:insertall(f)
-  end
-  return result
-end
-
-function specialize.privilege_region(cx, node)
-  local region = cx.env:lookup(node, node.region_name)
-  local fields = specialize.privilege_region_fields(cx, node.fields)
-
-  return {
-    region = region,
-    fields = fields,
-  }
-end
-
-function specialize.privilege(cx, node)
-  local privilege
-  if node.privilege == "reads" then
-    privilege = std.reads
-  elseif node.privilege == "writes" then
-    privilege = std.writes
-  elseif node.privilege == "reduces" then
-    privilege = std.reduces(node.op)
-  else
-    assert(false)
-  end
-
-  local region_fields = node.regions:map(
-    function(region) return specialize.privilege_region(cx, region) end)
-  return std.privilege(privilege, region_fields)
-end
-
-function specialize.constraint(cx, node)
-  local lhs = cx.env:lookup(node, node.lhs)
-  local rhs = cx.env:lookup(node, node.rhs)
-
-  return std.constraint(lhs, rhs, node.op)
-end
-
 function specialize.stat_task_param(cx, node)
   -- Hack: Params which are regions can be recursive on the name of
   -- the region so introduce the symbol before type checking to allow
@@ -1080,20 +1447,27 @@ function specialize.stat_task_param(cx, node)
   }
 end
 
+function specialize.stat_task_params(cx, node)
+  return node:map(
+    function(param) return specialize.stat_task_param(cx, param) end)
+end
+
 function specialize.stat_task(cx, node)
   local cx = cx:new_local_scope()
   local proto = std.newtask(node.name)
   proto:setinline(node.options.inline)
-  cx.env:insert(node, node.name, proto)
+  if #node.name == 1 then
+    cx.env:insert(node, node.name[1], proto)
+  end
   cx = cx:new_local_scope()
 
-  local params = node.params:map(
-    function(param) return specialize.stat_task_param(cx, param) end)
+  local params = specialize.stat_task_params(cx, node.params)
   local return_type = node.return_type_expr(cx.env:env())
-  local privileges = node.privileges:map(
-    function(privilege) return specialize.privilege(cx, privilege) end)
-  local constraints = node.constraints:map(
-    function(constraint) return specialize.constraint(cx, constraint) end)
+  local privileges = specialize.privileges(cx, node.privileges)
+  local coherence_modes = specialize.coherence_modes(cx, node.coherence_modes)
+  local flags = specialize.flags(cx, node.flags)
+  local conditions = specialize.conditions(cx, node.conditions)
+  local constraints = specialize.constraints(cx, node.constraints)
   local body = specialize.block(cx, node.body)
 
   return ast.specialized.stat.Task {
@@ -1101,6 +1475,9 @@ function specialize.stat_task(cx, node)
     params = params,
     return_type = return_type,
     privileges = privileges,
+    coherence_modes = coherence_modes,
+    flags = flags,
+    conditions = conditions,
     constraints = constraints,
     body = body,
     prototype = proto,
@@ -1143,12 +1520,12 @@ function specialize.stat_fspace(cx, node)
       function(param) return specialize.stat_fspace_param(cx, param) end)
   fs.fields = node.fields:map(
       function(field) return specialize.stat_fspace_field(cx, field) end)
-  fs.constraints = node.constraints:map(
-      function(constraint) return specialize.constraint(cx, constraint) end)
+  local constraints = specialize.constraints(cx, node.constraints)
 
   return ast.specialized.stat.Fspace {
     name = node.name,
     fspace = fs,
+    constraints = constraints,
     options = node.options,
     span = node.span,
   }

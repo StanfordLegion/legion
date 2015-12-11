@@ -14,12 +14,15 @@
 
 import "regent"
 
-task f()
-  var r = region(ispace(ptr, 5), int)
-  var p = new(ptr(int, r))
-end
-
 task main()
-  f()
+  var r = region(ispace(ptr, 5), int)
+  var x0 = new(ptr(int, r))
+  var x123 = new(ptr(int, r), 3)
+
+  var t = 0
+  for x in r do
+    t += 1
+  end
+  regentlib.assert(t == 4, "test failed")
 end
 regentlib.start(main)
