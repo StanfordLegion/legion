@@ -126,13 +126,17 @@ ifeq ($(strip $(USE_HWLOC)),1)
   LEGION_LD_FLAGS += -L$(HWLOC)/lib -lhwloc
 endif
 
-USE_LIBDL = 1
+USE_LIBDL ?= 1
 ifeq ($(strip $(USE_LIBDL)),1)
+ifneq ($(shell uname -s),Darwin)
 #CC_FLAGS += -rdynamic
 LEGION_LD_FLAGS += -ldl -rdynamic
+else
+LEGION_LD_FLAGS += -ldl -Wl,-export_dynamic
+endif
 endif
 
-# Falgs for running in the general low-level runtime
+# Flags for running in the general low-level runtime
 ifeq ($(strip $(SHARED_LOWLEVEL)),0)
 
 # general low-level uses CUDA by default
@@ -279,6 +283,7 @@ ifeq ($(strip $(SHARED_LOWLEVEL)),0)
 LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/runtime_impl.cc \
 	           $(LG_RT_DIR)/lowlevel_dma.cc \
 	           $(LG_RT_DIR)/realm/module.cc \
+	           $(LG_RT_DIR)/realm/codedesc.cc \
 	           $(LG_RT_DIR)/realm/threads.cc \
 		   $(LG_RT_DIR)/realm/operation.cc \
 	           $(LG_RT_DIR)/realm/tasks.cc \
@@ -413,7 +418,7 @@ $(GEN_GPU_OBJS) : %.o : %.cu
 $(GPU_RUNTIME_OBJS): %.o : %.cu
 	$(NVCC) -o $@ -c $< $(NVCC_FLAGS) $(INC_FLAGS)
 
-clean:
+clean::
 	$(RM) -f $(OUTFILE) $(SLIB_LEGION) $(SLIB_REALM) $(SLIB_SHAREDLLR) $(GEN_OBJS) $(GEN_GPU_OBJS) $(LOW_RUNTIME_OBJS) $(HIGH_RUNTIME_OBJS) $(GPU_RUNTIME_OBJS) $(MAPPER_OBJS) $(ASM_OBJS)
 
 endif

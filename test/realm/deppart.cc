@@ -309,7 +309,8 @@ public:
     return Event::merge_events(events);
   }
 
-  static void init_data_task_wrapper(const void *args, size_t arglen, Processor p)
+  static void init_data_task_wrapper(const void *args, size_t arglen,
+				     const void *userdata, size_t userlen, Processor p)
   {
     MiniAeroTest *me = (MiniAeroTest *)testcfg;
     me->init_data_task(args, arglen, p);
@@ -864,7 +865,8 @@ public:
     }
   }
 
-  static void init_data_task_wrapper(const void *args, size_t arglen, Processor p)
+  static void init_data_task_wrapper(const void *args, size_t arglen,
+				     const void *userdata, size_t userlen, Processor p)
   {
     CircuitTest *me = (CircuitTest *)testcfg;
     me->init_data_task(args, arglen, p);
@@ -1450,7 +1452,8 @@ public:
     return Event::merge_events(events);
   }
 
-  static void init_data_task_wrapper(const void *args, size_t arglen, Processor p)
+  static void init_data_task_wrapper(const void *args, size_t arglen,
+				     const void *userdata, size_t userlen, Processor p)
   {
     PennantTest *me = (PennantTest *)testcfg;
     me->init_data_task(args, arglen, p);
@@ -1798,7 +1801,8 @@ public:
 };
 
 
-void top_level_task(const void *args, size_t arglen, Processor p)
+void top_level_task(const void *args, size_t arglen,
+		    const void *userdata, size_t userlen, Processor p)
 {
   int errors = 0;
 

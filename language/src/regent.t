@@ -57,7 +57,7 @@ local language = {
     "__spmd",
     "__unroll",
     "__vectorize",
-    "aliased", -- reserved for future use
+    "aliased",
     "allocate_scratch_fields",
     "advance",
     "arrives",
@@ -65,15 +65,19 @@ local language = {
     "atomic",
     "copy",
     "cross_product",
-    "disjoint", -- reserved for future use
+    "disjoint",
     "dynamic_cast",
     "exclusive",
+    "equal",
     "fill",
+    "image",
     "index_type", -- reserved for future use
     "isnull",
     "ispace",
     "list_cross_product",
     "list_duplicate_partition",
+    "list_invert",
+    "list_phase_barriers",
     "list_range",
     "max",
     "min",
@@ -83,6 +87,7 @@ local language = {
     "null",
     "partition",
     "phase_barrier",
+    "preimage",
     "product",
     "ptr", -- reserved for future use
     "reads",

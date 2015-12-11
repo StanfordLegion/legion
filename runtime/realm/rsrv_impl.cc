@@ -451,7 +451,10 @@ namespace Realm {
 	impl->mode = args.mode;
 	impl->requested = false;
 
-	bool any_local = impl->select_local_waiters(to_wake);
+#ifndef NDEBUG
+	bool any_local =
+#endif
+	  impl->select_local_waiters(to_wake);
 	assert(any_local);
       }
 

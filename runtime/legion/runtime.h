@@ -195,6 +195,9 @@ namespace LegionRuntime {
       // These three fields are only valid on the owner node
       Operation *const producer_op;
       const GenerationID op_gen;
+#ifdef LEGION_SPY
+      const UniqueID producer_uid;
+#endif
     private:
       FRIEND_ALL_RUNTIME_CLASSES
       UserEvent ready_event;
@@ -476,6 +479,7 @@ namespace LegionRuntime {
       bool invoke_mapper_pre_map_task(TaskOp *task);
       void invoke_mapper_select_variant(TaskOp *task);
       bool invoke_mapper_map_task(TaskOp *task);
+      void invoke_mapper_post_map_task(TaskOp *task);
       void invoke_mapper_failed_mapping(Mappable *mappable);
       void invoke_mapper_notify_result(Mappable *mappable);
       void invoke_mapper_slice_domain(TaskOp *task,
@@ -692,6 +696,8 @@ namespace LegionRuntime {
                            const void *args, size_t arglen);
     public:
       Event notify_pending_shutdown(void);
+      bool has_recent_messages(void) const;
+      void clear_recent_messages(void);
     private:
       Reservation send_lock;
       char *const sending_buffer;
@@ -708,6 +714,7 @@ namespace LegionRuntime {
       unsigned receiving_index;
       size_t receiving_buffer_size;
       unsigned received_messages;
+      bool observed_recent;
     }; 
 
     /**
@@ -739,6 +746,8 @@ namespace LegionRuntime {
       MessageManager& operator=(const MessageManager &rhs);
     public:
       Event notify_pending_shutdown(void);
+      bool has_recent_messages(void) const;
+      void clear_recent_messages(void);
     public:
       void send_message(Serializer &rez, MessageKind kind, 
                         VirtualChannelKind channel, bool flush);
@@ -751,6 +760,49 @@ namespace LegionRuntime {
       // State for sending messages
       Processor target;
       VirtualChannel *const channels; 
+    };
+
+    /**
+     * \class ShutdownManager
+     * A class for helping to manage the shutdown of the 
+     * runtime after the application has finished
+     */
+    class ShutdownManager {
+    public:
+      struct NotificationArgs {
+      public:
+        HLRTaskID hlr_id;
+        MessageManager *manager;
+      };
+      struct ResponseArgs {
+      public:
+        HLRTaskID hlr_id;
+        MessageManager *target;
+        bool result;
+      };
+    public:
+      ShutdownManager(Internal *rt, AddressSpaceID source, MessageManager *man);
+      ShutdownManager(const ShutdownManager &rhs);
+      ~ShutdownManager(void);
+    public:
+      ShutdownManager& operator=(const ShutdownManager &rhs);
+    public:
+      bool has_managers(void) const;
+      void add_manager(AddressSpaceID target, MessageManager *manager);
+    public:
+      void send_notifications(void);
+      void send_response(void);
+      bool handle_response(AddressSpaceID sender, bool result);
+      void finalize(void);
+    public:
+      Internal *const runtime;
+      const AddressSpaceID source; 
+      MessageManager *const source_manager;
+    protected:
+      Reservation shutdown_lock;
+      std::map<AddressSpaceID,MessageManager*> managers;
+      unsigned observed_responses;
+      bool result;
     };
 
     /**
@@ -1093,6 +1145,9 @@ namespace LegionRuntime {
       void destroy_field_space(Context ctx, FieldSpace handle);
       size_t get_field_size(Context ctx, FieldSpace handle, FieldID fid);
       size_t get_field_size(FieldSpace handle, FieldID fid);
+      void get_field_space_fields(Context ctx, FieldSpace handle,
+                                  std::set<FieldID> &fields);
+      void get_field_space_fields(FieldSpace handle, std::set<FieldID> &fields);
       // Called from deletion op
       void finalize_field_space_destroy(FieldSpace handle);
       void finalize_field_destroy(FieldSpace handle, FieldID fid);
@@ -1237,6 +1292,11 @@ namespace LegionRuntime {
                                  const std::map<FieldID,const char*> field_map,
                                  LegionFileMode);
       void detach_hdf5(Context ctx, PhysicalRegion region);
+      PhysicalRegion attach_file(Context ctx, const char *file_name,
+                                 LogicalRegion handle, LogicalRegion parent,
+                                 const std::vector<FieldID> field_vec,
+                                 LegionFileMode);
+      void detach_file(Context ctx, PhysicalRegion region);
     public:
       void issue_copy_operation(Context ctx, const CopyLauncher &launcher);
     public:
@@ -1590,7 +1650,10 @@ namespace LegionRuntime {
       void handle_remote_reduction_creation(Deserializer &derez,
                                             AddressSpaceID source);
       void handle_remote_creation_response(Deserializer &derez);
-      void handle_logical_state_return(Deserializer &derez);
+      void handle_logical_state_return(Deserializer &derez,
+                                       AddressSpaceID source);
+      void handle_shutdown_notification(AddressSpaceID source);
+      void handle_shutdown_response(Deserializer &derez, AddressSpaceID source);
     public:
       // Helper methods for the RegionTreeForest
       inline unsigned get_context_count(void) { return total_contexts; }
@@ -1627,6 +1690,7 @@ namespace LegionRuntime {
       bool invoke_mapper_pre_map_task(Processor target, TaskOp *task);
       void invoke_mapper_select_variant(Processor target, TaskOp *task);
       bool invoke_mapper_map_task(Processor target, SingleTask *task);
+      void invoke_mapper_post_map_task(Processor target, TaskOp *task);
       void invoke_mapper_failed_mapping(Processor target, Mappable *mappable);
       void invoke_mapper_notify_result(Processor target, Mappable *mappable);
       void invoke_mapper_slice_domain(Processor target, MultiTask *task,
@@ -1710,7 +1774,7 @@ namespace LegionRuntime {
     public:
       void increment_outstanding_top_level_tasks(void);
       void decrement_outstanding_top_level_tasks(void);
-      void initiate_runtime_shutdown(void);
+      void initiate_runtime_shutdown(AddressSpaceID source);
     public:
       template<typename T>
       inline T* get_available(Reservation reservation,
@@ -1739,6 +1803,8 @@ namespace LegionRuntime {
       DeletionOp*           get_available_deletion_op(bool need_cont,
                                                   bool has_lock = false);
       InterCloseOp*         get_available_inter_close_op(bool need_cont,
+                                                  bool has_lock = false);
+      ReadCloseOp*          get_available_read_close_op(bool need_cont,
                                                   bool has_lock = false);
       PostCloseOp*          get_available_post_close_op(bool need_cont,
                                                   bool has_lock = false);
@@ -1789,6 +1855,7 @@ namespace LegionRuntime {
       void free_frame_op(FrameOp *op);
       void free_deletion_op(DeletionOp *op);
       void free_inter_close_op(InterCloseOp *op); 
+      void free_read_close_op(ReadCloseOp *op);
       void free_post_close_op(PostCloseOp *op);
       void free_virtual_close_op(VirtualCloseOp *op);
       void free_dynamic_collective_op(DynamicCollectiveOp *op);
@@ -1811,6 +1878,7 @@ namespace LegionRuntime {
       RemoteTask* find_or_init_remote_context(UniqueID uid, Processor orig,
                                               SingleTask *remote_parent_ctx); 
       SingleTask* find_remote_context(UniqueID uid, SingleTask *remote_ctx);
+      void release_remote_context(UniqueID remote_owner_uid);
     public:
       bool is_local(Processor proc) const;
       Processor find_utility_processor(Processor proc);
@@ -1844,15 +1912,25 @@ namespace LegionRuntime {
       // These are the static methods that become the meta-tasks
       // for performing all the needed runtime operations
       static void initialize_runtime(
-                          const void *args, size_t arglen, Processor p);
+                          const void *args, size_t arglen, 
+			  const void *userdata, size_t userlen,
+			  Processor p);
       static void shutdown_runtime(
-                          const void *args, size_t arglen, Processor p);
+                          const void *args, size_t arglen, 
+			  const void *userdata, size_t userlen,
+			  Processor p);
       static void high_level_runtime_task(
-                          const void *args, size_t arglen, Processor p);
+                          const void *args, size_t arglen, 
+			  const void *userdata, size_t userlen,
+			  Processor p);
       static void profiling_runtime_task(
-                          const void *args, size_t arglen, Processor p);
+                          const void *args, size_t arglen, 
+			  const void *userdata, size_t userlen,
+			  Processor p);
       static void profiling_mapper_task(
-                          const void *args, size_t arglen, Processor p);
+                          const void *args, size_t arglen, 
+			  const void *userdata, size_t userlen,
+			  Processor p);
     protected:
       // Internal runtime methods invoked by the above static methods
       // after the find the right runtime instance to call
@@ -1872,6 +1950,8 @@ namespace LegionRuntime {
       const bool has_explicit_utility_procs;
     protected:
       unsigned outstanding_top_level_tasks;
+      ShutdownManager *shutdown_manager;
+      Reservation shutdown_lock;
 #ifdef SPECIALIZED_UTIL_PROCS
     public:
       const Processor cleanup_proc;
@@ -1996,6 +2076,7 @@ namespace LegionRuntime {
       Reservation frame_op_lock;
       Reservation deletion_op_lock;
       Reservation inter_close_op_lock;
+      Reservation read_close_op_lock;
       Reservation post_close_op_lock;
       Reservation virtual_close_op_lock;
       Reservation dynamic_collective_op_lock;
@@ -2027,6 +2108,7 @@ namespace LegionRuntime {
       std::deque<FrameOp*>              available_frame_ops;
       std::deque<DeletionOp*>           available_deletion_ops;
       std::deque<InterCloseOp*>         available_inter_close_ops;
+      std::deque<ReadCloseOp*>          available_read_close_ops;
       std::deque<PostCloseOp*>          available_post_close_ops;
       std::deque<VirtualCloseOp*>       available_virtual_close_ops;
       std::deque<DynamicCollectiveOp*>  available_dynamic_collective_ops;
@@ -2070,10 +2152,12 @@ namespace LegionRuntime {
       static void set_top_level_task_id(Processor::TaskFuncID top_id);
       static void configure_MPI_interoperability(int rank);
       static const ReductionOp* get_reduction_op(ReductionOpID redop_id);
+      static const SerdezRedopFns* get_serdez_redop_fns(ReductionOpID redop_id);
       static void set_registration_callback(RegistrationCallbackFnptr callback);
       static InputArgs& get_input_args(void);
       static Internal* get_runtime(Processor p);
       static ReductionOpTable& get_reduction_table(void);
+      static SerdezRedopTable& get_serdez_redop_table(void);
       static ProjectionID register_region_projection_function(
                                     ProjectionID handle, void *func_ptr);
       static ProjectionID register_partition_projection_function(
@@ -2112,8 +2196,7 @@ namespace LegionRuntime {
 #endif
     private:
       static int* get_startup_arrivals(void);
-      static Processor::TaskIDTable& get_task_table(
-                                          bool add_runtime_tasks = true);
+      static TaskIDTable& get_task_table(bool add_runtime_tasks = true);
       static std::map<Processor::TaskFuncID,InlineFnptr>& 
                                             get_inline_table(void);
       static std::map<Processor::TaskFuncID,TaskVariantCollection*>& 
@@ -2122,7 +2205,7 @@ namespace LegionRuntime {
                                             get_user_data_table(void);
       static RegionProjectionTable& get_region_projection_table(void);
       static PartitionProjectionTable& get_partition_projection_table(void);
-      static void register_runtime_tasks(Processor::TaskIDTable &table);
+      static void register_runtime_tasks(TaskIDTable &table);
       static Processor::TaskFuncID get_next_available_id(void);
       static void log_machine(Machine machine);
 #ifdef SPECIALIZED_UTIL_PROCS

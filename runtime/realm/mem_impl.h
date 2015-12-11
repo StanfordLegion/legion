@@ -46,6 +46,7 @@ namespace Realm {
 
 	MKIND_ZEROCOPY, // CPU memory, pinned for GPU access
 	MKIND_DISK,    // disk memory accessible by owner node
+	MKIND_FILE,    // file memory accessible by owner node
 #ifdef USE_HDF
 	MKIND_HDF      // HDF memory accessible by owner node
 #endif
@@ -261,6 +262,64 @@ namespace Realm {
     public:
       int fd; // file descriptor
       std::string file;  // file name
+    };
+
+    class FileMemory : public MemoryImpl {
+    public:
+      static const size_t ALIGNMENT = 256;
+
+      FileMemory(Memory _me);
+
+      virtual ~FileMemory(void);
+
+      virtual RegionInstance create_instance(IndexSpace is,
+                                            const int *linearization_bits,
+                                            size_t bytes_needed,
+                                            size_t block_size,
+                                            size_t element_size,
+                                            const std::vector<size_t>& field_sizes,
+                                            ReductionOpID redopid,
+                                            off_t list_size,
+                                            const ProfilingRequestSet &reqs,
+                                            RegionInstance parent_inst);
+
+      RegionInstance create_instance(IndexSpace is,
+                                     const int *linearization_bits,
+                                     size_t bytes_needed,
+                                     size_t block_size,
+                                     size_t element_size,
+                                     const std::vector<size_t>& field_sizes,
+                                     ReductionOpID redopid,
+                                     off_t list_size,
+                                     const ProfilingRequestSet &reqs,
+                                     RegionInstance parent_inst,
+                                     const char *file_name,
+                                     Domain domain,
+                                     legion_lowlevel_file_mode_t file_mode);
+      virtual void destroy_instance(RegionInstance i,
+                                    bool local_destroy);
+
+
+      virtual off_t alloc_bytes(size_t size);
+
+      virtual void free_bytes(off_t offset, size_t size);
+
+      virtual void get_bytes(off_t offset, void *dst, size_t size);
+      void get_bytes(ID::IDType inst_id, off_t offset, void *dst, size_t size);
+
+      virtual void put_bytes(off_t offset, const void *src, size_t size);
+      void put_bytes(ID::IDType inst_id, off_t offset, const void *src, size_t size);
+
+      virtual void apply_reduction_list(off_t offset, const ReductionOpUntyped *redop,
+                                       size_t count, const void *entry_buffer);
+
+      virtual void *get_direct_ptr(off_t offset, size_t size);
+      virtual int get_home_node(off_t offset, size_t size);
+
+      int get_file_des(ID::IDType inst_id);
+    public:
+      std::vector<int> file_vec;
+      pthread_mutex_t vector_lock;
     };
 
 #ifdef USE_HDF

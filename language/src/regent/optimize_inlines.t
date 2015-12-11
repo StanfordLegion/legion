@@ -60,6 +60,7 @@ local function uses(cx, region_type, polarity)
   -- mapped, but codegen will be able to do the right thing by
   -- ignoring anything that isn't a root in the region forest.
 
+  assert(std.type_supports_privileges(region_type))
   local usage = { [region_type] = polarity }
   for other_region_type, _ in pairs(cx.region_universe) do
     local constraint = {
@@ -173,11 +174,24 @@ local function analyze_usage_node(cx)
     elseif node:is(ast.typed.expr.Fill) then
       local dst_type = std.as_read(node.dst.expr_type)
       return uses(cx, dst_type, remote)
+    elseif node:is(ast.typed.expr.Region) then
+      return uses(cx, node.expr_type, inline)
+    elseif node:is(ast.typed.expr.PartitionByField) then
+      return uses(cx, node.region.expr_type, remote)
+    elseif node:is(ast.typed.expr.Image) then
+      return uses(cx, node.region.expr_type, remote)
+    elseif node:is(ast.typed.expr.Preimage) then
+      return uses(cx, node.region.expr_type, remote)
+    elseif node:is(ast.typed.expr.IndexAccess) then
+      local base_type = std.as_read(node.value.expr_type)
+      if std.is_region(base_type) then
+        return uses(cx, base_type, inline)
+      end
     elseif node:is(ast.typed.expr.FieldAccess) or
       node:is(ast.typed.expr.Deref)
     then
       local ptr_type = std.as_read(node.value.expr_type)
-      if std.is_bounded_type(std.as_read(ptr_type)) then
+      if std.is_bounded_type(ptr_type) and ptr_type:is_ptr() then
         return data.reduce(
           usage_meet,
           ptr_type:bounds():map(
@@ -188,6 +202,7 @@ local function analyze_usage_node(cx)
 end
 
 local function analyze_usage(cx, node)
+  assert(node)
   return ast.mapreduce_node_postorder(
     analyze_usage_node(cx),
     usage_meet,
@@ -196,19 +211,19 @@ end
 
 local optimize_inlines = {}
 
-function annotate(node, in_usage, out_usage)
+local function annotate(node, in_usage, out_usage)
   return { node, in_usage, out_usage }
 end
 
-function annotated_in_usage(annotated_node)
+local function annotated_in_usage(annotated_node)
   return annotated_node[2]
 end
 
-function annotated_out_usage(annotated_node)
+local function annotated_out_usage(annotated_node)
   return annotated_node[3]
 end
 
-function map_regions(diff)
+local function map_regions(diff)
   local result = terralib.newlist()
   if diff then
     local region_types_by_polarity = {}
@@ -241,7 +256,7 @@ function map_regions(diff)
   return result
 end
 
-function fixup_block(annotated_block, in_usage, out_usage)
+local function fixup_block(annotated_block, in_usage, out_usage)
   local node, node_in_usage, node_out_usage = unpack(annotated_block)
   local stats = terralib.newlist()
   stats:insertall(map_regions(usage_diff(in_usage, node_in_usage)))
@@ -250,7 +265,7 @@ function fixup_block(annotated_block, in_usage, out_usage)
   return node { stats = stats }
 end
 
-function fixup_elseif(annotated_node, in_usage, out_usage)
+local function fixup_elseif(annotated_node, in_usage, out_usage)
   local node, node_in_usage, node_out_usage = unpack(annotated_node)
   local annotated_block = annotate(node.block, node_in_usage, node_out_usage)
   local block = fixup_block(annotated_block, in_usage, out_usage)
@@ -384,7 +399,7 @@ function optimize_inlines.stat_index_launch(cx, node)
 end
 
 function optimize_inlines.stat_var(cx, node)
-  local usage = analyze_usage(node)
+  local usage = analyze_usage(cx, node)
   return annotate(node, usage, usage)
 end
 

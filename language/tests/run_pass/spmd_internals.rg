@@ -13,6 +13,8 @@
 -- limitations under the License.
 
 -- runs-with:
+-- []
+
 -- [["-ll:cpu", "4"]]
 
 import "regent"
@@ -44,7 +46,12 @@ end
 task shard(is : regentlib.list(int),
            rs_private : regentlib.list(region(elt)),
            rs_ghost : regentlib.list(region(elt)),
-           rs_ghost_product : regentlib.list(regentlib.list(region(elt))))
+           rs_ghost_product : regentlib.list(
+             regentlib.list(region(elt), nil, 1), nil, 1),
+           empty_in : regentlib.list(regentlib.list(phase_barrier)),
+           empty_out : regentlib.list(regentlib.list(phase_barrier)),
+           full_in : regentlib.list(regentlib.list(phase_barrier)),
+           full_out : regentlib.list(regentlib.list(phase_barrier)))
 where
   reads writes(rs_private, rs_ghost, rs_ghost_product),
   simultaneous(rs_ghost, rs_ghost_product),
@@ -53,23 +60,30 @@ where
   -- rs_private * rs_ghost_product,
   -- rs_ghost * rs_ghost_product
 do
+  c.printf("running shard\n")
   var f = allocate_scratch_fields(rs_ghost.{a, b})
   for i in is do
     phase1(rs_private[i], rs_ghost[i])
   end
 
-  -- -- Zero the reduction fields:
-  -- fill((with_scratch_fields(rs_ghost.{a, b}, f)).{a, b}, 0) -- awaits(...)
+  -- Zero the reduction fields:
+  fill((with_scratch_fields(rs_ghost.{a, b}, f)).{a, b}, 0)
   for i in is do
     phase2(rs_private[i], with_scratch_fields((rs_ghost[i]).{a, b}, f))
   end
-  -- copy((with_scratch_fields(rs_ghost.{a, b}, f)).{a, b}, rs_ghost.{a, b}, +) -- arrives(...)
-  -- copy((with_scratch_fields(rs_ghost.{a, b}, f)).{a, b}, rs_ghost_product.{a, b}, +) -- arrives(...)
+  copy((with_scratch_fields(rs_ghost.{a, b}, f)).{a, b}, rs_ghost.{a, b}, +)
+  copy((with_scratch_fields(rs_ghost.{a, b}, f)).{a, b}, rs_ghost_product.{a, b}, +,
+       awaits(empty_out), arrives(full_out))
 
-  -- awaits(...)
+  -- awaits(advance(full_in)), arrives(empty_in)
   for i in is do
     phase3(rs_private[i], rs_ghost[i])
   end
+
+  empty_in = advance(empty_in)
+  empty_out = advance(empty_out)
+  full_in = advance(full_in)
+  full_out = advance(full_out)
 end
 
 -- x : regentlib.list(regentlib.list(region(...))) = list_cross_product(y, z)
@@ -81,21 +95,56 @@ task main()
   var lo, hi, stride = 0, 10, 3
 
   var r_private = region(ispace(ptr, hi-lo), elt)
-  var r_ghost = region(ispace(ptr, hi-lo), elt)
+  var x0 = new(ptr(elt, r_private))
+  var x1 = new(ptr(elt, r_private))
+  var x2 = new(ptr(elt, r_private))
+  var x3 = new(ptr(elt, r_private))
 
-  var rc = c.legion_coloring_create()
+  var cp = c.legion_coloring_create()
   for i = lo, hi do
-    c.legion_coloring_ensure_color(rc, i)
+    c.legion_coloring_ensure_color(cp, i)
   end
-  var p_private = partition(disjoint, r_private, rc)
-  var p_ghost = partition(aliased, r_ghost, rc)
-  c.legion_coloring_destroy(rc)
+  c.legion_coloring_add_point(cp, 0, __raw(x0))
+  c.legion_coloring_add_point(cp, 1, __raw(x1))
+  c.legion_coloring_add_point(cp, 2, __raw(x2))
+  c.legion_coloring_add_point(cp, 3, __raw(x3))
+  var p_private = partition(disjoint, r_private, cp)
+  c.legion_coloring_destroy(cp)
+
+  var r_ghost = region(ispace(ptr, hi-lo), elt)
+  var y0 = new(ptr(elt, r_ghost))
+  var y1 = new(ptr(elt, r_ghost))
+  var y2 = new(ptr(elt, r_ghost))
+  var y3 = new(ptr(elt, r_ghost))
+
+  var cg = c.legion_coloring_create()
+  for i = lo, hi do
+    c.legion_coloring_ensure_color(cg, i)
+  end
+  c.legion_coloring_add_point(cg, 0, __raw(y0))
+  c.legion_coloring_add_point(cg, 0, __raw(y1))
+  c.legion_coloring_add_point(cg, 1, __raw(y0))
+  c.legion_coloring_add_point(cg, 1, __raw(y1))
+  c.legion_coloring_add_point(cg, 1, __raw(y2))
+  c.legion_coloring_add_point(cg, 2, __raw(y1))
+  c.legion_coloring_add_point(cg, 2, __raw(y2))
+  c.legion_coloring_add_point(cg, 2, __raw(y3))
+  c.legion_coloring_add_point(cg, 3, __raw(y2))
+  c.legion_coloring_add_point(cg, 3, __raw(y3))
+  var p_ghost = partition(aliased, r_ghost, cg)
+  c.legion_coloring_destroy(cg)
 
   var rs_private = list_duplicate_partition(p_private, list_range(lo, hi))
   var rs_ghost = list_duplicate_partition(p_ghost, list_range(lo, hi))
   copy(r_private, rs_private)
   copy(r_ghost, rs_ghost)
   var rs_ghost_product = list_cross_product(rs_ghost, rs_ghost)
+  var rs_ghost_empty_in = list_phase_barriers(rs_ghost_product)
+  var rs_ghost_empty_out = list_invert(
+    rs_ghost, rs_ghost_product, rs_ghost_empty_in)
+  var rs_ghost_full_in = list_phase_barriers(rs_ghost_product)
+  var rs_ghost_full_out = list_invert(
+    rs_ghost, rs_ghost_product, rs_ghost_full_in)
   must_epoch
     for i = lo, hi, stride do
       var ilo, ihi = i, regentlib.fmin(i+stride, hi)
@@ -106,7 +155,11 @@ task main()
       var rs_p = rs_private[is]
       var rs_g = rs_ghost[is]
       var rs_g_p = rs_ghost_product[is]
-      shard(iis, rs_p, rs_g, rs_g_p)
+      var rs_g_e_i = rs_ghost_empty_in[is]
+      var rs_g_e_o = rs_ghost_empty_out[is]
+      var rs_g_f_i = rs_ghost_full_in[is]
+      var rs_g_f_o = rs_ghost_full_out[is]
+      shard(iis, rs_p, rs_g, rs_g_p, rs_g_e_i, rs_g_e_o, rs_g_f_i, rs_g_f_o)
     end
   end
 end

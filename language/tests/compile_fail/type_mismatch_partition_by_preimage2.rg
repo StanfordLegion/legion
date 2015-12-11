@@ -13,15 +13,16 @@
 -- limitations under the License.
 
 -- fails-with:
--- type_mismatch_partition3.rg:25: type mismatch in argument 1: expected disjoint or aliased but got int32
---   var p = partition(int, r, c)
---                   ^
+-- type_mismatch_partition_by_preimage2.rg:26: type mismatch: expected a region but got int32
+--   var q = preimage(s, p, (0))
+--                       ^
 
 import "regent"
 
-task f() : int
+task f()
   var r = region(ispace(ptr, 5), int)
-  var c : regentlib.c.legion_coloring_t
-  var p = partition(int, r, c)
+  var s = region(ispace(ptr, 5), ptr(int, r))
+  var p = partition(equal, r, ispace(int1d, 3))
+  var q = preimage(s, p, (0))
 end
 f:compile()

@@ -215,6 +215,7 @@ namespace LegionRuntime {
       rez.serialize(spawn_task);
       rez.serialize(map_locally);
       rez.serialize(profile_task);
+      rez.serialize(post_map_task);
       rez.serialize(task_priority);
       rez.serialize(early_mapped_regions.size());
       for (std::map<unsigned,InstanceRef>::iterator it = 
@@ -316,6 +317,7 @@ namespace LegionRuntime {
       derez.deserialize(spawn_task);
       derez.deserialize(map_locally);
       derez.deserialize(profile_task);
+      derez.deserialize(post_map_task);
       derez.deserialize(task_priority);
       size_t num_early;
       derez.deserialize(num_early);
@@ -395,6 +397,7 @@ namespace LegionRuntime {
       spawn_task = false;
       map_locally = false;
       profile_task = false;
+      post_map_task = false;
       task_priority = 0;
       start_time = 0;
       stop_time = 0;
@@ -454,6 +457,13 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       return TASK_OP_KIND;
+    }
+
+    //--------------------------------------------------------------------------
+    size_t TaskOp::get_region_count(void) const
+    //--------------------------------------------------------------------------
+    {
+      return regions.size();
     }
 
     //--------------------------------------------------------------------------
@@ -635,6 +645,9 @@ namespace LegionRuntime {
         {
           unsigned index;
           derez.deserialize(index);
+#ifdef DEBUG_HIGH_LEVEL
+          assert(index < infos.size());
+#endif
           infos[index].unpack_info(derez, source, runtime->forest);
         }
       }
@@ -1483,6 +1496,7 @@ namespace LegionRuntime {
       this->spawn_task = stealable; // set spawn to stealable
       this->map_locally = rhs->map_locally;
       this->profile_task = rhs->profile_task;
+      this->post_map_task = rhs->post_map_task;
       this->task_priority = rhs->task_priority;
       // From TaskOp
       this->early_mapped_regions = rhs->early_mapped_regions;
@@ -1529,9 +1543,10 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void TaskOp::compute_point_region_requirements(MinimalPoint *mp/*= NULL*/)
+    bool TaskOp::compute_point_region_requirements(MinimalPoint *mp/*= NULL*/)
     //--------------------------------------------------------------------------
     {
+      bool all_invalid = true;
       // Update the region requirements for this point
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
@@ -1550,10 +1565,10 @@ namespace LegionRuntime {
               if (index_point.get_dim() > 3)
               {
                 log_task.error("Projection ID 0 is invalid for tasks whose "
-                                     "points are larger than three dimensional "
-                                     "unsigned integers.  Points for task %s "
-                                     "have elements of %d dimensions",
-                                  this->variants->name, index_point.get_dim());
+                               "points are larger than three dimensional "
+                               "unsigned integers.  Points for task %s "
+                               "have elements of %d dimensions",
+                                this->variants->name, index_point.get_dim());
 #ifdef DEBUG_HIGH_LEVEL
                 assert(false);
 #endif
@@ -1625,7 +1640,15 @@ namespace LegionRuntime {
         }
         // Always check to see if there are any restrictions
         regions[idx].restricted = has_restrictions(idx, regions[idx].region);
+        // Check to see if the region is a NO_REGION,
+        // if it is then switch the privilege to NO_ACCESS
+        if (regions[idx].region == LogicalRegion::NO_REGION)
+          regions[idx].privilege = NO_ACCESS;
+        else
+          all_invalid = false;
       }
+      // Return true if this point has any valid region requirements
+      return (!all_invalid);
     }
 
     //--------------------------------------------------------------------------
@@ -2567,7 +2590,7 @@ namespace LegionRuntime {
     {
       // If we are performing a trace mark that the child has a trace
       if (current_trace != NULL)
-        op->set_trace(current_trace);
+        op->set_trace(current_trace, !current_trace->is_fixed());
       int outstanding_count = 
         __sync_add_and_fetch(&outstanding_children_count,1);
       // Only need to check if we are not tracing by frames
@@ -2815,7 +2838,25 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       if (current_fence != NULL)
+      {
         op->register_dependence(current_fence, fence_gen);
+#ifdef LEGION_SPY
+        unsigned num_regions = op->get_region_count();
+        if (num_regions > 0)
+        {
+          for (unsigned idx = 0; idx < num_regions; idx++)
+          {
+            LegionSpy::log_mapping_dependence(
+                get_unique_op_id(), current_fence->get_unique_op_id(), 0,
+                op->get_unique_op_id(), idx, TRUE_DEPENDENCE);
+          }
+        }
+        else
+          LegionSpy::log_mapping_dependence(
+              get_unique_op_id(), current_fence->get_unique_op_id(), 0,
+              op->get_unique_op_id(), 0, TRUE_DEPENDENCE);
+#endif
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -3845,7 +3886,9 @@ namespace LegionRuntime {
     void SingleTask::register_inline_mapped_region(PhysicalRegion &region)
     //--------------------------------------------------------------------------
     {
-      AutoLock o_lock(op_lock);
+      // Don't need the lock because this is only accessed from 
+      // the executing task context
+      //
       // Because of 'remap_region', this method can be called
       // both for inline regions as well as regions which were
       // initally mapped for the task.  Do a quick check to see
@@ -3862,7 +3905,8 @@ namespace LegionRuntime {
     void SingleTask::unregister_inline_mapped_region(PhysicalRegion &region)
     //--------------------------------------------------------------------------
     {
-      AutoLock o_lock(op_lock);
+      // Don't need the lock because this is only accessed from the
+      // executed task context
       for (std::list<PhysicalRegion>::iterator it = inline_regions.begin();
             it != inline_regions.end(); it++)
       {
@@ -4298,7 +4342,9 @@ namespace LegionRuntime {
               if (perform_mapping())
               {
 #ifdef DEBUG_HIGH_LEVEL
+#ifndef NDEBUG
                 bool still_local = 
+#endif
 #endif
                 distribute_task();
 #ifdef DEBUG_HIGH_LEVEL
@@ -4553,6 +4599,9 @@ namespace LegionRuntime {
         executing_processor = target;
         if (notify)
           runtime->invoke_mapper_notify_result(current_proc, this);
+        // See if we are supposed to post-map this task
+        if (post_map_task)
+          perform_post_mapping(target);
       }
 #ifdef LEGION_LOGGING
       LegionLogging::log_timing_event(Processor::get_executing_processor(),
@@ -4561,6 +4610,50 @@ namespace LegionRuntime {
 #endif
       return map_success;
     }  
+
+    //--------------------------------------------------------------------------
+    void SingleTask::perform_post_mapping(Processor target)
+    //--------------------------------------------------------------------------
+    {
+      // Clear out all the region requirements
+      for (unsigned idx = 0; idx < regions.size(); idx++)
+        regions[idx].initialize_mapping_fields();
+      // Invoke the mapper
+      runtime->invoke_mapper_post_map_task(current_proc, this); 
+      // Iterate over the regions and see if we need to make any instances
+      for (unsigned idx = 0; idx < regions.size(); idx++)
+      {
+        RegionRequirement &req = regions[idx];
+        if (req.target_ranking.empty() || has_restrictions(idx, req.region))
+          continue;
+        VersionInfo &version_info = get_version_info(idx);
+        // Otherwise we need to do to make an instance and issue the copy
+        MappingRef ref = runtime->forest->map_physical_region(
+                                              enclosing_contexts[idx], req,
+                                              idx, version_info,
+                                              this, current_proc, target
+#ifdef DEBUG_HIGH_LEVEL
+                                              , get_logging_name()
+                                              , unique_op_id
+#endif
+                                              );
+        // If we failed the mapping, then just assert for now
+        if (!ref.has_ref())
+          assert(false);
+        // Now do the registration, but with a NO_EVENT for the termination
+        // event since there won't actually be anyone immediately using
+        // the result
+        runtime->forest->register_physical_region(
+                                              enclosing_contexts[idx], ref,
+                                              req, idx, version_info, this,
+                                              current_proc, Event::NO_EVENT
+#ifdef DEBUG_HIGH_LEVEL
+                                              , get_logging_name()
+                                              , unique_op_id
+#endif
+                                              );
+      }
+    }
 
     //--------------------------------------------------------------------------
     void SingleTask::initialize_region_tree_contexts(
@@ -5270,6 +5363,16 @@ namespace LegionRuntime {
       assert(regions.size() == region_deleted.size());
       assert(regions.size() == local_instances.size());
 #endif
+      // Quick check to make sure the user didn't forget to end a trace
+      if (current_trace != NULL)
+      {
+        log_task.error("Task %s (UID %lld) failed to end trace before exiting!",
+                        variants->name, get_unique_task_id());
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_INCOMPLETE_TRACE);
+      }
       // Unmap all of the physical regions which are still mapped
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
@@ -5511,6 +5614,7 @@ namespace LegionRuntime {
       minimal_points_assigned = 0;
       redop = 0;
       reduction_op = NULL;
+      serdez_redop_fns = NULL;
       reduction_state_size = 0;
       reduction_state = NULL;
     }
@@ -5719,10 +5823,12 @@ namespace LegionRuntime {
       if (this->redop != 0)
       {
         this->reduction_op = rhs->reduction_op;
+        this->serdez_redop_fns = rhs->serdez_redop_fns;
         initialize_reduction_state();
       }
       // Take ownership of all the points
       rhs->assign_points(this, d);
+      this->restrict_infos = rhs->restrict_infos;
       // Copy over the version infos that we need, we can skip this if
       // we are remote and locally mapped
       if (!is_remote() || !is_locally_mapped())
@@ -5847,7 +5953,9 @@ namespace LegionRuntime {
                   if (perform_mapping())
                   {
 #ifdef DEBUG_HIGH_LEVEL
+#ifndef NDEBUG
                     bool still_local = 
+#endif
 #endif
                     distribute_task();
 #ifdef DEBUG_HIGH_LEVEL
@@ -5963,6 +6071,7 @@ namespace LegionRuntime {
       if (redop > 0)
       {
         reduction_op = Internal::get_reduction_op(redop);
+        serdez_redop_fns = Internal::get_serdez_redop_fns(redop);
         initialize_reduction_state();
       }
       size_t num_points;
@@ -5988,7 +6097,12 @@ namespace LegionRuntime {
 #endif
       reduction_state_size = reduction_op->sizeof_rhs;
       reduction_state = legion_malloc(REDUCTION_ALLOC, reduction_state_size);
-      reduction_op->init(reduction_state, 1);
+      // If we need to initialize specially, then we do that with a serdez fn
+      if (serdez_redop_fns != NULL)
+        (*(serdez_redop_fns->init_fn))(reduction_op, reduction_state, 
+                                       reduction_state_size);
+      else
+        reduction_op->init(reduction_state, 1);
     }
 
     //--------------------------------------------------------------------------
@@ -6002,10 +6116,13 @@ namespace LegionRuntime {
       assert(reduction_op != NULL);
       assert(reduction_op->is_foldable);
       assert(reduction_state != NULL);
-      assert(result_size == reduction_op->sizeof_rhs);
 #endif
-      // Perform the reduction
-      reduction_op->fold(reduction_state, result, 1, exclusive);
+      // Perform the reduction, see if we have to do serdez reductions
+      if (serdez_redop_fns != NULL)
+        (*(serdez_redop_fns->fold_fn))(reduction_op, reduction_state,
+                                       reduction_state_size, result, exclusive);
+      else
+        reduction_op->fold(reduction_state, result, 1, exclusive);
 
       // If we're the owner, then free the memory
       if (owner)
@@ -6105,7 +6222,10 @@ namespace LegionRuntime {
         for (std::map<AddressSpaceID,RemoteTask*>::const_iterator it = 
               remote_instances.begin(); it != remote_instances.end(); it++)
         {
-          runtime->send_free_remote_context(it->first, rez);
+          if (it->first == runtime->address_space)
+            runtime->release_remote_context(local_uid);
+          else
+            runtime->send_free_remote_context(it->first, rez);
         }
         remote_instances.clear();
       }
@@ -6376,6 +6496,12 @@ namespace LegionRuntime {
         assert(it->impl != NULL);
 #endif
         it->impl->register_dependence(this);
+#ifdef LEGION_SPY
+        if (it->impl->producer_op != NULL)
+          LegionSpy::log_mapping_dependence(
+              parent_ctx->get_unique_task_id(), it->impl->producer_uid, 0,
+              get_unique_task_id(), 0, TRUE_DEPENDENCE);
+#endif
       }
       // Also have to register any dependences on our predicate
       register_predicate_dependence();
@@ -6410,9 +6536,18 @@ namespace LegionRuntime {
                                                        version_info,
                                                        restrict_infos[*it],
                                                        privilege_paths[*it]);
-#ifdef DEBUG_HIGH_LEVEL
-          assert(rerun_analysis_requirements.empty());
-#endif
+          // If we still have re-run requirements, then we have
+          // interfering region requirements so warn the user
+          if (!rerun_analysis_requirements.empty())
+          {
+            for (std::set<unsigned>::const_iterator it2 = 
+                  rerun_analysis_requirements.begin(); it2 != 
+                  rerun_analysis_requirements.end(); it2++)
+            {
+              report_interfering_requirements(*it, *it2);
+            }
+            rerun_analysis_requirements.clear();
+          }
         }
       }
       end_dependence_analysis();
@@ -6491,7 +6626,7 @@ namespace LegionRuntime {
       log_run.error("Aliased region requirements for individual tasks "
                           "are not permitted. Region requirements %d and %d "
                           "of task %s (UID %lld) in parent task %s (UID %lld) "
-                          "are aliased.", idx1, idx2, variants->name,
+                          "are interfering.", idx1, idx2, variants->name,
                           get_unique_task_id(), parent_ctx->variants->name,
                           parent_ctx->get_unique_task_id());
 #ifdef DEBUG_HIGH_LEVEL
@@ -6500,12 +6635,12 @@ namespace LegionRuntime {
       exit(ERROR_ALIASED_REGION_REQUIREMENTS);
 #else
       log_run.warning("Region requirements %d and %d of individual task "
-                            "%s (UID %lld) in parent task %s (UID %lld) are "
-                            "aliased.  This behavior is currently undefined. "
-                            "You better really know what you are doing.",
-                            idx1, idx2, variants->name, get_unique_task_id(),
-                            parent_ctx->variants->name, 
-                            parent_ctx->get_unique_task_id());
+                      "%s (UID %lld) in parent task %s (UID %lld) are "
+                      "interfering.  This behavior is currently "
+                      "undefined. You better really know what you are "
+                      "doing.", idx1, idx2, variants->name, 
+                      get_unique_task_id(), parent_ctx->variants->name, 
+                      parent_ctx->get_unique_task_id());
 #endif
     }
 
@@ -6523,24 +6658,29 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(!premapped);
 #endif
-      for (unsigned idx = 0; idx < regions.size(); idx++)
+      // If we're remote then we don't need to do anything because
+      // we were premapped on the owner node before being sent remotely
+      if (!is_remote())
       {
-        // Do the premapping if it is not already premapped or early mapped
-        if (!regions[idx].premapped && 
-            (early_mapped_regions.find(idx) == early_mapped_regions.end()))
+        for (unsigned idx = 0; idx < regions.size(); idx++)
         {
-          regions[idx].premapped = runtime->forest->premap_physical_region(
-                                       enclosing_contexts[idx],
-                                       privilege_paths[idx], regions[idx], 
-                                       version_infos[idx], this, parent_ctx,
-                                       parent_ctx->get_executing_processor()
+          // Do the premapping if it is not already premapped or early mapped
+          if (!regions[idx].premapped && 
+              (early_mapped_regions.find(idx) == early_mapped_regions.end()))
+          {
+            regions[idx].premapped = runtime->forest->premap_physical_region(
+                                         enclosing_contexts[idx],
+                                         privilege_paths[idx], regions[idx], 
+                                         version_infos[idx], this, parent_ctx,
+                                         parent_ctx->get_executing_processor()
 #ifdef DEBUG_HIGH_LEVEL
-                                       , idx, get_logging_name(), unique_op_id
+                                         , idx, get_logging_name(), unique_op_id
 #endif
-                                       );
+                                         );
 #ifdef DEBUG_HIGH_LEVEL
-          assert(regions[idx].premapped);
+            assert(regions[idx].premapped);
 #endif
+          }
         }
       }
       premapped = true;
@@ -7355,7 +7495,10 @@ namespace LegionRuntime {
         for (std::map<AddressSpaceID,RemoteTask*>::const_iterator it = 
               remote_instances.begin(); it != remote_instances.end(); it++)
         {
-          runtime->send_free_remote_context(it->first, rez);
+          if (it->first == runtime->address_space)
+            runtime->release_remote_context(local_uid);
+          else
+            runtime->send_free_remote_context(it->first, rez);
         }
         remote_instances.clear();
       }
@@ -7928,6 +8071,7 @@ namespace LegionRuntime {
       context = RegionTreeContext();
       remote_owner_uid = 0;
       remote_parent_ctx = NULL;
+      is_top_level_context = false;
     }
 
     //--------------------------------------------------------------------------
@@ -7944,6 +8088,27 @@ namespace LegionRuntime {
                                                   false/*logical users only*/); 
         }
       }
+      if (!remote_instances.empty())
+      {
+#ifdef DEBUG_HIGH_LEVEL
+        assert(is_top_level_context);
+#endif
+        UniqueID local_uid = get_unique_task_id();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(local_uid);
+        }
+        for (std::map<AddressSpaceID,RemoteTask*>::const_iterator it = 
+              remote_instances.begin(); it != remote_instances.end(); it++)
+        {
+          if (it->first == runtime->address_space)
+            runtime->release_remote_context(local_uid);
+          else
+            runtime->send_free_remote_context(it->first, rez);
+        }
+        remote_instances.clear();
+      }
       top_level_regions.clear();
       if (context.exists())
         runtime->free_context(this);
@@ -7953,11 +8118,13 @@ namespace LegionRuntime {
     }
     
     //--------------------------------------------------------------------------
-    void RemoteTask::initialize_remote(UniqueID uid, SingleTask *remote_parent)
+    void RemoteTask::initialize_remote(UniqueID uid, SingleTask *remote_parent,
+                                       bool is_top_level)
     //--------------------------------------------------------------------------
     {
       remote_owner_uid = uid;
       remote_parent_ctx = remote_parent;
+      is_top_level_context = is_top_level;
       runtime->allocate_context(this);
 #ifdef DEBUG_HIGH_LEVEL
       assert(context.exists());
@@ -8015,17 +8182,26 @@ namespace LegionRuntime {
     void RemoteTask::record_remote_state(void)
     //--------------------------------------------------------------------------
     {
-      // should never be called
-      assert(false);
+      // Should only see this call if it is the top-level context
+#ifdef DEBUG_HIGH_LEVEL
+      assert(is_top_level_context);
+#endif
     }
 
     //--------------------------------------------------------------------------
-    void RemoteTask::record_remote_instance(AddressSpaceID remote_inst,
+    void RemoteTask::record_remote_instance(AddressSpaceID remote_instance,
                                             RemoteTask *remote_ctx)
     //--------------------------------------------------------------------------
     {
-      // should never be called
-      assert(false);
+      // should only see this call if it is the top-level context
+#ifdef DEBUG_HIGH_LEVEL
+      assert(is_top_level_context);
+#endif
+      AutoLock o_lock(op_lock);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(remote_instances.find(remote_instance) == remote_instances.end());
+#endif
+      remote_instances[remote_instance] = remote_ctx;
     }
 
     //--------------------------------------------------------------------------
@@ -8319,6 +8495,7 @@ namespace LegionRuntime {
     {
       activate_multi();
       reduction_op = NULL;
+      serdez_redop_fns = NULL;
       slice_fraction = Fraction<long long>(0,1); // empty fraction
       total_points = 0;
       mapped_points = 0;
@@ -8476,6 +8653,7 @@ namespace LegionRuntime {
       index_domain = launcher.launch_domain;
       redop = redop_id;
       reduction_op = Internal::get_reduction_op(redop);
+      serdez_redop_fns = Internal::get_serdez_redop_fns(redop);
       if (!reduction_op->is_foldable)
       {
         log_run.error("Reduction operation %d for index task launch %s "
@@ -8632,6 +8810,7 @@ namespace LegionRuntime {
       index_domain = domain;
       redop = redop_id;
       reduction_op = Internal::get_reduction_op(redop);
+      serdez_redop_fns = Internal::get_serdez_redop_fns(redop);
       if (!reduction_op->is_foldable)
       {
         log_run.error("Reduction operation %d for index task launch %s "
@@ -8780,6 +8959,12 @@ namespace LegionRuntime {
         assert(it->impl != NULL);
 #endif
         it->impl->register_dependence(this);
+#ifdef LEGION_SPY
+        if (it->impl->producer_op != NULL)
+          LegionSpy::log_mapping_dependence(
+              parent_ctx->get_unique_task_id(), it->impl->producer_uid, 0,
+              get_unique_task_id(), 0, TRUE_DEPENDENCE);
+#endif
       }
       // Also have to register any dependences on our predicate
       register_predicate_dependence();
@@ -8814,9 +8999,18 @@ namespace LegionRuntime {
                                                        version_info,
                                                        restrict_infos[*it],
                                                        privilege_paths[*it]);
-#ifdef DEBUG_HIGH_LEVEL
-          assert(rerun_analysis_requirements.empty());
-#endif
+          // If we still have re-run requirements, then we have
+          // interfering region requirements so warn the user
+          if (!rerun_analysis_requirements.empty())
+          {
+            for (std::set<unsigned>::const_iterator it2 = 
+                  rerun_analysis_requirements.begin(); it2 != 
+                  rerun_analysis_requirements.end(); it2++)
+            {
+              report_interfering_requirements(*it, *it2);
+            }
+            rerun_analysis_requirements.clear();
+          }
         }
       }
       end_dependence_analysis();
@@ -8868,7 +9062,7 @@ namespace LegionRuntime {
       log_run.error("Aliased region requirements for index tasks "
                           "are not permitted. Region requirements %d and %d "
                           "of task %s (UID %lld) in parent task %s (UID %lld) "
-                          "are aliased.", idx1, idx2, variants->name,
+                          "are interfering.", idx1, idx2, variants->name,
                           get_unique_task_id(), parent_ctx->variants->name,
                           parent_ctx->get_unique_task_id());
 #ifdef DEBUG_HIGH_LEVEL
@@ -8877,12 +9071,12 @@ namespace LegionRuntime {
       exit(ERROR_ALIASED_REGION_REQUIREMENTS);
 #else
       log_run.warning("Region requirements %d and %d of index task "
-                            "%s (UID %lld) in parent task %s (UID %lld) are "
-                            "aliased.  This behavior is currently undefined. "
-                            "You better really know what you are doing.",
-                            idx1, idx2, variants->name, get_unique_task_id(),
-                            parent_ctx->variants->name, 
-                            parent_ctx->get_unique_task_id());
+                      "%s (UID %lld) in parent task %s (UID %lld) are "
+                      "interfering.  This behavior is currently undefined. "
+                      "You better really know what you are doing.",
+                      idx1, idx2, variants->name, get_unique_task_id(),
+                      parent_ctx->variants->name, 
+                      parent_ctx->get_unique_task_id());
 #endif
     }
 
@@ -10260,9 +10454,6 @@ namespace LegionRuntime {
       // Quick check to see if we ended up back on the original node
       if (!is_remote())
       {
-        // Otherwise we can deactivate the remote ctx and use
-        // our original parent context
-        remote_ctx->deactivate();
         parent_ctx = index_owner->parent_ctx;
         // We also have our enclosing contexts
         enclosing_contexts = index_owner->enclosing_contexts;

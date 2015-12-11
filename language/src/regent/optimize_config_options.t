@@ -46,9 +46,14 @@ local function analyze_leaf_node(cx)
       node:is(ast.typed.expr.Ispace) or
       node:is(ast.typed.expr.Region) or
       node:is(ast.typed.expr.Partition) or
+      node:is(ast.typed.expr.PartitionEqual) or
+      node:is(ast.typed.expr.PartitionByField) or
+      node:is(ast.typed.expr.Image) or
+      node:is(ast.typed.expr.Preimage) or
       node:is(ast.typed.expr.CrossProduct) or
       node:is(ast.typed.expr.ListDuplicatePartition) or
       node:is(ast.typed.expr.ListCrossProduct) or
+      node:is(ast.typed.expr.ListPhaseBarriers) or
       node:is(ast.typed.expr.PhaseBarrier) or
       node:is(ast.typed.expr.Advance) or
       node:is(ast.typed.expr.Copy) or

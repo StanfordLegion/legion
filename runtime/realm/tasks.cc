@@ -76,7 +76,7 @@ namespace Realm {
     if(!p.exists())
       p = this->proc;
 
-    Processor::TaskFuncPtr fptr = get_runtime()->task_table[func_id];
+    //Processor::TaskFuncPtr fptr = get_runtime()->task_table[func_id];
 #if 0
     char argstr[100];
     argstr[0] = 0;
@@ -103,7 +103,9 @@ namespace Realm {
     // make sure the current processor is set during execution of the task
     ThreadLocal::current_processor = p;
 
-    (*fptr)(args.base(), args.size(), p);
+    //(*fptr)(args.base(), args.size(), p);
+
+    get_runtime()->get_processor_impl(p)->execute_task(func_id, args);
 
     // and clear the TLS when we're done
     // TODO: get this right when using user threads
@@ -174,7 +176,9 @@ namespace Realm {
 
     // sanity-check: a wait value earlier than the number we just incremented
     //  from should not be possible
+#ifndef NDEBUG
     long long wv_check = __sync_fetch_and_add(&wait_value, 0);
+#endif
     assert((wv_check == -1) || (wv_check > old_value));
   }
 
@@ -215,7 +219,10 @@ namespace Realm {
       condvar.broadcast();
     }
     assert(wv_read <= old_counter);
-    bool ok = __sync_bool_compare_and_swap(&wait_value, wv_read, old_counter);
+#ifndef NDEBUG
+    bool ok =
+#endif
+      __sync_bool_compare_and_swap(&wait_value, wv_read, old_counter);
     assert(ok); // swap should never fail
 
     // now that people know we're waiting, wait until the counter updates - check before
@@ -479,7 +486,10 @@ namespace Realm {
 	  // release the lock while we run the task
 	  lock.unlock();
 
-	  bool ok = execute_task(task);
+#ifndef NDEBUG
+	  bool ok =
+#endif
+	    execute_task(task);
 	  assert(ok);  // no fault recovery yet
 
 	  lock.lock();
@@ -719,7 +729,10 @@ namespace Realm {
 #endif
 
     // take ourself off the active list
-    size_t count = active_workers.erase(Thread::self());
+#ifndef NDEBUG
+    size_t count =
+#endif
+      active_workers.erase(Thread::self());
     assert(count == 1);
 
     GASNetCondVar my_cv(lock);
@@ -760,7 +773,10 @@ namespace Realm {
 #endif
 
     // take ourselves off the active list (FOREVER...)
-    size_t count = active_workers.erase(me);
+#ifndef NDEBUG
+    size_t count =
+#endif
+      active_workers.erase(me);
     assert(count == 1);
 
     // also off the all workers list
@@ -987,7 +1003,10 @@ namespace Realm {
     //size_t count = active_workers.erase(Thread::self());
     //assert(count == 1);
 
-    size_t count = all_workers.erase(Thread::self());
+#ifndef NDEBUG
+    size_t count =
+#endif
+      all_workers.erase(Thread::self());
     assert(count == 1);
 
     // whoever we switch to should delete us

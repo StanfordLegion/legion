@@ -19,6 +19,7 @@ import sys, os, shutil
 import string, re
 from math import sqrt, log
 from getopt import getopt
+from cgi import escape
 
 prefix = r'\[(?P<node>[0-9]+) - (?P<thread>[0-9a-f]+)\] \{\w+\}\{legion_prof\}: '
 task_info_pat = re.compile(prefix + r'Prof Task Info (?P<tid>[0-9]+) (?P<fid>[0-9]+) (?P<pid>[a-f0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)')
@@ -27,14 +28,18 @@ copy_info_pat = re.compile(prefix + r'Prof Copy Info (?P<opid>[0-9]+) (?P<src>[a
 copy_info_old_pat = re.compile(prefix + r'Prof Copy Info (?P<opid>[0-9]+) (?P<src>[a-f0-9]+) (?P<dst>[a-f0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)')
 fill_info_pat = re.compile(prefix + r'Prof Fill Info (?P<opid>[0-9]+) (?P<dst>[a-f0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)')
 inst_info_pat = re.compile(prefix + r'Prof Inst Info (?P<opid>[0-9]+) (?P<inst>[a-f0-9]+) (?P<mem>[a-f0-9]+) (?P<bytes>[0-9]+) (?P<create>[0-9]+) (?P<destroy>[0-9]+)')
-kind_pat = re.compile(prefix + r'Prof Task Kind (?P<tid>[0-9]+) (?P<name>[a-zA-Z0-9_]+)')
-variant_pat = re.compile(prefix + r'Prof Task Variant (?P<fid>[0-9]+) (?P<name>[a-zA-Z0-9_]+)')
+user_info_pat = re.compile(prefix + r'Prof User Info (?P<pid>[a-f0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+) (?P<name>[a-zA-Z0-9_]+)')
+kind_pat = re.compile(prefix + r'Prof Task Kind (?P<tid>[0-9]+) (?P<name>[a-zA-Z0-9_<>.]+)')
+variant_pat = re.compile(prefix + r'Prof Task Variant (?P<fid>[0-9]+) (?P<name>[a-zA-Z0-9_<>.]+)')
 operation_pat = re.compile(prefix + r'Prof Operation (?P<opid>[0-9]+) (?P<kind>[0-9]+)')
 multi_pat = re.compile(prefix + r'Prof Multi (?P<opid>[0-9]+) (?P<tid>[0-9]+)')
 meta_desc_pat = re.compile(prefix + r'Prof Meta Desc (?P<hlr>[0-9]+) (?P<kind>[a-zA-Z0-9_ ]+)')
 op_desc_pat = re.compile(prefix + r'Prof Op Desc (?P<opkind>[0-9]+) (?P<kind>[a-zA-Z0-9_ ]+)')
 proc_desc_pat = re.compile(prefix + r'Prof Proc Desc (?P<pid>[a-f0-9]+) (?P<kind>[0-9]+)')
 mem_desc_pat = re.compile(prefix + r'Prof Mem Desc (?P<mid>[a-f0-9]+) (?P<kind>[0-9]+) (?P<size>[0-9]+)')
+# Extensions for messages
+message_desc_pat = re.compile(prefix + r'Prof Message Desc (?P<mid>[0-9]+) (?P<desc>[a-zA-Z0-9_ ]+)')
+message_info_pat = re.compile(prefix + r'Prof Message Info (?P<mid>[0-9]+) (?P<pid>[a-f0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)')
 
 # Make sure this is up to date with lowlevel.h
 processor_kinds = {
@@ -54,9 +59,10 @@ memory_kinds = {
     5 : 'Framebuffer',
     6 : 'Disk',
     7 : 'HDF5',
-    8 : 'L3 Cache',
-    9 : 'L2 Cache',
-    10 : 'L1 Cache',
+    8 : 'File',
+    9 : 'L3 Cache',
+    10 : 'L2 Cache',
+    11 : 'L1 Cache',
 }
 
 # Micro-seconds per pixel
@@ -228,14 +234,21 @@ class TaskRange(TimeRange):
         self.task = task
 
     def emit_svg(self, printer, level):
-        assert self.task.is_task
-        assert self.task.variant is not None
-        title = repr(self.task)
-        if self.task.is_meta:
-            title += (' '+self.task.get_initiation())
-        title += (' '+self.task.get_timing())
-        printer.emit_timing_range(self.task.variant.color, level,
-                                  self.start_time, self.stop_time, title)
+        if self.task.is_task:
+            assert self.task.is_task
+            assert self.task.variant is not None
+            title = repr(self.task)
+            if self.task.is_meta:
+                title += (' '+self.task.get_initiation())
+            title += (' '+self.task.get_timing())
+            printer.emit_timing_range(self.task.variant.color, level,
+                                      self.start_time, self.stop_time, title)
+        else:
+            title = repr(self.task)
+            title += (' '+self.task.get_timing())
+            printer.emit_timing_range("#555555", level,
+                                      self.start_time, self.stop_time, title)
+
         for subrange in self.subranges:
             subrange.emit_svg(printer, level+1)
 
@@ -244,10 +257,14 @@ class TaskRange(TimeRange):
         if self.task.is_meta:
             title += (' '+self.task.get_initiation())
         title += (' '+self.task.get_timing())
+        if not self.task.is_task:
+            color = "#555555"
+        else:
+            color = self.task.variant.color
         tsv_file.write("%d\t%ld\t%ld\t%s\t%s\n" % \
                 (base_level + (max_levels - level),
                  self.start_time, self.stop_time,
-                 self.task.variant.color,title))
+                 color,title))
         for subrange in self.subranges:
             subrange.emit_tsv(tsv_file, base_level, max_levels, level + 1)
 
@@ -256,7 +273,8 @@ class TaskRange(TimeRange):
         for subrange in self.subranges:
             subrange.update_task_stats(stat)
             exec_time -= subrange.total_time()
-        stat.record_task(self.task, exec_time)
+        if self.task.is_task:
+            stat.record_task(self.task, exec_time)
 
     def active_time(self):
         return self.total_time()
@@ -290,23 +308,66 @@ class TaskRange(TimeRange):
             for subrange in self.subranges:
                 total += subrange.meta_time()
             return total
-        
+
+class MessageRange(TimeRange):
+    def __init__(self, message):
+        TimeRange.__init__(self, message.start, message.stop)
+        self.message = message
+
+    def emit_svg(self, printer, level):
+        title = repr(self.message)
+        title += (' '+self.message.get_timing())
+        printer.emit_timing_range(self.message.kind.color, level,
+                                  self.start_time, self.stop_time, title)
+        for subrange in self.subranges:
+            subrange.emit_svg(printer, level+1)
+
+    def emit_tsv(self, tsv_file, base_level, max_levels, level):
+        title = repr(self.message)
+        title += (' '+self.message.get_timing())
+        tsv_file.write("%d\t%ld\t%ld\t%s\t%s\n" % \
+                (base_level + (max_levels - level),
+                 self.start_time, self.stop_time,
+                 self.message.kind.color,title))
+        for subrange in self.subranges:
+            subrange.emit_tsv(tsv_file, base_level, max_levels, level + 1)
+
+    def update_task_stats(self, stat):
+        for subrange in self.subranges:
+            subrange.update_task_stats(stat)
+
+    def active_time(self):
+        return self.total_time()
+
+    def application_time(self):
+        return 0
+
+    def meta_time(self):
+        total = self.total_time()
+        for subrange in self.subranges:
+            total += subrange.meta_time()
+            total -= subrange.application_time()
+            assert total >= 0
+        return total
 
 class Processor(object):
     def __init__(self, proc_id, kind):
         self.proc_id = proc_id
         self.kind = kind
-        self.task_ranges = list()
+        self.app_ranges = list()
         self.full_range = None
 
     def add_task(self, task):
-        self.task_ranges.append(TaskRange(task))
+        self.app_ranges.append(TaskRange(task))
+
+    def add_message(self, message):
+        self.app_ranges.append(MessageRange(message))
 
     def init_time_range(self, last_time):
         self.full_range = BaseRange(0L, last_time, self)
 
     def sort_time_range(self):
-        for r in self.task_ranges:
+        for r in self.app_ranges:
             self.full_range.add_range(r)
         self.full_range.sort_range()
 
@@ -503,6 +564,7 @@ class Channel(object):
     def emit_tsv(self, tsv_file, base_level):
         max_levels = self.max_live_copies + 1
         if max_levels > 1:
+            max_levels = max(4, max_levels)
             for copy in self.copies:
                 assert copy.level is not None
                 assert copy.start is not None
@@ -686,6 +748,23 @@ class MetaTask(object):
     def __repr__(self):
         return 'Meta '+self.variant.name
 
+class UserMarker(object):
+    def __init__(self, name):
+        self.name = name
+        self.is_task = False
+        self.is_meta = False
+        self.create = None
+        self.ready = None
+        self.start = None
+        self.stop = None
+
+    def get_timing(self):
+        return 'total='+str(self.stop - self.start)+' us start='+ \
+                str(self.start)+' us stop='+str(self.stop)+' us'
+
+    def __repr__(self):
+        return 'User Marker "'+self.name+'"'
+
 class Copy(object):
     def __init__(self, src, dst, op):
         self.src = src
@@ -752,10 +831,33 @@ class Instance(object):
                 ' Created by="'+repr(self.op)+'" total='+str(self.destroy-self.create)+ \
                 ' us created='+str(self.create)+' us destroyed='+str(self.destroy)+' us'
 
+class MessageKind(object):
+    def __init__(self, message_id, desc):
+        self.message_id = message_id
+        self.desc = desc
+        self.color = None
+
+    def assign_color(self, color):
+        assert self.color is None
+        self.color = color
+
+class Message(object):
+    def __init__(self, kind, start, stop):
+        self.kind = kind
+        self.start = start
+        self.stop = stop
+
+    def get_timing(self):
+        return 'total='+str(self.stop - self.start)+' us start='+ \
+                str(self.start)+' us stop='+str(self.stop)+' us'
+
+    def __repr__(self):
+        return 'Message '+self.kind.desc
+
 class SVGPrinter(object):
     def __init__(self, file_name, html_file):
         self.target = open(file_name,'w')
-        self.file_name = file_name
+        self.file_name = os.path.basename(file_name)
         self.html_file = html_file
         assert self.target is not None
         self.offset = 0
@@ -791,7 +893,7 @@ class SVGPrinter(object):
 
     def emit_timing_range(self, color, level, start, finish, title):
         self.target.write('  <g>\n')
-        self.target.write('    <title>'+title+'</title>\n')
+        self.target.write('    <title>'+escape(title)+'</title>\n')
         assert level <= self.offset
         x_start = start//US_PER_PIXEL
         x_length = (finish-start)//US_PER_PIXEL
@@ -921,6 +1023,8 @@ class State(object):
         self.first_times = {}
         self.last_times = {}
         self.last_time = 0L
+        self.message_kinds = {}
+        self.messages = {}
 
     def parse_log_file(self, file_name):
         with open(file_name, 'rb') as log:  
@@ -990,6 +1094,13 @@ class State(object):
                                        read_time(m.group('create')),
                                        read_time(m.group('destroy')))
                     continue
+                m = user_info_pat.match(line)
+                if m is not None:
+                    self.log_user_info(int(m.group('pid'), 16),
+                                       read_time(m.group('start')),
+                                       read_time(m.group('stop')),
+                                       m.group('name'))
+                    continue
                 m = kind_pat.match(line)
                 if m is not None:
                     self.log_kind(int(m.group('tid')),
@@ -1034,6 +1145,18 @@ class State(object):
                     self.log_mem_desc(int(m.group('mid'),16),
                                       memory_kinds[kind],
                                       long(m.group('size')))
+                    continue
+                m = message_desc_pat.match(line)
+                if m is not None:
+                    self.log_message_desc(int(m.group('mid')),
+                                          m.group('desc'))
+                    continue
+                m = message_info_pat.match(line)
+                if m is not None:
+                    self.log_message_info(int(m.group('mid')),
+                                          int(m.group('pid'),16),
+                                          long(m.group('start')),
+                                          long(m.group('stop')))
                     continue
                 # If we made it here then we failed to match
                 matches -= 1 
@@ -1121,6 +1244,15 @@ class State(object):
             self.last_time = destroy 
         mem.add_instance(inst)
 
+    def log_user_info(self, proc_id, start, stop, name):
+        proc = self.find_processor(proc_id)
+        user = self.create_user_marker(name)
+        user.start = start
+        user.stop = stop
+        if stop > self.last_time:
+            self.last_time = stop 
+        proc.add_task(user)
+
     def log_kind(self, task_id, name):
         if task_id not in self.task_kinds:
             self.task_kinds[task_id] = TaskKind(task_id, name)
@@ -1164,6 +1296,19 @@ class State(object):
     def log_op_desc(self, kind, name):
         if kind not in self.op_kinds:
             self.op_kinds[kind] = name
+
+    def log_message_desc(self, kind, desc):
+        if kind not in self.message_kinds:
+            self.message_kinds[kind] = MessageKind(kind, desc) 
+
+    def log_message_info(self, kind, proc_id, start, stop):
+        assert start <= stop
+        assert kind in self.message_kinds
+        if stop > self.last_time:
+            self.last_time = stop
+        message = Message(self.message_kinds[kind], start, stop)
+        proc = self.find_processor(proc_id)
+        proc.add_message(message)
 
     def find_processor(self, proc_id):
         if proc_id not in self.processors:
@@ -1227,6 +1372,9 @@ class State(object):
     def create_instance(self, inst_id, mem, op, size):
         return Instance(inst_id, mem, op, size)
 
+    def create_user_marker(self, name):
+        return UserMarker(name)
+
     def build_time_ranges(self):
         assert self.last_time is not None 
         # Processors first
@@ -1283,7 +1431,8 @@ class State(object):
 
     def assign_colors(self):
         # Subtract out some colors for which we have special colors
-        num_colors = len(self.variants)+len(self.meta_variants)+len(self.op_kinds)
+        num_colors = len(self.variants) + len(self.meta_variants) + \
+                     len(self.op_kinds) + len(self.message_kinds)
         # Use a LFSR to randomize these colors
         lsfr = LFSR(num_colors)
         num_colors = lsfr.get_max_value()
@@ -1310,6 +1459,9 @@ class State(object):
         # Now we need to assign all the operations colors
         for op in self.operations.itervalues():
             op.assign_color(op_colors)
+        # Assign all the message kinds different colors
+        for kind in self.message_kinds.itervalues():
+            kind.assign_color(color_helper(lsfr.get_next(), num_colors))
 
     def emit_visualization(self, output_prefix, show_procs,
                            show_channels, show_instances):
@@ -1380,7 +1532,7 @@ class State(object):
                 "legion_prof.html.template")
         data_tsv_file_name = output_prefix + "_data.tsv"
         processor_tsv_file_name = output_prefix + "_processor.tsv"
-        html_file_name = output_prefix + "_interactive.html"
+        html_file_name = output_prefix + ".html"
         print 'Generating interactive visualization files %s, %s, and %s' % \
                 (data_tsv_file_name,processor_tsv_file_name,html_file_name)
 
@@ -1427,8 +1579,8 @@ class State(object):
 
         html_file = open(html_file_name, "w")
         html_file.write(template % (last_time, base_level + 1,
-                                    repr(data_tsv_file_name),
-                                    repr(processor_tsv_file_name)))
+                                    repr(os.path.basename(data_tsv_file_name)),
+                                    repr(os.path.basename(processor_tsv_file_name))))
         html_file.close()
 
 def usage():

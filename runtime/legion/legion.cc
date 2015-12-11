@@ -37,6 +37,7 @@ namespace LegionRuntime {
     Logger::Category log_allocation("allocation");
     Logger::Category log_prof("legion_prof");
     Logger::Category log_garbage("legion_gc");
+    Logger::Category log_shutdown("shutdown");
 #ifdef LEGION_SPY
     namespace LegionSpy {
       Logger::Category log_spy("legion_spy");
@@ -2708,6 +2709,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::get_field_space_fields(Context ctx, FieldSpace handle,
+                                         std::set<FieldID> &fields)
+    //--------------------------------------------------------------------------
+    {
+      runtime->get_field_space_fields(ctx, handle, fields);
+    }
+
+    //--------------------------------------------------------------------------
     LogicalRegion Runtime::create_logical_region(Context ctx, 
                                             IndexSpace index, FieldSpace fields)
     //--------------------------------------------------------------------------
@@ -3063,6 +3072,26 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       runtime->detach_hdf5(ctx, region);
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalRegion Runtime::attach_file(Context ctx,
+                                                 const char *file_name,
+                                                 LogicalRegion handle,
+                                                 LogicalRegion parent,
+                                 const std::vector<FieldID> &field_vec,
+                                                 LegionFileMode mode)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->attach_file(ctx, file_name, handle,
+                                  parent, field_vec, mode);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::detach_file(Context ctx, PhysicalRegion region)
+    //--------------------------------------------------------------------------
+    {
+      runtime->detach_file(ctx, region);
     }
 
     //--------------------------------------------------------------------------
@@ -3762,6 +3791,13 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    /*static*/ SerdezRedopTable& Runtime::get_serdez_redop_table(void)
+    //--------------------------------------------------------------------------
+    {
+      return Internal::get_serdez_redop_table();
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ ProjectionID Runtime::
       register_region_projection_function(ProjectionID handle, void *func_ptr)
     //--------------------------------------------------------------------------
@@ -3986,6 +4022,14 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       return runtime->runtime->get_field_size(handle, fid);
+    }
+
+    //--------------------------------------------------------------------------
+    void Mapper::get_field_space_fields(FieldSpace handle, 
+                                        std::set<FieldID> &fields)
+    //--------------------------------------------------------------------------
+    {
+      runtime->runtime->get_field_space_fields(handle, fields);
     }
 
     //--------------------------------------------------------------------------

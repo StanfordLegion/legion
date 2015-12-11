@@ -34,6 +34,14 @@ namespace LegionRuntime {
     public:
       static const AllocationType alloc_type = TRACE_ALLOC;
     public:
+      struct OperationInfo {
+      public:
+        OperationInfo(Operation *op)
+          : kind(op->get_operation_kind()), count(op->get_region_count()) { }
+      public:
+        Operation::OpKind kind;
+        unsigned count;
+      };
       struct DependenceRecord {
       public:
         DependenceRecord(int idx)
@@ -100,11 +108,18 @@ namespace LegionRuntime {
       // aliased but non-interfering region requirements. This should
       // be pretty sparse so we'll make it a map
       std::map<unsigned,std::vector<std::pair<unsigned,unsigned> > > alias_reqs;
+      // Metadata for checking the validity of a trace when it is replayed
+      std::vector<OperationInfo> op_info;
     protected:
       const TraceID tid;
       SingleTask *const ctx;
       bool fixed;
       bool tracing;
+#ifdef LEGION_SPY
+    protected:
+      std::vector<UniqueID> current_uids;
+      std::vector<unsigned> num_regions;
+#endif
     };
 
     /**

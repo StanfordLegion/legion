@@ -37,6 +37,10 @@ namespace Realm {
       void get_all_memories(std::set<Memory>& mset) const;
       void get_all_processors(std::set<Processor>& pset) const;
 
+      void get_local_processors(std::set<Processor>& pset) const;
+      void get_local_processors_by_kind(std::set<Processor>& pset,
+					Processor::Kind kind) const;
+
       // Return the set of memories visible from a processor
       void get_visible_memories(Processor p, std::set<Memory>& mset) const;
 

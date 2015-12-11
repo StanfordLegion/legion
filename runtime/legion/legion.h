@@ -1631,11 +1631,12 @@ namespace LegionRuntime {
       // interface for description of these fields.
       Processor                           target_proc;
       std::set<Processor>                 additional_procs;
+      TaskPriority                        task_priority;
       bool                                inline_task;
       bool                                spawn_task;
       bool                                map_locally;
       bool                                profile_task;
-      TaskPriority                        task_priority;
+      bool                                post_map_task;
     public:
       // Options for configuring this task's context
       int                                 max_window_size;
@@ -2304,6 +2305,22 @@ namespace LegionRuntime {
 
       /**
        * ----------------------------------------------------------------------
+       *  Post-Map Task 
+       * ----------------------------------------------------------------------
+       *  This is a temporary addition to the mapper interface that will
+       *  change significantly in the new mapper interface. If the 
+       *  'post_map_task' flag is set for a task in select_task_options
+       *  mapper call then this call will be invoked after map_task succeeds.
+       *  It works very similar to map_task in that the mapper can ask
+       *  for the creation of new instances for region requirements to be
+       *  done after the task has completed by filling in the target_ranking
+       *  field of a region requirement with memories in which to place 
+       *  additional instances after the task has finished executing. 
+       */
+      virtual void post_map_task(Task *task) = 0;
+
+      /**
+       * ----------------------------------------------------------------------
        *  Map Inline 
        * ----------------------------------------------------------------------
        * This call has a identical semantics to the map_task call, with the
@@ -2700,6 +2717,8 @@ namespace LegionRuntime {
       // For documentation see methods of the same name in Runtime
       //------------------------------------------------------------------------
       size_t get_field_size(FieldSpace handle, FieldID fid) const;
+
+      void get_field_space_fields(FieldSpace handle, std::set<FieldID> &fields);
     protected:
       //------------------------------------------------------------------------
       // Methods for introspecting logical region trees
@@ -3308,7 +3327,7 @@ namespace LegionRuntime {
        * existing field that represents an enumerated function from 
        * pointers into the logical region containing the field 'fid'
        * to pointers in the 'handle' index space. The function the field
-       * represents therefore has type ptr_t@projection -> ptr_t@parent.
+       * represents therefore has type ptr_t@projection -> ptr_t@handle.
        * We can therefore create a new index partition of 'handle' by
        * mapping each of the pointers in the index subspaces in the
        * index partition of the 'projection' logical partition to get
@@ -3329,11 +3348,11 @@ namespace LegionRuntime {
        *                   a projected version of through the field
        * @param parent the parent region from which privileges are derived
        * @param fid the field ID of the 'projection' logical partition
-       *            we are reading which contains ptr_t@parent
+       *            we are reading which contains ptr_t@handle
        * @param part_kind specify the kind of partition
        * @param color optional new color for the index partition
        * @param allocable whether dynamic allocation of pointers is permitted
-       * @return a new index partition of the 'parent' index space
+       * @return a new index partition of the 'handle' index space
        */
       IndexPartition create_partition_by_image(Context ctx,
                                          IndexSpace handle,
@@ -3739,6 +3758,15 @@ namespace LegionRuntime {
        * @return the size of the field in bytes
        */
       size_t get_field_size(Context ctx, FieldSpace handle, FieldID fid);
+
+      /**
+       * Get the IDs of the fields currently allocated in a field space.
+       * @param ctx enclosing task context
+       * @param handle field space handle
+       * @param set in which to place the field IDs
+       */
+      void get_field_space_fields(Context ctx, FieldSpace handle,
+                                  std::set<FieldID> &fields);
     public:
       //------------------------------------------------------------------------
       // Logical Region Operations
@@ -4310,6 +4338,22 @@ namespace LegionRuntime {
        * @param region the physical region for an HDF5 file to detach
        */
       void detach_hdf5(Context ctx, PhysicalRegion region);
+
+      /**
+       * Attach an normal file as a physical region. This attach is similar to
+       * attach_hdf5 operation, except that the file has exact same data format
+       * as in-memory physical region. Data lays out as SOA in file.
+       */
+      PhysicalRegion attach_file(Context ctx, const char *file_name,
+                                 LogicalRegion handle, LogicalRegion parent,
+                                 const std::vector<FieldID> &field_vec,
+                                 LegionFileMode mode);
+
+      /**
+       * Detach an normal file. THis detach operation is similar to
+       * detach_hdf5
+       */
+      void detach_file(Context ctx, PhysicalRegion region);
     public:
       //------------------------------------------------------------------------
       // Copy Operations
@@ -5493,6 +5537,7 @@ namespace LegionRuntime {
                       const void *user_data, size_t user_data_size);
       static const void* find_user_data(TaskID tid, VariantID vid);
       static ReductionOpTable& get_reduction_table(void);
+      static SerdezRedopTable& get_serdez_redop_table(void);
     private:
       friend class Mapper;
       Internal *runtime;

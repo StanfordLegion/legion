@@ -270,6 +270,12 @@ class IndexSpaceNode(object):
                 return child
         return None
 
+    def find_child_color(self, child):
+        for c, child_ in self.children.iteritems():
+            if child_ == child:
+                return c
+        return None
+
     def mark_independent(self, uid1, uid2):
         assert self.find_child(uid1) <> None
         assert self.find_child(uid2) <> None
@@ -365,6 +371,12 @@ class IndexPartNode(object):
                 return child
         return None
 
+    def find_child_color(self, child):
+        for c, child_ in self.children.iteritems():
+            if child_ == child:
+                return c
+        return None
+
     def mark_independent(self, uid1, uid2):
         assert self.find_child(uid1) <> None
         assert self.find_child(uid2) <> None
@@ -430,6 +442,16 @@ class FieldSpaceNode(object):
         else:
             return None
 
+    def field_mask_string(self, fields):
+        field_names = list()
+        for f in fields:
+            field_name = self.get_field_name(f)
+            if field_name != None:
+                field_names.append(field_name)
+            else:
+                field_names.append(str(f))
+        return ', '.join(field_names)
+
     def print_graph(self, printer):
         if self.name != None:
             label = self.name+' (ID: '+str(self.uid)+')'
@@ -477,6 +499,16 @@ class RegionNode(object):
         else:
             for child in self.children:
                 child.set_name(name, index_node, field_node)
+
+    def get_name(self):
+        if self.name <> None:
+            return self.name
+        elif self.parent <> None:
+            parent_name = self.parent.get_name()
+            color = self.parent.index_node.find_child_color(self.index_node)
+            assert(color <> None)
+            return parent_name + "[" + color.to_dim_string() + "]"
+        return None
 
     def find_node(self, index_node, field_node):
         if self.index_node == index_node and \
@@ -558,6 +590,14 @@ class PartitionNode(object):
         else:
             for child in self.children:
                 child.set_name(name, index_node, field_node)
+
+    def get_name(self):
+        if self.name <> None:
+            return self.name
+        elif self.parent <> None:
+            parent_name = self.parent.get_name()
+            return parent_name + ".partition"
+        return None
 
     def find_node(self, index_node, field_node):
         if self.index_node == index_node and \
@@ -714,13 +754,13 @@ class SingleTask(object):
                 op.get_reachable(reachable, False)
 
     def add_mdep(self, op1, op2, idx1, idx2, dtype):
-        assert op1 in self.ops
-        assert op2 in self.ops
+        assert isinstance(op1, Fence) or op1 in self.ops
+        assert isinstance(op2, Fence) or op2 in self.ops
         self.mdeps.append(MappingDependence(self, op1, op2, idx1, idx2, dtype))
 
     def add_adep(self, op1, op2, idx1, idx2, dtype):
-        assert op1 in self.ops
-        assert op2 in self.ops
+        assert isinstance(op1, Fence) or op1 in self.ops
+        assert isinstance(op2, Fence) or op2 in self.ops
         self.adeps.append(MappingDependence(self, op1, op2, idx1, idx2, dtype))
 
     def add_instance_requirement(self, idx, index):
@@ -782,10 +822,10 @@ class SingleTask(object):
                 for idx,inst in self.instances.iteritems():
                     assert idx in self.reqs
                     req = self.reqs[idx]
-                    if req.region_node.name != None:
-                        to_add = req.region_node.name+' '
-                    else:
-                        to_add = ''
+                    to_add = ''
+                    name = inst.region.get_name()
+                    if name <> None:
+                        to_add = name + ' '
                     to_add = to_add+'Inst\ '+hex(inst.iid)+'\ '+req.dot_requirement()
                     inst_string = inst_string+'\\n'+to_add
         if self.enclosing <> None:
@@ -812,30 +852,7 @@ class SingleTask(object):
             self.prev_event_deps.add(later_name)
 
     def print_igraph_node(self, printer):
-        inst_string = ''
-        if self.state.verbose:
-            for idx,inst in self.instances.iteritems():
-                assert idx in self.reqs
-                req = self.reqs[idx]
-                if req.region_node.name != None:
-                    to_add = req.region_node.name+' '
-                else:
-                    to_add = ''
-                to_add = to_add+'('+hex(inst.iid)+') '+req.dot_requirement()
-                inst_string = inst_string+'\\n'+to_add
-        if self.enclosing <> None:
-            # Index Space Point
-            index_string = 'Point\ '+self.point.to_string()
-            printer.println(self.node_name+' [style=filled,label="'+\
-                    self.name+' (UID: '+str(self.uid)+')\\n'+index_string+inst_string+\
-                    '",fillcolor=mediumslateblue,fontsize=14,fontcolor=black,'+\
-                    'shape=record,penwidth=2];')
-        else:
-            # Individual Task
-            printer.println(self.node_name+' [style=filled,label="'+\
-                    self.name+' (UID: '+str(self.uid)+')'+inst_string+'",'+\
-                    'fillcolor=lightskyblue,fontsize=14,fontcolor=black,'+\
-                    'shape=record,penwidth=2];')
+        self.print_base_node(printer, False)
 
     def print_igraph_edges(self, printer):
         for idx, inst in self.instances.iteritems():
@@ -927,6 +944,9 @@ class SingleTask(object):
                 # Skip any deletion op dependences since we haven't taught
                 # LegionSpy how to properly compute them yet
                 if mdep.op2.get_op_kind() == DELETION_OP:
+                    continue
+                # Skip fences too
+                if mdep.op1.get_op_kind() == FENCE_OP or mdep.op2.get_op_kind() == FENCE_OP:
                     continue
                 print "    WARNING: Computed extra mapping dependence "+\
                       "between index "+str(mdep.idx1)+" of "+\
@@ -1227,7 +1247,7 @@ class IndexTask(object):
         assert idx in self.reqs
         r = self.reqs[idx]
         result = Requirement(idx, True, index, r.fspace, r.tid, r.region_node,
-                r.priv, r.coher, r.redop)
+                r.priv, r.coher, r.redop, self.state)
         for f in r.fields:
             result.add_field(f)
         return result
@@ -1682,8 +1702,8 @@ class CopyOp(object):
                 ('' if logical else 'Inst:\ '+\
                 self.instances[0].dot_instance()+\
                 '\ \=\=\>\ '+self.instances[1].dot_instance()+'\\n'+\
-                'Field: \{'+self.reqs[0].to_field_mask_string()+'\}\ '+\
-                '\ \=\=\>\ \{'+self.reqs[1].to_field_mask_string()+'\}\\n')+\
+                'Field: \{'+self.reqs[0].field_mask_string()+'\}\ '+\
+                '\ \=\=\>\ \{'+self.reqs[1].field_mask_string()+'\}\\n')+\
                 'Src Req:\ '+self.reqs[0].to_summary_string()+\
                 ('\\n' if self.reqs[0].region_node.name == None
                         else '\\n('+self.reqs[0].region_node.name+')\\n')+\
@@ -1709,9 +1729,9 @@ class CopyOp(object):
         self.start_event.print_prev_event_dependences(printer, later_name)
 
     def print_igraph_edges(self, printer):
-        fields = self.reqs[0].to_field_mask_string()+\
+        fields = self.reqs[0].field_mask_string()+\
                 ' \-\> '+\
-                self.reqs[1].to_field_mask_string()
+                self.reqs[1].field_mask_string()
         self.instances[1].print_incoming_edge(printer,
                 self.instances[0].node_name,
                 edge_type='dashed',
@@ -1962,7 +1982,7 @@ class AcquireOp(object):
         printer.println(self.node_name+\
                 ' [style=filled,label="Acquire '+str(self.uid)+'\\n '+\
                 ('' if logical else 'Inst: '+hex(self.instances[0].iid)+'\\n ')+\
-                'Fields: '+self.reqs[0].to_field_mask_string()+'\\n '+\
+                'Fields: '+self.reqs[0].field_mask_string()+'\\n '+\
                 self.reqs[0].to_summary_string()+\
                 ('' if self.reqs[0].region_node.name == None
                         else '\\n('+self.reqs[0].region_node.name+')')+\
@@ -2113,7 +2133,7 @@ class ReleaseOp(object):
         printer.println(self.node_name+\
                 ' [style=filled,label="Release '+str(self.uid)+'\\n '+\
                 ('' if logical else 'Inst: '+hex(self.instances[0].iid)+'\\n ')+\
-                'Fields: '+self.reqs[0].to_field_mask_string()+'\\n '+\
+                'Fields: '+self.reqs[0].field_mask_string()+'\\n '+\
                 self.reqs[0].to_summary_string()+\
                 ('' if self.reqs[0].region_node.name == None
                         else '\\n('+self.reqs[0].region_node.name+')')+\
@@ -2765,8 +2785,16 @@ class Copy(object):
         self.physical_marked = False
 
     def field_mask_string(self):
-        ranges = list_to_ranges(self.fields)
-        return ','.join([r for r in ranges])
+        fspace = self.region.field_node
+        field_names = list()
+        for f in self.fields:
+            field_name = fspace.get_field_name(f)
+            if field_name != None:
+                field_names.append(field_name)
+            else:
+                field_names.append(str(f))
+
+        return ','.join(field_names)
 
     def print_physical_node(self, printer):
         self.mask = self.field_mask_string()
@@ -2843,11 +2871,12 @@ class PhysicalInstance(object):
         return hex(self.iid)+'@'+hex(self.memory.uid)+'\ ('+str(self.blocking)+')'
 
     def print_igraph_node(self, printer):
-        if self.region.name <> None:
-            label = self.region.name+'\\n'+hex(self.iid)+'@'+hex(self.memory.uid)
-        else:
-            label = hex(self.iid)+'@'+hex(self.memory.uid)
-        label = label+'\\nfields: '+','.join(r for r in list_to_ranges(self.fields))
+        name = self.region.get_name()
+        if name <> None:
+            label = name+'\\n'
+        label = label+hex(self.iid)+'@'+hex(self.memory.uid)
+        label = label+'\\nfields: '+\
+                self.region.field_node.field_mask_string(self.fields)
         label = label+'\\nblocking factor: '+str(self.blocking)
         printer.println(self.node_name+' [style=filled,label="'+label+\
                 '",fillcolor=dodgerblue4,fontsize=12,fontcolor=white,'+\
@@ -2971,7 +3000,7 @@ class PhaseBarrier(object):
             self.prev_event_deps.add(later_name)
 
 class Requirement(object):
-    def __init__(self, index, is_reg, ispace, fspace, tid, node, priv, coher, redop):
+    def __init__(self, index, is_reg, ispace, fspace, tid, node, priv, coher, redop, state):
         self.index = index
         self.is_reg = is_reg
         self.ispace = ispace
@@ -2982,6 +3011,7 @@ class Requirement(object):
         self.coher = coher
         self.redop = redop
         self.fields = list()
+        self.state = state
 
     def find_field_index(self, field):
         return self.fields.index(field)
@@ -3106,16 +3136,15 @@ class Requirement(object):
 
     def dot_requirement(self):
         result = self.get_privilege_and_coherence()
-        result = result + '\ Fields:' +\
-                ','.join([r for r in list_to_ranges(self.fields)])
+        result = result + '\ Fields:' + self.field_mask_string()
         return result
 
     def to_summary_string(self):
         return '\{index:'+hex(self.ispace)+',field:'+hex(self.fspace)+\
                 ',tree:'+str(self.tid)+'\}'
 
-    def to_field_mask_string(self):
-        return ','.join([str(f) for f in self.fields])
+    def field_mask_string(self):
+        return self.state.field_space_nodes[self.fspace].field_mask_string(self.fields)
 
 
 class MappingDependence(object):
@@ -3223,26 +3252,25 @@ class Point(object):
     def add_value(self, val):
         self.values.append(val)
 
-    def to_string(self):
-        result = '('
+    def mk_string(self, start, delim, end):
+        result = start
         first = True
         for val in self.values:
-            if not(first):
-                result = result + ','
+            if not first:
+                result = result + delim
             result = result + str(val)
             first = False
-        result = result + ')'
+        result = result + end
         return result
 
+    def to_string(self):
+        return self.mk_string("(", ",", ")")
+
+    def to_dim_string(self):
+        return self.mk_string("", "][", "")
+
     def to_simple_string(self):
-        result = ''
-        first = True
-        for val in self.values:
-            if not(first):
-                result = result + '_'
-            result = result + str(val)
-            first = False
-        return result
+        return self.mk_string("", "_", "")
 
     def __hash__(self):
         return hash(self.to_simple_string())
@@ -4034,7 +4062,7 @@ class State(object):
                     self.field_space_nodes[fspace])
 
         self.ops[uid].add_requirement(index, Requirement(index, is_reg, ispace, 
-                                                  fspace, tid, node, priv, coher, redop))
+                                                  fspace, tid, node, priv, coher, redop, self))
         return True
 
     def add_req_field(self, uid, idx, fid):

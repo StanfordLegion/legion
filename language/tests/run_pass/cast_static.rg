@@ -36,7 +36,7 @@ task main()
   var rc1 = c.legion_coloring_create()
   c.legion_coloring_ensure_color(rc1, 0)
   c.legion_coloring_ensure_color(rc1, 1)
-  var p1 = partition(disjoint, r1, rc)
+  var p1 = partition(disjoint, r1, rc1)
   var r10 = p1[0]
   var r11 = p1[1]
   c.legion_coloring_destroy(rc1)

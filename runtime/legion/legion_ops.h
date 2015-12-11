@@ -44,6 +44,7 @@ namespace LegionRuntime {
         FRAME_OP_KIND,
         DELETION_OP_KIND,
         INTER_CLOSE_OP_KIND,
+        READ_CLOSE_OP_KIND,
         POST_CLOSE_OP_KIND,
         VIRTUAL_CLOSE_OP_KIND,
         ACQUIRE_OP_KIND,
@@ -73,6 +74,7 @@ namespace LegionRuntime {
         "Frame",                    \
         "Deletion",                 \
         "Inter Close",              \
+        "Read Close",               \
         "Post Close",               \
         "Virtual Close",            \
         "Acquire",                  \
@@ -149,10 +151,13 @@ namespace LegionRuntime {
       Operation(Internal *rt);
       virtual ~Operation(void);
     public:
+      static const char* get_string_rep(OpKind kind);
+    public:
       virtual void activate(void) = 0;
       virtual void deactivate(void) = 0; 
       virtual const char* get_logging_name(void) = 0;
       virtual OpKind get_operation_kind(void) = 0;
+      virtual size_t get_region_count(void) const;
       virtual Mappable* get_mappable(void);
     protected:
       // Base call
@@ -187,7 +192,7 @@ namespace LegionRuntime {
       void initialize_mapping_path(RegionTreePath &path,
                                    const RegionRequirement &req,
                                    LogicalPartition start_node);
-      void set_trace(LegionTrace *trace);
+      void set_trace(LegionTrace *trace, bool is_tracing);
       void set_must_epoch(MustEpochOp *epoch, unsigned index);
     public:
       // Localize a region requirement to its parent context
@@ -562,6 +567,7 @@ namespace LegionRuntime {
       virtual void deactivate(void);
       virtual const char* get_logging_name(void);
       virtual OpKind get_operation_kind(void);
+      virtual size_t get_region_count(void) const;
       virtual Mappable* get_mappable(void);
     public:
       virtual void trigger_dependence_analysis(void);
@@ -616,6 +622,7 @@ namespace LegionRuntime {
       virtual void deactivate(void);
       virtual const char* get_logging_name(void);
       virtual OpKind get_operation_kind(void);
+      virtual size_t get_region_count(void) const;
       virtual Mappable* get_mappable(void);
     public:
       virtual void trigger_dependence_analysis(void);
@@ -803,7 +810,7 @@ namespace LegionRuntime {
       void deactivate_close(void);
       void initialize_close(SingleTask *ctx,
                             const RegionRequirement &req, bool track);
-      void perform_logging(unsigned is_inter_close_op = 0);
+      void perform_logging(bool is_intermediate_close_op);
     public:
       // For recording trace dependences
     public:
@@ -811,6 +818,7 @@ namespace LegionRuntime {
       virtual void deactivate(void) = 0;
       virtual const char* get_logging_name(void) = 0;
       virtual OpKind get_operation_kind(void) = 0;
+      virtual size_t get_region_count(void) const;
       virtual bool is_close_op(void) const { return true; }
     public:
       virtual void trigger_remote_state_analysis(UserEvent ready_event);
@@ -823,50 +831,44 @@ namespace LegionRuntime {
     };
 
     /**
-     * \class InterCloseOp
-     * Intermediate close operations are issued by the runtime
-     * for closing up region trees as part of the normal execution
-     * of an application.
+     * \class TraceCloseOp
+     * This is a pure virtual class for handling the common
+     * operations associated with tracing for close operations.
      */
-    class InterCloseOp : public CloseOp {
+    class TraceCloseOp : public CloseOp {
     public:
-      InterCloseOp(Internal *runtime);
-      InterCloseOp(const InterCloseOp &rhs);
-      virtual ~InterCloseOp(void);
+      TraceCloseOp(Internal *runtime);
+      virtual ~TraceCloseOp(void);
     public:
-      InterCloseOp& operator=(const InterCloseOp &rhs);
+      virtual void activate(void) = 0;
+      virtual void deactivate(void) = 0;
+      virtual const char* get_logging_name(void) = 0;
+      virtual OpKind get_operation_kind(void) = 0;
     public:
-      void initialize(SingleTask *ctx, const RegionRequirement &req,
-                      const std::set<ColorPoint> &targets, bool leave_open, 
-                      LegionTrace *trace, int close_idx, 
-                      const VersionInfo &close_info,
-                      const VersionInfo &version_info,
-                      const RestrictInfo &restrict_info,
-                      const FieldMask &close_mask, Operation *create_op);
-      void add_next_child(const ColorPoint &next_child);
-    public:
-      const RegionRequirement& get_region_requirement(void) const;
-      const std::set<ColorPoint>& get_target_children(void) const;
+      void initialize_trace_close_op(SingleTask *ctx, 
+                                     const RegionRequirement &req,
+                 const LegionMap<ColorPoint,FieldMask>::aligned &targets,
+                                     LegionTrace *trace, int close_idx,
+                                     const FieldMask &close_mask,
+                                     Operation *create_op);
+      void activate_trace_close(void);
+      void deactivate_trace_close(void);
     public:
       void record_trace_dependence(Operation *target, GenerationID target_gen,
                                    int target_idx, int source_idx, 
                                    DependenceType dtype,
                                    const FieldMask &dependent_mask);
+      void add_next_child(const ColorPoint &next_child);
     public:
-      virtual void activate(void);
-      virtual void deactivate(void);
-      virtual const char* get_logging_name(void);
-      virtual OpKind get_operation_kind(void);
-    public:
-      virtual bool trigger_execution(void);
-      virtual unsigned find_parent_index(unsigned idx);
-    public:
+      inline const RegionRequirement& get_region_requirement(void) const
+        { return requirement; }
+      inline const LegionMap<ColorPoint,FieldMask>::aligned& 
+        get_target_children(void) const { return target_children; }
       inline int get_close_index(void) const { return close_idx; }
     protected:
-      std::set<ColorPoint> target_children;
-      bool leave_open;
+      // Points to close, and the fields to leave open
+      LegionMap<ColorPoint,FieldMask/*leave open*/>::aligned target_children;
       std::set<ColorPoint> next_children;
-      unsigned parent_req_index;
     protected:
       // These things are really only needed for tracing
       // The source index from the original 
@@ -878,6 +880,73 @@ namespace LegionRuntime {
       // this close operation so we don't register dependences on it
       Operation *create_op;
       GenerationID create_gen;
+    };
+
+    /**
+     * \class InterCloseOp
+     * Intermediate close operations are issued by the runtime
+     * for closing up region trees as part of the normal execution
+     * of an application.
+     */
+    class InterCloseOp : public TraceCloseOp {
+    public:
+      InterCloseOp(Internal *runtime);
+      InterCloseOp(const InterCloseOp &rhs);
+      virtual ~InterCloseOp(void);
+    public:
+      InterCloseOp& operator=(const InterCloseOp &rhs);
+    public:
+      void initialize(SingleTask *ctx, const RegionRequirement &req,
+                      const LegionMap<ColorPoint,FieldMask>::aligned &targets,
+                      LegionTrace *trace, int close_idx, 
+                      const VersionInfo &close_info,
+                      const VersionInfo &version_info,
+                      const RestrictInfo &restrict_info,
+                      const FieldMask &close_mask, Operation *create_op);
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+      virtual const char* get_logging_name(void);
+      virtual OpKind get_operation_kind(void);
+    public:
+      virtual bool trigger_execution(void);
+      virtual unsigned find_parent_index(unsigned idx);
+    protected:
+      unsigned parent_req_index;
+    };
+    
+    /**
+     * \class ReadCloseOp
+     * Read close operations are close ops that act as 
+     * place holders for closing up read-only partitions.
+     * Closing a read-only partition doesn't actually involve
+     * any work, but we do need something to ensure that all
+     * the mapping dependences are satisfied for later operations
+     * that traverse different subtrees. Read close operations
+     * are summaries for all those dependences to reduce the
+     * overhead of testing against everything in a subtree.
+     */
+    class ReadCloseOp : public TraceCloseOp {
+    public:
+      ReadCloseOp(Internal *runtime);
+      ReadCloseOp(const ReadCloseOp &rhs);
+      virtual ~ReadCloseOp(void);
+    public:
+      ReadCloseOp& operator=(const ReadCloseOp &rhs);
+    public:
+      void initialize(SingleTask *ctx, const RegionRequirement &req,
+                      const LegionMap<ColorPoint,FieldMask>::aligned &targets,
+                      LegionTrace *trace, int close_idx,
+                      const FieldMask &close_mask, Operation *create_op);
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+      virtual const char* get_logging_name(void);
+      virtual OpKind get_operation_kind(void);
+    public:
+      virtual unsigned find_parent_index(unsigned idx);
+    protected:
+      unsigned parent_req_index; 
     };
 
     /**
@@ -963,6 +1032,7 @@ namespace LegionRuntime {
       virtual void deactivate(void);
       virtual const char* get_logging_name(void); 
       virtual OpKind get_operation_kind(void);
+      virtual size_t get_region_count(void) const;
       virtual Mappable* get_mappable(void);
     public:
       virtual void trigger_dependence_analysis(void);
@@ -1017,6 +1087,7 @@ namespace LegionRuntime {
       virtual void deactivate(void);
       virtual const char* get_logging_name(void);
       virtual OpKind get_operation_kind(void);
+      virtual size_t get_region_count(void) const;
       virtual Mappable* get_mappable(void);
     public:
       virtual void trigger_dependence_analysis(void);
@@ -1255,6 +1326,7 @@ namespace LegionRuntime {
       virtual void activate(void);
       virtual void deactivate(void);
       virtual const char* get_logging_name(void);
+      virtual size_t get_region_count(void) const;
       virtual OpKind get_operation_kind(void);
     public:
       virtual void trigger_dependence_analysis(void);
@@ -1684,6 +1756,7 @@ namespace LegionRuntime {
       virtual void deactivate(void);
       virtual const char* get_logging_name(void);
       virtual OpKind get_operation_kind(void);
+      virtual size_t get_region_count(void) const;
       virtual void trigger_commit(void);
     protected:
       void compute_parent_index(void);
@@ -1738,6 +1811,7 @@ namespace LegionRuntime {
       virtual void activate(void);
       virtual void deactivate(void);
       virtual const char* get_logging_name(void);
+      virtual size_t get_region_count(void) const;
       virtual OpKind get_operation_kind(void);
     public:
       virtual void trigger_dependence_analysis(void);
@@ -1770,6 +1844,11 @@ namespace LegionRuntime {
     class AttachOp : public Operation {
     public:
       static const AllocationType alloc_type = ATTACH_OP_ALLOC;
+      enum ExternalType {
+        HDF5_FILE,
+        NORMAL_FILE,
+        IN_MEMORY_DATA
+      };
     public:
       AttachOp(Internal *rt);
       AttachOp(const AttachOp &rhs);
@@ -1781,12 +1860,17 @@ namespace LegionRuntime {
                                  LogicalRegion handle, LogicalRegion parent,
                                  const std::map<FieldID,const char*> &field_map,
                                  LegionFileMode mode, bool check_privileges);
+      PhysicalRegion initialize_file(SingleTask *ctx, const char *file_name,
+                                     LogicalRegion handle, LogicalRegion parent,
+                                     const std::vector<FieldID> &field_vec,
+                                     LegionFileMode mode, bool check_privileges);
       inline const RegionRequirement& get_requirement(void) const 
         { return requirement; }
     public:
       virtual void activate(void);
       virtual void deactivate(void);
       virtual const char* get_logging_name(void);
+      virtual size_t get_region_count(void) const;
       virtual OpKind get_operation_kind(void);
     public:
       virtual void trigger_dependence_analysis(void);
@@ -1795,7 +1879,7 @@ namespace LegionRuntime {
       virtual unsigned find_parent_index(unsigned idx);
       virtual void trigger_commit(void);
     public:
-      PhysicalInstance create_instance(const Domain &dom, 
+      PhysicalInstance create_instance(const Domain &dom,
                                        const std::vector<size_t> &field_sizes);
     protected:
       void check_privilege(void);
@@ -1808,6 +1892,7 @@ namespace LegionRuntime {
       const char *file_name;
       std::map<FieldID,const char*> field_map;
       LegionFileMode file_mode;
+      ExternalType file_type;
       PhysicalRegion region;
       unsigned parent_req_index;
     };
@@ -1831,6 +1916,7 @@ namespace LegionRuntime {
       virtual void activate(void);
       virtual void deactivate(void);
       virtual const char* get_logging_name(void);
+      virtual size_t get_region_count(void) const;
       virtual OpKind get_operation_kind(void);
     public:
       virtual void trigger_dependence_analysis(void);
