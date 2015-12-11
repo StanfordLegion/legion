@@ -156,7 +156,6 @@ namespace Realm {
     return e;
   }
 
-
   template <int N, typename T>
   template <int N2, typename T2>
   __attribute__ ((noinline))
@@ -173,6 +172,28 @@ namespace Realm {
     images.resize(n);
     for(size_t i = 0; i < n; i++)
       images[i] = op->add_source(sources[i]);
+
+    op->deferred_launch(wait_on);
+    return e;
+  }
+
+  template <int N, typename T>
+  template <int N2, typename T2>
+  __attribute__ ((noinline))
+  Event ZIndexSpace<N,T>::create_subspaces_by_image_with_difference(const std::vector<FieldDataDescriptor<ZIndexSpace<N2,T2>,ZPoint<N,T> > >& field_data,
+							   const std::vector<ZIndexSpace<N2,T2> >& sources,
+							   const std::vector<ZIndexSpace<N,T> >& diff_rhss,
+							   std::vector<ZIndexSpace<N,T> >& images,
+							   const ProfilingRequestSet &reqs,
+							   Event wait_on /*= Event::NO_EVENT*/) const
+  {
+    Event e = GenEventImpl::create_genevent()->current_event();
+    ImageOperation<N,T,N2,T2> *op = new ImageOperation<N,T,N2,T2>(*this, field_data, reqs, e);
+
+    size_t n = sources.size();
+    images.resize(n);
+    for(size_t i = 0; i < n; i++)
+      images[i] = op->add_source_with_difference(sources[i], diff_rhss[i]);
 
     op->deferred_launch(wait_on);
     return e;
@@ -1948,6 +1969,16 @@ namespace Realm {
   }
 
   template <int N, typename T, int N2, typename T2>
+  void ImageMicroOp<N,T,N2,T2>::add_sparsity_output_with_difference(ZIndexSpace<N2,T2> _source,
+                                                    ZIndexSpace<N,T> _diff_rhs,
+						    SparsityMap<N,T> _sparsity)
+  {
+    sources.push_back(_source);
+    diff_rhss.push_back(_diff_rhs);
+    sparsity_outputs.push_back(_sparsity);
+  }
+
+  template <int N, typename T, int N2, typename T2>
   void ImageMicroOp<N,T,N2,T2>::add_approx_output(int index, PartitioningOperation *op)
   {
     assert(approx_output_index == -1);
@@ -1974,6 +2005,12 @@ namespace Realm {
 	    ZPoint<N,T> ptr = a_data.read(pir.p);
 
 	    if(parent_space.contains(ptr)) {
+              // optional filter
+              if(!diff_rhss.empty())
+                if(diff_rhss[i].contains(ptr)) {
+                  //std::cout << "point " << ptr << " filtered!\n";
+                  continue;
+                }
 	      //std::cout << "image " << i << "(" << sources[i] << ") -> " << pir.p << " -> " << ptr << std::endl;
 	      if(!bmpp) bmpp = &bitmasks[i];
 	      if(!*bmpp) *bmpp = new BM;
@@ -2083,6 +2120,17 @@ namespace Realm {
       }
     }
 
+    // need valid data for each diff_rhs (if present)
+    for(size_t i = 0; i < diff_rhss.size(); i++) {
+      if(!diff_rhss[i].dense()) {
+	// it's safe to add the count after the registration only because we initialized
+	//  the count to 2 instead of 1
+	bool registered = SparsityMapImpl<N,T>::lookup(diff_rhss[i].sparsity)->add_waiter(this, true /*precise*/);
+	if(registered)
+	  __sync_fetch_and_add(&wait_count, 1);
+      }
+    }
+
     // need valid data for the parent space too
     if(!parent_space.dense()) {
       // it's safe to add the count after the registration only because we initialized
@@ -2104,6 +2152,7 @@ namespace Realm {
 	   (s << inst) &&
 	   (s << field_offset) &&
 	   (s << sources) &&
+	   (s << diff_rhss) &&
 	   (s << sparsity_outputs) &&
 	   (s << approx_output_index) &&
 	   (s << approx_output_op));
@@ -2120,6 +2169,7 @@ namespace Realm {
 	       (s >> inst) &&
 	       (s >> field_offset) &&
 	       (s >> sources) &&
+	       (s >> diff_rhss) &&
 	       (s >> sparsity_outputs) &&
 	       (s >> approx_output_index) &&
 	       (s >> approx_output_op));
@@ -3511,6 +3561,40 @@ namespace Realm {
   }
 
   template <int N, typename T, int N2, typename T2>
+  ZIndexSpace<N,T> ImageOperation<N,T,N2,T2>::add_source_with_difference(const ZIndexSpace<N2,T2>& source,
+                                                                         const ZIndexSpace<N,T>& diff_rhs)
+  {
+    // try to filter out obviously empty sources
+    if(parent.empty() || source.empty())
+      return ZIndexSpace<N,T>(/*empty*/);
+
+    // otherwise it'll be something smaller than the current parent
+    ZIndexSpace<N,T> image;
+    image.bounds = parent.bounds;
+
+    // if the source has a sparsity map, use the same node - otherwise
+    // get a sparsity ID by round-robin'ing across the nodes that have field data
+    int target_node;
+    if(!source.dense())
+      target_node = ID(source.sparsity).node();
+    else
+      target_node = ID(field_data[sources.size() % field_data.size()].inst).node();
+    SparsityMap<N,T> sparsity;
+    if(target_node == gasnet_mynode()) {
+      SparsityMapImplWrapper *wrap = get_runtime()->local_sparsity_map_free_list->alloc_entry();
+      sparsity = wrap->me.convert<SparsityMap<N,T> >();
+    } else
+      sparsity = ID(get_runtime()->remote_id_allocator.get_remote_id(target_node, ID::ID_SPARSITY)).convert<SparsityMap<N,T> >();
+    image.sparsity = sparsity;
+
+    sources.push_back(source);
+    diff_rhss.push_back(diff_rhs);
+    images.push_back(sparsity);
+
+    return image;
+  }
+
+  template <int N, typename T, int N2, typename T2>
   void ImageOperation<N,T,N2,T2>::execute(void)
   {
     if(!cfg_disable_intersection_optimization) {
@@ -3537,7 +3621,10 @@ namespace Realm {
 								   field_data[i].inst,
 								   field_data[i].field_offset);
 	for(size_t j = 0; j < sources.size(); j++)
-	  uop->add_sparsity_output(sources[j], images[j]);
+          if(diff_rhss.empty())
+	    uop->add_sparsity_output(sources[j], images[j]);
+          else
+	    uop->add_sparsity_output_with_difference(sources[j], diff_rhss[j], images[j]);
 
 	uop->dispatch(this, true /* ok to run in this thread */);
       }
@@ -3581,7 +3668,10 @@ namespace Realm {
 	  it != overlaps_by_field_data[i].end();
 	  it++) {
 	int j = *it;
-	uop->add_sparsity_output(sources[j], images[j]);
+        if(diff_rhss.empty())
+	  uop->add_sparsity_output(sources[j], images[j]);
+        else
+	  uop->add_sparsity_output_with_difference(sources[j], diff_rhss[j], images[j]);
       }
       uop->dispatch(this, true /* ok to run in this thread */);
     }
@@ -4254,6 +4344,8 @@ namespace Realm {
 	list1[0].create_subspaces_by_preimage(field_data, list2, list1,
 					      Realm::ProfilingRequestSet());
 	list2[0].create_subspaces_by_image(field_data, list1, list2,
+					   Realm::ProfilingRequestSet());
+	list2[0].create_subspaces_by_image_with_difference(field_data, list1, list2, list2,
 					   Realm::ProfilingRequestSet());
       }
       static void inst_stuff(void)

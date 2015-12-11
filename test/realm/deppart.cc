@@ -14,6 +14,8 @@
 
 using namespace Realm;
 
+#define USE_IMAGE_DIFF
+
 Logger log_app("app");
 
 // Task IDs, some IDs are reserved so start at first available number
@@ -607,6 +609,25 @@ public:
       p_int_faces.push_back(p_facetypes[idx][BC_INTERIOR]);
       p_border_faces.push_back(p_facetypes[idx][BC_BLOCK_BORDER]);
     }
+    // miniaero's checks are faster with image/diff on 1 thread, but slower on 4
+#ifdef MINIAERO_USE_IMAGE_DIFF
+    std::vector<ZIndexSpace<1> > p_l_test, p_ri_test, p_rb_test;
+    Event e4 = is_cells.create_subspaces_by_image_with_difference(face_left_field_data,
+						  p_faces,
+						  p_cells,
+                                                  p_l_test,
+						  Realm::ProfilingRequestSet());
+    Event e5 = is_cells.create_subspaces_by_image_with_difference(face_right_field_data,
+						  p_int_faces,
+						  p_cells,
+                                                  p_ri_test,
+						  Realm::ProfilingRequestSet());
+    Event e6 = is_cells.create_subspaces_by_image_with_difference(face_right_field_data,
+						  p_border_faces,
+						  p_ghost,
+                                                  p_rb_test,
+						  Realm::ProfilingRequestSet());
+#else
     std::vector<ZIndexSpace<1> > p_img_left, p_img_right_i, p_img_right_b;
     Event e1 = is_cells.create_subspaces_by_image(face_left_field_data,
 						  p_faces,
@@ -633,6 +654,7 @@ public:
 						   p_rb_test,
 						   Realm::ProfilingRequestSet(),
 						   e3);
+#endif
     errors += check_empty(e4, p_l_test, "p_l_test");
     errors += check_empty(e5, p_ri_test, "p_ri_test");
     errors += check_empty(e6, p_rb_test, "p_rb_test");
@@ -1029,6 +1051,15 @@ public:
 
     // an image of p_edges through out_node gives us all the shared nodes, along
     //  with some private nodes
+#ifdef USE_IMAGE_DIFF
+    Event e4 = is_nodes.create_subspaces_by_image_with_difference(out_node_field_data,
+						  p_edges,
+                                                  p_nodes,
+						  p_ghost,
+						  Realm::ProfilingRequestSet(),
+						  e2);
+    if(wait_on_events) e4.wait();
+#else
     std::vector<ZIndexSpace<1> > p_extra_nodes;
 
     Event e3 = is_nodes.create_subspaces_by_image(out_node_field_data,
@@ -1045,6 +1076,7 @@ public:
 						   Realm::ProfilingRequestSet(),
 						   e3);
     if(wait_on_events) e4.wait();
+#endif
 
     // the union of everybody's ghost nodes is is_shared
     Event e5 = ZIndexSpace<1>::compute_union(p_ghost, is_shared,
@@ -1081,13 +1113,29 @@ public:
 
     // compute the intermediates for the checks - these duplicate things we
     //  already have, but we're not supposed to know that here
-    std::vector<ZIndexSpace<1> > p_pvt_and_shr, p_all, p_in_img, p_out_img;
+    std::vector<ZIndexSpace<1> > p_pvt_and_shr, p_all;
     Event e1 = ZIndexSpace<1>::compute_unions(p_pvt, p_shr, p_pvt_and_shr,
                                               Realm::ProfilingRequestSet(),
                                               Event::NO_EVENT);
     Event e2 = ZIndexSpace<1>::compute_unions(p_pvt_and_shr, p_ghost, p_all,
                                               Realm::ProfilingRequestSet(),
                                               e1);
+#ifdef USE_IMAGE_DIFF
+    std::vector<ZIndexSpace<1> > p_in_test, p_out_test;
+    Event e5 = is_nodes.create_subspaces_by_image_with_difference(in_node_field_data,
+						  p_edges,
+                                                  p_pvt_and_shr,
+						  p_in_test,
+						  Realm::ProfilingRequestSet(),
+						  e1);
+    Event e6 = is_nodes.create_subspaces_by_image_with_difference(out_node_field_data,
+						  p_edges,
+                                                  p_all,
+						  p_out_test,
+						  Realm::ProfilingRequestSet(),
+						  e2);
+#else
+    std::vector<ZIndexSpace<1> > p_in_img, p_out_img;
     Event e3 = is_nodes.create_subspaces_by_image(in_node_field_data,
 						  p_edges,
 						  p_in_img,
@@ -1107,6 +1155,7 @@ public:
                                                    p_out_test,
 						   Realm::ProfilingRequestSet(),
                                                    Event::merge_events(e2, e4));
+#endif
     errors += check_empty(e5, p_in_test, "p_in_test");
     errors += check_empty(e6, p_out_test, "p_out_test");
 
@@ -1608,6 +1657,25 @@ public:
   {
     int errors = 0;
 
+    // pennant's checks are actually slower with the fused image/diff
+#ifdef PENNANT_USE_IMAGE_DIFF
+    std::vector<ZIndexSpace<1> > p_z_test, p_p_test, p_s_test;
+    Event e4 = is_zones.create_subspaces_by_image_with_difference(side_mapsz_field_data,
+						  p_sides,
+                                                  p_zones,
+						  p_z_test,
+						  Realm::ProfilingRequestSet());
+    Event e5 = is_points.create_subspaces_by_image_with_difference(side_mapsp1_field_data,
+						   p_sides,
+						   p_points,
+                                                   p_p_test,
+						   Realm::ProfilingRequestSet());
+    Event e6 = is_sides.create_subspaces_by_image_with_difference(side_mapss3_field_data,
+						  p_sides,
+						  p_sides,
+                                                  p_s_test,
+						  Realm::ProfilingRequestSet());
+#else
     std::vector<ZIndexSpace<1> > p_img_mapsz, p_img_mapsp1, p_img_mapss3;
     Event e1 = is_zones.create_subspaces_by_image(side_mapsz_field_data,
 						  p_sides,
@@ -1634,6 +1702,7 @@ public:
 						   p_s_test,
 						   Realm::ProfilingRequestSet(),
 						   e3);
+#endif
     errors += check_empty(e4, p_z_test, "p_z_test");
     errors += check_empty(e5, p_p_test, "p_p_test");
     errors += check_empty(e6, p_s_test, "p_s_test");

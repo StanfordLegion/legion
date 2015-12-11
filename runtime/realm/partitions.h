@@ -340,6 +340,9 @@ namespace Realm {
     virtual ~ImageMicroOp(void);
 
     void add_sparsity_output(ZIndexSpace<N2,T2> _source, SparsityMap<N,T> _sparsity);
+    void add_sparsity_output_with_difference(ZIndexSpace<N2,T2> _source,
+                                             ZIndexSpace<N,T> _diff_rhs,
+                                             SparsityMap<N,T> _sparsity);
     void add_approx_output(int index, PartitioningOperation *op);
 
     virtual void execute(void);
@@ -366,6 +369,7 @@ namespace Realm {
     RegionInstance inst;
     size_t field_offset;
     std::vector<ZIndexSpace<N2,T2> > sources;
+    std::vector<ZIndexSpace<N,T> > diff_rhss;
     std::vector<SparsityMap<N,T> > sparsity_outputs;
     int approx_output_index;
     intptr_t approx_output_op;
@@ -560,6 +564,8 @@ namespace Realm {
     virtual ~ImageOperation(void);
 
     ZIndexSpace<N,T> add_source(const ZIndexSpace<N2,T2>& source);
+    ZIndexSpace<N,T> add_source_with_difference(const ZIndexSpace<N2,T2>& source,
+                                                const ZIndexSpace<N,T>& diff_rhs);
 
     virtual void execute(void);
 
@@ -569,6 +575,7 @@ namespace Realm {
     ZIndexSpace<N,T> parent;
     std::vector<FieldDataDescriptor<ZIndexSpace<N2,T2>,ZPoint<N,T> > > field_data;
     std::vector<ZIndexSpace<N2,T2> > sources;
+    std::vector<ZIndexSpace<N,T> > diff_rhss;
     std::vector<SparsityMap<N,T> > images;
   };
 

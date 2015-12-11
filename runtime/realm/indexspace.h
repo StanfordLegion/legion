@@ -1340,6 +1340,19 @@ namespace Realm {
 				    const ProfilingRequestSet &reqs,
 				    Event wait_on = Event::NO_EVENT) const;
 
+    // a common case that is worth optimizing is when the computed image is
+    //  going to be restricted by an intersection or difference operation - it
+    //  can often be much faster to filter the projected points before stuffing
+    //  them into an index space
+
+    template <int N2, typename T2>
+    Event create_subspaces_by_image_with_difference(const std::vector<FieldDataDescriptor<ZIndexSpace<N2,T2>,ZPoint<N,T> > >& field_data,
+				    const std::vector<ZIndexSpace<N2,T2> >& sources,
+				    const std::vector<ZIndexSpace<N,T> >& diff_rhs,
+				    std::vector<ZIndexSpace<N,T> >& images,
+				    const ProfilingRequestSet &reqs,
+				    Event wait_on = Event::NO_EVENT) const;
+
     // computes subspaces of this index space by determining what subsets can reach subsets
     //  of some other index space - the field data points from this index space to the other
     //  and is used to compute the preimage of each target - i.e. upon return (and waiting
