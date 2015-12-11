@@ -117,6 +117,11 @@ namespace LegionRuntime {
       public:
         PhysicalState *physical_state;
         FieldVersions *field_versions;
+        // For nodes in close operations that are not the top node
+        // this mask doubles as the set of fields which need to be 
+        // applied because the close is leave open. Unfortunately
+        // we can't put this in a union to make this more clear
+        // because C unions are dumb.
         FieldMask        advance_mask;
       public:
         unsigned bit_mask;
@@ -140,9 +145,8 @@ namespace LegionRuntime {
       void merge(const VersionInfo &rhs, const FieldMask &mask);
       void apply_mapping(ContextID ctx, AddressSpaceID target,
                          std::set<Event> &applied_conditions);
-      void apply_close(ContextID ctx, bool permit_leave_open, 
-                       const std::set<ColorPoint> &closed_children,
-                       AddressSpaceID target,
+      void apply_close(ContextID ctx, AddressSpaceID target,
+             const LegionMap<ColorPoint,FieldMask>::aligned &closed_children,
                        std::set<Event> &applied_conditions); 
       void reset(void);
       void release(void);
@@ -397,9 +401,10 @@ namespace LegionRuntime {
       void record_version_numbers(const FieldMask &mask,
                                   const LogicalUser &user,
                                   VersionInfo &version_info,
-                                  bool capture_previous, bool path_only, 
+                                  bool capture_previous, bool path_only,
                                   bool need_final, bool close_top, 
-                                  bool report_unversioned);
+                                  bool report_unversioned,
+                                  bool capture_leave_open = false);
       void advance_version_numbers(const FieldMask &mask);
     public:
       VersionState* create_new_version_state(VersionID vid); 
@@ -455,7 +460,7 @@ namespace LegionRuntime {
      * necessary for performing a close operation
      * on the logical region tree.
      */
-    struct LogicalCloser {
+    class LogicalCloser {
     public:
       struct ClosingInfo {
       public:
@@ -466,6 +471,7 @@ namespace LegionRuntime {
         { child_users.insert(child_users.end(), users.begin(), users.end()); }
       public:
         FieldMask child_fields;
+        FieldMask leave_open_mask;
         LegionList<LogicalUser,CLOSE_LOGICAL_ALLOC>::track_aligned child_users;
       };
       struct ClosingSet {
@@ -474,8 +480,36 @@ namespace LegionRuntime {
         ClosingSet(const FieldMask &m)
           : closing_mask(m) { }
       public:
+        inline void add_child(const ColorPoint &key, const FieldMask &open)
+        {
+          LegionMap<ColorPoint,FieldMask>::aligned::iterator finder = 
+            children.find(key);
+          if (finder != children.end())
+          {
+            if (!!open)
+              finder->second |= open;
+          }
+          else
+          {
+            if (!!open)
+              children[key] = open;
+            else
+              children[key] = FieldMask();
+          }
+        }
+        inline void filter_children(void)
+        {
+          for (LegionMap<ColorPoint,FieldMask>::aligned::iterator it = 
+                children.begin(); it != children.end(); it++)
+          {
+            it->second &= closing_mask;
+          }
+        }
+      public:
         FieldMask closing_mask;
-        std::set<ColorPoint> children;
+        // leave open may over-approximate so filter before
+        // building the close operations!
+        LegionMap<ColorPoint,FieldMask/*leave open*/>::aligned children;
       };
     public:
       LogicalCloser(ContextID ctx, const LogicalUser &u,
@@ -511,12 +545,12 @@ namespace LegionRuntime {
       static void compute_close_sets(
                      const LegionMap<ColorPoint,ClosingInfo>::aligned &children,
                      LegionList<ClosingSet>::aligned &close_sets);
-      void create_close_operations(RegionTreeNode *target, Operation *creator,
-                          const VersionInfo &local_info,
+      void create_normal_close_operations(RegionTreeNode *target, 
+                          Operation *creator, const VersionInfo &local_info,
                           const VersionInfo &version_info,
                           const RestrictInfo &restrict_info, 
-                          const TraceInfo &trace_info, bool open,
-                          const LegionList<ClosingSet>::aligned &close_sets);
+                          const TraceInfo &trace_info,
+                          LegionList<ClosingSet>::aligned &close_sets);
       void create_read_only_close_operations(RegionTreeNode *target, 
                           Operation *creator, const TraceInfo &trace_info,
                           const LegionList<ClosingSet>::aligned &close_sets);
@@ -534,19 +568,16 @@ namespace LegionRuntime {
       const bool capture_users;
       LegionDeque<LogicalUser>::aligned closed_users;
     protected:
-      FieldMask closed_mask, leave_open_mask, partial_mask;
-      LegionMap<ColorPoint,ClosingInfo>::aligned leave_open_children;
-      LegionMap<ColorPoint,ClosingInfo>::aligned force_close_children;
+      FieldMask closed_mask, partial_mask;
+      LegionMap<ColorPoint,ClosingInfo>::aligned closed_children;
       LegionMap<ColorPoint,ClosingInfo>::aligned read_only_children;
     protected:
       // Use the base TraceCloseOp class so we can call the same
       // register_dependences method on all of them
-      LegionMap<TraceCloseOp*,LogicalUser>::aligned leave_open_closes;
-      LegionMap<TraceCloseOp*,LogicalUser>::aligned force_close_closes;
+      LegionMap<TraceCloseOp*,LogicalUser>::aligned normal_closes;
       LegionMap<TraceCloseOp*,LogicalUser>::aligned read_only_closes;
     protected:
-      VersionInfo leave_open_versions;
-      VersionInfo force_close_versions;
+      VersionInfo closed_version_info;
       FieldMask flush_only_fields;
     }; 
 
@@ -564,10 +595,9 @@ namespace LegionRuntime {
      * \struct PhysicalCloser
      * Class for helping with the closing of physical region trees
      */
-    struct PhysicalCloser : public CopyTracker {
+    class PhysicalCloser : public CopyTracker {
     public:
       PhysicalCloser(const MappableInfo &info,
-                     bool leave_open,
                      LogicalRegion closing_handle);
       PhysicalCloser(const PhysicalCloser &rhs);
       ~PhysicalCloser(void);
@@ -585,9 +615,15 @@ namespace LegionRuntime {
       const FieldMask& get_dirty_mask(void) const;
       void update_node_views(RegionTreeNode *node, PhysicalState *state);
     public:
+      inline void set_leave_open_mask(const FieldMask &leave_open)
+        { leave_open_mask = leave_open; }
+      inline const FieldMask& get_leave_open_mask(void) const 
+        { return leave_open_mask; }
+    public:
       const MappableInfo &info;
       const LogicalRegion handle;
-      const bool permit_leave_open;
+    protected:
+      FieldMask leave_open_mask;
     protected:
       bool targets_selected;
       FieldMask dirty_mask;
@@ -600,10 +636,9 @@ namespace LegionRuntime {
      * \struct CompositeCloser
      * Class for helping with closing of physical trees to composite instances
      */
-    struct CompositeCloser {
+    class CompositeCloser {
     public:
-      CompositeCloser(ContextID ctx, VersionInfo &version_info,
-                      bool permit_leave_open);
+      CompositeCloser(ContextID ctx, VersionInfo &version_info);
       CompositeCloser(const CompositeCloser &rhs);
       ~CompositeCloser(void);
     public:
@@ -625,9 +660,13 @@ namespace LegionRuntime {
       bool filter_capture_mask(RegionTreeNode *node,
                                FieldMask &capture_mask);
     public:
+      inline void set_leave_open_mask(const FieldMask &leave_open)
+        { leave_open_mask = leave_open; }
+    public:
       const ContextID ctx;
-      const bool permit_leave_open;
       VersionInfo &version_info;
+    public:
+      FieldMask leave_open_mask;
     public:
       CompositeVersionInfo *composite_version_info;
       std::map<RegionTreeNode*,CompositeNode*> constructed_nodes;
@@ -683,7 +722,7 @@ namespace LegionRuntime {
       void apply_state(const FieldMask &advance_mask, 
             AddressSpaceID target, std::set<Event> &applied_conditions);
       void filter_and_apply(bool top, AddressSpaceID target,
-                            const std::set<ColorPoint> &closed_children,
+            const LegionMap<ColorPoint,FieldMask>::aligned &closed_children,
                             std::set<Event> &applied_conditions);
       void reset(void);
       void record_created_instance(InstanceView *view);
@@ -794,7 +833,7 @@ namespace LegionRuntime {
       void filter_and_merge_physical_state(const PhysicalState *state,
                                 const FieldMask &merge_mask, bool top,
                                 AddressSpaceID target,
-                                const std::set<ColorPoint> &closed_children,
+            const LegionMap<ColorPoint,FieldMask>::aligned &closed_children,
                                 std::set<Event> &applied_conditions);
     public:
       virtual void notify_active(void);

@@ -557,9 +557,9 @@ namespace LegionRuntime {
     struct LogicalUser;
     struct PhysicalUser;
     struct TraceInfo;
-    struct LogicalCloser;
-    struct PhysicalCloser;
-    struct CompositeCloser;
+    class LogicalCloser;
+    class PhysicalCloser;
+    class CompositeCloser;
     class ReductionCloser;
     class TreeCloseImpl;
     class TreeClose;

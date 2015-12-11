@@ -364,8 +364,7 @@ namespace LegionRuntime {
                                    RegionRequirement &req,
                                    SingleTask *parent_ctx,
                                    Processor local_proc,
-                                   const std::set<ColorPoint> &targets,
-                                   bool leave_open,
+                     const LegionMap<ColorPoint,FieldMask>::aligned &targets,
                                    const std::set<ColorPoint> &next_children,
                                    Event &closed,
                                    const MappingRef &target,
@@ -1566,8 +1565,7 @@ namespace LegionRuntime {
                                 bool &create_composite, bool &changed);
       // Analogous methods to those above except for closing to a composite view
       CompositeRef create_composite_instance(ContextID ctx_id,
-                                     const std::set<ColorPoint> &targets,
-                                     bool leave_open, 
+                       const LegionMap<ColorPoint,FieldMask>::aligned &targets,
                                      const std::set<ColorPoint> &next_children,
                                      const FieldMask &closing_mask,
                                      VersionInfo &version_info,
@@ -1730,22 +1728,20 @@ namespace LegionRuntime {
       virtual size_t get_num_children(void) const = 0;
       virtual InterCloseOp* create_close_op(Operation *creator, 
                                             const FieldMask &closing_mask,
-                                            bool leave_open,
-                                            const std::set<ColorPoint> &targets,
+                        const LegionMap<ColorPoint,FieldMask>::aligned &targets,
                                             const VersionInfo &close_info,
                                             const VersionInfo &version_info,
                                             const RestrictInfo &res_info,
                                             const TraceInfo &trace_info) = 0;
       virtual ReadCloseOp* create_read_only_close_op(Operation *creator,
                                             const FieldMask &closing_mask,
-                                            const std::set<ColorPoint> &targets,
+                        const LegionMap<ColorPoint,FieldMask>::aligned &targets,
                                             const TraceInfo &trace_info) = 0;
       virtual bool perform_close_operation(const MappableInfo &info,
                                            const FieldMask &closing_mask,
-                                           const std::set<ColorPoint> &targets,
+                       const LegionMap<ColorPoint,FieldMask>::aligned &targets,
                                            const MappingRef &target_region,
                                            VersionInfo &version_info,
-                                           bool leave_open,
                                      const std::set<ColorPoint> &next_children,
                                            Event &closed,
                                            bool &create_composite) = 0;
@@ -1874,22 +1870,20 @@ namespace LegionRuntime {
       virtual size_t get_num_children(void) const;
       virtual InterCloseOp* create_close_op(Operation *creator, 
                                             const FieldMask &closing_mask,
-                                            bool leave_open,
-                                            const std::set<ColorPoint> &targets,
+                        const LegionMap<ColorPoint,FieldMask>::aligned &targets,
                                             const VersionInfo &close_info,
                                             const VersionInfo &version_info,
                                             const RestrictInfo &res_info,
                                             const TraceInfo &trace_info);
       virtual ReadCloseOp* create_read_only_close_op(Operation *creator,
                                             const FieldMask &closing_mask,
-                                            const std::set<ColorPoint> &targets,
+                        const LegionMap<ColorPoint,FieldMask>::aligned &targets,
                                             const TraceInfo &trace_info);
       virtual bool perform_close_operation(const MappableInfo &info,
                                            const FieldMask &closing_mask,
-                                           const std::set<ColorPoint> &targets,
+                       const LegionMap<ColorPoint,FieldMask>::aligned &targets,
                                            const MappingRef &target_region,
                                            VersionInfo &version_info,
-                                           bool leave_open,
                                      const std::set<ColorPoint> &next_children,
                                            Event &closed,
                                            bool &create_composite);
@@ -2052,22 +2046,20 @@ namespace LegionRuntime {
       virtual size_t get_num_children(void) const;
       virtual InterCloseOp* create_close_op(Operation *creator, 
                                             const FieldMask &closing_mask,
-                                            bool leave_open,
-                                            const std::set<ColorPoint> &targets,
+                        const LegionMap<ColorPoint,FieldMask>::aligned &targets,
                                             const VersionInfo &close_info,
                                             const VersionInfo &version_info,
                                             const RestrictInfo &res_info,
                                             const TraceInfo &trace_info);
       virtual ReadCloseOp* create_read_only_close_op(Operation *creator,
                                             const FieldMask &closing_mask,
-                                            const std::set<ColorPoint> &targets,
+                        const LegionMap<ColorPoint,FieldMask>::aligned &targets,
                                             const TraceInfo &trace_info);
       virtual bool perform_close_operation(const MappableInfo &info,
                                            const FieldMask &closing_mask,
-                                           const std::set<ColorPoint> &targets,
+                       const LegionMap<ColorPoint,FieldMask>::aligned &targets,
                                            const MappingRef &target_region,
                                            VersionInfo &version_info,
-                                           bool leave_open,
                                      const std::set<ColorPoint> &next_children,
                                            Event &closed,
                                            bool &create_composite);
