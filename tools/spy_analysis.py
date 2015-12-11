@@ -270,6 +270,12 @@ class IndexSpaceNode(object):
                 return child
         return None
 
+    def find_child_color(self, child):
+        for c, child_ in self.children.iteritems():
+            if child_ == child:
+                return c
+        return None
+
     def mark_independent(self, uid1, uid2):
         assert self.find_child(uid1) <> None
         assert self.find_child(uid2) <> None
@@ -363,6 +369,12 @@ class IndexPartNode(object):
         for point,child in self.children.iteritems():
             if child.uid == uid:
                 return child
+        return None
+
+    def find_child_color(self, child):
+        for c, child_ in self.children.iteritems():
+            if child_ == child:
+                return c
         return None
 
     def mark_independent(self, uid1, uid2):
@@ -488,6 +500,16 @@ class RegionNode(object):
             for child in self.children:
                 child.set_name(name, index_node, field_node)
 
+    def get_name(self):
+        if self.name <> None:
+            return self.name
+        elif self.parent <> None:
+            parent_name = self.parent.get_name()
+            color = self.parent.index_node.find_child_color(self.index_node)
+            assert(color <> None)
+            return parent_name + "[" + color.to_dim_string() + "]"
+        return None
+
     def find_node(self, index_node, field_node):
         if self.index_node == index_node and \
                 self.field_node == field_node:
@@ -568,6 +590,14 @@ class PartitionNode(object):
         else:
             for child in self.children:
                 child.set_name(name, index_node, field_node)
+
+    def get_name(self):
+        if self.name <> None:
+            return self.name
+        elif self.parent <> None:
+            parent_name = self.parent.get_name()
+            return parent_name + ".partition"
+        return None
 
     def find_node(self, index_node, field_node):
         if self.index_node == index_node and \
@@ -2841,10 +2871,10 @@ class PhysicalInstance(object):
         return hex(self.iid)+'@'+hex(self.memory.uid)+'\ ('+str(self.blocking)+')'
 
     def print_igraph_node(self, printer):
-        if self.region.name <> None:
-            label = self.region.name+'\\n'+hex(self.iid)+'@'+hex(self.memory.uid)
-        else:
-            label = hex(self.iid)+'@'+hex(self.memory.uid)
+        name = self.region.get_name()
+        if name <> None:
+            label = name+'\\n'
+        label = label+hex(self.iid)+'@'+hex(self.memory.uid)
         label = label+'\\nfields: '+\
                 self.region.field_node.field_mask_string(self.fields)
         label = label+'\\nblocking factor: '+str(self.blocking)
@@ -3222,26 +3252,25 @@ class Point(object):
     def add_value(self, val):
         self.values.append(val)
 
-    def to_string(self):
-        result = '('
+    def mk_string(self, start, delim, end):
+        result = start
         first = True
         for val in self.values:
-            if not(first):
-                result = result + ','
+            if not first:
+                result = result + delim
             result = result + str(val)
             first = False
-        result = result + ')'
+        result = result + end
         return result
 
+    def to_string(self):
+        return self.mk_string("(", ",", ")")
+
+    def to_dim_string(self):
+        return self.mk_string("", "][", "")
+
     def to_simple_string(self):
-        result = ''
-        first = True
-        for val in self.values:
-            if not(first):
-                result = result + '_'
-            result = result + str(val)
-            first = False
-        return result
+        return self.mk_string("", "_", "")
 
     def __hash__(self):
         return hash(self.to_simple_string())

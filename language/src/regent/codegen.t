@@ -2931,6 +2931,7 @@ function codegen.expr_region(cx, node)
   local r = terralib.newsymbol(region_type, "r")
   local lr = terralib.newsymbol(c.legion_logical_region_t, "lr")
   local is = terralib.newsymbol(c.legion_index_space_t, "is")
+  local fs = terralib.newsymbol(c.legion_field_space_t, "fs")
   local fsa = terralib.newsymbol(c.legion_field_allocator_t, "fsa")
   local pr = terralib.newsymbol(c.legion_physical_region_t, "pr")
 
@@ -2962,27 +2963,36 @@ function codegen.expr_region(cx, node)
                      data.dict(data.zip(field_paths:map(data.hash), base_pointers)),
                      data.dict(data.zip(field_paths:map(data.hash), strides)))
 
+  local fs_naming_actions
+  if rawget(fspace_type, "is_fspace_instance") then
+    fs_naming_actions = quote
+      c.legion_field_space_attach_name([cx.runtime], [fs], [fspace_type.name])
+      [data.zip(field_paths, field_ids):map(
+         function(field)
+           local field_path, field_id = unpack(field)
+           local field_name = field_path:mkstring("", ".", "")
+           return `(c.legion_field_id_attach_name(
+                      [cx.runtime], [fs], field_id, field_name))
+         end)]
+    end
+  else
+    fs_naming_actions = quote end
+  end
+
   actions = quote
     [actions]
     var capacity = [ispace.value]
     var [is] = [ispace.value].impl
-    var fs = c.legion_field_space_create([cx.runtime], [cx.context])
-    c.legion_field_space_attach_name([cx.runtime], fs, [fspace_type.name])
-    var [fsa] = c.legion_field_allocator_create([cx.runtime], [cx.context],  fs);
+    var [fs] = c.legion_field_space_create([cx.runtime], [cx.context])
+    var [fsa] = c.legion_field_allocator_create([cx.runtime], [cx.context],  [fs]);
     [data.zip(field_types, field_ids):map(
        function(field)
          local field_type, field_id = unpack(field)
          return `(c.legion_field_allocator_allocate_field(
                     [fsa], terralib.sizeof([field_type]), [field_id]))
        end)]
-    [data.zip(field_paths, field_ids):map(
-       function(field)
-         local field_path, field_id = unpack(field)
-         local field_name = field_path:mkstring("", ".", "")
-         return `(c.legion_field_id_attach_name(
-                    [cx.runtime], fs, field_id, field_name))
-       end)]
-    var [lr] = c.legion_logical_region_create([cx.runtime], [cx.context], [is], fs)
+    [fs_naming_actions];
+    var [lr] = c.legion_logical_region_create([cx.runtime], [cx.context], [is], [fs])
     var il = c.legion_inline_launcher_create_logical_region(
       [lr], c.READ_WRITE, c.EXCLUSIVE, [lr], 0, false, 0, 0);
     [field_ids:map(
@@ -5463,6 +5473,17 @@ function codegen.stat_var(cx, node)
   end
   local actions = rhs:map(function(rh) return rh.actions end)
 
+  local function is_partitioning_expr(node)
+    if node:is(ast.typed.expr.Partition) or node:is(ast.typed.expr.PartitionEqual) or
+       node:is(ast.typed.expr.PartitionByField) or node:is(ast.typed.expr.Image) or
+       node:is(ast.typed.expr.Preimage) or
+       (node:is(ast.typed.expr.Binary) and std.is_partition(node.expr_type)) then
+      return true
+    else
+      return false
+    end
+  end
+
   if #rhs > 0 then
     local decls = terralib.newlist()
     for i, lh in ipairs(lhs) do
@@ -5475,6 +5496,11 @@ function codegen.stat_var(cx, node)
         actions = quote
           [actions]
           c.legion_logical_region_attach_name([cx.runtime], [ rhs_values[i] ].impl, [lh.displayname])
+        end
+      elseif is_partitioning_expr(node.values[i]) then
+        actions = quote
+          [actions]
+          c.legion_logical_partition_attach_name([cx.runtime], [ rhs_values[i] ].impl, [lh.displayname])
         end
       end
       decls:insert(quote var [lh] : types[i] = [ rhs_values[i] ] end)
