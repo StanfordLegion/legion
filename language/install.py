@@ -46,6 +46,10 @@ def git_update(repo_dir):
     subprocess.check_call(
         ['git', 'pull', '--ff-only'],
         cwd = repo_dir)
+    # FIXME: For now, version lock Terra to avoid breakage.
+    subprocess.check_call(
+        ['git', 'reset', '--hard', 'd9d038dcf29403e9419055ebf6648134b4476e0e'],
+        cwd = repo_dir)
 
 def build_terra(terra_dir, thread_count):
     subprocess.check_call(
