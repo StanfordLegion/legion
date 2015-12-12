@@ -5278,9 +5278,11 @@ namespace LegionRuntime {
       Domain parent_dom = forest->get_index_space_domain(parent);
       const size_t num_elmts = 
         parent_dom.get_index_space().get_valid_mask().get_num_elmts();
+      const int first_element =
+        parent_dom.get_index_space().get_valid_mask().get_first_element();
       for (GenericPointInRectIterator<1> pir(color_range); pir; pir++)
       {
-        LowLevel::ElementMask child_mask(num_elmts);
+        LowLevel::ElementMask child_mask(num_elmts, first_element);
         Color c = pir.p;
         std::map<Color,ColoredPoints<ptr_t> >::const_iterator finder = 
           coloring.find(c);
