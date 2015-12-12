@@ -91,6 +91,7 @@ physical_inst_pat       = re.compile(prefix+"Physical Instance (?P<iid>[0-9a-f]+
 physical_reduc_pat      = re.compile(prefix+"Reduction Instance (?P<iid>[0-9a-f]+) (?P<mid>[0-9a-f]+) (?P<index>[0-9a-f]+) (?P<field>[0-9]+) (?P<tid>[0-9]+) (?P<fold>[0-1]) (?P<indirect>[0-9]+)")
 inst_field_pat          = re.compile(prefix+"Instance Field (?P<iid>[0-9a-f]+) (?P<fid>[0-9]+)")
 op_user_pat             = re.compile(prefix+"Op Instance User (?P<uid>[0-9]+) (?P<idx>[0-9]+) (?P<iid>[0-9a-f]+)")
+op_field_user_pat       = re.compile(prefix+"Op Instance Field User (?P<uid>[0-9]+) (?P<idx>[0-9]+) (?P<iid>[0-9a-f]+) (?P<fid>[0-9]+)")
 op_proc_user_pat        = re.compile(prefix+"Op Processor User (?P<uid>[0-9]+) (?P<pid>[0-9a-f]+)")
 
 def parse_log_line(line, state):
@@ -306,6 +307,10 @@ def parse_log_line(line, state):
     m = op_user_pat.match(line)
     if m <> None:
         if state.add_op_user(int(m.group('uid')), int(m.group('idx')), int(m.group('iid'),16)):
+            return True
+    m = op_field_user_pat.match(line)
+    if m <> None:
+        if state.add_op_field_user(int(m.group('uid')), int(m.group('idx')), int(m.group('iid'),16), int(m.group('fid'))):
             return True
     m = op_proc_user_pat.match(line)
     if m <> None:

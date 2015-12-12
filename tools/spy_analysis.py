@@ -1701,6 +1701,14 @@ class CopyOp(object):
         assert idx not in self.instances
         self.instances[idx] = inst
 
+    def add_partial_instance(self, idx, inst, fid):
+        instance = dict()
+        if idx in self.instances:
+            instance = self.instances[idx]
+        assert not fid in instance
+        instance[fid] = inst
+        self.instances[idx] = instance
+
     def get_instance(self, idx):
         assert idx in self.instances
         return self.instances[idx]
@@ -1778,14 +1786,47 @@ class CopyOp(object):
                     src_req.to_summary_string(),
                     dst_req.to_summary_string()])
 
-            lines.append(
-                    ["Memory",
-                        hex(src_inst.memory.uid),
-                        hex(dst_inst.memory.uid)])
-            lines.append(
-                    ["Instance",
-                        src_inst.dot_instance(),
-                        dst_inst.dot_instance()])
+            if isinstance(src_inst, dict):
+                first_line = True
+                num_partial_copies = len(src_inst)
+                for fid, inst in src_inst.iteritems():
+                    if first_line:
+                        lines.append(
+                                [{"label" : "Memory", "rowspan" : num_partial_copies},
+                                    hex(inst.memory.uid),
+                                    {"label" : hex(dst_inst.memory.uid),
+                                        "rowspan" : num_partial_copies}])
+                        first_line = False
+                    else:
+                        lines.append([hex(inst.memory.uid)])
+
+                first_line = True
+                num_partial_copies = len(src_inst)
+                for fid, inst in src_inst.iteritems():
+                    field_name = self.reqs[0].region_node.field_node.get_field_name(fid)
+                    if field_name == None:
+                        field_name = str(fid)
+
+                    if first_line:
+                        lines.append(
+                                [{"label" : "Instance",
+                                    "rowspan" : num_partial_copies},
+                                    inst.dot_instance()+' for '+field_name,
+                                    {"label" : dst_inst.dot_instance(),
+                                        "rowspan" : num_partial_copies}])
+                        first_line = False
+                    else:
+                        lines.append([inst.dot_instance()+' for '+field_name])
+
+            else:
+                lines.append(
+                        ["Memory",
+                            hex(src_inst.memory.uid),
+                            hex(dst_inst.memory.uid)])
+                lines.append(
+                        ["Instance",
+                            src_inst.dot_instance(),
+                            dst_inst.dot_instance()])
 
             # TODO: reduction copy-across operations should also be tracked
             #if self.redop <> 0:
@@ -4318,6 +4359,16 @@ class State(object):
         if not self.instances[iid][-1].add_op_user(self.ops[uid], idx):
             return False
         self.ops[uid].add_instance(idx, self.instances[iid][-1])
+        return True
+
+    def add_op_field_user(self, uid, idx, iid, fid):
+        if uid not in self.ops:
+            return False
+        if iid not in self.instances:
+            return False
+        if not self.instances[iid][-1].add_op_user(self.ops[uid], idx):
+            return False
+        self.ops[uid].add_partial_instance(idx, self.instances[iid][-1], fid)
         return True
 
     def add_op_proc_user(self, uid, pid):

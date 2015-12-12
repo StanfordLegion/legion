@@ -430,6 +430,15 @@ namespace LegionRuntime {
                               user, idx, inst_id);
       }
 
+      static inline void log_op_user_with_field(UniqueID user,
+                                                unsigned idx,
+                                                IDType inst_id,
+                                                FieldID field_id)
+      {
+        log_spy.info("Op Instance Field User %llu %u " IDFMT " %u",
+                              user, idx, inst_id, field_id);
+      }
+
       static inline void log_phase_barrier(Barrier barrier)
       {
         log_spy.info("Phase Barrier " IDFMT, barrier.id);
