@@ -42,6 +42,21 @@ LOC_PROC = 0
 TOC_PROC = 1
 UTIL_PROC = 2
 
+MEMORY_TYPES = [
+"GASNET",
+"SYSTEM",
+"REGDMA",
+"SOCKET",
+"Z_COPY",
+"GPU_FB",
+"DISK",
+"HDF",
+"FILE",
+"LEVEL3_CACHE",
+"LEVEL2_CACHE",
+"LEVEL1_CACHE",
+]
+
 # Operation Kinds
 SINGLE_OP = 0
 INDEX_OP = 1
@@ -119,6 +134,7 @@ def generate_html_op_label(title, requirements, instances, color, verbose):
             lines.append(["Requirement", req_summary])
 
         if instances <> None:
+            lines.append(["Memory", instances[i].memory.dot_memory()])
             lines.append(["Instance", instances[i].dot_instance()])
 
         if verbose:
@@ -227,10 +243,11 @@ class UtilityProcessor(object):
         self.executed_ops.append(op)
 
 class Memory(object):
-    def __init__(self, state, uid, capacity):
+    def __init__(self, state, uid, capacity, kind):
         self.state = state
         self.uid = uid
         self.capacity = capacity
+        self.kind = kind
         self.proc_bandwidth = dict()
         self.proc_latency = dict()
         self.mem_bandwidth = dict()
@@ -266,6 +283,9 @@ class Memory(object):
     def print_timeline(self):
         name = "memory_"+str(self.uid)+"_timeline"
         return
+
+    def dot_memory(self):
+        return hex(self.uid)+' ('+MEMORY_TYPES[self.kind]+')'
 
 
 class IndexSpaceNode(object):
@@ -1793,12 +1813,12 @@ class CopyOp(object):
                     if first_line:
                         lines.append(
                                 [{"label" : "Memory", "rowspan" : num_partial_copies},
-                                    hex(inst.memory.uid),
-                                    {"label" : hex(dst_inst.memory.uid),
+                                    inst.memory.dot_memory(),
+                                    {"label" : dst_inst.memory.dot_memory(),
                                         "rowspan" : num_partial_copies}])
                         first_line = False
                     else:
-                        lines.append([hex(inst.memory.uid)])
+                        lines.append([inst.memory.dot_memory()])
 
                 first_line = True
                 num_partial_copies = len(src_inst)
@@ -2933,8 +2953,8 @@ class Copy(object):
 
         lines.append(
                 ["Memory",
-                    hex(self.src_inst.memory.uid),
-                    hex(self.dst_inst.memory.uid)])
+                    self.src_inst.memory.dot_memory(),
+                    self.dst_inst.memory.dot_memory()])
         lines.append(
                 ["Instance",
                     self.src_inst.dot_instance(),
@@ -3917,9 +3937,9 @@ class State(object):
         self.processors[pid] = Processor(self, pid, kind)
         return True
 
-    def add_memory(self, mid, capacity):
+    def add_memory(self, mid, capacity, kind):
         assert mid not in self.memories
-        self.memories[mid] = Memory(self, mid, capacity)
+        self.memories[mid] = Memory(self, mid, capacity, kind)
         return True
 
     def set_proc_mem(self, pid, mid, bandwidth, latency):

@@ -26,7 +26,7 @@ prefix_pat              = re.compile(prefix)
 # Logger calls for the shape of the machine
 utility_pat             = re.compile(prefix+"Utility (?P<pid>[0-9a-f]+)")
 processor_pat           = re.compile(prefix+"Processor (?P<pid>[0-9a-f]+) (?P<kind>[0-9]+)")
-memory_pat              = re.compile(prefix+"Memory (?P<mid>[0-9a-f]+) (?P<capacity>[0-9]+)")
+memory_pat              = re.compile(prefix+"Memory (?P<mid>[0-9a-f]+) (?P<capacity>[0-9]+) (?P<kind>[0-9]+)")
 proc_mem_pat            = re.compile(prefix+"Processor Memory (?P<pid>[0-9a-f]+) (?P<mid>[0-9a-f]+) (?P<band>[0-9]+) (?P<lat>[0-9]+)")
 mem_mem_pat             = re.compile(prefix+"Memory Memory (?P<mone>[0-9a-f]+) (?P<mtwo>[0-9a-f]+) (?P<band>[0-9]+) (?P<lat>[0-9]+)")
 
@@ -106,7 +106,7 @@ def parse_log_line(line, state):
             return True
     m = memory_pat.match(line)
     if m <> None:
-        if state.add_memory(int(m.group('mid'),16), int(m.group('capacity'))):
+        if state.add_memory(int(m.group('mid'),16), int(m.group('capacity')), int(m.group('kind'))):
             return True
     m = proc_mem_pat.match(line)
     if m <> None:

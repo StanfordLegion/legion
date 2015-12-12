@@ -16205,7 +16205,7 @@ namespace LegionRuntime {
       machine.get_all_memories(all_mems);
       for (std::set<Memory>::const_iterator it = all_mems.begin();
             it != all_mems.end(); it++)
-        LegionSpy::log_memory(it->id, it->capacity());
+        LegionSpy::log_memory(it->id, it->capacity(), it->kind());
       // Log Proc-Mem Affinity
       for (std::set<Processor>::const_iterator pit = all_procs.begin();
             pit != all_procs.end(); pit++)
