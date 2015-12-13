@@ -1474,11 +1474,10 @@ namespace LegionRuntime {
       void send_did_remote_gc_update(AddressSpaceID target, Serializer &rez);
       void send_did_remote_resource_update(AddressSpaceID target,
                                            Serializer &rez);
+      void send_did_add_create_reference(AddressSpaceID target,Serializer &rez);
+      void send_did_remove_create_reference(AddressSpaceID target,
+                                            Serializer &rez, bool flush = true);
       void send_view_remote_registration(AddressSpaceID target,Serializer &rez);
-      void send_view_remote_valid_update(AddressSpaceID target,Serializer &rez);
-      void send_view_remote_gc_update(AddressSpaceID target, Serializer &rez);
-      void send_view_remote_resource_update(AddressSpaceID target,
-                                            Serializer &rez);
       void send_back_atomic(AddressSpaceID target, Serializer &rez);
       void send_materialized_view(AddressSpaceID target, Serializer &rez);
       void send_materialized_update(AddressSpaceID target, Serializer &rez);
@@ -1581,11 +1580,10 @@ namespace LegionRuntime {
       void handle_did_remote_valid_update(Deserializer &derez);
       void handle_did_remote_gc_update(Deserializer &derez);
       void handle_did_remote_resource_update(Deserializer &derez);
+      void handle_did_create_add(Deserializer &derez);
+      void handle_did_create_remove(Deserializer &derez);
       void handle_view_remote_registration(Deserializer &derez, 
                                            AddressSpaceID source);
-      void handle_view_remote_valid_update(Deserializer &derez);
-      void handle_view_remote_gc_update(Deserializer &derez);
-      void handle_view_remote_resource_update(Deserializer &derez);
       void handle_send_back_atomic(Deserializer &derez, AddressSpaceID source);
       void handle_send_materialized_view(Deserializer &derez, 
                                          AddressSpaceID source);

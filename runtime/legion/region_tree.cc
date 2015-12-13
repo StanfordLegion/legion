@@ -8787,7 +8787,8 @@ namespace LegionRuntime {
                                                      unsigned depth,
                                                      RegionNode *node,
                                                      DistributedID result_did,
-                                                     UniqueID op_id)
+                                                     UniqueID op_id, 
+                                                     bool &remote_creation)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_PERF
@@ -8839,6 +8840,7 @@ namespace LegionRuntime {
 #else
         InstanceManager *result = static_cast<InstanceManager*>(dc);
 #endif
+        remote_creation = true;
         return result;
       }
       InstanceManager *result = NULL;
@@ -8930,6 +8932,7 @@ namespace LegionRuntime {
 #endif
         }
       }
+      remote_creation = false;
       return result;
     }
 
@@ -8969,12 +8972,23 @@ namespace LegionRuntime {
       FieldSpaceNode *target = region_node->column_source;
 
       // Try to make the manager
+      bool remote_creation;
       InstanceManager *result = target->create_instance(location, domain,
                                           fields, blocking_factor, depth,
-                                          region_node, did, op_id);
+                                          region_node, did, op_id,
+                                          remote_creation);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(!remote_creation);
+#endif
       // If we succeeded, send the manager back
       if (result != NULL)
+      {
+        // Before sending the result add a valid reference. This
+        // will get removed by created_instances state in PhysicalState
+        // see PhysicalState::apply_state
+        result->add_base_valid_ref(INITIAL_CREATION_REF);
         result->send_manager(source);
+      }
       // No matter what send the notification
       Serializer rez;
       rez.serialize(done_event);
@@ -8989,7 +9003,8 @@ namespace LegionRuntime {
                                                        RegionNode *node,
                                                        ReductionOpID redop,
                                                        DistributedID result_did,
-                                                       UniqueID op_id)
+                                                       UniqueID op_id,
+                                                       bool &remote_creation)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_PERF
@@ -9036,6 +9051,7 @@ namespace LegionRuntime {
 #else
         ReductionManager *result = static_cast<ReductionManager*>(dc);
 #endif
+        remote_creation = true;
         return result;
       }
       ReductionManager *result = NULL;
@@ -9108,6 +9124,7 @@ namespace LegionRuntime {
 #endif
         }
       }
+      remote_creation = false;
       return result;
     }
 
@@ -9139,11 +9156,21 @@ namespace LegionRuntime {
       RegionNode *region_node = forest->get_node(handle);
       FieldSpaceNode *target = region_node->column_source;
 
+      bool remote_creation;
       ReductionManager *result = target->create_reduction(location, domain,
                                           fid, reduction_list, region_node,
-                                          redop, did, op_id);
+                                          redop, did, op_id, remote_creation);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(!remote_creation);
+#endif
       if (result != NULL)
+      {
+        // Before sending the result add a valid reference. This
+        // will get removed by created_instances state in PhysicalState
+        // see PhysicalState::apply_state
+        result->add_base_valid_ref(INITIAL_CREATION_REF);
         result->send_manager(source);
+      }
       // No matter what send the notification
       Serializer rez;
       rez.serialize(done_event);
@@ -12132,19 +12159,20 @@ namespace LegionRuntime {
         for (unsigned idx = 0; idx < to_create.size(); idx++)
         {
           // Try making an instance in memory
+          bool remote_creation;
           MaterializedView *new_view = 
             create_instance(to_create[idx], 
                             closer.info.req.privilege_fields, 
                             blocking_factor,
                             closer.info.op->get_mappable()->get_depth(),
-                            closer.info.op);
+                            closer.info.op, remote_creation);
           if (new_view != NULL)
           {
             // Update all the fields
             update_views[new_view] = closing_mask;
             closer.add_target(new_view);
             // Make sure to tell our state we created a new instance
-            state->record_created_instance(new_view);
+            state->record_created_instance(new_view, remote_creation);
             // If we only needed to make one, then we are done
             if (create_one)
               break;
@@ -14730,8 +14758,8 @@ namespace LegionRuntime {
     MaterializedView* RegionNode::create_instance(Memory target_mem,
                                                 const std::set<FieldID> &fields,
                                                 size_t blocking_factor,
-                                                unsigned depth,
-                                                Operation *op)
+                                                unsigned depth, Operation *op, 
+                                                bool &remote_creation)
     //--------------------------------------------------------------------------
     {
       DistributedID did = context->runtime->get_available_distributed_id(false);
@@ -14739,7 +14767,7 @@ namespace LegionRuntime {
       InstanceManager *manager = column_source->create_instance(target_mem,
                                       row_source->get_domain_blocking(),
                                       fields, blocking_factor, depth, this, 
-                                      did, op_id);
+                                      did, op_id, remote_creation);
       // See if we made the instance
       MaterializedView *result = NULL;
       if (manager != NULL)
@@ -14772,7 +14800,8 @@ namespace LegionRuntime {
     ReductionView* RegionNode::create_reduction(Memory target_mem, FieldID fid,
                                                 bool reduction_list,
                                                 ReductionOpID redop,
-                                                Operation *op)
+                                                Operation *op,
+                                                bool &remote_creation)
     //--------------------------------------------------------------------------
     {
       DistributedID did = context->runtime->get_available_distributed_id(false);
@@ -14780,7 +14809,7 @@ namespace LegionRuntime {
       ReductionManager *manager = column_source->create_reduction(target_mem,
                                       row_source->get_domain_blocking(),
                                       fid, reduction_list, this, redop, 
-                                      did, op_id);
+                                      did, op_id, remote_creation);
       ReductionView *result = NULL;
       if (manager != NULL)
       {
@@ -16402,7 +16431,8 @@ namespace LegionRuntime {
     MaterializedView* PartitionNode::create_instance(Memory target_mem,
                                                 const std::set<FieldID> &fields,
                                                 size_t blocking_factor,
-                                                unsigned depth, Operation *op)
+                                                unsigned depth, Operation *op,
+                                                bool &remote_creation)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -16411,7 +16441,8 @@ namespace LegionRuntime {
       MaterializedView *result = parent->create_instance(target_mem, 
                                                          fields, 
                                                          blocking_factor,
-                                                         depth, op);
+                                                         depth, op,
+                                                         remote_creation);
       if (result != NULL)
       {
         result = result->get_materialized_subview(row_source->color);
@@ -16422,14 +16453,15 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     ReductionView* PartitionNode::create_reduction(Memory target_mem, 
                                             FieldID fid, bool reduction_list,
-                                            ReductionOpID redop, Operation *op)
+                                            ReductionOpID redop, Operation *op,
+                                            bool &remote_creation)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
       assert(parent != NULL);
 #endif
-      return parent->create_reduction(target_mem, fid, 
-                                      reduction_list, redop, op);
+      return parent->create_reduction(target_mem, fid, reduction_list, 
+                                      redop, op, remote_creation);
     }
 
     //--------------------------------------------------------------------------

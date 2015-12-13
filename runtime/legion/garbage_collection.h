@@ -19,6 +19,19 @@
 
 #include "legion_types.h"
 
+// This is a macro for enabling the use of remote references
+// on distributed collectable objects. Remote references 
+// account for the transitory nature of references that are
+// in flight but not necessarily known to the owner node.
+// For example, a copy of a distributed collectable on node A
+// sends a messages to node B to create a copy of itself and
+// add a reference. Remote references are a notfication to 
+// the owner node that this creation and reference are in flight
+// in case the copy on node A has all its references removed
+// before the instance on node B can be created and send its
+// own references to the owner node.
+// #define USE_REMOTE_REFERENCES
+
 namespace LegionRuntime {
   namespace HighLevel {
 
@@ -37,6 +50,7 @@ namespace LegionRuntime {
       COMPOSITE_HANDLE_REF,
       PERSISTENCE_REF,
       INITIAL_CREATION_REF,
+      REMOTE_CREATE_REF,
       LAST_SOURCE_REF,
     };
 
@@ -62,6 +76,7 @@ namespace LegionRuntime {
       "Composite Handle Reference",                 \
       "Persistent Reference",                       \
       "Initial Creation Reference",                 \
+      "Remote Creation Reference",                  \
     }
 
     extern Logger::Category log_garbage;
@@ -169,6 +184,13 @@ namespace LegionRuntime {
     private:
       void add_resource_reference(unsigned cnt);
       bool remove_resource_reference(unsigned cnt);
+#ifdef USE_REMOTE_REFERENCES
+    private:
+      bool add_create_reference(AddressSpaceID source,
+                                AddressSpaceID target, ReferenceKind kind);
+      bool remove_create_reference(AddressSpaceID source,
+                                   AddressSpaceID target, ReferenceKind kind);
+#endif
     public:
       // Methods for changing state
       virtual void notify_active(void) = 0;
@@ -190,12 +212,18 @@ namespace LegionRuntime {
       void register_with_runtime(void);
     public:
       virtual void send_remote_registration(void);
-      virtual void send_remote_valid_update(AddressSpaceID target, 
-                                            unsigned count, bool add);
-      virtual void send_remote_gc_update(AddressSpaceID target,
-                                         unsigned count, bool add);
-      virtual void send_remote_resource_update(AddressSpaceID target,
-                                               unsigned count, bool add);
+      void send_remote_valid_update(AddressSpaceID target, 
+                                    unsigned count, bool add);
+      void send_remote_gc_update(AddressSpaceID target,
+                                 unsigned count, bool add);
+      void send_remote_resource_update(AddressSpaceID target,
+                                       unsigned count, bool add);
+#ifdef USE_REMOTE_REFERENCES
+    public:
+      ReferenceKind send_create_reference(AddressSpaceID target);
+      void post_create_reference(ReferenceKind kind, 
+                                 AddressSpaceID target, bool flush);
+#endif
     public:
       static void handle_did_remote_registration(Internal *runtime,
                                                  Deserializer &derez,
@@ -206,6 +234,11 @@ namespace LegionRuntime {
                                               Deserializer &derez);
       static void handle_did_remote_resource_update(Internal *runtime,
                                                     Deserializer &derez);
+    public:
+      static void handle_did_add_create(Internal *runtime, 
+                                        Deserializer &derez);
+      static void handle_did_remove_create(Internal *runtime, 
+                                           Deserializer &derez);
     protected:
       bool update_state(bool &need_activate, bool &need_validate,
                         bool &need_invalidate, bool &need_deactivate,
@@ -222,6 +255,14 @@ namespace LegionRuntime {
       unsigned gc_references;
       unsigned valid_references;
       unsigned resource_references;
+#ifdef USE_REMOTE_REFERENCES
+    protected:
+      // These are only valid on the owner node
+      std::map<std::pair<AddressSpaceID/*src*/,
+                         AddressSpaceID/*dst*/>,int> create_gc_refs;
+      std::map<std::pair<AddressSpaceID/*src*/,
+                         AddressSpaceID/*dst*/>,int> create_valid_refs;
+#endif
     protected:
       // Track all the remote instances (relative to ourselves) we know about
       NodeSet                  remote_instances;

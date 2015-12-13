@@ -2029,16 +2029,17 @@ namespace LegionRuntime {
           }
         }
         // If it didn't find a valid instance, try to make one
+        bool remote_creation;
         chosen_inst = node->create_instance(*mit, new_fields, 
                                             blocking_factor,
                                           info.op->get_mappable()->get_depth(),
-                                            info.op);
+                                            info.op, remote_creation);
         if (chosen_inst != NULL)
         {
           // We successfully made an instance
           needed_fields = user_mask;
           // Make sure to tell our physical state
-          state->record_created_instance(chosen_inst);
+          state->record_created_instance(chosen_inst, remote_creation);
           break;
         }
       }
@@ -2131,13 +2132,14 @@ namespace LegionRuntime {
 #endif
           FieldID fid = *(info.req.privilege_fields.begin());
           // Try making a reduction instance in this memory
+          bool remote_creation;
           chosen_inst = node->create_reduction(*mit, fid, 
                                                info.req.reduction_list,
                                                info.req.redop,
-                                               info.op);
+                                               info.op, remote_creation);
           if (chosen_inst != NULL)
           {
-            state->record_created_instance(chosen_inst);
+            state->record_created_instance(chosen_inst, remote_creation);
             break;
           }
         }
@@ -4288,15 +4290,7 @@ namespace LegionRuntime {
       // If we have any created instances, we can now remove our
       // valid references on them because we've applied all our updates
       if (!created_instances.empty())
-      {
-        for (std::deque<InstanceView*>::const_iterator it = 
-              created_instances.begin(); it != created_instances.end(); it++)
-        {
-          if ((*it)->remove_base_valid_ref(INITIAL_CREATION_REF))
-            LogicalView::delete_logical_view(*it);
-        }
-        created_instances.clear();
-      }
+        release_created_instances();
     }
 
     //--------------------------------------------------------------------------
@@ -4365,15 +4359,29 @@ namespace LegionRuntime {
       // If we have any created instances, we can now remove our
       // valid references on them because we've applied all our updates
       if (!created_instances.empty())
+        release_created_instances();
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalState::release_created_instances(void)
+    //--------------------------------------------------------------------------
+    {
+      for (std::deque<std::pair<InstanceView*,bool> >::const_iterator it =
+            created_instances.begin(); it != created_instances.end(); it++)
       {
-        for (std::deque<InstanceView*>::const_iterator it = 
-              created_instances.begin(); it != created_instances.end(); it++)
+        if (!it->second)
         {
-          if ((*it)->remove_base_valid_ref(INITIAL_CREATION_REF))
-            LogicalView::delete_logical_view(*it);
+          if (it->first->remove_base_valid_ref(INITIAL_CREATION_REF))
+            LogicalView::delete_logical_view(it->first);
         }
-        created_instances.clear();
+        else
+        {
+          PhysicalManager *manager = it->first->get_manager();
+          manager->send_remote_valid_update(manager->owner_space,
+                                            1/*count*/, false/*add*/);
+        }
       }
+      created_instances.clear();
     }
 
     //--------------------------------------------------------------------------
@@ -4390,11 +4398,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalState::record_created_instance(InstanceView *view)
+    void PhysicalState::record_created_instance(InstanceView *view, bool remote)
     //--------------------------------------------------------------------------
     {
-      view->add_base_valid_ref(INITIAL_CREATION_REF); 
-      created_instances.push_back(view);
+      // If this is remote, it already had its valid reference added
+      // by the remote node so no need to do anything here
+      if (!remote)
+        view->add_base_valid_ref(INITIAL_CREATION_REF); 
+      created_instances.push_back(std::pair<InstanceView*,bool>(view,remote));
     }
 
     //--------------------------------------------------------------------------
@@ -5891,7 +5902,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void VersionState::send_version_state_request(AddressSpaceID target,
-                                    AddressSpaceID source, UserEvent to_trigger, 
+                                    AddressSpaceID source, UserEvent to_trigger,
                                     const FieldMask &request_mask, 
                                     VersionRequestKind request_kind) 
     //--------------------------------------------------------------------------
