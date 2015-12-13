@@ -101,7 +101,6 @@ do
     local splitStart, splitEnd = string.find(include_path, ";", start)
     while splitStart do
       path = string.sub(include_path, start, splitStart - 1)
-      print(path)
       local f = io.open(path .. "/liblegion_terra.so", "r")
       if f ~= nil then
         binding_library_path = path .. "/liblegion_terra.so"
