@@ -152,6 +152,31 @@ def generate_html_op_label(title, requirements, instances, color, verbose):
             "".join([wrap_with_trtd(line) for line in lines]) +\
             '</table>'
 
+def generate_html_instance_label(title, instance, color, verbose):
+    colspan = 2 if len(instance.fields) > 1 and verbose else 1
+
+    lines = list()
+    lines.append([{"label" : title, "colspan" : colspan}])
+    lines.append([{"label" : "Memory: " + instance.memory.dot_memory(),
+        "colspan" : colspan}])
+    lines.append([{"label" : "Instance: " + instance.dot_instance(),
+        "colspan" : colspan}])
+    lines.append([{"label" : "Instance: " + instance.dot_instance(),
+        "colspan" : colspan}])
+
+    if verbose:
+        lines.append([{"label" : "", "colspan" : colspan}])
+        lines.append([{"label" : "Fields", "colspan" : colspan}])
+        fields = instance.region.field_node.get_field_names(instance.fields)
+        if len(fields) % 2 == 1:
+            fields.append("")
+        for i in range(0, len(fields) / 2):
+            lines.append([fields[2 * i], fields[2 * i + 1]])
+
+    return '<table border="0" cellborder="0" cellpadding="2" cellspacing="0" bgcolor="%s">' % color + \
+            "".join([wrap_with_trtd(line) for line in lines]) +\
+            '</table>'
+
 def compute_dependence_type(req1, req2):
     if req1.is_read_only() and req2.is_read_only():
         return NO_DEPENDENCE
@@ -3039,17 +3064,11 @@ class PhysicalInstance(object):
         return hex(self.iid)+' ('+str(self.blocking)+')'
 
     def print_igraph_node(self, printer):
-        name = self.region.get_name()
-        label =''
-        if name <> None:
-            label = name+'\\n'
-        label += hex(self.iid)+'@'+hex(self.memory.uid)
-        label += '\\nfields: '+\
-                self.region.field_node.field_mask_string(self.fields)
-        label += '\\nblocking factor: '+str(self.blocking)
-        printer.println(self.node_name+' [style=filled,label="'+label+\
-                '",fillcolor=dodgerblue4,fontsize=12,fontcolor=white,'+\
-                'shape=oval,penwidth=0,margin=0];')
+        label = generate_html_instance_label(self.region.get_name(),
+                self, "dodgerblue4", self.state.verbose)
+        printer.println(self.node_name+' [style=filled,label=<'+label+\
+                '>,fillcolor=dodgerblue4,fontsize=11,fontcolor=white,'+\
+                'shape=Mrecord,penwidth=0];')
 
     def print_incoming_edge(self, printer, prev, edge_type='solid', edge_label='', dir='forward'):
         if prev not in self.igraph_incoming_deps:
@@ -3095,17 +3114,14 @@ class ReductionInstance(object):
         self.fields.append(fid)
 
     def dot_instance(self):
-        return hex(self.iid)
+        return hex(self.iid)+" (reduction)"
 
     def print_igraph_node(self, printer):
-        if self.region.name <> None:
-            label = self.region.name+'\\n'+hex(self.iid)+'@'+hex(self.memory.uid)
-        else:
-            label = hex(self.iid)+'@'+hex(self.memory.uid)
-        label = label+'\\nfields: '+','.join(r for r in list_to_ranges(self.fields))
-        printer.println(self.node_name+' [style=filled,label="'+label+\
-                '",fillcolor=deeppink3,fontsize=10,fontcolor=white,'+\
-                'shape=oval,penwidth=0,margin=0];')
+        label = generate_html_instance_label(self.region.get_name(),
+                self, "deeppink3", self.state.verbose)
+        printer.println(self.node_name+' [style=filled,label=<'+label+\
+                '>,fillcolor=deeppink3,fontsize=11,fontcolor=white,'+\
+                'shape=Mrecord,penwidth=0];')
 
     def print_incoming_edge(self, printer, prev, edge_type='solid', edge_label='', dir='forward'):
         if prev not in self.igraph_incoming_deps:
