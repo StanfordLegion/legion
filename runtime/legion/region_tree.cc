@@ -2268,6 +2268,17 @@ namespace LegionRuntime {
                                         Event pre)
     //--------------------------------------------------------------------------
     {
+#ifdef LEGION_SPY
+      CopyOp* copy_op = dynamic_cast<CopyOp*>(op);
+      int src_req_idx = -1;
+      for (unsigned i = 0; i < copy_op->src_requirements.size(); ++i)
+        if (copy_op->src_requirements[i] == src_req)
+        {
+          src_req_idx = i;
+          break;
+        }
+      assert(src_req_idx != -1);
+#endif
  #ifdef DEBUG_PERF
       begin_perf_trace(COPY_ACROSS_ANALYSIS);
 #endif
@@ -2356,6 +2367,13 @@ namespace LegionRuntime {
             // we've already mapped it.
             local_results.insert(copy_post);
             found = true;
+#ifdef LEGION_SPY
+            assert(src_fields.size() == 1);
+            LegionSpy::log_op_user_with_field(
+                copy_op->get_unique_mappable_id(),
+                src_req_idx, src_fields[0].inst.id,
+                src_req.instance_fields[idx]);
+#endif
             break;
           }
         }
@@ -3516,14 +3534,6 @@ namespace LegionRuntime {
       const Domain &right_dom = right_node->get_domain_blocking();
       if (left_dom.get_dim() != right_dom.get_dim())
         return false;
-      else if (left_dom.get_dim() == 0)
-      {
-        const LowLevel::ElementMask &left_mask = 
-          left_dom.get_index_space().get_valid_mask();
-        const LowLevel::ElementMask &right_mask = 
-          right_dom.get_index_space().get_valid_mask();
-        return (left_mask.get_num_elmts() == right_mask.get_num_elmts());
-      }
       return true;
     }
 
@@ -5001,35 +5011,54 @@ namespace LegionRuntime {
       Domain left = *(left_set.begin());
       if (left.get_dim() == 0)
       {
-        // Union left and right together and then test
-        LowLevel::ElementMask left_mask, right_mask;
-        bool first = true;
-        for (std::set<Domain>::const_iterator it = left_set.begin();
-              it != left_set.end(); it++)
-        {
-          if (first)
-          {
-            left_mask = it->get_index_space().get_valid_mask();
-            first = false;
-          }
-          else
-            left_mask |= it->get_index_space().get_valid_mask();
-        }
-        first = true;
-        for (std::set<Domain>::const_iterator it = right_set.begin();
-              it != right_set.end(); it++)
-        {
-          if (first)
-          {
-            right_mask = it->get_index_space().get_valid_mask();
-            first = false;
-          }
-          else
-            right_mask |= it->get_index_space().get_valid_mask();
-        }
-        LowLevel::ElementMask diff = right_mask - left_mask;
-        if (!diff)
-          dominates = true;
+	// We're going to compute the union of the right set members and then
+	//  subtract out the left set members and see if anything is left
+	// If there is, left does NOT dominate right
+	
+	LowLevel::ElementMask *mask = 0;
+	// We need first to make sure we have an ElementMask that can hold all
+	//  the right_set members, which may have been trimmed
+	if (right_set.size() == 1)
+	{
+	  // just make a copy of the only set member's mask
+	  mask = new LowLevel::ElementMask(right_set.begin()->get_index_space()
+					   .get_valid_mask());
+	} else {
+	  std::set<Domain>::const_iterator it = right_set.begin();
+	  assert(it != right_set.end());
+	  const LowLevel::ElementMask *maskp = &(it->get_index_space().get_valid_mask());
+	  int first_elmt = maskp->first_enabled();
+	  int last_elmt = maskp->last_enabled();
+	  while(++it != right_set.end())
+	  {
+	    maskp = &(it->get_index_space().get_valid_mask());
+	    int new_first = maskp->first_enabled();
+	    int new_last = maskp->last_enabled();
+	    if ((new_first != -1) && ((first_elmt == -1) || (first_elmt > new_first)))
+	      first_elmt = new_first;
+	    if ((new_last != -1) && (last_elmt < new_last))
+	      last_elmt = new_last;
+	  }
+	  // If there are no elements, right is trivially dominated
+	  if ((first_elmt > last_elmt) || (last_elmt == -1))
+	    return true;
+	  // Now construct the mask
+	  mask = new LowLevel::ElementMask(last_elmt - first_elmt + 1, first_elmt);
+	  // And copy in the bits from each member set
+	  for (it = right_set.begin(); it != right_set.end(); it++)
+	    *mask |= it->get_index_space().get_valid_mask();
+	}
+
+	// Now go through the left set members and subtract them all ot
+	for (std::set<Domain>::const_iterator it = left_set.begin();
+	     it != left_set.end(); it++)
+	  *mask -= it->get_index_space().get_valid_mask();
+	  
+        // Union left and right together and then test (empty == domainated)
+	dominates = !(*mask);
+
+	// Clean up our working copy
+	delete mask;
       }
       else if (left_set.size() == 1)
       {

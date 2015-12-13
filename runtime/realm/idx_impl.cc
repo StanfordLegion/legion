@@ -704,27 +704,123 @@ namespace Realm {
     ElementMask::ElementMask(int _num_elements, int _first_element /*= 0*/)
       : first_element(_first_element), num_elements(_num_elements), memory(Memory::NO_MEMORY), offset(-1), first_enabled_elmt(-1), last_enabled_elmt(-1)
     {
+      // adjust first/num elements to be multiples of 64
+      int low_extra = (first_element & 63);
+      first_element -= low_extra;
+      num_elements += low_extra;
+      int high_extra = ((-num_elements) & 63);
+      num_elements += high_extra;
+
       size_t bytes_needed = ElementMaskImpl::bytes_needed(first_element, num_elements);
-      raw_data = calloc(1, bytes_needed);
+      raw_data = (char *)calloc(1, bytes_needed);
       //((ElementMaskImpl *)raw_data)->count = num_elements;
       //((ElementMaskImpl *)raw_data)->offset = first_element;
+
+      assert((first_element & 63) == 0);
+      assert((num_elements & 63) == 0);
     }
 
     ElementMask::ElementMask(const ElementMask &copy_from, 
-			     int _num_elements /*= -1*/, int _first_element /*= 0*/)
+			     int _num_elements, int _first_element /*= -1*/)
+    {
+      first_element = (_first_element >= 0) ? _first_element : copy_from.first_element;
+      num_elements = _num_elements;
+
+      // adjust first/num elements to be multiples of 64
+      int low_extra = (first_element & 63);
+      first_element -= low_extra;
+      num_elements += low_extra;
+      int high_extra = ((-num_elements) & 63);
+      num_elements += high_extra;
+
+      first_enabled_elmt = copy_from.first_enabled_elmt;
+      last_enabled_elmt = copy_from.last_enabled_elmt;
+      // if we have bounds, make sure they're trimmed to what we actually cover
+      if((first_enabled_elmt >= 0) && (first_enabled_elmt < first_element)) {
+	first_enabled_elmt = first_element;
+      }
+      if((last_enabled_elmt >= 0) && (last_enabled_elmt >= (first_element + num_elements))) {
+	last_enabled_elmt = first_element + num_elements - 1;
+      }
+      // figure out the copy offset - must be an integral number of bytes
+      ptrdiff_t copy_byte_offset = (first_element - copy_from.first_element);
+      assert((copy_from.first_element + (copy_byte_offset << 3)) == first_element);
+
+      size_t bytes_needed = ElementMaskImpl::bytes_needed(first_element, num_elements);
+      raw_data = (char *)calloc(1, bytes_needed);  // sets initial values to 0
+
+      // how much to copy?
+      size_t bytes_avail = (ElementMaskImpl::bytes_needed(copy_from.first_element, 
+							  copy_from.num_elements) -
+			    copy_byte_offset);
+      size_t bytes_to_copy = (bytes_needed <= bytes_avail) ? bytes_needed : bytes_avail;
+
+      if(copy_from.raw_data) {
+	if(copy_byte_offset >= 0) {
+	  memcpy(raw_data, copy_from.raw_data + copy_byte_offset, bytes_to_copy);
+	} else {
+	  // we start before the input mask, so offset is applied to our pointer
+	  memcpy(raw_data + (-copy_byte_offset), copy_from.raw_data, bytes_to_copy);
+	}
+
+	// if there were extra bits, make sure they're cleared out
+	if(low_extra > 0)
+	  *(uint64_t *)raw_data &= ~((~(uint64_t)0) << low_extra);
+	if(high_extra > 0)
+	  *(uint64_t *)(raw_data + ((num_elements - 64) >> 3)) &= ~((~(uint64_t)0) << high_extra);
+      } else {
+	if(copy_byte_offset >= 0 ) {
+	  get_runtime()->get_memory_impl(copy_from.memory)->get_bytes(copy_from.offset + copy_byte_offset, raw_data, bytes_to_copy);
+	} else {
+	  // we start before the input mask, so offset is applied to our pointer
+	  get_runtime()->get_memory_impl(copy_from.memory)->get_bytes(copy_from.offset, raw_data + (-copy_byte_offset), bytes_to_copy);
+	}
+	assert(low_extra == 0);
+	assert(high_extra == 0);
+      }
+
+      assert((first_element & 63) == 0);
+      assert((num_elements & 63) == 0);
+    }
+
+    ElementMask::ElementMask(const ElementMask &copy_from, bool trim /*= false*/)
     {
       first_element = copy_from.first_element;
       num_elements = copy_from.num_elements;
       first_enabled_elmt = copy_from.first_enabled_elmt;
       last_enabled_elmt = copy_from.last_enabled_elmt;
+      ptrdiff_t copy_byte_offset = 0;
+      if(trim) {
+	// trimming from the end is easy - just reduce num_elements - keep to multiples of 64 though
+	if(last_enabled_elmt >= 0) {
+	  int high_trim = (first_element + num_elements) - (last_enabled_elmt + 1);
+	  high_trim &= ~(int)63;
+	  num_elements -= high_trim;
+	}
+
+	// trimming from the beginning requires stepping by units of 64 so that we can copy uint64_t's
+	if(first_enabled_elmt > first_element) {
+	  assert(first_enabled_elmt < (first_element + num_elements));
+	  int low_trim = (first_enabled_elmt - first_element);
+	  low_trim &= ~(int)63;
+	  first_element += low_trim;
+	  num_elements -= low_trim;
+	  copy_byte_offset = low_trim >> 3;  // truncates
+	}
+      }
+      assert(num_elements >= 0);
+	
       size_t bytes_needed = ElementMaskImpl::bytes_needed(first_element, num_elements);
-      raw_data = calloc(1, bytes_needed);
+      raw_data = (char *)calloc(1, bytes_needed);
 
       if(copy_from.raw_data) {
-	memcpy(raw_data, copy_from.raw_data, bytes_needed);
+	memcpy(raw_data, copy_from.raw_data + copy_byte_offset, bytes_needed);
       } else {
-	get_runtime()->get_memory_impl(copy_from.memory)->get_bytes(copy_from.offset, raw_data, bytes_needed);
+	get_runtime()->get_memory_impl(copy_from.memory)->get_bytes(copy_from.offset + copy_byte_offset, raw_data, bytes_needed);
       }
+
+      assert((first_element & 63) == 0);
+      assert((num_elements & 63) == 0);
     }
 
     ElementMask::~ElementMask(void)
@@ -744,7 +840,7 @@ namespace Realm {
       size_t bytes_needed = rhs.raw_size();
       if (raw_data)
         free(raw_data);
-      raw_data = calloc(1, bytes_needed);
+      raw_data = (char *)calloc(1, bytes_needed);
       if (rhs.raw_data)
         memcpy(raw_data, rhs.raw_data, bytes_needed);
       else
@@ -759,16 +855,20 @@ namespace Realm {
       memory = _memory;
       offset = _offset;
       size_t bytes_needed = ElementMaskImpl::bytes_needed(first_element, num_elements);
-      raw_data = get_runtime()->get_memory_impl(memory)->get_direct_ptr(offset, bytes_needed);
+      raw_data = (char *)(get_runtime()->get_memory_impl(memory)->get_direct_ptr(offset, bytes_needed));
     }
 
     void ElementMask::enable(int start, int count /*= 1*/)
     {
+      // adjust starting point to our first_element, and make sure span fits
+      start -= first_element;
+      assert(start >= 0);
+      assert((start + count) <= num_elements);
+
       if(raw_data != 0) {
 	ElementMaskImpl *impl = (ElementMaskImpl *)raw_data;
 	//printf("ENABLE %p %d %d %d " IDFMT "\n", raw_data, offset, start, count, impl->bits[0]);
-	int pos = start - first_element;
-        assert(pos < num_elements);
+	int pos = start;
 	for(int i = 0; i < count; i++) {
 	  uint64_t *ptr = &(impl->bits[pos >> 6]);
 	  *ptr |= (1ULL << (pos & 0x3f));
@@ -779,7 +879,7 @@ namespace Realm {
 	//printf("ENABLE(2) " IDFMT " %d %d %d\n", memory.id, offset, start, count);
 	MemoryImpl *m_impl = get_runtime()->get_memory_impl(memory);
 
-	int pos = start - first_element;
+	int pos = start;
 	for(int i = 0; i < count; i++) {
 	  off_t ofs = offset + ((pos >> 6) << 3);
 	  uint64_t val;
@@ -791,6 +891,7 @@ namespace Realm {
 	}
       }
 
+      start += first_element;
       if((first_enabled_elmt < 0) || (start < first_enabled_elmt))
 	first_enabled_elmt = start;
 
@@ -800,9 +901,14 @@ namespace Realm {
 
     void ElementMask::disable(int start, int count /*= 1*/)
     {
+      // adjust starting point to our first_element, and make sure span fits
+      start -= first_element;
+      assert(start >= 0);
+      assert((start + count) <= num_elements);
+
       if(raw_data != 0) {
 	ElementMaskImpl *impl = (ElementMaskImpl *)raw_data;
-	int pos = start - first_element;
+	int pos = start;
 	for(int i = 0; i < count; i++) {
 	  uint64_t *ptr = &(impl->bits[pos >> 6]);
 	  *ptr &= ~(1ULL << (pos & 0x3f));
@@ -812,7 +918,7 @@ namespace Realm {
 	//printf("DISABLE(2) " IDFMT " %d %d %d\n", memory.id, offset, start, count);
 	MemoryImpl *m_impl = get_runtime()->get_memory_impl(memory);
 
-	int pos = start - first_element;
+	int pos = start;
 	for(int i = 0; i < count; i++) {
 	  off_t ofs = offset + ((pos >> 6) << 3);
 	  uint64_t val;
@@ -824,17 +930,20 @@ namespace Realm {
 	}
       }
 
-      // not really right
+      start += first_element;
       if(start == first_enabled_elmt) {
 	//printf("pushing first: %d -> %d\n", first_enabled_elmt, first_enabled_elmt+1);
-	first_enabled_elmt++;
+	first_enabled_elmt = find_enabled(1, first_enabled_elmt + count);
+	// if we didn't find anything we just cleared the last enabled bit too
+	if(first_enabled_elmt == -1)
+	  last_enabled_elmt = -1;
       }
     }
 
     int ElementMask::find_enabled(int count /*= 1 */, int start /*= 0*/) const
     {
       if(start == 0)
-	start = first_enabled_elmt;
+	start = first_enabled_elmt - first_element;
       if(raw_data != 0) {
 	ElementMaskImpl *impl = (ElementMaskImpl *)raw_data;
 	//printf("FIND_ENABLED %p %d %d " IDFMT "\n", raw_data, first_element, count, impl->bits[0]);
@@ -844,7 +953,7 @@ namespace Realm {
 	    uint64_t bit = ((impl->bits[pos >> 6] >> (pos & 0x3f))) & 1;
 	    if(bit != 1) break;
 	    pos++; run++;
-	    if(run >= count) return pos - run;
+	    if(run >= count) return (pos - run) + first_element;
 	  }
 	}
       } else {
@@ -859,7 +968,7 @@ namespace Realm {
 	    uint64_t bit = (val >> (pos & 0x3f)) & 1;
 	    if(bit != 1) break;
 	    pos++; run++;
-	    if(run >= count) return pos - run;
+	    if(run >= count) return (pos - run) + first_element;
 	  }
 	}
       }
@@ -869,7 +978,7 @@ namespace Realm {
     int ElementMask::find_disabled(int count /*= 1 */, int start /*= 0*/) const
     {
       if((start == 0) && (first_enabled_elmt > 0))
-	start = first_enabled_elmt;
+	start = first_enabled_elmt - first_element;
       if(raw_data != 0) {
 	ElementMaskImpl *impl = (ElementMaskImpl *)raw_data;
 	for(int pos = start; pos <= num_elements - count; pos++) {
@@ -878,7 +987,7 @@ namespace Realm {
 	    uint64_t bit = ((impl->bits[pos >> 6] >> (pos & 0x3f))) & 1;
 	    if(bit != 0) break;
 	    pos++; run++;
-	    if(run >= count) return pos - run;
+	    if(run >= count) return (pos - run) + first_element;
 	  }
 	}
       } else {
@@ -904,6 +1013,11 @@ namespace Realm {
 
     bool ElementMask::is_set(int ptr) const
     {
+      // adjust starting point to our first_element, and make sure span fits
+      ptr -= first_element;
+      if((ptr < 0) || (ptr >= num_elements))
+	return false;
+
       if(raw_data != 0) {
 	ElementMaskImpl *impl = (ElementMaskImpl *)raw_data;
 	
@@ -962,18 +1076,58 @@ namespace Realm {
 
     bool ElementMask::operator==(const ElementMask &other) const
     {
-      if (num_elements != other.num_elements)
-        return false;
-      if (raw_data != 0) {
+      // TODO: allow equality between trimmed and untrimmed ElementMasks
+      // first check - do the enabled ranges match?
+      if(first_enabled_elmt != other.first_enabled_elmt) return false;
+      if(last_enabled_elmt != other.last_enabled_elmt) return false;
+
+      // support bitwise operations between ElementMasks with different sizes/starts,
+      //  but only if the bits line up conveniently
+      assert((first_element & 63) == (other.first_element & 63));
+
+      // empty/singleton masks are also easy
+      if(first_enabled_elmt >= last_enabled_elmt)
+	return true;
+
+      if(raw_data != 0) {
         ElementMaskImpl *impl = (ElementMaskImpl *)raw_data;
-        if (other.raw_data != 0) {
-          ElementMaskImpl *other_impl = (ElementMaskImpl *)other.raw_data;
-          const int max_full = ((num_elements+63) >> 6);
-          for (int index = 0; index < max_full; index++)
-          {
-            if (impl->bits[index] != other_impl->bits[index])
-              return false;
-          }
+	if(other.raw_data != 0) {
+	  ElementMaskImpl *other_impl = (ElementMaskImpl *)other.raw_data;
+	  // we're going to walk over two bit arrays in lockstep
+	  const uint64_t *bits = impl->bits + ((first_enabled_elmt - first_element) >> 6);
+	  const uint64_t *other_bits = other_impl->bits + ((other.first_enabled_elmt - other.first_element) >> 6);
+	  // relative positions are relative to the first bit in the words we selected above
+	  int rel_pos = (first_enabled_elmt - first_element) & 63;
+	  int count = rel_pos + (last_enabled_elmt - first_enabled_elmt + 1);
+
+	  // handle the first word specially
+	  if(rel_pos > 0) {
+	    int shft = rel_pos & 63;
+	    uint64_t v = *bits++ ^ *other_bits++;
+	    v &= (~(uint64_t)0) << shft;
+	    // subcase if we don't extend outside first word
+	    if(count < 64)
+	      v &= ~((~(uint64_t)0) << count);
+	    if(v != 0)
+	      return false;
+	  }
+
+	  // whole words next
+	  while(count >= 64) {
+	    if(*bits++ != *other_bits++)
+	      return false;
+	    count -= 64;
+	  }
+
+	  // trailing bits
+	  if(count > 0) {
+	    uint64_t v = *bits ^ *other_bits;
+	    v &= ~((~(uint64_t)0) << count);
+	    if(v != 0)
+	      return false;
+	  }
+
+	  return true;
         } else {
           // TODO: Implement this
           assert(false);
@@ -992,87 +1146,131 @@ namespace Realm {
 
     ElementMask ElementMask::operator|(const ElementMask &other) const
     {
-      ElementMask result(num_elements);
-      ElementMaskImpl *target = (ElementMaskImpl *)result.raw_data;
-      if (raw_data != 0) {
-        ElementMaskImpl *impl = (ElementMaskImpl *)raw_data;
-        if (other.raw_data != 0) {
-          ElementMaskImpl *other_impl = (ElementMaskImpl *)other.raw_data;
-          assert(num_elements == other.num_elements);
-          const int max_full = ((num_elements+63) >> 6);
-          for (int index = 0; index < max_full; index++) {
-            target->bits[index] = impl->bits[index] | other_impl->bits[index]; 
-          }
-        } else {
-          // TODO implement this
-          assert(0);
-        }
-      } else {
-        // TODO: implement this
-        assert(0);
-      }
+      // result needs to be big enough to hold both ranges
+      int new_first = std::min(first_element, other.first_element);
+      int new_count = (std::max(first_element + num_elements,
+				other.first_element + other.num_elements) -
+		       new_first);
+
+      ElementMask result(new_count, new_first);
+      result |= *this;
+      result |= other;
       return result;
     }
 
     ElementMask ElementMask::operator&(const ElementMask &other) const
     {
-      ElementMask result(num_elements);
-      ElementMaskImpl *target = (ElementMaskImpl *)result.raw_data;
-      if (raw_data != 0) {
-        ElementMaskImpl *impl = (ElementMaskImpl *)raw_data;
-        if (other.raw_data != 0) {
-          ElementMaskImpl *other_impl = (ElementMaskImpl *)other.raw_data;
-          assert(num_elements == other.num_elements);
-          const int max_full = ((num_elements+63) >> 6);
-          for (int index = 0; index < max_full; index++) {
-            target->bits[index] = impl->bits[index] & other_impl->bits[index];
-          }
-        } else {
-          // TODO: implement this
-          assert(0);
-        }
-      } else {
-        // TODO: implement this
-        assert(0);
-      }
+      // result sized the same as lhs
+      ElementMask result(*this);
+      result &= other;
       return result;
     }
 
     ElementMask ElementMask::operator-(const ElementMask &other) const
     {
-      ElementMask result(num_elements);
-      ElementMaskImpl *target = (ElementMaskImpl *)result.raw_data;
+      // result sized the same as lhs
+      ElementMask result(*this);
+      result -= other;
+      return result;
+    }
+
+    void ElementMask::recalc_first_last_enabled(void)
+    {
       if (raw_data != 0) {
         ElementMaskImpl *impl = (ElementMaskImpl *)raw_data;
-        if (other.raw_data != 0) {
-          ElementMaskImpl *other_impl = (ElementMaskImpl *)other.raw_data;
-          assert(num_elements == other.num_elements);
-          const int max_full = ((num_elements+63) >> 6);
-          for (int index = 0; index < max_full; index++) {
-            target->bits[index] = impl->bits[index] & ~(other_impl->bits[index]);
-          }
-        } else {
-          // TODO: implement this
-          assert(0);
-        }
+
+	int count = num_elements >> 6;
+
+	// find first word that isn't 0
+	first_enabled_elmt = -1;
+	for(int i = 0; i < count; i++) {
+	  uint64_t v = impl->bits[i];
+	  if(v != 0) {
+	    int ofs = __builtin_ctzl(v);
+	    first_enabled_elmt = first_element + (i << 6) + ofs;
+	    //printf("FOUNDFIRST: %lx %d %d %d\n", v, i, ofs, first_enabled_elmt);
+	    break;
+	  }
+	}
+
+	// find last word that isn't 0 - no search if the first search failed
+	last_enabled_elmt = -1;
+	if(first_enabled_elmt >= 0)  {
+	  for(int i = count - 1; i >= 0; i--) {
+	    uint64_t v = impl->bits[i];
+	    if(v != 0) {
+	      int ofs = __builtin_clzl(v);
+	      last_enabled_elmt = first_element + (i << 6) + (63 - ofs);
+	      //printf("FOUNDLAST: %lx %d %d %d\n", v, i, ofs, last_enabled_elmt);
+	      break;
+	    }
+	  }
+	}
       } else {
         // TODO: implement this
         assert(0);
       }
-      return result;
     }
 
     ElementMask& ElementMask::operator|=(const ElementMask &other)
     {
+      // an empty rhs is trivial
+      if(other.first_enabled_elmt == -1)
+	return *this;
+
+      // support bitwise operations between ElementMasks with different sizes/starts,
+      //  but only if the bits line up conveniently
+      assert((first_element & 63) == (other.first_element & 63));
+
+      // if the rhs's range is larger than ours, die - we can't fit the result
+      int abs_start = ((other.first_enabled_elmt >= 0) ?
+		         other.first_enabled_elmt :
+		         other.first_element);
+      int abs_end = ((other.last_enabled_elmt >= 0) ?
+		       (other.last_enabled_elmt + 1) :
+		       (other.first_element + other.num_elements));
+      assert(abs_start >= first_element);
+      assert(abs_end <= (first_element + num_elements));
+
+      // no overlap case is simple
+      if(abs_start >= abs_end)
+	return *this;
+
       if (raw_data != 0) {
         ElementMaskImpl *impl = (ElementMaskImpl *)raw_data;
         if (other.raw_data != 0) {
           ElementMaskImpl *other_impl = (ElementMaskImpl *)other.raw_data;
-          assert(num_elements == other.num_elements);
-          const int max_full = ((num_elements+63) >> 6);
-          for (int index = 0; index < max_full; index++) {
-            impl->bits[index] |= other_impl->bits[index];
-          }
+	  // we're going to walk over two bit arrays in lockstep
+	  uint64_t *bits = impl->bits + ((abs_start - first_element) >> 6);
+	  const uint64_t *other_bits = other_impl->bits + ((abs_start - other.first_element) >> 6);
+	  // relative positions are relative to the first bit in the words we selected above
+	  int rel_pos = (abs_start - first_element) & 63;
+	  int count = rel_pos + (abs_end - abs_start);
+
+	  // handle the first word specially
+	  if(rel_pos > 0) {
+	    int shft = rel_pos & 63;
+	    uint64_t v = *other_bits++;
+	    v &= (~(uint64_t)0) << shft;
+	    // subcase if we don't extend outside first word
+	    if(count < 64)
+	      v &= ~((~(uint64_t)0) << count);
+	    *bits++ |= v;
+	    count -= 64;
+	  }
+
+	  // whole words next
+	  while(count >= 64) {
+	    *bits++ |= (*other_bits++);
+	    count -= 64;
+	  }
+
+	  // trailing bits
+	  if(count > 0) {
+	    uint64_t v = *other_bits;
+	    v &= ~((~(uint64_t)0) << count);
+	    *bits |= v;
+	  }
         } else {
           // TODO: implement this
           assert(0);
@@ -1081,42 +1279,146 @@ namespace Realm {
         // TODO: implement this
         assert(0);
       }
+
+      recalc_first_last_enabled();
+
       return *this;
     }
 
     ElementMask& ElementMask::operator&=(const ElementMask &other)
     {
+      // support bitwise operations between ElementMasks with different sizes/starts,
+      //  but only if the bits line up conveniently
+      assert((first_element & 63) == (other.first_element & 63));
+
+      // we need to cover our entire range of bits, either and'ing with the other's mask or
+      //  clearing them out
+      int abs_start = first_element;
+      int abs_end = first_element + num_elements;
+
+      // no overlap case is simple
+      if(abs_start >= abs_end)
+	return *this;
+
       if (raw_data != 0) {
         ElementMaskImpl *impl = (ElementMaskImpl *)raw_data;
         if (other.raw_data != 0) {
           ElementMaskImpl *other_impl = (ElementMaskImpl *)other.raw_data;
-          assert(num_elements == other.num_elements);
-          const int max_full = ((num_elements+63) >> 6);
-          for (int index = 0; index < max_full; index++) {
-            impl->bits[index] &= other_impl->bits[index];
-          }
-        } else {
+	  // we're going to walk over two bit arrays in lockstep
+	  uint64_t *bits = impl->bits + ((abs_start - first_element) >> 6);
+
+	  // 'other_bits' may be out of range if lhs is bigger than rhs - keep the valid start
+	  //  and end too and supply zeroes instead of reading from the pointer when it's out of range
+	  const uint64_t *other_bits = other_impl->bits + ((abs_start - other.first_element) >> 6);
+	  const uint64_t *other_bits_valid_start = other_impl->bits;
+	  const uint64_t *other_bits_valid_end = other_impl->bits + (other.num_elements >> 6);
+
+	  // relative positions are relative to the first bit in the words we selected above
+	  int rel_pos = (abs_start - first_element) & 63;
+	  int count = rel_pos + (abs_end - abs_start);
+
+	  // handle the first word specially
+	  if(rel_pos > 0) {
+	    if((other_bits >= other_bits_valid_start) && (other_bits < other_bits_valid_end)) {
+	      int shft = rel_pos & 63;
+	      uint64_t v = *other_bits;
+	      v &= (~(uint64_t)0) << shft;
+	      // subcase if we don't extend outside first word
+	      if(count < 64)
+		v &= ~((~(uint64_t)0) << count);
+	      *bits++ &= v;
+	    } else
+	      *bits++ = 0;
+	    other_bits++;
+	    count -= 64;
+	  }
+
+	  // whole words next
+	  while(count >= 64) {
+	    if((other_bits >= other_bits_valid_start) && (other_bits < other_bits_valid_end))
+	      *bits++ &= *other_bits;
+	    else
+	      *bits++ = 0;
+	    other_bits++;
+	    count -= 64;
+	  }
+
+	  // trailing bits
+	  if(count > 0) {
+	    if((other_bits >= other_bits_valid_start) && (other_bits < other_bits_valid_end)) {
+	      uint64_t v = *other_bits;
+	      v &= ~((~(uint64_t)0) << count);
+	      *bits &= v;
+	    } else
+	      *bits = 0;
+	  }
+	} else {
           // TODO: implement this
           assert(0);
-        }
+	}
       } else {
         // TODO: implement this
         assert(0);
       }
+
+      recalc_first_last_enabled();
+
       return *this;
     }
 
     ElementMask& ElementMask::operator-=(const ElementMask &other)
     {
+      // an empty rhs is trivial
+      if(other.first_enabled_elmt == -1)
+	return *this;
+
+      // support bitwise operations between ElementMasks with different sizes/starts,
+      //  but only if the bits line up conveniently
+      assert((first_element & 63) == (other.first_element & 63));
+
+      // determine the range of bits we're going to cover - trim to both masks
+      int abs_start = std::max(first_element, other.first_element);
+      int abs_end = std::min(first_element + num_elements,
+			     other.first_element + other.num_elements);
+      // no overlap case is simple
+      if(abs_start >= abs_end)
+	return *this;
+
       if (raw_data != 0) {
         ElementMaskImpl *impl = (ElementMaskImpl *)raw_data;
         if (other.raw_data != 0) {
           ElementMaskImpl *other_impl = (ElementMaskImpl *)other.raw_data;
-          assert(num_elements == other.num_elements);
-          const int max_full = ((num_elements+63) >> 6);
-          for (int index = 0; index < max_full; index++) {
-            impl->bits[index] &= ~(other_impl->bits[index]);
-          }
+	  // we're going to walk over two bit arrays in lockstep
+	  uint64_t *bits = impl->bits + ((abs_start - first_element) >> 6);
+	  const uint64_t *other_bits = other_impl->bits + ((abs_start - other.first_element) >> 6);
+	  // relative positions are relative to the first bit in the words we selected above
+	  int rel_pos = (abs_start - first_element) & 63;
+	  int count = rel_pos + (abs_end - abs_start);
+
+	  // handle the first word specially
+	  if(rel_pos > 0) {
+	    int shft = rel_pos & 63;
+	    uint64_t v = *other_bits++;
+	    v &= (~(uint64_t)0) << shft;
+	    // subcase if we don't extend outside first word
+	    if(count < 64)
+	      v &= ~((~(uint64_t)0) << count);
+	    *bits++ &= ~v;
+	    count -= 64;
+	  }
+
+	  // whole words next
+	  while(count >= 64) {
+	    *bits++ &= ~(*other_bits++);
+	    count -= 64;
+	  }
+
+	  // trailing bits
+	  if(count > 0) {
+	    uint64_t v = *other_bits;
+	    v &= ~((~(uint64_t)0) << count);
+	    *bits &= ~v;
+	  }
         } else {
           // TODO: implement this
           assert(0);
@@ -1125,21 +1427,52 @@ namespace Realm {
         // TODO: implement this
         assert(0);
       }
+
+      recalc_first_last_enabled();
+
       return *this;
     }
 
     ElementMask::OverlapResult ElementMask::overlaps_with(const ElementMask& other,
 							  off_t max_effort /*= -1*/) const
     {
+      // do the spans clearly not interact?
+      int first1 = (first_enabled_elmt >= 0) ? first_enabled_elmt : first_element;
+      int last1 = (last_enabled_elmt >= 0) ? last_enabled_elmt : (first_element + num_elements - 1);
+      int first2 = (other.first_enabled_elmt >= 0) ? other.first_enabled_elmt : other.first_element;
+      int last2 = (other.last_enabled_elmt >= 0) ? other.last_enabled_elmt : (other.first_element + other.num_elements - 1);
+
+      int first = std::max(first1, first2);
+      int last = std::min(last1, last2);
+
+      if(first > last)
+	return ElementMask::OVERLAP_NO;
+	
       if (raw_data != 0) {
         ElementMaskImpl *i1 = (ElementMaskImpl *)raw_data;
         if (other.raw_data != 0) {
           ElementMaskImpl *i2 = (ElementMaskImpl *)(other.raw_data);
-          assert(num_elements == other.num_elements);
-          for(int i = 0; i < (num_elements + 63) >> 6; i++)
-            if((i1->bits[i] & i2->bits[i]) != 0)
-              return ElementMask::OVERLAP_YES;
-          return ElementMask::OVERLAP_NO;
+
+	  // if different in the first elements is a multiple of 64, we can do 64 bit compares
+	  if(((first_element - other.first_element) & 63) == 0) {
+	    const uint64_t *bits1 = i1->bits + ((first - first_element) >> 6);
+	    const uint64_t *bits2 = i2->bits + ((first - other.first_element) >> 6);
+	    size_t count = (last - (first & 63) + 63) >> 6;
+	    for(size_t i = 0; i < count; i++)
+	      if((*bits1++ & *bits2++) != 0)
+		return ElementMask::OVERLAP_YES;
+	    return ElementMask::OVERLAP_NO;
+	  } else {
+	    // fall back to byte-wise compare
+	    assert(((first_element - other.first_element) & 7) == 0);
+	    const unsigned char *bits1 = ((const unsigned char *)(i1->bits)) + ((first - first_element) >> 3);
+	    const unsigned char *bits2 = ((const unsigned char *)(i2->bits)) + ((first - other.first_element) >> 3);
+	    size_t count = (last - (first & 7) + 7) >> 3;
+	    for(size_t i = 0; i < count; i++)
+	      if((*bits1++ & *bits2++) != 0)
+		return ElementMask::OVERLAP_YES;
+	    return ElementMask::OVERLAP_NO;
+	  }
         } else {
           return ElementMask::OVERLAP_MAYBE;
         }
@@ -1169,30 +1502,35 @@ namespace Realm {
 	ElementMaskImpl *impl = (ElementMaskImpl *)(mask.raw_data);
 
 	// are we already off the end?
-	if(pos >= mask.num_elements)
+	if(pos >= (mask.first_element + mask.num_elements))
 	  return false;
+
+	// can never start before the beginning of the mask
+	if(pos < mask.first_element)
+	  pos = mask.first_element;
 
         // if our current pos is below the first known-set element, skip to there
         if((mask.first_enabled_elmt > 0) && (pos < mask.first_enabled_elmt))
           pos = mask.first_enabled_elmt;
 
 	// fetch first value and see if we have any bits set
-	int idx = pos >> 6;
+	int rel_pos = pos - mask.first_element;
+	int idx = rel_pos >> 6;
 	uint64_t bits = impl->bits[idx];
 	if(!polarity) bits = ~bits;
 
 	// for the first one, we may have bits to ignore at the start
-	if(pos & 0x3f)
-	  bits &= ~((1ULL << (pos & 0x3f)) - 1);
+	if(rel_pos & 0x3f)
+	  bits &= ~((1ULL << (rel_pos & 0x3f)) - 1);
 
 	// skip over words that are all zeros, and try to ignore trailing zeros completely
         int stop_at = mask.num_elements;
         if(mask.last_enabled_elmt >= 0)
-          stop_at = mask.last_enabled_elmt+1;
+          stop_at = mask.last_enabled_elmt - mask.first_element + 1; // relative stop location
 	while(!bits) {
 	  idx++;
 	  if((idx << 6) >= stop_at) {
-	    pos = mask.num_elements; // so we don't scan again
+	    pos = mask.num_elements + mask.first_element; // so we don't scan again
 	    return false;
 	  }
 	  bits = impl->bits[idx];
@@ -1202,7 +1540,7 @@ namespace Realm {
 	// if we get here, we've got at least one good bit
 	int extra = __builtin_ctzll(bits);
 	assert(extra < 64);
-	position = (idx << 6) + extra;
+	position = mask.first_element + (idx << 6) + extra;
 	
 	// now we're going to turn it around and scan ones
 	if(extra)
@@ -1212,9 +1550,9 @@ namespace Realm {
 	while(!bits) {
 	  idx++;
 	  // did our 1's take us right to the end?
-	  if((idx << 6) >= mask.num_elements) {
-	    pos = mask.num_elements; // so we don't scan again
-	    length = mask.num_elements - position;
+	  if((idx << 6) >= stop_at) {
+	    pos = mask.num_elements + mask.first_element; // so we don't scan again
+	    length = mask.first_element + stop_at - position;
 	    return true;
 	  }
 	  bits = ~impl->bits[idx]; // note the inversion
@@ -1223,9 +1561,10 @@ namespace Realm {
 
 	// if we get here, we got to the end of the 1's
 	int extra2 = __builtin_ctzll(bits);
-	pos = (idx << 6) + extra2;
-	if(pos >= mask.num_elements)
-	  pos = mask.num_elements;
+	// if we run off the end, that's bad, but don't get confused by a few extra bits in the last word
+	assert((idx << 6) <= mask.num_elements);
+	rel_pos = std::min((idx << 6) + extra2, mask.num_elements);
+	pos = mask.first_element + rel_pos;
 	length = pos - position;
 	return true;
       } else {
@@ -1311,7 +1650,7 @@ namespace Realm {
       locked_data.valid_mask_owners = (1ULL << gasnet_mynode());
       locked_data.avail_mask_owner = gasnet_mynode();
       valid_mask = (_initial_valid_mask?
-		    new ElementMask(*_initial_valid_mask) :
+		    new ElementMask(*_initial_valid_mask, _frozen) : // trim if frozen
 		    new ElementMask(_num_elmts));
       valid_mask_complete = true;
       valid_mask_event = Event::NO_EVENT;
@@ -1449,8 +1788,9 @@ namespace Realm {
     DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
     IndexSpaceImpl *r_impl = get_runtime()->get_index_space_impl(args.is);
 
-    assert(r_impl->valid_mask);
-    const char *mask_data = (const char *)(r_impl->valid_mask->get_raw());
+    const ElementMask *mask = r_impl->valid_mask;
+    assert(mask);
+    const char *mask_data = (const char *)(mask->get_raw());
     assert(mask_data);
 
     size_t mask_len = r_impl->valid_mask->raw_size();
@@ -1459,6 +1799,10 @@ namespace Realm {
     unsigned block_id = 0;
     while(mask_len >= (1 << 11)) {
       ValidMaskDataMessage::send_request(args.sender, args.is, block_id,
+					 mask->first_element,
+					 mask->num_elements,
+					 mask->first_enabled_elmt,
+					 mask->last_enabled_elmt,
 					 mask_data,
 					 1 << 11,
 					 PAYLOAD_KEEP);
@@ -1468,6 +1812,10 @@ namespace Realm {
     }
     if(mask_len) {
       ValidMaskDataMessage::send_request(args.sender, args.is, block_id,
+					 mask->first_element,
+					 mask->num_elements,
+					 mask->first_enabled_elmt,
+					 mask->last_enabled_elmt,
 					 mask_data,
 					 mask_len,
 					 PAYLOAD_KEEP);
@@ -1497,17 +1845,35 @@ namespace Realm {
     DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
     IndexSpaceImpl *r_impl = get_runtime()->get_index_space_impl(args.is);
 
-    assert(r_impl->valid_mask);
-    // removing const on purpose here...
-    char *mask_data = (char *)(r_impl->valid_mask->get_raw());
-    assert(mask_data);
-    assert((args.block_id << 11) < r_impl->valid_mask->raw_size());
-
-    memcpy(mask_data + (args.block_id << 11), data, datalen);
-
     GenEventImpl *to_trigger = 0;
     {
       AutoHSLLock a(r_impl->valid_mask_mutex);
+      log_meta.info() << "received valid mask data for " << args.is << ", " << datalen << " bytes (" << r_impl->valid_mask_count << " blocks expected)";
+
+      ElementMask *mask = r_impl->valid_mask;
+      assert(mask);
+
+      // make sure parameters match
+      if((mask->first_element != args.first_element) ||
+	 (mask->num_elements != args.num_elements) ||
+	 (mask->first_enabled_elmt != args.first_enabled_elmt) ||
+	 (mask->last_enabled_elmt != args.last_enabled_elmt)) {
+	log_meta.info() << "resizing valid mask for " << args.is << " (first=" << args.first_element << " num=" << args.num_elements << ")";
+
+	mask->first_element = args.first_element;
+	mask->num_elements = args.num_elements;
+	mask->first_enabled_elmt = args.first_enabled_elmt;
+	mask->last_enabled_elmt = args.last_enabled_elmt;
+	free(mask->raw_data);
+	size_t bytes_needed = ElementMaskImpl::bytes_needed(args.first_element, args.num_elements);
+	mask->raw_data = (char *)calloc(1, bytes_needed);  // sets initial values to 0
+	r_impl->valid_mask_count = (mask->raw_size() + 2047) >> 11;
+      }
+
+      assert((args.block_id << 11) < mask->raw_size());
+
+      memcpy(mask->raw_data + (args.block_id << 11), data, datalen);
+
       //printf("got piece of valid mask data for region " IDFMT " (%d expected)\n",
       //       args.region.id, r_impl->valid_mask_count);
       r_impl->valid_mask_count--;
@@ -1527,6 +1893,10 @@ namespace Realm {
 
   /*static*/ void ValidMaskDataMessage::send_request(gasnet_node_t target,
 						     IndexSpace is, unsigned block_id,
+						     int first_element,
+						     int num_elements,
+						     int first_enabled_elmt,
+						     int last_enabled_elmt,
 						     const void *data,
 						     size_t datalen,
 						     int payload_mode)
@@ -1535,6 +1905,10 @@ namespace Realm {
 
     args.is = is;
     args.block_id = block_id;
+    args.first_element = first_element;
+    args.num_elements = num_elements;
+    args.first_enabled_elmt = first_enabled_elmt;
+    args.last_enabled_elmt = last_enabled_elmt;
     Message::request(target, args, data, datalen, payload_mode);
   }
   
