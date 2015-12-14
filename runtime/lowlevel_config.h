@@ -38,6 +38,7 @@ typedef unsigned legion_lowlevel_id_t;
 typedef unsigned int legion_lowlevel_address_space_t;
 typedef unsigned legion_lowlevel_task_func_id_t;
 typedef int legion_lowlevel_reduction_op_id_t;
+typedef int legion_lowlevel_custom_serdez_id_t;
 
 // Different Processor types
 // Keep this in sync with Processor::Kind in lowlevel.h

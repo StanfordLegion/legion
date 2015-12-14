@@ -310,10 +310,14 @@ namespace LegionRuntime {
        * @param desired_fieldid field ID to be assigned to the
        *   field or AUTO_GENERATE_ID to specify that the runtime
        *   should assign a fresh field ID
+       * @param serdez_id optional parameter for specifying a
+       *   custom serdez object for serializing and deserializing
+       *   a field when it is moved.
        * @return field ID for the allocated field
        */
       inline FieldID allocate_field(size_t field_size, 
-              FieldID desired_fieldid = AUTO_GENERATE_ID);
+              FieldID desired_fieldid = AUTO_GENERATE_ID,
+              CustomSerdezID serdez_id = 0);
       /**
        * Deallocate the specified field from the field space.
        * @param fid the field ID to be deallocated
@@ -328,7 +332,8 @@ namespace LegionRuntime {
        * allocated completes.
        */
       inline FieldID allocate_local_field(size_t field_size,
-              FieldID desired_fieldid = AUTO_GENERATE_ID);
+              FieldID desired_fieldid = AUTO_GENERATE_ID,
+              CustomSerdezID serdez_id = 0);
       /**
        * Allocate a collection of fields with the specified sizes.
        * Optionally pass in a set of field IDs to use when allocating
@@ -344,7 +349,8 @@ namespace LegionRuntime {
        *    the length of field_sizes with field IDs specified
        */
       inline void allocate_fields(const std::vector<size_t> &field_sizes,
-                                  std::vector<FieldID> &resulting_fields);
+                                  std::vector<FieldID> &resulting_fields,
+                                  CustomSerdezID serdez_id = 0);
       /**
        * Free a collection of field IDs
        * @param to_free set of field IDs to be freed
@@ -358,7 +364,8 @@ namespace LegionRuntime {
        * they were created completes.
        */
       inline void allocate_local_fields(const std::vector<size_t> &field_sizes,
-                                        std::vector<FieldID> &resulting_fields);
+                                        std::vector<FieldID> &resulting_fields,
+                                        CustomSerdezID serdez_id = 0);
       /**
        * @return field space associated with this allocator
        */
@@ -5235,6 +5242,24 @@ namespace LegionRuntime {
       static const ReductionOp* get_reduction_op(ReductionOpID redop_id);
 
       /**
+       * Register custom serialize/deserialize operation with the
+       * runtime. This can be used for providing custom serialization
+       * and deserialization method for fields that are not trivially
+       * copied (e.g. byte-wise copies). The type being registered
+       * must conform to the Realm definition of a CustomSerdez
+       * object (see realm/custom_serdez.h).
+       */
+      template<typename SERDEZ>
+      static void register_custom_serdez_op(CustomSerdezID serdez_id);
+
+      /**
+       * Return a pointer to the given custom serdez operation object.
+       * @param serdez_id ID of the serdez operation to find
+       * @return a pointer to the serdez operation object if it exists
+       */
+      static const SerdezOp* get_serdez_op(CustomSerdezID serdez_id);
+
+      /**
        * Register a region projection function that can be used to map
        * from an upper bound of a logical region down to a specific
        * logical sub-region for a given domain point during index
@@ -5498,11 +5523,13 @@ namespace LegionRuntime {
     private:
       friend class FieldAllocator;
       FieldID allocate_field(Context ctx, FieldSpace space, 
-                             size_t field_size, FieldID fid, bool local);
+                             size_t field_size, FieldID fid, bool local,
+                             CustomSerdezID serdez_id);
       void free_field(Context ctx, FieldSpace space, FieldID fid);
       void allocate_fields(Context ctx, FieldSpace space, 
                            const std::vector<size_t> &sizes,
-                           std::vector<FieldID> &resulting_fields, bool local);
+                           std::vector<FieldID> &resulting_fields, 
+                           bool local, CustomSerdezID serdez_id);
       void free_fields(Context ctx, FieldSpace space, 
                        const std::set<FieldID> &to_free);
     private:
@@ -5537,6 +5564,7 @@ namespace LegionRuntime {
                       const void *user_data, size_t user_data_size);
       static const void* find_user_data(TaskID tid, VariantID vid);
       static ReductionOpTable& get_reduction_table(void);
+      static SerdezOpTable& get_serdez_table(void);
       static SerdezRedopTable& get_serdez_redop_table(void);
     private:
       friend class Mapper;

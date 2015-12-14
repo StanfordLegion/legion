@@ -135,6 +135,7 @@ namespace LegionRuntime {
     struct OffsetsAndSize {
       off_t src_offset, dst_offset;
       int size;
+      CustomSerdezID serdez_id;
     };
     typedef std::vector<OffsetsAndSize> OASVec;
 
@@ -198,6 +199,7 @@ namespace LegionRuntime {
     public:
       static MemPairCopier* create_copier(Memory src_mem, Memory dst_mem,
 					  ReductionOpID redop_id = 0,
+					  CustomSerdezID serdez_id = 0,
 					  bool fold = false);
 
       MemPairCopier(void);

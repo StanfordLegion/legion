@@ -294,9 +294,12 @@ typedef enum legion_error_t {
   ERROR_NO_PROCESSORS = 131,
   ERROR_ILLEGAL_REDUCTION_VIRTUAL_MAPPING = 132,
   ERROR_INVALID_MAPPED_REGION_LOCATION = 133,
-  ERROR_TRACE_VIOLATION = 134,
-  ERROR_INVALID_TARGET_PROC = 135,
-  ERROR_INCOMPLETE_TRACE = 136,
+  ERROR_RESERVED_SERDEZ_ID = 134,
+  ERROR_DUPLICATE_SERDEZ_ID = 135,
+  ERROR_INVALID_SERDEZ_ID = 136,
+  ERROR_TRACE_VIOLATION = 137,
+  ERROR_INVALID_TARGET_PROC = 138,
+  ERROR_INCOMPLETE_TRACE = 139,
 }  legion_error_t;
 
 // enum and namepsaces don't really get along well
@@ -375,6 +378,7 @@ typedef legion_lowlevel_processor_kind_t legion_processor_kind_t;
 typedef legion_lowlevel_memory_kind_t legion_memory_kind_t;
 typedef legion_lowlevel_domain_max_rect_dim_t legion_domain_max_rect_dim_t;
 typedef legion_lowlevel_reduction_op_id_t legion_reduction_op_id_t;
+typedef legion_lowlevel_custom_serdez_id_t legion_custom_serdez_id_t;
 typedef legion_lowlevel_address_space_t legion_address_space_t;
 typedef int legion_task_priority_t;
 typedef unsigned int legion_color_t;

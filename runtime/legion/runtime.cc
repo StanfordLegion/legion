@@ -10712,7 +10712,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     FieldID Internal::allocate_field(Context ctx, FieldSpace space,
                                           size_t field_size, FieldID fid,
-                                          bool local)
+                                          bool local, CustomSerdezID serdez_id)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -10741,10 +10741,10 @@ namespace LegionRuntime {
                                         space, fid, local);
 #endif
       if (local)
-        ctx->add_local_field(space, fid, field_size);
+        ctx->add_local_field(space, fid, field_size, serdez_id);
       else
       {
-        forest->allocate_field(space, field_size, fid, local);
+        forest->allocate_field(space, field_size, fid, local, serdez_id);
         ctx->register_field_creation(space, fid);
       }
       return fid;
@@ -10791,7 +10791,7 @@ namespace LegionRuntime {
     void Internal::allocate_fields(Context ctx, FieldSpace space,
                                         const std::vector<size_t> &sizes,
                                         std::vector<FieldID> &resulting_fields,
-                                        bool local)
+                                        bool local, CustomSerdezID serdez_id)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -10824,12 +10824,11 @@ namespace LegionRuntime {
                                           space, resulting_fields[idx], local);
 #endif
       }
-      
       if (local)
-        ctx->add_local_fields(space, resulting_fields, sizes);
+        ctx->add_local_fields(space, resulting_fields, sizes, serdez_id);
       else
       {
-        forest->allocate_fields(space, sizes, resulting_fields);
+        forest->allocate_fields(space, sizes, resulting_fields, serdez_id); 
         ctx->register_field_creations(space, resulting_fields);
       }
     }
@@ -11430,6 +11429,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     void Internal::send_field_allocation(FieldSpace space, FieldID fid,
                                               size_t size, unsigned idx,
+                                              CustomSerdezID serdez_id,
                                               AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
@@ -11440,6 +11440,7 @@ namespace LegionRuntime {
         rez.serialize(fid);
         rez.serialize(size);
         rez.serialize(idx);
+        rez.serialize(serdez_id);
       }
       find_messenger(target)->send_message(rez, FIELD_ALLOCATION_MESSAGE,
                                INDEX_AND_FIELD_VIRTUAL_CHANNEL, false/*flush*/);
@@ -12154,7 +12155,9 @@ namespace LegionRuntime {
       derez.deserialize(size);
       unsigned idx;
       derez.deserialize(idx);
-      forest->allocate_field_index(handle, size, fid, idx, source);
+      CustomSerdezID serdez_id;
+      derez.deserialize(serdez_id);
+      forest->allocate_field_index(handle, size, fid, idx, serdez_id, source);
     }
 
     //--------------------------------------------------------------------------
@@ -15427,6 +15430,11 @@ namespace LegionRuntime {
 	    it != red_table.end();
 	    it++)
 	  realm.register_reduction(it->first, it->second);
+
+        const SerdezOpTable &serdez_table = get_serdez_table();
+        for (SerdezOpTable::const_iterator it = serdez_table.begin();
+              it != serdez_table.end(); it++)
+          realm.register_custom_serdez(it->first, it->second);
       }
       
       // Parse any inputs for the high level runtime
@@ -15619,6 +15627,29 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    /*static*/ const SerdezOp* Internal::get_serdez_op(CustomSerdezID serdez_id)
+    //--------------------------------------------------------------------------
+    {
+      if (serdez_id == 0)
+      {
+        log_run.error("ERROR: CustomSerdezID zero is reserved.");
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_RESERVED_SERDEZ_ID);
+      }
+      SerdezOpTable &serdez_table = Internal::get_serdez_table();
+#ifdef DEBUG_HIGH_LEVEL
+      if (serdez_table.find(serdez_id) == serdez_table.end())
+      {
+        log_run.error("Invalid CustomSerdezOpID %d", serdez_id);
+        assert(false);
+        exit(ERROR_INVALID_SERDEZ_ID);
+      }
+#endif
+      return serdez_table[serdez_id];
+    }
+
     /*static*/ const SerdezRedopFns* Internal::get_serdez_redop_fns(
                                                          ReductionOpID redop_id)
     //--------------------------------------------------------------------------
@@ -15664,6 +15695,14 @@ namespace LegionRuntime {
       return table;
     }
 
+    //--------------------------------------------------------------------------
+    /*static*/ SerdezOpTable& Internal::get_serdez_table(void)
+    //--------------------------------------------------------------------------
+    {
+      static SerdezOpTable table;
+      return table;
+    }
+    
     //--------------------------------------------------------------------------
     /*static*/ SerdezRedopTable& Internal::get_serdez_redop_table(void)
     //--------------------------------------------------------------------------

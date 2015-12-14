@@ -67,7 +67,8 @@ namespace LegionRuntime {
                                 std::vector<Domain::CopySrcDstField> &fields);
     public:
       void add_field_info(FieldID fid, unsigned index,
-                          size_t offset, size_t field_size);
+                          size_t offset, size_t field_size,
+                          CustomSerdezID serdez_id);
       const Domain::CopySrcDstField& find_field_info(FieldID fid) const;
       size_t get_layout_size(void) const;
     public:
