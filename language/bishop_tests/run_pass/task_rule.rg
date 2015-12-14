@@ -23,17 +23,18 @@ local b = bishoplib.c
 
 mapper
 
-task {
-  target : processors[isa=x86][2];
+task#foo[index=$p] {
+  target : processors[isa=x86][($p[0] + 2) % processors[isa=x86].size];
 }
 
 task#bar {
   target : processors[isa=x86][1];
 }
 
-task#foo[index=$p] {
-  target : processors[isa=x86][($p[0] + 2) % processors[isa=x86].size];
+task {
+  target : processors[isa=x86][2];
 }
+
 end
 
 task bar()
