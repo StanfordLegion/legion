@@ -14,7 +14,7 @@ RUN apt-get update && \
 # Install Regent.
 COPY . /usr/local/legion
 RUN LLVM_CONFIG=llvm-config-3.5 /usr/local/legion/language/install.py && \
-    ln -s /usr/local/legion/language/regent.py /usr/bin/regent
+    ln -s /usr/local/legion/language/regent.py /usr/local/bin/regent
 
 # Configure container startup.
-CMD ["/usr/local/regent"]
+CMD ["/usr/local/bin/regent"]
