@@ -8,7 +8,7 @@ MAINTAINER Elliott Slaughter <slaughter@cs.stanford.edu>
 # Install dependencies.
 ENV DEBIAN_FRONTEND noninteractive
 RUN apt-get update && \
-    apt-get install -y build-essential clang-3.5 git libclang-3.5-dev libncurses5-dev llvm-3.5-dev zlib1g-dev && \
+    apt-get install -y build-essential clang-3.5 git libclang-3.5-dev libncurses5-dev llvm-3.5-dev wget zlib1g-dev && \
     apt-get clean
 
 # Install Regent.
