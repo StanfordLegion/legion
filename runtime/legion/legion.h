@@ -130,6 +130,7 @@ namespace LegionRuntime {
       inline bool operator<(const FieldSpace &rhs) const;
       inline bool operator>(const FieldSpace &rhs) const;
       inline FieldSpaceID get_id(void) const { return id; }
+      inline bool exists(void) const { return (id != 0); }
     private:
       FieldSpaceID id;
     };
@@ -167,6 +168,7 @@ namespace LegionRuntime {
       inline IndexSpace get_index_space(void) const { return index_space; }
       inline FieldSpace get_field_space(void) const { return field_space; }
       inline RegionTreeID get_tree_id(void) const { return tree_id; }
+      inline bool exists(void) const { return (tree_id != 0); } 
     private:
       // These are private so the user can't just arbitrarily change them
       RegionTreeID tree_id;
@@ -209,6 +211,7 @@ namespace LegionRuntime {
         { return index_partition; }
       inline FieldSpace get_field_space(void) const { return field_space; }
       inline RegionTreeID get_tree_id(void) const { return tree_id; }
+      inline bool exists(void) const { return (tree_id != 0); }
     private:
       // These are private so the user can't just arbitrary change them
       RegionTreeID tree_id;
@@ -1880,7 +1883,8 @@ namespace LegionRuntime {
        */
       const Variant& get_variant(VariantID vid);
 
-      const std::map<VariantID,Variant>& get_all_variants(void) const { return variants; }
+      const std::map<VariantID,Variant>& get_all_variants(void) const
+        { return variants; }
     public:
       const Processor::TaskFuncID user_id;
       const char *name;
