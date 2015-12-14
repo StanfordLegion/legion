@@ -358,7 +358,7 @@ local function compare_rules(rule1, rule2)
   local specificity1 = calculate_specificity(rule1.selector)
   local specificity2 = calculate_specificity(rule2.selector)
   for i = 1, 4 do
-    if specificity1[i] >= specificity2[i] then return false end
+    if specificity1[i] > specificity2[i] then return false end
   end
   return true
 end
