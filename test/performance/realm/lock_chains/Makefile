@@ -1,0 +1,41 @@
+
+ifndef LG_RT_DIR
+$(error LG_RT_DIR variable is not defined, aborting build)
+endif
+
+#Flags for directing the runtime makefile what to include
+DEBUG ?= 0                   # Include debugging symbols
+OUTPUT_LEVEL ?= LEVEL_PRINT  # Compile time print level
+SHARED_LOWLEVEL ?= 0 	     # Use the shared low level
+
+# GASNet and CUDA off by default for now
+USE_GASNET ?= 0
+USE_CUDA ?= 0
+
+# Put the binary file name here
+OUTFILE		:= lock_chains 
+# List all the application source files here
+GEN_SRC		:= lock_chains.cc   # .cc files
+GEN_GPU_SRC	:=		    # .cu files
+
+# You can modify these variables, some will be appended to by the runtime makefile
+INC_FLAGS	:=
+CC_FLAGS	:= 
+NVCC_FLAGS	:=
+GASNET_FLAGS	:=
+LD_FLAGS	:=
+
+TESTARGS.default =
+RUNMODE ?= default
+
+run : $(OUTFILE)
+	$(dir $(OUTFILE))$(notdir $(OUTFILE)) $(TESTARGS.$(RUNMODE))
+
+###########################################################################
+#
+#   Don't change anything below here
+#   
+###########################################################################
+
+include $(LG_RT_DIR)/runtime.mk
+

@@ -52,3 +52,6 @@ script:
   - make -C test/realm LG_RT_DIR=../../runtime DEBUG=0 SHARED_LOWLEVEL=1 run_all
   - make -C test/realm LG_RT_DIR=../../runtime DEBUG=0 SHARED_LOWLEVEL=1 clean
   - make -C test/realm LG_RT_DIR=../../runtime DEBUG=0 SHARED_LOWLEVEL=0 USE_CUDA=0 USE_GASNET=0 run_all
+  - make -C test/performance/realm LG_RT_DIR=../../../runtime SHARED_LOWLEVEL=1 run_all
+  - make -C test/performance/realm LG_RT_DIR=../../../runtime SHARED_LOWLEVEL=1 clean_all
+  - make -C test/performance/realm LG_RT_DIR=../../../runtime SHARED_LOWLEVEL=0 run_all
