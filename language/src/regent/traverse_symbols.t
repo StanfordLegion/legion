@@ -120,6 +120,7 @@ function traverse_symbols.expr(defined, undefined, node)
     local code = codegen(node)
     local actions = code.actions
     traverse_symbols.terra_stat(defined_local, undefined, actions.tree)
+    traverse_symbols.expr(defined, undefined, node.value)
     traverse_symbols.expr(defined, undefined, node.index)
 
   elseif node:is(ast.typed.expr.Unary) then
@@ -141,7 +142,6 @@ function traverse_symbols.expr(defined, undefined, node)
   elseif node:is(ast.typed.expr.Constant) then
 
   elseif node:is(ast.typed.expr.Call) then
-    traverse_symbols.expr(defined, undefined, node.fn)
     node.args:map(function(arg)
       traverse_symbols.expr(defined, undefined, arg)
     end)
@@ -149,7 +149,7 @@ function traverse_symbols.expr(defined, undefined, node)
   elseif node:is(ast.typed.expr.Cast) then
     traverse_symbols.expr(defined, undefined, node.arg)
 
-  elseif node:is(ast.typed.expr.Function) then
+  elseif node:is(ast.typed.expr.StaticCast) then
     traverse_symbols.expr(defined, undefined, node.value)
 
   elseif node:is(ast.typed.expr.Deref) then

@@ -26,7 +26,8 @@ Processor *task_procs = 0;
 double *task_start_times = 0;
 double *task_end_times = 0;
 
-void delay_task(const void *args, size_t arglen, Processor p)
+void delay_task(const void *args, size_t arglen, 
+		const void *userdata, size_t userlen, Processor p)
 {
   const DelayTaskArgs& d_args = *(const DelayTaskArgs *)args;
 
@@ -65,7 +66,8 @@ static int check_task_ordering(int start1, int end1, int start2, int end2)
   return 0;
 }    
 
-void top_level_task(const void *args, size_t arglen, Processor p)
+void top_level_task(const void *args, size_t arglen, 
+		    const void *userdata, size_t userlen, Processor p)
 {
   int errors = 0;
 

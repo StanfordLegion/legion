@@ -39,21 +39,27 @@ namespace LegionRuntime {
 
       TaskResult(const void *v, size_t v_size)
         : value(NULL), value_size(v_size) {
+        if (!v) return;
         value = malloc(value_size);
         assert(value);
         memcpy(value, v, value_size);
       }
 
       TaskResult(const TaskResult &r) : value(NULL), value_size(r.value_size) {
+        if (!r.value) return;
         value = malloc(value_size);
         assert(value);
         memcpy(value, r.value, value_size);
       }
 
       const TaskResult &operator=(const TaskResult &r) {
-        free(value);
+        if (value) free(value);
 
         value_size = r.value_size;
+        if (!r.value) {
+          value = NULL;
+          return r;
+        }
         value = malloc(value_size);
         assert(value);
         memcpy(value, r.value, value_size);
@@ -61,7 +67,7 @@ namespace LegionRuntime {
       }
 
       ~TaskResult(void) {
-        free(value);
+        if (value) free(value);
       }
 
       size_t legion_buffer_size(void) const {
@@ -69,7 +75,9 @@ namespace LegionRuntime {
       }
       size_t legion_serialize(void *buffer) const {
         *(size_t *)buffer = value_size;
-        memcpy((void *)(((size_t *)buffer)+1), value, value_size);
+        if (value) {
+          memcpy((void *)(((size_t *)buffer)+1), value, value_size);
+        }
         return sizeof(size_t) + value_size;
       }
       size_t legion_deserialize(const void *buffer) {
@@ -111,7 +119,7 @@ namespace LegionRuntime {
         return static_cast<const T>(t_.impl);                           \
       }
 
-      NEW_OPAQUE_WRAPPER(legion_runtime_t, HighLevelRuntime *);
+      NEW_OPAQUE_WRAPPER(legion_runtime_t, Runtime *);
       NEW_OPAQUE_WRAPPER(legion_context_t, Context);
       NEW_OPAQUE_WRAPPER(legion_coloring_t, Coloring *);
       NEW_OPAQUE_WRAPPER(legion_domain_coloring_t, DomainColoring *);

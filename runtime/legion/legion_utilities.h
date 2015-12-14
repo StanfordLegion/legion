@@ -1206,8 +1206,8 @@ namespace LegionRuntime {
           last_index(_last_index), lock(Reservation::create_reservation()) { }
       virtual ~DynamicTableNodeBase(void) { lock.destroy_reservation(); }
     public:
-      int level;
-      IT first_index, last_index;
+      const int level;
+      const IT first_index, last_index;
       Reservation lock;
     };
 
@@ -1316,7 +1316,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     // Give the implementations here so the templates get instantiated
-    //-------------------------------------------------------------------------- 
+    //--------------------------------------------------------------------------
 
     //--------------------------------------------------------------------------
     inline Serializer& Serializer::operator=(const Serializer &rhs)
@@ -1606,7 +1606,9 @@ namespace LegionRuntime {
     {
 #ifdef DEBUG_HIGH_LEVEL
       // Save our enclosing context on the stack
+#ifndef NDEBUG
       size_t sent_context = *((const size_t*)(buffer+index));
+#endif
       index += sizeof(size_t);
       // Check to make sure that they match
       assert(sent_context == context_bytes);
@@ -1620,7 +1622,9 @@ namespace LegionRuntime {
     {
 #ifdef DEBUG_HIGH_LEVEL
       // Read the send context size out of the buffer      
+#ifndef NDEBUG
       size_t sent_context = *((const size_t*)(buffer+index));
+#endif
       index += sizeof(size_t);
       // Check to make sure that they match
       assert(sent_context == context_bytes);
@@ -8510,7 +8514,7 @@ namespace LegionRuntime {
                                              parent_first, parent_last);
             typename ALLOCATOR::INNER_TYPE *inner = 
               static_cast<typename ALLOCATOR::INNER_TYPE*>(parent);
-            inner->elems[0] = parent;
+            inner->elems[0] = root;
             root = parent;
           }
         }

@@ -247,6 +247,7 @@ function flip_types.expr(cx, simd_width, symbol, node)
       new_node.fn = ast.typed.expr.Function {
         expr_type = flip_types.type(simd_width, node.fn.expr_type),
         value = flip_types.type(simd_width, node.fn.value),
+        options = node.options,
         span = node.span,
       }
     end
@@ -551,6 +552,13 @@ function check_vectorizability.stat(cx, node)
         return false
       end
 
+      -- TODO: we could accept statements with no loop carrying dependence
+      if cx:lookup_expr_type(lh) == S then
+        cx:report_error_when_demanded(node, error_prefix ..
+          "an assignment to a scalar expression")
+        return false
+      end
+
       -- TODO: for the moment we reject an assignment such as
       -- 'r[i] = i' where 'i' is of an index type
       if std.is_bounded_type(rh.expr_type) and
@@ -804,6 +812,10 @@ function check_vectorizability.expr(cx, node)
     elseif node:is(ast.typed.expr.Function) then
       cx:report_error_when_demanded(node,
         error_prefix .. "a function reference")
+
+    elseif node:is(ast.typed.expr.RawValue) then
+      cx:report_error_when_demanded(node,
+        error_prefix .. "a raw operator")
 
     else
       assert(false, "unexpected node type " .. tostring(node:type()))

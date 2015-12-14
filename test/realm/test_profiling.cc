@@ -60,7 +60,8 @@ public:
 MyMachineUpdateTracker tracker;
 #endif
 
-void child_task(const void *args, size_t arglen, Processor p)
+void child_task(const void *args, size_t arglen, 
+		const void *userdata, size_t userlen, Processor p)
 {
   printf("starting task on processor " IDFMT "\n", p.id);
   sleep(1);
@@ -81,7 +82,8 @@ void child_task(const void *args, size_t arglen, Processor p)
 Barrier response_counter;
 int expected_responses_remaining;
 
-void response_task(const void *args, size_t arglen, Processor p)
+void response_task(const void *args, size_t arglen,
+		   const void *userdata, size_t userlen, Processor p)
 {
   printf("got profiling response - %zd bytes\n", arglen);
   printf("Bytes:");
@@ -133,7 +135,8 @@ void response_task(const void *args, size_t arglen, Processor p)
   response_counter.arrive();
 }
 
-void top_level_task(const void *args, size_t arglen, Processor p)
+void top_level_task(const void *args, size_t arglen, 
+		    const void *userdata, size_t userlen, Processor p)
 {
   printf("top level task - getting machine and list of CPUs\n");
 

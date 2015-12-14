@@ -36,7 +36,7 @@ namespace Realm {
     TYPE_IS_SERIALIZABLE(OperationStatus::Result);
 
     template <typename S>
-    bool operator&(S& serdez, const OperationStatus& s)
+    bool serdez(S& serdez, const OperationStatus& s)
     {
       return ((serdez & s.result) &&
 	      (serdez & s.error_code) &&
@@ -115,7 +115,7 @@ namespace Realm {
   }
 
   template <typename S>
-  bool operator<<(S &s, const ProfilingRequest &pr)
+  bool serialize(S &s, const ProfilingRequest &pr)
   {
     return((s << pr.response_proc) &&
 	   (s << pr.response_task_id) &&
@@ -163,7 +163,10 @@ namespace Realm {
 
     // serialize the data
     Serialization::DynamicBufferSerializer dbs(128);
-    bool ok = dbs << data;
+#ifndef NDEBUG
+    bool ok =
+#endif
+      dbs << data;
     assert(ok);
 
     // measurement data is stored in a ByteArray
@@ -179,7 +182,7 @@ namespace Realm {
   //
 
   template <typename S>
-  bool operator<<(S &s, const ProfilingRequestSet &prs)
+  bool serialize(S &s, const ProfilingRequestSet &prs)
   {
     size_t len = prs.requests.size();
     if(!(s << len)) return false;
@@ -189,7 +192,7 @@ namespace Realm {
   }
   
   template <typename S>
-  bool operator>>(S &s, ProfilingRequestSet &prs)
+  bool deserialize(S &s, ProfilingRequestSet &prs)
   {
     size_t len;
     if(!(s >> len)) return false;
@@ -223,7 +226,10 @@ namespace Realm {
     if(find_id((int)(T::ID), offset, size)) {
       Serialization::FixedBufferDeserializer fbd(data + offset, size);
       T *m = new T;
-      bool ok = fbd >> *m;
+#ifndef NDEBUG
+      bool ok =
+#endif
+        fbd >> *m;
       assert(ok);
       return m;
     } else

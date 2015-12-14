@@ -13,13 +13,11 @@
 -- limitations under the License.
 
 -- fails-with:
--- type_mismatch_ispace5.rg:25: type mismatch in argument 2: expected int1d but got bool
+-- type_mismatch_ispace5.rg:23: type mismatch in argument 2: expected int1d but got bool
 --   var r = ispace(int1d, true, int1d(5))
 --                ^
 
 import "regent"
-
-local int1d = index_type(int, "int1d")
 
 task f()
   var r = ispace(int1d, true, int1d(5))

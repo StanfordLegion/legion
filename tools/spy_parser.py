@@ -26,28 +26,28 @@ prefix_pat              = re.compile(prefix)
 # Logger calls for the shape of the machine
 utility_pat             = re.compile(prefix+"Utility (?P<pid>[0-9a-f]+)")
 processor_pat           = re.compile(prefix+"Processor (?P<pid>[0-9a-f]+) (?P<kind>[0-9]+)")
-memory_pat              = re.compile(prefix+"Memory (?P<mid>[0-9a-f]+) (?P<capacity>[0-9]+)")
+memory_pat              = re.compile(prefix+"Memory (?P<mid>[0-9a-f]+) (?P<capacity>[0-9]+) (?P<kind>[0-9]+)")
 proc_mem_pat            = re.compile(prefix+"Processor Memory (?P<pid>[0-9a-f]+) (?P<mid>[0-9a-f]+) (?P<band>[0-9]+) (?P<lat>[0-9]+)")
 mem_mem_pat             = re.compile(prefix+"Memory Memory (?P<mone>[0-9a-f]+) (?P<mtwo>[0-9a-f]+) (?P<band>[0-9]+) (?P<lat>[0-9]+)")
 
 # Calls for the shape of region trees
 top_index_pat           = re.compile(prefix+"Index Space (?P<uid>[0-9a-f]+)")
-top_index_name_pat      = re.compile(prefix+"Index Space Name (?P<uid>[0-9a-f]+) (?P<name>[-\w ]+)")
+top_index_name_pat      = re.compile(prefix+"Index Space Name (?P<uid>[0-9a-f]+) (?P<name>[-\w. ]+)")
 index_part_pat          = re.compile(prefix+"Index Partition (?P<pid>[0-9a-f]+) (?P<uid>[0-9a-f]+) (?P<disjoint>[0-1]) (?P<dim>[0-9]+) (?P<val1>[0-9]+) (?P<val2>[0-9]+) (?P<val3>[0-9]+)")
-index_part_name_pat     = re.compile(prefix+"Index Partition Name (?P<uid>[0-9a-f]+) (?P<name>[-\w ]+)")
+index_part_name_pat     = re.compile(prefix+"Index Partition Name (?P<uid>[0-9a-f]+) (?P<name>[-\w. ]+)")
 index_subspace_pat      = re.compile(prefix+"Index Subspace (?P<pid>[0-9a-f]+) (?P<uid>[0-9a-f]+) (?P<dim>[0-9]+) (?P<val1>[0-9]+) (?P<val2>[0-9]+) (?P<val3>[0-9]+)")
 field_space_pat         = re.compile(prefix+"Field Space (?P<uid>[0-9]+)")
-field_space_name_pat    = re.compile(prefix+"Field Space Name (?P<uid>[0-9]+) (?P<name>[-\w ]+)")
+field_space_name_pat    = re.compile(prefix+"Field Space Name (?P<uid>[0-9]+) (?P<name>[-\w. ]+)")
 field_create_pat        = re.compile(prefix+"Field Creation (?P<uid>[0-9]+) (?P<fid>[0-9]+)")
-field_name_pat          = re.compile(prefix+"Field Name (?P<uid>[0-9]+) (?P<fid>[0-9]+) (?P<name>[-\w ]+)")
+field_name_pat          = re.compile(prefix+"Field Name (?P<uid>[0-9]+) (?P<fid>[0-9]+) (?P<name>[-\w. ]+)")
 region_pat              = re.compile(prefix+"Region (?P<iid>[0-9a-f]+) (?P<fid>[0-9]+) (?P<tid>[0-9]+)")
-region_name_pat         = re.compile(prefix+"Logical Region Name (?P<iid>[0-9a-f]+) (?P<fid>[0-9]+) (?P<tid>[0-9]+) (?P<name>[-\w ]+)")
-partition_name_pat      = re.compile(prefix+"Logical Partition Name (?P<iid>[0-9a-f]+) (?P<fid>[0-9]+) (?P<tid>[0-9]+) (?P<name>[-\w ]+)")
+region_name_pat         = re.compile(prefix+"Logical Region Name (?P<iid>[0-9a-f]+) (?P<fid>[0-9]+) (?P<tid>[0-9]+) (?P<name>[-\w. ]+)")
+partition_name_pat      = re.compile(prefix+"Logical Partition Name (?P<iid>[0-9a-f]+) (?P<fid>[0-9]+) (?P<tid>[0-9]+) (?P<name>[-\w. ]+)")
 
 # Logger calls for operations
-top_task_pat             = re.compile(prefix+"Top Task (?P<tid>[0-9]+) (?P<uid>[0-9]+) (?P<name>\w+)")
-single_task_pat          = re.compile(prefix+"Individual Task (?P<ctx>[0-9]+) (?P<tid>[0-9]+) (?P<uid>[0-9]+) (?P<name>\w+)")
-index_task_pat           = re.compile(prefix+"Index Task (?P<ctx>[0-9]+) (?P<tid>[0-9]+) (?P<uid>[0-9]+) (?P<name>\w+)")
+top_task_pat             = re.compile(prefix+"Top Task (?P<tid>[0-9]+) (?P<uid>[0-9]+) (?P<name>[-\w. ]+)")
+single_task_pat          = re.compile(prefix+"Individual Task (?P<ctx>[0-9]+) (?P<tid>[0-9]+) (?P<uid>[0-9]+) (?P<name>[-\w. ]+)")
+index_task_pat           = re.compile(prefix+"Index Task (?P<ctx>[0-9]+) (?P<tid>[0-9]+) (?P<uid>[0-9]+) (?P<name>[-\w. ]+)")
 mapping_pat              = re.compile(prefix+"Mapping Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
 close_pat                = re.compile(prefix+"Close Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+) (?P<is_inter>[0-1])")
 fence_pat                = re.compile(prefix+"Fence Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
@@ -91,6 +91,7 @@ physical_inst_pat       = re.compile(prefix+"Physical Instance (?P<iid>[0-9a-f]+
 physical_reduc_pat      = re.compile(prefix+"Reduction Instance (?P<iid>[0-9a-f]+) (?P<mid>[0-9a-f]+) (?P<index>[0-9a-f]+) (?P<field>[0-9]+) (?P<tid>[0-9]+) (?P<fold>[0-1]) (?P<indirect>[0-9]+)")
 inst_field_pat          = re.compile(prefix+"Instance Field (?P<iid>[0-9a-f]+) (?P<fid>[0-9]+)")
 op_user_pat             = re.compile(prefix+"Op Instance User (?P<uid>[0-9]+) (?P<idx>[0-9]+) (?P<iid>[0-9a-f]+)")
+op_field_user_pat       = re.compile(prefix+"Op Instance Field User (?P<uid>[0-9]+) (?P<idx>[0-9]+) (?P<iid>[0-9a-f]+) (?P<fid>[0-9]+)")
 op_proc_user_pat        = re.compile(prefix+"Op Processor User (?P<uid>[0-9]+) (?P<pid>[0-9a-f]+)")
 
 def parse_log_line(line, state):
@@ -105,7 +106,7 @@ def parse_log_line(line, state):
             return True
     m = memory_pat.match(line)
     if m <> None:
-        if state.add_memory(int(m.group('mid'),16), int(m.group('capacity'))):
+        if state.add_memory(int(m.group('mid'),16), int(m.group('capacity')), int(m.group('kind'))):
             return True
     m = proc_mem_pat.match(line)
     if m <> None:
@@ -306,6 +307,10 @@ def parse_log_line(line, state):
     m = op_user_pat.match(line)
     if m <> None:
         if state.add_op_user(int(m.group('uid')), int(m.group('idx')), int(m.group('iid'),16)):
+            return True
+    m = op_field_user_pat.match(line)
+    if m <> None:
+        if state.add_op_field_user(int(m.group('uid')), int(m.group('idx')), int(m.group('iid'),16), int(m.group('fid'))):
             return True
     m = op_proc_user_pat.match(line)
     if m <> None:

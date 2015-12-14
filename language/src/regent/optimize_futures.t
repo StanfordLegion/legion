@@ -151,7 +151,34 @@ function analyze_var_flow.expr(cx, node)
   elseif node:is(ast.typed.expr.Partition) then
     return nil
 
+  elseif node:is(ast.typed.expr.PartitionEqual) then
+    return nil
+
+  elseif node:is(ast.typed.expr.PartitionByField) then
+    return nil
+
+  elseif node:is(ast.typed.expr.Image) then
+    return nil
+
+  elseif node:is(ast.typed.expr.Preimage) then
+    return nil
+
   elseif node:is(ast.typed.expr.CrossProduct) then
+    return nil
+
+  elseif node:is(ast.typed.expr.ListDuplicatePartition) then
+    return nil
+
+  elseif node:is(ast.typed.expr.ListCrossProduct) then
+    return nil
+
+  elseif node:is(ast.typed.expr.ListPhaseBarriers) then
+    return nil
+
+  elseif node:is(ast.typed.expr.ListInvert) then
+    return nil
+
+  elseif node:is(ast.typed.expr.ListRange) then
     return nil
 
   elseif node:is(ast.typed.expr.PhaseBarrier) then
@@ -161,6 +188,15 @@ function analyze_var_flow.expr(cx, node)
     return nil
 
   elseif node:is(ast.typed.expr.Copy) then
+    return nil
+
+  elseif node:is(ast.typed.expr.Fill) then
+    return nil
+
+  elseif node:is(ast.typed.expr.AllocateScratchFields) then
+    return nil
+
+  elseif node:is(ast.typed.expr.WithScratchFields) then
     return nil
 
   elseif node:is(ast.typed.expr.Unary) then
@@ -333,7 +369,7 @@ function analyze_var_flow.stat(cx, node)
   end
 end
 
-function compute_var_futures(cx)
+local function compute_var_futures(cx)
   local inflow = {}
   for v1, flow in pairs(cx.var_flows) do
     for v2, _ in pairs(flow) do
@@ -363,7 +399,7 @@ end
 
 local optimize_futures = {}
 
-function concretize(node)
+local function concretize(node)
   local expr_type = std.as_read(node.expr_type)
   if std.is_future(expr_type) then
     return ast.typed.expr.FutureGetResult {
@@ -376,7 +412,7 @@ function concretize(node)
   return node
 end
 
-function promote(node)
+local function promote(node)
   local expr_type = std.as_read(node.expr_type)
   if not std.is_future(expr_type) then
     return ast.typed.expr.Future {
@@ -397,12 +433,9 @@ function optimize_futures.expr_region_root(cx, node)
 end
 
 function optimize_futures.expr_condition(cx, node)
-  local values = node.values:map(
-    function(value)
-      return concretize(optimize_futures.expr(cx, node.region))
-    end)
+  local value = concretize(optimize_futures.expr(cx, node.value))
   return node {
-    values = values,
+    value = value,
   }
 end
 
@@ -564,11 +597,96 @@ function optimize_futures.expr_partition(cx, node)
   }
 end
 
+function optimize_futures.expr_partition_equal(cx, node)
+  local region = concretize(optimize_futures.expr(cx, node.region))
+  local colors = concretize(optimize_futures.expr(cx, node.colors))
+  return node {
+    region = region,
+    colors = colors,
+  }
+end
+
+function optimize_futures.expr_partition_by_field(cx, node)
+  local region = concretize(optimize_futures.expr_region_root(cx, node.region))
+  local colors = concretize(optimize_futures.expr(cx, node.colors))
+  return node {
+    region = region,
+    colors = colors,
+  }
+end
+
+function optimize_futures.expr_image(cx, node)
+  local parent = concretize(optimize_futures.expr(cx, node.parent))
+  local partition = concretize(optimize_futures.expr(cx, node.partition))
+  local region = concretize(optimize_futures.expr_region_root(cx, node.region))
+  return node {
+    parent = parent,
+    partition = partition,
+    region = region,
+  }
+end
+
+function optimize_futures.expr_preimage(cx, node)
+  local parent = concretize(optimize_futures.expr(cx, node.parent))
+  local partition = concretize(optimize_futures.expr(cx, node.partition))
+  local region = concretize(optimize_futures.expr_region_root(cx, node.region))
+  return node {
+    parent = parent,
+    partition = partition,
+    region = region,
+  }
+end
+
 function optimize_futures.expr_cross_product(cx, node)
   local args = node.args:map(
     function(arg) return concretize(optimize_futures.expr(cx, arg)) end)
   return node {
     args = args,
+  }
+end
+
+function optimize_futures.expr_list_duplicate_partition(cx, node)
+  local partition = concretize(optimize_futures.expr(cx, node.partition))
+  local indices = concretize(optimize_futures.expr(cx, node.indices))
+  return node {
+    partition = partition,
+    indices = indices,
+  }
+end
+
+function optimize_futures.expr_list_cross_product(cx, node)
+  local lhs = concretize(optimize_futures.expr(cx, node.lhs))
+  local rhs = concretize(optimize_futures.expr(cx, node.rhs))
+  return node {
+    lhs = lhs,
+    rhs = rhs,
+  }
+end
+
+function optimize_futures.expr_list_phase_barriers(cx, node)
+  local product = concretize(optimize_futures.expr(cx, node.product))
+  return node {
+    product = product,
+  }
+end
+
+function optimize_futures.expr_list_invert(cx, node)
+  local rhs = concretize(optimize_futures.expr(cx, node.rhs))
+  local product = concretize(optimize_futures.expr(cx, node.product))
+  local barriers = concretize(optimize_futures.expr(cx, node.barriers))
+  return node {
+    rhs = rhs,
+    product = product,
+    barriers = barriers,
+  }
+end
+
+function optimize_futures.expr_list_range(cx, node)
+  local start = concretize(optimize_futures.expr(cx, node.start))
+  local stop = concretize(optimize_futures.expr(cx, node.stop))
+  return node {
+    start = start,
+    stop = stop,
   }
 end
 
@@ -597,6 +715,36 @@ function optimize_futures.expr_copy(cx, node)
     src = src,
     dst = dst,
     conditions = conditions,
+  }
+end
+
+function optimize_futures.expr_fill(cx, node)
+  local dst = concretize(optimize_futures.expr_region_root(cx, node.dst))
+  local value = concretize(optimize_futures.expr(cx, node.value))
+  local conditions = node.conditions:map(
+    function(condition)
+      return concretize(optimize_futures.expr_condition(cx, condition))
+    end)
+  return node {
+    dst = dst,
+    value = value,
+    conditions = conditions,
+  }
+end
+
+function optimize_futures.expr_allocate_scratch_fields(cx, node)
+  local region = concretize(optimize_futures.expr_region_root(cx, node.region))
+  return node {
+    region = region,
+  }
+end
+
+function optimize_futures.expr_with_scratch_fields(cx, node)
+  local region = concretize(optimize_futures.expr_region_root(cx, node.region))
+  local field_ids = concretize(optimize_futures.expr(cx, node.field_ids))
+  return node {
+    region = region,
+    field_ids = field_ids,
   }
 end
 
@@ -705,8 +853,35 @@ function optimize_futures.expr(cx, node)
   elseif node:is(ast.typed.expr.Partition) then
     return optimize_futures.expr_partition(cx, node)
 
+  elseif node:is(ast.typed.expr.PartitionEqual) then
+    return optimize_futures.expr_partition_equal(cx, node)
+
+  elseif node:is(ast.typed.expr.PartitionByField) then
+    return optimize_futures.expr_partition_by_field(cx, node)
+
+  elseif node:is(ast.typed.expr.Image) then
+    return optimize_futures.expr_image(cx, node)
+
+  elseif node:is(ast.typed.expr.Preimage) then
+    return optimize_futures.expr_preimage(cx, node)
+
   elseif node:is(ast.typed.expr.CrossProduct) then
     return optimize_futures.expr_cross_product(cx, node)
+
+  elseif node:is(ast.typed.expr.ListDuplicatePartition) then
+    return optimize_futures.expr_list_duplicate_partition(cx, node)
+
+  elseif node:is(ast.typed.expr.ListCrossProduct) then
+    return optimize_futures.expr_list_cross_product(cx, node)
+
+  elseif node:is(ast.typed.expr.ListPhaseBarriers) then
+    return optimize_futures.expr_list_phase_barriers(cx, node)
+
+  elseif node:is(ast.typed.expr.ListInvert) then
+    return optimize_futures.expr_list_invert(cx, node)
+
+  elseif node:is(ast.typed.expr.ListRange) then
+    return optimize_futures.expr_list_range(cx, node)
 
   elseif node:is(ast.typed.expr.PhaseBarrier) then
     return optimize_futures.expr_phase_barrier(cx, node)
@@ -716,6 +891,15 @@ function optimize_futures.expr(cx, node)
 
   elseif node:is(ast.typed.expr.Copy) then
     return optimize_futures.expr_copy(cx, node)
+
+  elseif node:is(ast.typed.expr.Fill) then
+    return optimize_futures.expr_fill(cx, node)
+
+  elseif node:is(ast.typed.expr.AllocateScratchFields) then
+    return optimize_futures.expr_allocate_scratch_fields(cx, node)
+
+  elseif node:is(ast.typed.expr.WithScratchFields) then
+    return optimize_futures.expr_with_scratch_fields(cx, node)
 
   elseif node:is(ast.typed.expr.Unary) then
     return optimize_futures.expr_unary(cx, node)

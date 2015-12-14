@@ -103,14 +103,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void TreeStateLogger::capture_state(Runtime *rt, unsigned idx, 
+    /*static*/ void TreeStateLogger::capture_state(Internal *rt, unsigned idx, 
                                 const char *task_name, unsigned uid,
                                 RegionNode *node, ContextID ctx, bool pack, bool send, 
                                 FieldMask capture_mask, FieldMask working_mask)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
-      if (Runtime::logging_region_tree_state)
+      if (Internal::logging_region_tree_state)
       {
         char *field_mask = working_mask.to_string();
         TreeStateLogger *logger = rt->get_tree_state_logger();
@@ -148,14 +148,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void TreeStateLogger::capture_state(Runtime *rt, unsigned idx, 
+    /*static*/ void TreeStateLogger::capture_state(Internal *rt, unsigned idx, 
                                 const char *task_name, unsigned uid,
                                 PartitionNode *node, ContextID ctx, bool pack, bool send, 
                                 FieldMask capture_mask, FieldMask working_mask)
     //--------------------------------------------------------------------------
     {
  #ifdef DEBUG_HIGH_LEVEL
-      if (Runtime::logging_region_tree_state)
+      if (Internal::logging_region_tree_state)
       {
         TreeStateLogger *logger = rt->get_tree_state_logger();
         assert(logger != NULL);
@@ -193,7 +193,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void TreeStateLogger::capture_state(Runtime *rt, 
+    /*static*/ void TreeStateLogger::capture_state(Internal *rt, 
                   const RegionRequirement *req, unsigned idx, const char *task_name, 
                   unsigned uid, RegionNode *node, ContextID ctx, bool pre_map, 
                   bool sanitize, bool closing, 
@@ -201,7 +201,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
-      if (Runtime::logging_region_tree_state)
+      if (Internal::logging_region_tree_state)
       {
         TreeStateLogger *logger = rt->get_tree_state_logger();
         assert(logger != NULL);
@@ -269,7 +269,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void TreeStateLogger::capture_state(Runtime *rt, LogicalRegion handle, 
+    void TreeStateLogger::capture_state(Internal *rt, LogicalRegion handle, 
                                         const char *task_name, unsigned uid,
                                         RegionNode *node, ContextID ctx, bool pack, 
                                         unsigned shift, FieldMask capture_mask, 
@@ -277,7 +277,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
-      if (Runtime::logging_region_tree_state)
+      if (Internal::logging_region_tree_state)
       {
         TreeStateLogger *logger = rt->get_tree_state_logger();
         assert(logger != NULL);

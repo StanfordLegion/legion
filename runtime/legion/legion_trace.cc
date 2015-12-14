@@ -16,6 +16,7 @@
 
 #include "legion.h"
 #include "legion_ops.h"
+#include "legion_spy.h"
 #include "legion_trace.h"
 #include "legion_tasks.h"
 
@@ -80,6 +81,10 @@ namespace LegionRuntime {
       op_map.clear();
       close_dependences.clear();
       tracing = false;
+#ifdef LEGION_SPY
+      current_uids.clear();
+      num_regions.clear();
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -95,10 +100,22 @@ namespace LegionRuntime {
       {
         const std::pair<Operation*,GenerationID> &target = operations[idx];
         op->register_dependence(target.first, target.second);
+#ifdef LEGION_SPY
+        for (unsigned req_idx = 0; req_idx < num_regions[idx]; req_idx++)
+        {
+          LegionSpy::log_mapping_dependence(
+              op->get_parent()->get_unique_op_id(), current_uids[idx], req_idx,
+              op->get_unique_op_id(), 0, TRUE_DEPENDENCE);
+        }
+#endif
         // Remove any mapping references that we hold
         target.first->remove_mapping_reference(target.second);
       }
       operations.clear();
+#ifdef LEGION_SPY
+      current_uids.clear();
+      num_regions.clear();
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -117,6 +134,9 @@ namespace LegionRuntime {
           op_map[key] = index;
           // Add a new vector for storing dependences onto the back
           dependences.push_back(LegionVector<DependenceRecord>::aligned());
+          // Record meta-data about the trace for verifying that
+          // it is being replayed correctly
+          op_info.push_back(OperationInfo(op));
         }
         else // Otherwise, track close operations separately
           close_dependences[key] = LegionVector<DependenceRecord>::aligned();
@@ -125,15 +145,63 @@ namespace LegionRuntime {
       {
         if (!op->is_close_op())
         {
+          // Check for exceeding the trace size
+          if (index >= dependences.size())
+          {
+            log_run.error("Trace violation! Recorded %ld operations in trace "
+                          "%d in task %s (UID %lld) but %d operations have "
+                          "now been issued!", dependences.size(), tid,
+                          ctx->variants->name, 
+                          ctx->get_unique_task_id(), index+1);
+#ifdef DEBUG_HIGH_LEVEL
+            assert(false);
+#endif
+            exit(ERROR_TRACE_VIOLATION);
+          }
+          // Check to see if the meta-data alignes
+          const OperationInfo &info = op_info[index];
+          // Check that they are the same kind of operation
+          if (info.kind != op->get_operation_kind())
+          {
+            log_run.error("Trace violation! Operation at index %d of trace %d "
+                          "in task %s (UID %lld) was recorded as having type "
+                          "%s but instead has type %s in replay.",
+                          index, tid, ctx->variants->name, 
+                          ctx->get_unique_task_id(), 
+                          Operation::get_string_rep(info.kind),
+                          Operation::get_string_rep(op->get_operation_kind()));
+#ifdef DEBUG_HIGH_LEVEL
+            assert(false);
+#endif
+            exit(ERROR_TRACE_VIOLATION);
+          }
+          // Check that they have the same number of region requirements
+          if (info.count != op->get_region_count())
+          {
+            log_run.error("Trace violation! Operation at index %d of trace %d "
+                          "in task %s (UID %lld) was recorded as having %d "
+                          "regions, but instead has %ld regions in replay.",
+                          index, tid, ctx->variants->name,
+                          ctx->get_unique_task_id(), info.count,
+                          op->get_region_count());
+#ifdef DEBUG_HIGH_LEVEL
+            assert(false);
+#endif
+            exit(ERROR_TRACE_VIOLATION);
+          }
+          // If we make it here, everything is good
           const LegionVector<DependenceRecord>::aligned &deps = 
                                                           dependences[index];
           operations.push_back(key);
+#ifdef LEGION_SPY
+          current_uids.push_back(op->get_unique_op_id());
+          num_regions.push_back(op->get_region_count());
+#endif
           // Add a mapping reference since people will be 
           // registering dependences
           op->add_mapping_reference(gen);  
           // Then compute all the dependences on this operation from
           // our previous recording of the trace
-          
           for (LegionVector<DependenceRecord>::aligned::const_iterator it = 
                 deps.begin(); it != deps.end(); it++)
           {
@@ -143,13 +211,32 @@ namespace LegionRuntime {
 #endif
             const std::pair<Operation*,GenerationID> &target = 
                                                   operations[it->operation_idx];
+
             if ((it->prev_idx == -1) || (it->next_idx == -1))
+            {
               op->register_dependence(target.first, target.second);
+#ifdef LEGION_SPY
+              LegionSpy::log_mapping_dependence(
+                  op->get_parent()->get_unique_op_id(),
+                  current_uids[it->operation_idx], 
+                  (it->prev_idx == -1) ? 0 : it->prev_idx,
+                  op->get_unique_op_id(), 
+                  (it->next_idx == -1) ? 0 : it->next_idx, TRUE_DEPENDENCE);
+#endif
+            }
             else
+            {
               op->register_region_dependence(it->next_idx, target.first,
                                              target.second, it->prev_idx,
                                              it->dtype, it->validates,
                                              it->dependent_mask);
+#ifdef LEGION_SPY
+              LegionSpy::log_mapping_dependence(
+                  op->get_parent()->get_unique_op_id(),
+                  current_uids[it->operation_idx], it->prev_idx,
+                  op->get_unique_op_id(), it->next_idx, it->dtype);
+#endif
+            }
           }
         }
         else
@@ -167,13 +254,18 @@ namespace LegionRuntime {
           // We can get this from the set of operations on which the
           // operation we are currently performing dependence analysis
           // has dependences.
-          InterCloseOp *close_op = static_cast<InterCloseOp*>(op);
+          TraceCloseOp *close_op = static_cast<TraceCloseOp*>(op);
 #ifdef DEBUG_HIGH_LEVEL
-          assert(close_op == dynamic_cast<InterCloseOp*>(op));
+          assert(close_op == dynamic_cast<TraceCloseOp*>(op));
 #endif
+          int closing_index = close_op->get_close_index();
           for (LegionVector<DependenceRecord>::aligned::const_iterator it = 
                 deps.begin(); it != deps.end(); it++)
           {
+            // We only record dependences for this close operation on
+            // the indexes for which this close operation is being done
+            if (closing_index != it->next_idx)
+              continue;
 #ifdef DEBUG_HIGH_LEVEL
             assert((it->operation_idx >= 0) &&
                    ((size_t)it->operation_idx < operations.size()));
@@ -182,11 +274,29 @@ namespace LegionRuntime {
                                                   operations[it->operation_idx];
             // If this is the case we can do the normal registration
             if ((it->prev_idx == -1) || (it->next_idx == -1))
+            {
               close_op->register_dependence(target.first, target.second);
+#ifdef LEGION_SPY
+              LegionSpy::log_mapping_dependence(
+                  op->get_parent()->get_unique_op_id(),
+                  current_uids[it->operation_idx], 
+                  (it->prev_idx == -1) ? 0 : it->prev_idx,
+                  op->get_unique_op_id(), 
+                  (it->next_idx == -1) ? 0 : it->next_idx, TRUE_DEPENDENCE);
+#endif
+            }
             else
+            {
               close_op->record_trace_dependence(target.first, target.second,
                                                 it->prev_idx, it->next_idx,
                                                 it->dtype, it->dependent_mask);
+#ifdef LEGION_SPY
+              LegionSpy::log_mapping_dependence(
+                  close_op->get_parent()->get_unique_op_id(),
+                  current_uids[it->operation_idx], it->prev_idx,
+                  close_op->get_unique_op_id(), it->next_idx, it->dtype);
+#endif
+            }
           }
           // Also see if we have any aliased region requirements that we
           // need to notify the generating task of
@@ -214,29 +324,57 @@ namespace LegionRuntime {
     {
 #ifdef DEBUG_HIGH_LEVEL
       assert(tracing);
-      assert(operations.back().first == source);
-      assert(operations.back().second == src_gen);
-      assert(!source->is_close_op());
+      if (!source->is_close_op())
+      {
+        assert(operations.back().first == source);
+        assert(operations.back().second == src_gen);
+      }
 #endif
       std::pair<Operation*,GenerationID> target_key(target, tar_gen);
       std::map<std::pair<Operation*,GenerationID>,unsigned>::const_iterator
         finder = op_map.find(target_key);
       // We only need to record it if it falls within our trace
       if (finder != op_map.end())
-        dependences.back().push_back(DependenceRecord(finder->second));
+      {
+        // Two cases here
+        if (!source->is_close_op())
+        {
+          // Normal case
+          dependences.back().push_back(DependenceRecord(finder->second));
+        }
+        else
+        {
+          // Otherwise this is a close op so record it special
+          // Don't record dependences on our creator
+          if (target_key != operations.back())
+          {
+            std::pair<Operation*,GenerationID> src_key(source, src_gen);
+#ifdef DEBUG_HIGH_LEVEL
+            assert(close_dependences.find(src_key) != close_dependences.end());
+#endif
+            close_dependences[src_key].push_back(
+                DependenceRecord(finder->second));
+          }
+        }
+      }
       else if (target->is_close_op())
       {
-        // See if the target is a close operation on which 
-        // we need to check for transitive dependences
+        // They shouldn't both be close operations, if they are, then
+        // they should be going through the other path that tracks
+        // dependences based on specific region requirements
+#ifdef DEBUG_HIGH_LEVEL
+        assert(!source->is_close_op());
+#endif
+        // First check to see if the close op is one of ours
         std::map<std::pair<Operation*,GenerationID>,
                 LegionVector<DependenceRecord>::aligned>::const_iterator
           close_finder = close_dependences.find(target_key);
         if (close_finder != close_dependences.end())
         {
           LegionVector<DependenceRecord>::aligned &target_deps = 
-                                                          dependences.back();
+                                                        dependences.back();
           const LegionVector<DependenceRecord>::aligned &close_deps = 
-                                                          close_finder->second;
+                                                        close_finder->second;
           for (LegionVector<DependenceRecord>::aligned::const_iterator it = 
                 close_deps.begin(); it != close_deps.end(); it++)
           {
@@ -298,7 +436,7 @@ namespace LegionRuntime {
       }
       else if (target->is_close_op())
       {
-        // First check to see if the close ops is one of ours
+        // First check to see if the close op is one of ours
         std::map<std::pair<Operation*,GenerationID>,
                  LegionVector<DependenceRecord>::aligned>::const_iterator
           close_finder = close_dependences.find(target_key);
@@ -363,7 +501,7 @@ namespace LegionRuntime {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    TraceCaptureOp::TraceCaptureOp(Runtime *rt)
+    TraceCaptureOp::TraceCaptureOp(Internal *rt)
       : Operation(rt)
     //--------------------------------------------------------------------------
     {
@@ -451,7 +589,7 @@ namespace LegionRuntime {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    TraceCompleteOp::TraceCompleteOp(Runtime *rt)
+    TraceCompleteOp::TraceCompleteOp(Internal *rt)
       : FenceOp(rt)
     //--------------------------------------------------------------------------
     {

@@ -282,17 +282,17 @@ TYPE_IS_SERIALIZABLE(PODStruct);
 
 typedef Pair<double, float> PODPacked;
 template <typename S>
-bool operator<<(S& s, const PODPacked& p) { return (s << p.x) && (s << p.y); }
+bool serialize(S& s, const PODPacked& p) { return (s << p.x) && (s << p.y); }
 template <typename S>
-bool operator>>(S& s, PODPacked& p) { return (s >> p.x) && (s >> p.y); }
+bool deserialize(S& s, PODPacked& p) { return (s >> p.x) && (s >> p.y); }
 
 typedef Pair<double, char> PODPacked2;
 template <typename S>
-bool operator&(S& s, const PODPacked2& p) { return (s & p.x) && (s & p.y); }
+bool serdez(S& s, const PODPacked2& p) { return (s & p.x) && (s & p.y); }
 
 typedef Pair<PODPacked, int> PP2;
 template <typename S>
-bool operator&(S& s, const PP2& p) { return (s & p.x) && (s & p.y); }
+bool serdez(S& s, const PP2& p) { return (s & p.x) && (s & p.y); }
 
 int main(int argc, const char *argv[])
 {

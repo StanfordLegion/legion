@@ -13,21 +13,23 @@
  * limitations under the License.
  */
 
-#ifndef __LISZT_GPU_MAPPER_H__
-#define __LISZT_GPU_MAPPER_H__
-
-//#include <stdbool.h>
-//#include <stddef.h>
-//#include <stdint.h>
+#ifndef __MANUAL_CAPI_TASK_RESULT_REDUCE_H__
+#define __MANUAL_CAPI_TASK_RESULT_REDUCE_H__
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-void register_liszt_gpu_mapper();
+#include "legion_c.h"
+
+// struct for types
+typedef struct { int    value[1 ]; }    int_1 ;
+
+// register plus on scalars
+void register_reduction_global_plus_int32(legion_reduction_op_id_t redop);
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif // __LISZT_GPU_MAPPER_H__
+#endif // __MANUAL_CAPI_TASK_RESULT_REDUCE_H__

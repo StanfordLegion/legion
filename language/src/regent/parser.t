@@ -16,6 +16,7 @@
 
 local parsing = require("parsing")
 local ast = require("regent/ast")
+local data = require("regent/data")
 local std = require("regent/std")
 
 local parser = {}
@@ -249,24 +250,42 @@ function parser.coherence_kind(p)
   end
 end
 
-function parser.privilege_and_coherence_kinds(p)
+function parser.is_flag_kind(p)
+  return p:matches("no_access_flag")
+end
+
+function parser.flag_kind(p)
+  local start = ast.save(p)
+  if p:nextif("no_access_flag") then
+    return ast.unspecialized.flag_kind.NoAccessFlag {
+      span = ast.span(start, p),
+    }
+  else
+    p:error("expected flag")
+  end
+end
+
+function parser.privilege_coherence_flag_kinds(p)
   local privileges = terralib.newlist()
   local coherence_modes = terralib.newlist()
+  local flags = terralib.newlist()
   while not p:matches("(") do
     if p:is_privilege_kind() then
       privileges:insert(p:privilege_kind())
     elseif p:is_coherence_kind() then
       coherence_modes:insert(p:coherence_kind())
+    elseif p:is_flag_kind() then
+      flags:insert(p:flag_kind())
     else
       p:error("expected privilege or coherence mode")
     end
   end
-  return privileges, coherence_modes
+  return privileges, coherence_modes, flags
 end
 
-function parser.privilege_and_coherence(p)
+function parser.privilege_coherence_flags(p)
   local start = ast.save(p)
-  local privileges, coherence_modes = p:privilege_and_coherence_kinds()
+  local privileges, coherence_modes, flags = p:privilege_coherence_flag_kinds()
   p:expect("(")
   local regions = p:regions()
   p:expect(")")
@@ -281,7 +300,12 @@ function parser.privilege_and_coherence(p)
     regions = regions,
     span = ast.span(start, p),
   }
-  return privilege, coherence
+  local flag = ast.unspecialized.Flag {
+    flags = flags,
+    regions = regions,
+    span = ast.span(start, p),
+  }
+  return privilege, coherence, flag
 end
 
 function parser.is_condition_kind(p)
@@ -335,6 +359,7 @@ function parser.expr_condition(p)
   return ast.unspecialized.expr.Condition {
     conditions = conditions,
     values = values,
+    options = ast.default_options(),
     span = ast.span(start, p),
   }
 end
@@ -365,6 +390,25 @@ function parser.constraint(p)
     rhs = rhs,
     span = ast.span(start, p),
   }
+end
+
+function parser.is_disjointness_kind(p)
+  return p:matches("aliased") or p:matches("disjoint")
+end
+
+function parser.disjointness_kind(p)
+  local start = ast.save(p)
+  if p:nextif("aliased") then
+    return ast.unspecialized.disjointness_kind.Aliased {
+      span = ast.span(start, p),
+    }
+  elseif p:nextif("disjoint") then
+    return ast.unspecialized.disjointness_kind.Disjoint {
+      span = ast.span(start, p),
+    }
+  else
+    p:error("expected disjointness")
+  end
 end
 
 function parser.expr_prefix(p)
@@ -479,9 +523,14 @@ function parser.expr_prefix(p)
   elseif p:nextif("new") then
     p:expect("(")
     local pointer_type_expr = p:luaexpr()
+    local extent = false
+    if p:nextif(",") then
+      extent = p:expr()
+    end
     p:expect(")")
     return ast.unspecialized.expr.New {
       pointer_type_expr = pointer_type_expr,
+      extent = extent,
       options = ast.default_options(),
       span = ast.span(start, p),
     }
@@ -556,29 +605,148 @@ function parser.expr_prefix(p)
 
   elseif p:nextif("partition") then
     p:expect("(")
-    local disjointness_expr = p:luaexpr()
+    if p:is_disjointness_kind() then
+      local disjointness = p:disjointness_kind()
+      p:expect(",")
+      local region = p:expr()
+      p:expect(",")
+      local coloring = p:expr()
+      p:expect(")")
+      return ast.unspecialized.expr.Partition {
+        disjointness = disjointness,
+        region = region,
+        coloring = coloring,
+        options = ast.default_options(),
+        span = ast.span(start, p),
+      }
+    elseif p:nextif("equal") then
+      p:expect(",")
+      local region = p:expr()
+      p:expect(",")
+      local colors = p:expr()
+      p:expect(")")
+      return ast.unspecialized.expr.PartitionEqual {
+        region = region,
+        colors = colors,
+        options = ast.default_options(),
+        span = ast.span(start, p),
+      }
+    else
+      local region = p:expr_region_root()
+      p:expect(",")
+      local colors = p:expr()
+      p:expect(")")
+      return ast.unspecialized.expr.PartitionByField {
+        region = region,
+        colors = colors,
+        options = ast.default_options(),
+        span = ast.span(start, p),
+      }
+    end
+
+  elseif p:nextif("image") then
+    p:expect("(")
+    local parent = p:expr()
     p:expect(",")
-    local region_type_expr = p:luaexpr()
+    local partition = p:expr()
     p:expect(",")
-    local coloring = p:expr()
+    local region = p:expr_region_root()
     p:expect(")")
-    return ast.unspecialized.expr.Partition {
-      disjointness_expr = disjointness_expr,
-      region_type_expr = region_type_expr,
-      coloring = coloring,
+    return ast.unspecialized.expr.Image {
+      parent = parent,
+      partition = partition,
+      region = region,
+      options = ast.default_options(),
+      span = ast.span(start, p),
+    }
+
+  elseif p:nextif("preimage") then
+    p:expect("(")
+    local parent = p:expr()
+    p:expect(",")
+    local partition = p:expr()
+    p:expect(",")
+    local region = p:expr_region_root()
+    p:expect(")")
+    return ast.unspecialized.expr.Preimage {
+      parent = parent,
+      partition = partition,
+      region = region,
       options = ast.default_options(),
       span = ast.span(start, p),
     }
 
   elseif p:nextif("cross_product") then
     p:expect("(")
-    local arg_type_exprs = terralib.newlist()
-    repeat
-      arg_type_exprs:insert(p:luaexpr())
-    until not p:nextif(",")
+    local args = p:expr_list()
     p:expect(")")
     return ast.unspecialized.expr.CrossProduct {
-      arg_type_exprs = arg_type_exprs,
+      args = args,
+      options = ast.default_options(),
+      span = ast.span(start, p),
+    }
+
+  elseif p:nextif("list_duplicate_partition") then
+    p:expect("(")
+    local partition = p:expr()
+    p:expect(",")
+    local indices = p:expr()
+    p:expect(")")
+    return ast.unspecialized.expr.ListDuplicatePartition {
+      partition = partition,
+      indices = indices,
+      options = ast.default_options(),
+      span = ast.span(start, p),
+    }
+
+  elseif p:nextif("list_cross_product") then
+    p:expect("(")
+    local lhs = p:expr()
+    p:expect(",")
+    local rhs = p:expr()
+    p:expect(")")
+    return ast.unspecialized.expr.ListCrossProduct {
+      lhs = lhs,
+      rhs = rhs,
+      options = ast.default_options(),
+      span = ast.span(start, p),
+    }
+
+  elseif p:nextif("list_phase_barriers") then
+    p:expect("(")
+    local product = p:expr()
+    p:expect(")")
+    return ast.unspecialized.expr.ListPhaseBarriers {
+      product = product,
+      options = ast.default_options(),
+      span = ast.span(start, p),
+    }
+
+  elseif p:nextif("list_invert") then
+    p:expect("(")
+    local rhs = p:expr()
+    p:expect(",")
+    local product = p:expr()
+    p:expect(",")
+    local barriers = p:expr()
+    p:expect(")")
+    return ast.unspecialized.expr.ListInvert {
+      rhs = rhs,
+      product = product,
+      barriers = barriers,
+      options = ast.default_options(),
+      span = ast.span(start, p),
+    }
+
+  elseif p:nextif("list_range") then
+    p:expect("(")
+    local range_start = p:expr()
+    p:expect(",")
+    local range_stop = p:expr()
+    p:expect(")")
+    return ast.unspecialized.expr.ListRange {
+      start = range_start,
+      stop = range_stop,
       options = ast.default_options(),
       span = ast.span(start, p),
     }
@@ -625,6 +793,49 @@ function parser.expr_prefix(p)
       dst = dst,
       op = op,
       conditions = conditions,
+      options = ast.default_options(),
+      span = ast.span(start, p),
+    }
+
+  elseif p:nextif("fill") then
+    p:expect("(")
+    local dst = p:expr_region_root()
+    p:expect(",")
+    local value = p:expr()
+    local conditions = terralib.newlist()
+    if p:nextif(",") then
+      repeat
+        conditions:insert(p:expr_condition())
+      until not p:nextif(",")
+    end
+    p:expect(")")
+    return ast.unspecialized.expr.Fill {
+      dst = dst,
+      value = value,
+      conditions = conditions,
+      options = ast.default_options(),
+      span = ast.span(start, p),
+    }
+
+  elseif p:nextif("allocate_scratch_fields") then
+    p:expect("(")
+    local region = p:expr_region_root()
+    p:expect(")")
+    return ast.unspecialized.expr.AllocateScratchFields {
+      region = region,
+      options = ast.default_options(),
+      span = ast.span(start, p),
+    }
+
+  elseif p:nextif("with_scratch_fields") then
+    p:expect("(")
+    local region = p:expr_region_root()
+    p:expect(",")
+    local field_ids = p:expr()
+    p:expect(")")
+    return ast.unspecialized.expr.WithScratchFields {
+      region = region,
+      field_ids = field_ids,
       options = ast.default_options(),
       span = ast.span(start, p),
     }
@@ -879,6 +1090,8 @@ parser.expr = parsing.Pratt()
   :infix(">=", 20, parser.expr_binary_left)
   :infix("==", 20, parser.expr_binary_left)
   :infix("~=", 20, parser.expr_binary_left)
+  :infix("&", 15, parser.expr_binary_left)
+  :infix("|", 12, parser.expr_binary_left)
   :infix("and", 10, parser.expr_binary_left)
   :infix("or", 10, parser.expr_binary_left)
   :prefix(parsing.default, parser.expr_simple)
@@ -1248,6 +1461,14 @@ function parser.stat(p)
   end
 end
 
+function parser.stat_task_name(p)
+  local name = terralib.newlist()
+  repeat
+    name:insert(p:expect(p.name).value)
+  until not p:nextif(".")
+  return data.newtuple(unpack(name))
+end
+
 function parser.stat_task_params(p)
   p:expect("(")
   local params = terralib.newlist()
@@ -1279,14 +1500,16 @@ end
 function parser.stat_task_effects(p)
   local privileges = terralib.newlist()
   local coherence_modes = terralib.newlist()
+  local flags = terralib.newlist()
   local conditions = terralib.newlist()
   local constraints = terralib.newlist()
   if p:nextif("where") then
     repeat
-      if p:is_privilege_kind() or p:is_coherence_kind() then
-        local privilege, coherence = p:privilege_and_coherence()
+      if p:is_privilege_kind() or p:is_coherence_kind() or p:is_flag_kind() then
+        local privilege, coherence, flag = p:privilege_coherence_flags()
         privileges:insert(privilege)
         coherence_modes:insert(coherence)
+        flags:insert(flag)
       elseif p:is_condition_kind() then
         conditions:insert(p:condition())
       else
@@ -1295,16 +1518,16 @@ function parser.stat_task_effects(p)
     until not p:nextif(",")
     p:expect("do")
   end
-  return privileges, coherence_modes, conditions, constraints
+  return privileges, coherence_modes, flags, conditions, constraints
 end
 
 function parser.stat_task(p, options)
   local start = ast.save(p)
   p:expect("task")
-  local name = p:expect(p.name).value
+  local name = p:stat_task_name()
   local params = p:stat_task_params()
   local return_type = p:stat_task_return()
-  local privileges, coherence_modes, conditions, constraints =
+  local privileges, coherence_modes, flags, conditions, constraints =
     p:stat_task_effects()
   local body = p:block()
   p:expect("end")
@@ -1315,6 +1538,7 @@ function parser.stat_task(p, options)
     return_type_expr = return_type,
     privileges = privileges,
     coherence_modes = coherence_modes,
+    flags = flags,
     conditions = conditions,
     constraints = constraints,
     body = body,

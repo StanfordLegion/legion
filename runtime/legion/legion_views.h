@@ -42,12 +42,9 @@ namespace LegionRuntime {
       static void delete_logical_view(LogicalView *view);
     public:
       virtual void send_remote_registration(void);
-      virtual void send_remote_valid_update(AddressSpaceID target, 
-                                            unsigned count, bool add);
-      virtual void send_remote_gc_update(AddressSpaceID target,
-                                         unsigned count, bool add);
-      virtual void send_remote_resource_update(AddressSpaceID target,
-                                               unsigned count, bool add);
+      static void handle_view_remote_registration(RegionTreeForest *forest,
+                                                  Deserializer &derez,
+                                                  AddressSpaceID source);
     public:
       virtual bool is_instance_view(void) const = 0;
       virtual bool is_deferred_view(void) const = 0;
@@ -59,16 +56,6 @@ namespace LegionRuntime {
       virtual LogicalView* get_parent(void) const = 0;
       virtual LogicalView* get_subview(const ColorPoint &c) = 0;
       virtual bool has_space(const FieldMask &space_mask) const = 0;
-    public:
-      static void handle_view_remote_registration(RegionTreeForest *forest,
-                                                  Deserializer &derez,
-                                                  AddressSpaceID source);
-      static void handle_view_remote_valid_update(RegionTreeForest *forest,
-                                                  Deserializer &derez);
-      static void handle_view_remote_gc_update(RegionTreeForest *forest,
-                                               Deserializer &derez);
-      static void handle_view_remote_resource_update(RegionTreeForest *forest,
-                                                     Deserializer &derez);
     public:
       virtual void notify_active(void) = 0;
       virtual void notify_inactive(void) = 0;
@@ -191,7 +178,7 @@ namespace LegionRuntime {
       template<bool MAKE>
       struct PersistenceFunctor {
       public:
-        PersistenceFunctor(AddressSpaceID s, Runtime *rt, 
+        PersistenceFunctor(AddressSpaceID s, Internal *rt, 
                            SingleTask *p, LogicalRegion h,
                            LogicalRegion u,
                            DistributedID id, unsigned pidx, 
@@ -202,7 +189,7 @@ namespace LegionRuntime {
         void apply(AddressSpaceID target);
       protected:
         AddressSpaceID source;
-        Runtime *runtime;
+        Internal *runtime;
         SingleTask *parent;
         LogicalRegion handle;
         LogicalRegion upper;
@@ -383,13 +370,13 @@ namespace LegionRuntime {
       static void handle_send_back_atomic(RegionTreeForest *ctx,
                                           Deserializer &derez);
     public:
-      static void handle_send_materialized_view(Runtime *runtime,
+      static void handle_send_materialized_view(Internal *runtime,
                               Deserializer &derez, AddressSpaceID source);
-      static void handle_send_update(Runtime *runtime, Deserializer &derez,
+      static void handle_send_update(Internal *runtime, Deserializer &derez,
                                      AddressSpaceID source);
-      static void handle_make_persistent(Runtime *runtime, Deserializer &derez,
+      static void handle_make_persistent(Internal *runtime, Deserializer &derez,
                                          AddressSpaceID source);
-      static void handle_unmake_persistent(Runtime *runtime, 
+      static void handle_unmake_persistent(Internal *runtime, 
                                    Deserializer &derez, AddressSpaceID source);
     public:
       InstanceManager *const manager;
@@ -540,9 +527,9 @@ namespace LegionRuntime {
                              Event term_event, const FieldMask &user_mask);
       void filter_local_users(Event term_event);
     public:
-      static void handle_send_reduction_view(Runtime *runtime,
+      static void handle_send_reduction_view(Internal *runtime,
                               Deserializer &derez, AddressSpaceID source);
-      static void handle_send_update(Runtime *runtime,
+      static void handle_send_update(Internal *runtime,
                               Deserializer &derez, AddressSpaceID source);
     public:
       ReductionOpID get_redop(void) const;
@@ -693,7 +680,7 @@ namespace LegionRuntime {
       void process_deferred_view_update(Deserializer &derez, 
                                         AddressSpaceID source);
     public:
-      static void handle_deferred_update(Runtime *rt, Deserializer &derez,
+      static void handle_deferred_update(Internal *rt, Deserializer &derez,
                                          AddressSpaceID source);
     protected:
       // Track the set of reduction views which need to be applied here
@@ -794,7 +781,7 @@ namespace LegionRuntime {
                                                 Event precondition,
                                          std::set<Event> &postconditions);
     public:
-      static void handle_send_composite_view(Runtime *runtime, 
+      static void handle_send_composite_view(Internal *runtime, 
                               Deserializer &derez, AddressSpaceID source);
     public:
       CompositeView *const parent;
@@ -1030,7 +1017,7 @@ namespace LegionRuntime {
                              std::vector<LowLevel::IndexSpace> &already_handled,
                                        std::set<Event> &already_preconditions);
     public:
-      static void handle_send_fill_view(Runtime *runtime, Deserializer &derez,
+      static void handle_send_fill_view(Internal *runtime, Deserializer &derez,
                                         AddressSpaceID source);
     public:
       FillView *const parent;

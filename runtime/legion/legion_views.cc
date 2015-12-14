@@ -39,7 +39,7 @@ namespace LegionRuntime {
                              AddressSpaceID own_addr, AddressSpace loc_space,
                              RegionTreeNode *node, bool register_now)
       : DistributedCollectable(ctx->runtime, did, own_addr, 
-                               loc_space, false/*register with runtime*/), 
+                               loc_space, register_now), 
         context(ctx), logical_node(node), 
         view_lock(Reservation::create_reservation()) 
     //--------------------------------------------------------------------------
@@ -108,69 +108,6 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void LogicalView::send_remote_valid_update(AddressSpaceID target,
-                                               unsigned count, bool add)
-    //--------------------------------------------------------------------------
-    {
-      Serializer rez;
-      {
-        RezCheck z(rez);
-        rez.serialize(did);
-        rez.serialize(count);
-        rez.serialize(add);
-        const bool is_region = logical_node->is_region();
-        rez.serialize<bool>(is_region);
-        if (is_region)
-          rez.serialize(logical_node->as_region_node()->handle);
-        else
-          rez.serialize(logical_node->as_partition_node()->handle);
-      }
-      runtime->send_view_remote_valid_update(target, rez);
-    }
-
-    //--------------------------------------------------------------------------
-    void LogicalView::send_remote_gc_update(AddressSpaceID target,
-                                            unsigned count, bool add)
-    //--------------------------------------------------------------------------
-    {
-      Serializer rez;
-      {
-        RezCheck z(rez);
-        rez.serialize(did);
-        rez.serialize(count);
-        rez.serialize(add);
-        const bool is_region = logical_node->is_region();
-        rez.serialize<bool>(is_region);
-        if (is_region)
-          rez.serialize(logical_node->as_region_node()->handle);
-        else
-          rez.serialize(logical_node->as_partition_node()->handle);
-      }
-      runtime->send_view_remote_gc_update(target, rez);
-    }
-
-    //--------------------------------------------------------------------------
-    void LogicalView::send_remote_resource_update(AddressSpaceID target,
-                                                  unsigned count, bool add)
-    //--------------------------------------------------------------------------
-    {
-      Serializer rez;
-      {
-        RezCheck z(rez);
-        rez.serialize(did);
-        rez.serialize(count);
-        rez.serialize(add);
-        const bool is_region = logical_node->is_region();
-        rez.serialize<bool>(is_region);
-        if (is_region)
-          rez.serialize(logical_node->as_region_node()->handle);
-        else
-          rez.serialize(logical_node->as_partition_node()->handle);
-      }
-      runtime->send_view_remote_resource_update(target, rez);
-    }
-
-    //--------------------------------------------------------------------------
     /*static*/ void LogicalView::handle_view_remote_registration(
            RegionTreeForest *forest, Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
@@ -195,114 +132,6 @@ namespace LegionRuntime {
         derez.deserialize(handle);
         forest->get_node(handle)->find_view(did)->register_remote_instance(
                                                       source, destroy_event);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void LogicalView::handle_view_remote_valid_update(
-                                  RegionTreeForest *forest, Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      DistributedID did;
-      derez.deserialize(did);
-      unsigned count;
-      derez.deserialize(count);
-      bool add;
-      derez.deserialize(add);
-      bool is_region;
-      derez.deserialize(is_region);
-      if (is_region)
-      {
-        LogicalRegion handle;
-        derez.deserialize(handle);
-        LogicalView *target = forest->get_node(handle)->find_view(did);
-        if (add)
-          target->add_base_valid_ref(REMOTE_DID_REF, count);
-        else if (target->remove_base_valid_ref(REMOTE_DID_REF, count))
-          delete target;
-      }
-      else
-      {
-        LogicalPartition handle;
-        derez.deserialize(handle);
-        LogicalView *target = forest->get_node(handle)->find_view(did);
-        if (add)
-          target->add_base_valid_ref(REMOTE_DID_REF, count);
-        else if (target->remove_base_valid_ref(REMOTE_DID_REF, count))
-          delete target;
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void LogicalView::handle_view_remote_gc_update(
-                                  RegionTreeForest *forest, Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      DistributedID did;
-      derez.deserialize(did);
-      unsigned count;
-      derez.deserialize(count);
-      bool add;
-      derez.deserialize(add);
-      bool is_region;
-      derez.deserialize(is_region);
-      if (is_region)
-      {
-        LogicalRegion handle;
-        derez.deserialize(handle);
-        LogicalView *target = forest->get_node(handle)->find_view(did);
-        if (add)
-          target->add_base_gc_ref(REMOTE_DID_REF, count);
-        else if (target->remove_base_gc_ref(REMOTE_DID_REF, count))
-          delete target;
-      }
-      else
-      {
-        LogicalPartition handle;
-        derez.deserialize(handle);
-        LogicalView *target = forest->get_node(handle)->find_view(did);
-        if (add)
-          target->add_base_gc_ref(REMOTE_DID_REF, count);
-        else if (target->remove_base_gc_ref(REMOTE_DID_REF, count))
-          delete target;
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void LogicalView::handle_view_remote_resource_update(
-                                  RegionTreeForest *forest, Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      DistributedID did;
-      derez.deserialize(did);
-      unsigned count;
-      derez.deserialize(count);
-      bool add;
-      derez.deserialize(add);
-      bool is_region;
-      derez.deserialize(is_region);
-      if (is_region)
-      {
-        LogicalRegion handle;
-        derez.deserialize(handle);
-        LogicalView *target = forest->get_node(handle)->find_view(did);
-        if (add)
-          target->add_base_resource_ref(REMOTE_DID_REF, count);
-        else if (target->remove_base_resource_ref(REMOTE_DID_REF, count))
-          delete target;
-      }
-      else
-      {
-        LogicalPartition handle;
-        derez.deserialize(handle);
-        LogicalView *target = forest->get_node(handle)->find_view(did);
-        if (add)
-          target->add_base_resource_ref(REMOTE_DID_REF, count);
-        else if (target->remove_base_resource_ref(REMOTE_DID_REF, count))
-          delete target;
       }
     }
 
@@ -464,9 +293,6 @@ namespace LegionRuntime {
         {
           UpdateReferenceFunctor<RESOURCE_REF_KIND,false/*add*/> functor(this);
           map_over_remote_instances(functor);
-          // If we are the top the tree on the owner node we can recycle 
-          // the distributed ID once our destruction event triggers
-          runtime->recycle_distributed_id(did, destruction_event);
         }
       }
       if (!atomic_reservations.empty())
@@ -1083,7 +909,7 @@ namespace LegionRuntime {
     } 
 
     //--------------------------------------------------------------------------
-    DistributedID MaterializedView::send_view_base(AddressSpaceID target)
+    DistributedID MaterializedView::send_view_base(AddressSpaceID target) 
     //--------------------------------------------------------------------------
     {
       // See if we already have it
@@ -2856,7 +2682,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     /*static*/ void MaterializedView::handle_send_materialized_view(
-                   Runtime *runtime, Deserializer &derez, AddressSpaceID source)
+                  Internal *runtime, Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez); 
@@ -2892,11 +2718,14 @@ namespace LegionRuntime {
           legion_delete(new_view);
       }
       else
+      {
+        new_view->register_with_runtime();
         new_view->update_remote_instances(source);
+      }
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void MaterializedView::handle_send_update(Runtime *runtime,
+    /*static*/ void MaterializedView::handle_send_update(Internal *runtime,
                                      Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -2929,7 +2758,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void MaterializedView::handle_make_persistent(Runtime *runtime,
+    /*static*/ void MaterializedView::handle_make_persistent(Internal *runtime,
                                      Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -2965,8 +2794,8 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void MaterializedView::handle_unmake_persistent(Runtime *runtime,
-                                     Deserializer &derez, AddressSpaceID source)
+    /*static*/ void MaterializedView::handle_unmake_persistent(
+                  Internal *runtime, Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
@@ -3403,7 +3232,7 @@ namespace LegionRuntime {
             assert((*it)->logical_node->is_region());
 #endif
             rez.serialize((*it)->logical_node->as_region_node()->handle);
-            DistributedID red_did = (*it)->send_view(target, update_mask);
+            DistributedID red_did = (*it)->send_view(target, update_mask); 
             rez.serialize(red_did);
           }
         }
@@ -3458,7 +3287,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void DeferredView::handle_deferred_update(Runtime *runtime,
+    /*static*/ void DeferredView::handle_deferred_update(Internal *runtime,
                                      Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -3545,9 +3374,6 @@ namespace LegionRuntime {
       {
         UpdateReferenceFunctor<RESOURCE_REF_KIND,false/*add*/> functor(this);
         map_over_remote_instances(functor);
-        // If we are the top the tree on the owner node we can recycle 
-        // the distributed ID once our destruction event triggers
-        runtime->recycle_distributed_id(did, destruction_event);
       }
       // Remove any references we have to our roots
       for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it = 
@@ -3698,7 +3524,7 @@ namespace LegionRuntime {
               // local space parameters.
               VersionInfo &info = it->first->version_info->get_version_info();
               info.pack_version_info(rez, 0, 0);
-              it->first->pack_composite_tree(rez, target);
+              it->first->pack_composite_tree(rez, target); 
               rez.serialize(it->second);
             }
           }
@@ -3759,7 +3585,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void CompositeView::handle_send_composite_view(Runtime *runtime,
+    /*static*/ void CompositeView::handle_send_composite_view(Internal *runtime,
                                      Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -3797,7 +3623,10 @@ namespace LegionRuntime {
           legion_delete(new_view);
       }
       else
+      {
+        new_view->register_with_runtime();
         new_view->update_remote_instances(source);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -5217,7 +5046,7 @@ namespace LegionRuntime {
       {
         // Only need to send the structure for now, we'll check for
         // updates when we unpack and request anything we need later
-        DistributedID did = it->first->send_view_base(target);
+        DistributedID did = it->first->send_view_base(target); 
         rez.serialize(did);
         rez.serialize(it->second);
       }
@@ -5364,9 +5193,6 @@ namespace LegionRuntime {
       {
         UpdateReferenceFunctor<RESOURCE_REF_KIND,false/*add*/> functor(this);
         map_over_remote_instances(functor);
-        // If we are the top the tree on the owner node we can recycle 
-        // the distributed ID once our destruction event triggers
-        runtime->recycle_distributed_id(did, destruction_event);
       }
     }
 
@@ -5462,7 +5288,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void FillView::handle_send_fill_view(Runtime *runtime,
+    /*static*/ void FillView::handle_send_fill_view(Internal *runtime,
                                      Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -5491,7 +5317,10 @@ namespace LegionRuntime {
           legion_delete(new_view);
       }
       else
+      {
+        new_view->register_with_runtime();
         new_view->update_remote_instances(source);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -5905,8 +5734,6 @@ namespace LegionRuntime {
         // If we're the owner, remove our valid references on remote nodes
         UpdateReferenceFunctor<RESOURCE_REF_KIND,false/*add*/> functor(this);
         map_over_remote_instances(functor);
-        // If we are the owner node, then we can recycle the distributed ID
-        runtime->recycle_distributed_id(did, destruction_event);
       }
       if (manager->remove_nested_resource_ref(did))
       {
@@ -6812,7 +6639,6 @@ namespace LegionRuntime {
     {
       if (!has_remote_instance(target))
       {
-        // If we are the parent we have to do the send
         // Send the physical manager first
         DistributedID manager_did = manager->send_manager(target);
 #ifdef DEBUG_HIGH_LEVEL
@@ -7027,7 +6853,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void ReductionView::handle_send_reduction_view(Runtime *runtime,
+    /*static*/ void ReductionView::handle_send_reduction_view(Internal *runtime,
                                      Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -7053,13 +6879,19 @@ namespace LegionRuntime {
                                    target_node, red_manager,
                                    false/*don't register yet*/);
       if (!target_node->register_logical_view(new_view))
-        legion_delete(new_view);
+      {
+        if (new_view->remove_base_resource_ref(REMOTE_DID_REF))
+          legion_delete(new_view);
+      }
       else
+      {
+        new_view->register_with_runtime();
         new_view->update_remote_instances(source);
+      }
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void ReductionView::handle_send_update(Runtime *runtime,
+    /*static*/ void ReductionView::handle_send_update(Internal *runtime,
                                      Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
