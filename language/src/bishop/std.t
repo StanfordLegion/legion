@@ -23,6 +23,7 @@ local c = terralib.includecstring [[
 ]]
 
 local std = {}
+std.c = c
 
 terra std.assert(x : bool, message : rawstring)
   if not x then

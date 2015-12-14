@@ -130,9 +130,19 @@ function specialize.expr(node)
   elseif node:is(ast.unspecialized.expr.Filter) then
     local value = specialize.expr(node.value)
     local constraints = node.constraints:map(function(constraint)
+      local field = constraint.field
+      local value
+      if constraint:is(ast.unspecialized.Constraint) then
+        value = constraint.value
+      else assert(constraint:is(ast.unspecialized.PatternMatch)) 
+        value = ast.unspecialized.expr.Variable {
+          value = constraint.binder,
+          position = constraint.position,
+        }
+      end
       return ast.specialized.FilterConstraint {
-        field = constraint.field,
-        value = specialize.expr(constraint.value),
+        field = field,
+        value = specialize.expr(value),
         position = constraint.position,
       }
     end)
@@ -189,16 +199,16 @@ function specialize.property(node, type)
   local field = node.field
   local value = specialize.expr(node.value)
 
+  if not (property_checks[field] and
+    property_checks[field].type(type)) then
+    log.error(node, "unexpected property '" .. field ..
+    "' for " .. type .. " rule")
+  end
   if value:is(ast.specialized.expr.Keyword) then
-    if not (property_checks[field] and
-      property_checks[field].type(type)) then
-      log.error(node, "unexpected property " .. field ..
-      " for element type " .. type)
-    end
     local keyword = value.value
     if not property_checks[field].condition(keyword) then
-      log.error(node, "unexpected keyword \"" .. keyword ..
-      "\" for property " .. field)
+      log.error(node, "unexpected keyword '" .. keyword ..
+      "' for property '" .. field .. "'")
     end
   end
 
@@ -291,17 +301,17 @@ function specialize.selector(node)
     type = "task"
     if #elements > 1 then
       log.error(node,
-        "task selectors with multiple elements are not supported yet.")
+        "task selectors with multiple elements are not supported yet")
     end
   else assert(elements[1]:is(ast.specialized.element.Region))
     type = "region"
     if not elements[2]:is(ast.specialized.element.Task) then
       log.error(elements[2],
-        "region element should be preceded by task element in selectors.")
+        "region element should be preceded by task element in selectors")
     end
     if #elements > 2 then
       log.error(node,
-        "region selectors with multiple task elements are not supported yet.")
+        "region selectors with multiple task elements are not supported yet")
     end
   end
 
