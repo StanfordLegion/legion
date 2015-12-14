@@ -268,6 +268,140 @@ namespace LegionRuntime {
       return can_delete();
     }
 
+#ifdef USE_REMOTE_REFERENCES
+    //--------------------------------------------------------------------------
+    bool DistributedCollectable::add_create_reference(AddressSpaceID source,
+                                      AddressSpaceID target, ReferenceKind kind)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(is_owner());
+      assert(source != owner_space);
+      assert(current_state != DELETED_STATE);
+      assert((kind == GC_REF_KIND) || (kind == VALID_REF_KIND));
+#endif
+      bool need_activate = false;
+      bool need_validate = false;
+      bool need_invalidate = false;
+      bool need_deactivate = false;
+      bool do_deletion = false;
+      bool done = false;
+      bool first = true;
+      while (!done)
+      {
+        if (need_activate)
+          notify_active();
+        if (need_validate)
+          notify_valid();
+        if (need_invalidate)
+          notify_invalid();
+        if (need_deactivate)
+          notify_inactive();
+        AutoLock gc(gc_lock);
+        if (first)
+        {
+          std::pair<AddressSpaceID,AddressSpaceID> key(source, target);
+          if (kind == VALID_REF_KIND)
+          {
+            std::map<std::pair<AddressSpaceID,AddressSpaceID>,int>::iterator 
+              finder = create_valid_refs.find(key);
+            if (finder != create_valid_refs.end())
+            {
+              finder->second += 1;
+              if (finder->second == 0)
+                create_valid_refs.erase(finder);
+            }
+            else
+              create_valid_refs[key] = 1;
+          }
+          else
+          {
+            std::map<std::pair<AddressSpaceID,AddressSpaceID>,int>::iterator 
+              finder = create_gc_refs.find(key);
+            if (finder != create_gc_refs.end())
+            {
+              finder->second += 1;
+              if (finder->second == 0)
+                create_gc_refs.erase(finder);
+            }
+            else
+              create_gc_refs[key] = 1;
+          }
+          first = false;
+        }
+        done = update_state(need_activate, need_validate,
+                            need_invalidate, need_deactivate, do_deletion);
+      }
+      return do_deletion;
+    }
+
+    //--------------------------------------------------------------------------
+    bool DistributedCollectable::remove_create_reference(AddressSpaceID source,
+                                      AddressSpaceID target, ReferenceKind kind)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(is_owner());
+      assert(source != owner_space);
+      assert(current_state != DELETED_STATE);
+      assert((kind == GC_REF_KIND) || (kind == VALID_REF_KIND));
+#endif
+      bool need_activate = false;
+      bool need_validate = false;
+      bool need_invalidate = false;
+      bool need_deactivate = false;
+      bool do_deletion = false;
+      bool done = false;
+      bool first = true;
+      while (!done)
+      {
+        if (need_activate)
+          notify_active();
+        if (need_validate)
+          notify_valid();
+        if (need_invalidate)
+          notify_invalid();
+        if (need_deactivate)
+          notify_inactive();
+        AutoLock gc(gc_lock);
+        if (first)
+        {
+          std::pair<AddressSpaceID,AddressSpaceID> key(source, target);
+          if (kind == VALID_REF_KIND)
+          {
+            std::map<std::pair<AddressSpaceID,AddressSpaceID>,int>::iterator 
+              finder = create_valid_refs.find(key);
+            if (finder != create_valid_refs.end())
+            {
+              finder->second -= 1;
+              if (finder->second == 0)
+                create_valid_refs.erase(finder);
+            }
+            else
+              create_valid_refs[key] = -1;
+          }
+          else
+          {
+            std::map<std::pair<AddressSpaceID,AddressSpaceID>,int>::iterator 
+              finder = create_gc_refs.find(key);
+            if (finder != create_gc_refs.end())
+            {
+              finder->second -= 1;
+              if (finder->second == 0)
+                create_gc_refs.erase(finder);
+            }
+            else
+              create_gc_refs[key] = -1;
+          }
+          first = false;
+        }
+        done = update_state(need_activate, need_validate,
+                            need_invalidate, need_deactivate, do_deletion);
+      }
+      return do_deletion;
+    }
+#endif // USE_REMOTE_REFERENCES
+
     //--------------------------------------------------------------------------
     bool DistributedCollectable::has_remote_instance(
                                                AddressSpaceID remote_inst) const
@@ -339,12 +473,14 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(registered_with_runtime);
 #endif
+      int signed_count = count;
+      if (!add)
+        signed_count = -signed_count;
       Serializer rez;
       {
         RezCheck z(rez);
         rez.serialize(did);
-        rez.serialize(count);
-        rez.serialize(add);
+        rez.serialize(signed_count);
       }
       runtime->send_did_remote_valid_update(target, rez);
     }
@@ -357,12 +493,14 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(registered_with_runtime);
 #endif
+      int signed_count = count;
+      if (!add)
+        signed_count = -signed_count;
       Serializer rez;
       {
         RezCheck z(rez);
         rez.serialize(did);
-        rez.serialize(count);
-        rez.serialize(add);
+        rez.serialize(signed_count);
       }
       runtime->send_did_remote_gc_update(target, rez);
     }
@@ -375,15 +513,83 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(registered_with_runtime);
 #endif
+      int signed_count = count;
+      if (!add)
+        signed_count = -signed_count;
       Serializer rez;
       {
         RezCheck z(rez);
         rez.serialize(did);
-        rez.serialize(count);
-        rez.serialize(add);
+        rez.serialize(signed_count);
       }
       runtime->send_did_remote_resource_update(target, rez);
     }
+
+#ifdef USE_REMOTE_REFERENCES
+    //--------------------------------------------------------------------------
+    ReferenceKind DistributedCollectable::send_create_reference(
+                                                          AddressSpaceID target)
+    //--------------------------------------------------------------------------
+    {
+      // If the target is the owner then no need to do anything
+      if (target == owner_space)
+        return GC_REF_KIND;
+      // Sample our current state, it's up to the caller to make sure
+      // this is a good state for this object
+      State copy = current_state;
+      // We better be holding a gc reference or a valid reference when
+      // we are doing this operation
+#ifdef DEBUG_HIGH_LEVEL
+      assert((copy == ACTIVE_INVALID_STATE) || (copy == VALID_STATE) ||
+             (copy == PENDING_VALID_STATE) || (copy == PENDING_INVALID_STATE));
+#endif
+      ReferenceKind result; 
+      if (copy == VALID_STATE)
+        result = VALID_REF_KIND;
+      else
+        result = GC_REF_KIND;
+      if (is_owner())
+      {
+        if (result == VALID_REF_KIND)
+          add_base_valid_ref(REMOTE_CREATE_REF);
+        else
+          add_base_gc_ref(REMOTE_CREATE_REF);
+      }
+      else
+      {
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize(local_space);
+          rez.serialize(target);
+          rez.serialize(result);
+        }
+        runtime->send_did_add_create_reference(owner_space, rez);
+      }
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    void DistributedCollectable::post_create_reference(ReferenceKind kind,
+                                              AddressSpaceID target, bool flush)
+    //--------------------------------------------------------------------------
+    {
+      // No need to do anything if we are sending stuff to the owner
+      if (target == owner_space)
+        return;
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(did);
+        rez.serialize(local_space);
+        rez.serialize(target);
+        rez.serialize(owner_space);
+        rez.serialize(kind);
+      }
+      runtime->send_did_remove_create_reference(target, rez, flush);
+    }
+#endif // USE_REMOTE_REFERENCES
 
     //--------------------------------------------------------------------------
     /*static*/ void DistributedCollectable::handle_did_remote_registration(
@@ -408,15 +614,13 @@ namespace LegionRuntime {
       DerezCheck z(derez);
       DistributedID did;
       derez.deserialize(did);
-      unsigned count;
+      int count;
       derez.deserialize(count);
-      bool add;
-      derez.deserialize(add);
       DistributedCollectable *target = 
         runtime->find_distributed_collectable(did);
-      if (add)
-        target->add_base_valid_ref(REMOTE_DID_REF, count);
-      else if (target->remove_base_valid_ref(REMOTE_DID_REF, count))
+      if (count > 0)
+        target->add_base_valid_ref(REMOTE_DID_REF, unsigned(count));
+      else if (target->remove_base_valid_ref(REMOTE_DID_REF, unsigned(-count)))
         delete target;
     }
 
@@ -428,15 +632,13 @@ namespace LegionRuntime {
       DerezCheck z(derez);
       DistributedID did;
       derez.deserialize(did);
-      unsigned count;
+      int count;
       derez.deserialize(count);
-      bool add;
-      derez.deserialize(add);
       DistributedCollectable *target = 
         runtime->find_distributed_collectable(did);
-      if (add)
-        target->add_base_gc_ref(REMOTE_DID_REF, count);
-      else if (target->remove_base_gc_ref(REMOTE_DID_REF, count))
+      if (count > 0)
+        target->add_base_gc_ref(REMOTE_DID_REF, unsigned(count));
+      else if (target->remove_base_gc_ref(REMOTE_DID_REF, unsigned(-count)))
         delete target;
     }
 
@@ -448,16 +650,104 @@ namespace LegionRuntime {
       DerezCheck z(derez);
       DistributedID did;
       derez.deserialize(did);
-      unsigned count;
+      int count;
       derez.deserialize(count);
-      bool add;
-      derez.deserialize(add);
       DistributedCollectable *target = 
         runtime->find_distributed_collectable(did);
-      if (add)
-        target->add_base_resource_ref(REMOTE_DID_REF, count);
-      else if (target->remove_base_resource_ref(REMOTE_DID_REF, count))
+      if (count > 0)
+        target->add_base_resource_ref(REMOTE_DID_REF, unsigned(count));
+      else if (target->remove_base_resource_ref(REMOTE_DID_REF, 
+                                                unsigned(-count)))
         delete target;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void DistributedCollectable::handle_did_add_create(
+                                         Internal *runtime, Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+#ifdef USE_REMOTE_REFERENCES
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      AddressSpaceID source;
+      derez.deserialize(source);
+      AddressSpaceID target;
+      derez.deserialize(target);
+      ReferenceKind kind;
+      derez.deserialize(kind);
+      DistributedCollectable *dist = 
+        runtime->find_distributed_collectable(did);
+      if (dist->add_create_reference(source, target, kind))
+        delete dist;
+#else
+      assert(false);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void DistributedCollectable::handle_did_remove_create(
+                                         Internal *runtime, Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+#ifdef USE_REMOTE_REFERENCES
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      AddressSpaceID source;
+      derez.deserialize(source);
+      AddressSpaceID target;
+      derez.deserialize(target);
+      AddressSpaceID owner;
+      derez.deserialize(owner);
+      ReferenceKind kind;
+      derez.deserialize(kind);
+      // Check to see if we are on the owner node or whether we should
+      // keep forwarding this message onto the owner
+      if (runtime->address_space == owner)
+      {
+        // We're the owner so handle it
+        DistributedCollectable *dist = 
+          runtime->find_distributed_collectable(did);
+        if (source == owner)
+        {
+#ifdef DEBUG_HIGH_LEVEL
+          assert((kind == GC_REF_KIND) || (kind == VALID_REF_KIND));
+#endif
+          if (kind == VALID_REF_KIND)
+          {
+            if (dist->remove_base_valid_ref(REMOTE_CREATE_REF))
+              delete dist;
+          }
+          else
+          {
+            if (dist->remove_base_gc_ref(REMOTE_CREATE_REF))
+              delete dist;
+          }
+        }
+        else
+        {
+          if (dist->remove_create_reference(source, target, kind))
+            delete dist;
+        }
+      }
+      else
+      {
+        // Keep forwarding on to the owner
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize(source);
+          rez.serialize(target);
+          rez.serialize(owner);
+          rez.serialize(kind);
+        }
+        runtime->send_did_remove_create_reference(owner, rez);
+      }
+#else
+      assert(false);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -474,7 +764,12 @@ namespace LegionRuntime {
         case INACTIVE_STATE:
           {
             // See if we have any reason to be active
+#ifdef USE_REMOTE_REFERENCES
+            if ((gc_references > 0) || (valid_references > 0) ||
+                || !create_gc_refs.empty() || !create_valid_refs.empty())
+#else
             if ((gc_references > 0) || (valid_references > 0))
+#endif
             {
               // Move to the pending active state
               current_state = PENDING_ACTIVE_STATE;
@@ -490,7 +785,11 @@ namespace LegionRuntime {
         case ACTIVE_INVALID_STATE:
           {
             // See if we have a reason to be valid
+#ifdef USE_REMOTE_REFERENCES
+            if ((valid_references > 0) || !create_valid_refs.empty())
+#else
             if (valid_references > 0)
+#endif
             {
               // Move to a pending valid state
               current_state = PENDING_VALID_STATE;
@@ -498,7 +797,11 @@ namespace LegionRuntime {
               need_deactivate = false;
             }
             // See if we have a reason to be inactive
+#ifdef USE_REMOTE_REFERENCES
+            else if ((gc_references == 0) && create_gc_refs.empty())
+#else
             else if (gc_references == 0)
+#endif
             {
               current_state = PENDING_INACTIVE_STATE;
               need_validate = false;
@@ -516,7 +819,11 @@ namespace LegionRuntime {
         case VALID_STATE:
           {
             // See if we have a reason to be invalid
+#ifdef USE_REMOTE_REFERENCES
+            if ((valid_references == 0) && create_valid_refs.empty())
+#else
             if (valid_references == 0)
+#endif
             {
               current_state = PENDING_INVALID_STATE;
               need_invalidate = true;
@@ -534,14 +841,22 @@ namespace LegionRuntime {
             if (need_activate)
             {
               // See if we are still active
+#ifdef USE_REMOTE_REFERENCES
+              if ((valid_references > 0) || !create_valid_refs.empty())
+#else
               if (valid_references > 0)
+#endif
               {
                 // Now we need a validate
                 current_state = PENDING_VALID_STATE;
                 need_validate = true;
                 need_deactivate = false;
               }
+#ifdef USE_REMOTE_REFERENCES
+              else if ((gc_references > 0) || !create_gc_refs.empty())
+#else
               else if (gc_references > 0)
+#endif
               {
                 // Nothing more to do
                 current_state = ACTIVE_INVALID_STATE;
@@ -573,7 +888,12 @@ namespace LegionRuntime {
             if (need_deactivate)
             {
               // See if we are still inactive
+#ifdef USE_REMOTE_REFERENCES
+              if ((gc_references == 0) && (valid_references == 0) &&
+                  create_gc_refs.empty() && create_valid_refs.empty())
+#else
               if ((gc_references == 0) && (valid_references == 0))
+#endif
               {
                 current_state = INACTIVE_STATE;
                 need_activate = false;
@@ -601,7 +921,11 @@ namespace LegionRuntime {
             if (need_validate)
             {
               // Check to see if we are still valid
+#ifdef USE_REMOTE_REFERENCES
+              if ((valid_references > 0) || !create_valid_refs.empty())
+#else
               if (valid_references > 0)
+#endif
               {
                 current_state = VALID_STATE;
                 need_invalidate = false;
@@ -629,14 +953,22 @@ namespace LegionRuntime {
             if (need_invalidate)
             {
               // Check to see if we are still valid
+#ifdef USE_REMOTE_REFERENCES
+              if ((valid_references > 0) || !create_valid_refs.empty())
+#else
               if (valid_references > 0)
+#endif
               {
                 // Now we are valid again
                 current_state = PENDING_VALID_STATE;
                 need_validate = true;
                 need_deactivate = false;
               }
+#ifdef USE_REMOTE_REFERENCES
+              else if ((gc_references == 0) && create_gc_refs.empty())
+#else
               else if (gc_references == 0)
+#endif
               {
                 // No longer active either
                 current_state = PENDING_INACTIVE_STATE;
@@ -678,8 +1010,14 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       // Better be called while holding the lock
+#ifdef USE_REMOTE_REFERENCES
+      bool result = ((resource_references == 0) && (gc_references == 0) &&
+              (valid_references == 0) && create_gc_refs.empty() && 
+              create_valid_refs.empty() && (current_state == INACTIVE_STATE));
+#else
       bool result = ((resource_references == 0) && (gc_references == 0) &&
               (valid_references == 0) && (current_state == INACTIVE_STATE));
+#endif
       if (result)
         current_state = DELETED_STATE;
       return result;

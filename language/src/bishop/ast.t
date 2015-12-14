@@ -380,13 +380,25 @@ ast.specialized.rule:leaf("Region", {})
 
 ast.specialized:leaf("Selector", { "type", "elements", "constraints" })
 function ast.specialized.Selector:unparse()
-  return table.concat(unparse_all(self.elements), " ")
+  local str = table.concat(unparse_all(self.elements), " ")
+  if #self.constraints > 0 then
+    local const_str = table.concat(unparse_all(self.constraints), " and ")
+    str = str .. "[" .. const_str .. "]"
+  end
+  return str
 end
 
 ast.specialized:inner("element", { "name", "classes", "patterns" })
 function ast.specialized.element:unparse()
   local str = ""
   if #self.name > 0 then str = str .. "#" .. self.name[1] end
+  for i = 1, #self.classes do
+    str = str .. "." .. self.classes[i]
+  end
+  if #self.patterns > 0 then
+    local pat_str = table.concat(unparse_all(self.patterns), " and ")
+    str = str .. "[" .. pat_str .. "]"
+  end
   return str
 end
 ast.specialized.element:leaf("Task", {})
@@ -400,11 +412,17 @@ end
 
 ast.specialized:leaf("Property", { "field", "value" })
 ast.specialized:leaf("Constraint", { "lhs", "rhs" })
+function ast.specialized.Constraint:unparse()
+  return self.lhs:unparse() .. "=" .. self.rhs:unparse()
+end
 ast.specialized:leaf("FilterConstraint", { "field", "value" })
 function ast.specialized.FilterConstraint:unparse()
   return self.field .. "=" .. self.value:unparse()
 end
 ast.specialized:leaf("PatternMatch", { "field", "binder" })
+function ast.specialized.PatternMatch:unparse()
+  return self.field .. "=$" .. self.binder
+end
 
 ast.specialized:inner("expr")
 ast.specialized.expr:leaf("Unary", { "rhs", "op" })

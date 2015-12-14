@@ -74,14 +74,14 @@ function type_check.filter_constraint(value_type, type_env, constraint)
   assert(constraint:is(ast.specialized.FilterConstraint))
   local value = type_check.expr(type_env, constraint.value)
   local invalid_field_msg = "invalid filter constraint on field '" ..
-    constraint.field .. "'"
+    constraint.field .. "' for " .. tostring(value_type)
   local type_error_msg = "expression of type '" .. tostring(value.expr_type) ..
-    "' is invalid on field '" .. constraint.field .. "'"
+    "' is invalid for filtering on field '" .. constraint.field .. "'"
 
   if std.is_processor_list_type(value_type) then
     if constraint.field == "isa" then
       if not std.is_isa_type(value.expr_type) then
-        log.error(expr.value, type_error_msg)
+        log.error(constraint.value, type_error_msg)
       end
     else
       log.error(constraint, invalid_field_msg)
@@ -90,7 +90,7 @@ function type_check.filter_constraint(value_type, type_env, constraint)
   elseif std.is_memory_list_type(value_type) then
     if constraint.field == "kind" then
       if not std.is_memory_kind_type(value.expr_type) then
-        log.error(expr.value, type_error_msg)
+        log.error(constraint.value, type_error_msg)
       end
     else
       log.error(constraint, invalid_field_msg)
@@ -113,7 +113,7 @@ function type_check.expr(type_env, expr)
     if expr.op == "-" then
       if rhs.expr_type ~= int then
         log.error(expr.rhs, "unary op " .. expr.op ..
-          " expects the rhs to be of integer type")
+          " requires the rhs to be of integer type")
       end
     else
       log.error(expr, "unexpected unary operation")
@@ -134,10 +134,10 @@ function type_check.expr(type_env, expr)
     end
     if lhs.expr_type ~= int then
       log.error(expr.lhs, "binary op " .. expr.op ..
-        " expects the lhs to be of integer type")
+        " requires the lhs to be of integer type")
     elseif rhs.expr_type ~= int then
       log.error(expr.rhs, "binary op " .. expr.op ..
-        " expects the rhs to be of integer type")
+        " requires the rhs to be of integer type")
     end
 
     return ast.typed.expr.Binary {
@@ -152,14 +152,14 @@ function type_check.expr(type_env, expr)
     local value = type_check.expr(type_env, expr.value)
     local index = type_check.expr(type_env, expr.index)
     if index.expr_type ~= int then
-      log.error(expr.index, "invalid type '" .. tostring(index.expr_type) ..
-        "' for index expression")
+      log.error(expr.index, "indexing expression requires to have integer type," ..
+        " but received '" .. tostring(index.expr_type) .. "'")
     end
     if not (std.is_processor_list_type(value.expr_type) or
             std.is_memory_list_type(value.expr_type) or
             std.is_point_type(value.expr_type)) then
-      log.error(expr.value, "invalid type '" .. tostring(value.expr_type) ..
-        "' for index access")
+      log.error(expr.value, "index access requires list or point type," ..
+        " but received '" .. tostring(value.expr_type) .. "'")
     end
     local expr_type
     if std.is_point_type(value.expr_type) then
@@ -182,7 +182,7 @@ function type_check.expr(type_env, expr)
     local value = type_check.expr(type_env, expr.value)
     if not (std.is_processor_list_type(value.expr_type) or
             std.is_memory_list_type(value.expr_type)) then
-      log.error(expr.value, "filter access is not valid on expressions of " ..
+      log.error(expr.value, "filter is not valid on expressions of " ..
         "type '" .. tostring(value.expr_type) .. "'")
     end
     local constraints = expr.constraints:map(
@@ -243,8 +243,8 @@ function type_check.expr(type_env, expr)
   elseif expr:is(ast.specialized.expr.Variable) then
     local assigned_type = type_env[expr.value]
     if not assigned_type then
-      log.error(expr, "variable '" .. expr.value ..
-        "' is used without being typed")
+      log.error(expr, "variable '$" .. expr.value ..
+        "' was used without being bound by a pattern matching")
     end
     return ast.typed.expr.Variable {
       value = expr.value,
@@ -286,12 +286,10 @@ function type_check.element(type_env, element)
   local patterns = element.patterns:map(function(pattern)
     local desired_type = type_assignment[pattern.field]
     local existing_type = type_env[pattern.binder] or desired_type
-    if not desired_type then
-      log.error(pattern, "unexpected field " .. pattern.field .. " for " ..
-        element_type .. " element")
-    elseif desired_type ~= existing_type then
-      log.error(pattern, "field " .. pattern.field ..
-        " assigned to two different types '" .. tostring(existing_type) ..
+    assert(desired_type)
+    if desired_type ~= existing_type then
+      log.error(pattern, "variable '$" .. pattern.binder .. "' was assigned" ..
+        " to two different types '" .. tostring(existing_type) ..
         "' and '" .. tostring(desired_type) .. "'")
     end
     type_env[pattern.binder] = desired_type
@@ -322,10 +320,7 @@ end
 function type_check.property(rule_type, type_env, property)
   local value = type_check.expr(type_env, property.value)
   local desired_types = property_type_assignment[rule_type][property.field]
-  if not desired_types then
-    log.error(property, "invalid property assignment on field '" ..
-      property.field .. "' for " .. rule_type .. " rule")
-  end
+  assert(desired_types)
   local found = false
   for i = 1, #desired_types do
     if desired_types[i] == value.expr_type then
@@ -334,8 +329,9 @@ function type_check.property(rule_type, type_env, property)
     end
   end
   if not found then
-    log.error(property, "expression of type '" .. tostring(value.expr_type) ..
-      "' is invalid for property '" .. property.field .. "'")
+    log.error(property, "property '" .. property.field .. "' of " ..
+      rule_type .. " rule cannot get assigned by an expression of type '" ..
+      tostring(value.expr_type) .. "'")
   end
 
   return ast.typed.Property {

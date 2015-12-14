@@ -2268,6 +2268,17 @@ namespace LegionRuntime {
                                         Event pre)
     //--------------------------------------------------------------------------
     {
+#ifdef LEGION_SPY
+      CopyOp* copy_op = dynamic_cast<CopyOp*>(op);
+      int src_req_idx = -1;
+      for (unsigned i = 0; i < copy_op->src_requirements.size(); ++i)
+        if (copy_op->src_requirements[i] == src_req)
+        {
+          src_req_idx = i;
+          break;
+        }
+      assert(src_req_idx != -1);
+#endif
  #ifdef DEBUG_PERF
       begin_perf_trace(COPY_ACROSS_ANALYSIS);
 #endif
@@ -2356,6 +2367,13 @@ namespace LegionRuntime {
             // we've already mapped it.
             local_results.insert(copy_post);
             found = true;
+#ifdef LEGION_SPY
+            assert(src_fields.size() == 1);
+            LegionSpy::log_op_user_with_field(
+                copy_op->get_unique_mappable_id(),
+                src_req_idx, src_fields[0].inst.id,
+                src_req.instance_fields[idx]);
+#endif
             break;
           }
         }
@@ -3516,14 +3534,6 @@ namespace LegionRuntime {
       const Domain &right_dom = right_node->get_domain_blocking();
       if (left_dom.get_dim() != right_dom.get_dim())
         return false;
-      else if (left_dom.get_dim() == 0)
-      {
-        const LowLevel::ElementMask &left_mask = 
-          left_dom.get_index_space().get_valid_mask();
-        const LowLevel::ElementMask &right_mask = 
-          right_dom.get_index_space().get_valid_mask();
-        return (left_mask.get_num_elmts() == right_mask.get_num_elmts());
-      }
       return true;
     }
 
@@ -5001,35 +5011,54 @@ namespace LegionRuntime {
       Domain left = *(left_set.begin());
       if (left.get_dim() == 0)
       {
-        // Union left and right together and then test
-        LowLevel::ElementMask left_mask, right_mask;
-        bool first = true;
-        for (std::set<Domain>::const_iterator it = left_set.begin();
-              it != left_set.end(); it++)
-        {
-          if (first)
-          {
-            left_mask = it->get_index_space().get_valid_mask();
-            first = false;
-          }
-          else
-            left_mask |= it->get_index_space().get_valid_mask();
-        }
-        first = true;
-        for (std::set<Domain>::const_iterator it = right_set.begin();
-              it != right_set.end(); it++)
-        {
-          if (first)
-          {
-            right_mask = it->get_index_space().get_valid_mask();
-            first = false;
-          }
-          else
-            right_mask |= it->get_index_space().get_valid_mask();
-        }
-        LowLevel::ElementMask diff = right_mask - left_mask;
-        if (!diff)
-          dominates = true;
+	// We're going to compute the union of the right set members and then
+	//  subtract out the left set members and see if anything is left
+	// If there is, left does NOT dominate right
+	
+	LowLevel::ElementMask *mask = 0;
+	// We need first to make sure we have an ElementMask that can hold all
+	//  the right_set members, which may have been trimmed
+	if (right_set.size() == 1)
+	{
+	  // just make a copy of the only set member's mask
+	  mask = new LowLevel::ElementMask(right_set.begin()->get_index_space()
+					   .get_valid_mask());
+	} else {
+	  std::set<Domain>::const_iterator it = right_set.begin();
+	  assert(it != right_set.end());
+	  const LowLevel::ElementMask *maskp = &(it->get_index_space().get_valid_mask());
+	  int first_elmt = maskp->first_enabled();
+	  int last_elmt = maskp->last_enabled();
+	  while(++it != right_set.end())
+	  {
+	    maskp = &(it->get_index_space().get_valid_mask());
+	    int new_first = maskp->first_enabled();
+	    int new_last = maskp->last_enabled();
+	    if ((new_first != -1) && ((first_elmt == -1) || (first_elmt > new_first)))
+	      first_elmt = new_first;
+	    if ((new_last != -1) && (last_elmt < new_last))
+	      last_elmt = new_last;
+	  }
+	  // If there are no elements, right is trivially dominated
+	  if ((first_elmt > last_elmt) || (last_elmt == -1))
+	    return true;
+	  // Now construct the mask
+	  mask = new LowLevel::ElementMask(last_elmt - first_elmt + 1, first_elmt);
+	  // And copy in the bits from each member set
+	  for (it = right_set.begin(); it != right_set.end(); it++)
+	    *mask |= it->get_index_space().get_valid_mask();
+	}
+
+	// Now go through the left set members and subtract them all ot
+	for (std::set<Domain>::const_iterator it = left_set.begin();
+	     it != left_set.end(); it++)
+	  *mask -= it->get_index_space().get_valid_mask();
+	  
+        // Union left and right together and then test (empty == domainated)
+	dominates = !(*mask);
+
+	// Clean up our working copy
+	delete mask;
       }
       else if (left_set.size() == 1)
       {
@@ -8787,7 +8816,8 @@ namespace LegionRuntime {
                                                      unsigned depth,
                                                      RegionNode *node,
                                                      DistributedID result_did,
-                                                     UniqueID op_id)
+                                                     UniqueID op_id, 
+                                                     bool &remote_creation)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_PERF
@@ -8839,6 +8869,7 @@ namespace LegionRuntime {
 #else
         InstanceManager *result = static_cast<InstanceManager*>(dc);
 #endif
+        remote_creation = true;
         return result;
       }
       InstanceManager *result = NULL;
@@ -8930,6 +8961,7 @@ namespace LegionRuntime {
 #endif
         }
       }
+      remote_creation = false;
       return result;
     }
 
@@ -8969,12 +9001,23 @@ namespace LegionRuntime {
       FieldSpaceNode *target = region_node->column_source;
 
       // Try to make the manager
+      bool remote_creation;
       InstanceManager *result = target->create_instance(location, domain,
                                           fields, blocking_factor, depth,
-                                          region_node, did, op_id);
+                                          region_node, did, op_id,
+                                          remote_creation);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(!remote_creation);
+#endif
       // If we succeeded, send the manager back
       if (result != NULL)
+      {
+        // Before sending the result add a valid reference. This
+        // will get removed by created_instances state in PhysicalState
+        // see PhysicalState::apply_state
+        result->add_base_valid_ref(INITIAL_CREATION_REF);
         result->send_manager(source);
+      }
       // No matter what send the notification
       Serializer rez;
       rez.serialize(done_event);
@@ -8989,7 +9032,8 @@ namespace LegionRuntime {
                                                        RegionNode *node,
                                                        ReductionOpID redop,
                                                        DistributedID result_did,
-                                                       UniqueID op_id)
+                                                       UniqueID op_id,
+                                                       bool &remote_creation)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_PERF
@@ -9036,6 +9080,7 @@ namespace LegionRuntime {
 #else
         ReductionManager *result = static_cast<ReductionManager*>(dc);
 #endif
+        remote_creation = true;
         return result;
       }
       ReductionManager *result = NULL;
@@ -9108,6 +9153,7 @@ namespace LegionRuntime {
 #endif
         }
       }
+      remote_creation = false;
       return result;
     }
 
@@ -9139,11 +9185,21 @@ namespace LegionRuntime {
       RegionNode *region_node = forest->get_node(handle);
       FieldSpaceNode *target = region_node->column_source;
 
+      bool remote_creation;
       ReductionManager *result = target->create_reduction(location, domain,
                                           fid, reduction_list, region_node,
-                                          redop, did, op_id);
+                                          redop, did, op_id, remote_creation);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(!remote_creation);
+#endif
       if (result != NULL)
+      {
+        // Before sending the result add a valid reference. This
+        // will get removed by created_instances state in PhysicalState
+        // see PhysicalState::apply_state
+        result->add_base_valid_ref(INITIAL_CREATION_REF);
         result->send_manager(source);
+      }
       // No matter what send the notification
       Serializer rez;
       rez.serialize(done_event);
@@ -10059,8 +10115,8 @@ namespace LegionRuntime {
           FieldMask new_dirty_fields = user.field_mask - state.dirty_below;
           if (!!new_dirty_fields)
           {
-            state.advance_version_numbers(new_dirty_fields);
             state.dirty_below |= new_dirty_fields;
+            state.advance_version_numbers(new_dirty_fields);
           }
           // We already know that all the version numbers have been advanced
           state.record_version_numbers(user.field_mask, user, version_info, 
@@ -10185,8 +10241,8 @@ namespace LegionRuntime {
 #endif
         if (has_write)
         {
-          state.advance_version_numbers(user.field_mask);
           state.dirty_below |= user.field_mask;
+          state.advance_version_numbers(user.field_mask);
           // We already know we advanced
           state.record_version_numbers(user.field_mask, user, version_info,
                                  true/*previous*/, true/*path only*/,
@@ -10385,8 +10441,8 @@ namespace LegionRuntime {
           FieldMask new_dirty_fields = user.field_mask - state.dirty_below;
           if (!!new_dirty_fields)
           {
-            state.advance_version_numbers(new_dirty_fields);
             state.dirty_below |= new_dirty_fields;
+            state.advance_version_numbers(new_dirty_fields);
           }
           // We already know that we advanced all the version numbers
           state.record_version_numbers(user.field_mask, user, version_info,
@@ -10492,8 +10548,8 @@ namespace LegionRuntime {
 #endif
         if (has_write)
         {
-          state.advance_version_numbers(user.field_mask);
           state.dirty_below |= user.field_mask;
+          state.advance_version_numbers(user.field_mask);
           // We already know that we advanced
           state.record_version_numbers(user.field_mask, user, version_info,
                                  true/*previous*/, true/*path only*/,
@@ -12132,19 +12188,20 @@ namespace LegionRuntime {
         for (unsigned idx = 0; idx < to_create.size(); idx++)
         {
           // Try making an instance in memory
+          bool remote_creation;
           MaterializedView *new_view = 
             create_instance(to_create[idx], 
                             closer.info.req.privilege_fields, 
                             blocking_factor,
                             closer.info.op->get_mappable()->get_depth(),
-                            closer.info.op);
+                            closer.info.op, remote_creation);
           if (new_view != NULL)
           {
             // Update all the fields
             update_views[new_view] = closing_mask;
             closer.add_target(new_view);
             // Make sure to tell our state we created a new instance
-            state->record_created_instance(new_view);
+            state->record_created_instance(new_view, remote_creation);
             // If we only needed to make one, then we are done
             if (create_one)
               break;
@@ -14730,8 +14787,8 @@ namespace LegionRuntime {
     MaterializedView* RegionNode::create_instance(Memory target_mem,
                                                 const std::set<FieldID> &fields,
                                                 size_t blocking_factor,
-                                                unsigned depth,
-                                                Operation *op)
+                                                unsigned depth, Operation *op, 
+                                                bool &remote_creation)
     //--------------------------------------------------------------------------
     {
       DistributedID did = context->runtime->get_available_distributed_id(false);
@@ -14739,7 +14796,7 @@ namespace LegionRuntime {
       InstanceManager *manager = column_source->create_instance(target_mem,
                                       row_source->get_domain_blocking(),
                                       fields, blocking_factor, depth, this, 
-                                      did, op_id);
+                                      did, op_id, remote_creation);
       // See if we made the instance
       MaterializedView *result = NULL;
       if (manager != NULL)
@@ -14772,7 +14829,8 @@ namespace LegionRuntime {
     ReductionView* RegionNode::create_reduction(Memory target_mem, FieldID fid,
                                                 bool reduction_list,
                                                 ReductionOpID redop,
-                                                Operation *op)
+                                                Operation *op,
+                                                bool &remote_creation)
     //--------------------------------------------------------------------------
     {
       DistributedID did = context->runtime->get_available_distributed_id(false);
@@ -14780,7 +14838,7 @@ namespace LegionRuntime {
       ReductionManager *manager = column_source->create_reduction(target_mem,
                                       row_source->get_domain_blocking(),
                                       fid, reduction_list, this, redop, 
-                                      did, op_id);
+                                      did, op_id, remote_creation);
       ReductionView *result = NULL;
       if (manager != NULL)
       {
@@ -16402,7 +16460,8 @@ namespace LegionRuntime {
     MaterializedView* PartitionNode::create_instance(Memory target_mem,
                                                 const std::set<FieldID> &fields,
                                                 size_t blocking_factor,
-                                                unsigned depth, Operation *op)
+                                                unsigned depth, Operation *op,
+                                                bool &remote_creation)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -16411,7 +16470,8 @@ namespace LegionRuntime {
       MaterializedView *result = parent->create_instance(target_mem, 
                                                          fields, 
                                                          blocking_factor,
-                                                         depth, op);
+                                                         depth, op,
+                                                         remote_creation);
       if (result != NULL)
       {
         result = result->get_materialized_subview(row_source->color);
@@ -16422,14 +16482,15 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     ReductionView* PartitionNode::create_reduction(Memory target_mem, 
                                             FieldID fid, bool reduction_list,
-                                            ReductionOpID redop, Operation *op)
+                                            ReductionOpID redop, Operation *op,
+                                            bool &remote_creation)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
       assert(parent != NULL);
 #endif
-      return parent->create_reduction(target_mem, fid, 
-                                      reduction_list, redop, op);
+      return parent->create_reduction(target_mem, fid, reduction_list, 
+                                      redop, op, remote_creation);
     }
 
     //--------------------------------------------------------------------------

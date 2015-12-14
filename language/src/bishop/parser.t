@@ -21,23 +21,21 @@ local parser = {}
 
 function parser.value(p)
   local value
+  local pos = ast.save(p)
   if p:matches(p.number) then
     local token = p:next(p.number)
-    local pos = ast.save(p)
     value = ast.unspecialized.expr.Constant {
       value = token.value,
       position = pos,
     }
   elseif p:nextif("$") then
     local token = p:next(p.name)
-    local pos = ast.save(p)
     value = ast.unspecialized.expr.Variable {
       value = token.value,
       position = pos,
     }
   elseif p:matches(p.name) then
     local token = p:next(p.name)
-    local pos = ast.save(p)
     value = ast.unspecialized.expr.Keyword {
       value = token.value,
       position = pos,
@@ -124,8 +122,8 @@ parser.expr = parsing.Pratt()
 
 
 function parser.property(p)
-  local field = p:next(p.name)
   local pos = ast.save(p)
+  local field = p:next(p.name)
   p:expect(":")
   local value = p:expr()
   p:expect(";")
@@ -179,6 +177,7 @@ end
 function parser.element(p)
   local ctor
   local tbl = {}
+  local pos = ast.save(p)
   if p:nextif("task") then
     ctor = ast.unspecialized.element.Task
   elseif p:nextif("region") then
@@ -195,7 +194,6 @@ function parser.element(p)
   else
     p:error("unexpected element name")
   end
-  local pos = ast.save(p)
 
   local name = terralib.newlist()
   local classes = terralib.newlist()
@@ -204,7 +202,7 @@ function parser.element(p)
   while p:matches("#") or p:matches(".") or p:matches("[") do
     if p:nextif("#") then
       if #name > 0 then
-        p:error("selector cannot have multiple names")
+        p:error("element cannot have multiple names")
       end
       name:insert(p:next(p.name).value)
     elseif p:nextif(".") then

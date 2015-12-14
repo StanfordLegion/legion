@@ -2964,7 +2964,7 @@ function codegen.expr_region(cx, node)
                      data.dict(data.zip(field_paths:map(data.hash), strides)))
 
   local fs_naming_actions
-  if rawget(fspace_type, "is_fspace_instance") then
+  if fspace_type:isstruct() then
     fs_naming_actions = quote
       c.legion_field_space_attach_name([cx.runtime], [fs], [fspace_type.name])
       [data.zip(field_paths, field_ids):map(

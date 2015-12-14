@@ -3407,25 +3407,20 @@ namespace LegionRuntime {
               runtime->handle_did_remote_resource_update(derez);
               break;
             }
+          case DISTRIBUTED_CREATE_ADD:
+            {
+              runtime->handle_did_create_add(derez);
+              break;
+            }
+          case DISTRIBUTED_CREATE_REMOVE:
+            {
+              runtime->handle_did_create_remove(derez);
+              break;
+            }
           case VIEW_REMOTE_REGISTRATION:
             {
               runtime->handle_view_remote_registration(derez, 
                                                        remote_address_space);
-              break;
-            }
-          case VIEW_VALID_UPDATE:
-            {
-              runtime->handle_view_remote_valid_update(derez);
-              break;
-            }
-          case VIEW_GC_UPDATE:
-            {
-              runtime->handle_view_remote_gc_update(derez); 
-              break;
-            }
-          case VIEW_RESOURCE_UPDATE:
-            {
-              runtime->handle_view_remote_resource_update(derez);
               break;
             }
           case SEND_BACK_ATOMIC:
@@ -5278,9 +5273,11 @@ namespace LegionRuntime {
       Domain parent_dom = forest->get_index_space_domain(parent);
       const size_t num_elmts = 
         parent_dom.get_index_space().get_valid_mask().get_num_elmts();
+      const int first_element =
+        parent_dom.get_index_space().get_valid_mask().get_first_element();
       for (GenericPointInRectIterator<1> pir(color_range); pir; pir++)
       {
-        LowLevel::ElementMask child_mask(num_elmts);
+        LowLevel::ElementMask child_mask(num_elmts, first_element);
         Color c = pir.p;
         std::map<Color,ColoredPoints<ptr_t> >::const_iterator finder = 
           coloring.find(c);
@@ -11563,38 +11560,29 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void Internal::send_did_add_create_reference(AddressSpaceID target,
+                                                 Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, DISTRIBUTED_CREATE_ADD,
+                                    DISTRIBUTED_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Internal::send_did_remove_create_reference(AddressSpaceID target,
+                                                    Serializer &rez, bool flush)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, DISTRIBUTED_CREATE_REMOVE,
+                                           DISTRIBUTED_VIRTUAL_CHANNEL, flush);
+    }
+
+    //--------------------------------------------------------------------------
     void Internal::send_view_remote_registration(AddressSpaceID target, 
                                                 Serializer &rez)
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, VIEW_REMOTE_REGISTRATION,
-                                    DISTRIBUTED_VIRTUAL_CHANNEL, true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Internal::send_view_remote_valid_update(AddressSpaceID target,
-                                                Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(rez, VIEW_VALID_UPDATE,
-                                    DISTRIBUTED_VIRTUAL_CHANNEL, true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Internal::send_view_remote_gc_update(AddressSpaceID target,
-                                             Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(rez, VIEW_GC_UPDATE,
-                                    DISTRIBUTED_VIRTUAL_CHANNEL, true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Internal::send_view_remote_resource_update(AddressSpaceID target,
-                                                   Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(rez, VIEW_RESOURCE_UPDATE,
                                     DISTRIBUTED_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
@@ -12255,32 +12243,25 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void Internal::handle_did_create_add(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DistributedCollectable::handle_did_add_create(this, derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Internal::handle_did_create_remove(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DistributedCollectable::handle_did_remove_create(this, derez);
+    }
+
+    //--------------------------------------------------------------------------
     void Internal::handle_view_remote_registration(Deserializer &derez,
                                                   AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
       LogicalView::handle_view_remote_registration(forest, derez, source);
-    }
-
-    //--------------------------------------------------------------------------
-    void Internal::handle_view_remote_valid_update(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      LogicalView::handle_view_remote_valid_update(forest, derez);
-    }
-
-    //--------------------------------------------------------------------------
-    void Internal::handle_view_remote_gc_update(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      LogicalView::handle_view_remote_gc_update(forest, derez); 
-    }
-
-    //--------------------------------------------------------------------------
-    void Internal::handle_view_remote_resource_update(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      LogicalView::handle_view_remote_resource_update(forest, derez); 
     }
 
     //--------------------------------------------------------------------------
@@ -16203,7 +16184,7 @@ namespace LegionRuntime {
       machine.get_all_memories(all_mems);
       for (std::set<Memory>::const_iterator it = all_mems.begin();
             it != all_mems.end(); it++)
-        LegionSpy::log_memory(it->id, it->capacity());
+        LegionSpy::log_memory(it->id, it->capacity(), it->kind());
       // Log Proc-Mem Affinity
       for (std::set<Processor>::const_iterator pit = all_procs.begin();
             pit != all_procs.end(); pit++)

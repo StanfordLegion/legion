@@ -1980,9 +1980,9 @@ namespace LegionRuntime {
     {
       if (task_name == NULL)
       {
-        // Has no name, so just call it by its number
+        // Has no name, so just call it by 'unnamed_task_<uid>'
         char *buffer = (char*)malloc(32*sizeof(char));
-        sprintf(buffer,"%d",id);
+        sprintf(buffer,"unnamed_task_%d",id);
         task_name = buffer;
       }
       return Runtime::update_collection_table(
@@ -2005,9 +2005,9 @@ namespace LegionRuntime {
     {
       if (task_name == NULL)
       {
-        // Has no name, so just call it by its number
+        // Has no name, so just call it by 'unnamed_task_<uid>'
         char *buffer = (char*)malloc(32*sizeof(char));
-        sprintf(buffer,"%d",id);
+        sprintf(buffer,"unnamed_task_%d",id);
         task_name = buffer;
       }
       else
@@ -2033,9 +2033,9 @@ namespace LegionRuntime {
     {
       if (task_name == NULL)
       {
-        // Has no name, so just call it by its number
+        // Has no name, so just call it by 'unnamed_task_<uid>'
         char *buffer = (char*)malloc(32*sizeof(char));
-        sprintf(buffer,"%d",id);
+        sprintf(buffer,"unnamed_task_%d",id);
         task_name = buffer;
       }
       else
@@ -2062,9 +2062,9 @@ namespace LegionRuntime {
     {
       if (task_name == NULL)
       {
-        // Has no name, so just call it by its number
+        // Has no name, so just call it by 'unnamed_task_<uid>'
         char *buffer = (char*)malloc(32*sizeof(char));
-        sprintf(buffer,"%d",id);
+        sprintf(buffer,"unnamed_task_%d",id);
         task_name = buffer;
       }
       else

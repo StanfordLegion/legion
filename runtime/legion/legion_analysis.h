@@ -724,8 +724,9 @@ namespace LegionRuntime {
       void filter_and_apply(bool top, AddressSpaceID target,
             const LegionMap<ColorPoint,FieldMask>::aligned &closed_children,
                             std::set<Event> &applied_conditions);
+      void release_created_instances(void);
       void reset(void);
-      void record_created_instance(InstanceView *view);
+      void record_created_instance(InstanceView *view, bool remote);
       void filter_open_children(const FieldMask &filter_mask);
     public:
       PhysicalState* clone(bool clone_state, bool need_advance) const;
@@ -755,7 +756,7 @@ namespace LegionRuntime {
       // Any instance views which we created and are therefore holding
       // additional valid references that will need to be removed
       // after our updates have been applied
-      std::deque<InstanceView*> created_instances;
+      std::deque<std::pair<InstanceView*,bool/*remote*/> > created_instances;
     public:
       LegionMap<VersionID,VersionStateInfo>::aligned version_states;
       LegionMap<VersionID,VersionStateInfo>::aligned advance_states;

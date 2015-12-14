@@ -307,7 +307,11 @@ function codegen.task_rule(node)
   local selector_body = quote var [is_matched] = true end
   if #first_element.name > 0 then
     assert(#first_element.name == 1)
-    local task_name = terralib.constant(first_element.name[1])
+    local task_name = first_element.name[1]
+    if not rawget(_G, task_name) then
+      log.error(first_element,
+        "task '" .. task_name .. "' does not exist")
+    end
     selector_body = quote
       [selector_body];
       var name = c.legion_task_get_name([task_var])
@@ -461,7 +465,12 @@ function codegen.region_rule(node)
 
   if #first_task_element.name > 0 then
     assert(#first_task_element.name == 1)
-    local task_name = terralib.constant(first_task_element.name[1])
+    local task_name = first_task_element.name[1]
+    local regent_task = rawget(_G, task_name)
+    if not regent_task then
+      log.error(first_task_element,
+        "task '" .. task_name .. "' does not exist")
+    end
     selector_body = quote
       [selector_body];
       var name = c.legion_task_get_name([task_var])
@@ -513,12 +522,14 @@ function codegen.region_rule(node)
   local map_task_body = quote end
   if #first_element.name > 0 then
     if #first_task_element.name == 0 then
-      log.error(first_element,
-        "named region element should be preceded by a named task element")
+      log.error(first_task_element,
+        "unnamed task element cannot have a named region element")
     end
 
     local param_name = "$" .. first_element.name[1]
-    local regent_task = _G[first_task_element.name[1]]
+    local task_name = first_task_element.name[1]
+    local regent_task = rawget(_G, task_name)
+    assert(regent_task, "unreachable")
     local task_params = regent_task.ast.params
     local param_type = nil
     local accum_idx, start_idx, end_idx = 0, 0, 0

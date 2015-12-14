@@ -1319,11 +1319,12 @@ namespace LegionRuntime {
                                        const std::set<FieldID> &fields,
                                        size_t blocking_factor, unsigned depth,
                                        RegionNode *node, DistributedID did,
-                                       UniqueID op_id);
+                                       UniqueID op_id, bool &remote);
       ReductionManager* create_reduction(Memory location, Domain dom,
                                         FieldID fid, bool reduction_list,
                                         RegionNode *node, ReductionOpID redop,
-                                        DistributedID did, UniqueID op_id);
+                                        DistributedID did, UniqueID op_id,
+                                        bool &remote_creation);
     public:
       InstanceManager* create_file_instance(const std::set<FieldID> &fields,
                                             const FieldMask &attach_mask,
@@ -1748,13 +1749,14 @@ namespace LegionRuntime {
       virtual MaterializedView * create_instance(Memory target_mem,
                                                 const std::set<FieldID> &fields,
                                                 size_t blocking_factor,
-                                                unsigned depth, 
-                                                Operation *op) = 0;
+                                                unsigned depth, Operation *op,
+                                                bool &remote_creation) = 0;
       virtual ReductionView* create_reduction(Memory target_mem,
                                               FieldID fid,
                                               bool reduction_list,
                                               ReductionOpID redop,
-                                              Operation *op) = 0;
+                                              Operation *op,
+                                              bool &remote_creation) = 0;
       virtual void send_node(AddressSpaceID target) = 0;
       virtual void print_logical_context(ContextID ctx, 
                                          TreeStateLogger *logger,
@@ -1890,13 +1892,14 @@ namespace LegionRuntime {
       virtual MaterializedView* create_instance(Memory target_mem,
                                                 const std::set<FieldID> &fields,
                                                 size_t blocking_factor,
-                                                unsigned depth,
-                                                Operation *op);
+                                                unsigned depth, Operation *op,
+                                                bool &remote);
       virtual ReductionView* create_reduction(Memory target_mem,
                                               FieldID fid,
                                               bool reduction_list,
                                               ReductionOpID redop,
-                                              Operation *op);
+                                              Operation *op,
+                                              bool &remote_creation);
       virtual void send_node(AddressSpaceID target);
       static void handle_node_creation(RegionTreeForest *context,
                             Deserializer &derez, AddressSpaceID source);
@@ -2066,13 +2069,14 @@ namespace LegionRuntime {
       virtual MaterializedView* create_instance(Memory target_mem,
                                                 const std::set<FieldID> &fields,
                                                 size_t blocking_factor,
-                                                unsigned depth,
-                                                Operation *op);
+                                                unsigned depth, Operation *op,
+                                                bool &remote);
       virtual ReductionView* create_reduction(Memory target_mem,
                                               FieldID fid,
                                               bool reduction_list,
                                               ReductionOpID redop,
-                                              Operation *op);
+                                              Operation *op,
+                                              bool &remote_creation);
       virtual void send_node(AddressSpaceID target);
     public:
       virtual void send_semantic_request(AddressSpaceID target, 
