@@ -46,6 +46,7 @@ namespace LegionRuntime{
     class Channel;
 
     typedef Realm::Cuda::GPU GPU;
+    typedef Realm::Cuda::GPUFBMemory GPUFBMemory;
 
     class Buffer {
     public:
