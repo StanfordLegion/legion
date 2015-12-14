@@ -10115,8 +10115,8 @@ namespace LegionRuntime {
           FieldMask new_dirty_fields = user.field_mask - state.dirty_below;
           if (!!new_dirty_fields)
           {
-            state.advance_version_numbers(new_dirty_fields);
             state.dirty_below |= new_dirty_fields;
+            state.advance_version_numbers(new_dirty_fields);
           }
           // We already know that all the version numbers have been advanced
           state.record_version_numbers(user.field_mask, user, version_info, 
@@ -10241,8 +10241,8 @@ namespace LegionRuntime {
 #endif
         if (has_write)
         {
-          state.advance_version_numbers(user.field_mask);
           state.dirty_below |= user.field_mask;
+          state.advance_version_numbers(user.field_mask);
           // We already know we advanced
           state.record_version_numbers(user.field_mask, user, version_info,
                                  true/*previous*/, true/*path only*/,
@@ -10441,8 +10441,8 @@ namespace LegionRuntime {
           FieldMask new_dirty_fields = user.field_mask - state.dirty_below;
           if (!!new_dirty_fields)
           {
-            state.advance_version_numbers(new_dirty_fields);
             state.dirty_below |= new_dirty_fields;
+            state.advance_version_numbers(new_dirty_fields);
           }
           // We already know that we advanced all the version numbers
           state.record_version_numbers(user.field_mask, user, version_info,
@@ -10548,8 +10548,8 @@ namespace LegionRuntime {
 #endif
         if (has_write)
         {
-          state.advance_version_numbers(user.field_mask);
           state.dirty_below |= user.field_mask;
+          state.advance_version_numbers(user.field_mask);
           // We already know that we advanced
           state.record_version_numbers(user.field_mask, user, version_info,
                                  true/*previous*/, true/*path only*/,
