@@ -264,6 +264,22 @@ function codegen.expr(binders, node)
       [actions];
       [value] = [ binders[node.value] ]
     end
+  elseif node:is(ast.typed.expr.Coerce) then
+    if node.expr_type == int and std.is_point_type(node.value.expr_type) then
+      local base = codegen.expr(binders, node.value)
+      actions = quote
+        [actions];
+        [base.actions];
+        [value] = [ base.value ].point_data[0]
+      end
+    else
+      assert(false, "unknown coercion from type " ..
+        tostring(node.value.expr_type) ..
+        " to type " .. tostring(node.expr_type))
+    end
+
+  else
+    assert(false, "unexpected node type: " .. tostring(node.node_type))
   end
 
   return {

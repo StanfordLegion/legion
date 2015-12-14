@@ -575,11 +575,13 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     inline FieldID FieldAllocator::allocate_field(size_t field_size, 
-                                FieldID desired_fieldid /*= AUTO_GENERATE_ID*/)
+                                FieldID desired_fieldid /*= AUTO_GENERATE_ID*/,
+                                CustomSerdezID serdez_id /*=0*/)
     //--------------------------------------------------------------------------
     {
       return runtime->allocate_field(parent, field_space, 
-                                 field_size, desired_fieldid, false/*local*/); 
+                                     field_size, desired_fieldid, 
+                                     false/*local*/, serdez_id); 
     }
 
     //--------------------------------------------------------------------------
@@ -591,21 +593,24 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     inline FieldID FieldAllocator::allocate_local_field(size_t field_size,
-                                FieldID desired_fieldid /*= AUTO_GENERATE_ID*/)
+                                FieldID desired_fieldid /*= AUTO_GENERATE_ID*/,
+                                CustomSerdezID serdez_id /*=0*/)
     //--------------------------------------------------------------------------
     {
       return runtime->allocate_field(parent, field_space,
-                                field_size, desired_fieldid, true/*local*/);
+                                     field_size, desired_fieldid, 
+                                     true/*local*/, serdez_id);
     }
 
     //--------------------------------------------------------------------------
     inline void FieldAllocator::allocate_fields(
         const std::vector<size_t> &field_sizes,
-        std::vector<FieldID> &resulting_fields)
+        std::vector<FieldID> &resulting_fields, CustomSerdezID serdez_id /*=0*/)
     //--------------------------------------------------------------------------
     {
       runtime->allocate_fields(parent, field_space, 
-                               field_sizes, resulting_fields, false/*local*/);
+                               field_sizes, resulting_fields, 
+                               false/*local*/, serdez_id);
     }
 
     //--------------------------------------------------------------------------
@@ -618,11 +623,12 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     inline void FieldAllocator::allocate_local_fields(
         const std::vector<size_t> &field_sizes,
-        std::vector<FieldID> &resulting_fields)
+        std::vector<FieldID> &resulting_fields, CustomSerdezID serdez_id /*=0*/)
     //--------------------------------------------------------------------------
     {
       runtime->allocate_fields(parent, field_space, 
-                               field_sizes, resulting_fields, true/*local*/);
+                               field_sizes, resulting_fields, 
+                               true/*local*/, serdez_id);
     }
 
     //--------------------------------------------------------------------------
@@ -1368,6 +1374,34 @@ namespace LegionRuntime {
       // and deserialization methods on the RHS type for doing fold reductions
       SerdezRedopTable &serdez_red_table = Runtime::get_serdez_redop_table();
       LegionSerialization::register_reduction<REDOP>(serdez_red_table,redop_id);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename SERDEZ>
+    /*static*/ void Runtime::register_custom_serdez_op(CustomSerdezID serdez_id)
+    //--------------------------------------------------------------------------
+    {
+      if (serdez_id == 0)
+      {
+        fprintf(stderr,"ERROR: Custom Serdez ID zero is reserved.\n");
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_RESERVED_SERDEZ_ID);
+      }
+      SerdezOpTable &serdez_table = Runtime::get_serdez_table();
+      // Check to make sure we're not overwriting a prior serdez op
+      if (serdez_table.find(serdez_id) != serdez_table.end())
+      {
+        fprintf(stderr,"ERROR: CustomSerdezID %d has already been used "
+                       "in the serdez operation table\n", serdez_id);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_DUPLICATE_SERDEZ_ID);
+      }
+      serdez_table[serdez_id] =
+        LowLevel::CustomSerdezUntyped::create_custom_serdez<SERDEZ>();
     }
 
     //--------------------------------------------------------------------------

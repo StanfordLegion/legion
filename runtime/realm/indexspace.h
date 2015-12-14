@@ -28,6 +28,7 @@
 
 #include "lowlevel_config.h"
 #include "arrays.h"
+#include "custom_serdez.h"
 
 namespace Realm {
 
@@ -923,13 +924,16 @@ namespace Realm {
                                           legion_lowlevel_file_mode_t file_mode) const;
       struct CopySrcDstField {
       public:
-        CopySrcDstField(void)
-          : inst(RegionInstance::NO_INST), offset(0), size(0) { }
+        CopySrcDstField(void) 
+          : inst(RegionInstance::NO_INST), offset(0), size(0), serdez_id(0) { }
         CopySrcDstField(RegionInstance i, unsigned o, unsigned s)
-          : inst(i), offset(o), size(s) { }
+          : inst(i), offset(o), size(s), serdez_id(0) { }
+        CopySrcDstField(RegionInstance i, unsigned o, unsigned s, CustomSerdezID sid)
+          : inst(i), offset(o), size(s), serdez_id(sid) { }
       public:
 	RegionInstance inst;
 	unsigned offset, size;
+	CustomSerdezID serdez_id;
       };
 
       Event fill(const std::vector<CopySrcDstField> &dsts,

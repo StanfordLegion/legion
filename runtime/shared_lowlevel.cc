@@ -19,6 +19,7 @@
 #include "legion_logging.h"
 #include "realm/profiling.h"
 #include "realm/timers.h"
+#include "realm/custom_serdez.h"
 
 #ifndef __GNUC__
 #include "atomics.h" // for __sync_fetch_and_add
@@ -234,6 +235,7 @@ namespace LegionRuntime {
     protected:
       TaskTable task_table;
       std::map<ReductionOpID, const ReductionOpUntyped *> redop_table;
+      std::map<CustomSerdezID, const CustomSerdezUntyped *> custom_serdez_table;
       std::set<Processor> procs;
       std::vector<EventImpl*> events;
       std::deque<EventImpl*> free_events; 
@@ -3714,6 +3716,13 @@ namespace Realm {
       impl->deactivate();
     }
 
+    void RegionInstance::destroy(const std::vector<DestroyedField>& destroyed_fields,
+				 Event wait_on /*= Event::NO_EVENT*/) const
+    {
+      // TODO: actually call destructor
+      assert(destroyed_fields.empty());
+      destroy(wait_on);
+    }
 };
 
 namespace LegionRuntime {
@@ -6654,6 +6663,17 @@ namespace Realm {
 	return false;
 
       ((RuntimeImpl *)impl)->redop_table[redop_id] = redop;
+      return true;
+    }
+
+    bool Runtime::register_custom_serdez(CustomSerdezID serdez_id, const CustomSerdezUntyped *serdez)
+    {
+      assert(impl != 0);
+
+      if(((RuntimeImpl *)impl)->custom_serdez_table.count(serdez_id) > 0)
+	return false;
+
+      ((RuntimeImpl *)impl)->custom_serdez_table[serdez_id] = serdez;
       return true;
     }
 
