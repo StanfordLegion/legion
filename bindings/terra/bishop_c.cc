@@ -90,7 +90,13 @@ bishop_all_processors()
   bishop_processor_list_t procs_ = bishop_create_processor_list(procs.size());
   int idx = 0;
   for (set<Processor>::iterator it = procs.begin(); it != procs.end(); ++it)
-    procs_.list[idx++] = CObjectWrapper::wrap(*it);
+  {
+    // FIXME: need to change this if we add more processors useful for
+    // mapping purporses
+    if (it->kind() == Processor::LOC_PROC || it->kind() == Processor::TOC_PROC)
+      procs_.list[idx++] = CObjectWrapper::wrap(*it);
+  }
+  procs_.size = idx;
   return procs_;
 }
 
