@@ -13,8 +13,7 @@
 -- limitations under the License.
 
 -- fails-with:
--- ...tanford/projects/legion/language/src/bishop/type_check.t:291: variable '$p' was assigned to two different types 'isa_type' and 'point_type'
--- type_mismatch_binders.rg:25: 
+-- type_mismatch_binders.rg:24: variable '$p' was assigned to two different types 'isa_type' and 'point_type'
 -- task[isa=$p and index=$p] {
 --                     ^
 

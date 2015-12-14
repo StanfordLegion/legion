@@ -13,8 +13,7 @@
 -- limitations under the License.
 
 -- fails-with:
--- ...tanford/projects/legion/language/src/bishop/type_check.t:155: indexing expression requires to have integer type, but received 'processor_type'
--- invalid_index1.rg:26: 
+-- invalid_index1.rg:25: indexing expression requires to have integer type, but received 'processor_type'
 --   target : memories[$proc];
 --                     ^
 

@@ -13,8 +13,7 @@
 -- limitations under the License.
 
 -- fails-with:
--- ...tanford/projects/legion/language/src/bishop/type_check.t:216: value of type 'memory_type' does not have field 'size'
--- invalid_field2.rg:26: 
+-- invalid_field2.rg:25: value of type 'memory_type' does not have field 'size'
 --   target : memories[kind=sysmem][0].size;
 --                                         ^
 

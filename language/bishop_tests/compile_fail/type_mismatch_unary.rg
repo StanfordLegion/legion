@@ -13,10 +13,9 @@
 -- limitations under the License.
 
 -- fails-with:
--- ...tanford/projects/legion/language/src/bishop/type_check.t:115: unary op - requires the rhs to be of integer type
--- type_mismatch_unary.rg:26: 
+-- type_mismatch_unary.rg:25: unary op - requires the rhs to be of integer type
 --   target : processors[-$proc];
---                          ^
+--                        ^
 
 import "bishop"
 

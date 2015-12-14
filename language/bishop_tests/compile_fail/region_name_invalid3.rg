@@ -13,8 +13,7 @@
 -- limitations under the License.
 
 -- fails-with:
--- ...e/stanford/projects/legion/language/src/bishop/codegen.t:525: unnamed task element cannot have a named region element
--- region_name_invalid3.rg:26: 
+-- region_name_invalid3.rg:25: unnamed task element cannot have a named region element
 -- task region#r {
 --    ^
 

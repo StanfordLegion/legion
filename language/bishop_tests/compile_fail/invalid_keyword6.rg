@@ -13,8 +13,7 @@
 -- limitations under the License.
 
 -- fails-with:
--- ...tanford/projects/legion/language/src/bishop/specialize.t:210: unexpected keyword 'demand' for property 'isa'
--- invalid_keyword6.rg:26: 
+-- invalid_keyword6.rg:25: unexpected keyword 'demand' for property 'isa'
 --   isa : demand;
 --     ^
 

@@ -29,8 +29,8 @@ log.error = function(node, ...)
   -- The compiler cannot handle running past an error anyway, so just
   -- build the diagnostics object here and don't bother reusing it.
   local diag = terralib.newdiagnostics()
-  diag:reporterror(node.position)
-  diag:finishandabortiferrors(..., 2)
+  diag:reporterror(node.position, ...)
+  diag:finishandabortiferrors("Errors reported during typechecking.", 2)
   assert(false) -- unreachable
 end
 

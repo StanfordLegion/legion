@@ -13,8 +13,7 @@
 -- limitations under the License.
 
 -- fails-with:
--- ...tanford/projects/legion/language/src/bishop/type_check.t:87: invalid filter constraint on field 'kind' for processor_list_type
--- invalid_filter1.rg:26: 
+-- invalid_filter1.rg:25: invalid filter constraint on field 'kind' for processor_list_type
 --   target : processors[kind=x86];
 --                          ^
 

@@ -13,10 +13,9 @@
 -- limitations under the License.
 
 -- fails-with:
--- ...e/stanford/projects/legion/language/src/bishop/codegen.t:471: task 'foo' does not exist
--- task_name_invalid2.rg:26: 
+-- task_name_invalid2.rg:25: task 'foo' does not exist
 -- task#foo region {
---     ^
+--    ^
 
 import "regent"
 import "bishop"

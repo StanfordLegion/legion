@@ -13,10 +13,9 @@
 -- limitations under the License.
 
 -- fails-with:
--- ...tanford/projects/legion/language/src/bishop/type_check.t:246: variable '$isa' was used without being bound by a pattern matching
--- undefined_binder.rg:26: 
+-- undefined_binder.rg:25: variable '$isa' was used without being bound by a pattern matching
 --   target : processors[isa=$isa];
---                           ^
+--                         ^
 
 import "bishop"
 

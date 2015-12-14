@@ -13,8 +13,7 @@
 -- limitations under the License.
 
 -- fails-with:
--- ...tanford/projects/legion/language/src/bishop/specialize.t:204: unexpected property 'isa' for region rule
--- invalid_keyword4.rg:26: 
+-- invalid_keyword4.rg:25: unexpected property 'isa' for region rule
 --   isa : x86;
 --     ^
 

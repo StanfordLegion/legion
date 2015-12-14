@@ -13,8 +13,7 @@
 -- limitations under the License.
 
 -- fails-with:
--- ...tanford/projects/legion/language/src/bishop/type_check.t:84: expression of type 'point_type' is invalid for filtering on field 'isa'
--- type_mismatch_filter.rg:26: 
+-- type_mismatch_filter.rg:25: expression of type 'point_type' is invalid for filtering on field 'isa'
 --   target : processors[isa=$p];
 --                         ^
 

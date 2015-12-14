@@ -13,8 +13,7 @@
 -- limitations under the License.
 
 -- fails-with:
--- ...tanford/projects/legion/language/src/bishop/type_check.t:332: property 'target' of region rule cannot get assigned by an expression of type 'processor_list_type'
--- type_mismatch_property2.rg:26: 
+-- type_mismatch_property2.rg:25: property 'target' of region rule cannot get assigned by an expression of type 'processor_list_type'
 --   target : processors[isa=x86];
 --        ^
 

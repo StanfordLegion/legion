@@ -13,8 +13,7 @@
 -- limitations under the License.
 
 -- fails-with:
--- ...tanford/projects/legion/language/src/bishop/specialize.t:263: invalid pattern match on field 'ind'
--- invalid_pattern_match1.rg:25: 
+-- invalid_pattern_match1.rg:24: invalid pattern match on field 'ind'
 -- task[ind=$p] {
 --        ^
 

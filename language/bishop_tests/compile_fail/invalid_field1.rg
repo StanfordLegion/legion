@@ -13,8 +13,7 @@
 -- limitations under the License.
 
 -- fails-with:
--- ...tanford/projects/legion/language/src/bishop/type_check.t:201: value of type 'memory_list_type' does not have field 'memories'
--- invalid_field1.rg:26: 
+-- invalid_field1.rg:25: value of type 'memory_list_type' does not have field 'memories'
 --   target : memories[kind=sysmem].memories;
 --                                          ^
 

@@ -13,8 +13,7 @@
 -- limitations under the License.
 
 -- fails-with:
--- ...tanford/projects/legion/language/src/bishop/type_check.t:161: index access requires list or point type, but received 'processor_type'
--- invalid_index2.rg:26: 
+-- invalid_index2.rg:25: index access requires list or point type, but received 'processor_type'
 --   target : $proc[0];
 --            ^
 

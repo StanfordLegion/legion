@@ -13,10 +13,9 @@
 -- limitations under the License.
 
 -- fails-with:
--- ...tanford/projects/legion/language/src/bishop/type_check.t:185: filter is not valid on expressions of type 'processor_type'
--- invalid_filter3.rg:26: 
+-- invalid_filter3.rg:25: filter is not valid on expressions of type 'processor_type'
 --   target : $proc[isa=x86];
---                 ^
+--            ^
 
 import "bishop"
 

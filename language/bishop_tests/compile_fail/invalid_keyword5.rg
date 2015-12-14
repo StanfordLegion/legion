@@ -13,8 +13,7 @@
 -- limitations under the License.
 
 -- fails-with:
--- ...tanford/projects/legion/language/src/bishop/specialize.t:309: region element should be preceded by task element in selectors
--- invalid_keyword5.rg:25: 
+-- invalid_keyword5.rg:24: region element should be preceded by task element in selectors
 -- task region region {
 --           ^
 

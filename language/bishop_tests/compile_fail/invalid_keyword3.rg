@@ -13,10 +13,9 @@
 -- limitations under the License.
 
 -- fails-with:
--- ...tanford/projects/legion/language/src/bishop/specialize.t:204: unexpected property 'targe' for task rule
--- invalid_keyword3.rg:26: 
+-- invalid_keyword3.rg:25: unexpected property 'targe' for task rule
 --   targe : processors[isa=x86];
---         ^
+--       ^
 
 import "bishop"
 

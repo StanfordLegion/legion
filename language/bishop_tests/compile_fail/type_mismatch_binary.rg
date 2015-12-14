@@ -13,8 +13,7 @@
 -- limitations under the License.
 
 -- fails-with:
--- ...tanford/projects/legion/language/src/bishop/type_check.t:136: binary op + requires the lhs to be of integer type
--- type_mismatch_binary.rg:26: 
+-- type_mismatch_binary.rg:25: binary op + requires the lhs to be of integer type
 --   target : processors[$proc + 1];
 --                       ^
 

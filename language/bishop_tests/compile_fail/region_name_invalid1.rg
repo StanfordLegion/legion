@@ -13,10 +13,9 @@
 -- limitations under the License.
 
 -- fails-with:
--- ...e/stanford/projects/legion/language/src/bishop/codegen.t:554: parameter 'r' either does not exist or have a non-region type
--- region_name_invalid1.rg:26: 
+-- region_name_invalid1.rg:25: parameter 'r' either does not exist or have a non-region type
 -- task#toplevel region#r {
---                     ^
+--                    ^
 
 import "regent"
 import "bishop"

@@ -13,8 +13,7 @@
 -- limitations under the License.
 
 -- fails-with:
--- ...tanford/projects/legion/language/src/bishop/type_check.t:96: invalid filter constraint on field 'isa' for memory_list_type
--- invalid_filter2.rg:26: 
+-- invalid_filter2.rg:25: invalid filter constraint on field 'isa' for memory_list_type
 --   target : memories[isa=x86];
 --                       ^
 
