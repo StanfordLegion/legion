@@ -18,8 +18,7 @@
 import "regent"
 import "bishop"
 
-local c = regentlib.c
-local b = bishoplib.c
+local c = bishoplib.c
 
 mapper
 
@@ -40,28 +39,28 @@ end
 task bar()
   var proc =
     c.legion_runtime_get_executing_processor(__runtime(), __context())
-  var procs = b.bishop_all_processors()
-  regentlib.assert(procs.list[2].id == proc.id, "assertion failed")
+  var procs = c.bishop_all_processors()
+  regentlib.assert(procs.list[1].id == proc.id, "assertion failed")
 end
 
 task foo(x : int)
   var proc =
     c.legion_runtime_get_executing_processor(__runtime(), __context())
-  var procs = b.bishop_all_processors()
-  regentlib.assert(procs.list[(x + 2) % (procs.size - 1) + 1].id == proc.id,
+  var procs = c.bishop_all_processors()
+  regentlib.assert(procs.list[(x + 2) % procs.size].id == proc.id,
     "assertion failed")
 end
 
 task toplevel()
   var proc =
     c.legion_runtime_get_executing_processor(__runtime(), __context())
-  var procs = b.bishop_all_processors()
+  var procs = c.bishop_all_processors()
   bar()
   __demand(__parallel)
   for i = 0, 4 do
     foo(i)
   end
-  regentlib.assert(procs.list[3].id == proc.id, "assertion failed")
+  regentlib.assert(procs.list[2].id == proc.id, "assertion failed")
 end
 
 bishoplib.register_bishop_mappers()
