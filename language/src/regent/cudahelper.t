@@ -14,7 +14,12 @@
 
 local cudahelper = {}
 
-if not terralib.cudacompile then return cudahelper end
+local log = require("regent/log")
+
+if not terralib.cudacompile then
+  cudahelper.check_cuda_available = function() return false end
+  return cudahelper
+end
 
 -- copied and modified from cudalib.lua in Terra interpreter
 
@@ -37,13 +42,7 @@ end
 local ef = terralib.externfunction
 
 local RuntimeAPI = terralib.includec("cuda_runtime.h")
-RuntimeAPI.__cudaRegisterCudaBinary =
-  ef("__cudaRegisterCudaBinary", {&opaque, uint64} -> &&opaque)
-RuntimeAPI.__cudaRegisterFunction =
-  ef("__cudaRegisterFunction",
-     {&opaque, &int8, &int8, &int8, int,
-      &RuntimeAPI.uint3, &RuntimeAPI.uint3,
-      &RuntimeAPI.dim3, &RuntimeAPI.dim3, &int} -> {})
+local HijackAPI = terralib.includec("legion_terra_cudart_hijack.h")
 
 local C = terralib.includecstring [[
 #include <stdio.h>
@@ -71,7 +70,7 @@ local CU_JIT_ERROR_LOG_BUFFER = 5
 local CU_JIT_ERROR_LOG_BUFFER_SIZE_BYTES = 6
 local CU_JIT_INPUT_PTX = 1
 local CU_JIT_TARGET = 9
-local DeviceAPI = {
+local DriverAPI = {
   cuInit = ef("cuInit", {uint32} -> uint32);
   cuCtxGetCurrent = ef("cuCtxGetCurrent", {&&CUctx_st} -> uint32);
   cuCtxGetDevice = ef("cuCtxGetDevice",{&int32} -> uint32);
@@ -88,22 +87,62 @@ local DeviceAPI = {
   cuLinkDestroy = ef("cuLinkDestroy", {&CUlinkState_st} -> uint32);
 }
 
+do
+  -- handles the case that the binding library does not have support support
+  local binding_library_path = nil
+  local lg_rt_dir = os.getenv("LG_RT_DIR")
+  if lg_rt_dir then
+    binding_library_path = lg_rt_dir ..
+      "/../bindings/terra/liblegion_terra.so"
+  else
+    -- if LG_RT_DIR was not set, try to find the library using INCLUDE_PATH
+    local include_path = os.getenv("INCLUDE_PATH")
+    local start = 1
+    local splitStart, splitEnd = string.find(include_path, ";", start)
+    while splitStart do
+      path = string.sub(include_path, start, splitStart - 1)
+      local f = io.open(path .. "/liblegion_terra.so", "r")
+      if f ~= nil then
+        binding_library_path = path .. "/liblegion_terra.so"
+        f.close()
+        break
+      end
+      start = splitEnd + 1
+      splitStart, splitEnd = string.find(include_path, ";", start)
+    end
+  end
+  assert(binding_library_path ~= nil,
+    "failed to find 'liblegion_terra.so' in cudahelper")
+  has_cuInit_symbol =
+    os.execute("nm " .. binding_library_path .. " | grep cuInit > /dev/null") == 0
+  if has_cuInit_symbol then
+    terra cudahelper.check_cuda_available()
+      var r = DriverAPI.cuInit(0)
+      return r == 0
+    end
+  else
+    terra cudahelper.check_cuda_available()
+      return false
+    end
+  end
+end
+
 -- copied and modified from cudalib.lua in Terra interpreter
 
 local terra init_cuda() : int32
-  var r = DeviceAPI.cuInit(0)
+  var r = DriverAPI.cuInit(0)
   assert(r == 0, "CUDA error in cuInit")
   var cx : &CUctx_st
-  r = DeviceAPI.cuCtxGetCurrent(&cx)
+  r = DriverAPI.cuCtxGetCurrent(&cx)
   assert(r == 0, "CUDA error in cuCtxGetCurrent")
   var d : int32
   if cx ~= nil then
-    r = DeviceAPI.cuCtxGetDevice(&d)
+    r = DriverAPI.cuCtxGetDevice(&d)
     assert(r == 0, "CUDA error in cuCtxGetDevice")
   else
-    r = DeviceAPI.cuDeviceGet(&d, 0)
+    r = DriverAPI.cuDeviceGet(&d, 0)
     assert(r == 0, "CUDA error in cuDeviceGet")
-    r = DeviceAPI.cuCtxCreate_v2(&cx, 0, d)
+    r = DriverAPI.cuCtxCreate_v2(&cx, 0, d)
     assert(r == 0, "CUDA error in cuCtxCreate_v2")
   end
 
@@ -112,37 +151,33 @@ end
 
 local terra get_cuda_version(device : int) : uint64
   var major : int, minor : int
-  var r = DeviceAPI.cuDeviceComputeCapability(&major, &minor, device)
+  var r = DriverAPI.cuDeviceComputeCapability(&major, &minor, device)
   assert(r == 0, "CUDA error in cuDeviceComputeCapability")
   return [uint64](major * 10 + minor)
 end
 
 --
 
+struct fat_bin_t {
+  magic : int,
+  versions : int,
+  data : &opaque,
+  filename : &opaque,
+}
+
 local terra compile_ptx(ptxc : rawstring, ptxSize : uint32, version : uint64) : &&opaque
-  var linkState : &CUlinkState_st
-  var cubin : &opaque
-  var cubinSize : uint64
-  var options = arrayof(CUjit_option, CU_JIT_TARGET, CU_JIT_ERROR_LOG_BUFFER, CU_JIT_ERROR_LOG_BUFFER_SIZE_BYTES)
-  var option_values = arrayof([&opaque], [&opaque](version))
-  var r = DeviceAPI.cuLinkCreate_v2(1, options, option_values, &linkState)
-  assert(r == 0, "CUDA error in creating linker")
-  r = DeviceAPI.cuLinkAddData_v2(linkState, CU_JIT_INPUT_PTX, ptxc, ptxSize, nil, 0, nil, nil)
-  assert(r == 0, "CUDA error in adding PTX")
-  r = DeviceAPI.cuLinkComplete(linkState, &cubin, &cubinSize)
-  assert(r == 0, "CUDA error in linking")
-
-  var handle = RuntimeAPI.__cudaRegisterCudaBinary(cubin, cubinSize)
-
-  r = DeviceAPI.cuLinkDestroy(linkState)
-  assert(r == 0, "CUDA error in destroying linker")
-
+  var fat_bin : &fat_bin_t
+  -- TODO: this line is leaking memory
+  fat_bin = [&fat_bin_t](C.malloc(sizeof(fat_bin_t)))
+  fat_bin.magic = 1234
+  fat_bin.versions = 5678
+  fat_bin.data = ptxc
+  var handle = HijackAPI.hijackCudaRegisterFatBinary(fat_bin)
   return handle
 end
 
 local terra register_function(handle : &&opaque, id : int, name : &int8)
-  RuntimeAPI.__cudaRegisterFunction(handle, [&int8](id), name,
-                                    nil, 0, nil, nil, nil, nil, nil)
+  HijackAPI.hijackCudaRegisterFunction(handle, [&int8](id), name)
 end
 
 function cudahelper.jit_compile_kernels_and_register(kernels)

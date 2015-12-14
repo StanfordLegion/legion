@@ -447,6 +447,7 @@ namespace LegionRuntime {
     protected:
       bool map_all_regions(Processor target, Event user_event, 
                            bool mapper_invoked); 
+      void perform_post_mapping(Processor target);
       void initialize_region_tree_contexts(
           const std::vector<RegionRequirement> &clone_requirements,
           const std::vector<UserEvent> &unmap_events,
@@ -673,6 +674,8 @@ namespace LegionRuntime {
     protected:
       ReductionOpID redop;
       const ReductionOp *reduction_op;
+      // For handling reductions of types with serdez methods
+      const SerdezRedopFns *serdez_redop_fns;
       size_t reduction_state_size;
       void *reduction_state; 
     };

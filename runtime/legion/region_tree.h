@@ -208,6 +208,7 @@ namespace LegionRuntime {
       void get_all_fields(FieldSpace handle, std::set<FieldID> &fields);
       void get_all_regions(FieldSpace handle, std::set<LogicalRegion> &regions);
       size_t get_field_size(FieldSpace handle, FieldID fid);
+      void get_field_space_fields(FieldSpace handle, std::set<FieldID> &fields);
     public:
       void create_logical_region(LogicalRegion handle);
       bool destroy_logical_region(LogicalRegion handle, 
@@ -366,8 +367,7 @@ namespace LegionRuntime {
                                    RegionRequirement &req,
                                    SingleTask *parent_ctx,
                                    Processor local_proc,
-                                   const std::set<ColorPoint> &targets,
-                                   bool leave_open,
+                     const LegionMap<ColorPoint,FieldMask>::aligned &targets,
                                    const std::set<ColorPoint> &next_children,
                                    Event &closed,
                                    const MappingRef &target,
@@ -1330,11 +1330,12 @@ namespace LegionRuntime {
                                        const std::set<FieldID> &fields,
                                        size_t blocking_factor, unsigned depth,
                                        RegionNode *node, DistributedID did,
-                                       UniqueID op_id);
+                                       UniqueID op_id, bool &remote);
       ReductionManager* create_reduction(Memory location, Domain dom,
                                         FieldID fid, bool reduction_list,
                                         RegionNode *node, ReductionOpID redop,
-                                        DistributedID did, UniqueID op_id);
+                                        DistributedID did, UniqueID op_id,
+                                        bool &remote_creation);
     public:
       InstanceManager* create_file_instance(const std::set<FieldID> &fields,
                                             const FieldMask &attach_mask,
@@ -1515,6 +1516,7 @@ namespace LegionRuntime {
                                     bool allow_next_child,
                                     bool upgrade_next_child, 
                                     bool permit_leave_open,
+                                    bool read_only_close,
                                     bool record_close_operations,
                                     bool record_closed_fields,
                                    LegionDeque<FieldState>::aligned &new_states,
@@ -1543,9 +1545,11 @@ namespace LegionRuntime {
       void send_back_logical_state(ContextID local_ctx, ContextID remote_ctx,
                                    const FieldMask &send_mask, 
                                    AddressSpaceID target);
-      void process_logical_state_return(Deserializer &derez);
+      void process_logical_state_return(Deserializer &derez,
+                                        AddressSpaceID source);
       static void handle_logical_state_return(RegionTreeForest *forest,
-                                              Deserializer &derez);
+                                              Deserializer &derez,
+                                              AddressSpaceID source);
     public:
       void initialize_current_state(ContextID ctx);
       void invalidate_current_state(ContextID ctx, bool logical_users_only);
@@ -1574,8 +1578,7 @@ namespace LegionRuntime {
                                 bool &create_composite, bool &changed);
       // Analogous methods to those above except for closing to a composite view
       CompositeRef create_composite_instance(ContextID ctx_id,
-                                     const std::set<ColorPoint> &targets,
-                                     bool leave_open, 
+                       const LegionMap<ColorPoint,FieldMask>::aligned &targets,
                                      const std::set<ColorPoint> &next_children,
                                      const FieldMask &closing_mask,
                                      VersionInfo &version_info,
@@ -1738,31 +1741,34 @@ namespace LegionRuntime {
       virtual size_t get_num_children(void) const = 0;
       virtual InterCloseOp* create_close_op(Operation *creator, 
                                             const FieldMask &closing_mask,
-                                            bool leave_open,
-                                            const std::set<ColorPoint> &targets,
+                        const LegionMap<ColorPoint,FieldMask>::aligned &targets,
                                             const VersionInfo &close_info,
                                             const VersionInfo &version_info,
                                             const RestrictInfo &res_info,
                                             const TraceInfo &trace_info) = 0;
+      virtual ReadCloseOp* create_read_only_close_op(Operation *creator,
+                                            const FieldMask &closing_mask,
+                        const LegionMap<ColorPoint,FieldMask>::aligned &targets,
+                                            const TraceInfo &trace_info) = 0;
       virtual bool perform_close_operation(const MappableInfo &info,
                                            const FieldMask &closing_mask,
-                                           const std::set<ColorPoint> &targets,
+                       const LegionMap<ColorPoint,FieldMask>::aligned &targets,
                                            const MappingRef &target_region,
                                            VersionInfo &version_info,
-                                           bool leave_open,
                                      const std::set<ColorPoint> &next_children,
                                            Event &closed,
                                            bool &create_composite) = 0;
       virtual MaterializedView * create_instance(Memory target_mem,
                                                 const std::set<FieldID> &fields,
                                                 size_t blocking_factor,
-                                                unsigned depth, 
-                                                Operation *op) = 0;
+                                                unsigned depth, Operation *op,
+                                                bool &remote_creation) = 0;
       virtual ReductionView* create_reduction(Memory target_mem,
                                               FieldID fid,
                                               bool reduction_list,
                                               ReductionOpID redop,
-                                              Operation *op) = 0;
+                                              Operation *op,
+                                              bool &remote_creation) = 0;
       virtual void send_node(AddressSpaceID target) = 0;
       virtual void print_logical_context(ContextID ctx, 
                                          TreeStateLogger *logger,
@@ -1878,31 +1884,34 @@ namespace LegionRuntime {
       virtual size_t get_num_children(void) const;
       virtual InterCloseOp* create_close_op(Operation *creator, 
                                             const FieldMask &closing_mask,
-                                            bool leave_open,
-                                            const std::set<ColorPoint> &targets,
+                        const LegionMap<ColorPoint,FieldMask>::aligned &targets,
                                             const VersionInfo &close_info,
                                             const VersionInfo &version_info,
                                             const RestrictInfo &res_info,
                                             const TraceInfo &trace_info);
+      virtual ReadCloseOp* create_read_only_close_op(Operation *creator,
+                                            const FieldMask &closing_mask,
+                        const LegionMap<ColorPoint,FieldMask>::aligned &targets,
+                                            const TraceInfo &trace_info);
       virtual bool perform_close_operation(const MappableInfo &info,
                                            const FieldMask &closing_mask,
-                                           const std::set<ColorPoint> &targets,
+                       const LegionMap<ColorPoint,FieldMask>::aligned &targets,
                                            const MappingRef &target_region,
                                            VersionInfo &version_info,
-                                           bool leave_open,
                                      const std::set<ColorPoint> &next_children,
                                            Event &closed,
                                            bool &create_composite);
       virtual MaterializedView* create_instance(Memory target_mem,
                                                 const std::set<FieldID> &fields,
                                                 size_t blocking_factor,
-                                                unsigned depth,
-                                                Operation *op);
+                                                unsigned depth, Operation *op,
+                                                bool &remote);
       virtual ReductionView* create_reduction(Memory target_mem,
                                               FieldID fid,
                                               bool reduction_list,
                                               ReductionOpID redop,
-                                              Operation *op);
+                                              Operation *op,
+                                              bool &remote_creation);
       virtual void send_node(AddressSpaceID target);
       static void handle_node_creation(RegionTreeForest *context,
                             Deserializer &derez, AddressSpaceID source);
@@ -2052,31 +2061,34 @@ namespace LegionRuntime {
       virtual size_t get_num_children(void) const;
       virtual InterCloseOp* create_close_op(Operation *creator, 
                                             const FieldMask &closing_mask,
-                                            bool leave_open,
-                                            const std::set<ColorPoint> &targets,
+                        const LegionMap<ColorPoint,FieldMask>::aligned &targets,
                                             const VersionInfo &close_info,
                                             const VersionInfo &version_info,
                                             const RestrictInfo &res_info,
                                             const TraceInfo &trace_info);
+      virtual ReadCloseOp* create_read_only_close_op(Operation *creator,
+                                            const FieldMask &closing_mask,
+                        const LegionMap<ColorPoint,FieldMask>::aligned &targets,
+                                            const TraceInfo &trace_info);
       virtual bool perform_close_operation(const MappableInfo &info,
                                            const FieldMask &closing_mask,
-                                           const std::set<ColorPoint> &targets,
+                       const LegionMap<ColorPoint,FieldMask>::aligned &targets,
                                            const MappingRef &target_region,
                                            VersionInfo &version_info,
-                                           bool leave_open,
                                      const std::set<ColorPoint> &next_children,
                                            Event &closed,
                                            bool &create_composite);
       virtual MaterializedView* create_instance(Memory target_mem,
                                                 const std::set<FieldID> &fields,
                                                 size_t blocking_factor,
-                                                unsigned depth,
-                                                Operation *op);
+                                                unsigned depth, Operation *op,
+                                                bool &remote);
       virtual ReductionView* create_reduction(Memory target_mem,
                                               FieldID fid,
                                               bool reduction_list,
                                               ReductionOpID redop,
-                                              Operation *op);
+                                              Operation *op,
+                                              bool &remote_creation);
       virtual void send_node(AddressSpaceID target);
     public:
       virtual void send_semantic_request(AddressSpaceID target, 

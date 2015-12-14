@@ -22,6 +22,16 @@ namespace LegionRuntime {
   namespace HighLevel {
 
     /**
+     * \struct SerdezRedopFns
+     * Small helper class for storing instantiated templates
+     */
+    struct SerdezRedopFns {
+    public:
+      SerdezInitFnptr init_fn;
+      SerdezFoldFnptr fold_fn;
+    };
+
+    /**
      * \class LegionSerialization
      * The Legion serialization class provides template meta-programming
      * help for returning complex data types from task calls.  If the 
@@ -191,6 +201,95 @@ namespace LegionRuntime {
       {
         return StructHandler<T,IsAStruct<T>::value>::unpack(result);
       }
+
+      // Some more help for reduction operations with RHS types
+      // that have serialize and deserialize methods
+
+      template<typename REDOP_RHS>
+      static void serdez_redop_init(const ReductionOp *reduction_op,
+                              void *&ptr, size_t &size)
+      {
+        REDOP_RHS init_serdez;
+        reduction_op->init(&init_serdez, 1);
+        size_t new_size = init_serdez.legion_buffer_size();
+        if (new_size > size)
+        {
+          size = new_size;
+          ptr = realloc(ptr, size);
+        }
+        init_serdez.legion_serialize(ptr);
+      }
+
+      template<typename REDOP_RHS>
+      static void serdez_redop_fold(const ReductionOp *reduction_op,
+                                    void *&lhs_ptr, size_t &lhs_size,
+                                    const void *rhs_ptr, bool exclusive)
+      {
+        REDOP_RHS lhs_serdez, rhs_serdez;
+        lhs_serdez.legion_deserialize(lhs_ptr);
+        rhs_serdez.legion_deserialize(rhs_ptr);
+        reduction_op->fold(&lhs_serdez, &rhs_serdez, 1, exclusive); 
+        size_t new_size = lhs_serdez.legion_buffer_size();
+        // Reallocate the buffer if it has grown
+        if (new_size > lhs_size)
+        {
+          lhs_size = new_size;
+          lhs_ptr = realloc(lhs_ptr, lhs_size);
+        }
+        // Now save the value
+        lhs_serdez.legion_serialize(lhs_ptr);
+      }
+
+      template<typename REDOP_RHS, bool HAS_SERDEZ>
+      struct SerdezRedopHandler {
+        static inline void register_reduction(SerdezRedopTable &table,
+                                              ReductionOpID redop_id)
+        {
+          // Do nothing in the case where there are no serdez functions
+        }
+      };
+      // True case of template specialization
+      template<typename REDOP_RHS>
+      struct SerdezRedopHandler<REDOP_RHS,true> {
+        static inline void register_reduction(SerdezRedopTable &table,
+                                              ReductionOpID redop_id)
+        {
+          // Now we can do the registration
+          SerdezRedopFns &fns = table[redop_id];
+          fns.init_fn = serdez_redop_init<REDOP_RHS>;
+          fns.fold_fn = serdez_redop_fold<REDOP_RHS>;
+        }
+      };
+
+      template<typename REDOP_RHS, bool IS_STRUCT>
+      struct StructRedopHandler {
+        static inline void register_reduction(SerdezRedopTable &table,
+                                              ReductionOpID redop_id)
+        {
+          // Do nothing in the case where this isn't a struct
+        }
+      };
+      // True case of template specialization
+      template<typename REDOP_RHS>
+      struct StructRedopHandler<REDOP_RHS,true> {
+        static inline void register_reduction(SerdezRedopTable &table,
+                                              ReductionOpID redop_id)
+        {
+          SerdezRedopHandler<REDOP_RHS,HasSerialize<REDOP_RHS>::value>::
+            register_reduction(table, redop_id);
+        }
+      };
+
+      // Register reduction functions if necessary
+      template<typename REDOP>
+      static inline void register_reduction(SerdezRedopTable &table,
+                                            ReductionOpID redop_id)
+      {
+        StructRedopHandler<typename REDOP::RHS, 
+          IsAStruct<typename REDOP::RHS>::value>::register_reduction(table, 
+                                                                     redop_id);
+      }
+
     };
 
     //--------------------------------------------------------------------------
@@ -1247,8 +1346,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     template<typename REDOP>
-    /*static*/ void Runtime::register_reduction_op(
-                                                        ReductionOpID redop_id)
+    /*static*/ void Runtime::register_reduction_op(ReductionOpID redop_id)
     //--------------------------------------------------------------------------
     {
       if (redop_id == 0)
@@ -1272,6 +1370,10 @@ namespace LegionRuntime {
       }
       red_table[redop_id] = 
         LowLevel::ReductionOpUntyped::create_reduction_op<REDOP>(); 
+      // We also have to check to see if there are explicit serialization
+      // and deserialization methods on the RHS type for doing fold reductions
+      SerdezRedopTable &serdez_red_table = Runtime::get_serdez_redop_table();
+      LegionSerialization::register_reduction<REDOP>(serdez_red_table,redop_id);
     }
 
     //--------------------------------------------------------------------------
@@ -1912,9 +2014,9 @@ namespace LegionRuntime {
     {
       if (task_name == NULL)
       {
-        // Has no name, so just call it by its number
+        // Has no name, so just call it by 'unnamed_task_<uid>'
         char *buffer = (char*)malloc(32*sizeof(char));
-        sprintf(buffer,"%d",id);
+        sprintf(buffer,"unnamed_task_%d",id);
         task_name = buffer;
       }
       return Runtime::update_collection_table(
@@ -1937,9 +2039,9 @@ namespace LegionRuntime {
     {
       if (task_name == NULL)
       {
-        // Has no name, so just call it by its number
+        // Has no name, so just call it by 'unnamed_task_<uid>'
         char *buffer = (char*)malloc(32*sizeof(char));
-        sprintf(buffer,"%d",id);
+        sprintf(buffer,"unnamed_task_%d",id);
         task_name = buffer;
       }
       else
@@ -1965,9 +2067,9 @@ namespace LegionRuntime {
     {
       if (task_name == NULL)
       {
-        // Has no name, so just call it by its number
+        // Has no name, so just call it by 'unnamed_task_<uid>'
         char *buffer = (char*)malloc(32*sizeof(char));
-        sprintf(buffer,"%d",id);
+        sprintf(buffer,"unnamed_task_%d",id);
         task_name = buffer;
       }
       else
@@ -1994,9 +2096,9 @@ namespace LegionRuntime {
     {
       if (task_name == NULL)
       {
-        // Has no name, so just call it by its number
+        // Has no name, so just call it by 'unnamed_task_<uid>'
         char *buffer = (char*)malloc(32*sizeof(char));
-        sprintf(buffer,"%d",id);
+        sprintf(buffer,"unnamed_task_%d",id);
         task_name = buffer;
       }
       else

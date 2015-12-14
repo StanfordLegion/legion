@@ -44,6 +44,7 @@
         overflow-x: scroll;
         overflow-y: scroll;
         margin-left: 300px;
+        margin-right: 50px;
       }
 
       div.fixed-left {
@@ -83,14 +84,15 @@
       var zoom = 1.0;
       var maxZoom = 1000.0
       var margin_left = 300;
+      var margin_right = 50;
       var margin_bottom = 50;
-      var width = $(window).width() - margin_left;
+      var width = $(window).width() - margin_left - margin_right;
       var height = $(window).height() - margin_bottom;
       var start = 0;
-      var end = %d;
+      var end = %d * 1.01;
       var max_level = %d;
       var scale = width / (end - start);
-      var thickness = height / max_level;
+      var thickness = Math.max(height / max_level, 20);
       var baseThickness = height / max_level;
       height = max_level * thickness;
 
@@ -409,7 +411,9 @@
         var paneHeight = $("#timeline").height();
         var helpBoxGroup = timelineSvg.append("g").attr("class", "help-box");
         var helpBoxWidth = Math.min(450, paneWidth - 100);
-        var helpBoxHeight = Math.min(450, paneHeight - 100);
+        var helpTextOffset = 20;
+        var helpBoxHeight = Math.min(helpMessage.length * helpTextOffset + 100,
+                                     paneHeight - 100);
 
         var timelineWidth = timelineSvg.select("g#timeline").attr("width");
         var timelineHeight = timelineSvg.select("g#timeline").attr("height");
@@ -441,8 +445,9 @@
         var off = 15;
         for (var i = 0; i < helpMessage.length; ++i) {
           helpText.append("tspan")
+            .style("font-size", "12pt")
             .attr("text-anchor", "start")
-            .attr({ x: boxStartX + 30, dy: off + 25})
+            .attr({ x: boxStartX + 30, dy: off + helpTextOffset})
             .text(helpMessage[i]);
           off = 0;
         }
@@ -831,6 +836,8 @@
     <div id="loader-icon" style="position: absolute; left: 50%%; top: 50%%;"></div>
 
     <script type="text/javascript">
+      width = $("body").width() - margin_left - margin_right - 16;
+      scale = width / (end - start);
       init();
 
       var timelineSvg = d3.select("#timeline").append("svg")

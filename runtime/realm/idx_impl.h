@@ -30,12 +30,11 @@ namespace Realm {
     struct ElementMaskImpl {
       //int count, offset;
       typedef unsigned long long uint64;
-      uint64_t dummy;
       uint64_t bits[0];
 
       static size_t bytes_needed(off_t offset, off_t count)
       {
-	size_t need = sizeof(ElementMaskImpl) + (((count + 63) >> 6) << 3);
+	size_t need = (((count + 63) >> 6) << 3);
 	return need;
       }
 	
@@ -129,6 +128,10 @@ namespace Realm {
       struct RequestArgs : public BaseMedium {
 	IndexSpace is;
 	unsigned block_id;
+	int first_element;
+	int num_elements;
+	int first_enabled_elmt;
+	int last_enabled_elmt;
       };
 
       static void handle_request(RequestArgs args, const void *data, size_t datalen);
@@ -138,6 +141,8 @@ namespace Realm {
 				         handle_request> Message;
       
       static void send_request(gasnet_node_t target, IndexSpace is, unsigned block_id,
+			       int first_element, int num_elements,
+			       int first_enabled_elmt, int last_enabled_elmt,
 			       const void *data, size_t datalen, int payload_mode);
     };
 

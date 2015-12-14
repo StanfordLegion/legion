@@ -16,8 +16,6 @@ import "regent"
 
 -- This code has not been optimized and is not high performance.
 
-local int1d = index_type(int, "int1d")
-
 terra abs(a : double) : double
   if a < 0 then
     return -a

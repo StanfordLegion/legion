@@ -2645,27 +2645,81 @@ namespace Realm {
         first_enabled_elmt(-1), last_enabled_elmt(-1)
     {
       size_t bytes_needed = ElementMaskImpl::bytes_needed(first_element, num_elements);
-      raw_data = calloc(1, bytes_needed);
+      raw_data = (char *)calloc(1, bytes_needed);
       //((ElementMaskImpl *)raw_data)->count = num_elements;
       //((ElementMaskImpl *)raw_data)->offset = first_element;
     }
 
     ElementMask::ElementMask(const ElementMask &copy_from, 
-			     int _num_elements /*= -1*/, int _first_element /*= 0*/)
+			     int _num_elements, int _first_element /*= -1*/)
+    {
+      first_element = (_first_element >= 0) ? _first_element : copy_from.first_element;
+      num_elements = _num_elements;
+      first_enabled_elmt = copy_from.first_enabled_elmt;
+      last_enabled_elmt = copy_from.last_enabled_elmt;
+      // if we have bounds, make sure they're trimmed to what we actually cover
+      if((first_enabled_elmt >= 0) && (first_enabled_elmt < first_element)) {
+	first_enabled_elmt = first_element;
+      }
+      if((last_enabled_elmt >= 0) && (last_enabled_elmt >= (first_element + num_elements))) {
+	last_enabled_elmt = first_element + num_elements - 1;
+      }
+      // figure out the copy offset - must be an integral number of bytes
+      ptrdiff_t copy_byte_offset = (first_element - copy_from.first_element);
+      assert((copy_from.first_element + (copy_byte_offset << 3)) == first_element);
+
+      size_t bytes_needed = ElementMaskImpl::bytes_needed(first_element, num_elements);
+      raw_data = (char *)calloc(1, bytes_needed);  // sets initial values to 0
+
+      // how much to copy?
+      size_t bytes_avail = (ElementMaskImpl::bytes_needed(copy_from.first_element, 
+							  copy_from.num_elements) -
+			    copy_byte_offset);
+      size_t bytes_to_copy = (bytes_needed <= bytes_avail) ? bytes_needed : bytes_avail;
+
+      if(copy_from.raw_data) {
+	if(copy_byte_offset >= 0) {
+	  memcpy(raw_data, copy_from.raw_data + copy_byte_offset, bytes_to_copy);
+	} else {
+	  // we start before the input mask, so offset is applied to our pointer
+	  memcpy(raw_data + (-copy_byte_offset), copy_from.raw_data, bytes_to_copy);
+	}
+      } else {
+        assert(false);
+      }
+    }
+
+    ElementMask::ElementMask(const ElementMask &copy_from, bool trim /*= false*/)
     {
       first_element = copy_from.first_element;
       num_elements = copy_from.num_elements;
       first_enabled_elmt = copy_from.first_enabled_elmt;
       last_enabled_elmt = copy_from.last_enabled_elmt;
+      ptrdiff_t copy_byte_offset = 0;
+      if(trim) {
+	// trimming from the end is easy - just reduce num_elements
+	if(last_enabled_elmt >= 0) {
+	  assert(last_enabled_elmt < (first_element + num_elements));
+	  num_elements = last_enabled_elmt + 1 - first_element;
+	}
+
+	// trimming from the beginning requires stepping by units of 8 so that we can copy bytes
+	if(first_enabled_elmt > first_element) {
+	  assert(first_enabled_elmt < (first_element + num_elements));
+	  copy_byte_offset = (first_enabled_elmt - first_element) >> 3;  // truncates
+	  first_element += (copy_byte_offset << 3); // convert back to bits
+	  num_elements -= (copy_byte_offset << 3);
+	}
+      }
+      assert(num_elements >= 0);
+	
       size_t bytes_needed = ElementMaskImpl::bytes_needed(first_element, num_elements);
-      //if (raw_data)
-      //  free(raw_data);
-      raw_data = calloc(1, bytes_needed);
+      raw_data = (char *)calloc(1, bytes_needed);
 
       if(copy_from.raw_data) {
-	memcpy(raw_data, copy_from.raw_data, bytes_needed);
+	memcpy(raw_data, copy_from.raw_data + copy_byte_offset, bytes_needed);
       } else {
-        assert(false);
+	assert(false);
       }
     }
 
@@ -2687,7 +2741,7 @@ namespace Realm {
       size_t bytes_needed = rhs.raw_size();
       if (raw_data)
         free(raw_data);
-      raw_data = calloc(1, bytes_needed);
+      raw_data = (char *)calloc(1, bytes_needed);
       if (rhs.raw_data)
       {
         memcpy(raw_data, rhs.raw_data, bytes_needed);
@@ -4039,8 +4093,11 @@ namespace LegionRuntime {
     {
       assert(fill_size == fill_value_size);
       size_t field_start = 0, field_size = 0, within_field = 0;
-      size_t bytes = find_field(get_field_sizes(), fill_offset, fill_size,
-                                field_start, field_size, within_field);
+#ifndef NDEBUG
+      size_t bytes =
+#endif
+	find_field(get_field_sizes(), fill_offset, fill_size,
+		   field_start, field_size, within_field);
       assert(bytes == fill_size);
       if (domain.get_dim() == 0) {
         if (linearization.get_dim() == 1) {
@@ -5212,8 +5269,11 @@ namespace LegionRuntime {
         RegionInstanceImpl *inst = rt->get_instance_impl(it->inst);
         // Find the field data for this field
         size_t field_start = 0, field_size = 0, within_field = 0;
-        size_t bytes = find_field(inst->get_field_sizes(), it->field_offset,
-                                  it->field_size, field_start, field_size, within_field);
+#ifndef NDEBUG
+        size_t bytes =
+#endif
+	  find_field(inst->get_field_sizes(), it->field_offset,
+		     it->field_size, field_start, field_size, within_field);
         // Should have at least enough bytes to read
         assert(bytes >= it->field_size);
         // Now iterate over all the points in the element space 
@@ -5323,8 +5383,11 @@ namespace LegionRuntime {
         RegionInstanceImpl *inst = rt->get_instance_impl(it->inst);
         // Find the field data for this field
         size_t field_start = 0, field_size = 0, within_field = 0;
-        size_t bytes = find_field(inst->get_field_sizes(), it->field_offset,
-                                  it->field_size, field_start, field_size, within_field);
+#ifndef NDEBUG
+        size_t bytes =
+#endif
+	  find_field(inst->get_field_sizes(), it->field_offset,
+		     it->field_size, field_start, field_size, within_field);
         // Should have at least enough bytes to read
         assert(bytes >= it->field_size);
         IndexSpaceImpl *source = rt->get_metadata_impl(it->index_space);
@@ -5380,8 +5443,11 @@ namespace LegionRuntime {
         RegionInstanceImpl *inst = rt->get_instance_impl(it->inst);
         // Find the field data for this field
         size_t field_start = 0, field_size = 0, within_field = 0;
-        size_t bytes = find_field(inst->get_field_sizes(), it->field_offset,
-                                  it->field_size, field_start, field_size, within_field);
+#ifndef NDEBUG
+        size_t bytes =
+#endif
+	  find_field(inst->get_field_sizes(), it->field_offset,
+		     it->field_size, field_start, field_size, within_field);
         // Should have at least enough bytes to read
         assert(bytes >= it->field_size);
         IndexSpaceImpl *source = rt->get_metadata_impl(it->index_space);
@@ -5605,7 +5671,7 @@ namespace LegionRuntime {
 	      size_t offset = i->offset;
 	      size_t size = i->size;
 	      while(size > 0) {
-		size_t field_start, field_size, within_field;
+		size_t field_start = 0, field_size = 0, within_field = 0;
 		size_t bytes = find_field(inst->get_field_sizes(), offset, size,
 					  field_start, field_size, within_field);
 		// printf("RD(%d,%d,%d)(%zd,%zd,%zd,%zd,%zd)(%p,%p)\n",
@@ -5630,7 +5696,7 @@ namespace LegionRuntime {
 	      size_t offset = i->offset;
 	      size_t size = i->size;
 	      while(size > 0) {
-		size_t field_start, field_size, within_field;
+		size_t field_start = 0, field_size = 0, within_field = 0;
 		size_t bytes = find_field(inst->get_field_sizes(), offset, size,
 					  field_start, field_size, within_field);
 		// printf("WR(%d,%d,%d)(%zd,%zd,%zd,%zd,%zd)(%p,%p)\n",

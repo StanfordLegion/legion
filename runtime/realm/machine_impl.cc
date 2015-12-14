@@ -121,8 +121,9 @@ namespace Realm {
       AutoHSLLock al(mutex);
 
       const size_t *cur = (const size_t *)args;
+#ifndef NDEBUG
       const size_t *limit = (const size_t *)(((const char *)args)+arglen);
-
+#endif
       while(1) {
 	assert(cur < limit);
 	if(*cur == NODE_ANNOUNCE_DONE) break;

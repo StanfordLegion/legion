@@ -197,11 +197,6 @@ terra load_circuit(runtime : c.legion_runtime_t,
   var fa_node_voltage =
     c.legion_physical_region_get_field_accessor_array(all_nodes[3], all_nodes_fields[3])
   var all_nodes_ispace = c.legion_physical_region_get_logical_region(all_nodes[0]).index_space
-  do
-    var node_allocator = c.legion_index_allocator_create(runtime, ctx, all_nodes_ispace)
-    c.legion_index_allocator_alloc(node_allocator, conf.num_pieces * conf.nodes_per_piece)
-    c.legion_index_allocator_destroy(node_allocator)
-  end
   --var first_nodes : &c.legion_ptr_t =
   --  [&c.legion_ptr_t](c.malloc(conf.num_pieces * sizeof(c.legion_ptr_t)))
   var piece_node_ptrs : &&c.legion_ptr_t =
@@ -266,11 +261,6 @@ terra load_circuit(runtime : c.legion_runtime_t,
   var first_wires : &c.legion_ptr_t =
     [&c.legion_ptr_t](c.malloc(conf.num_pieces * sizeof(c.legion_ptr_t)))
   var all_wires_ispace = c.legion_physical_region_get_logical_region(all_wires[0]).index_space
-  do
-    var wire_allocator = c.legion_index_allocator_create(runtime, ctx, all_wires_ispace)
-    c.legion_index_allocator_alloc(wire_allocator, conf.num_pieces * conf.wires_per_piece)
-    c.legion_index_allocator_destroy(wire_allocator)
-  end
   do
     var itr = c.legion_index_iterator_create(runtime, ctx, all_wires_ispace)
     for n = 0, conf.num_pieces do
@@ -567,9 +557,9 @@ task toplevel()
   var conf : Config
   conf.num_loops = 5
   conf.num_pieces = 4
-  conf.nodes_per_piece = 2
-  conf.wires_per_piece = 4
-  conf.pct_wire_in_piece = 95
+  conf.nodes_per_piece = 4
+  conf.wires_per_piece = 8
+  conf.pct_wire_in_piece = 80
   conf.random_seed = 12345
   conf.steps = STEPS
   conf.sync = 0
@@ -586,6 +576,9 @@ task toplevel()
 
   var all_nodes = region(ispace(ptr, num_circuit_nodes), node)
   var all_wires = region(ispace(ptr, num_circuit_wires), wire(wild, wild, wild))
+
+  new(ptr(node, all_nodes), num_circuit_nodes)
+  new(ptr(wire(wild, wild, wild), all_wires), num_circuit_wires)
 
   -- report mesh size in bytes
   do

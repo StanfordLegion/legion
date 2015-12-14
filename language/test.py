@@ -117,8 +117,9 @@ class Counter:
 
 tests = [
     # FIXME: Move this flag into a per-test parameter so we don't use it everywhere.
+    # Don't include backtraces on those expected to fail
     ('compile_fail', (test_compile_fail, (['-fbounds-checks', '1'],
-                                          {'REALM_BACKTRACE': '1'})),
+                                          { })),
      (os.path.join('tests', 'compile_fail'),)),
     ('run_pass', (test_run_pass, (['-fbounds-checks', '1'],
                                   {'REALM_BACKTRACE': '1'})),

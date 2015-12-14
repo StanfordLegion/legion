@@ -359,3 +359,33 @@ legion_terra_cached_index_iterator_reset(
 
   handle->reset();
 }
+
+unsigned
+legion_terra_task_launcher_get_region_requirement_logical_region(
+  legion_task_launcher_t launcher_,
+  legion_logical_region_t region_)
+{
+  TaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  LogicalRegion region = CObjectWrapper::unwrap(region_);
+
+  unsigned idx = (unsigned)-1;
+  for (unsigned i = 0; i < launcher->region_requirements.size(); i++) {
+    if (launcher->region_requirements[i].handle_type == SINGULAR &&
+        launcher->region_requirements[i].region == region) {
+      idx = i;
+      break;
+    }
+  }
+  return idx;
+}
+
+bool
+legion_terra_task_launcher_has_field(
+  legion_task_launcher_t launcher_,
+  unsigned idx,
+  legion_field_id_t fid)
+{
+  TaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  const RegionRequirement &req = launcher->region_requirements[idx];
+  return req.privilege_fields.count(fid) > 0;
+}

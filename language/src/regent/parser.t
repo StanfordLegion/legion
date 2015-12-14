@@ -16,6 +16,7 @@
 
 local parsing = require("parsing")
 local ast = require("regent/ast")
+local data = require("regent/data")
 local std = require("regent/std")
 
 local parser = {}
@@ -391,6 +392,25 @@ function parser.constraint(p)
   }
 end
 
+function parser.is_disjointness_kind(p)
+  return p:matches("aliased") or p:matches("disjoint")
+end
+
+function parser.disjointness_kind(p)
+  local start = ast.save(p)
+  if p:nextif("aliased") then
+    return ast.unspecialized.disjointness_kind.Aliased {
+      span = ast.span(start, p),
+    }
+  elseif p:nextif("disjoint") then
+    return ast.unspecialized.disjointness_kind.Disjoint {
+      span = ast.span(start, p),
+    }
+  else
+    p:error("expected disjointness")
+  end
+end
+
 function parser.expr_prefix(p)
   local start = ast.save(p)
   if p:nextif("(") then
@@ -503,9 +523,14 @@ function parser.expr_prefix(p)
   elseif p:nextif("new") then
     p:expect("(")
     local pointer_type_expr = p:luaexpr()
+    local extent = false
+    if p:nextif(",") then
+      extent = p:expr()
+    end
     p:expect(")")
     return ast.unspecialized.expr.New {
       pointer_type_expr = pointer_type_expr,
+      extent = extent,
       options = ast.default_options(),
       span = ast.span(start, p),
     }
@@ -580,29 +605,83 @@ function parser.expr_prefix(p)
 
   elseif p:nextif("partition") then
     p:expect("(")
-    local disjointness_expr = p:luaexpr()
+    if p:is_disjointness_kind() then
+      local disjointness = p:disjointness_kind()
+      p:expect(",")
+      local region = p:expr()
+      p:expect(",")
+      local coloring = p:expr()
+      p:expect(")")
+      return ast.unspecialized.expr.Partition {
+        disjointness = disjointness,
+        region = region,
+        coloring = coloring,
+        options = ast.default_options(),
+        span = ast.span(start, p),
+      }
+    elseif p:nextif("equal") then
+      p:expect(",")
+      local region = p:expr()
+      p:expect(",")
+      local colors = p:expr()
+      p:expect(")")
+      return ast.unspecialized.expr.PartitionEqual {
+        region = region,
+        colors = colors,
+        options = ast.default_options(),
+        span = ast.span(start, p),
+      }
+    else
+      local region = p:expr_region_root()
+      p:expect(",")
+      local colors = p:expr()
+      p:expect(")")
+      return ast.unspecialized.expr.PartitionByField {
+        region = region,
+        colors = colors,
+        options = ast.default_options(),
+        span = ast.span(start, p),
+      }
+    end
+
+  elseif p:nextif("image") then
+    p:expect("(")
+    local parent = p:expr()
     p:expect(",")
-    local region_type_expr = p:luaexpr()
+    local partition = p:expr()
     p:expect(",")
-    local coloring = p:expr()
+    local region = p:expr_region_root()
     p:expect(")")
-    return ast.unspecialized.expr.Partition {
-      disjointness_expr = disjointness_expr,
-      region_type_expr = region_type_expr,
-      coloring = coloring,
+    return ast.unspecialized.expr.Image {
+      parent = parent,
+      partition = partition,
+      region = region,
+      options = ast.default_options(),
+      span = ast.span(start, p),
+    }
+
+  elseif p:nextif("preimage") then
+    p:expect("(")
+    local parent = p:expr()
+    p:expect(",")
+    local partition = p:expr()
+    p:expect(",")
+    local region = p:expr_region_root()
+    p:expect(")")
+    return ast.unspecialized.expr.Preimage {
+      parent = parent,
+      partition = partition,
+      region = region,
       options = ast.default_options(),
       span = ast.span(start, p),
     }
 
   elseif p:nextif("cross_product") then
     p:expect("(")
-    local arg_type_exprs = terralib.newlist()
-    repeat
-      arg_type_exprs:insert(p:luaexpr())
-    until not p:nextif(",")
+    local args = p:expr_list()
     p:expect(")")
     return ast.unspecialized.expr.CrossProduct {
-      arg_type_exprs = arg_type_exprs,
+      args = args,
       options = ast.default_options(),
       span = ast.span(start, p),
     }
@@ -1011,6 +1090,8 @@ parser.expr = parsing.Pratt()
   :infix(">=", 20, parser.expr_binary_left)
   :infix("==", 20, parser.expr_binary_left)
   :infix("~=", 20, parser.expr_binary_left)
+  :infix("&", 15, parser.expr_binary_left)
+  :infix("|", 12, parser.expr_binary_left)
   :infix("and", 10, parser.expr_binary_left)
   :infix("or", 10, parser.expr_binary_left)
   :prefix(parsing.default, parser.expr_simple)
@@ -1380,6 +1461,14 @@ function parser.stat(p)
   end
 end
 
+function parser.stat_task_name(p)
+  local name = terralib.newlist()
+  repeat
+    name:insert(p:expect(p.name).value)
+  until not p:nextif(".")
+  return data.newtuple(unpack(name))
+end
+
 function parser.stat_task_params(p)
   p:expect("(")
   local params = terralib.newlist()
@@ -1435,7 +1524,7 @@ end
 function parser.stat_task(p, options)
   local start = ast.save(p)
   p:expect("task")
-  local name = p:expect(p.name).value
+  local name = p:stat_task_name()
   local params = p:stat_task_params()
   local return_type = p:stat_task_return()
   local privileges, coherence_modes, flags, conditions, constraints =

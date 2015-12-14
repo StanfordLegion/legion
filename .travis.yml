@@ -15,6 +15,11 @@ matrix:
   exclude:
     - os: osx
       compiler: gcc
+# blacklist some branches
+branches:
+  except:
+    - deppart
+    - rdir
 # addons:
 #   apt:
 #     sources:

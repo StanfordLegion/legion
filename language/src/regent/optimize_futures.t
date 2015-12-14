@@ -151,6 +151,18 @@ function analyze_var_flow.expr(cx, node)
   elseif node:is(ast.typed.expr.Partition) then
     return nil
 
+  elseif node:is(ast.typed.expr.PartitionEqual) then
+    return nil
+
+  elseif node:is(ast.typed.expr.PartitionByField) then
+    return nil
+
+  elseif node:is(ast.typed.expr.Image) then
+    return nil
+
+  elseif node:is(ast.typed.expr.Preimage) then
+    return nil
+
   elseif node:is(ast.typed.expr.CrossProduct) then
     return nil
 
@@ -357,7 +369,7 @@ function analyze_var_flow.stat(cx, node)
   end
 end
 
-function compute_var_futures(cx)
+local function compute_var_futures(cx)
   local inflow = {}
   for v1, flow in pairs(cx.var_flows) do
     for v2, _ in pairs(flow) do
@@ -387,7 +399,7 @@ end
 
 local optimize_futures = {}
 
-function concretize(node)
+local function concretize(node)
   local expr_type = std.as_read(node.expr_type)
   if std.is_future(expr_type) then
     return ast.typed.expr.FutureGetResult {
@@ -400,7 +412,7 @@ function concretize(node)
   return node
 end
 
-function promote(node)
+local function promote(node)
   local expr_type = std.as_read(node.expr_type)
   if not std.is_future(expr_type) then
     return ast.typed.expr.Future {
@@ -582,6 +594,46 @@ function optimize_futures.expr_partition(cx, node)
   return node {
     region = region,
     coloring = coloring,
+  }
+end
+
+function optimize_futures.expr_partition_equal(cx, node)
+  local region = concretize(optimize_futures.expr(cx, node.region))
+  local colors = concretize(optimize_futures.expr(cx, node.colors))
+  return node {
+    region = region,
+    colors = colors,
+  }
+end
+
+function optimize_futures.expr_partition_by_field(cx, node)
+  local region = concretize(optimize_futures.expr_region_root(cx, node.region))
+  local colors = concretize(optimize_futures.expr(cx, node.colors))
+  return node {
+    region = region,
+    colors = colors,
+  }
+end
+
+function optimize_futures.expr_image(cx, node)
+  local parent = concretize(optimize_futures.expr(cx, node.parent))
+  local partition = concretize(optimize_futures.expr(cx, node.partition))
+  local region = concretize(optimize_futures.expr_region_root(cx, node.region))
+  return node {
+    parent = parent,
+    partition = partition,
+    region = region,
+  }
+end
+
+function optimize_futures.expr_preimage(cx, node)
+  local parent = concretize(optimize_futures.expr(cx, node.parent))
+  local partition = concretize(optimize_futures.expr(cx, node.partition))
+  local region = concretize(optimize_futures.expr_region_root(cx, node.region))
+  return node {
+    parent = parent,
+    partition = partition,
+    region = region,
   }
 end
 
@@ -800,6 +852,18 @@ function optimize_futures.expr(cx, node)
 
   elseif node:is(ast.typed.expr.Partition) then
     return optimize_futures.expr_partition(cx, node)
+
+  elseif node:is(ast.typed.expr.PartitionEqual) then
+    return optimize_futures.expr_partition_equal(cx, node)
+
+  elseif node:is(ast.typed.expr.PartitionByField) then
+    return optimize_futures.expr_partition_by_field(cx, node)
+
+  elseif node:is(ast.typed.expr.Image) then
+    return optimize_futures.expr_image(cx, node)
+
+  elseif node:is(ast.typed.expr.Preimage) then
+    return optimize_futures.expr_preimage(cx, node)
 
   elseif node:is(ast.typed.expr.CrossProduct) then
     return optimize_futures.expr_cross_product(cx, node)

@@ -20,7 +20,7 @@ import os, platform, subprocess, sys
 
 os_name = platform.system()
 
-root_dir = os.path.realpath(os.path.dirname(__file__))
+root_dir = os.path.dirname(os.path.realpath(__file__))
 legion_dir = os.path.dirname(root_dir)
 
 terra_dir = os.path.join(root_dir, 'terra')
@@ -32,14 +32,6 @@ legion_runtime_dir = os.path.join(runtime_dir, 'legion')
 bindings_dir = os.path.join(legion_dir, 'bindings', 'terra')
 # CUDA directoy is hard-coded, but should be entered via an shell variable
 cuda_dir = "/usr/local/cuda/include"
-
-terra_path = [
-    '?.t',
-    os.path.join(root_dir, 'src', '?.t'),
-    os.path.join(terra_dir, 'tests', 'lib', '?.t'),
-    os.path.join(terra_dir, 'release', 'include', '?.t'),
-    os.path.join(bindings_dir, '?.t'),
-]
 
 include_path = [
     bindings_dir,
@@ -62,13 +54,22 @@ lib_path = (
  ])
 
 terra_exe = os.path.join(terra_dir, 'terra')
-terra_env = {
-    'TERRA_PATH': ';'.join(terra_path),
-    LD_LIBRARY_PATH: ':'.join(lib_path),
-    'INCLUDE_PATH': ';'.join(include_path),
-}
-
 def regent(args, env = {}, **kwargs):
+    terra_path = (
+        ['?.t'] +
+        ([os.path.join(os.path.dirname(os.path.realpath(args[0])), '?.t')]
+          if len(args) >= 1 and os.path.exists(args[0]) else []) +
+        [os.path.join(root_dir, 'src', '?.t'),
+        os.path.join(terra_dir, 'tests', 'lib', '?.t'),
+        os.path.join(terra_dir, 'release', 'include', '?.t'),
+        os.path.join(bindings_dir, '?.t')])
+
+    terra_env = {
+        'TERRA_PATH': ';'.join(terra_path),
+        LD_LIBRARY_PATH: ':'.join(lib_path),
+        'INCLUDE_PATH': ';'.join(include_path),
+    }
+
     cmd = []
     if 'LAUNCHER' in os.environ:
         cmd = cmd + (os.environ['LAUNCHER'].split()

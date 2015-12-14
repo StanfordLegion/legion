@@ -299,6 +299,7 @@ typedef enum legion_error_t {
   ERROR_INVALID_SERDEZ_ID = 136,
   ERROR_TRACE_VIOLATION = 137,
   ERROR_INVALID_TARGET_PROC = 138,
+  ERROR_INCOMPLETE_TRACE = 139,
 }  legion_error_t;
 
 // enum and namepsaces don't really get along well
@@ -368,15 +369,11 @@ enum {
   FIRST_AVAILABLE_SEMANTIC_TAG = 1,
 };
 
-typedef enum legion_file_mode_t {
-  LEGION_FILE_READ_ONLY,
-  LEGION_FILE_READ_WRITE,
-} legion_file_mode_t;
-
 //==========================================================================
 //                                Types
 //==========================================================================
 
+typedef legion_lowlevel_file_mode_t legion_file_mode_t;
 typedef legion_lowlevel_processor_kind_t legion_processor_kind_t;
 typedef legion_lowlevel_memory_kind_t legion_memory_kind_t;
 typedef legion_lowlevel_domain_max_rect_dim_t legion_domain_max_rect_dim_t;
