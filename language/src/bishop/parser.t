@@ -263,12 +263,18 @@ function parser.rule(p)
   }
 end
 
-function parser.rules(p)
-  local rules = terralib.newlist()
-  while not p:matches("end") do
-    rules:insert(p:rule())
-  end
-  return rules
+function parser.assignment(p)
+  local pos = ast.save(p)
+  p:expect("$")
+  local token = p:next(p.name)
+  local binder = token.value
+  p:expect("=")
+  local value = p:expr()
+  return ast.unspecialized.Assignment {
+    binder = binder,
+    value = value,
+    position = pos,
+  }
 end
 
 function parser.top(p)
@@ -278,15 +284,25 @@ function parser.top(p)
   p:expect("mapper")
   local pos = ast.save(p)
 
-  local rules = p:rules()
+  local assignments = terralib.newlist()
+  local rules = terralib.newlist()
+
+  while not p:matches("end") do
+    if p:matches("$") then
+      assignments:insert(p:assignment())
+    else
+      rules:insert(p:rule())
+    end
+  end
 
   if not p:matches("end") then
     p:error("unexpected token in top-level statement")
   end
   p:expect("end")
 
-  return ast.unspecialized.Rules {
+  return ast.unspecialized.Mapper {
     rules = rules,
+    assignments = assignments,
     position = pos,
   }
 end

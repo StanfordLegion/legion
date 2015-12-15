@@ -363,7 +363,15 @@ local function compare_rules(rule1, rule2)
   return true
 end
 
-function specialize.rules(node)
+function specialize.assignment(node)
+  return ast.specialized.Assignment {
+    binder = node.binder,
+    value = specialize.expr(node.value),
+    position = node.position,
+  }
+end
+
+function specialize.mapper(node)
   local flattened = terralib.newlist()
   node.rules:map(function(rule)
     rule.selectors:map(function(selector)
@@ -386,9 +394,12 @@ function specialize.rules(node)
   table.sort(task_rules, compare_rules)
   table.sort(region_rules, compare_rules)
 
-  return ast.specialized.Rules {
+  local assignments = node.assignments:map(specialize.assignment)
+
+  return ast.specialized.Mapper {
     task_rules = task_rules,
     region_rules = region_rules,
+    assignments = assignments,
     position = node.position,
   }
 end

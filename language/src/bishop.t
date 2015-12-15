@@ -57,10 +57,10 @@ local language = {
 function language:statement(lex)
   local node = parser:parse(lex)
   local function ctor(environment_function)
-    node = specialize.rules(node)
-    node = type_check.rules(node)
+    node = specialize.mapper(node)
+    node = type_check.mapper(node)
     return function()
-      return codegen.rules(node)
+      return codegen.mapper(node)
     end
   end
   return ctor, {"__bishop_jit_mappers__"}

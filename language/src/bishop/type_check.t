@@ -18,6 +18,7 @@
 local ast = require("bishop/ast")
 local log = require("bishop/log")
 local std = require("bishop/std")
+local symbol_table = require("regent/symbol_table")
 
 local type_check = {}
 
@@ -181,8 +182,7 @@ function type_check.expr(type_env, expr)
       log.error(expr.index, "indexing expression requires to have integer type," ..
         " but received '" .. tostring(index.expr_type) .. "'")
     end
-    if not (std.is_processor_list_type(value.expr_type) or
-            std.is_memory_list_type(value.expr_type) or
+    if not (std.is_list_type(value.expr_type) or
             std.is_point_type(value.expr_type)) then
       log.error(expr.value, "index access requires list or point type," ..
         " but received '" .. tostring(value.expr_type) .. "'")
@@ -206,8 +206,7 @@ function type_check.expr(type_env, expr)
 
   elseif expr:is(ast.specialized.expr.Filter) then
     local value = type_check.expr(type_env, expr.value)
-    if not (std.is_processor_list_type(value.expr_type) or
-            std.is_memory_list_type(value.expr_type)) then
+    if not std.is_list_type(value.expr_type) then
       log.error(expr.value, "filter is not valid on expressions of " ..
         "type '" .. tostring(value.expr_type) .. "'")
     end
@@ -237,8 +236,7 @@ function type_check.expr(type_env, expr)
       }
 
     elseif expr.field == "size" then
-      if not (std.is_processor_list_type(value.expr_type) or
-              std.is_memory_list_type(value.expr_type)) then
+      if not std.is_list_type(value.expr_type) then
         log.error(expr, "value of type '" .. tostring(value.expr_type) ..
           "' does not have field '" .. expr.field .. "'")
       end
@@ -267,7 +265,7 @@ function type_check.expr(type_env, expr)
     }
 
   elseif expr:is(ast.specialized.expr.Variable) then
-    local assigned_type = type_env[expr.value]
+    local assigned_type = type_env:safe_lookup(expr.value)
     if not assigned_type then
       log.error(expr, "variable '$" .. expr.value ..
         "' was used without being bound by a pattern matching")
@@ -311,14 +309,14 @@ function type_check.element(type_env, element)
   end
   local patterns = element.patterns:map(function(pattern)
     local desired_type = type_assignment[pattern.field]
-    local existing_type = type_env[pattern.binder] or desired_type
+    local existing_type = type_env:safe_lookup(pattern.binder) or desired_type
     assert(desired_type)
     if desired_type ~= existing_type then
       log.error(pattern, "variable '$" .. pattern.binder .. "' was assigned" ..
         " to two different types '" .. tostring(existing_type) ..
         "' and '" .. tostring(desired_type) .. "'")
     end
-    type_env[pattern.binder] = desired_type
+    type_env:insert(element, pattern.binder, desired_type)
     return ast.typed.PatternMatch(pattern)
   end)
   return ctor {
@@ -379,8 +377,7 @@ function type_check.selector(type_env, selector)
   }
 end
 
-function type_check.rule(rule_type, rule)
-  local type_env = {}
+function type_check.rule(rule_type, type_env, rule)
   local selector = type_check.selector(type_env, rule.selector)
   local properties =
     rule.properties:map(curry2(type_check.property, rule_type, type_env))
@@ -391,14 +388,46 @@ function type_check.rule(rule_type, rule)
   }
 end
 
-type_check.task_rule = curry(type_check.rule, "task")
-type_check.region_rule = curry(type_check.rule, "region")
+function type_check.task_rule(type_env, rule)
+  return type_check.rule("task", type_env, rule)
+end
+function type_check.region_rule(type_env, rule)
+  return type_check.rule("region", type_env, rule)
+end
 
-function type_check.rules(rules)
-  return ast.typed.Rules {
-    task_rules = rules.task_rules:map(type_check.task_rule),
-    region_rules = rules.region_rules:map(type_check.region_rule),
-    position = rules.position,
+function type_check.assignment(type_env, assignment)
+  local value = type_check.expr(type_env, assignment.value)
+  if type_env:safe_lookup(assignment.binder) then
+    log.error(assignment, "variable '$" .. assignment.binder ..
+      "' has been already defined")
+  end
+  type_env:insert(assignment, assignment.binder, value.expr_type)
+  return ast.typed.Assignment {
+    binder = assignment.binder,
+    value = value,
+    position = assignment.position,
+  }
+end
+
+function type_check.mapper(mapper)
+  local type_env = symbol_table:new_global_scope()
+  local assignments = mapper.assignments:map(function(assignment)
+    return type_check.assignment(type_env, assignment)
+  end)
+
+  local task_rules = mapper.task_rules:map(function(rule)
+    local local_type_env = type_env:new_local_scope()
+    return type_check.task_rule(local_type_env, rule)
+  end)
+  local region_rules = mapper.region_rules:map(function(rule)
+    local local_type_env = type_env:new_local_scope()
+    return type_check.region_rule(local_type_env, rule)
+  end)
+  return ast.typed.Mapper {
+    assignments = assignments,
+    task_rules = task_rules,
+    region_rules = region_rules,
+    position = mapper.position,
   }
 end
 
