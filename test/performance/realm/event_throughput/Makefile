@@ -20,10 +20,16 @@ GEN_GPU_SRC	:=		    # .cu files
 
 # You can modify these variables, some will be appended to by the runtime makefile
 INC_FLAGS	:=
-CC_FLAGS	:= 
 NVCC_FLAGS	:=
 GASNET_FLAGS	:=
 LD_FLAGS	:=
+
+# since we're just doing Realm and not Legion, we need to strip out a few
+#  things that might have come in from CC_FLAGS that require Legion goo
+override CC_FLAGS := $(filter-out -DBOUNDS_CHECKS, \
+                     $(filter-out -DPRIVILEGE_CHECKS, \
+                     $(filter-out -DLEGION_SPY, \
+                       $(CC_FLAGS))))
 
 TESTARGS.default =
 RUNMODE ?= default
