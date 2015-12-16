@@ -13,9 +13,9 @@
 -- limitations under the License.
 
 -- fails-with:
--- type_mismatch_unary.rg:25: unary op - requires the rhs to be of integer type
---   target : processors[-$proc];
---                        ^
+-- type_mismatch_unary.rg:25: unary op '-' expects integer type, but got type 'processor_type'
+-- target : processors[-$proc];
+-- ^
 
 import "bishop"
 
