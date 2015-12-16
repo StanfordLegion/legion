@@ -957,14 +957,28 @@ function type_check.expr_raw_context(cx, node)
   }
 end
 
+local function extract_field_path(node)
+  if node:is(ast.specialized.expr.ID) then
+    return node, data.newtuple()
+  elseif node:is(ast.specialized.expr.FieldAccess) then
+    local base, path = extract_field_path(node.value)
+    return base, path .. data.newtuple(node.field_name)
+  else
+    log.error(node, "unexpected type of expression in raw operator")
+  end
+end
+
 function type_check.expr_raw_fields(cx, node)
-  local region = type_check.expr(cx, node.region)
+  local base, region_field_path = extract_field_path(node.region)
+  local region = type_check.expr(cx, base)
   local region_type = std.check_read(cx, region)
 
   local field_paths, _ = std.flatten_struct_fields(region_type:fspace())
   local privilege_fields = terralib.newlist()
   for _, field_path in ipairs(field_paths) do
-    if std.check_any_privilege(cx, region_type, field_path) then
+    if std.check_any_privilege(cx, region_type, field_path) and
+       field_path:starts_with(region_field_path)
+    then
       privilege_fields:insert(field_path)
     end
   end
@@ -980,13 +994,16 @@ function type_check.expr_raw_fields(cx, node)
 end
 
 function type_check.expr_raw_physical(cx, node)
-  local region = type_check.expr(cx, node.region)
+  local base, region_field_path = extract_field_path(node.region)
+  local region = type_check.expr(cx, base)
   local region_type = std.check_read(cx, region)
 
   local field_paths, _ = std.flatten_struct_fields(region_type:fspace())
   local privilege_fields = terralib.newlist()
   for _, field_path in ipairs(field_paths) do
-    if std.check_any_privilege(cx, region_type, field_path) then
+    if std.check_any_privilege(cx, region_type, field_path) and
+       field_path:starts_with(region_field_path)
+    then
       privilege_fields:insert(field_path)
     end
   end
