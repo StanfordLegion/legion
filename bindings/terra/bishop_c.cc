@@ -30,6 +30,7 @@ using namespace LegionRuntime::HighLevel::MappingUtilities ;
 
 static vector<bishop_task_rule_t> task_rules;
 static vector<bishop_region_rule_t> region_rules;
+static bishop_mapper_state_init_fn_t mapper_init;
 
 extern Logger::Category log_bishop;
 
@@ -41,6 +42,7 @@ bishop_mapper_registration_callback(Machine machine, Runtime *runtime,
        it != local_procs.end(); it++)
   {
     runtime->replace_default_mapper(new BishopMapper(task_rules, region_rules,
+                                                     mapper_init,
                                                      machine, runtime, *it),
                                     *it);
   }
@@ -50,12 +52,14 @@ void
 register_bishop_mappers(bishop_task_rule_t* _task_rules,
                         unsigned _num_task_rules,
                         bishop_region_rule_t* _region_rules,
-                        unsigned _num_region_rules)
+                        unsigned _num_region_rules,
+                        bishop_mapper_state_init_fn_t _mapper_init)
 {
   for (unsigned i = 0; i < _num_task_rules; ++i)
     task_rules.push_back(_task_rules[i]);
   for (unsigned i = 0; i < _num_region_rules; ++i)
     region_rules.push_back(_region_rules[i]);
+  mapper_init = _mapper_init;
 
   HighLevelRuntime::set_registration_callback(
       bishop_mapper_registration_callback);
@@ -69,12 +73,13 @@ bishop_create_##NAME##_list(unsigned size)               \
   l.size = size;                                         \
   if (size > 0)                                          \
     l.list = (BASE*)malloc(sizeof(BASE) * size);         \
+  l.persistent = 0;                                      \
   return l;                                              \
 }                                                        \
 void                                                     \
 bishop_delete_##NAME##_list(TYPE l)                      \
 {                                                        \
-  if (l.size > 0) free(l.list);                          \
+  if (!l.persistent && l.size > 0) free(l.list);         \
 }                                                        \
 
 LIST_OP(processor, bishop_processor_list_t, legion_processor_t)

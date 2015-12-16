@@ -252,9 +252,12 @@ end
 
 ast:inner("unspecialized", { "position" })
 
-ast.unspecialized:leaf("Rules", { "rules" })
-function ast.unspecialized.Rules:unparse()
+ast.unspecialized:leaf("Mapper", { "rules", "assignments" })
+function ast.unspecialized.Mapper:unparse()
   local str = ""
+  for i = 1, #self.assignments do
+    str = str .. self.assignments[i]:unparse() .. "\n"
+  end
   for i = 1, #self.rules do
     str = str .. self.rules[i]:unparse()
   end
@@ -330,6 +333,11 @@ function ast.unspecialized.PatternMatch:unparse()
   return self.field .. " = " .. self.binder
 end
 
+ast.unspecialized:leaf("Assignment", { "binder", "value" })
+function ast.unspecialized.Assignment:unparse()
+  return "$" .. self.binder .. " = " .. self.value:unparse()
+end
+
 ast.unspecialized:inner("expr")
 ast.unspecialized.expr:leaf("Unary", { "rhs", "op" })
 function ast.unspecialized.expr.Unary:unparse()
@@ -372,7 +380,7 @@ end
 
 ast:inner("specialized", { "position" })
 
-ast.specialized:leaf("Rules", { "task_rules", "region_rules" })
+ast.specialized:leaf("Mapper", { "task_rules", "region_rules", "assignments" })
 
 ast.specialized:inner("rule", { "selector", "properties" })
 ast.specialized.rule:leaf("Task", {})
@@ -423,6 +431,10 @@ ast.specialized:leaf("PatternMatch", { "field", "binder" })
 function ast.specialized.PatternMatch:unparse()
   return self.field .. "=$" .. self.binder
 end
+ast.specialized:leaf("Assignment", { "binder", "value" })
+function ast.specialized.Assignment:unparse()
+  return "$" .. self.binder .. " = " .. self.value:unparse()
+end
 
 ast.specialized:inner("expr")
 ast.specialized.expr:leaf("Unary", { "rhs", "op" })
@@ -455,7 +467,7 @@ ast.specialized.expr.Keyword.unparse = ast.unspecialized.expr.Keyword.unparse
 
 ast:inner("typed", { "position" })
 
-ast.typed:leaf("Rules", { "task_rules", "region_rules" })
+ast.typed:leaf("Mapper", { "task_rules", "region_rules", "assignments" })
 ast.typed:inner("rule", { "selector", "properties" })
 ast.typed.rule:leaf("Task", {})
 ast.typed.rule:leaf("Region", {})
@@ -490,6 +502,10 @@ function ast.typed.FilterConstraint:unparse()
   return self.field .. "=" .. self.value:unparse()
 end
 ast.typed:leaf("PatternMatch", { "field", "binder" })
+ast.typed:leaf("Assignment", { "binder", "value" })
+function ast.typed.Assignment:unparse()
+  return "$" .. self.binder .. " = " .. self.value:unparse()
+end
 
 ast.typed:inner("expr", { "expr_type" })
 ast.typed.expr:leaf("Unary", { "rhs", "op" })

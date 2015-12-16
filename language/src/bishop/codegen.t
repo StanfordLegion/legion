@@ -103,7 +103,7 @@ function codegen.type(ty)
   end
 end
 
-function codegen.expr(binders, node)
+function codegen.expr(binders, state_var, node)
   local value = terralib.newsymbol(codegen.type(node.expr_type))
   local actions = quote
     var [value]
@@ -138,7 +138,7 @@ function codegen.expr(binders, node)
     end
 
   elseif node:is(ast.typed.expr.Unary) then
-    local rhs = codegen.expr(binders, node.rhs)
+    local rhs = codegen.expr(binders, state_var, node.rhs)
     actions = quote
       [rhs.actions];
       [actions];
@@ -146,8 +146,8 @@ function codegen.expr(binders, node)
     end
 
   elseif node:is(ast.typed.expr.Binary) then
-    local lhs = codegen.expr(binders, node.lhs)
-    local rhs = codegen.expr(binders, node.rhs)
+    local lhs = codegen.expr(binders, state_var, node.lhs)
+    local rhs = codegen.expr(binders, state_var, node.rhs)
     actions = quote
       [lhs.actions];
       [rhs.actions];
@@ -156,7 +156,7 @@ function codegen.expr(binders, node)
     end
 
   elseif node:is(ast.typed.expr.Filter) then
-    local base = codegen.expr(binders, node.value)
+    local base = codegen.expr(binders, state_var, node.value)
     actions = quote
       [actions];
       [base.actions];
@@ -164,7 +164,7 @@ function codegen.expr(binders, node)
     end
     node.constraints:map(function(constraint)
       assert(constraint:is(ast.typed.FilterConstraint))
-      local v = codegen.expr(binders, constraint.value)
+      local v = codegen.expr(binders, state_var, constraint.value)
       if constraint.field == "isa" then
         assert(std.is_processor_list_type(node.value.expr_type))
         assert(std.is_isa_type(constraint.value.expr_type))
@@ -199,8 +199,8 @@ function codegen.expr(binders, node)
     end)
 
   elseif node:is(ast.typed.expr.Index) then
-    local base = codegen.expr(binders, node.value)
-    local index = codegen.expr(binders, node.index)
+    local base = codegen.expr(binders, state_var, node.value)
+    local index = codegen.expr(binders, state_var, node.index)
     if std.is_point_type(node.value.expr_type) then
       actions = quote
         [actions];
@@ -230,7 +230,7 @@ function codegen.expr(binders, node)
     end
   elseif node:is(ast.typed.expr.Field) then
     if node.field == "memories" then
-      local base = codegen.expr(binders, node.value)
+      local base = codegen.expr(binders, state_var, node.value)
       actions = quote
         [actions];
         [base.actions];
@@ -243,7 +243,7 @@ function codegen.expr(binders, node)
         end
       end
     elseif node.field == "size" then
-      local base = codegen.expr(binders, node.value)
+      local base = codegen.expr(binders, state_var, node.value)
       actions = quote
         [actions];
         [base.actions];
@@ -259,14 +259,20 @@ function codegen.expr(binders, node)
       [value] = [node.value]
     end
   elseif node:is(ast.typed.expr.Variable) then
-    assert(binders[node.value])
-    actions = quote
-      [actions];
-      [value] = [ binders[node.value] ]
+    if binders[node.value] then
+      actions = quote
+        [actions];
+        [value] = [ binders[node.value] ]
+      end
+    else 
+      actions = quote
+        [actions];
+        [value] = [state_var].[node.value]
+      end
     end
   elseif node:is(ast.typed.expr.Coerce) then
     if node.expr_type == int and std.is_point_type(node.value.expr_type) then
-      local base = codegen.expr(binders, node.value)
+      local base = codegen.expr(binders, state_var, node.value)
       actions = quote
         [actions];
         [base.actions];
@@ -288,9 +294,9 @@ function codegen.expr(binders, node)
   }
 end
 
-function codegen.property(binders, rule_type, obj_var, node)
+function codegen.property(binders, state_var, rule_type, obj_var, node)
   local setter_info = property_setters:find_setter(rule_type, node)
-  local value = codegen.expr(binders, node.value)
+  local value = codegen.expr(binders, state_var, node.value)
   local actions = quote
     [value.actions];
     var result = [setter_info.fn]([obj_var], [value.value])
@@ -308,7 +314,7 @@ function codegen.property(binders, rule_type, obj_var, node)
   return actions
 end
 
-function codegen.task_rule(node)
+function codegen.task_rule(state_type, node)
   local task_var = terralib.newsymbol(c.legion_task_t)
   local is_matched = terralib.newsymbol(bool)
   local point_var = terralib.newsymbol(c.legion_domain_point_t, "dp_")
@@ -319,6 +325,7 @@ function codegen.task_rule(node)
   local first_element = selector.elements[1]
   assert(first_element:is(ast.typed.element.Task))
   local binders = {}
+  local state_var = terralib.newsymbol(&state_type)
 
   local selector_body = quote var [is_matched] = true end
   if #first_element.name > 0 then
@@ -364,7 +371,7 @@ function codegen.task_rule(node)
 
   node.properties:map(function(property)
     if property.field == "target" then
-      local value = codegen.expr(binders, property.value)
+      local value = codegen.expr(binders, state_var, property.value)
       select_target_for_point_body = quote
         [select_target_for_point_body];
         [value.actions];
@@ -395,15 +402,15 @@ function codegen.task_rule(node)
       end
       select_task_options_body = quote
         [select_task_options_body];
-        [codegen.property(binders, "task", task_var, property)]
+        [codegen.property(binders, state_var, "task", task_var, property)]
       end
     end
   end)
 
   local constraint_checks = quote end
   selector.constraints:map(function(constraint)
-    local lhs = codegen.expr(binders, constraint.lhs)
-    local rhs = codegen.expr(binders, constraint.rhs)
+    local lhs = codegen.expr(binders, state_var, constraint.lhs)
+    local rhs = codegen.expr(binders, state_var, constraint.rhs)
     constraint_checks = quote
       [constraint_checks];
       do
@@ -414,7 +421,9 @@ function codegen.task_rule(node)
     end
   end)
 
-  local terra matches([task_var] : c.legion_task_t)
+  local terra matches(ptr        : &opaque,
+                      [task_var] : c.legion_task_t)
+    var [state_var] = [&state_type](ptr)
     [selector_body];
     [predicate_pattern_matches];
     [constraint_checks];
@@ -438,7 +447,9 @@ function codegen.task_rule(node)
     end
   end
 
-  local terra select_task_options([task_var] : c.legion_task_t)
+  local terra select_task_options(ptr        : &opaque,
+                                  [task_var] : c.legion_task_t)
+    var [state_var] = [&state_type](ptr)
     [selector_body];
     [early_out("select_task_options")];
     [select_task_options_pattern_matches];
@@ -449,8 +460,10 @@ function codegen.task_rule(node)
     [select_task_options_body]
   end
 
-  local terra select_target_for_point([task_var] : c.legion_task_t,
+  local terra select_target_for_point(ptr         : &opaque,
+                                      [task_var]  : c.legion_task_t,
                                       [point_var] : c.legion_domain_point_t)
+    var [state_var] = [&state_type](ptr)
     [select_target_for_point_pattern_matches];
     [select_target_for_point_body]
   end
@@ -463,7 +476,7 @@ function codegen.task_rule(node)
   }
 end
 
-function codegen.region_rule(node)
+function codegen.region_rule(state_type, node)
   local task_var = terralib.newsymbol(c.legion_task_t)
   local req_var = terralib.newsymbol(c.legion_region_requirement_t)
   local req_idx = terralib.newsymbol(uint)
@@ -478,6 +491,7 @@ function codegen.region_rule(node)
   local first_task_element = selector.elements[2]
   assert(first_task_element:is(ast.typed.element.Task))
   local binders = {}
+  local state_var = terralib.newsymbol(&state_type)
 
   if #first_task_element.name > 0 then
     assert(#first_task_element.name == 1)
@@ -523,8 +537,8 @@ function codegen.region_rule(node)
 
   local constraint_checks = quote end
   selector.constraints:map(function(constraint)
-    local lhs = codegen.expr(binders, constraint.lhs)
-    local rhs = codegen.expr(binders, constraint.rhs)
+    local lhs = codegen.expr(binders, state_var, constraint.lhs)
+    local rhs = codegen.expr(binders, state_var, constraint.rhs)
     constraint_checks = quote
       [constraint_checks];
       do
@@ -582,7 +596,7 @@ function codegen.region_rule(node)
   node.properties:map(function(property)
     map_task_body = quote
       [map_task_body];
-      [codegen.property(binders, "region", req_var, property)]
+      [codegen.property(binders, state_var, "region", req_var, property)]
     end
   end)
 
@@ -594,9 +608,11 @@ function codegen.region_rule(node)
     end
   end
 
-  local terra map_task([task_var] : c.legion_task_t,
-                       [req_var] : c.legion_region_requirement_t,
-                       [req_idx] : uint)
+  local terra map_task(ptr        : &opaque,
+                       [task_var] : c.legion_task_t,
+                       [req_var]  : c.legion_region_requirement_t,
+                       [req_idx]  : uint)
+    var [state_var] = [&state_type](ptr)
     [selector_body];
     [early_out];
     [pattern_matches];
@@ -612,10 +628,57 @@ function codegen.region_rule(node)
   }
 end
 
-function codegen.rules(node)
-  local task_rules = node.task_rules:map(codegen.task_rule)
-  local region_rules = node.region_rules:map(codegen.region_rule)
+function codegen.mapper_init(assignments)
+  local entries = terralib.newlist()
+  local binders = {}
+  -- TODO: we might need to randomly generate this name with multiple mappers
+  local mapper_state_type = terralib.types.newstruct("mapper_state");
+  mapper_state_type.entries = assignments:map(function(assignment)
+    return {
+      field = assignment.binder,
+      type = codegen.type(assignment.value.expr_type),
+    }
+  end)
+  local mapper_state_var = terralib.newsymbol(&mapper_state_type)
+  local terra mapper_init
+
+  if sizeof(mapper_state_type) > 0 then
+    terra mapper_init(ptr : &&opaque)
+      @ptr = c.malloc([sizeof(mapper_state_type)])
+      var [mapper_state_var] = [&mapper_state_type](@ptr)
+      [assignments:map(function(assignment)
+        local value = codegen.expr(binders, mapper_state_var, assignment.value)
+        local mark_persistent = quote end
+        if std.is_list_type(assignment.value.expr_type) then
+          mark_persistent = quote [value.value].persistent = 1 end
+        end
+        return quote
+          [value.actions]
+          [mark_persistent]
+          [mapper_state_var].[assignment.binder] = [value.value]
+        end
+      end)]
+    end
+  else
+    terra mapper_init(ptr : &&opaque)
+    end
+  end
+  return mapper_init, mapper_state_type
+end
+
+function codegen.mapper(node)
+  local mapper_init, mapper_state_type =
+    codegen.mapper_init(node.assignments)
+  local task_rules =
+    node.task_rules:map(function(rule)
+      return codegen.task_rule(mapper_state_type, rule)
+    end)
+  local region_rules =
+    node.region_rules:map(function(rule)
+      codegen.region_rule(mapper_state_type, rule)
+    end)
   return {
+    mapper_init = mapper_init,
     task_rules = task_rules,
     region_rules = region_rules,
   }
