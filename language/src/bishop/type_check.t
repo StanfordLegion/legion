@@ -381,7 +381,13 @@ function type_check.rule(rule_type, type_env, rule)
   local selector = type_check.selector(type_env, rule.selector)
   local properties =
     rule.properties:map(curry2(type_check.property, rule_type, type_env))
-  return ast.typed.rule.Task {
+  local ctor
+  if rule_type == "task" then
+    ctor = ast.typed.rule.Task
+  else assert(rule_type == "region")
+    ctor = ast.typed.rule.Region
+  end
+  return ctor {
     selector = selector,
     properties = properties,
     position = rule.position,

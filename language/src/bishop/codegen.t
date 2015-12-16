@@ -675,7 +675,7 @@ function codegen.mapper(node)
     end)
   local region_rules =
     node.region_rules:map(function(rule)
-      codegen.region_rule(mapper_state_type, rule)
+      return codegen.region_rule(mapper_state_type, rule)
     end)
   return {
     mapper_init = mapper_init,
