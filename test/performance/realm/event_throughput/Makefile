@@ -24,6 +24,8 @@ NVCC_FLAGS	:=
 GASNET_FLAGS	:=
 LD_FLAGS	:=
 
+include $(LG_RT_DIR)/runtime.mk
+
 # since we're just doing Realm and not Legion, we need to strip out a few
 #  things that might have come in from CC_FLAGS that require Legion goo
 override CC_FLAGS := $(filter-out -DBOUNDS_CHECKS, \
@@ -36,11 +38,3 @@ RUNMODE ?= default
 
 run : $(OUTFILE)
 	$(dir $(OUTFILE))$(notdir $(OUTFILE)) $(TESTARGS.$(RUNMODE))
-
-###########################################################################
-#
-#   Don't change anything below here
-#   
-###########################################################################
-
-include $(LG_RT_DIR)/runtime.mk
