@@ -4823,6 +4823,15 @@ namespace Realm {
       return RegionInstance::NO_INST;
     }
 
+    RegionInstance Domain::create_file_instance(const char *file_name,
+                                                const std::vector<size_t> &field_sizes,
+                                                legion_lowlevel_file_mode_t file_mode) const
+    {
+      // TODO: Implement this
+      assert(false);
+      return RegionInstance::NO_INST;
+    }
+
 #if 0
     RegionInstance IndexSpace::create_instance(Memory m, ReductionOpID redop) const
     {
