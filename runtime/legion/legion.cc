@@ -3624,7 +3624,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       const void* dummy_ptr; size_t dummy_size;
-      Runtime::retrieve_semantic_information(handle,
+      Runtime::retrieve_semantic_information(handle, fid,
           NAME_SEMANTIC_TAG, dummy_ptr, dummy_size);
       result = reinterpret_cast<const char*>(dummy_ptr);
     }
