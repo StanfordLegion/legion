@@ -404,6 +404,7 @@ namespace LegionRuntime {
     struct CopyLauncher;
     struct AcquireLauncher;
     struct ReleaseLauncher;
+    struct TaskVariantRegistrar;
     class Future;
     class FutureMap;
     class Predicate;
@@ -562,6 +563,25 @@ namespace LegionRuntime {
     class TreeCloseImpl;
     class TreeClose;
     struct CloseInfo;
+
+    // legion_constraint.h
+    class ISAConstraint;
+    class ResourceConstraint;
+    class LaunchConstraint;
+    class ColocationConstraint;
+    class ExecutionConstraintSet;
+
+    class SpecializedConstraint;
+    class MemoryConstraint;
+    class FieldConstraint;
+    class OrderingConstraint;
+    class SplittingConstraint;
+    class DimensionConstraint;
+    class AlignmentConstraint;
+    class OffsetConstraint;
+    class PointerConstraint;
+    class LayoutConstraintSet;
+    class TaskLayoutConstraintSet;
 
     // legion_utilities.h
     struct RegionUsage;

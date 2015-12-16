@@ -23,6 +23,7 @@
  */
 
 #include "legion_types.h"
+#include "legion_constraint.h"
 
 // temporary helper macro to turn link errors into runtime errors
 #define UNIMPLEMENTED_METHOD(retval) do { assert(0); return retval; } while(0)
@@ -1289,6 +1290,65 @@ namespace LegionRuntime {
       Predicate                       predicate;
       MapperID                        map_id;
       MappingTagID                    tag;
+    };
+
+    //==========================================================================
+    //                          Task Variant Registrars 
+    //==========================================================================
+
+    /**
+     * \struct TaskVariantRegistrar
+     * This structure captures all the meta-data information necessary for
+     * describing a task variant including the logical task ID, the execution
+     * constraints, the layout constraints, and any properties of the task.
+     * This structure is used for registering task variants and is also
+     * the output type for variants created by task variant generators.
+     */
+    struct TaskVariantRegistrar {
+    public:
+      TaskVariantRegistrar(TaskID task_id, const char *variant_name = NULL);
+    public: // Add layout constraints
+      TaskVariantRegistrar&
+        add_constraint(unsigned idx, const SpecializedConstraint &constraint);
+      TaskVariantRegistrar&
+        add_constraint(unsigned idx, const MemoryConstraint &constraint);
+      TaskVariantRegistrar&
+        add_constraint(unsigned idx, const OrderingConstraint &constraint);
+      TaskVariantRegistrar&
+        add_constraint(unsigned idx, const SplittingConstraint &constraint);
+      TaskVariantRegistrar&
+        add_constraint(unsigned idx, const FieldConstraint &constraint);
+      TaskVariantRegistrar&
+        add_constraint(unsigned idx, const DimensionConstraint &constraint);
+      TaskVariantRegistrar&
+        add_constraint(unsigned idx, const AlignmentConstraint &constraint);
+      TaskVariantRegistrar&
+        add_constraint(unsigned idx, const OffsetConstraint &constraint);
+      TaskVariantRegistrar&
+        add_constraint(unsigned idx, const PointerConstraint &constraint);
+    public: // Add execution constraints
+      TaskVariantRegistrar& 
+        add_constraint(const ISAConstraint &constraint);
+      TaskVariantRegistrar& 
+        add_constraint(const ResourceConstraint &constraint);
+      TaskVariantRegistrar&
+        add_constraint(const LaunchConstraint &constraint);
+      TaskVariantRegistrar&
+        add_constraint(const ColocationConstraint &constraint);
+    public: // Set properties
+      void set_leaf(bool is_leaf = true);
+      void set_inner(bool is_inner = true);
+      void set_idempotent(bool is_idempotent = true);
+    public:
+      TaskID                            task_id;
+      const char*                       task_variant_name;
+    public: // constraints
+      ExecutionConstraintSet            execution_constraints; 
+      TaskLayoutConstraintSet           layout_constraints;
+    public: // properties
+      bool                              leaf_variant;
+      bool                              inner_variant;
+      bool                              idempotent_variant;
     };
  
     //==========================================================================
@@ -4809,6 +4869,15 @@ namespace LegionRuntime {
       // Semantic Information 
       //------------------------------------------------------------------------
       /**
+       * Attach semantic information to a logical task
+       * @param handle task_id the ID of the task
+       * @param tag the semantic tag
+       * @param buffer pointer to a buffer
+       * @param size size of the buffer to save
+       */
+      void attach_semantic_information(TaskID task_id, SemanticTag tag,
+                                       const void *buffer, size_t size);
+      /**
        * Attach semantic information to an index space
        * @param handle index space handle
        * @param tag semantic tag
@@ -4872,6 +4941,13 @@ namespace LegionRuntime {
                                        const void *buffer, size_t size);
 
       /**
+       * Attach a name to a task
+       * @param task_id the ID of the task
+       * @param name pointer to the name
+       */
+      void attach_name(TaskID task_id, const char *name);
+
+      /**
        * Attach a name to an index space
        * @param handle index space handle
        * @param name pointer to a name
@@ -4913,6 +4989,16 @@ namespace LegionRuntime {
        * @param name pointer to a name
        */
       void attach_name(LogicalPartition handle, const char *name);
+
+      /**
+       * Retrieve semantic information for a task
+       * @param task_id the ID of the task
+       * @param tag semantic tag
+       * @param result pointer to assign to the semantic buffer
+       * @param size where to write the size of the semantic buffer
+       */
+      void retrieve_semantic_information(TaskID task_id, SemanticTag tag,
+                                         const void *&result, size_t &size);
 
       /**
        * Retrieve semantic information for an index space
@@ -4976,6 +5062,13 @@ namespace LegionRuntime {
       void retrieve_semantic_information(LogicalPartition handle, 
                                          SemanticTag tag,
                                          const void *&result, size_t &size);
+
+      /**
+       * Retrieve the name of a task
+       * @param task_id the ID of the task
+       * @param result pointer to assign to the name
+       */
+      void retrieve_name(TaskID task_id, const char *&result);
 
       /**
        * Retrieve the name of an index space
@@ -5327,6 +5420,115 @@ namespace LegionRuntime {
       // Task Registration Operations
       //------------------------------------------------------------------------
       /**
+       * Dynamically register a new task variant with the runtime with
+       * a non-void return type.
+       * @param registrar the task variant registrar for describing the task
+       * @return variant ID for the task
+       */
+      template<typename T,
+        T (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
+                      Context, Runtime*)>
+      VariantID register_task_variant(const TaskVariantRegistrar &registrar);
+
+      /**
+       * Dynamically register a new task variant with the runtime with
+       * a non-void return type and user data.
+       * @param registrar the task variant registrar for describing the task
+       * @param user_data the user data to associate with the task variant
+       * @return variant ID for the task
+       */
+      template<typename T, typename UDT,
+        T (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
+                      Context, Runtime*, const UDT&)>
+      VariantID register_task_variant(const TaskVariantRegistrar &registrar,
+                                      const UDT &user_data);
+
+      /**
+       * Dynamically register a new task variant with the runtime with
+       * a void return type.
+       * @param registrar the task variant registrar for describing the task
+       * @return variant ID for the task
+       */
+      template<
+        void (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
+                         Context, Runtime*)>
+      VariantID register_task_variant(const TaskVariantRegistrar &registrar);
+
+      /**
+       * Dynamically register a new task variant with the runtime with
+       * a void return type and user data.
+       * @param registrar the task variant registrar for describing the task
+       * @param user_data the user data to associate with the task variant
+       * @return variant ID for the task
+       */
+      template<typename UDT,
+        void (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
+                         Context, Runtime*)>
+      VariantID register_task_variant(const TaskVariantRegistrar &registrar,
+                                      const UDT &user_data);
+
+      /**
+       * Statically register a new task variant with the runtime with
+       * a non-void return type prior to the runtime starting. This call
+       * must be made on all nodes and it will fail if done after the
+       * Runtime::start method has been invoked.
+       * @param registrar the task variant registrar for describing the task
+       * @return variant ID for the task
+       */
+      template<typename T,
+        T (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
+                      Context, Runtime*)>
+      static VariantID preregister_task_variant(
+                                    const TaskVariantRegistrar &registrar);
+
+      /**
+       * Statically register a new task variant with the runtime with
+       * a non-void return type and userd data prior to the runtime 
+       * starting. This call must be made on all nodes and it will 
+       * fail if done after the Runtime::start method has been invoked.
+       * @param registrar the task variant registrar for describing the task
+       * @param user_data the user data to associate with the task variant
+       * @return variant ID for the task
+       */
+      template<typename T, typename UDT,
+        T (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
+                      Context, Runtime*, const UDT&)>
+      static VariantID preregister_task_variant(
+              const TaskVariantRegistrar &registrar, const UDT &user_data);
+       
+      /**
+       * Statically register a new task variant with the runtime with
+       * a void return type prior to the runtime starting. This call
+       * must be made on all nodes and it will fail if done after the
+       * Runtime::start method has been invoked.
+       * @param registrar the task variant registrar for describing the task
+       * @return variant ID for the task
+       */
+      template<
+        void (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
+                         Context, Runtime*)>
+      static VariantID preregister_task_variant(
+                                    const TaskVariantRegistrar &registrar);
+
+      /**
+       * Statically register a new task variant with the runtime with
+       * a void return type and user data prior to the runtime starting. 
+       * This call must be made on all nodes and it will fail if done 
+       * after the Runtime::start method has been invoked.
+       * @param registrar the task variant registrar for describing the task
+       * @param user_data the user data to associate with the task variant
+       * @return variant ID for the task
+       */
+      template<typename UDT,
+        void (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
+                         Context, Runtime*)>
+      static VariantID preregister_task_variant(
+              const TaskVariantRegistrar &registrar, const UDT &user_data);
+
+    public:
+      // ------------------ Deprecated task registration -----------------------
+      /**
+       * @deprecated
        * Register a task with a template return type for the given
        * kind of processor.
        * @param id the ID to assign to the task
@@ -5347,6 +5549,7 @@ namespace LegionRuntime {
                               TaskConfigOptions options = TaskConfigOptions(),
                                          const char *task_name = NULL);
       /**
+       * @deprecated
        * Register a task with a void return type for the given
        * kind of processor.
        * @param id the ID to assign to the task 
@@ -5367,6 +5570,7 @@ namespace LegionRuntime {
                              TaskConfigOptions options = TaskConfigOptions(),
                                          const char *task_name = NULL);
       /**
+       * @deprecated
        * Same as the register_legion_task above, but allow for users to
        * pass some static data that will be passed as an argument to
        * all invocations of the function.
@@ -5390,6 +5594,7 @@ namespace LegionRuntime {
                               TaskConfigOptions options = TaskConfigOptions(),
                                          const char *task_name = NULL);
       /**
+       * @deprecated
        * Same as the register_legion_task above, but allow for users to
        * pass some static data that will be passed as an argument to
        * all invocations of the function.
@@ -5412,109 +5617,6 @@ namespace LegionRuntime {
                                          VariantID vid = AUTO_GENERATE_ID,
                               TaskConfigOptions options = TaskConfigOptions(),
                                          const char *task_name = NULL);
-      /**
-       * @deprecated
-       * Register a single task with a template return type for the given
-       * task ID and the processor kind.  Optionally specify whether the
-       * task is a leaf task or give it a name for debugging error messages.
-       * @param id the ID at which to assign the task
-       * @param proc_kind the processor kind on which the task can run
-       * @param leaf whether the task is a leaf task (makes no runtime calls)
-       * @param name for the task in error messages
-       * @param vid the variant ID to assign to the task
-       * @param inner whether the task is an inner task
-       * @param idempotent whether the task is idempotent
-       * @return the ID the task was assigned
-       */
-      template<typename T,
-        T (*TASK_PTR)(const void*,size_t,
-                      const std::vector<RegionRequirement>&,
-                      const std::vector<PhysicalRegion>&,
-                      Context, Runtime*)>
-      static TaskID register_single_task(TaskID id, Processor::Kind proc_kind,
-                                         bool leaf = false,
-                                         const char *name = NULL,
-                                         VariantID vid = AUTO_GENERATE_ID,
-                                         bool inner = false,
-                                         bool idempotent = false);
-      /**
-       * @deprecated
-       * Register a single task with a void return type for the given
-       * task ID and the processor kind.  Optionally specify whether the
-       * task is a leaf task or give it a name for debugging error messages.
-       * @param id the ID at which to assign the task
-       * @param proc_kind the processor kind on which the task can run
-       * @param leaf whether the task is a leaf task (makes no runtime calls)
-       * @param name for the task in error messages
-       * @param vid the variant ID to assign to the task
-       * @param inner whether the task is an inner task
-       * @param idempotent whether the task is idempotent
-       * @return the ID the task was assigned
-       */
-      template<
-        void (*TASK_PTR)(const void*,size_t,
-                         const std::vector<RegionRequirement>&,
-                         const std::vector<PhysicalRegion>&,
-                         Context, Runtime*)>
-      static TaskID register_single_task(TaskID id, Processor::Kind proc_kind,
-                                         bool leaf = false,
-                                         const char *name = NULL,
-                                         VariantID vid = AUTO_GENERATE_ID,
-                                         bool inner = false,
-                                         bool idempotent = false);
-      /**
-       * @deprecated
-       * Register an index space task with a template return type
-       * for the given task ID and processor kind.  Optionally specify
-       * whether the task is a leaf task or give it a name for 
-       * debugging error messages.
-       * @param id the ID at which to assign the task
-       * @param proc_kind the processor kind on which the task can run
-       * @param leaf whether the task is a leaf task (makes no runtime calls)
-       * @param name for the task in error messages
-       * @param vid the variant ID to assign to the task
-       * @param inner whether the task is an inner task
-       * @param idempotent whether the task is idempotent
-       * @return the ID the task was assigned
-       */
-      template<typename T,
-        T (*TASK_PTR)(const void*,size_t,const void*,size_t,const DomainPoint&,
-                      const std::vector<RegionRequirement>&,
-                      const std::vector<PhysicalRegion>&,
-                      Context, Runtime*)>
-      static TaskID register_index_task(TaskID id, Processor::Kind proc_kind,
-                                        bool leaf = false,
-                                        const char *name = NULL,
-                                        VariantID vid = AUTO_GENERATE_ID,
-                                        bool inner = false,
-                                        bool idempotent = false); 
-      /**
-       * @deprecated
-       * Register an index space task with a void return type
-       * for the given task ID and processor kind.  Optionally specify
-       * whether the task is a leaf task or give it a name for 
-       * debugging error messages.
-       * @param id the ID at which to assign the task
-       * @param proc_kind the processor kind on which the task can run
-       * @param leaf whether the task is a leaf task (makes no runtime calls)
-       * @param name for the task in error messages
-       * @param vid the variant ID to assign to the task
-       * @param inner whether the task is an inner task
-       * @param idempotent whether the task is idempotent
-       * @return the ID the task was assigned
-       */
-      template<
-        void (*TASK_PTR)(const void*,size_t,const void*,size_t,
-                         const DomainPoint&,
-                         const std::vector<RegionRequirement>&,
-                         const std::vector<PhysicalRegion>&,
-                         Context, Runtime*)>
-      static TaskID register_index_task(TaskID id, Processor::Kind proc_kind,
-                                        bool leaf = false,
-                                        const char *name = NULL,
-                                        VariantID vid = AUTO_GENERATE_ID,
-                                        bool inner = false,
-                                        bool idempotent = false);
     public:
       /**
        * Provide a mechanism for finding the high-level runtime
