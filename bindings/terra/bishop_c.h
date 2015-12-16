@@ -101,6 +101,9 @@ bool bishop_region_set_target_memory_list(legion_region_requirement_t,
 
 bishop_isa_t bishop_processor_get_isa(legion_processor_t);
 
+legion_memory_t
+bishop_physical_region_get_memory(legion_physical_region_t);
+
 bishop_memory_list_t
 bishop_physical_region_get_memories(legion_physical_region_t);
 

@@ -267,6 +267,16 @@ bishop_processor_get_isa(legion_processor_t proc_)
   }
 }
 
+legion_memory_t
+bishop_physical_region_get_memory(legion_physical_region_t pr_)
+{
+  set<Memory> memories;
+  PhysicalRegion* pr = CObjectWrapper::unwrap(pr_);
+  pr->get_memories(memories);
+  assert(memories.size() > 0);
+  return CObjectWrapper::wrap(*memories.begin());
+}
+
 bishop_memory_list_t
 bishop_physical_region_get_memories(legion_physical_region_t pr_)
 {
