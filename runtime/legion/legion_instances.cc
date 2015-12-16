@@ -243,6 +243,20 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void LayoutDescription::get_fields(std::vector<FieldID>& fields) const
+    //--------------------------------------------------------------------------
+    {
+      // order field ids by their offsets by inserting them to std::map
+      std::map<unsigned, FieldID> offsets;
+      for (std::map<FieldID, Domain::CopySrcDstField>::const_iterator it =
+            field_infos.begin(); it != field_infos.end(); ++it)
+        offsets[it->second.offset] = it->first;
+      for (std::map<unsigned, FieldID>::const_iterator it = offsets.begin();
+           it != offsets.end(); ++it)
+        fields.push_back(it->second);
+    }
+
+    //--------------------------------------------------------------------------
     bool LayoutDescription::match_shape(const size_t field_size) const
     //--------------------------------------------------------------------------
     {
