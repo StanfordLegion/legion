@@ -32,6 +32,9 @@
 #include <signal.h>
 #include <execinfo.h>
 #endif
+#ifdef LEGION_SPY
+#include <unistd.h> // sleep for warning
+#endif
 
 namespace LegionRuntime {
 
@@ -15535,6 +15538,31 @@ namespace LegionRuntime {
         assert(initial_task_window_hysteresis <= 100);
 #endif
       }
+#ifdef LEGION_SPY
+      if (num_profiling_nodes > 0)
+      {
+        // Give a massive warning about profiling with Legion Spy enabled
+        for (int i = 0; i < 2; i++)
+          fprintf(stderr,"!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
+        for (int i = 0; i < 4; i++)
+          fprintf(stderr,"!WARNING WARNING WARNING WARNING WARNING WARNING!\n");
+        for (int i = 0; i < 2; i++)
+          fprintf(stderr,"!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
+        fprintf(stderr,"!!! YOU ARE PROFILING WITH LegionSpy ENABLED  !!!\n");
+        fprintf(stderr,"!!! SERIOUS PERFORMANCE DEGRADATION WILL OCCUR!!!\n");
+        fprintf(stderr,"!!! COMPILE WITHOUT -DLEGION_SPY FOR PROFILING!!!\n");
+        for (int i = 0; i < 2; i++)
+          fprintf(stderr,"!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
+        for (int i = 0; i < 4; i++)
+          fprintf(stderr,"!WARNING WARNING WARNING WARNING WARNING WARNING!\n");
+        for (int i = 0; i < 2; i++)
+          fprintf(stderr,"!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
+        fprintf(stderr,"\n");
+        fprintf(stderr,"SLEEPING FOR 5 SECONDS SO YOU READ THIS WARNING...\n");
+        fflush(stderr);
+        sleep(5);
+      }
+#endif
       // Now we can set out input args
       Internal::get_input_args().argv = argv;
       Internal::get_input_args().argc = argc;
