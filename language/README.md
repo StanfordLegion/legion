@@ -7,8 +7,8 @@ below for instructions for installing and running the compiler.
 
   * Linux, OS X, or another Unix.
   * Python >= 2.7 (for the self-installer and test suite).
-  * LLVM and Clang **with headers** on `PATH` (as of December 2015
-    LLVM 3.5 is recommended; 3.6 works but is missing debug symbols).
+  * LLVM and Clang **with headers** (as of December 2015 LLVM 3.5 is
+    recommended; 3.6 works but is missing debug symbols).
 
 ## Installing
 
