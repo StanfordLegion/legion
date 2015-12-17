@@ -30,9 +30,8 @@ task b(points : region(point)) where reads writes(points.x) do end
 task c(points : region(point)) where reads writes(points.y) do end
 task d(points : region(point)) where reads(points) do end
 
--- Execution typically begins at a main task. Regent code obeys
--- traditional sequential semantics, so read the code top-to-bottom as
--- usual.
+-- Execution begins at a main task. Regent code obeys traditional
+-- sequential semantics, so read the code top-to-bottom as usual.
 task main()
   -- Create a region (like an array) with room for 5 elements.
   var points = region(ispace(ptr, 5), point)
