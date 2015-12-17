@@ -136,7 +136,7 @@ parser.expr = parsing.Pratt()
   :infix("==" , 20, parser.expr_binary_left)
   :infix("~=" , 20, parser.expr_binary_left)
   :infix("and", 19, parser.expr_binary_left)
-  :infix("or" , 19, parser.expr_binary_left)
+  :infix("or" , 18, parser.expr_binary_left)
   :infix("?"  , 15, parser.expr_ternary_left)
   :prefix(parsing.default, parser.expr_complex)
 
