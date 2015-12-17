@@ -24,7 +24,7 @@ mapper
 
 $HAS_REGMEM = memories[kind=regmem].size > 0
 
-task#foo[target=$proc] region#r2 {
+task#foo[target=$proc] region#r1 {
   target : $HAS_REGMEM ? $proc.memories[kind=regmem] :
                          $proc.memories[kind=l1cache];
 }
@@ -35,23 +35,32 @@ task[target=$proc] region {
 
 end
 
-task foo(r1 : region(int), r2 : region(int))
-where reads(r1, r2)
+fspace Vec2
+{
+  x : float,
+  y : float,
+}
+
+task foo(r1 : region(Vec2), r2 : region(int))
+where reads(r1.x, r2), writes(r1.y)
 do
-  var memories_r1 = c.bishop_physical_region_get_memories(__physical(r1)[0])
-  var memories_r2 = c.bishop_physical_region_get_memories(__physical(r2)[0])
-  var kind_r1 = c.legion_memory_kind(memories_r1.list[0])
-  var kind_r2 = c.legion_memory_kind(memories_r2.list[0])
-  regentlib.assert(kind_r1 == c.SYSTEM_MEM, "test failed")
-  regentlib.assert(
-    kind_r2 == c.REGDMA_MEM or kind_r2 == c.LEVEL1_CACHE,
+  var memory_r1x = c.bishop_physical_region_get_memory(__physical(r1.x)[0])
+  var kind_r1x = c.legion_memory_kind(memory_r1x)
+  var memory_r1y = c.bishop_physical_region_get_memory(__physical(r1.y)[0])
+  var kind_r1y = c.legion_memory_kind(memory_r1y)
+  var memory_r2 = c.bishop_physical_region_get_memory(__physical(r2)[0])
+  var kind_r2 = c.legion_memory_kind(memory_r2)
+  regentlib.assert(kind_r1x == c.REGDMA_MEM or kind_r1x == c.LEVEL1_CACHE,
     "test failed")
+  regentlib.assert(kind_r1y == c.REGDMA_MEM or kind_r1y == c.LEVEL1_CACHE,
+    "test failed")
+  regentlib.assert(kind_r2 == c.SYSTEM_MEM, "test failed")
 end
 
 task toplevel()
-  var r1 = region(ispace(ptr, 10), int)
+  var r1 = region(ispace(ptr, 10), Vec2)
   var r2 = region(ispace(ptr, 10), int)
-  new(ptr(int, r1), 10)
+  new(ptr(Vec2, r1), 10)
   new(ptr(int, r2), 10)
   foo(r1, r2)
 end

@@ -101,6 +101,9 @@ bool bishop_region_set_target_memory_list(legion_region_requirement_t,
 
 bishop_isa_t bishop_processor_get_isa(legion_processor_t);
 
+legion_memory_t
+bishop_physical_region_get_memory(legion_physical_region_t);
+
 bishop_memory_list_t
 bishop_physical_region_get_memories(legion_physical_region_t);
 
@@ -110,6 +113,8 @@ bishop_physical_region_get_fields(legion_physical_region_t);
 void bishop_logger_info(const char* msg, ...)
   __attribute__((format (printf, 1, 2)));
 void bishop_logger_warning(const char* msg, ...)
+  __attribute__((format (printf, 1, 2)));
+void bishop_logger_debug(const char* msg, ...)
   __attribute__((format (printf, 1, 2)));
 
 #ifdef __cplusplus

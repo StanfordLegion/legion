@@ -99,6 +99,10 @@ function std.quote_binary_op(op, lhs, rhs)
     return `([lhs] == [rhs])
   elseif op == "~=" then
     return `([lhs] ~= [rhs])
+  elseif op == "and" then
+    return `([lhs] and [rhs])
+  elseif op == "or" then
+    return `([lhs] or [rhs])
   else
     assert(false, "unknown operator " .. tostring(op))
   end
