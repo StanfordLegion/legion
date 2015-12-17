@@ -35,7 +35,7 @@ task d(points : region(point)) where reads(points) do end
 -- usual.
 task main()
   -- Create a region (like an array) with room for 5 elements.
-  var points = region(ispace(ptr, 5), points)
+  var points = region(ispace(ptr, 5), point)
   new(ptr(point, points), 5) -- Allocate the elements.
 
   -- Partition the region into subregions. Each subregion is a view
