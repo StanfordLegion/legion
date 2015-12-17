@@ -259,6 +259,7 @@ void top_level_task(const void *args, size_t arglen,
   Memory m = farthest_memory(p);
   printf("placing master instance in memory %x\n", m.id);
   RegionInstance hist_inst(Domain(hist_region).create_instance(m, sizeof(BucketType)));
+  assert(hist_inst.exists());
 
   HistBatchArgs<BucketType> hbargs;
   hbargs.count = batch_size;
@@ -371,7 +372,10 @@ void hist_batch_localize_task(const void *args, size_t arglen,
 
   // create a local full instance
   Memory m = closest_memory(p);
-  RegionInstance lclinst = Domain(hbargs->region).create_instance(m, sizeof(BucketType));
+  RegionInstance lclinst = RegionInstance::NO_INST;
+  while (!lclinst.exists())
+    lclinst = Domain(hbargs->region).create_instance(m, sizeof(BucketType));
+  assert(lclinst.exists());
 
   std::vector<Domain::CopySrcDstField> src;
   std::vector<Domain::CopySrcDstField> dst;
@@ -403,7 +407,10 @@ void hist_batch_redfold_task(const void *args, size_t arglen,
 
   // create a reduction fold instance
   Memory m = closest_memory(p);
-  RegionInstance redinst = Domain(hbargs->region).create_instance(m, sizeof(int), REDOP_BUCKET_ADD);
+  RegionInstance redinst = RegionInstance::NO_INST;
+  while (!redinst.exists())
+    redinst = Domain(hbargs->region).create_instance(m, sizeof(int), REDOP_BUCKET_ADD);
+  assert(redinst.exists());
 
   // get a reduction accessor for the instance
   RegionAccessor<AccessorType::ReductionFold<REDOP>, BucketType> ria = redinst.get_accessor().typeify<BucketType>().convert<AccessorType::ReductionFold<REDOP> >();
@@ -434,7 +441,10 @@ void hist_batch_redlist_task(const void *args, size_t arglen,
 
   // create a reduction list instance
   Memory m = closest_memory(p);
-  RegionInstance<BucketType> redinst = hbargs->region.create_instance(m, REDOP_BUCKET_ADD, hbargs->count, hbargs->inst);
+  RegionInstance<BucketType> redinst = RegionInstance::NO_INST;
+  while (!redinst.exists())
+    redinst = hbargs->region.create_instance(m, REDOP_BUCKET_ADD, hbargs->count, hbargs->inst);
+  assert(redinst.exists());
 
   // get a reduction accessor for the instance
   RegionInstanceAccessor<BucketType,AccessorReductionList> ria = redinst.get_accessor().convert<AccessorReductionList>();
@@ -462,7 +472,10 @@ void hist_batch_redsingle_task(const void *args, size_t arglen,
 
   // create a reduction list instance
   Memory m = closest_memory(p);
-  RegionInstance<BucketType> redinst = hbargs->region.create_instance(m, REDOP_BUCKET_ADD, 1, hbargs->inst);
+  RegionInstance<BucketType> redinst = RegionInstance::NO_INST;
+  while (!redinst.exists())
+    redinst = hbargs->region.create_instance(m, REDOP_BUCKET_ADD, 1, hbargs->inst);
+  assert(redinst.exists());
 
   // get a reduction accessor for the instance
   RegionInstanceAccessor<BucketType,AccessorReductionList> ria = redinst.get_accessor().convert<AccessorReductionList>();
