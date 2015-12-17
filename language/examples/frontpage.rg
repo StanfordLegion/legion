@@ -37,8 +37,8 @@ task main()
   var points = region(ispace(ptr, 5), point)
   new(ptr(point, points), 5) -- Allocate the elements.
 
-  -- Partition the region into subregions. Each subregion is a view
-  -- onto a subset of the data of the parent.
+  -- Partition the region into three subregions. Each subregion is a
+  -- view onto a subset of the data of the parent.
   var part = partition(equal, points, ispace(int1d, 3))
 
   -- Launch tasks a, b, c, and d.
