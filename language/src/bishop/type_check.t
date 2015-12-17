@@ -71,6 +71,35 @@ keyword_type_assignment:assign_type({ "forbid", "allow", "demand" },
 keyword_type_assignment:assign_type({ "processors" }, std.processor_list_type)
 keyword_type_assignment:assign_type({ "memories" }, std.memory_list_type)
 
+local binary_op_types = {}
+binary_op_types["+"]   = {int, int}
+binary_op_types["-"]   = {int, int}
+binary_op_types["*"]   = {int, int}
+binary_op_types["/"]   = {int, int}
+binary_op_types["%"]   = {int, int}
+binary_op_types["<"]   = {int, bool}
+binary_op_types["<="]  = {int, bool}
+binary_op_types[">"]   = {int, bool}
+binary_op_types[">="]  = {int, bool}
+binary_op_types["=="]  = {int, bool}
+binary_op_types["~="]  = {int, bool}
+binary_op_types["and"] = {bool, bool}
+binary_op_types["or"]  = {bool, bool}
+
+function type_check.coerce_if_needed(expr, target_type)
+  if expr.expr_type == target_type then
+    return expr
+  elseif std.is_point_type(expr.expr_type) and target_type == int then
+    return ast.typed.expr.Coerce {
+      value = expr,
+      expr_type = target_type,
+      position = expr.position,
+    }
+  else
+    return nil
+  end
+end
+
 function type_check.filter_constraint(value_type, type_env, constraint)
   assert(constraint:is(ast.specialized.FilterConstraint))
   local value = type_check.expr(type_env, constraint.value)
@@ -112,61 +141,76 @@ function type_check.expr(type_env, expr)
   if expr:is(ast.specialized.expr.Unary) then
     local rhs = type_check.expr(type_env, expr.rhs)
     if expr.op == "-" then
-      if std.is_point_type(rhs.expr_type) then
-        rhs = ast.typed.expr.Coerce {
-          value = rhs,
-          expr_type = int,
-          position = expr.position,
-        }
-      elseif rhs.expr_type ~= int then
-        log.error(expr.rhs, "unary op " .. expr.op ..
-          " requires the rhs to be of integer type")
+      local rhs_ = type_check.coerce_if_needed(rhs, int)
+      if not rhs_ then
+        log.error(rhs, "unary op '" .. expr.op ..
+          "' expects integer type, but got type '" ..
+          tostring(rhs.expr_type) .. "'")
       end
+      return ast.typed.expr.Unary {
+        rhs = rhs_,
+        op = expr.op,
+        expr_type = rhs.expr_type,
+        position = expr.position,
+      }
     else
       log.error(expr, "unexpected unary operation")
     end
-    return ast.typed.expr.Unary {
-      rhs = rhs,
-      op = expr.op,
-      expr_type = rhs.expr_type,
-      position = expr.position,
-    }
 
   elseif expr:is(ast.specialized.expr.Binary) then
     local lhs = type_check.expr(type_env, expr.lhs)
     local rhs = type_check.expr(type_env, expr.rhs)
-    if not (expr.op == "+" or expr.op == "-" or
-            expr.op == "*" or expr.op == "/" or expr.op == "%") then
-      log.error(expr, "unexpected binary operation")
-    end
-    if std.is_point_type(lhs.expr_type) then
-      lhs = ast.typed.expr.Coerce {
-        value = lhs,
-        expr_type = int,
-        position = expr.position,
-      }
-    elseif lhs.expr_type ~= int then
-      log.error(expr.lhs, "binary op " .. expr.op ..
-        " requires the lhs to be of integer type")
+    local type_info = binary_op_types[expr.op]
+    if type_info == nil then
+      log.error(expr, "unexpected binary operation '" .. expr.op .. "'")
     end
 
-    if std.is_point_type(rhs.expr_type) then
-      rhs = ast.typed.expr.Coerce {
-        value = rhs,
-        expr_type = int,
-        position = expr.position,
-      }
-    elseif rhs.expr_type ~= int then
-      log.error(expr.rhs, "binary op " .. expr.op ..
-        " requires the rhs to be of integer type")
+    local desired_expr_type, assigned_type = unpack(type_info)
+
+    local lhs_ = type_check.coerce_if_needed(lhs, desired_expr_type)
+    local rhs_ = type_check.coerce_if_needed(rhs, desired_expr_type)
+
+    if not lhs_ then
+      log.error(lhs, "binary op '" .. expr.op ..
+        "' expects type '" .. tostring(desired_expr_type) ..
+        "', but got type '" .. tostring(lhs.expr_type) .. "'")
+    end
+    if not rhs_ then
+      log.error(rhs, "binary op '" .. expr.op ..
+        "' expects type '" .. tostring(desired_expr_type) ..
+        "', but got type '" .. tostring(rhs.expr_type) .. "'")
     end
 
     return ast.typed.expr.Binary {
-      lhs = lhs,
-      rhs = rhs,
+      lhs = lhs_,
+      rhs = rhs_,
       op = expr.op,
-      expr_type = rhs.expr_type,
+      expr_type = assigned_type,
       position = expr.position,
+    }
+
+  elseif expr:is(ast.specialized.expr.Ternary) then
+    local cond = type_check.expr(type_env, expr.cond)
+    local true_expr = type_check.expr(type_env, expr.true_expr)
+    local false_expr = type_check.expr(type_env, expr.false_expr)
+
+    if cond.expr_type ~= bool then
+      log.error(cond, "ternary op expects boolean type, but got type '" ..
+        tostring(cond.expr_type) .. "'")
+    end
+    if true_expr.expr_type ~= false_expr.expr_type then
+      log.error(true_expr,
+        "ternary op expects the same type on both expressions, " ..
+        "but got types '" .. tostring(true_expr.expr_type) ..
+        "' and '" .. tostring(false_expr.expr_type) .. "'")
+    end
+
+    return ast.typed.expr.Ternary {
+      cond = cond,
+      true_expr = true_expr,
+      false_expr = false_expr,
+      position = expr.position,
+      expr_type = true_expr.expr_type,
     }
 
   elseif expr:is(ast.specialized.expr.Index) then
@@ -381,7 +425,13 @@ function type_check.rule(rule_type, type_env, rule)
   local selector = type_check.selector(type_env, rule.selector)
   local properties =
     rule.properties:map(curry2(type_check.property, rule_type, type_env))
-  return ast.typed.rule.Task {
+  local ctor
+  if rule_type == "task" then
+    ctor = ast.typed.rule.Task
+  else assert(rule_type == "region")
+    ctor = ast.typed.rule.Region
+  end
+  return ctor {
     selector = selector,
     properties = properties,
     position = rule.position,

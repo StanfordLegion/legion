@@ -55,29 +55,26 @@ function parser.expr_complex(p)
     if p:nextif("[") then
       if p:matches(p.name) and p:lookahead("=") then
         local constraints = p:constraints()
-        local pos = ast.save(p)
         expr = ast.unspecialized.expr.Filter {
           value = expr,
           constraints = constraints,
-          position = pos,
+          position = expr.position,
         }
       else
         local value = p:expr()
-        local pos = ast.save(p)
         expr = ast.unspecialized.expr.Index {
           value = expr,
           index = value,
-          position = pos,
+          position = expr.position,
         }
       end
       p:expect("]")
     elseif p:nextif(".") then
       local token = p:next(p.name)
-      local pos = ast.save(p)
       expr = ast.unspecialized.expr.Field {
         value = expr,
         field = token.value,
-        position = pos,
+        position = expr.position,
       }
     else
       break
@@ -111,13 +108,36 @@ function parser.expr_binary_left(p, lhs)
   }
 end
 
+function parser.expr_ternary_left(p, cond)
+  local position = cond.position
+  local op = p:next().type
+  local true_expr = p:expr(op)
+  p:expect(":")
+  local false_expr = p:expr(op)
+  return ast.unspecialized.expr.Ternary {
+    cond = cond,
+    true_expr = true_expr,
+    false_expr = false_expr,
+    position = position,
+  }
+end
+
 parser.expr = parsing.Pratt()
   :prefix("-", parser.expr_unary(50))
-  :infix("*", 40, parser.expr_binary_left)
-  :infix("/", 40, parser.expr_binary_left)
-  :infix("%", 40, parser.expr_binary_left)
-  :infix("+", 30, parser.expr_binary_left)
-  :infix("-", 30, parser.expr_binary_left)
+  :infix("*"  , 40, parser.expr_binary_left)
+  :infix("/"  , 40, parser.expr_binary_left)
+  :infix("%"  , 40, parser.expr_binary_left)
+  :infix("+"  , 30, parser.expr_binary_left)
+  :infix("-"  , 30, parser.expr_binary_left)
+  :infix("<"  , 20, parser.expr_binary_left)
+  :infix(">"  , 20, parser.expr_binary_left)
+  :infix("<=" , 20, parser.expr_binary_left)
+  :infix(">=" , 20, parser.expr_binary_left)
+  :infix("==" , 20, parser.expr_binary_left)
+  :infix("~=" , 20, parser.expr_binary_left)
+  :infix("and", 19, parser.expr_binary_left)
+  :infix("or" , 19, parser.expr_binary_left)
+  :infix("?"  , 15, parser.expr_ternary_left)
   :prefix(parsing.default, parser.expr_complex)
 
 
@@ -146,7 +166,7 @@ function parser.constraint(p)
   local pos = ast.save(p)
   local field = p:next(p.name).value
   p:expect("=")
-  local value = p:expr()
+  local value = p:expr_complex()
   if value:is(ast.unspecialized.expr.Variable) then
     return ast.unspecialized.PatternMatch {
       field = field,

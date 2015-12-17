@@ -349,6 +349,13 @@ function ast.unspecialized.expr.Binary:unparse()
   return self.lhs:unparse() .. tostring(self.op) .. self.rhs:unparse()
 end
 
+ast.unspecialized.expr:leaf("Ternary", { "cond", "true_expr", "false_expr" })
+function ast.unspecialized.expr.Ternary:unparse()
+  return self.cond:unparse() .. " ? " ..
+         self.true_expr:unparse() .. " : " ..
+         self.false_expr:unparse()
+end
+
 ast.unspecialized.expr:leaf("Index", { "value", "index" })
 function ast.unspecialized.expr.Index:unparse()
   return self.value:unparse() .. "[" .. self.index:unparse() .. "]"
@@ -445,6 +452,12 @@ ast.specialized.expr:leaf("Binary", { "lhs", "rhs", "op" })
 function ast.specialized.expr.Binary:unparse()
   return self.lhs:unparse() .. tostring(self.op) .. self.rhs:unparse()
 end
+ast.specialized.expr:leaf("Ternary", { "cond", "true_expr", "false_expr" })
+function ast.specialized.expr.Ternary:unparse()
+  return self.cond:unparse() .. " ? " ..
+         self.true_expr:unparse() .. " : " ..
+         self.false_expr:unparse()
+end
 ast.specialized.expr:leaf("Index", { "value", "index" })
 function ast.specialized.expr.Index:unparse()
   return self.value:unparse() .. "[" .. self.index:unparse() .. "]"
@@ -515,6 +528,12 @@ end
 ast.typed.expr:leaf("Binary", { "lhs", "rhs", "op" })
 function ast.typed.expr.Binary:unparse()
   return self.lhs:unparse() .. tostring(self.op) .. self.rhs:unparse()
+end
+ast.typed.expr:leaf("Ternary", { "cond", "true_expr", "false_expr" })
+function ast.typed.expr.Ternary:unparse()
+  return self.cond:unparse() .. " ? " ..
+         self.true_expr:unparse() .. " : " ..
+         self.false_expr:unparse()
 end
 ast.typed.expr:leaf("Index", { "value", "index" })
 function ast.typed.expr.Index:unparse()

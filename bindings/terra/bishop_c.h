@@ -28,10 +28,12 @@ extern "C" {
   unsigned persistent;                                     \
 } TYPE;                                                    \
                                                            \
+void bishop_create_##NAME##_list(TYPE);                    \
 void bishop_delete_##NAME##_list(TYPE);                    \
 
 LIST_TYPE(processor, bishop_processor_list_t, legion_processor_t)
 LIST_TYPE(memory, bishop_memory_list_t, legion_memory_t)
+LIST_TYPE(field, bishop_field_list_t, legion_field_id_t)
 
 typedef void* bishop_mapper_state_t;
 
@@ -98,6 +100,12 @@ bool bishop_region_set_target_memory_list(legion_region_requirement_t,
                                           bishop_memory_list_t);
 
 bishop_isa_t bishop_processor_get_isa(legion_processor_t);
+
+bishop_memory_list_t
+bishop_physical_region_get_memories(legion_physical_region_t);
+
+bishop_field_list_t
+bishop_physical_region_get_fields(legion_physical_region_t);
 
 void bishop_logger_info(const char* msg, ...)
   __attribute__((format (printf, 1, 2)));

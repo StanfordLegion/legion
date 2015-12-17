@@ -1432,6 +1432,14 @@ namespace LegionRuntime {
        */
       Accessor::RegionAccessor<Accessor::AccessorType::Generic> 
         get_field_accessor(FieldID field) const; 
+      /**
+       * Return the memories where the underlying physical instances locate.
+       */
+      void get_memories(std::set<Memory>& memories) const;
+      /**
+       * Return a list of fields that the physical region contains.
+       */
+      void get_fields(std::vector<FieldID>& fields) const;
     };
 
     /**

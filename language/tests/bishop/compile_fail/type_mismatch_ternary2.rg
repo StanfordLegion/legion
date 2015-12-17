@@ -13,16 +13,16 @@
 -- limitations under the License.
 
 -- fails-with:
--- type_mismatch_binary.rg:25: binary op '+' expects type 'int32', but got type 'processor_type'
--- target : processors[$proc + 1];
--- ^
+-- type_mismatch_ternary2.rg:25: ternary op expects the same type on both expressions, but got types 'processor_list_type' and 'processor_type'
+-- target : processors.size > 0 ? processors : processors[1];
+--                                         ^
 
 import "bishop"
 
 mapper
 
 task[target=$proc] {
-  target : processors[$proc + 1];
+  target : processors.size > 0 ? processors : processors[1];
 }
 
 end

@@ -300,6 +300,8 @@ namespace LegionRuntime {
                            UserEvent term_event);
       Event get_ready_event(void) const;
       const InstanceRef& get_reference(void) const;
+      void get_memories(std::set<Memory>& memories) const;
+      void get_fields(std::vector<FieldID>& fields) const;
 #if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS)
     public:
       const char* get_task_name(void) const;

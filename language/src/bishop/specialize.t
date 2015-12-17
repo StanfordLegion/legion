@@ -190,6 +190,16 @@ function specialize.expr(node)
       rhs = rhs,
       position = node.position,
     }
+  elseif node:is(ast.unspecialized.expr.Ternary) then
+    local cond = specialize.expr(node.cond)
+    local true_expr = specialize.expr(node.true_expr)
+    local false_expr = specialize.expr(node.false_expr)
+    return ast.specialized.expr.Ternary {
+      cond = cond,
+      true_expr = true_expr,
+      false_expr = false_expr,
+      position = node.position,
+    }
   else
     assert(false, "unexpected node type: " .. tostring(node.node_type))
   end

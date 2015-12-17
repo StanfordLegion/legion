@@ -71,6 +71,7 @@ namespace LegionRuntime {
                           CustomSerdezID serdez_id);
       const Domain::CopySrcDstField& find_field_info(FieldID fid) const;
       size_t get_layout_size(void) const;
+      void get_fields(std::vector<FieldID>& fields) const;
     public:
       bool match_shape(const size_t field_size) const;
       bool match_shape(const std::vector<size_t> &field_sizes, 

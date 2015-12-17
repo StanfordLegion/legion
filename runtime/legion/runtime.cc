@@ -1423,6 +1423,29 @@ namespace LegionRuntime {
       return reference;
     }
 
+    //--------------------------------------------------------------------------
+    void PhysicalRegion::Impl::get_memories(std::set<Memory>& memories) const
+    //--------------------------------------------------------------------------
+    {
+      memories.insert(reference.get_memory());
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalRegion::Impl::get_fields(std::vector<FieldID>& fields) const
+    //--------------------------------------------------------------------------
+    {
+      const PhysicalManager* manager = reference.get_manager();
+      if (manager->is_reduction_manager())
+        // if the instance is a reduction instance,
+        // just extract the list of fields from the region requirement
+        fields.insert(fields.end(), req.instance_fields.begin(),
+            req.instance_fields.end());
+      else
+        // otherwise, read the list from the layout description
+        manager->as_instance_manager()->layout->get_fields(fields);
+    }
+
+
 #if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS)
     //--------------------------------------------------------------------------
     const char* PhysicalRegion::Impl::get_task_name(void) const

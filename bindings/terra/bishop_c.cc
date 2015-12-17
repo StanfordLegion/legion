@@ -84,6 +84,7 @@ bishop_delete_##NAME##_list(TYPE l)                      \
 
 LIST_OP(processor, bishop_processor_list_t, legion_processor_t)
 LIST_OP(memory, bishop_memory_list_t, legion_memory_t)
+LIST_OP(field, bishop_field_list_t, legion_field_id_t)
 
 bishop_processor_list_t
 bishop_all_processors()
@@ -264,6 +265,34 @@ bishop_processor_get_isa(legion_processor_t proc_)
         return X86_ISA; // unreachable
       }
   }
+}
+
+bishop_memory_list_t
+bishop_physical_region_get_memories(legion_physical_region_t pr_)
+{
+  set<Memory> memories;
+  PhysicalRegion* pr = CObjectWrapper::unwrap(pr_);
+  pr->get_memories(memories);
+  bishop_memory_list_t memories_ = bishop_create_memory_list(memories.size());
+  unsigned idx = 0;
+  for (set<Memory>::const_iterator it = memories.begin();
+       it != memories.end(); it++)
+    memories_.list[idx++] = CObjectWrapper::wrap(*it);
+  return memories_;
+}
+
+bishop_field_list_t
+bishop_physical_region_get_fields(legion_physical_region_t pr_)
+{
+  vector<FieldID> fields;
+  PhysicalRegion* pr = CObjectWrapper::unwrap(pr_);
+  pr->get_fields(fields);
+  bishop_field_list_t fields_ = bishop_create_field_list(fields.size());
+  unsigned idx = 0;
+  for (vector<FieldID>::const_iterator it = fields.begin();
+       it != fields.end(); it++)
+    fields_.list[idx++] = *it;
+  return fields_;
 }
 
 void
