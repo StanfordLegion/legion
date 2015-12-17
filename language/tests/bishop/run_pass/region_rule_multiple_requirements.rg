@@ -29,6 +29,10 @@ task#foo[target=$proc] region#r1 {
                          $proc.memories[kind=l1cache];
 }
 
+task[target=$proc] region {
+  target : $proc.memories[kind=sysmem];
+}
+
 end
 
 fspace Vec2

@@ -29,6 +29,10 @@ task#foo[target=$proc] region#r2 {
                          $proc.memories[kind=l1cache];
 }
 
+task[target=$proc] region {
+  target : $proc.memories[kind=sysmem];
+}
+
 end
 
 task foo(r1 : region(int), r2 : region(int))
