@@ -189,7 +189,7 @@ function codegen.expr(binders, state_var, node)
           [v.actions]
           [value] = c.bishop_filter_processors_by_isa([value], [v.value])
           if [value].size == 0 then
-            c.bishop_logger_warning("expression '%s' yields an empty list",
+            c.bishop_logger_debug("expression '%s' yields an empty list",
               [node:unparse()])
           end
           c.bishop_delete_processor_list([base.value])
@@ -203,7 +203,7 @@ function codegen.expr(binders, state_var, node)
           [v.actions]
           [value] = c.bishop_filter_memories_by_kind([value], [v.value])
           if [value].size == 0 then
-            c.bishop_logger_warning("expression '%s' yields an empty list",
+            c.bishop_logger_debug("expression '%s' yields an empty list",
               [node:unparse()])
           end
           c.bishop_delete_memory_list([base.value])
@@ -253,7 +253,7 @@ function codegen.expr(binders, state_var, node)
         do
           [value] = c.bishop_filter_memories_by_visibility([base.value])
           if [value].size == 0 then
-            c.bishop_logger_warning("  expression '%s' yields an empty list",
+            c.bishop_logger_debug("  expression '%s' yields an empty list",
               [node:unparse()])
           end
         end

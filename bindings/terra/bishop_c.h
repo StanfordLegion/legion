@@ -114,6 +114,8 @@ void bishop_logger_info(const char* msg, ...)
   __attribute__((format (printf, 1, 2)));
 void bishop_logger_warning(const char* msg, ...)
   __attribute__((format (printf, 1, 2)));
+void bishop_logger_debug(const char* msg, ...)
+  __attribute__((format (printf, 1, 2)));
 
 #ifdef __cplusplus
 }

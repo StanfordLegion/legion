@@ -322,3 +322,12 @@ bishop_logger_warning(const char* msg, ...)
   log_bishop.warning().vprintf(msg, args);
   va_end(args);
 }
+
+void
+bishop_logger_debug(const char* msg, ...)
+{
+  va_list args;
+  va_start(args, msg);
+  log_bishop.debug().vprintf(msg, args);
+  va_end(args);
+}
