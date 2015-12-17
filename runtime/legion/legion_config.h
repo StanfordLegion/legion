@@ -404,6 +404,7 @@ typedef unsigned long legion_semantic_tag_t;
 typedef unsigned long long legion_unique_id_t;
 typedef unsigned long long legion_version_id_t;
 typedef legion_lowlevel_task_func_id_t legion_task_id_t;
+typedef unsigned long legion_layout_description_id_t;
 
 
 #endif // __LEGION_CONFIG_H__

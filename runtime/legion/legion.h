@@ -1297,6 +1297,45 @@ namespace LegionRuntime {
     //==========================================================================
 
     /**
+     * \struct LayoutDescriptionRegistrar
+     * A layout description registrar is the mechanism by which application
+     * can register a set of constraints with a specific ID. This ID can
+     * then be used globally to refer to this set of constraints. All 
+     * constraint sets are associated with a specifid field space which
+     * contains the FieldIDs used in the constraints. This can be a 
+     * NO_SPACE if there are no field constraints. All the rest of the 
+     * constraints can be optionally specified.
+     */
+    struct LayoutDescriptionRegistrar {
+    public:
+      LayoutDescriptionRegistrar(FieldSpace handle, 
+                                 const char *layout_name = NULL);
+    public:
+      LayoutDescriptionRegistrar&
+        add_constraint(const SpecializedConstraint &constraint);
+      LayoutDescriptionRegistrar&
+        add_constraint(const MemoryConstraint &constraint);
+      LayoutDescriptionRegistrar&
+        add_constraint(const OrderingConstraint &constraint);
+      LayoutDescriptionRegistrar&
+        add_constraint(const SplittingConstraint &constraint);
+      LayoutDescriptionRegistrar&
+        add_constraint(const FieldConstraint &constraint);
+      LayoutDescriptionRegistrar&
+        add_constraint(const DimensionConstraint &constraint);
+      LayoutDescriptionRegistrar&
+        add_constraint(const AlignmentConstraint &constraint);
+      LayoutDescriptionRegistrar&
+        add_constraint(const OffsetConstraint &constraint);
+      LayoutDescriptionRegistrar&
+        add_constraint(const PointerConstraint &constraint); 
+    public:
+      FieldSpace                                handle;
+      LayoutConstraintSet                       layout_constraints;
+      const char*                               layout_name;
+    };
+
+    /**
      * \struct TaskVariantRegistrar
      * This structure captures all the meta-data information necessary for
      * describing a task variant including the logical task ID, the execution
@@ -1307,25 +1346,6 @@ namespace LegionRuntime {
     struct TaskVariantRegistrar {
     public:
       TaskVariantRegistrar(TaskID task_id, const char *variant_name = NULL);
-    public: // Add layout constraints
-      TaskVariantRegistrar&
-        add_constraint(unsigned idx, const SpecializedConstraint &constraint);
-      TaskVariantRegistrar&
-        add_constraint(unsigned idx, const MemoryConstraint &constraint);
-      TaskVariantRegistrar&
-        add_constraint(unsigned idx, const OrderingConstraint &constraint);
-      TaskVariantRegistrar&
-        add_constraint(unsigned idx, const SplittingConstraint &constraint);
-      TaskVariantRegistrar&
-        add_constraint(unsigned idx, const FieldConstraint &constraint);
-      TaskVariantRegistrar&
-        add_constraint(unsigned idx, const DimensionConstraint &constraint);
-      TaskVariantRegistrar&
-        add_constraint(unsigned idx, const AlignmentConstraint &constraint);
-      TaskVariantRegistrar&
-        add_constraint(unsigned idx, const OffsetConstraint &constraint);
-      TaskVariantRegistrar&
-        add_constraint(unsigned idx, const PointerConstraint &constraint);
     public: // Add execution constraints
       TaskVariantRegistrar& 
         add_constraint(const ISAConstraint &constraint);
@@ -1344,7 +1364,7 @@ namespace LegionRuntime {
       const char*                       task_variant_name;
     public: // constraints
       ExecutionConstraintSet            execution_constraints; 
-      TaskLayoutConstraintSet           layout_constraints;
+      TaskLayoutDescriptionSet          layout_constraints;
     public: // properties
       bool                              leaf_variant;
       bool                              inner_variant;
@@ -5415,6 +5435,57 @@ namespace LegionRuntime {
        * Dump the current profiling information to file.
        */
       static void dump_profiling(void);
+    public:
+      //------------------------------------------------------------------------
+      // Layout Registration Operations
+      //------------------------------------------------------------------------
+      /**
+       * Register a new layout description with the runtime. The ID for this
+       * layout can either be specified by the application (in which case
+       * it must be globally unique) or the application can ask the runtime
+       * to make a unique layout ID.
+       * @param registrar a layout description registrar 
+       * @param layout_id an optional layout ID to use
+       * @return the layout ID specified
+       */
+      LayoutDescriptionID register_layout(
+                             const LayoutDescriptionRegistrar &registrar,
+                             LayoutDescriptionID layout_id = AUTO_GENERATE_ID);
+
+      /**
+       * A static version of the method above to register layout
+       * descriptions prior to the runtime starting. Attempting to
+       * use this method after the runtime starts will result in a 
+       * failure. All of the calls to this method must specifiy layout
+       * descriptions that are not associated with a field space.
+       * @param layout_id the ID to associate with the description
+       * @param registrar a layout description registrar
+       */
+      static void register_layout(LayoutDescriptionID layout_id,
+                             const LayoutDescriptionRegistrar &registrar);
+
+      /**
+       * Get the field space for a specific layout description
+       * @param layout_id the layout ID for which to obtain the field space
+       * @return the field space handle for the layout description
+       */
+      FieldSpace get_layout_description_field_space(
+                                  LayoutDescriptionID layout_id);
+
+      /**
+       * Get the constraints for a specific layout description
+       * @param layout_id the layout ID for which to obtain the constraints
+       * @param layout_constraints a LayoutConstraintSet to populate
+       */
+      void get_layout_description(LayoutDescriptionID layout_id,
+                                  LayoutConstraintSet &layout_constraints);
+
+      /**
+       * Get the name associated with a particular layout description
+       * @param layout_id the layout ID for which to obtain the name
+       * @return a pointer to a string of the name of the layou description
+       */
+      const char* get_layout_description_name(LayoutDescriptionID layout_id);
     public:
       //------------------------------------------------------------------------
       // Task Registration Operations

@@ -404,6 +404,7 @@ namespace LegionRuntime {
     struct CopyLauncher;
     struct AcquireLauncher;
     struct ReleaseLauncher;
+    struct LayoutDescriptionRegistrar;
     struct TaskVariantRegistrar;
     class Future;
     class FutureMap;
@@ -581,7 +582,7 @@ namespace LegionRuntime {
     class OffsetConstraint;
     class PointerConstraint;
     class LayoutConstraintSet;
-    class TaskLayoutConstraintSet;
+    class TaskLayoutDescriptionSet;
 
     // legion_utilities.h
     struct RegionUsage;
@@ -665,6 +666,7 @@ namespace LegionRuntime {
     typedef ::legion_unique_id_t UniqueID;
     typedef ::legion_version_id_t VersionID;
     typedef ::legion_task_id_t TaskID;
+    typedef ::legion_layout_description_id_t LayoutDescriptionID;
     typedef SingleTask* Context;
     typedef std::map<Color,ColoredPoints<ptr_t> > Coloring;
     typedef std::map<Color,Domain> DomainColoring;

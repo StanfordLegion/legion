@@ -471,6 +471,7 @@ namespace LegionRuntime {
       bool satisfies(const PointerConstraint *other) const;
       bool conflicts(const PointerConstraint *other) const;
     protected:
+      bool is_valid;
       FieldID fid;
       uintptr_t ptr;
       Memory memory;
@@ -515,44 +516,20 @@ namespace LegionRuntime {
     };
 
     /**
-     * \class TaskLayoutConstraintSet
-     * Provide a class for tracking all the layout constaints
-     * associated with a task. The data structures in this class
-     * are indexed by the region requirement to which the 
-     * constraints apply
+     * \class TaskLayoutDescriptionSet
+     * Provide a class to describe the layout descriptions for
+     * all the regions in a task. Since a region requirement
+     * can be satisfied by more than one instance, we allow
+     * multiple layout descriptions to be specified for the
+     * same region requirement.  The desriptions for a region
+     * requirement should not describe any of the same fields.
      */
-    class TaskLayoutConstraintSet {
+    class TaskLayoutDescriptionSet {
     public:
-      // Make sure these methods return ourself so we can 
-      // easily chain them together when adding constraints
-      TaskLayoutConstraintSet&
-        add_constraint(unsigned idx, const SpecializedConstraint &constraint);
-      TaskLayoutConstraintSet&
-        add_constraint(unsigned idx, const MemoryConstraint &constraint);
-      TaskLayoutConstraintSet&
-        add_constraint(unsigned idx, const OrderingConstraint &constraint);
-      TaskLayoutConstraintSet&
-        add_constraint(unsigned idx, const SplittingConstraint &constraint);
-      TaskLayoutConstraintSet&
-        add_constraint(unsigned idx, const FieldConstraint &constraint);
-      TaskLayoutConstraintSet&
-        add_constraint(unsigned idx, const DimensionConstraint &constraint);
-      TaskLayoutConstraintSet&
-        add_constraint(unsigned idx, const AlignmentConstraint &constraint);
-      TaskLayoutConstraintSet&
-        add_constraint(unsigned idx, const OffsetConstraint &constraint);
-      TaskLayoutConstraintSet&
-        add_constraint(unsigned idx, const PointerConstraint &constraint);
+      TaskLayoutDescriptionSet&
+        add_layout_description(unsigned idx, LayoutDescriptionID desc);
     public:
-      std::map<unsigned,SpecializedConstraint>    specialized_constraints;
-      std::map<unsigned,MemoryConstraint>         memory_constraints;
-      std::map<unsigned,PointerConstraint>        pointer_constraints;
-      std::multimap<unsigned,OrderingConstraint>  ordering_constraints;
-      std::multimap<unsigned,SplittingConstraint> splitting_constraints;
-      std::multimap<unsigned,FieldConstraint>     field_constraints; 
-      std::multimap<unsigned,DimensionConstraint> dimension_constraints;
-      std::multimap<unsigned,AlignmentConstraint> alignment_constraint; 
-      std::multimap<unsigned,OffsetConstraint>    offset_constraints;
+      std::multimap<unsigned,LayoutDescriptionID> layouts;
     };
 
   }; // namesapce HighLevel
