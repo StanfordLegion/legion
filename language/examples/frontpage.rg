@@ -42,7 +42,7 @@ task main()
   end
   c(points)
   for i = 0, 3 do
-    d(points)
+    d(part[i])
   end
 end
 regentlib.start(main)
