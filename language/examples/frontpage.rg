@@ -12,10 +12,9 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- Load the Regent language definition.
 import "regent"
 
--- Define a simple struct to be used later.
+-- Define a simple struct type with two fields.
 struct point {
   x : float,
   y : float,
@@ -40,7 +39,7 @@ task main()
   -- onto a subset of the data of the parent.
   var part = partition(equal, points, ispace(int1d, 3))
 
-  -- Launch tasks a, b, c, and d.
+  -- Launch subtasks a, b, c, and d.
   a(points)
   for i = 0, 3 do
     b(part[i])
