@@ -1481,6 +1481,28 @@ legion_index_partition_destroy(legion_runtime_t runtime_,
   runtime->destroy_index_partition(ctx, handle);
 }
 
+void
+legion_index_partition_attach_name(legion_runtime_t runtime_,
+                                   legion_index_partition_t handle_,
+                                   const char *name)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  IndexPartition handle = CObjectWrapper::unwrap(handle_);
+
+  runtime->attach_name(handle, name);
+}
+
+void
+legion_index_partition_retrieve_name(legion_runtime_t runtime_,
+                                     legion_index_partition_t handle_,
+                                     const char **result)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  IndexPartition handle = CObjectWrapper::unwrap(handle_);
+
+  runtime->retrieve_name(handle, *result);
+}
+
 // -------------------------------------------------------
 // Field Space Operations
 // -------------------------------------------------------
@@ -1506,6 +1528,52 @@ legion_field_space_destroy(legion_runtime_t runtime_,
   FieldSpace handle = CObjectWrapper::unwrap(handle_);
 
   runtime->destroy_field_space(ctx, handle);
+}
+
+void
+legion_field_space_attach_name(legion_runtime_t runtime_,
+                               legion_field_space_t handle_,
+                               const char *name)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  FieldSpace handle = CObjectWrapper::unwrap(handle_);
+
+  runtime->attach_name(handle, name);
+}
+
+void
+legion_field_space_retrieve_name(legion_runtime_t runtime_,
+                                 legion_field_space_t handle_,
+                                 const char **result)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  FieldSpace handle = CObjectWrapper::unwrap(handle_);
+
+  runtime->retrieve_name(handle, *result);
+}
+
+void
+legion_field_id_attach_name(legion_runtime_t runtime_,
+                            legion_field_space_t handle_,
+                            legion_field_id_t id,
+                            const char *name)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  FieldSpace handle = CObjectWrapper::unwrap(handle_);
+
+  runtime->attach_name(handle, id, name);
+}
+
+void
+legion_field_id_retrieve_name(legion_runtime_t runtime_,
+                              legion_field_space_t handle_,
+                              legion_field_id_t id,
+                              const char **result)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  FieldSpace handle = CObjectWrapper::unwrap(handle_);
+
+  runtime->retrieve_name(handle, id, *result);
 }
 
 // -------------------------------------------------------
@@ -1691,6 +1759,28 @@ legion_logical_partition_get_parent_logical_region(
 
   LogicalRegion r = runtime->get_parent_logical_region(ctx, handle);
   return CObjectWrapper::wrap(r);
+}
+
+void
+legion_logical_partition_attach_name(legion_runtime_t runtime_,
+                                     legion_logical_partition_t handle_,
+                                     const char *name)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  LogicalPartition handle = CObjectWrapper::unwrap(handle_);
+
+  runtime->attach_name(handle, name);
+}
+
+void
+legion_logical_partition_retrieve_name(legion_runtime_t runtime_,
+                                       legion_logical_partition_t handle_,
+                                       const char **result)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  LogicalPartition handle = CObjectWrapper::unwrap(handle_);
+
+  runtime->retrieve_name(handle, *result);
 }
 
 // -----------------------------------------------------------------------
@@ -3900,7 +3990,12 @@ legion_processor_kind(legion_processor_t proc_)
 // -----------------------------------------------------------------------
 
 legion_memory_kind_t
-legion_memory_kind(legion_memory_t proc_);
+legion_memory_kind(legion_memory_t mem_)
+{
+  Memory mem = CObjectWrapper::unwrap(mem_);
+
+  return CObjectWrapper::wrap(mem.kind());
+}
 
 // -----------------------------------------------------------------------
 // Machine Query Interface Operations

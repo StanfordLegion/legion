@@ -19,6 +19,7 @@
 #include "legion_logging.h"
 #include "realm/profiling.h"
 #include "realm/timers.h"
+#include "realm/custom_serdez.h"
 
 #ifndef __GNUC__
 #include "atomics.h" // for __sync_fetch_and_add
@@ -234,6 +235,7 @@ namespace LegionRuntime {
     protected:
       TaskTable task_table;
       std::map<ReductionOpID, const ReductionOpUntyped *> redop_table;
+      std::map<CustomSerdezID, const CustomSerdezUntyped *> custom_serdez_table;
       std::set<Processor> procs;
       std::vector<EventImpl*> events;
       std::deque<EventImpl*> free_events; 
@@ -2643,27 +2645,81 @@ namespace Realm {
         first_enabled_elmt(-1), last_enabled_elmt(-1)
     {
       size_t bytes_needed = ElementMaskImpl::bytes_needed(first_element, num_elements);
-      raw_data = calloc(1, bytes_needed);
+      raw_data = (char *)calloc(1, bytes_needed);
       //((ElementMaskImpl *)raw_data)->count = num_elements;
       //((ElementMaskImpl *)raw_data)->offset = first_element;
     }
 
     ElementMask::ElementMask(const ElementMask &copy_from, 
-			     int _num_elements /*= -1*/, int _first_element /*= 0*/)
+			     int _num_elements, int _first_element /*= -1*/)
+    {
+      first_element = (_first_element >= 0) ? _first_element : copy_from.first_element;
+      num_elements = _num_elements;
+      first_enabled_elmt = copy_from.first_enabled_elmt;
+      last_enabled_elmt = copy_from.last_enabled_elmt;
+      // if we have bounds, make sure they're trimmed to what we actually cover
+      if((first_enabled_elmt >= 0) && (first_enabled_elmt < first_element)) {
+	first_enabled_elmt = first_element;
+      }
+      if((last_enabled_elmt >= 0) && (last_enabled_elmt >= (first_element + num_elements))) {
+	last_enabled_elmt = first_element + num_elements - 1;
+      }
+      // figure out the copy offset - must be an integral number of bytes
+      ptrdiff_t copy_byte_offset = (first_element - copy_from.first_element);
+      assert((copy_from.first_element + (copy_byte_offset << 3)) == first_element);
+
+      size_t bytes_needed = ElementMaskImpl::bytes_needed(first_element, num_elements);
+      raw_data = (char *)calloc(1, bytes_needed);  // sets initial values to 0
+
+      // how much to copy?
+      size_t bytes_avail = (ElementMaskImpl::bytes_needed(copy_from.first_element, 
+							  copy_from.num_elements) -
+			    copy_byte_offset);
+      size_t bytes_to_copy = (bytes_needed <= bytes_avail) ? bytes_needed : bytes_avail;
+
+      if(copy_from.raw_data) {
+	if(copy_byte_offset >= 0) {
+	  memcpy(raw_data, copy_from.raw_data + copy_byte_offset, bytes_to_copy);
+	} else {
+	  // we start before the input mask, so offset is applied to our pointer
+	  memcpy(raw_data + (-copy_byte_offset), copy_from.raw_data, bytes_to_copy);
+	}
+      } else {
+        assert(false);
+      }
+    }
+
+    ElementMask::ElementMask(const ElementMask &copy_from, bool trim /*= false*/)
     {
       first_element = copy_from.first_element;
       num_elements = copy_from.num_elements;
       first_enabled_elmt = copy_from.first_enabled_elmt;
       last_enabled_elmt = copy_from.last_enabled_elmt;
+      ptrdiff_t copy_byte_offset = 0;
+      if(trim) {
+	// trimming from the end is easy - just reduce num_elements
+	if(last_enabled_elmt >= 0) {
+	  assert(last_enabled_elmt < (first_element + num_elements));
+	  num_elements = last_enabled_elmt + 1 - first_element;
+	}
+
+	// trimming from the beginning requires stepping by units of 8 so that we can copy bytes
+	if(first_enabled_elmt > first_element) {
+	  assert(first_enabled_elmt < (first_element + num_elements));
+	  copy_byte_offset = (first_enabled_elmt - first_element) >> 3;  // truncates
+	  first_element += (copy_byte_offset << 3); // convert back to bits
+	  num_elements -= (copy_byte_offset << 3);
+	}
+      }
+      assert(num_elements >= 0);
+	
       size_t bytes_needed = ElementMaskImpl::bytes_needed(first_element, num_elements);
-      //if (raw_data)
-      //  free(raw_data);
-      raw_data = calloc(1, bytes_needed);
+      raw_data = (char *)calloc(1, bytes_needed);
 
       if(copy_from.raw_data) {
-	memcpy(raw_data, copy_from.raw_data, bytes_needed);
+	memcpy(raw_data, copy_from.raw_data + copy_byte_offset, bytes_needed);
       } else {
-        assert(false);
+	assert(false);
       }
     }
 
@@ -2685,7 +2741,7 @@ namespace Realm {
       size_t bytes_needed = rhs.raw_size();
       if (raw_data)
         free(raw_data);
-      raw_data = calloc(1, bytes_needed);
+      raw_data = (char *)calloc(1, bytes_needed);
       if (rhs.raw_data)
       {
         memcpy(raw_data, rhs.raw_data, bytes_needed);
@@ -3660,6 +3716,13 @@ namespace Realm {
       impl->deactivate();
     }
 
+    void RegionInstance::destroy(const std::vector<DestroyedField>& destroyed_fields,
+				 Event wait_on /*= Event::NO_EVENT*/) const
+    {
+      // TODO: actually call destructor
+      assert(destroyed_fields.empty());
+      destroy(wait_on);
+    }
 };
 
 namespace LegionRuntime {
@@ -4754,6 +4817,15 @@ namespace Realm {
                                                 const std::vector<size_t> &field_sizes,
                                                 const std::vector<const char*> &field_files,
                                                 bool ready_only) const
+    {
+      // TODO: Implement this
+      assert(false);
+      return RegionInstance::NO_INST;
+    }
+
+    RegionInstance Domain::create_file_instance(const char *file_name,
+                                                const std::vector<size_t> &field_sizes,
+                                                legion_lowlevel_file_mode_t file_mode) const
     {
       // TODO: Implement this
       assert(false);
@@ -6600,6 +6672,17 @@ namespace Realm {
 	return false;
 
       ((RuntimeImpl *)impl)->redop_table[redop_id] = redop;
+      return true;
+    }
+
+    bool Runtime::register_custom_serdez(CustomSerdezID serdez_id, const CustomSerdezUntyped *serdez)
+    {
+      assert(impl != 0);
+
+      if(((RuntimeImpl *)impl)->custom_serdez_table.count(serdez_id) > 0)
+	return false;
+
+      ((RuntimeImpl *)impl)->custom_serdez_table[serdez_id] = serdez;
       return true;
     }
 

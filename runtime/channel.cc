@@ -42,6 +42,8 @@ namespace LegionRuntime {
       }
 #endif /*USE_DISK*/
 
+      // TODO: currently we use dma_all_gpus to track the set of GPU* created
+      std::vector<GPU*> dma_all_gpus;
       // we use a single queue for all xferDes
       static XferDesQueue *xferDes_queue = 0;
 
@@ -1586,11 +1588,12 @@ namespace LegionRuntime {
           {
             GPUtoFBRequest** gpu_to_fb_reqs = (GPUtoFBRequest**) requests;
             for (int i = 0; i < nr; i++) {
-              gpu_to_fb_reqs[i]->complete_event = GenEventImpl::create_genevent()->current_event();
+              //gpu_to_fb_reqs[i]->complete_event = GenEventImpl::create_genevent()->current_event();
               src_gpu->copy_to_fb(gpu_to_fb_reqs[i]->dst_offset,
                                   gpu_to_fb_reqs[i]->src,
-                                  gpu_to_fb_reqs[i]->nbytes/*,
-                                  Event::NO_EVENT,
+                                  gpu_to_fb_reqs[i]->nbytes,
+                                  &gpu_to_fb_reqs[i]->event
+                                  /*Event::NO_EVENT,
                                   gpu_to_fb_reqs[i]->complete_event*/);
               pending_copies.push_back(gpu_to_fb_reqs[i]);
             }
@@ -1600,11 +1603,12 @@ namespace LegionRuntime {
           {
             GPUfromFBRequest** gpu_from_fb_reqs = (GPUfromFBRequest**) requests;
             for (int i = 0; i < nr; i++) {
-              gpu_from_fb_reqs[i]->complete_event = GenEventImpl::create_genevent()->current_event();
+              //gpu_from_fb_reqs[i]->complete_event = GenEventImpl::create_genevent()->current_event();
               src_gpu->copy_from_fb(gpu_from_fb_reqs[i]->dst,
                                     gpu_from_fb_reqs[i]->src_offset,
-                                    gpu_from_fb_reqs[i]->nbytes/*,
-                                    Event::NO_EVENT,
+                                    gpu_from_fb_reqs[i]->nbytes,
+                                    &gpu_from_fb_reqs[i]->event
+                                    /*Event::NO_EVENT,
                                     gpu_from_fb_reqs[i]->complete_event*/);
               pending_copies.push_back(gpu_from_fb_reqs[i]);
             }
@@ -1614,11 +1618,12 @@ namespace LegionRuntime {
           {
             GPUinFBRequest** gpu_in_fb_reqs = (GPUinFBRequest**) requests;
             for (int i = 0; i < nr; i++) {
-              gpu_in_fb_reqs[i]->complete_event = GenEventImpl::create_genevent()->current_event();
+              //gpu_in_fb_reqs[i]->complete_event = GenEventImpl::create_genevent()->current_event();
               src_gpu->copy_within_fb(gpu_in_fb_reqs[i]->dst_offset,
                                       gpu_in_fb_reqs[i]->src_offset,
-                                      gpu_in_fb_reqs[i]->nbytes/*,
-                                      Event::NO_EVENT,
+                                      gpu_in_fb_reqs[i]->nbytes,
+                                      &gpu_in_fb_reqs[i]->event
+                                      /*Event::NO_EVENT,
                                       gpu_in_fb_reqs[i]->complete_event*/);
               pending_copies.push_back(gpu_in_fb_reqs[i]);
             }
@@ -1628,12 +1633,13 @@ namespace LegionRuntime {
           {
             GPUpeerFBRequest** gpu_peer_fb_reqs = (GPUpeerFBRequest**) requests;
             for (int i = 0; i < nr; i++) {
-              gpu_peer_fb_reqs[i]->complete_event = GenEventImpl::create_genevent()->current_event();
+              //gpu_peer_fb_reqs[i]->complete_event = GenEventImpl::create_genevent()->current_event();
               src_gpu->copy_to_peer(gpu_peer_fb_reqs[i]->dst_gpu,
                                     gpu_peer_fb_reqs[i]->dst_offset,
                                     gpu_peer_fb_reqs[i]->src_offset,
-                                    gpu_peer_fb_reqs[i]->nbytes/*,
-                                    Event::NO_EVENT,
+                                    gpu_peer_fb_reqs[i]->nbytes,
+                                    &gpu_peer_fb_reqs[i]->event
+                                    /*Event::NO_EVENT,
                                     gpu_peer_fb_reqs[i]->complete_event*/);
               pending_copies.push_back(gpu_peer_fb_reqs[i]);
             }
@@ -1651,7 +1657,7 @@ namespace LegionRuntime {
           case XferDes::XFER_GPU_TO_FB:
             while (!pending_copies.empty()) {
               GPUtoFBRequest* gpu_to_fb_req = (GPUtoFBRequest*)pending_copies.front();
-              if (gpu_to_fb_req->complete_event.has_triggered()) {
+              if (gpu_to_fb_req->event.has_triggered()) {
                 gpu_to_fb_req->xd->notify_request_read_done(gpu_to_fb_req);
                 gpu_to_fb_req->xd->notify_request_write_done(gpu_to_fb_req);
                 pending_copies.pop_front();
@@ -1663,7 +1669,7 @@ namespace LegionRuntime {
           case XferDes::XFER_GPU_FROM_FB:
             while (!pending_copies.empty()) {
               GPUfromFBRequest* gpu_from_fb_req = (GPUfromFBRequest*)pending_copies.front();
-              if (gpu_from_fb_req->complete_event.has_triggered()) {
+              if (gpu_from_fb_req->event.has_triggered()) {
                 gpu_from_fb_req->xd->notify_request_read_done(gpu_from_fb_req);
                 gpu_from_fb_req->xd->notify_request_write_done(gpu_from_fb_req);
                 pending_copies.pop_front();
@@ -1675,7 +1681,7 @@ namespace LegionRuntime {
           case XferDes::XFER_GPU_IN_FB:
             while (!pending_copies.empty()) {
               GPUinFBRequest* gpu_in_fb_req = (GPUinFBRequest*)pending_copies.front();
-              if (gpu_in_fb_req->complete_event.has_triggered()) {
+              if (gpu_in_fb_req->event.has_triggered()) {
                 gpu_in_fb_req->xd->notify_request_read_done(gpu_in_fb_req);
                 gpu_in_fb_req->xd->notify_request_write_done(gpu_in_fb_req);
                 pending_copies.pop_front();
@@ -1687,7 +1693,7 @@ namespace LegionRuntime {
           case XferDes::XFER_GPU_PEER_FB:
             while (!pending_copies.empty()) {
               GPUinFBRequest* gpu_peer_fb_req = (GPUinFBRequest*)pending_copies.front();
-              if (gpu_peer_fb_req->complete_event.has_triggered()) {
+              if (gpu_peer_fb_req->event.has_triggered()) {
                 gpu_peer_fb_req->xd->notify_request_read_done(gpu_peer_fb_req);
                 gpu_peer_fb_req->xd->notify_request_write_done(gpu_peer_fb_req);
                 pending_copies.pop_front();
@@ -1924,26 +1930,20 @@ namespace LegionRuntime {
         return xferDes_queue;
       }
 
-      void start_channel_manager(int count, int max_nr, Realm::CoreReservationSet& crs
-#ifdef USE_CUDA
-                                ,std::vector<GPU*> &local_gpus
-#endif
-                               )
+      void register_gpu_in_dma_systems(GPU* gpu)
+      {
+        dma_all_gpus.push_back(gpu);
+      }
+
+      void start_channel_manager(int count, int max_nr, Realm::CoreReservationSet& crs)
       {
         xferDes_queue = new XferDesQueue(crs);
         channel_manager = new ChannelManager;
-#ifdef USE_CUDA
-        xferDes_queue->start_worker(count, max_nr, channel_manager, local_gpus);
-#else
-		xferDes_queue->start_worker(count, max_nr, channel_manager);
-#endif
+        xferDes_queue->start_worker(count, max_nr, channel_manager);
       }
 
-      void XferDesQueue::start_worker(int count, int max_nr, ChannelManager* channel_manager
-#ifdef USE_CUDA
-                                      ,std::vector<GPU*> &local_gpus
-#endif
-    ) {
+      void XferDesQueue::start_worker(int count, int max_nr, ChannelManager* channel_manager) 
+      {
         log_new_dma.info("XferDesQueue: start_workers");
         // TODO: count is currently ignored
         num_threads = 3;
@@ -1964,7 +1964,7 @@ namespace LegionRuntime {
 #endif /*USE_DISK*/
 #ifdef USE_CUDA
         std::vector<GPU*>::iterator it;
-        for (it = local_gpus.begin(); it != local_gpus.end(); it ++) {
+        for (it = dma_all_gpus.begin(); it != dma_all_gpus.end(); it ++) {
           async_channels.push_back(channel_manager->create_gpu_to_fb_channel(max_nr, *it));
           async_channels.push_back(channel_manager->create_gpu_from_fb_channel(max_nr, *it));
           async_channels.push_back(channel_manager->create_gpu_in_fb_channel(max_nr, *it));

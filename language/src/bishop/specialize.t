@@ -130,9 +130,19 @@ function specialize.expr(node)
   elseif node:is(ast.unspecialized.expr.Filter) then
     local value = specialize.expr(node.value)
     local constraints = node.constraints:map(function(constraint)
+      local field = constraint.field
+      local value
+      if constraint:is(ast.unspecialized.Constraint) then
+        value = constraint.value
+      else assert(constraint:is(ast.unspecialized.PatternMatch)) 
+        value = ast.unspecialized.expr.Variable {
+          value = constraint.binder,
+          position = constraint.position,
+        }
+      end
       return ast.specialized.FilterConstraint {
-        field = constraint.field,
-        value = specialize.expr(constraint.value),
+        field = field,
+        value = specialize.expr(value),
         position = constraint.position,
       }
     end)
@@ -180,6 +190,16 @@ function specialize.expr(node)
       rhs = rhs,
       position = node.position,
     }
+  elseif node:is(ast.unspecialized.expr.Ternary) then
+    local cond = specialize.expr(node.cond)
+    local true_expr = specialize.expr(node.true_expr)
+    local false_expr = specialize.expr(node.false_expr)
+    return ast.specialized.expr.Ternary {
+      cond = cond,
+      true_expr = true_expr,
+      false_expr = false_expr,
+      position = node.position,
+    }
   else
     assert(false, "unexpected node type: " .. tostring(node.node_type))
   end
@@ -189,16 +209,16 @@ function specialize.property(node, type)
   local field = node.field
   local value = specialize.expr(node.value)
 
+  if not (property_checks[field] and
+    property_checks[field].type(type)) then
+    log.error(node, "unexpected property '" .. field ..
+    "' for " .. type .. " rule")
+  end
   if value:is(ast.specialized.expr.Keyword) then
-    if not (property_checks[field] and
-      property_checks[field].type(type)) then
-      log.error(node, "unexpected property " .. field ..
-      " for element type " .. type)
-    end
     local keyword = value.value
     if not property_checks[field].condition(keyword) then
-      log.error(node, "unexpected keyword \"" .. keyword ..
-      "\" for property " .. field)
+      log.error(node, "unexpected keyword '" .. keyword ..
+      "' for property '" .. field .. "'")
     end
   end
 
@@ -291,17 +311,17 @@ function specialize.selector(node)
     type = "task"
     if #elements > 1 then
       log.error(node,
-        "task selectors with multiple elements are not supported yet.")
+        "task selectors with multiple elements are not supported yet")
     end
   else assert(elements[1]:is(ast.specialized.element.Region))
     type = "region"
     if not elements[2]:is(ast.specialized.element.Task) then
       log.error(elements[2],
-        "region element should be preceded by task element in selectors.")
+        "region element should be preceded by task element in selectors")
     end
     if #elements > 2 then
       log.error(node,
-        "region selectors with multiple task elements are not supported yet.")
+        "region selectors with multiple task elements are not supported yet")
     end
   end
 
@@ -348,12 +368,20 @@ local function compare_rules(rule1, rule2)
   local specificity1 = calculate_specificity(rule1.selector)
   local specificity2 = calculate_specificity(rule2.selector)
   for i = 1, 4 do
-    if specificity1[i] >= specificity2[i] then return false end
+    if specificity1[i] > specificity2[i] then return false end
   end
   return true
 end
 
-function specialize.rules(node)
+function specialize.assignment(node)
+  return ast.specialized.Assignment {
+    binder = node.binder,
+    value = specialize.expr(node.value),
+    position = node.position,
+  }
+end
+
+function specialize.mapper(node)
   local flattened = terralib.newlist()
   node.rules:map(function(rule)
     rule.selectors:map(function(selector)
@@ -376,9 +404,12 @@ function specialize.rules(node)
   table.sort(task_rules, compare_rules)
   table.sort(region_rules, compare_rules)
 
-  return ast.specialized.Rules {
+  local assignments = node.assignments:map(specialize.assignment)
+
+  return ast.specialized.Mapper {
     task_rules = task_rules,
     region_rules = region_rules,
+    assignments = assignments,
     position = node.position,
   }
 end

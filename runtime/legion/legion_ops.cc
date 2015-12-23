@@ -4225,9 +4225,8 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     void TraceCloseOp::initialize_trace_close_op(SingleTask *ctx, 
                                                  const RegionRequirement &req,
-                                            const std::set<ColorPoint> &targets,
-                                                 LegionTrace *trace,
-                                                 int close, 
+                        const LegionMap<ColorPoint,FieldMask>::aligned &targets,
+                                                 LegionTrace *trace, int close, 
                                                  const FieldMask &close_m,
                                                  Operation *create)
     //--------------------------------------------------------------------------
@@ -4347,7 +4346,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void InterCloseOp::initialize(SingleTask *ctx, const RegionRequirement &req,
-                                  const std::set<ColorPoint> &targets,bool open,
+                        const LegionMap<ColorPoint,FieldMask>::aligned &targets,
                                   LegionTrace *trace, int close, 
                                   const VersionInfo &close_info,
                                   const VersionInfo &ver_info,
@@ -4361,7 +4360,6 @@ namespace LegionRuntime {
       version_info.merge(close_info, close_m);
       version_info.merge(ver_info, close_m);
       restrict_info.merge(res_info, close_m);
-      leave_open = open;
       parent_req_index = create->find_parent_index(close_idx);
     } 
 
@@ -4370,7 +4368,6 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       activate_trace_close();  
-      leave_open = false;
     }
 
     //--------------------------------------------------------------------------
@@ -4435,7 +4432,7 @@ namespace LegionRuntime {
       bool success = runtime->forest->perform_close_operation(physical_ctx,
                                               requirement, parent_ctx,
                                               local_proc, target_children,
-                                              leave_open, next_children, 
+                                              next_children, 
                                               close_event, target,
                                               version_info, force_composite
 #ifdef DEBUG_HIGH_LEVEL
@@ -4451,8 +4448,8 @@ namespace LegionRuntime {
         return false;
       }
       std::set<Event> applied_conditions;
-      version_info.apply_close(physical_ctx.get_id(), leave_open,
-                               runtime->address_space, applied_conditions);
+      version_info.apply_close(physical_ctx.get_id(), runtime->address_space,
+                               target_children, applied_conditions);
 #ifdef LEGION_LOGGING
       LegionLogging::log_timing_event(Processor::get_executing_processor(),
                                       unique_op_id, END_MAPPING);
@@ -4534,7 +4531,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void ReadCloseOp::initialize(SingleTask *ctx, const RegionRequirement &req,
-                                 const std::set<ColorPoint> &targets,
+                        const LegionMap<ColorPoint,FieldMask>::aligned &targets,
                                  LegionTrace *trace, int close,
                                  const FieldMask &close_m, Operation *create)
     //--------------------------------------------------------------------------

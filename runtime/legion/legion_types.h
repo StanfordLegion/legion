@@ -252,10 +252,9 @@ namespace LegionRuntime {
       DISTRIBUTED_VALID_UPDATE,
       DISTRIBUTED_GC_UPDATE,
       DISTRIBUTED_RESOURCE_UPDATE,
+      DISTRIBUTED_CREATE_ADD,
+      DISTRIBUTED_CREATE_REMOVE,
       VIEW_REMOTE_REGISTRATION,
-      VIEW_VALID_UPDATE,
-      VIEW_GC_UPDATE,
-      VIEW_RESOURCE_UPDATE,
       SEND_BACK_ATOMIC,
       SEND_MATERIALIZED_VIEW,
       SEND_MATERIALIZED_UPDATE,
@@ -337,10 +336,9 @@ namespace LegionRuntime {
         "Distributed Valid Update",                                   \
         "Distributed GC Update",                                      \
         "Distributed Resource Update",                                \
+        "Distributed Create Add",                                     \
+        "Distributed Create Remove",                                  \
         "View Remote Registration",                                   \
-        "View Valid Update",                                          \
-        "View GC Update",                                             \
-        "View Resource Update",                                       \
         "Send Back Atomic",                                           \
         "Send Materialized View",                                     \
         "Send Materialized Update",                                   \
@@ -557,9 +555,9 @@ namespace LegionRuntime {
     struct LogicalUser;
     struct PhysicalUser;
     struct TraceInfo;
-    struct LogicalCloser;
-    struct PhysicalCloser;
-    struct CompositeCloser;
+    class LogicalCloser;
+    class PhysicalCloser;
+    class CompositeCloser;
     class ReductionCloser;
     class TreeCloseImpl;
     class TreeClose;
@@ -609,10 +607,13 @@ namespace LegionRuntime {
     typedef LowLevel::Barrier Barrier;
     typedef ::legion_reduction_op_id_t ReductionOpID;
     typedef LowLevel::ReductionOpUntyped ReductionOp;
+    typedef ::legion_custom_serdez_id_t CustomSerdezID;
+    typedef LowLevel::CustomSerdezUntyped SerdezOp;
     typedef LowLevel::Machine::ProcessorMemoryAffinity ProcessorMemoryAffinity;
     typedef LowLevel::Machine::MemoryMemoryAffinity MemoryMemoryAffinity;
     typedef LowLevel::ElementMask::Enumerator Enumerator;
     typedef LowLevel::IndexSpace::FieldDataDescriptor FieldDataDescriptor;
+    typedef std::map<CustomSerdezID, const LowLevel::CustomSerdezUntyped *> SerdezOpTable;
     typedef std::map<LowLevel::ReductionOpID, 
             const LowLevel::ReductionOpUntyped *> ReductionOpTable;
     typedef void (*SerdezInitFnptr)(const ReductionOp*, void *&, size_t&);

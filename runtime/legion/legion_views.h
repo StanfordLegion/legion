@@ -42,12 +42,9 @@ namespace LegionRuntime {
       static void delete_logical_view(LogicalView *view);
     public:
       virtual void send_remote_registration(void);
-      virtual void send_remote_valid_update(AddressSpaceID target, 
-                                            unsigned count, bool add);
-      virtual void send_remote_gc_update(AddressSpaceID target,
-                                         unsigned count, bool add);
-      virtual void send_remote_resource_update(AddressSpaceID target,
-                                               unsigned count, bool add);
+      static void handle_view_remote_registration(RegionTreeForest *forest,
+                                                  Deserializer &derez,
+                                                  AddressSpaceID source);
     public:
       virtual bool is_instance_view(void) const = 0;
       virtual bool is_deferred_view(void) const = 0;
@@ -59,16 +56,6 @@ namespace LegionRuntime {
       virtual LogicalView* get_parent(void) const = 0;
       virtual LogicalView* get_subview(const ColorPoint &c) = 0;
       virtual bool has_space(const FieldMask &space_mask) const = 0;
-    public:
-      static void handle_view_remote_registration(RegionTreeForest *forest,
-                                                  Deserializer &derez,
-                                                  AddressSpaceID source);
-      static void handle_view_remote_valid_update(RegionTreeForest *forest,
-                                                  Deserializer &derez);
-      static void handle_view_remote_gc_update(RegionTreeForest *forest,
-                                               Deserializer &derez);
-      static void handle_view_remote_resource_update(RegionTreeForest *forest,
-                                                     Deserializer &derez);
     public:
       virtual void notify_active(void) = 0;
       virtual void notify_inactive(void) = 0;

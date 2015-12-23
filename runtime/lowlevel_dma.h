@@ -136,11 +136,7 @@ namespace LegionRuntime {
     extern void start_dma_worker_threads(int count, Realm::CoreReservationSet& crs);
     extern void stop_dma_worker_threads(void);
 
-    extern void start_dma_system(int count, int max_nr
-#ifdef USE_CUDA
-                                 //,std::vector<Realm::Cuda::GPU*> &local_gpus
-#endif
-                                 ,Realm::CoreReservationSet& crs);
+    extern void start_dma_system(int count, int max_nr, Realm::CoreReservationSet& crs);
 
     extern void stop_dma_system(void);
     extern void create_builtin_dma_channels(Realm::RuntimeImpl *r);
@@ -171,6 +167,7 @@ namespace LegionRuntime {
     struct OffsetsAndSize {
       off_t src_offset, dst_offset;
       int size;
+      CustomSerdezID serdez_id;
     };
     typedef std::vector<OffsetsAndSize> OASVec;
 
@@ -234,6 +231,7 @@ namespace LegionRuntime {
     public:
       static MemPairCopier* create_copier(Memory src_mem, Memory dst_mem,
 					  ReductionOpID redop_id = 0,
+					  CustomSerdezID serdez_id = 0,
 					  bool fold = false);
 
       MemPairCopier(void);

@@ -49,10 +49,11 @@ namespace LegionRuntime {
                 unique_id, kind);
       }
 
-      static inline void log_memory(IDType unique_id, size_t capacity)
+      static inline void log_memory(IDType unique_id, size_t capacity,
+          unsigned kind)
       {
-        log_spy.info("Memory " IDFMT " %lu", 
-                unique_id, capacity);
+        log_spy.info("Memory " IDFMT " %lu %u", 
+                unique_id, capacity, kind);
       }
 
       static inline void log_proc_mem_affinity(IDType proc_id, 
@@ -428,6 +429,15 @@ namespace LegionRuntime {
       {
         log_spy.info("Op Instance User %llu %u " IDFMT "", 
                               user, idx, inst_id);
+      }
+
+      static inline void log_op_user_with_field(UniqueID user,
+                                                unsigned idx,
+                                                IDType inst_id,
+                                                FieldID field_id)
+      {
+        log_spy.info("Op Instance Field User %llu %u " IDFMT " %u",
+                              user, idx, inst_id, field_id);
       }
 
       static inline void log_phase_barrier(Barrier barrier)

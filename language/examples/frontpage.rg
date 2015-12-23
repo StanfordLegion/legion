@@ -14,24 +14,34 @@
 
 import "regent"
 
-fspace point { x : int, y : int, z : int }
+struct point { x : float, y : float } -- A simple struct with two fields.
 
-task inc(points : region(point))
-where reads writes(points.{x, y, z}) do
-  for x in points do
-    x.{x, y, z} += 1
-  end
-end
+-- Define 4 tasks. Ignore the task bodies for the moment; the behavior of each
+-- task is soundly described by its declaration. Note that each declaration
+-- says what the task will read or write.
+task a(points : region(point)) where writes(points) do --[[ ... ]] end
+task b(points : region(point)) where reads writes(points.x) do --[[ ... ]] end
+task c(points : region(point)) where reads writes(points.y) do --[[ ... ]] end
+task d(points : region(point)) where reads(points) do --[[ ... ]] end
 
+-- Execution begins at main. Read the code top-down (like a sequential program).
 task main()
+  -- Create a region (like an array) with room for 5 elements.
   var points = region(ispace(ptr, 5), point)
-  for i = 0, 5 do new(ptr(point, points)) end
-  fill(points.{x, y, z}, 0)
+  new(ptr(point, points), 5) -- Allocate the elements.
 
-  var colors = ispace(ptr, 3)
-  var part = partition(equal, points, colors)
+  -- Partition the region into 3 subregions. Each subregion is a view onto a
+  -- subset of the data of the parent.
+  var part = partition(equal, points, ispace(int1d, 3))
 
-  for i in colors do
-    inc(part[i])
+  -- Launch subtasks a, b, c, and d.
+  a(points)
+  for i = 0, 3 do
+    b(part[i])
+  end
+  c(points)
+  for i = 0, 3 do
+    d(part[i])
   end
 end
+regentlib.start(main)

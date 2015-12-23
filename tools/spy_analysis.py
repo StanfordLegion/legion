@@ -42,6 +42,21 @@ LOC_PROC = 0
 TOC_PROC = 1
 UTIL_PROC = 2
 
+MEMORY_TYPES = [
+"GASNET",
+"SYSTEM",
+"REGDMA",
+"SOCKET",
+"Z_COPY",
+"GPU_FB",
+"DISK",
+"HDF",
+"FILE",
+"LEVEL3_CACHE",
+"LEVEL2_CACHE",
+"LEVEL1_CACHE",
+]
+
 # Operation Kinds
 SINGLE_OP = 0
 INDEX_OP = 1
@@ -66,7 +81,6 @@ RELEASE_INST = 5
 DEPENDENT_PARTITION_INST = 6
 PENDING_PARTITION_INST = 7
 
-
 # Some helper methods
 def is_mapping_dependence(dtype):
     if dtype == NO_DEPENDENCE:
@@ -83,6 +97,85 @@ def check_for_anti_dependence(req1, req2, actual):
             return ANTI_DEPENDENCE
         else:
             return actual
+
+def wrap_with_trtd(labels):
+    line = "<tr>"
+    for label in labels:
+        if isinstance(label, str):
+            l = label
+            rowspan = 1
+            colspan = 1
+        else:
+            l = label["label"]
+            rowspan = label["rowspan"] if "rowspan" in label else 1
+            colspan = label["colspan"] if "colspan" in label else 1
+        line = line + ('<td colspan="%d" rowspan="%d">%s</td>' % (colspan, rowspan, l))
+    line = line + "</tr>"
+    return line
+
+def generate_html_op_label(title, requirements, instances, color, verbose):
+    lines = list()
+    lines.append([{"label" : title, "colspan" : 2}])
+
+    for i in range(0, len(requirements)):
+        req = requirements[i]
+        region_name = req.region_node.get_name()
+        priv = req.get_privilege_and_coherence()
+        if region_name <> None:
+            line = ["Region " + str(i), region_name+" (priv: "+priv+")"]
+        else:
+            line = [{"label" : "Region "+str(i)+" (priv:"+priv+")", "colspan" : 2}]
+        lines.append(line)
+        if verbose:
+            req_summary = 'index:%s,field:%s,tree:%s' % \
+                    (hex(req.region_node.index_node.uid),
+                            hex(req.region_node.field_node.uid),
+                            str(req.region_node.tid))
+            lines.append(["Requirement", req_summary])
+
+        if instances <> None and i in instances:
+            lines.append(["Memory", instances[i].memory.dot_memory()])
+            lines.append(["Instance", instances[i].dot_instance()])
+
+        if verbose:
+            field_names = req.get_field_names()
+            first_field = True
+            for f in field_names:
+                line = []
+                if first_field:
+                    line.append({"label" : "Fields", "rowspan" : len(field_names)})
+                line.append(f)
+                lines.append(line)
+                first_field = False
+
+    return '<table border="0" cellborder="1" cellpadding="3" cellspacing="0" bgcolor="%s">' % color + \
+            "".join([wrap_with_trtd(line) for line in lines]) +\
+            '</table>'
+
+def generate_html_instance_label(title, instance, color, verbose):
+    colspan = 2 if len(instance.fields) > 1 and verbose else 1
+
+    lines = list()
+    lines.append([{"label" : title, "colspan" : colspan}])
+    lines.append([{"label" : "Memory: " + instance.memory.dot_memory(),
+        "colspan" : colspan}])
+    lines.append([{"label" : "Instance: " + instance.dot_instance(),
+        "colspan" : colspan}])
+    lines.append([{"label" : "Instance: " + instance.dot_instance(),
+        "colspan" : colspan}])
+
+    if verbose:
+        lines.append([{"label" : "", "colspan" : colspan}])
+        lines.append([{"label" : "Fields", "colspan" : colspan}])
+        fields = instance.region.field_node.get_field_names(instance.fields)
+        if len(fields) % 2 == 1:
+            fields.append("")
+        for i in range(0, len(fields) / 2):
+            lines.append([fields[2 * i], fields[2 * i + 1]])
+
+    return '<table border="0" cellborder="0" cellpadding="2" cellspacing="0" bgcolor="%s">' % color + \
+            "".join([wrap_with_trtd(line) for line in lines]) +\
+            '</table>'
 
 def compute_dependence_type(req1, req2):
     if req1.is_read_only() and req2.is_read_only():
@@ -175,10 +268,11 @@ class UtilityProcessor(object):
         self.executed_ops.append(op)
 
 class Memory(object):
-    def __init__(self, state, uid, capacity):
+    def __init__(self, state, uid, capacity, kind):
         self.state = state
         self.uid = uid
         self.capacity = capacity
+        self.kind = kind
         self.proc_bandwidth = dict()
         self.proc_latency = dict()
         self.mem_bandwidth = dict()
@@ -214,6 +308,9 @@ class Memory(object):
     def print_timeline(self):
         name = "memory_"+str(self.uid)+"_timeline"
         return
+
+    def dot_memory(self):
+        return hex(self.uid)+' ('+MEMORY_TYPES[self.kind]+')'
 
 
 class IndexSpaceNode(object):
@@ -268,6 +365,12 @@ class IndexSpaceNode(object):
         for point,child in self.children.iteritems():
             if child.uid == uid:
                 return child
+        return None
+
+    def find_child_color(self, child):
+        for c, child_ in self.children.iteritems():
+            if child_ == child:
+                return c
         return None
 
     def mark_independent(self, uid1, uid2):
@@ -365,6 +468,12 @@ class IndexPartNode(object):
                 return child
         return None
 
+    def find_child_color(self, child):
+        for c, child_ in self.children.iteritems():
+            if child_ == child:
+                return c
+        return None
+
     def mark_independent(self, uid1, uid2):
         assert self.find_child(uid1) <> None
         assert self.find_child(uid2) <> None
@@ -430,6 +539,19 @@ class FieldSpaceNode(object):
         else:
             return None
 
+    def get_field_names(self, fields):
+        field_names = list()
+        for f in fields:
+            field_name = self.get_field_name(f)
+            if field_name != None:
+                field_names.append(field_name)
+            else:
+                field_names.append(str(f))
+        return field_names
+
+    def field_mask_string(self, fields):
+        return ', '.join(self.get_field_names(fields))
+
     def print_graph(self, printer):
         if self.name != None:
             label = self.name+' (ID: '+str(self.uid)+')'
@@ -477,6 +599,19 @@ class RegionNode(object):
         else:
             for child in self.children:
                 child.set_name(name, index_node, field_node)
+
+    def get_name(self):
+        if self.name <> None:
+            return self.name
+        elif self.parent <> None:
+            parent_name = self.parent.get_name()
+            color = self.parent.index_node.find_child_color(self.index_node)
+            assert(color <> None)
+            if parent_name <> None:
+                return parent_name + "[" + color.to_dim_string() + "]"
+            else:
+                return None
+        return None
 
     def find_node(self, index_node, field_node):
         if self.index_node == index_node and \
@@ -558,6 +693,15 @@ class PartitionNode(object):
         else:
             for child in self.children:
                 child.set_name(name, index_node, field_node)
+
+    def get_name(self):
+        if self.name <> None:
+            return self.name
+        elif self.parent <> None:
+            parent_name = self.parent.get_name()
+            if parent_name <> None:
+                return parent_name + ".partition"
+        return None
 
     def find_node(self, index_node, field_node):
         if self.index_node == index_node and \
@@ -773,34 +917,23 @@ class SingleTask(object):
         self.print_base_node(printer, False)
 
     def print_base_node(self, printer, logical):
-        inst_string = ''
-        if self.state.verbose:
-            if logical:
-                for idx,req, in self.reqs.iteritems():
-                    inst_string = inst_string+'\\n'+req.dot_requirement()
-            else:
-                for idx,inst in self.instances.iteritems():
-                    assert idx in self.reqs
-                    req = self.reqs[idx]
-                    if req.region_node.name != None:
-                        to_add = req.region_node.name+' '
-                    else:
-                        to_add = ''
-                    to_add = to_add+'Inst\ '+hex(inst.iid)+'\ '+req.dot_requirement()
-                    inst_string = inst_string+'\\n'+to_add
+        color = "lightskyblue"
+        task_title = self.name
+        point = ""
         if self.enclosing <> None:
-            # Index Space Point
-            index_string = '\\nPoint\ '+self.point.to_string()
-            printer.println(self.node_name+' [style=filled,label="'+\
-                str(self.name)+index_string+'\\nUnique\ ID\ '+str(self.uid)+inst_string+\
-                '",fillcolor=mediumslateblue,fontsize=14,fontcolor=black,'+\
-                'shape=record,penwidth=2];')
-        else:
-            # Individual Task 
-            printer.println(self.node_name+' [style=filled,label="'+\
-                str(self.name)+'\\nUnique\ ID\ '+str(self.uid)+inst_string+'",'+\
-                'fillcolor=lightskyblue,fontsize=14,fontcolor=black,'+\
-                'shape=record,penwidth=2];')
+            color = "mediumslateblue"
+            point = "["+self.point.to_dim_string()+"]"
+            task_title += point
+
+        if self.ctx <> None:
+            task_title += ' in '+self.ctx.name+" (UID: "+str(self.uid)+")"
+
+        label = generate_html_op_label(task_title, self.reqs,
+                self.instances if not logical else None,
+                color, self.state.verbose)
+
+        printer.println(self.node_name+' [label=<'+label+'>,fontsize=14,'+\
+                'fontcolor=black,shape=record,penwidth=0];')
 
     def print_event_dependences(self, printer):
         self.start_event.print_prev_event_dependences(printer, self.node_name)
@@ -812,30 +945,7 @@ class SingleTask(object):
             self.prev_event_deps.add(later_name)
 
     def print_igraph_node(self, printer):
-        inst_string = ''
-        if self.state.verbose:
-            for idx,inst in self.instances.iteritems():
-                assert idx in self.reqs
-                req = self.reqs[idx]
-                if req.region_node.name != None:
-                    to_add = req.region_node.name+' '
-                else:
-                    to_add = ''
-                to_add = to_add+'('+hex(inst.iid)+') '+req.dot_requirement()
-                inst_string = inst_string+'\\n'+to_add
-        if self.enclosing <> None:
-            # Index Space Point
-            index_string = 'Point\ '+self.point.to_string()
-            printer.println(self.node_name+' [style=filled,label="'+\
-                    self.name+' (UID: '+str(self.uid)+')\\n'+index_string+inst_string+\
-                    '",fillcolor=mediumslateblue,fontsize=14,fontcolor=black,'+\
-                    'shape=record,penwidth=2];')
-        else:
-            # Individual Task
-            printer.println(self.node_name+' [style=filled,label="'+\
-                    self.name+' (UID: '+str(self.uid)+')'+inst_string+'",'+\
-                    'fillcolor=lightskyblue,fontsize=14,fontcolor=black,'+\
-                    'shape=record,penwidth=2];')
+        self.print_base_node(printer, False)
 
     def print_igraph_edges(self, printer):
         for idx, inst in self.instances.iteritems():
@@ -956,7 +1066,7 @@ class SingleTask(object):
     def print_dataflow(self, path, simplify_graphs):
         if len(self.ops) < 2:
             return 0
-        filename = 'dataflow_'+self.name+'_'+str(self.uid)
+        filename = 'dataflow_'+self.name.replace(' ', '_')+'_'+str(self.uid)
         printer = GraphPrinter(path,filename)
         # First emit the nodes
         for op in self.ops:
@@ -1230,7 +1340,7 @@ class IndexTask(object):
         assert idx in self.reqs
         r = self.reqs[idx]
         result = Requirement(idx, True, index, r.fspace, r.tid, r.region_node,
-                r.priv, r.coher, r.redop)
+                r.priv, r.coher, r.redop, self.state)
         for f in r.fields:
             result.add_field(f)
         return result
@@ -1267,14 +1377,14 @@ class IndexTask(object):
                 op.get_reachable(reachable, False)
 
     def print_logical_node(self, printer):
-        inst_string = ''
-        if self.state.verbose:
-            for idx,req in self.reqs.iteritems():
-                inst_string = inst_string+'\\n'+req.dot_requirement() 
-        printer.println(self.node_name+' [style=filled,label="'+\
-                str(self.name)+'\\nUnique\ ID\ '+str(self.uid)+inst_string+\
-                '",fillcolor=mediumslateblue,fontsize=14,fontcolor=black,'+\
-                'shape=record,penwidth=2];')
+        color = "mediumslateblue"
+        task_title = self.name + " (UID: "+str(self.uid)+")"
+
+        label = generate_html_op_label(task_title, self.reqs, None, color,
+                self.state.verbose)
+
+        printer.println(self.node_name+' [label=<'+label+'>,fontsize=14,'+\
+                'fontcolor=black,shape=record,penwidth=0];')
 
     def print_dataflow(self, path, simplify):
         return 0
@@ -1413,24 +1523,17 @@ class Mapping(object):
         self.print_base_node(printer, False)
 
     def print_base_node(self, printer, logical):
-        ranges = list_to_ranges(self.requirement.fields)
-        field_string = ','.join([r for r in ranges])
-        inst_string = ''
-        if self.state.verbose:
-            if (logical):
-                inst_string = '\\n'+self.requirement.dot_requirement()
-            else:
-                inst_string = '\\nInst\ '+hex(self.instance.iid)+'\ '+\
-                    self.requirement.dot_requirement()
-        printer.println(self.node_name+' [style=filled,label="'+\
-            'Mapping\ '+str(self.uid)+'\ in\ '+self.ctx.name+'\\nField: \{'+\
-            field_string+'\}\\nReq: '+\
-            self.requirement.to_summary_string()+\
-            ('' if self.requirement.region_node.name == None
-                else '\\n('+self.requirement.region_node.name+')')+\
-            inst_string+'",'+\
-            'fillcolor=mediumseagreen,fontsize=14,fontcolor=black,'+\
-            'shape=record,penwidth=2];')
+        lines = [[{
+            "label" : 'Mapping in '+self.ctx.name+' (UID: '+str(self.uid)+')',
+            "colspan" : 2 }]]
+
+        label = generate_html_op_label(
+                'Mapping in '+self.ctx.name+' (UID: '+str(self.uid)+')',
+                [self.requirement], [self.instance], 'mediumseagreen',
+                self.state.verbose)
+
+        printer.println(self.node_name+' [label=<'+label+'>,fontsize=14,'+\
+                'fontcolor=black,shape=record,penwidth=0];')
 
     def print_event_dependences(self, printer):
         self.start_event.print_prev_event_dependences(printer, self.node_name)
@@ -1643,6 +1746,14 @@ class CopyOp(object):
         assert idx not in self.instances
         self.instances[idx] = inst
 
+    def add_partial_instance(self, idx, inst, fid):
+        instance = dict()
+        if idx in self.instances:
+            instance = self.instances[idx]
+        assert not fid in instance
+        instance[fid] = inst
+        self.instances[idx] = instance
+
     def get_instance(self, idx):
         assert idx in self.instances
         return self.instances[idx]
@@ -1671,6 +1782,10 @@ class CopyOp(object):
     def physical_unmark(self):
         self.physical_marked = False
 
+    def field_mask_string(self):
+        return self.reqs[0].field_mask_string()+' \-\> '+\
+                self.reqs[1].field_mask_string()
+
     def print_logical_node(self, printer):
         self.print_base_node(printer, True)
 
@@ -1681,24 +1796,111 @@ class CopyOp(object):
         self.print_base_node(printer, False)
 
     def print_base_node(self, printer, logical):
-        label = 'Copy Across '+str(self.uid)+'\\n '+\
-                ('' if logical else 'Inst:\ '+\
-                self.instances[0].dot_instance()+\
-                '\ \=\=\>\ '+self.instances[1].dot_instance()+'\\n'+\
-                'Field: \{'+self.reqs[0].to_field_mask_string()+'\}\ '+\
-                '\ \=\=\>\ \{'+self.reqs[1].to_field_mask_string()+'\}\\n')+\
-                'Src Req:\ '+self.reqs[0].to_summary_string()+\
-                ('\\n' if self.reqs[0].region_node.name == None
-                        else '\\n('+self.reqs[0].region_node.name+')\\n')+\
-                'Dst Req:\ '+self.reqs[1].to_summary_string()+\
-                ('' if self.reqs[1].region_node.name == None
-                        else '\\n('+self.reqs[1].region_node.name+')')
+        title = 'Copy Across '+str(self.uid)+' in '+self.ctx.name
+        # TODO: reduction copy-across operations should also be tracked
+        #if self.redop <> 0:
+        #    title = 'Reduction ' + title
+        lines = [[{ "label" : title, "colspan" : 3 }]]
+
         color = 'darkgoldenrod3'
         size = 14
+        # TODO: reduction copy-across operations should also be tracked
+        #if self.redop <> 0:
+        #    lines.append(["Reduction Op", {"colspan" : 2, "label" : str(self.redop)}])
+        #    color = 'tomato 3'
 
-        printer.println(self.node_name+' [style=filled,label="'+label+\
-                '",fillcolor='+color+',fontsize='+str(size)+',fontcolor=black,'+\
-                'shape=record,penwidth=2];')
+        num_copies = len(self.reqs) / 2
+        for i in range(0, num_copies):
+            src_req = self.reqs[i]
+            dst_req = self.reqs[num_copies + i]
+            src_inst = self.instances[i]
+            dst_inst = self.instances[num_copies + i]
+
+            src_region_name = src_req.region_node.get_name()
+            dst_region_name = dst_req.region_node.get_name()
+
+            if src_region_name <> None or dst_region_name <> None:
+                lines.append(["Region Pair " + str(i),
+                    src_region_name if src_region_name <> None else '',
+                    dst_region_name if dst_region_name <> None else ''])
+            else:
+                lines.append([{"label" : "Region Pair " + str(i), "colspan" : 3}])
+
+            if self.state.verbose:
+                lines.append(["Requirement",
+                    src_req.to_summary_string(),
+                    dst_req.to_summary_string()])
+
+            if isinstance(src_inst, dict):
+                first_line = True
+                num_partial_copies = len(src_inst)
+                for fid, inst in src_inst.iteritems():
+                    if first_line:
+                        lines.append(
+                                [{"label" : "Memory", "rowspan" : num_partial_copies},
+                                    inst.memory.dot_memory(),
+                                    {"label" : dst_inst.memory.dot_memory(),
+                                        "rowspan" : num_partial_copies}])
+                        first_line = False
+                    else:
+                        lines.append([inst.memory.dot_memory()])
+
+                first_line = True
+                num_partial_copies = len(src_inst)
+                for fid, inst in src_inst.iteritems():
+                    field_name = self.reqs[0].region_node.field_node.get_field_name(fid)
+                    if field_name == None:
+                        field_name = str(fid)
+
+                    if first_line:
+                        lines.append(
+                                [{"label" : "Instance",
+                                    "rowspan" : num_partial_copies},
+                                    inst.dot_instance()+' for '+field_name,
+                                    {"label" : dst_inst.dot_instance(),
+                                        "rowspan" : num_partial_copies}])
+                        first_line = False
+                    else:
+                        lines.append([inst.dot_instance()+' for '+field_name])
+
+            else:
+                lines.append(
+                        ["Memory",
+                            hex(src_inst.memory.uid),
+                            hex(dst_inst.memory.uid)])
+                lines.append(
+                        ["Instance",
+                            src_inst.dot_instance(),
+                            dst_inst.dot_instance()])
+
+            # TODO: reduction copy-across operations should also be tracked
+            #if self.redop <> 0:
+            #    max_blocking = max(src_inst.blocking, dst_inst.blocking)
+            #    min_blocking = min(src_inst.blocking, dst_inst.blocking)
+            #    if max_blocking > 1 and min_blocking == 1:
+            #        color = 'red'
+            #        size = 16
+
+            if self.state.verbose:
+                src_field_names = src_req.get_field_names()
+                dst_field_names = dst_req.get_field_names()
+                first_field = True
+                assert(len(src_field_names) == len(dst_field_names))
+                for (f1, f2) in zip(src_field_names, dst_field_names):
+                    line = []
+                    if first_field:
+                        line.append({"label" : "Fields", "rowspan" : len(src_field_names)})
+                    line.append(f1)
+                    line.append(f2)
+                    lines.append(line)
+                    first_field = False
+
+        label = '<table border="0" cellborder="1" cellspacing="0" cellpadding="3" bgcolor="%s">' % color + \
+                "".join([wrap_with_trtd(line) for line in lines]) +\
+                '</table>'
+
+        printer.println(self.node_name+' [label=<'+label+'>,fontsize='+str(size)+\
+                ',fontcolor=black,shape=record,penwidth=0];')
 
     def print_event_dependences(self, printer):
         self.start_event.print_prev_event_dependences(printer, self.node_name)
@@ -1712,9 +1914,9 @@ class CopyOp(object):
         self.start_event.print_prev_event_dependences(printer, later_name)
 
     def print_igraph_edges(self, printer):
-        fields = self.reqs[0].to_field_mask_string()+\
+        fields = self.reqs[0].field_mask_string()+\
                 ' \-\> '+\
-                self.reqs[1].to_field_mask_string()
+                self.reqs[1].field_mask_string()
         self.instances[1].print_incoming_edge(printer,
                 self.instances[0].node_name,
                 edge_type='dashed',
@@ -1792,20 +1994,12 @@ class FillOp(object):
         return 0
 
     def print_base_node(self, printer, logical):
-        ranges = list_to_ranges(self.requirement.fields)
-        field_string = ','.join([r for r in ranges])
-        inst_string = ''
-        if self.state.verbose:
-            if (logical):
-                inst_string = '\\n'+self.requirement.dot_requirement()
-        printer.println(self.node_name+' [style=filled,label="'+\
-            'Fill\ '+str(self.uid)+'\ in\ '+self.ctx.name+'\\nField: \{'+\
-            field_string+'\}\\nReq: '+\
-            self.requirement.to_summary_string()+\
-            ('' if self.requirement.region_node.name == None
-                else '\\n('+self.requirement.region_node.name+')')+'",'+\
-            'fillcolor=darkorange1,fontsize=14,fontcolor=black,'+\
-            'shape=record,penwidth=2];')
+        label = generate_html_op_label(
+                'Fill in '+self.ctx.name+' (UID: '+str(self.uid)+')',
+                [self.requirement], None, 'darkorange1', self.state.verbose)
+
+        printer.println(self.node_name+' [label=<'+label+'>,fontsize=14,'+\
+                'fontcolor=black,shape=record,penwidth=0];')
 
     def print_igraph_node(self, printer):
         printer.println(self.node_name+' [style=filled,label="'+\
@@ -1962,15 +2156,12 @@ class AcquireOp(object):
         self.print_base_node(printer, False)
 
     def print_base_node(self, printer, logical):
-        printer.println(self.node_name+\
-                ' [style=filled,label="Acquire '+str(self.uid)+'\\n '+\
-                ('' if logical else 'Inst: '+hex(self.instances[0].iid)+'\\n ')+\
-                'Fields: '+self.reqs[0].to_field_mask_string()+'\\n '+\
-                self.reqs[0].to_summary_string()+\
-                ('' if self.reqs[0].region_node.name == None
-                        else '\\n('+self.reqs[0].region_node.name+')')+\
-                '",fillcolor=darkolivegreen,fontsize=14,fontcolor=black,'+\
-                'shape=record,penwidth=2];')
+        label = generate_html_op_label(
+                'Acquire in '+self.ctx.name+' (UID: '+str(self.uid)+')',
+                self.reqs, self.instances, 'darkolivegreen', self.state.verbose)
+
+        printer.println(self.node_name+' [label=<'+label+'>,fontsize=14,'+\
+                'fontcolor=black,shape=record,penwidth=0];')
 
     def print_event_dependences(self, printer):
         self.start_event.print_prev_event_dependences(printer, self.node_name)
@@ -2113,15 +2304,12 @@ class ReleaseOp(object):
         self.print_base_node(printer, False)
 
     def print_base_node(self, printer, logical):
-        printer.println(self.node_name+\
-                ' [style=filled,label="Release '+str(self.uid)+'\\n '+\
-                ('' if logical else 'Inst: '+hex(self.instances[0].iid)+'\\n ')+\
-                'Fields: '+self.reqs[0].to_field_mask_string()+'\\n '+\
-                self.reqs[0].to_summary_string()+\
-                ('' if self.reqs[0].region_node.name == None
-                        else '\\n('+self.reqs[0].region_node.name+')')+\
-                '",fillcolor=darksalmon,fontsize=14,fontcolor=black,'+\
-                'shape=record,penwidth=2];')
+        label = generate_html_op_label(
+                'Release in '+self.ctx.name+' (UID: '+str(self.uid)+')',
+                self.reqs, self.instances, 'darksalmon', self.state.verbose)
+
+        printer.println(self.node_name+' [label=<'+label+'>,fontsize=14,'+\
+                'fontcolor=black,shape=record,penwidth=0];')
 
     def print_event_dependences(self, printer):
         self.start_event.print_prev_event_dependences(printer, self.node_name)
@@ -2571,13 +2759,13 @@ class Close(object):
         color = 'orangered'
         if self.is_inter_close_op:
             color = 'red'
-        req_string = ''
-        if self.state.verbose:
-            req_string = '\\n'+self.requirement.dot_requirement() 
-        printer.println(self.node_name+' [style=filled,label="'+\
-            'Close\ '+str(self.uid)+'\ in\ '+self.ctx.name+req_string+'",'+\
-            'fillcolor='+color+',fontsize=14,fontcolor=black,'+\
-            'shape=record,penwidth=2];')
+
+        label = generate_html_op_label(
+                'Close in '+self.ctx.name+' (UID: '+str(self.uid)+')',
+                [self.requirement], None, color, self.state.verbose)
+
+        printer.println(self.node_name+' [label=<'+label+'>,fontsize=14,'+\
+                'fontcolor=black,shape=record,penwidth=0];')
 
     def print_event_dependences(self, printer):
         if self.state.verbose:
@@ -2768,23 +2956,50 @@ class Copy(object):
         self.physical_marked = False
 
     def field_mask_string(self):
-        ranges = list_to_ranges(self.fields)
-        return ','.join([r for r in ranges])
+        return self.region.field_node.field_mask_string(self.fields)
 
     def print_physical_node(self, printer):
-        self.mask = self.field_mask_string()
-        label = 'Copy '+str(self.uid)+'\\n'+\
-                'Inst:\ '+self.src_inst.dot_instance()+\
-                '\ \=\=\>\ '+self.dst_inst.dot_instance()+'\\n'+\
-                'Field: \{'+self.mask+'\}\ '+'\ \=\=\>\ \{'+self.mask+'\}\\n'+\
-                'Req:\ \{index:'+hex(self.region.index_node.uid)+\
-                ',field:'+hex(self.region.field_node.uid)+',tree:'+\
-                str(self.region.tid)+'\}'+\
-                ('' if self.region.name == None else '\\n('+self.region.name+')')
+        title = 'Copy '+str(self.uid)
+        if self.redop <> 0:
+            title = 'Reduction ' + title
+        lines = [[{ "label" : title, "colspan" : 3 }]]
+
+        region_name = self.region.get_name()
+        if region_name <> None:
+            lines.append(["Region", {"colspan" : 2, "label" : region_name}])
+
+        if self.state.verbose:
+            summary = 'index:%s,field:%s,tree:%s' % \
+                    (hex(self.region.index_node.uid),
+                            hex(self.region.field_node.uid),
+                            str(self.region.tid))
+            lines.append(["Requirement",
+                {"colspan" : 2, "label" : summary}])
+
+        lines.append(
+                ["Memory",
+                    self.src_inst.memory.dot_memory(),
+                    self.dst_inst.memory.dot_memory()])
+        lines.append(
+                ["Instance",
+                    self.src_inst.dot_instance(),
+                    self.dst_inst.dot_instance()])
+
+        if self.state.verbose:
+            field_names = self.region.field_node.get_field_names(self.fields)
+            first_field = True
+            for f in field_names:
+                line = []
+                if first_field:
+                    line.append({"label" : "Fields", "rowspan" : len(field_names)})
+                line.append({"label" : f, "colspan" : 2})
+                lines.append(line)
+                first_field = False
+
         color = 'darkgoldenrod1'
         size = 14
         if self.redop <> 0:
-            label += '\\nReduction\ Op:\ '+str(self.redop)
+            lines.append(["Reduction Op", {"colspan" : 2, "label" : str(self.redop)}])
             color = 'tomato'
         else:
             max_blocking = max(self.src_inst.blocking, self.dst_inst.blocking)
@@ -2793,9 +3008,12 @@ class Copy(object):
                 color = 'red'
                 size = 16
 
-        printer.println(self.node_name+' [style=filled,label="'+label+\
-                '",fillcolor='+color+',fontsize='+str(size)+',fontcolor=black,'+\
-                'shape=record,penwidth=2];')
+        label = '<table border="0" cellborder="1" cellspacing="0" cellpadding="3" bgcolor="%s">' % color + \
+                "".join([wrap_with_trtd(line) for line in lines]) +\
+                '</table>'
+
+        printer.println(self.node_name+' [label=<'+label+'>,fontsize='+str(size)+\
+                ',fontcolor=black,shape=record,penwidth=0];')
 
     def print_event_dependences(self, printer):
         self.start_event.print_prev_event_dependences(printer, self.node_name)
@@ -2843,18 +3061,14 @@ class PhysicalInstance(object):
         self.fields.append(fid)
 
     def dot_instance(self):
-        return hex(self.iid)+'@'+hex(self.memory.uid)+'\ ('+str(self.blocking)+')'
+        return hex(self.iid)+' ('+str(self.blocking)+')'
 
     def print_igraph_node(self, printer):
-        if self.region.name <> None:
-            label = self.region.name+'\\n'+hex(self.iid)+'@'+hex(self.memory.uid)
-        else:
-            label = hex(self.iid)+'@'+hex(self.memory.uid)
-        label = label+'\\nfields: '+','.join(r for r in list_to_ranges(self.fields))
-        label = label+'\\nblocking factor: '+str(self.blocking)
-        printer.println(self.node_name+' [style=filled,label="'+label+\
-                '",fillcolor=dodgerblue4,fontsize=12,fontcolor=white,'+\
-                'shape=oval,penwidth=0,margin=0];')
+        label = generate_html_instance_label(self.region.get_name(),
+                self, "dodgerblue4", self.state.verbose)
+        printer.println(self.node_name+' [style=filled,label=<'+label+\
+                '>,fillcolor=dodgerblue4,fontsize=11,fontcolor=white,'+\
+                'shape=Mrecord,penwidth=0];')
 
     def print_incoming_edge(self, printer, prev, edge_type='solid', edge_label='', dir='forward'):
         if prev not in self.igraph_incoming_deps:
@@ -2900,17 +3114,14 @@ class ReductionInstance(object):
         self.fields.append(fid)
 
     def dot_instance(self):
-        return hex(self.iid)+'@'+hex(self.memory.uid)
+        return hex(self.iid)+" (reduction)"
 
     def print_igraph_node(self, printer):
-        if self.region.name <> None:
-            label = self.region.name+'\\n'+hex(self.iid)+'@'+hex(self.memory.uid)
-        else:
-            label = hex(self.iid)+'@'+hex(self.memory.uid)
-        label = label+'\\nfields: '+','.join(r for r in list_to_ranges(self.fields))
-        printer.println(self.node_name+' [style=filled,label="'+label+\
-                '",fillcolor=deeppink3,fontsize=10,fontcolor=white,'+\
-                'shape=oval,penwidth=0,margin=0];')
+        label = generate_html_instance_label(self.region.get_name(),
+                self, "deeppink3", self.state.verbose)
+        printer.println(self.node_name+' [style=filled,label=<'+label+\
+                '>,fillcolor=deeppink3,fontsize=11,fontcolor=white,'+\
+                'shape=Mrecord,penwidth=0];')
 
     def print_incoming_edge(self, printer, prev, edge_type='solid', edge_label='', dir='forward'):
         if prev not in self.igraph_incoming_deps:
@@ -2974,7 +3185,7 @@ class PhaseBarrier(object):
             self.prev_event_deps.add(later_name)
 
 class Requirement(object):
-    def __init__(self, index, is_reg, ispace, fspace, tid, node, priv, coher, redop):
+    def __init__(self, index, is_reg, ispace, fspace, tid, node, priv, coher, redop, state):
         self.index = index
         self.is_reg = is_reg
         self.ispace = ispace
@@ -2985,6 +3196,7 @@ class Requirement(object):
         self.coher = coher
         self.redop = redop
         self.fields = list()
+        self.state = state
 
     def find_field_index(self, field):
         return self.fields.index(field)
@@ -3051,7 +3263,7 @@ class Requirement(object):
                   str(self.fspace)+","+str(self.tid)+")"
         print "    Privilege: "+self.get_privilege()
         print "    Coherence: "+self.get_coherence()
-        print "    Fields: "+self.get_fields()
+        print "    Fields: "+" ".join(self.get_field_names())
 
     def get_privilege(self):
         if self.priv == NO_ACCESS:
@@ -3077,11 +3289,8 @@ class Requirement(object):
             assert self.coher == RELAXED
             return "RELAXED"
 
-    def get_fields(self):
-        result = ""
-        for f in self.fields:
-            result = result + str(f) + " "
-        return result
+    def get_field_names(self):
+        return self.state.field_space_nodes[self.fspace].get_field_names(self.fields)
 
     def get_privilege_and_coherence(self):
         result = ''
@@ -3109,16 +3318,15 @@ class Requirement(object):
 
     def dot_requirement(self):
         result = self.get_privilege_and_coherence()
-        result = result + '\ Fields:' +\
-                ','.join([r for r in list_to_ranges(self.fields)])
+        result = result + '\ Fields:' + self.field_mask_string()
         return result
 
     def to_summary_string(self):
-        return '\{index:'+hex(self.ispace)+',field:'+hex(self.fspace)+\
-                ',tree:'+str(self.tid)+'\}'
+        return 'index:%s,field:%s,tree:%s' % \
+                (hex(self.ispace), hex(self.fspace), str(self.tid))
 
-    def to_field_mask_string(self):
-        return ','.join([str(f) for f in self.fields])
+    def field_mask_string(self):
+        return self.state.field_space_nodes[self.fspace].field_mask_string(self.fields)
 
 
 class MappingDependence(object):
@@ -3226,26 +3434,25 @@ class Point(object):
     def add_value(self, val):
         self.values.append(val)
 
-    def to_string(self):
-        result = '('
+    def mk_string(self, start, delim, end):
+        result = start
         first = True
         for val in self.values:
-            if not(first):
-                result = result + ','
+            if not first:
+                result = result + delim
             result = result + str(val)
             first = False
-        result = result + ')'
+        result = result + end
         return result
 
+    def to_string(self):
+        return self.mk_string("(", ",", ")")
+
+    def to_dim_string(self):
+        return self.mk_string("", "][", "")
+
     def to_simple_string(self):
-        result = ''
-        first = True
-        for val in self.values:
-            if not(first):
-                result = result + '_'
-            result = result + str(val)
-            first = False
-        return result
+        return self.mk_string("", "_", "")
 
     def __hash__(self):
         return hash(self.to_simple_string())
@@ -3597,8 +3804,17 @@ class ConnectedComponent(object):
                 copy = copies[i]
                 edge_label = edge_label + ', copy '+hex(copy.uid)+\
                         ' (fields: '+copy.field_mask_string()+')'
-            copy.dst_inst.print_incoming_edge(printer,
-                    copy.src_inst.node_name,
+            src_inst = None
+            dst_inst = None
+            if isinstance(copy, Copy):
+                src_inst = copy.src_inst
+                dst_inst = copy.dst_inst
+            else:
+                assert(isinstance(copy, CopyOp))
+                src_inst = copy.instances[0]
+                dst_inst = copy.instances[1]
+            dst_inst.print_incoming_edge(printer,
+                    src_inst.node_name,
                     edge_type='dashed',
                     edge_label=edge_label)
 
@@ -3737,9 +3953,9 @@ class State(object):
         self.processors[pid] = Processor(self, pid, kind)
         return True
 
-    def add_memory(self, mid, capacity):
+    def add_memory(self, mid, capacity, kind):
         assert mid not in self.memories
-        self.memories[mid] = Memory(self, mid, capacity)
+        self.memories[mid] = Memory(self, mid, capacity, kind)
         return True
 
     def set_proc_mem(self, pid, mid, bandwidth, latency):
@@ -4037,7 +4253,7 @@ class State(object):
                     self.field_space_nodes[fspace])
 
         self.ops[uid].add_requirement(index, Requirement(index, is_reg, ispace, 
-                                                  fspace, tid, node, priv, coher, redop))
+                                                  fspace, tid, node, priv, coher, redop, self))
         return True
 
     def add_req_field(self, uid, idx, fid):
@@ -4179,6 +4395,16 @@ class State(object):
         if not self.instances[iid][-1].add_op_user(self.ops[uid], idx):
             return False
         self.ops[uid].add_instance(idx, self.instances[iid][-1])
+        return True
+
+    def add_op_field_user(self, uid, idx, iid, fid):
+        if uid not in self.ops:
+            return False
+        if iid not in self.instances:
+            return False
+        if not self.instances[iid][-1].add_op_user(self.ops[uid], idx):
+            return False
+        self.ops[uid].add_partial_instance(idx, self.instances[iid][-1], fid)
         return True
 
     def add_op_proc_user(self, uid, pid):

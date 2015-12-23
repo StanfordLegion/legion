@@ -541,6 +541,25 @@ namespace Realm {
       // no simple send_request method here - see below
     };
 
+    struct RemoteSerdezMessage {
+      struct RequestArgs : public BaseMedium {
+        Memory mem;
+        off_t offset;
+        size_t count;
+        CustomSerdezID serdez_id;
+        unsigned sender;
+        unsigned sequence_id;
+      };
+
+      static void handle_request(RequestArgs args, const void *data, size_t datalen);
+
+      typedef ActiveMessageMediumNoReply<REMOTE_SERDEZ_MSGID,
+                                         RequestArgs,
+                                         handle_request> Message;
+
+      // no simple send_request method here - see below
+    };
+
     struct RemoteReduceMessage {
       struct RequestArgs : public BaseMedium {
 	Memory mem;
@@ -639,7 +658,10 @@ namespace Realm {
 				    const SpanList& spans, size_t datalen,
 				    unsigned sequence_id,
 				    bool make_copy = false);
-
+    extern unsigned do_remote_serdez(Memory mem, off_t offset,
+                                     CustomSerdezID serdez_id,
+                                     const void *data, size_t datalen,
+                                     unsigned sequence_id);
     extern unsigned do_remote_reduce(Memory mem, off_t offset,
 				     ReductionOpID redop_id, bool red_fold,
 				     const void *data, size_t count,

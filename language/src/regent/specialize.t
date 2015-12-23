@@ -210,8 +210,8 @@ local function get_num_accessed_fields(node)
     return 1
 
   elseif node:is(ast.unspecialized.expr.Region) then
+    if get_num_accessed_fields(node.ispace) > 1 then return false end
     if get_num_accessed_fields(node.fspace_type_expr) > 1 then return false end
-    if get_num_accessed_fields(node.size) > 1 then return false end
     return 1
 
   elseif node:is(ast.unspecialized.expr.Partition) then

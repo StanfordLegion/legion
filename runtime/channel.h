@@ -214,12 +214,21 @@ namespace LegionRuntime{
     };
 
 #ifdef USE_CUDA
+    class GPUCompletionEvent : public Realm::Cuda::GPUCompletionNotification {
+    public:
+      GPUCompletionEvent(void) {triggered = false;}
+      void request_completed(void) {triggered = true;}
+      bool has_triggered(void) {return triggered;}
+    private:
+      bool triggered;
+    };
+
     class GPUtoFBRequest : public Request {
     public:
       const char* src;
       off_t dst_offset;
       size_t nbytes;
-      Event complete_event;
+      GPUCompletionEvent event;
     };
 
     class GPUfromFBRequest : public Request {
@@ -227,14 +236,14 @@ namespace LegionRuntime{
       off_t src_offset;
       char* dst;
       size_t nbytes;
-      Event complete_event;
+      GPUCompletionEvent event;
     };
 
     class GPUinFBRequest : public Request {
     public:
       off_t src_offset, dst_offset;
       size_t nbytes;
-      Event complete_event;
+      GPUCompletionEvent event;
     };
 
     class GPUpeerFBRequest : public Request {
@@ -242,7 +251,7 @@ namespace LegionRuntime{
       off_t src_offset, dst_offset;
       size_t nbytes;
       GPU* dst_gpu;
-      Event complete_event;
+      GPUCompletionEvent event;
     };
 
 #endif
@@ -1568,11 +1577,7 @@ namespace LegionRuntime{
         return true;
       }
 
-      void start_worker(int count, int max_nr, ChannelManager* channel_manager
-#ifdef USE_CUDA
-                                ,std::vector<GPU*> &local_gpus
-#endif
-                       );
+      void start_worker(int count, int max_nr, ChannelManager* channel_manager);
 
       void stop_worker();
 
@@ -1590,11 +1595,8 @@ namespace LegionRuntime{
     };
 
     XferDesQueue* get_xdq_singleton();
-    void start_channel_manager(int count, int max_nr, Realm::CoreReservationSet& crs
-#ifdef USE_CUDA
-                              ,std::vector<GPU*> &local_gpus
-#endif
-                             );
+    void register_gpu_in_dma_systems(GPU* gpu);
+    void start_channel_manager(int count, int max_nr, Realm::CoreReservationSet& crs);
     void stop_channel_manager();
     template<unsigned DIM>
     void create_xfer_des(DmaRequest* _dma_request, gasnet_node_t _launch_node,

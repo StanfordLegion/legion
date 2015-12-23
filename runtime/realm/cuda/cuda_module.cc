@@ -20,6 +20,7 @@
 #include "realm/cmdline.h"
 
 #include "lowlevel_dma.h"
+#include "channel.h"
 
 #include "realm/cuda/cudart_hijack.h"
 
@@ -46,7 +47,6 @@ namespace Realm {
     extern Logger log_event_graph;
 #endif
     Logger log_stream("gpustream");
-
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -762,6 +762,12 @@ namespace Realm {
 
     void GPU::create_dma_channels(Realm::RuntimeImpl *r)
     {
+      // <NEW_DMA>
+      // Not a good design choice
+      // For now, channel_manager will creates all channels
+      // for GPUs in dma_all_gpus
+      LegionRuntime::LowLevel::register_gpu_in_dma_systems(this);
+      // </NEW_DMA>
       if(!pinned_sysmems.empty()) {
 	r->add_dma_channel(new GPUDMAChannel_H2D(this));
 	r->add_dma_channel(new GPUDMAChannel_D2H(this));

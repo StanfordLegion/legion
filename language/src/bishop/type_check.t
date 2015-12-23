@@ -18,6 +18,7 @@
 local ast = require("bishop/ast")
 local log = require("bishop/log")
 local std = require("bishop/std")
+local symbol_table = require("regent/symbol_table")
 
 local type_check = {}
 
@@ -70,18 +71,47 @@ keyword_type_assignment:assign_type({ "forbid", "allow", "demand" },
 keyword_type_assignment:assign_type({ "processors" }, std.processor_list_type)
 keyword_type_assignment:assign_type({ "memories" }, std.memory_list_type)
 
+local binary_op_types = {}
+binary_op_types["+"]   = {int, int}
+binary_op_types["-"]   = {int, int}
+binary_op_types["*"]   = {int, int}
+binary_op_types["/"]   = {int, int}
+binary_op_types["%"]   = {int, int}
+binary_op_types["<"]   = {int, bool}
+binary_op_types["<="]  = {int, bool}
+binary_op_types[">"]   = {int, bool}
+binary_op_types[">="]  = {int, bool}
+binary_op_types["=="]  = {int, bool}
+binary_op_types["~="]  = {int, bool}
+binary_op_types["and"] = {bool, bool}
+binary_op_types["or"]  = {bool, bool}
+
+function type_check.coerce_if_needed(expr, target_type)
+  if expr.expr_type == target_type then
+    return expr
+  elseif std.is_point_type(expr.expr_type) and target_type == int then
+    return ast.typed.expr.Coerce {
+      value = expr,
+      expr_type = target_type,
+      position = expr.position,
+    }
+  else
+    return nil
+  end
+end
+
 function type_check.filter_constraint(value_type, type_env, constraint)
   assert(constraint:is(ast.specialized.FilterConstraint))
   local value = type_check.expr(type_env, constraint.value)
   local invalid_field_msg = "invalid filter constraint on field '" ..
-    constraint.field .. "'"
+    constraint.field .. "' for " .. tostring(value_type)
   local type_error_msg = "expression of type '" .. tostring(value.expr_type) ..
-    "' is invalid on field '" .. constraint.field .. "'"
+    "' is invalid for filtering on field '" .. constraint.field .. "'"
 
   if std.is_processor_list_type(value_type) then
     if constraint.field == "isa" then
       if not std.is_isa_type(value.expr_type) then
-        log.error(expr.value, type_error_msg)
+        log.error(constraint.value, type_error_msg)
       end
     else
       log.error(constraint, invalid_field_msg)
@@ -90,7 +120,7 @@ function type_check.filter_constraint(value_type, type_env, constraint)
   elseif std.is_memory_list_type(value_type) then
     if constraint.field == "kind" then
       if not std.is_memory_kind_type(value.expr_type) then
-        log.error(expr.value, type_error_msg)
+        log.error(constraint.value, type_error_msg)
       end
     else
       log.error(constraint, invalid_field_msg)
@@ -111,55 +141,95 @@ function type_check.expr(type_env, expr)
   if expr:is(ast.specialized.expr.Unary) then
     local rhs = type_check.expr(type_env, expr.rhs)
     if expr.op == "-" then
-      if rhs.expr_type ~= int then
-        log.error(expr.rhs, "unary op " .. expr.op ..
-          " expects the rhs to be of integer type")
+      local rhs_ = type_check.coerce_if_needed(rhs, int)
+      if not rhs_ then
+        log.error(rhs, "unary op '" .. expr.op ..
+          "' expects integer type, but got type '" ..
+          tostring(rhs.expr_type) .. "'")
       end
+      return ast.typed.expr.Unary {
+        rhs = rhs_,
+        op = expr.op,
+        expr_type = rhs.expr_type,
+        position = expr.position,
+      }
     else
       log.error(expr, "unexpected unary operation")
     end
-    return ast.typed.expr.Unary {
-      rhs = rhs,
-      op = expr.op,
-      expr_type = rhs.expr_type,
-      position = expr.position,
-    }
 
   elseif expr:is(ast.specialized.expr.Binary) then
     local lhs = type_check.expr(type_env, expr.lhs)
     local rhs = type_check.expr(type_env, expr.rhs)
-    if not (expr.op == "+" or expr.op == "-" or
-            expr.op == "*" or expr.op == "/" or expr.op == "%") then
-      log.error(expr, "unexpected binary operation")
+    local type_info = binary_op_types[expr.op]
+    if type_info == nil then
+      log.error(expr, "unexpected binary operation '" .. expr.op .. "'")
     end
-    if lhs.expr_type ~= int then
-      log.error(expr.lhs, "binary op " .. expr.op ..
-        " expects the lhs to be of integer type")
-    elseif rhs.expr_type ~= int then
-      log.error(expr.rhs, "binary op " .. expr.op ..
-        " expects the rhs to be of integer type")
+
+    local desired_expr_type, assigned_type = unpack(type_info)
+
+    local lhs_ = type_check.coerce_if_needed(lhs, desired_expr_type)
+    local rhs_ = type_check.coerce_if_needed(rhs, desired_expr_type)
+
+    if not lhs_ then
+      log.error(lhs, "binary op '" .. expr.op ..
+        "' expects type '" .. tostring(desired_expr_type) ..
+        "', but got type '" .. tostring(lhs.expr_type) .. "'")
+    end
+    if not rhs_ then
+      log.error(rhs, "binary op '" .. expr.op ..
+        "' expects type '" .. tostring(desired_expr_type) ..
+        "', but got type '" .. tostring(rhs.expr_type) .. "'")
     end
 
     return ast.typed.expr.Binary {
-      lhs = lhs,
-      rhs = rhs,
+      lhs = lhs_,
+      rhs = rhs_,
       op = expr.op,
-      expr_type = rhs.expr_type,
+      expr_type = assigned_type,
       position = expr.position,
+    }
+
+  elseif expr:is(ast.specialized.expr.Ternary) then
+    local cond = type_check.expr(type_env, expr.cond)
+    local true_expr = type_check.expr(type_env, expr.true_expr)
+    local false_expr = type_check.expr(type_env, expr.false_expr)
+
+    if cond.expr_type ~= bool then
+      log.error(cond, "ternary op expects boolean type, but got type '" ..
+        tostring(cond.expr_type) .. "'")
+    end
+    if true_expr.expr_type ~= false_expr.expr_type then
+      log.error(true_expr,
+        "ternary op expects the same type on both expressions, " ..
+        "but got types '" .. tostring(true_expr.expr_type) ..
+        "' and '" .. tostring(false_expr.expr_type) .. "'")
+    end
+
+    return ast.typed.expr.Ternary {
+      cond = cond,
+      true_expr = true_expr,
+      false_expr = false_expr,
+      position = expr.position,
+      expr_type = true_expr.expr_type,
     }
 
   elseif expr:is(ast.specialized.expr.Index) then
     local value = type_check.expr(type_env, expr.value)
     local index = type_check.expr(type_env, expr.index)
-    if index.expr_type ~= int then
-      log.error(expr.index, "invalid type '" .. tostring(index.expr_type) ..
-        "' for index expression")
+    if std.is_point_type(index.expr_type) then
+      index = ast.typed.expr.Coerce {
+        value = index,
+        expr_type = int,
+        position = expr.position,
+      }
+    elseif index.expr_type ~= int then
+      log.error(expr.index, "indexing expression requires to have integer type," ..
+        " but received '" .. tostring(index.expr_type) .. "'")
     end
-    if not (std.is_processor_list_type(value.expr_type) or
-            std.is_memory_list_type(value.expr_type) or
+    if not (std.is_list_type(value.expr_type) or
             std.is_point_type(value.expr_type)) then
-      log.error(expr.value, "invalid type '" .. tostring(value.expr_type) ..
-        "' for index access")
+      log.error(expr.value, "index access requires list or point type," ..
+        " but received '" .. tostring(value.expr_type) .. "'")
     end
     local expr_type
     if std.is_point_type(value.expr_type) then
@@ -180,9 +250,8 @@ function type_check.expr(type_env, expr)
 
   elseif expr:is(ast.specialized.expr.Filter) then
     local value = type_check.expr(type_env, expr.value)
-    if not (std.is_processor_list_type(value.expr_type) or
-            std.is_memory_list_type(value.expr_type)) then
-      log.error(expr.value, "filter access is not valid on expressions of " ..
+    if not std.is_list_type(value.expr_type) then
+      log.error(expr.value, "filter is not valid on expressions of " ..
         "type '" .. tostring(value.expr_type) .. "'")
     end
     local constraints = expr.constraints:map(
@@ -211,8 +280,7 @@ function type_check.expr(type_env, expr)
       }
 
     elseif expr.field == "size" then
-      if not (std.is_processor_list_type(value.expr_type) or
-              std.is_memory_list_type(value.expr_type)) then
+      if not std.is_list_type(value.expr_type) then
         log.error(expr, "value of type '" .. tostring(value.expr_type) ..
           "' does not have field '" .. expr.field .. "'")
       end
@@ -241,10 +309,10 @@ function type_check.expr(type_env, expr)
     }
 
   elseif expr:is(ast.specialized.expr.Variable) then
-    local assigned_type = type_env[expr.value]
+    local assigned_type = type_env:safe_lookup(expr.value)
     if not assigned_type then
-      log.error(expr, "variable '" .. expr.value ..
-        "' is used without being typed")
+      log.error(expr, "variable '$" .. expr.value ..
+        "' was used without being bound by a pattern matching")
     end
     return ast.typed.expr.Variable {
       value = expr.value,
@@ -285,16 +353,14 @@ function type_check.element(type_env, element)
   end
   local patterns = element.patterns:map(function(pattern)
     local desired_type = type_assignment[pattern.field]
-    local existing_type = type_env[pattern.binder] or desired_type
-    if not desired_type then
-      log.error(pattern, "unexpected field " .. pattern.field .. " for " ..
-        element_type .. " element")
-    elseif desired_type ~= existing_type then
-      log.error(pattern, "field " .. pattern.field ..
-        " assigned to two different types '" .. tostring(existing_type) ..
+    local existing_type = type_env:safe_lookup(pattern.binder) or desired_type
+    assert(desired_type)
+    if desired_type ~= existing_type then
+      log.error(pattern, "variable '$" .. pattern.binder .. "' was assigned" ..
+        " to two different types '" .. tostring(existing_type) ..
         "' and '" .. tostring(desired_type) .. "'")
     end
-    type_env[pattern.binder] = desired_type
+    type_env:insert(element, pattern.binder, desired_type)
     return ast.typed.PatternMatch(pattern)
   end)
   return ctor {
@@ -322,10 +388,7 @@ end
 function type_check.property(rule_type, type_env, property)
   local value = type_check.expr(type_env, property.value)
   local desired_types = property_type_assignment[rule_type][property.field]
-  if not desired_types then
-    log.error(property, "invalid property assignment on field '" ..
-      property.field .. "' for " .. rule_type .. " rule")
-  end
+  assert(desired_types)
   local found = false
   for i = 1, #desired_types do
     if desired_types[i] == value.expr_type then
@@ -334,8 +397,9 @@ function type_check.property(rule_type, type_env, property)
     end
   end
   if not found then
-    log.error(property, "expression of type '" .. tostring(value.expr_type) ..
-      "' is invalid for property '" .. property.field .. "'")
+    log.error(property, "property '" .. property.field .. "' of " ..
+      rule_type .. " rule cannot get assigned by an expression of type '" ..
+      tostring(value.expr_type) .. "'")
   end
 
   return ast.typed.Property {
@@ -357,26 +421,63 @@ function type_check.selector(type_env, selector)
   }
 end
 
-function type_check.rule(rule_type, rule)
-  local type_env = {}
+function type_check.rule(rule_type, type_env, rule)
   local selector = type_check.selector(type_env, rule.selector)
   local properties =
     rule.properties:map(curry2(type_check.property, rule_type, type_env))
-  return ast.typed.rule.Task {
+  local ctor
+  if rule_type == "task" then
+    ctor = ast.typed.rule.Task
+  else assert(rule_type == "region")
+    ctor = ast.typed.rule.Region
+  end
+  return ctor {
     selector = selector,
     properties = properties,
     position = rule.position,
   }
 end
 
-type_check.task_rule = curry(type_check.rule, "task")
-type_check.region_rule = curry(type_check.rule, "region")
+function type_check.task_rule(type_env, rule)
+  return type_check.rule("task", type_env, rule)
+end
+function type_check.region_rule(type_env, rule)
+  return type_check.rule("region", type_env, rule)
+end
 
-function type_check.rules(rules)
-  return ast.typed.Rules {
-    task_rules = rules.task_rules:map(type_check.task_rule),
-    region_rules = rules.region_rules:map(type_check.region_rule),
-    position = rules.position,
+function type_check.assignment(type_env, assignment)
+  local value = type_check.expr(type_env, assignment.value)
+  if type_env:safe_lookup(assignment.binder) then
+    log.error(assignment, "variable '$" .. assignment.binder ..
+      "' has been already defined")
+  end
+  type_env:insert(assignment, assignment.binder, value.expr_type)
+  return ast.typed.Assignment {
+    binder = assignment.binder,
+    value = value,
+    position = assignment.position,
+  }
+end
+
+function type_check.mapper(mapper)
+  local type_env = symbol_table:new_global_scope()
+  local assignments = mapper.assignments:map(function(assignment)
+    return type_check.assignment(type_env, assignment)
+  end)
+
+  local task_rules = mapper.task_rules:map(function(rule)
+    local local_type_env = type_env:new_local_scope()
+    return type_check.task_rule(local_type_env, rule)
+  end)
+  local region_rules = mapper.region_rules:map(function(rule)
+    local local_type_env = type_env:new_local_scope()
+    return type_check.region_rule(local_type_env, rule)
+  end)
+  return ast.typed.Mapper {
+    assignments = assignments,
+    task_rules = task_rules,
+    region_rules = region_rules,
+    position = mapper.position,
   }
 end
 

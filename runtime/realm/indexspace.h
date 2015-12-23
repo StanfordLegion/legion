@@ -28,6 +28,7 @@
 
 #include "lowlevel_config.h"
 #include "arrays.h"
+#include "custom_serdez.h"
 
 namespace Realm {
 
@@ -37,11 +38,13 @@ namespace Realm {
     public:
       ElementMask(void);
       explicit ElementMask(int num_elements, int first_element = 0);
-      ElementMask(const ElementMask &copy_from, int num_elements = -1, int first_element = 0);
+      explicit ElementMask(const ElementMask &copy_from, int num_elements, int first_element = -1);
+      ElementMask(const ElementMask &copy_from, bool trim = false);
       ~ElementMask(void);
 
       void init(int _first_element, int _num_elements, Memory _memory, off_t _offset);
 
+      int get_first_element(void) const { return first_element; }
       int get_num_elmts(void) const { return num_elements; }
 
       void enable(int start, int count = 1);
@@ -113,12 +116,14 @@ namespace Realm {
 			       bool do_enabled2 = true);
 
     public:
+      void recalc_first_last_enabled(void);
+
       friend class Enumerator;
       int first_element;
       int num_elements;
       Memory memory;
       off_t offset;
-      void *raw_data;
+      char *raw_data;
       int first_enabled_elmt, last_enabled_elmt;
     };
 
@@ -928,13 +933,16 @@ namespace Realm {
                                           legion_lowlevel_file_mode_t file_mode) const;
       struct CopySrcDstField {
       public:
-        CopySrcDstField(void)
-          : inst(RegionInstance::NO_INST), offset(0), size(0) { }
+        CopySrcDstField(void) 
+          : inst(RegionInstance::NO_INST), offset(0), size(0), serdez_id(0) { }
         CopySrcDstField(RegionInstance i, unsigned o, unsigned s)
-          : inst(i), offset(o), size(s) { }
+          : inst(i), offset(o), size(s), serdez_id(0) { }
+        CopySrcDstField(RegionInstance i, unsigned o, unsigned s, CustomSerdezID sid)
+          : inst(i), offset(o), size(s), serdez_id(sid) { }
       public:
 	RegionInstance inst;
 	unsigned offset, size;
+	CustomSerdezID serdez_id;
       };
 
       Event fill(const std::vector<CopySrcDstField> &dsts,

@@ -300,6 +300,8 @@ namespace LegionRuntime {
                            UserEvent term_event);
       Event get_ready_event(void) const;
       const InstanceRef& get_reference(void) const;
+      void get_memories(std::set<Memory>& memories) const;
+      void get_fields(std::vector<FieldID>& fields) const;
 #if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS)
     public:
       const char* get_task_name(void) const;
@@ -1393,11 +1395,13 @@ namespace LegionRuntime {
                                          const void *&result, size_t &size);
     public:
       FieldID allocate_field(Context ctx, FieldSpace space, 
-                             size_t field_size, FieldID fid, bool local);
+                             size_t field_size, FieldID fid, 
+                             bool local, CustomSerdezID serdez);
       void free_field(Context ctx, FieldSpace space, FieldID fid);
       void allocate_fields(Context ctx, FieldSpace space, 
                            const std::vector<size_t> &sizes,
-                           std::vector<FieldID> &resulting_fields, bool local);
+                           std::vector<FieldID> &resulting_fields, 
+                           bool local, CustomSerdezID serdez);
       void free_fields(Context ctx, FieldSpace space, 
                        const std::set<FieldID> &to_free);
     public:
@@ -1459,6 +1463,7 @@ namespace LegionRuntime {
                                               AddressSpaceID target);
       void send_field_allocation(FieldSpace space, FieldID fid, 
                                  size_t size, unsigned idx, 
+                                 CustomSerdezID serdez_id,
                                  AddressSpaceID target);
       void send_field_destruction(FieldSpace space, FieldID fid, 
                                   AddressSpaceID target); 
@@ -1474,11 +1479,10 @@ namespace LegionRuntime {
       void send_did_remote_gc_update(AddressSpaceID target, Serializer &rez);
       void send_did_remote_resource_update(AddressSpaceID target,
                                            Serializer &rez);
+      void send_did_add_create_reference(AddressSpaceID target,Serializer &rez);
+      void send_did_remove_create_reference(AddressSpaceID target,
+                                            Serializer &rez, bool flush = true);
       void send_view_remote_registration(AddressSpaceID target,Serializer &rez);
-      void send_view_remote_valid_update(AddressSpaceID target,Serializer &rez);
-      void send_view_remote_gc_update(AddressSpaceID target, Serializer &rez);
-      void send_view_remote_resource_update(AddressSpaceID target,
-                                            Serializer &rez);
       void send_back_atomic(AddressSpaceID target, Serializer &rez);
       void send_materialized_view(AddressSpaceID target, Serializer &rez);
       void send_materialized_update(AddressSpaceID target, Serializer &rez);
@@ -1581,11 +1585,10 @@ namespace LegionRuntime {
       void handle_did_remote_valid_update(Deserializer &derez);
       void handle_did_remote_gc_update(Deserializer &derez);
       void handle_did_remote_resource_update(Deserializer &derez);
+      void handle_did_create_add(Deserializer &derez);
+      void handle_did_create_remove(Deserializer &derez);
       void handle_view_remote_registration(Deserializer &derez, 
                                            AddressSpaceID source);
-      void handle_view_remote_valid_update(Deserializer &derez);
-      void handle_view_remote_gc_update(Deserializer &derez);
-      void handle_view_remote_resource_update(Deserializer &derez);
       void handle_send_back_atomic(Deserializer &derez, AddressSpaceID source);
       void handle_send_materialized_view(Deserializer &derez, 
                                          AddressSpaceID source);
@@ -2152,11 +2155,13 @@ namespace LegionRuntime {
       static void set_top_level_task_id(Processor::TaskFuncID top_id);
       static void configure_MPI_interoperability(int rank);
       static const ReductionOp* get_reduction_op(ReductionOpID redop_id);
+      static const SerdezOp* get_serdez_op(CustomSerdezID serdez_id);
       static const SerdezRedopFns* get_serdez_redop_fns(ReductionOpID redop_id);
       static void set_registration_callback(RegistrationCallbackFnptr callback);
       static InputArgs& get_input_args(void);
       static Internal* get_runtime(Processor p);
       static ReductionOpTable& get_reduction_table(void);
+      static SerdezOpTable& get_serdez_table(void);
       static SerdezRedopTable& get_serdez_redop_table(void);
       static ProjectionID register_region_projection_function(
                                     ProjectionID handle, void *func_ptr);

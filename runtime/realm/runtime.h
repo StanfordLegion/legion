@@ -20,6 +20,7 @@
 
 #include "processor.h"
 #include "redop.h"
+#include "custom_serdez.h"
 
 #include "lowlevel_config.h"
 
@@ -45,6 +46,18 @@ namespace Realm {
       bool register_task(Processor::TaskFuncID taskid, Processor::TaskFuncPtr taskptr);
 
       bool register_reduction(ReductionOpID redop_id, const ReductionOpUntyped *redop);
+      template <typename REDOP>
+      bool register_reduction(ReductionOpID redop_id)
+      {
+	return register_reduction(redop_id, ReductionOpUntyped::create_reduction_op<REDOP>());
+      }
+
+      bool register_custom_serdez(CustomSerdezID serdez_id, const CustomSerdezUntyped *serdez);
+      template <typename SERDEZ>
+      bool register_custom_serdez(CustomSerdezID serdez_id)
+      {
+	return register_custom_serdez(serdez_id, CustomSerdezUntyped::create_custom_serdez<SERDEZ>());
+      }
 
       // there are three potentially interesting ways to start the initial
       // tasks:

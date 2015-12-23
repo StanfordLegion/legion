@@ -817,6 +817,22 @@ extern "C" {
                                 legion_context_t ctx,
                                  legion_index_partition_t handle);
 
+  /**
+   * @see LegionRuntime::HighLevel::Runtime::attach_name()
+   */
+  void
+  legion_index_partition_attach_name(legion_runtime_t runtime,
+                                     legion_index_partition_t handle,
+                                     const char *name);
+
+  /**
+   * @see LegionRuntime::HighLevel::Runtime::retrieve_name()
+   */
+  void
+  legion_index_partition_retrieve_name(legion_runtime_t runtime,
+                                       legion_index_partition_t handle,
+                                       const char **result);
+
   // -----------------------------------------------------------------------
   // Field Space Operations
   // -----------------------------------------------------------------------
@@ -839,6 +855,40 @@ extern "C" {
   legion_field_space_destroy(legion_runtime_t runtime,
                              legion_context_t ctx,
                              legion_field_space_t handle);
+
+  /**
+   * @see LegionRuntime::HighLevel::Runtime::attach_name()
+   */
+  void
+  legion_field_space_attach_name(legion_runtime_t runtime,
+                                 legion_field_space_t handle,
+                                 const char *name);
+
+  /**
+   * @see LegionRuntime::HighLevel::Runtime::retrieve_name()
+   */
+  void
+  legion_field_space_retrieve_name(legion_runtime_t runtime,
+                                   legion_field_space_t handle,
+                                   const char **result);
+
+  /**
+   * @see LegionRuntime::HighLevel::Runtime::retrieve_name()
+   */
+  void
+  legion_field_id_attach_name(legion_runtime_t runtime,
+                              legion_field_space_t handle,
+                              legion_field_id_t id,
+                              const char *name);
+
+  /**
+   * @see LegionRuntime::HighLevel::Runtime::attach_name()
+   */
+  void
+  legion_field_id_retrieve_name(legion_runtime_t runtime,
+                                legion_field_space_t handle,
+                                legion_field_id_t id,
+                                const char **result);
 
   // -----------------------------------------------------------------------
   // Logical Region Operations
@@ -976,6 +1026,22 @@ extern "C" {
     legion_runtime_t runtime,
     legion_context_t ctx,
     legion_logical_partition_t handle);
+
+  /**
+   * @see LegionRuntime::HighLevel::Runtime::attach_name()
+   */
+  void
+  legion_logical_partition_attach_name(legion_runtime_t runtime,
+                                       legion_logical_partition_t handle,
+                                       const char *name);
+
+  /**
+   * @see LegionRuntime::HighLevel::Runtime::retrieve_name()
+   */
+  void
+  legion_logical_partition_retrieve_name(legion_runtime_t runtime,
+                                         legion_logical_partition_t handle,
+                                         const char **result);
 
   // -----------------------------------------------------------------------
   // Region Requirement Operations

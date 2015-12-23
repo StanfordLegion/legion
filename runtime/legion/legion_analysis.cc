@@ -460,45 +460,37 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void VersionInfo::apply_close(ContextID ctx, bool permit_leave_open,
-                     AddressSpaceID target, std::set<Event> &applied_conditions)
+    void VersionInfo::apply_close(ContextID ctx, AddressSpaceID target,
+              const LegionMap<ColorPoint,FieldMask>::aligned &closed_children,
+                                          std::set<Event> &applied_conditions)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
       assert(!packed);
 #endif
-      if (permit_leave_open)
+      for (LegionMap<RegionTreeNode*,NodeInfo>::aligned::iterator it = 
+            node_infos.begin(); it != node_infos.end(); it++)
       {
-        for (LegionMap<RegionTreeNode*,NodeInfo>::aligned::iterator it = 
-              node_infos.begin(); it != node_infos.end(); it++)
+        if (it->second.physical_state == NULL)
+          continue;
+        if (it->second.path_only())
         {
-          if (it->second.physical_state == NULL)
-            continue;
-          if (it->second.path_only())
-            it->second.physical_state->apply_path_only_state(
-                        it->second.advance_mask, target, applied_conditions);
-          else
-            it->second.physical_state->filter_and_apply(it->second.close_top(),
-                        false/*filter children*/, target, applied_conditions);
+          it->second.physical_state->apply_path_only_state(
+                      it->second.advance_mask, target, applied_conditions);
+          continue;
         }
-      }
-      else
-      {
-        for (LegionMap<RegionTreeNode*,NodeInfo>::aligned::iterator it = 
-              node_infos.begin(); it != node_infos.end(); it++)
+        if (it->second.close_top())
         {
-          if (it->second.physical_state == NULL)
-            continue;
-          if (it->second.path_only())
-          {
-            it->second.physical_state->apply_path_only_state(
-                        it->second.advance_mask, target, applied_conditions);
-          }
-          // We can also skip anything that isn't the top node
-          if (!it->second.close_top())
-            continue;
+          // If it is the top node we do the full filter and apply
           it->second.physical_state->filter_and_apply(true/*top*/,
-                         true/*filter children*/, target, applied_conditions);
+                                target, closed_children, applied_conditions);
+        }
+        else if (!!it->second.advance_mask)
+        {
+          // Otherwise if this is a node in the close op that has
+          // leave open fields, then we have to apply the state
+          it->second.physical_state->filter_and_apply(false/*top*/,
+                                target, closed_children, applied_conditions);
         }
       }
     }
@@ -2037,16 +2029,17 @@ namespace LegionRuntime {
           }
         }
         // If it didn't find a valid instance, try to make one
+        bool remote_creation;
         chosen_inst = node->create_instance(*mit, new_fields, 
                                             blocking_factor,
                                           info.op->get_mappable()->get_depth(),
-                                            info.op);
+                                            info.op, remote_creation);
         if (chosen_inst != NULL)
         {
           // We successfully made an instance
           needed_fields = user_mask;
           // Make sure to tell our physical state
-          state->record_created_instance(chosen_inst);
+          state->record_created_instance(chosen_inst, remote_creation);
           break;
         }
       }
@@ -2139,13 +2132,14 @@ namespace LegionRuntime {
 #endif
           FieldID fid = *(info.req.privilege_fields.begin());
           // Try making a reduction instance in this memory
+          bool remote_creation;
           chosen_inst = node->create_reduction(*mit, fid, 
                                                info.req.reduction_list,
                                                info.req.redop,
-                                               info.op);
+                                               info.op, remote_creation);
           if (chosen_inst != NULL)
           {
-            state->record_created_instance(chosen_inst);
+            state->record_created_instance(chosen_inst, remote_creation);
             break;
           }
         }
@@ -2492,12 +2486,15 @@ namespace LegionRuntime {
                                               VersionInfo &version_info,
                                               bool capture_previous, 
                                               bool path_only, bool needs_final,
-                                              bool close_top, bool report)
+                                              bool close_top, bool report,
+                                              bool capture_leave_open)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
       sanity_check();
       version_info.sanity_check(owner);
+      assert(!capture_previous || !capture_leave_open);
+      assert(!close_top || !capture_leave_open);
 #endif
       // Capture the version information for this logical region  
       VersionInfo::NodeInfo &node_info = 
@@ -2508,7 +2505,7 @@ namespace LegionRuntime {
         node_info.set_needs_final();
       if (close_top)
         node_info.set_close_top();
-      if (capture_previous)
+      if (capture_previous || capture_leave_open)
         node_info.advance_mask |= mask;
       if (node_info.physical_state == NULL)
       {
@@ -3294,10 +3291,8 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       // Clear out our version infos
-      leave_open_versions.release();
-      leave_open_versions.clear();
-      force_close_versions.release();
-      force_close_versions.clear();
+      closed_version_info.release();
+      closed_version_info.clear();
     }
 
     //--------------------------------------------------------------------------
@@ -3323,21 +3318,7 @@ namespace LegionRuntime {
       // IMPORTANT: Always do this even if we don't have any closed users
       // They could have been pruned out because they finished executing, but
       // we still need to do the close operation.
-      if (leave_open)
-      {
-        leave_open_mask |= mask;
-        LegionMap<ColorPoint,ClosingInfo>::aligned::iterator finder = 
-                                              leave_open_children.find(child);
-        if (finder != leave_open_children.end())
-        {
-          finder->second.child_fields |= mask;
-          finder->second.child_users.insert(finder->second.child_users.end(),
-                                      closed_users.begin(), closed_users.end());
-        }
-        else
-          leave_open_children[child] = ClosingInfo(mask, closed_users);
-      }
-      else if (read_only)
+      if (read_only)
       {
         LegionMap<ColorPoint,ClosingInfo>::aligned::iterator finder = 
                                               read_only_children.find(child);
@@ -3353,15 +3334,15 @@ namespace LegionRuntime {
       else
       {
         LegionMap<ColorPoint,ClosingInfo>::aligned::iterator finder = 
-                                              force_close_children.find(child);
-        if (finder != force_close_children.end())
+                                              closed_children.find(child);
+        if (finder != closed_children.end())
         {
           finder->second.child_fields |= mask;
           finder->second.child_users.insert(finder->second.child_users.end(),
                                       closed_users.begin(), closed_users.end());
         }
         else
-          force_close_children[child] = ClosingInfo(mask, closed_users);
+          closed_children[child] = ClosingInfo(mask, closed_users);
       }
       // Always clean out our list of closed users
       closed_users.clear();
@@ -3395,12 +3376,12 @@ namespace LegionRuntime {
     {
       // First sort the close operations into sets of fields which all
       // close the same sets of children
-      if (!leave_open_children.empty())
+      if (!closed_children.empty())
       {
-        LegionList<ClosingSet>::aligned leave_open;
-        compute_close_sets(leave_open_children, leave_open);
-        create_close_operations(target, creator, leave_open_versions, ver_info,
-                         res_info, trace_info, true/*leave open*/, leave_open);
+        LegionList<ClosingSet>::aligned closes;
+        compute_close_sets(closed_children, closes);
+        create_normal_close_operations(target, creator, closed_version_info, 
+                                       ver_info, res_info, trace_info, closes);
       }
       if (!read_only_children.empty())
       {
@@ -3409,26 +3390,18 @@ namespace LegionRuntime {
         create_read_only_close_operations(target, creator, 
                                           trace_info, read_only);
       }
-      if (!force_close_children.empty())
-      {
-        LegionList<ClosingSet>::aligned force_close;
-        compute_close_sets(force_close_children, force_close);
-        create_close_operations(target, creator, force_close_versions, ver_info,
-                        res_info, trace_info, false/*leave open*/, force_close);
-      }
       // Finally if we have any fields which are flush only
       // make a close operation for them and add it to force close
       if (!!flush_only_fields)
       {
-        std::set<ColorPoint> empty_children;
+        LegionMap<ColorPoint,FieldMask>::aligned empty_children;
         InterCloseOp *flush_op = target->create_close_op(creator,
                                                          flush_only_fields,
-                                                         false/*leave open*/,
                                                          empty_children,
-                                                         force_close_versions,
+                                                         closed_version_info,
                                                          ver_info, res_info,
                                                          trace_info);
-        force_close_closes[flush_op] = LogicalUser(flush_op, 0/*idx*/,
+        normal_closes[flush_op] = LogicalUser(flush_op, 0/*idx*/,
                               RegionUsage(flush_op->get_region_requirement()),
                               flush_only_fields);
       }
@@ -3440,7 +3413,7 @@ namespace LegionRuntime {
     {
       // Only need to add children to leave open closes
       for (LegionMap<TraceCloseOp*,LogicalUser>::aligned::const_iterator it = 
-            leave_open_closes.begin(); it != leave_open_closes.end(); it++)
+            normal_closes.begin(); it != normal_closes.end(); it++)
       {
         it->first->add_next_child(next_child);
       }
@@ -3457,13 +3430,15 @@ namespace LegionRuntime {
       {
         bool inserted = false;
         FieldMask remaining = cit->second.child_fields;
+        FieldMask remaining_leave_open = cit->second.leave_open_mask;
         for (LegionList<ClosingSet>::aligned::iterator it = 
               close_sets.begin(); it != close_sets.end(); it++)
         {
           // Easy case, check for equality
           if (remaining == it->closing_mask)
           {
-            it->children.insert(cit->first);
+            // Add the child
+            it->add_child(cit->first, remaining_leave_open);
             inserted = true;
             break;
           }
@@ -3480,7 +3455,8 @@ namespace LegionRuntime {
             close_sets.push_back(ClosingSet(overlap));
             ClosingSet &last = close_sets.back();
             last.children = it->children;
-            last.children.insert(cit->first);
+            // Insert the new child
+            last.add_child(cit->first, remaining_leave_open);
             inserted = true;
             break;
           }
@@ -3489,8 +3465,9 @@ namespace LegionRuntime {
           {
             // Add ourselves to the existing set and then
             // keep going for the remaining fields
-            it->children.insert(cit->first);
+            it->add_child(cit->first, remaining_leave_open & overlap);
             remaining -= overlap;
+            remaining_leave_open -= overlap;
             continue;
           }
           // Hard case, neither dominates, compute
@@ -3499,11 +3476,13 @@ namespace LegionRuntime {
           // one at the end for overlap, continue
           // iterating for the right one
           it->closing_mask -= overlap;
-          const std::set<ColorPoint> &temp_children = it->children;
+          const LegionMap<ColorPoint,FieldMask>::aligned &temp_children = 
+                                                            it->children;
           it = close_sets.insert(it, ClosingSet(overlap));
           it->children = temp_children;
-          it->children.insert(cit->first);
+          it->add_child(cit->first, remaining_leave_open & overlap);
           remaining -= overlap;
+          remaining_leave_open -= overlap;
           continue;
         }
         // If we didn't add it yet, add it now
@@ -3511,38 +3490,35 @@ namespace LegionRuntime {
         {
           close_sets.push_back(ClosingSet(remaining));
           ClosingSet &last = close_sets.back();
-          last.children.insert(cit->first);
+          last.add_child(cit->first, remaining_leave_open);
         }
       }
     }
 
     //--------------------------------------------------------------------------
-    void LogicalCloser::create_close_operations(RegionTreeNode *target,
+    void LogicalCloser::create_normal_close_operations(RegionTreeNode *target,
                               Operation *creator, const VersionInfo &local_info,
                               const VersionInfo &version_info,
                               const RestrictInfo &restrict_info, 
-                              const TraceInfo &trace_info, bool leave_open,
-                              const LegionList<ClosingSet>::aligned &close_sets)
+                              const TraceInfo &trace_info,
+                              LegionList<ClosingSet>::aligned &close_sets)
     //--------------------------------------------------------------------------
     {
-      for (LegionList<ClosingSet>::aligned::const_iterator it = 
+      for (LegionList<ClosingSet>::aligned::iterator it = 
             close_sets.begin(); it != close_sets.end(); it++)
       {
+        // Filter the leave open fields before passing them
+        it->filter_children();
         InterCloseOp *close_op = target->create_close_op(creator, 
                                                        it->closing_mask,
-                                                       leave_open, it->children,
+                                                       it->children,
                                                        local_info,
                                                        version_info,
                                                        restrict_info, 
                                                        trace_info);
-        if (leave_open)
-          leave_open_closes[close_op] = LogicalUser(close_op, 0/*idx*/,
-                        RegionUsage(close_op->get_region_requirement()),
-                        it->closing_mask);
-        else
-          force_close_closes[close_op] = LogicalUser(close_op, 0/*idx*/,
-                        RegionUsage(close_op->get_region_requirement()),
-                        it->closing_mask);
+        normal_closes[close_op] = LogicalUser(close_op, 0/*idx*/,
+                      RegionUsage(close_op->get_region_requirement()),
+                      it->closing_mask);
       }
     }
 
@@ -3556,6 +3532,7 @@ namespace LegionRuntime {
       for (LegionList<ClosingSet>::aligned::const_iterator it = 
             close_sets.begin(); it != close_sets.end(); it++)
       {
+        // No need to filter here since we won't ever use those fields
         ReadCloseOp *close_op = target->create_read_only_close_op(creator,
                                                               it->closing_mask,
                                                               it->children,
@@ -3577,15 +3554,12 @@ namespace LegionRuntime {
       // don't run too early.
       LegionList<LogicalUser,LOGICAL_REC_ALLOC>::track_aligned &above_users = 
                                               current.op->get_logical_records();
-      if (!leave_open_closes.empty())
-        register_dependences(current, open_below, leave_open_closes, 
-                             leave_open_children, above_users, cusers, pusers);
+      if (!normal_closes.empty())
+        register_dependences(current, open_below, normal_closes, 
+                             closed_children, above_users, cusers, pusers);
       if (!read_only_closes.empty())
         register_dependences(current, open_below, read_only_closes,
                              read_only_children, above_users, cusers, pusers);
-      if (!force_close_closes.empty())
-        register_dependences(current, open_below, force_close_closes, 
-                             force_close_children, above_users, cusers, pusers);
     }
 
     // If you are looking for LogicalCloser::register_dependences it can 
@@ -3637,10 +3611,10 @@ namespace LegionRuntime {
     {
       // Add our close operations onto the list
       // Note we already added our mapping references when we made them
-      if (!leave_open_closes.empty())
+      if (!normal_closes.empty())
       {
         for (LegionMap<TraceCloseOp*,LogicalUser>::aligned::const_iterator it =
-              leave_open_closes.begin(); it != leave_open_closes.end(); it++)
+              normal_closes.begin(); it != normal_closes.end(); it++)
         {
           users.push_back(it->second);
         }
@@ -3649,14 +3623,6 @@ namespace LegionRuntime {
       {
         for (LegionMap<TraceCloseOp*,LogicalUser>::aligned::const_iterator it =
               read_only_closes.begin(); it != read_only_closes.end(); it++)
-        {
-          users.push_back(it->second);
-        }
-      }
-      if (!force_close_closes.empty())
-      {
-        for (LegionMap<TraceCloseOp*,LogicalUser>::aligned::const_iterator it =
-              force_close_closes.begin(); it != force_close_closes.end(); it++)
         {
           users.push_back(it->second);
         }
@@ -3676,16 +3642,10 @@ namespace LegionRuntime {
       // Don't need the previous because writes were already done in the
       // sub-tree we are closing so the version number for the target
       // region has already been advanced.
-      if (leave_open)
-        state.record_version_numbers(local_mask, user, leave_open_versions, 
-                                     false/*previous*/, 
-                                     false/*path only*/, true/*final*/,
-                                     false/*close top*/, false/*report*/);
-      else
-        state.record_version_numbers(local_mask, user, force_close_versions, 
-                                     false/*previous*/,
-                                     false/*path only*/, true/*final*/,
-                                     false/*close top*/, false/*report*/);
+      state.record_version_numbers(local_mask, user, closed_version_info, 
+                                   false/*previous*/, false/*path only*/, 
+                                   true/*final*/, false/*close top*/, 
+                                   false/*report*/, leave_open);
     }
 
     //--------------------------------------------------------------------------
@@ -3701,110 +3661,29 @@ namespace LegionRuntime {
         if (!!update_mask)
           state.advance_version_numbers(update_mask);
       }
-      // We don't need to advance the version numbers because we know
-      // that was already done when we 
-      if (!!leave_open_mask)
+      // See if there are any partially closed fields
+      FieldMask partial_close = closed_mask & state.partially_closed;
+      if (!partial_close)
       {
-        // See if we have any partial closes for these fields, if there
-        // are partially closed fields we don't need to capture from 
-        // the previous version number because we've already done that
-        if (!state.partially_closed || (closed_mask * state.partially_closed))
-        {
-          // Common case, there are no partially closed fields
-          state.record_version_numbers(leave_open_mask, user,
-                                       leave_open_versions,
-                                       true/*previous*/, 
-                                       false/*path only*/, true/*final*/,
-                                       true/*close top*/, false/*report*/);
-          FieldMask force_close_mask = closed_mask - leave_open_mask;
-          if (!!force_close_mask)
-            state.record_version_numbers(force_close_mask, user,
-                                         force_close_versions, true/*previous*/,
-                                         false/*path only*/, true/*final*/, 
-                                         true/*close top*/, false/*report*/);
-        }
-        else
-        {
-          // Handle partially closed fields
-          FieldMask partial_open = leave_open_mask & state.partially_closed;
-          if (!!partial_open)
-          {
-            state.record_version_numbers(partial_open, user,
-                                         leave_open_versions,
-                                         false/*previous*/,
-                                         false/*path only*/, true/*final*/,
-                                         true/*close top*/, false/*report*/);
-            FieldMask non_partial_open = leave_open_mask - partial_open;
-            if (!!non_partial_open)
-              state.record_version_numbers(non_partial_open, user,
-                                           leave_open_versions,
-                                           true/*previous*/, 
-                                           false/*path only*/, true/*final*/,
-                                           true/*close top*/, false/*report*/);
-          }
-          else
-          {
-            // No partial fields for leave open
-            state.record_version_numbers(leave_open_mask, user,
-                                         leave_open_versions,
-                                         true/*previous*/, 
-                                         false/*path only*/, true/*final*/,
-                                         true/*close top*/, false/*report*/);
-          }
-          FieldMask force_close_mask = closed_mask - leave_open_mask;
-          if (!!force_close_mask)
-          {
-            FieldMask partial_close = force_close_mask & state.partially_closed;
-            if (!!partial_close)
-            {
-              state.record_version_numbers(partial_close, user,
-                                        force_close_versions, false/*previous*/,
-                                        false/*path only*/,true/*final*/,
-                                        true/*close top*/, false/*report*/);
-              FieldMask non_partial_close = force_close_mask - partial_close;
-              if (!!non_partial_close)
-                state.record_version_numbers(non_partial_close, user,
-                                        force_close_versions, true/*previous*/,
-                                        false/*path only*/, true/*final*/,
-                                        true/*close top*/, false/*report*/);
-            }
-            else
-            {
-              state.record_version_numbers(force_close_mask, user,
-                                         force_close_versions, true/*previous*/,
-                                         false/*path only*/, true/*final*/, 
-                                         true/*close top*/, false/*report*/);
-            }
-          }
-        }
+        // Common case: there are no partially closed fields
+        state.record_version_numbers(closed_mask, user, closed_version_info,
+                                     true/*previous*/, false/*path only*/, 
+                                     true/*final*/, true/*close top*/, 
+                                     false/*report*/, false/*leave open*/);
       }
       else
       {
-        // Normal case is relatively simple
-        // See if there are any partially closed fields
-        FieldMask partial_close = closed_mask & state.partially_closed;
-        if (!partial_close)
-        {
-          // Common case: there are no partially closed fields
-          state.record_version_numbers(closed_mask, user, force_close_versions,
+        // Record the partially closed fields from this version
+        state.record_version_numbers(partial_close, user, closed_version_info,
+                                     false/*previous*/, false/*path only*/, 
+                                     true/*final*/, true/*close top*/, 
+                                     false/*report*/, false/*leave open*/);
+        FieldMask non_partial = closed_mask - partial_close;
+        if (!!non_partial)
+          state.record_version_numbers(non_partial, user, closed_version_info,
                                        true/*previous*/, false/*path only*/, 
-                                       true/*final*/, true/*close top*/,
-                                       false/*report*/);
-        }
-        else
-        {
-          // Record the partially closed fields from this version
-          state.record_version_numbers(partial_close, user, 
-                                       force_close_versions, false/*previous*/,
-                                       false/*path only*/, true/*final*/,
-                                       true/*close top*/, false/*report*/);
-          FieldMask non_partial = closed_mask - partial_close;
-          if (!!non_partial)
-            state.record_version_numbers(non_partial, user,
-                                         force_close_versions, true/*previous*/,
-                                         false/*path only*/, true/*final*/,
-                                         true/*close top*/, false/*report*/);
-        }
+                                       true/*final*/, true/*close top*/, 
+                                       false/*report*/, false/*leave open*/);
       }
     }
 
@@ -3813,14 +3692,13 @@ namespace LegionRuntime {
                                            const FieldMask &merge_mask)
     //--------------------------------------------------------------------------
     {
-      target.merge(leave_open_versions, merge_mask);
-      target.merge(force_close_versions, merge_mask);
+      target.merge(closed_version_info, merge_mask);
     }
 
     //--------------------------------------------------------------------------
     PhysicalCloser::PhysicalCloser(const MappableInfo &in, 
-                                   bool open, LogicalRegion h)
-      : info(in), handle(h), permit_leave_open(open), targets_selected(false)
+                                   LogicalRegion h)
+      : info(in), handle(h), targets_selected(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -3828,7 +3706,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     PhysicalCloser::PhysicalCloser(const PhysicalCloser &rhs)
       : info(rhs.info), handle(rhs.handle), 
-        permit_leave_open(rhs.permit_leave_open),
+        leave_open_mask(rhs.leave_open_mask),
         upper_targets(rhs.get_lower_targets())
     //--------------------------------------------------------------------------
     {
@@ -3928,8 +3806,8 @@ namespace LegionRuntime {
     } 
 
     //--------------------------------------------------------------------------
-    CompositeCloser::CompositeCloser(ContextID c, VersionInfo &info, bool open)
-      : ctx(c), permit_leave_open(open), version_info(info)
+    CompositeCloser::CompositeCloser(ContextID c, VersionInfo &info)
+      : ctx(c), version_info(info)
     //--------------------------------------------------------------------------
     {
       composite_version_info = new CompositeVersionInfo();
@@ -3937,7 +3815,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     CompositeCloser::CompositeCloser(const CompositeCloser &rhs)
-      : ctx(0), permit_leave_open(false), version_info(rhs.version_info)
+      : ctx(0), version_info(rhs.version_info)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -4412,37 +4290,51 @@ namespace LegionRuntime {
       // If we have any created instances, we can now remove our
       // valid references on them because we've applied all our updates
       if (!created_instances.empty())
-      {
-        for (std::deque<InstanceView*>::const_iterator it = 
-              created_instances.begin(); it != created_instances.end(); it++)
-        {
-          if ((*it)->remove_base_valid_ref(INITIAL_CREATION_REF))
-            LogicalView::delete_logical_view(*it);
-        }
-        created_instances.clear();
-      }
+        release_created_instances();
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalState::filter_and_apply(bool top, bool filter_children,
-                     AddressSpaceID target, std::set<Event> &applied_conditions)
+    void PhysicalState::filter_and_apply(bool top, AddressSpaceID target, 
+               const LegionMap<ColorPoint,FieldMask>::aligned &closed_children,
+                                   std::set<Event> &applied_conditions)
     //--------------------------------------------------------------------------
     {
       if (top)
       {
 #ifdef DEBUG_HIGH_LEVEL
-        assert(!advance_states.empty());
+        assert(!advance_states.empty() || !version_states.empty());
 #endif
-        for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator 
-              vit = advance_states.begin(); vit != 
-              advance_states.end(); vit++)
+        // Advance states are fields that are being closed for the first
+        // time while version states are the ones that have already undergone
+        // at least one close.
+        if (!version_states.empty())
         {
-          const VersionStateInfo &info = vit->second;
-          for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator 
-                it = info.states.begin(); it != info.states.end(); it++)
+          for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator
+                vit = version_states.begin(); vit !=
+                version_states.end(); vit++)
           {
-            it->first->filter_and_merge_physical_state(this, it->second, 
-                         true, filter_children, target, applied_conditions);
+            const VersionStateInfo &info = vit->second;
+            for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator
+                  it = info.states.begin(); it != info.states.end(); it++)
+            {
+              it->first->filter_and_merge_physical_state(this, it->second,
+                     true/*top*/, target, closed_children, applied_conditions);
+            }
+          }
+        }
+        if (!advance_states.empty())
+        {
+          for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator 
+                vit = advance_states.begin(); vit != 
+                advance_states.end(); vit++)
+          {
+            const VersionStateInfo &info = vit->second;
+            for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator 
+                  it = info.states.begin(); it != info.states.end(); it++)
+            {
+              it->first->filter_and_merge_physical_state(this, it->second, 
+                     true/*top*/, target, closed_children, applied_conditions);
+            }
           }
         }
       }
@@ -4460,22 +4352,36 @@ namespace LegionRuntime {
                 it = info.states.begin(); it != info.states.end(); it++)
           {
             it->first->filter_and_merge_physical_state(this, it->second, 
-                         false, filter_children, target, applied_conditions);
+                         false, target, closed_children, applied_conditions);
           }
         }
       }
       // If we have any created instances, we can now remove our
       // valid references on them because we've applied all our updates
       if (!created_instances.empty())
+        release_created_instances();
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalState::release_created_instances(void)
+    //--------------------------------------------------------------------------
+    {
+      for (std::deque<std::pair<InstanceView*,bool> >::const_iterator it =
+            created_instances.begin(); it != created_instances.end(); it++)
       {
-        for (std::deque<InstanceView*>::const_iterator it = 
-              created_instances.begin(); it != created_instances.end(); it++)
+        if (!it->second)
         {
-          if ((*it)->remove_base_valid_ref(INITIAL_CREATION_REF))
-            LogicalView::delete_logical_view(*it);
+          if (it->first->remove_base_valid_ref(INITIAL_CREATION_REF))
+            LogicalView::delete_logical_view(it->first);
         }
-        created_instances.clear();
+        else
+        {
+          PhysicalManager *manager = it->first->get_manager();
+          manager->send_remote_valid_update(manager->owner_space,
+                                            1/*count*/, false/*add*/);
+        }
       }
+      created_instances.clear();
     }
 
     //--------------------------------------------------------------------------
@@ -4492,11 +4398,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalState::record_created_instance(InstanceView *view)
+    void PhysicalState::record_created_instance(InstanceView *view, bool remote)
     //--------------------------------------------------------------------------
     {
-      view->add_base_valid_ref(INITIAL_CREATION_REF); 
-      created_instances.push_back(view);
+      // If this is remote, it already had its valid reference added
+      // by the remote node so no need to do anything here
+      if (!remote)
+        view->add_base_valid_ref(INITIAL_CREATION_REF); 
+      created_instances.push_back(std::pair<InstanceView*,bool>(view,remote));
     }
 
     //--------------------------------------------------------------------------
@@ -5319,7 +5228,8 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     void VersionState::filter_and_merge_physical_state(
                         const PhysicalState *state, const FieldMask &merge_mask,
-                        bool top, bool filter_children, AddressSpaceID target,
+                        bool top, AddressSpaceID target,
+                const LegionMap<ColorPoint,FieldMask>::aligned &closed_children,
                         std::set<Event> &applied_conditions)
     //--------------------------------------------------------------------------
     {
@@ -5385,30 +5295,37 @@ namespace LegionRuntime {
           }
         }
       }
-      if (filter_children)
+      if (top && !closed_children.empty() && !children.open_children.empty())
       {
-        children.valid_fields -= merge_mask;  
-        if (!children.valid_fields)
-          children.open_children.clear();
-        else
+        bool changed = false;
+        for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it = 
+              closed_children.begin(); it != closed_children.end(); it++)
         {
-          std::vector<ColorPoint> to_delete;
-          for (LegionMap<ColorPoint,FieldMask>::aligned::iterator it = 
-                children.open_children.begin(); it != 
-                children.open_children.end(); it++)
+          LegionMap<ColorPoint,FieldMask>::aligned::iterator finder = 
+            children.open_children.find(it->first);
+          if (finder == children.open_children.end())
+            continue;
+          changed = true;
+          finder->second -= merge_mask;
+          if (!finder->second)
+            children.open_children.erase(finder);
+        }
+        // See if we need to rebuild the open children mask
+        if (changed)
+        {
+          if (!children.open_children.empty())
           {
-            it->second -= merge_mask;
-            if (!it->second)
-              to_delete.push_back(it->first);
-          }
-          if (!to_delete.empty())
-          {
-            for (std::vector<ColorPoint>::const_iterator it = 
-                  to_delete.begin(); it != to_delete.end(); it++)
+            FieldMask new_open_child_mask;
+            for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it =
+                  children.open_children.begin(); it != 
+                  children.open_children.end(); it++)
             {
-              children.open_children.erase(*it);
+              new_open_child_mask |= it->second;
             }
+            children.valid_fields = new_open_child_mask;
           }
+          else
+            children.valid_fields.clear();
         }
       }
       // Now we can do the merge
@@ -5985,7 +5902,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void VersionState::send_version_state_request(AddressSpaceID target,
-                                    AddressSpaceID source, UserEvent to_trigger, 
+                                    AddressSpaceID source, UserEvent to_trigger,
                                     const FieldMask &request_mask, 
                                     VersionRequestKind request_kind) 
     //--------------------------------------------------------------------------

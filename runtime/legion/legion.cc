@@ -1852,6 +1852,20 @@ namespace LegionRuntime {
       return impl->get_field_accessor(fid);
     }
 
+    //--------------------------------------------------------------------------
+    void PhysicalRegion::get_memories(std::set<Memory>& memories) const
+    //--------------------------------------------------------------------------
+    {
+      impl->get_memories(memories);
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalRegion::get_fields(std::vector<FieldID>& fields) const
+    //--------------------------------------------------------------------------
+    {
+      impl->get_fields(fields);
+    }
+
     /////////////////////////////////////////////////////////////
     // Index Iterator  
     /////////////////////////////////////////////////////////////
@@ -3610,7 +3624,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       const void* dummy_ptr; size_t dummy_size;
-      Runtime::retrieve_semantic_information(handle,
+      Runtime::retrieve_semantic_information(handle, fid,
           NAME_SEMANTIC_TAG, dummy_ptr, dummy_size);
       result = reinterpret_cast<const char*>(dummy_ptr);
     }
@@ -3640,10 +3654,10 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     FieldID Runtime::allocate_field(Context ctx, FieldSpace space,
                                              size_t field_size, FieldID fid,
-                                             bool local)
+                                             bool local, CustomSerdezID sd_id)
     //--------------------------------------------------------------------------
     {
-      return runtime->allocate_field(ctx, space, field_size, fid, local);
+      return runtime->allocate_field(ctx, space, field_size, fid, local, sd_id);
     }
 
     //--------------------------------------------------------------------------
@@ -3657,10 +3671,10 @@ namespace LegionRuntime {
     void Runtime::allocate_fields(Context ctx, FieldSpace space,
                                            const std::vector<size_t> &sizes,
                                          std::vector<FieldID> &resulting_fields,
-                                         bool local)
+                                         bool local, CustomSerdezID _id)
     //--------------------------------------------------------------------------
     {
-      runtime->allocate_fields(ctx, space, sizes, resulting_fields, local);
+      runtime->allocate_fields(ctx, space, sizes, resulting_fields, local, _id);
     }
 
     //--------------------------------------------------------------------------
@@ -3762,6 +3776,13 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    /*static*/ const SerdezOp* Runtime::get_serdez_op(CustomSerdezID serdez_id)
+    //--------------------------------------------------------------------------
+    {
+      return Internal::get_serdez_op(serdez_id);
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ void Runtime::set_registration_callback(
                                             RegistrationCallbackFnptr callback)
     //--------------------------------------------------------------------------
@@ -3791,6 +3812,12 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    /*static*/ SerdezOpTable& Runtime::get_serdez_table(void)
+    //--------------------------------------------------------------------------
+    {
+      return Internal::get_serdez_table();
+    }
+
     /*static*/ SerdezRedopTable& Runtime::get_serdez_redop_table(void)
     //--------------------------------------------------------------------------
     {

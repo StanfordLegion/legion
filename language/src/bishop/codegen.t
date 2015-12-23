@@ -95,7 +95,7 @@ function codegen.type(ty)
     return c.legion_memory_kind_t
   elseif std.is_point_type(ty) then
     return c.legion_domain_point_t
-  elseif ty == int then
+  elseif ty == int or ty == bool then
     return ty
   else
     assert(false, "type '" .. tostring(ty) .. "' should not be used for " ..
@@ -103,7 +103,7 @@ function codegen.type(ty)
   end
 end
 
-function codegen.expr(binders, node)
+function codegen.expr(binders, state_var, node)
   local value = terralib.newsymbol(codegen.type(node.expr_type))
   local actions = quote
     var [value]
@@ -114,23 +114,23 @@ function codegen.expr(binders, node)
     if keyword == "processors" then
       assert(std.is_processor_list_type(node.expr_type))
       actions = quote
-        [actions];
+        [actions]
         [value] = c.bishop_all_processors()
       end
       elseif keyword == "memories" then
       assert(std.is_memory_list_type(node.expr_type))
       actions = quote
-        [actions];
+        [actions]
         [value] = c.bishop_all_memories()
       end
     elseif std.is_isa_type(node.expr_type) then
       actions = quote
-        [actions];
+        [actions]
         [value] = [ processor_isa[keyword] ]
       end
     elseif std.is_memory_kind_type(node.expr_type) then
       actions = quote
-        [actions];
+        [actions]
         [value] = [ memory_kind[keyword] ]
       end
     else
@@ -138,42 +138,58 @@ function codegen.expr(binders, node)
     end
 
   elseif node:is(ast.typed.expr.Unary) then
-    local rhs = codegen.expr(binders, node.rhs)
+    local rhs = codegen.expr(binders, state_var, node.rhs)
     actions = quote
-      [rhs.actions];
-      [actions];
+      [rhs.actions]
+      [actions]
       [value] = [std.quote_unary_op(node.op, rhs.value)]
     end
 
   elseif node:is(ast.typed.expr.Binary) then
-    local lhs = codegen.expr(binders, node.lhs)
-    local rhs = codegen.expr(binders, node.rhs)
+    local lhs = codegen.expr(binders, state_var, node.lhs)
+    local rhs = codegen.expr(binders, state_var, node.rhs)
     actions = quote
-      [lhs.actions];
-      [rhs.actions];
-      [actions];
+      [lhs.actions]
+      [rhs.actions]
+      [actions]
       [value] = [std.quote_binary_op(node.op, lhs.value, rhs.value)]
     end
 
-  elseif node:is(ast.typed.expr.Filter) then
-    local base = codegen.expr(binders, node.value)
+  elseif node:is(ast.typed.expr.Ternary) then
+    local cond = codegen.expr(binders, state_var, node.cond)
+    local true_expr = codegen.expr(binders, state_var, node.true_expr)
+    local false_expr = codegen.expr(binders, state_var, node.false_expr)
     actions = quote
-      [actions];
-      [base.actions];
+      [actions]
+      [cond.actions]
+      if [cond.value] then
+        [true_expr.actions]
+        [value] = [true_expr.value]
+      else
+        [false_expr.actions]
+        [value] = [false_expr.value]
+      end
+    end
+
+  elseif node:is(ast.typed.expr.Filter) then
+    local base = codegen.expr(binders, state_var, node.value)
+    actions = quote
+      [actions]
+      [base.actions]
       [value] = [base.value]
     end
     node.constraints:map(function(constraint)
       assert(constraint:is(ast.typed.FilterConstraint))
-      local v = codegen.expr(binders, constraint.value)
+      local v = codegen.expr(binders, state_var, constraint.value)
       if constraint.field == "isa" then
         assert(std.is_processor_list_type(node.value.expr_type))
         assert(std.is_isa_type(constraint.value.expr_type))
         actions = quote
-          [actions];
-          [v.actions];
+          [actions]
+          [v.actions]
           [value] = c.bishop_filter_processors_by_isa([value], [v.value])
           if [value].size == 0 then
-            c.bishop_logger_warning("expression '%s' yields an empty list",
+            c.bishop_logger_debug("expression '%s' yields an empty list",
               [node:unparse()])
           end
           c.bishop_delete_processor_list([base.value])
@@ -183,11 +199,11 @@ function codegen.expr(binders, node)
         assert(std.is_memory_list_type(node.value.expr_type))
         assert(std.is_memory_kind_type(constraint.value.expr_type))
         actions = quote
-          [actions];
-          [v.actions];
+          [actions]
+          [v.actions]
           [value] = c.bishop_filter_memories_by_kind([value], [v.value])
           if [value].size == 0 then
-            c.bishop_logger_warning("expression '%s' yields an empty list",
+            c.bishop_logger_debug("expression '%s' yields an empty list",
               [node:unparse()])
           end
           c.bishop_delete_memory_list([base.value])
@@ -199,13 +215,13 @@ function codegen.expr(binders, node)
     end)
 
   elseif node:is(ast.typed.expr.Index) then
-    local base = codegen.expr(binders, node.value)
-    local index = codegen.expr(binders, node.index)
+    local base = codegen.expr(binders, state_var, node.value)
+    local index = codegen.expr(binders, state_var, node.index)
     if std.is_point_type(node.value.expr_type) then
       actions = quote
-        [actions];
-        [base.actions];
-        [index.actions];
+        [actions]
+        [base.actions]
+        [index.actions]
         [value] = [base.value].point_data[ [index.value] ]
       end
     else
@@ -217,9 +233,9 @@ function codegen.expr(binders, node)
         cleanup = c.bishop_delete_memory_list
       end
       actions = quote
-        [actions];
-        [base.actions];
-        [index.actions];
+        [actions]
+        [base.actions]
+        [index.actions]
         do
           std.assert([index.value] >= 0 and [index.value] < [base.value].size,
             ["index " .. tostring(index.value) .. " is out-of-bounds"])
@@ -230,23 +246,23 @@ function codegen.expr(binders, node)
     end
   elseif node:is(ast.typed.expr.Field) then
     if node.field == "memories" then
-      local base = codegen.expr(binders, node.value)
+      local base = codegen.expr(binders, state_var, node.value)
       actions = quote
-        [actions];
-        [base.actions];
+        [actions]
+        [base.actions]
         do
           [value] = c.bishop_filter_memories_by_visibility([base.value])
           if [value].size == 0 then
-            c.bishop_logger_warning("  expression '%s' yields an empty list",
+            c.bishop_logger_debug("  expression '%s' yields an empty list",
               [node:unparse()])
           end
         end
       end
     elseif node.field == "size" then
-      local base = codegen.expr(binders, node.value)
+      local base = codegen.expr(binders, state_var, node.value)
       actions = quote
-        [actions];
-        [base.actions];
+        [actions]
+        [base.actions]
         [value] = [base.value].size
       end
 
@@ -255,15 +271,37 @@ function codegen.expr(binders, node)
     end
   elseif node:is(ast.typed.expr.Constant) then
     actions = quote
-      [actions];
+      [actions]
       [value] = [node.value]
     end
   elseif node:is(ast.typed.expr.Variable) then
-    assert(binders[node.value])
-    actions = quote
-      [actions];
-      [value] = [ binders[node.value] ]
+    if binders[node.value] then
+      actions = quote
+        [actions]
+        [value] = [ binders[node.value] ]
+      end
+    else 
+      actions = quote
+        [actions]
+        [value] = [state_var].[node.value]
+      end
     end
+  elseif node:is(ast.typed.expr.Coerce) then
+    if node.expr_type == int and std.is_point_type(node.value.expr_type) then
+      local base = codegen.expr(binders, state_var, node.value)
+      actions = quote
+        [actions]
+        [base.actions]
+        [value] = [ base.value ].point_data[0]
+      end
+    else
+      assert(false, "unknown coercion from type " ..
+        tostring(node.value.expr_type) ..
+        " to type " .. tostring(node.expr_type))
+    end
+
+  else
+    assert(false, "unexpected node type: " .. tostring(node.node_type))
   end
 
   return {
@@ -272,11 +310,11 @@ function codegen.expr(binders, node)
   }
 end
 
-function codegen.property(binders, rule_type, obj_var, node)
+function codegen.property(binders, state_var, rule_type, obj_var, node)
   local setter_info = property_setters:find_setter(rule_type, node)
-  local value = codegen.expr(binders, node.value)
+  local value = codegen.expr(binders, state_var, node.value)
   local actions = quote
-    [value.actions];
+    [value.actions]
     var result = [setter_info.fn]([obj_var], [value.value])
     if not result then
       c.bishop_logger_warning("  property '%s' was not properly assigned",
@@ -285,14 +323,14 @@ function codegen.property(binders, rule_type, obj_var, node)
   end
   if setter_info.cleanup then
     actions = quote
-      [actions];
+      [actions]
       [setter_info.cleanup]([value.value])
     end
   end
   return actions
 end
 
-function codegen.task_rule(node)
+function codegen.task_rule(state_type, node)
   local task_var = terralib.newsymbol(c.legion_task_t)
   local is_matched = terralib.newsymbol(bool)
   local point_var = terralib.newsymbol(c.legion_domain_point_t, "dp_")
@@ -303,13 +341,18 @@ function codegen.task_rule(node)
   local first_element = selector.elements[1]
   assert(first_element:is(ast.typed.element.Task))
   local binders = {}
+  local state_var = terralib.newsymbol(&state_type)
 
   local selector_body = quote var [is_matched] = true end
   if #first_element.name > 0 then
     assert(#first_element.name == 1)
-    local task_name = terralib.constant(first_element.name[1])
+    local task_name = first_element.name[1]
+    if not rawget(_G, task_name) then
+      log.error(first_element,
+        "task '" .. task_name .. "' does not exist")
+    end
     selector_body = quote
-      [selector_body];
+      [selector_body]
       var name = c.legion_task_get_name([task_var])
       [is_matched] = [is_matched] and (c.strcmp(name, [task_name]) == 0)
     end
@@ -323,13 +366,13 @@ function codegen.task_rule(node)
       local binder = terralib.newsymbol(pattern.binder)
       binders[pattern.binder] = binder
       select_task_options_pattern_matches = quote
-        [select_task_options_pattern_matches];
+        [select_task_options_pattern_matches]
         var [binder] : c.legion_domain_point_t
         [binder].dim = 1
         [binder].point_data[0] = 0
       end
       select_target_for_point_pattern_matches = quote
-        [select_target_for_point_pattern_matches];
+        [select_target_for_point_pattern_matches]
         var [binder] : c.legion_domain_point_t
         [binder] = [point_var]
       end
@@ -344,14 +387,14 @@ function codegen.task_rule(node)
 
   node.properties:map(function(property)
     if property.field == "target" then
-      local value = codegen.expr(binders, property.value)
+      local value = codegen.expr(binders, state_var, property.value)
       select_target_for_point_body = quote
-        [select_target_for_point_body];
-        [value.actions];
+        [select_target_for_point_body]
+        [value.actions]
       end
       if std.is_processor_list_type(property.value.expr_type) then
         select_target_for_point_body = quote
-          [select_target_for_point_body];
+          [select_target_for_point_body]
           if [value.value].size == 0 then
             c.bishop_logger_warning(
               ["[slice_domain] expression at %s returned an empty list. " ..
@@ -367,37 +410,39 @@ function codegen.task_rule(node)
         end
       elseif std.is_processor_type(property.value.expr_type) then
         select_target_for_point_body = quote
-          [select_target_for_point_body];
+          [select_target_for_point_body]
           return [value.value]
         end
       else
         assert(false, "unreachable")
       end
       select_task_options_body = quote
-        [select_task_options_body];
-        [codegen.property(binders, "task", task_var, property)]
+        [select_task_options_body]
+        [codegen.property(binders, state_var, "task", task_var, property)]
       end
     end
   end)
 
   local constraint_checks = quote end
   selector.constraints:map(function(constraint)
-    local lhs = codegen.expr(binders, constraint.lhs)
-    local rhs = codegen.expr(binders, constraint.rhs)
+    local lhs = codegen.expr(binders, state_var, constraint.lhs)
+    local rhs = codegen.expr(binders, state_var, constraint.rhs)
     constraint_checks = quote
-      [constraint_checks];
+      [constraint_checks]
       do
-        [lhs.actions];
-        [rhs.actions];
+        [lhs.actions]
+        [rhs.actions]
         [is_matched] = [is_matched] and [lhs.value] == [rhs.value]
       end
     end
   end)
 
-  local terra matches([task_var] : c.legion_task_t)
-    [selector_body];
-    [predicate_pattern_matches];
-    [constraint_checks];
+  local terra matches(ptr        : &opaque,
+                      [task_var] : c.legion_task_t)
+    var [state_var] = [&state_type](ptr)
+    [selector_body]
+    [predicate_pattern_matches]
+    [constraint_checks]
     if [is_matched] then
       c.bishop_logger_info("[slice_domain] rule at %s matches",
         position_string)
@@ -418,20 +463,24 @@ function codegen.task_rule(node)
     end
   end
 
-  local terra select_task_options([task_var] : c.legion_task_t)
-    [selector_body];
-    [early_out("select_task_options")];
-    [select_task_options_pattern_matches];
-    [constraint_checks];
-    [early_out("select_task_options")];
+  local terra select_task_options(ptr        : &opaque,
+                                  [task_var] : c.legion_task_t)
+    var [state_var] = [&state_type](ptr)
+    [selector_body]
+    [early_out("select_task_options")]
+    [select_task_options_pattern_matches]
+    [constraint_checks]
+    [early_out("select_task_options")]
     c.bishop_logger_info("[select_task_options] rule at %s matches",
       position_string)
     [select_task_options_body]
   end
 
-  local terra select_target_for_point([task_var] : c.legion_task_t,
+  local terra select_target_for_point(ptr         : &opaque,
+                                      [task_var]  : c.legion_task_t,
                                       [point_var] : c.legion_domain_point_t)
-    [select_target_for_point_pattern_matches];
+    var [state_var] = [&state_type](ptr)
+    [select_target_for_point_pattern_matches]
     [select_target_for_point_body]
   end
 
@@ -443,7 +492,7 @@ function codegen.task_rule(node)
   }
 end
 
-function codegen.region_rule(node)
+function codegen.region_rule(state_type, node)
   local task_var = terralib.newsymbol(c.legion_task_t)
   local req_var = terralib.newsymbol(c.legion_region_requirement_t)
   local req_idx = terralib.newsymbol(uint)
@@ -458,12 +507,18 @@ function codegen.region_rule(node)
   local first_task_element = selector.elements[2]
   assert(first_task_element:is(ast.typed.element.Task))
   local binders = {}
+  local state_var = terralib.newsymbol(&state_type)
 
   if #first_task_element.name > 0 then
     assert(#first_task_element.name == 1)
-    local task_name = terralib.constant(first_task_element.name[1])
+    local task_name = first_task_element.name[1]
+    local regent_task = rawget(_G, task_name)
+    if not regent_task then
+      log.error(first_task_element,
+        "task '" .. task_name .. "' does not exist")
+    end
     selector_body = quote
-      [selector_body];
+      [selector_body]
       var name = c.legion_task_get_name([task_var])
       [is_matched] = [is_matched] and (c.strcmp(name, [task_name]) == 0)
     end
@@ -475,7 +530,7 @@ function codegen.region_rule(node)
       local binder = terralib.newsymbol(pattern.binder)
       binders[pattern.binder] = binder
       pattern_matches = quote
-        [pattern_matches];
+        [pattern_matches]
         var [binder] : c.legion_processor_t
         [binder] = c.legion_task_get_target_proc([task_var])
       end
@@ -483,7 +538,7 @@ function codegen.region_rule(node)
       local binder = terralib.newsymbol(pattern.binder)
       binders[pattern.binder] = binder
       pattern_matches = quote
-        [pattern_matches];
+        [pattern_matches]
         var [binder] : c.legion_processor_kind_t
         do
           var proc = c.legion_task_get_target_proc([task_var])
@@ -498,13 +553,13 @@ function codegen.region_rule(node)
 
   local constraint_checks = quote end
   selector.constraints:map(function(constraint)
-    local lhs = codegen.expr(binders, constraint.lhs)
-    local rhs = codegen.expr(binders, constraint.rhs)
+    local lhs = codegen.expr(binders, state_var, constraint.lhs)
+    local rhs = codegen.expr(binders, state_var, constraint.rhs)
     constraint_checks = quote
-      [constraint_checks];
+      [constraint_checks]
       do
-        [lhs.actions];
-        [rhs.actions];
+        [lhs.actions]
+        [rhs.actions]
         [is_matched] = [is_matched] and [lhs.value] == [rhs.value]
       end
     end
@@ -513,12 +568,14 @@ function codegen.region_rule(node)
   local map_task_body = quote end
   if #first_element.name > 0 then
     if #first_task_element.name == 0 then
-      log.error(first_element,
-        "named region element should be preceded by a named task element")
+      log.error(first_task_element,
+        "unnamed task element cannot have a named region element")
     end
 
     local param_name = "$" .. first_element.name[1]
-    local regent_task = _G[first_task_element.name[1]]
+    local task_name = first_task_element.name[1]
+    local regent_task = rawget(_G, task_name)
+    assert(regent_task, "unreachable")
     local task_params = regent_task.ast.params
     local param_type = nil
     local accum_idx, start_idx, end_idx = 0, 0, 0
@@ -545,7 +602,7 @@ function codegen.region_rule(node)
         "' either does not exist or have a non-region type")
     end
     selector_body = quote
-      [selector_body];
+      [selector_body]
       [is_matched] = [is_matched] and
                      [req_idx] >= start_idx and
                      [req_idx] <= end_idx
@@ -554,8 +611,8 @@ function codegen.region_rule(node)
 
   node.properties:map(function(property)
     map_task_body = quote
-      [map_task_body];
-      [codegen.property(binders, "region", req_var, property)]
+      [map_task_body]
+      [codegen.property(binders, state_var, "region", req_var, property)]
     end
   end)
 
@@ -567,14 +624,16 @@ function codegen.region_rule(node)
     end
   end
 
-  local terra map_task([task_var] : c.legion_task_t,
-                       [req_var] : c.legion_region_requirement_t,
-                       [req_idx] : uint)
-    [selector_body];
-    [early_out];
-    [pattern_matches];
-    [constraint_checks];
-    [early_out];
+  local terra map_task(ptr        : &opaque,
+                       [task_var] : c.legion_task_t,
+                       [req_var]  : c.legion_region_requirement_t,
+                       [req_idx]  : uint)
+    var [state_var] = [&state_type](ptr)
+    [selector_body]
+    [early_out]
+    [pattern_matches]
+    [constraint_checks]
+    [early_out]
     c.bishop_logger_info("[map_task] rule at %s matches", position_string)
     [map_task_body]
   end
@@ -585,10 +644,57 @@ function codegen.region_rule(node)
   }
 end
 
-function codegen.rules(node)
-  local task_rules = node.task_rules:map(codegen.task_rule)
-  local region_rules = node.region_rules:map(codegen.region_rule)
+function codegen.mapper_init(assignments)
+  local entries = terralib.newlist()
+  local binders = {}
+  -- TODO: we might need to randomly generate this name with multiple mappers
+  local mapper_state_type = terralib.types.newstruct("mapper_state")
+  mapper_state_type.entries = assignments:map(function(assignment)
+    return {
+      field = assignment.binder,
+      type = codegen.type(assignment.value.expr_type),
+    }
+  end)
+  local mapper_state_var = terralib.newsymbol(&mapper_state_type)
+  local terra mapper_init
+
+  if sizeof(mapper_state_type) > 0 then
+    terra mapper_init(ptr : &&opaque)
+      @ptr = c.malloc([sizeof(mapper_state_type)])
+      var [mapper_state_var] = [&mapper_state_type](@ptr)
+      [assignments:map(function(assignment)
+        local value = codegen.expr(binders, mapper_state_var, assignment.value)
+        local mark_persistent = quote end
+        if std.is_list_type(assignment.value.expr_type) then
+          mark_persistent = quote [value.value].persistent = 1 end
+        end
+        return quote
+          [value.actions]
+          [mark_persistent]
+          [mapper_state_var].[assignment.binder] = [value.value]
+        end
+      end)]
+    end
+  else
+    terra mapper_init(ptr : &&opaque)
+    end
+  end
+  return mapper_init, mapper_state_type
+end
+
+function codegen.mapper(node)
+  local mapper_init, mapper_state_type =
+    codegen.mapper_init(node.assignments)
+  local task_rules =
+    node.task_rules:map(function(rule)
+      return codegen.task_rule(mapper_state_type, rule)
+    end)
+  local region_rules =
+    node.region_rules:map(function(rule)
+      return codegen.region_rule(mapper_state_type, rule)
+    end)
   return {
+    mapper_init = mapper_init,
     task_rules = task_rules,
     region_rules = region_rules,
   }

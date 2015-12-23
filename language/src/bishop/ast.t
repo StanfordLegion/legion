@@ -252,9 +252,12 @@ end
 
 ast:inner("unspecialized", { "position" })
 
-ast.unspecialized:leaf("Rules", { "rules" })
-function ast.unspecialized.Rules:unparse()
+ast.unspecialized:leaf("Mapper", { "rules", "assignments" })
+function ast.unspecialized.Mapper:unparse()
   local str = ""
+  for i = 1, #self.assignments do
+    str = str .. self.assignments[i]:unparse() .. "\n"
+  end
   for i = 1, #self.rules do
     str = str .. self.rules[i]:unparse()
   end
@@ -330,6 +333,11 @@ function ast.unspecialized.PatternMatch:unparse()
   return self.field .. " = " .. self.binder
 end
 
+ast.unspecialized:leaf("Assignment", { "binder", "value" })
+function ast.unspecialized.Assignment:unparse()
+  return "$" .. self.binder .. " = " .. self.value:unparse()
+end
+
 ast.unspecialized:inner("expr")
 ast.unspecialized.expr:leaf("Unary", { "rhs", "op" })
 function ast.unspecialized.expr.Unary:unparse()
@@ -339,6 +347,13 @@ end
 ast.unspecialized.expr:leaf("Binary", { "lhs", "rhs", "op" })
 function ast.unspecialized.expr.Binary:unparse()
   return self.lhs:unparse() .. tostring(self.op) .. self.rhs:unparse()
+end
+
+ast.unspecialized.expr:leaf("Ternary", { "cond", "true_expr", "false_expr" })
+function ast.unspecialized.expr.Ternary:unparse()
+  return self.cond:unparse() .. " ? " ..
+         self.true_expr:unparse() .. " : " ..
+         self.false_expr:unparse()
 end
 
 ast.unspecialized.expr:leaf("Index", { "value", "index" })
@@ -372,7 +387,7 @@ end
 
 ast:inner("specialized", { "position" })
 
-ast.specialized:leaf("Rules", { "task_rules", "region_rules" })
+ast.specialized:leaf("Mapper", { "task_rules", "region_rules", "assignments" })
 
 ast.specialized:inner("rule", { "selector", "properties" })
 ast.specialized.rule:leaf("Task", {})
@@ -380,13 +395,25 @@ ast.specialized.rule:leaf("Region", {})
 
 ast.specialized:leaf("Selector", { "type", "elements", "constraints" })
 function ast.specialized.Selector:unparse()
-  return table.concat(unparse_all(self.elements), " ")
+  local str = table.concat(unparse_all(self.elements), " ")
+  if #self.constraints > 0 then
+    local const_str = table.concat(unparse_all(self.constraints), " and ")
+    str = str .. "[" .. const_str .. "]"
+  end
+  return str
 end
 
 ast.specialized:inner("element", { "name", "classes", "patterns" })
 function ast.specialized.element:unparse()
   local str = ""
   if #self.name > 0 then str = str .. "#" .. self.name[1] end
+  for i = 1, #self.classes do
+    str = str .. "." .. self.classes[i]
+  end
+  if #self.patterns > 0 then
+    local pat_str = table.concat(unparse_all(self.patterns), " and ")
+    str = str .. "[" .. pat_str .. "]"
+  end
   return str
 end
 ast.specialized.element:leaf("Task", {})
@@ -400,11 +427,21 @@ end
 
 ast.specialized:leaf("Property", { "field", "value" })
 ast.specialized:leaf("Constraint", { "lhs", "rhs" })
+function ast.specialized.Constraint:unparse()
+  return self.lhs:unparse() .. "=" .. self.rhs:unparse()
+end
 ast.specialized:leaf("FilterConstraint", { "field", "value" })
 function ast.specialized.FilterConstraint:unparse()
   return self.field .. "=" .. self.value:unparse()
 end
 ast.specialized:leaf("PatternMatch", { "field", "binder" })
+function ast.specialized.PatternMatch:unparse()
+  return self.field .. "=$" .. self.binder
+end
+ast.specialized:leaf("Assignment", { "binder", "value" })
+function ast.specialized.Assignment:unparse()
+  return "$" .. self.binder .. " = " .. self.value:unparse()
+end
 
 ast.specialized:inner("expr")
 ast.specialized.expr:leaf("Unary", { "rhs", "op" })
@@ -414,6 +451,12 @@ end
 ast.specialized.expr:leaf("Binary", { "lhs", "rhs", "op" })
 function ast.specialized.expr.Binary:unparse()
   return self.lhs:unparse() .. tostring(self.op) .. self.rhs:unparse()
+end
+ast.specialized.expr:leaf("Ternary", { "cond", "true_expr", "false_expr" })
+function ast.specialized.expr.Ternary:unparse()
+  return self.cond:unparse() .. " ? " ..
+         self.true_expr:unparse() .. " : " ..
+         self.false_expr:unparse()
 end
 ast.specialized.expr:leaf("Index", { "value", "index" })
 function ast.specialized.expr.Index:unparse()
@@ -437,7 +480,7 @@ ast.specialized.expr.Keyword.unparse = ast.unspecialized.expr.Keyword.unparse
 
 ast:inner("typed", { "position" })
 
-ast.typed:leaf("Rules", { "task_rules", "region_rules" })
+ast.typed:leaf("Mapper", { "task_rules", "region_rules", "assignments" })
 ast.typed:inner("rule", { "selector", "properties" })
 ast.typed.rule:leaf("Task", {})
 ast.typed.rule:leaf("Region", {})
@@ -472,6 +515,10 @@ function ast.typed.FilterConstraint:unparse()
   return self.field .. "=" .. self.value:unparse()
 end
 ast.typed:leaf("PatternMatch", { "field", "binder" })
+ast.typed:leaf("Assignment", { "binder", "value" })
+function ast.typed.Assignment:unparse()
+  return "$" .. self.binder .. " = " .. self.value:unparse()
+end
 
 ast.typed:inner("expr", { "expr_type" })
 ast.typed.expr:leaf("Unary", { "rhs", "op" })
@@ -481,6 +528,12 @@ end
 ast.typed.expr:leaf("Binary", { "lhs", "rhs", "op" })
 function ast.typed.expr.Binary:unparse()
   return self.lhs:unparse() .. tostring(self.op) .. self.rhs:unparse()
+end
+ast.typed.expr:leaf("Ternary", { "cond", "true_expr", "false_expr" })
+function ast.typed.expr.Ternary:unparse()
+  return self.cond:unparse() .. " ? " ..
+         self.true_expr:unparse() .. " : " ..
+         self.false_expr:unparse()
 end
 ast.typed.expr:leaf("Index", { "value", "index" })
 function ast.typed.expr.Index:unparse()
@@ -495,6 +548,7 @@ ast.typed.expr:leaf("Field", { "value", "field" })
 function ast.typed.expr.Field:unparse()
   return self.value:unparse() .. "." .. self.field
 end
+ast.typed.expr:leaf("Coerce", { "value" })
 ast.typed.expr:leaf("Constant", { "value" })
 ast.typed.expr.Constant.unparse = ast.specialized.expr.Constant.unparse
 ast.typed.expr:leaf("Variable", { "value" })

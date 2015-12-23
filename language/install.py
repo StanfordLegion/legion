@@ -64,7 +64,7 @@ def install_terra(terra_dir, external_terra_dir, thread_count):
                 print('Error: Attempting build with external Terra when internal Terra')
                 print('already exists. Please remove the following directory to continue with')
                 print('an external Terra installation.')
-                print ('    %s' % terra_dir)
+                print('    %s' % terra_dir)
                 sys.exit(1)
             if os.path.realpath(terra_dir) != os.path.realpath(external_terra_dir):
                 os.unlink(terra_dir)
@@ -78,7 +78,7 @@ def install_terra(terra_dir, external_terra_dir, thread_count):
             print('Error: Attempting build with internal Terra when external Terra')
             print('already exists. Please remove the following symlink to continue with')
             print('an internal Terra installation.')
-            print ('    %s' % terra_dir)
+            print('    %s' % terra_dir)
             sys.exit(1)
 
     if not os.path.exists(terra_dir):
@@ -93,7 +93,7 @@ def symlink(from_path, to_path):
 
 def install_bindings(bindings_dir, runtime_dir, terra_dir, debug, general_llr,
                      cuda, gasnet, thread_count):
-    env = dict(os.environ.items() + [
+    env = dict(list(os.environ.items()) + [
         ('LG_RT_DIR', runtime_dir),
         ('TERRA_DIR', terra_dir),                           # for bindings
     ])

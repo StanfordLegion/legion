@@ -21,23 +21,21 @@ local parser = {}
 
 function parser.value(p)
   local value
+  local pos = ast.save(p)
   if p:matches(p.number) then
     local token = p:next(p.number)
-    local pos = ast.save(p)
     value = ast.unspecialized.expr.Constant {
       value = token.value,
       position = pos,
     }
   elseif p:nextif("$") then
     local token = p:next(p.name)
-    local pos = ast.save(p)
     value = ast.unspecialized.expr.Variable {
       value = token.value,
       position = pos,
     }
   elseif p:matches(p.name) then
     local token = p:next(p.name)
-    local pos = ast.save(p)
     value = ast.unspecialized.expr.Keyword {
       value = token.value,
       position = pos,
@@ -57,29 +55,26 @@ function parser.expr_complex(p)
     if p:nextif("[") then
       if p:matches(p.name) and p:lookahead("=") then
         local constraints = p:constraints()
-        local pos = ast.save(p)
         expr = ast.unspecialized.expr.Filter {
           value = expr,
           constraints = constraints,
-          position = pos,
+          position = expr.position,
         }
       else
         local value = p:expr()
-        local pos = ast.save(p)
         expr = ast.unspecialized.expr.Index {
           value = expr,
           index = value,
-          position = pos,
+          position = expr.position,
         }
       end
       p:expect("]")
     elseif p:nextif(".") then
       local token = p:next(p.name)
-      local pos = ast.save(p)
       expr = ast.unspecialized.expr.Field {
         value = expr,
         field = token.value,
-        position = pos,
+        position = expr.position,
       }
     else
       break
@@ -113,19 +108,42 @@ function parser.expr_binary_left(p, lhs)
   }
 end
 
+function parser.expr_ternary_left(p, cond)
+  local position = cond.position
+  local op = p:next().type
+  local true_expr = p:expr(op)
+  p:expect(":")
+  local false_expr = p:expr(op)
+  return ast.unspecialized.expr.Ternary {
+    cond = cond,
+    true_expr = true_expr,
+    false_expr = false_expr,
+    position = position,
+  }
+end
+
 parser.expr = parsing.Pratt()
   :prefix("-", parser.expr_unary(50))
-  :infix("*", 40, parser.expr_binary_left)
-  :infix("/", 40, parser.expr_binary_left)
-  :infix("%", 40, parser.expr_binary_left)
-  :infix("+", 30, parser.expr_binary_left)
-  :infix("-", 30, parser.expr_binary_left)
+  :infix("*"  , 40, parser.expr_binary_left)
+  :infix("/"  , 40, parser.expr_binary_left)
+  :infix("%"  , 40, parser.expr_binary_left)
+  :infix("+"  , 30, parser.expr_binary_left)
+  :infix("-"  , 30, parser.expr_binary_left)
+  :infix("<"  , 20, parser.expr_binary_left)
+  :infix(">"  , 20, parser.expr_binary_left)
+  :infix("<=" , 20, parser.expr_binary_left)
+  :infix(">=" , 20, parser.expr_binary_left)
+  :infix("==" , 20, parser.expr_binary_left)
+  :infix("~=" , 20, parser.expr_binary_left)
+  :infix("and", 19, parser.expr_binary_left)
+  :infix("or" , 18, parser.expr_binary_left)
+  :infix("?"  , 15, parser.expr_ternary_left)
   :prefix(parsing.default, parser.expr_complex)
 
 
 function parser.property(p)
-  local field = p:next(p.name)
   local pos = ast.save(p)
+  local field = p:next(p.name)
   p:expect(":")
   local value = p:expr()
   p:expect(";")
@@ -148,7 +166,7 @@ function parser.constraint(p)
   local pos = ast.save(p)
   local field = p:next(p.name).value
   p:expect("=")
-  local value = p:expr()
+  local value = p:expr_complex()
   if value:is(ast.unspecialized.expr.Variable) then
     return ast.unspecialized.PatternMatch {
       field = field,
@@ -179,6 +197,7 @@ end
 function parser.element(p)
   local ctor
   local tbl = {}
+  local pos = ast.save(p)
   if p:nextif("task") then
     ctor = ast.unspecialized.element.Task
   elseif p:nextif("region") then
@@ -195,7 +214,6 @@ function parser.element(p)
   else
     p:error("unexpected element name")
   end
-  local pos = ast.save(p)
 
   local name = terralib.newlist()
   local classes = terralib.newlist()
@@ -204,7 +222,7 @@ function parser.element(p)
   while p:matches("#") or p:matches(".") or p:matches("[") do
     if p:nextif("#") then
       if #name > 0 then
-        p:error("selector cannot have multiple names")
+        p:error("element cannot have multiple names")
       end
       name:insert(p:next(p.name).value)
     elseif p:nextif(".") then
@@ -265,30 +283,46 @@ function parser.rule(p)
   }
 end
 
-function parser.rules(p)
-  local rules = terralib.newlist()
-  while not p:matches("end") do
-    rules:insert(p:rule())
-  end
-  return rules
+function parser.assignment(p)
+  local pos = ast.save(p)
+  p:expect("$")
+  local token = p:next(p.name)
+  local binder = token.value
+  p:expect("=")
+  local value = p:expr()
+  return ast.unspecialized.Assignment {
+    binder = binder,
+    value = value,
+    position = pos,
+  }
 end
 
 function parser.top(p)
-  if not p:matches("bishop") then
+  if not p:matches("mapper") then
     p:error("unexpected token in top-level statement")
   end
-  p:expect("bishop")
+  p:expect("mapper")
   local pos = ast.save(p)
 
-  local rules = p:rules()
+  local assignments = terralib.newlist()
+  local rules = terralib.newlist()
+
+  while not p:matches("end") do
+    if p:matches("$") then
+      assignments:insert(p:assignment())
+    else
+      rules:insert(p:rule())
+    end
+  end
 
   if not p:matches("end") then
     p:error("unexpected token in top-level statement")
   end
   p:expect("end")
 
-  return ast.unspecialized.Rules {
+  return ast.unspecialized.Mapper {
     rules = rules,
+    assignments = assignments,
     position = pos,
   }
 end
