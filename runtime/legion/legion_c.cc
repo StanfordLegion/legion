@@ -3990,7 +3990,12 @@ legion_processor_kind(legion_processor_t proc_)
 // -----------------------------------------------------------------------
 
 legion_memory_kind_t
-legion_memory_kind(legion_memory_t proc_);
+legion_memory_kind(legion_memory_t mem_)
+{
+  Memory mem = CObjectWrapper::unwrap(mem_);
+
+  return CObjectWrapper::wrap(mem.kind());
+}
 
 // -----------------------------------------------------------------------
 // Machine Query Interface Operations

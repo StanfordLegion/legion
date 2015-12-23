@@ -154,6 +154,17 @@ namespace Realm {
       return true;
     }
 
+    bool Runtime::register_custom_serdez(CustomSerdezID serdez_id, const CustomSerdezUntyped *serdez)
+    {
+      assert(impl != 0);
+
+      if(((RuntimeImpl *)impl)->custom_serdez_table.count(serdez_id) > 0)
+	return false;
+
+      ((RuntimeImpl *)impl)->custom_serdez_table[serdez_id] = serdez;
+      return true;
+    }
+
     void Runtime::run(Processor::TaskFuncID task_id /*= 0*/,
 		      RunStyle style /*= ONE_TASK_ONLY*/,
 		      const void *args /*= 0*/, size_t arglen /*= 0*/,
@@ -808,6 +819,7 @@ namespace Realm {
       hcount += DestroyInstanceMessage::Message::add_handler_entries(&handlers[hcount], "Destroy Instance AM");
       hcount += RemoteWriteMessage::Message::add_handler_entries(&handlers[hcount], "Remote Write AM");
       hcount += RemoteReduceMessage::Message::add_handler_entries(&handlers[hcount], "Remote Reduce AM");
+      hcount += RemoteSerdezMessage::Message::add_handler_entries(&handlers[hcount], "Remote Serdez AM");
       hcount += RemoteWriteFenceMessage::Message::add_handler_entries(&handlers[hcount], "Remote Write Fence AM");
       hcount += RemoteWriteFenceAckMessage::Message::add_handler_entries(&handlers[hcount], "Remote Write Fence Ack AM");
       hcount += DestroyLockMessage::Message::add_handler_entries(&handlers[hcount], "Destroy Lock AM");

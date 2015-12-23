@@ -80,7 +80,7 @@ CONDUIT=ibv
 GPU_ARCH=fermi
 endif
 ifeq ($(findstring titan,$(shell uname -n)),titan)
-GCC=CC
+CXX=CC
 F90=ftn
 # without this, lapack stuff will link, but generate garbage output - thanks Cray!
 LAPACK_LIBS=-L/opt/acml/5.3.1/gfortran64_fma4/lib -Wl,-rpath=/opt/acml/5.3.1/gfortran64_fma4/lib -lacml
@@ -93,7 +93,7 @@ LEGION_LD_FLAGS += ${CRAY_UGNI_POST_LINK_OPTS}
 LEGION_LD_FLAGS += ${CRAY_PMI_POST_LINK_OPTS}
 endif
 ifeq ($(findstring daint,$(shell uname -n)),daint)
-GCC=CC
+CXX=CC
 F90=ftn
 # Cray's magic wrappers automatically provide LAPACK goodness?
 LAPACK_LIBS=
@@ -247,7 +247,6 @@ ifeq ($(strip $(USE_MPI)),1)
   ifeq ($(filter-out $(SKIP_MACHINES),$(shell uname -n)),$(shell uname -n))
     CC		:= mpicc
     CXX		:= mpicxx
-    GCC		:= $(CXX)
     F90         := mpif90
     LEGION_LD_FLAGS	+= -L$(MPI)/lib -lmpi
     LAPACK_LIBS ?= -lblas
@@ -351,9 +350,6 @@ SED	:= sed
 ECHO	:= echo
 TOUCH	:= touch
 MAKE	:= make
-ifndef GCC
-GCC	:= g++
-endif
 ifndef NVCC
 NVCC	:= $(CUDA)/bin/nvcc
 endif
@@ -381,7 +377,7 @@ all: $(OUTFILE)
 # If we're using the general low-level runtime we have to link with nvcc
 $(OUTFILE) : $(GEN_OBJS) $(GEN_GPU_OBJS) $(SLIB_LEGION) $(SLIB_REALM) $(SLIB_SHAREDLLR)
 	@echo "---> Linking objects into one binary: $(OUTFILE)"
-	$(GCC) -o $(OUTFILE) $(GEN_OBJS) $(GEN_GPU_OBJS) $(LD_FLAGS) $(LEGION_LIBS) $(LEGION_LD_FLAGS) $(GASNET_FLAGS)
+	$(CXX) -o $(OUTFILE) $(GEN_OBJS) $(GEN_GPU_OBJS) $(LD_FLAGS) $(LEGION_LIBS) $(LEGION_LD_FLAGS) $(GASNET_FLAGS)
 
 $(SLIB_LEGION) : $(HIGH_RUNTIME_OBJS) $(MAPPER_OBJS)
 	rm -f $@
@@ -398,19 +394,19 @@ $(SLIB_SHAREDLLR) : $(LOW_RUNTIME_OBJS)
 endif
 
 $(GEN_OBJS) : %.o : %.cc
-	$(GCC) -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS)
+	$(CXX) -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS)
 
 $(ASM_OBJS) : %.o : %.S
-	$(GCC) -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS)
+	$(CXX) -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS)
 
 $(LOW_RUNTIME_OBJS) : %.o : %.cc
-	$(GCC) -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS)
+	$(CXX) -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS)
 
 $(HIGH_RUNTIME_OBJS) : %.o : %.cc
-	$(GCC) -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS)
+	$(CXX) -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS)
 
 $(MAPPER_OBJS) : %.o : %.cc
-	$(GCC) -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS)
+	$(CXX) -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS)
 
 $(GEN_GPU_OBJS) : %.o : %.cu
 	$(NVCC) -o $@ -c $< $(NVCC_FLAGS) $(INC_FLAGS)

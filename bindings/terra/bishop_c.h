@@ -25,24 +25,36 @@ extern "C" {
 #define LIST_TYPE(NAME, TYPE, BASE) typedef struct TYPE {  \
   BASE* list;                                              \
   unsigned size;                                           \
+  unsigned persistent;                                     \
 } TYPE;                                                    \
                                                            \
+void bishop_create_##NAME##_list(TYPE);                    \
 void bishop_delete_##NAME##_list(TYPE);                    \
 
 LIST_TYPE(processor, bishop_processor_list_t, legion_processor_t)
 LIST_TYPE(memory, bishop_memory_list_t, legion_memory_t)
+LIST_TYPE(field, bishop_field_list_t, legion_field_id_t)
 
-typedef bool (*bishop_task_predicate_t)(legion_task_t);
-typedef bool (*bishop_region_predicate_t)(legion_task_t,
+typedef void* bishop_mapper_state_t;
+
+typedef bool (*bishop_task_predicate_t)(bishop_mapper_state_t,
+                                        legion_task_t);
+typedef bool (*bishop_region_predicate_t)(bishop_mapper_state_t,
+                                          legion_task_t,
                                           legion_region_requirement_t);
 
-typedef void (*bishop_task_callback_fn_t)(legion_task_t);
-typedef void (*bishop_region_callback_fn_t)(legion_task_t,
+typedef void (*bishop_task_callback_fn_t)(bishop_mapper_state_t,
+                                          legion_task_t);
+typedef void (*bishop_region_callback_fn_t)(bishop_mapper_state_t,
+                                            legion_task_t,
                                             legion_region_requirement_t,
                                             unsigned);
 
-typedef legion_processor_t (*bishop_assignment_fn_t)(legion_task_t,
+typedef legion_processor_t (*bishop_assignment_fn_t)(bishop_mapper_state_t,
+                                                     legion_task_t,
                                                      legion_domain_point_t);
+
+typedef void (*bishop_mapper_state_init_fn_t)(bishop_mapper_state_t*);
 
 typedef struct bishop_task_rule_t {
   bishop_task_predicate_t matches;
@@ -62,7 +74,8 @@ typedef enum bishop_isa_t {
 } bishop_isa_t;
 
 void register_bishop_mappers(bishop_task_rule_t*, unsigned,
-                             bishop_region_rule_t*, unsigned);
+                             bishop_region_rule_t*, unsigned,
+                             bishop_mapper_state_init_fn_t);
 
 bishop_processor_list_t bishop_all_processors();
 legion_processor_t bishop_get_no_processor();
@@ -88,9 +101,20 @@ bool bishop_region_set_target_memory_list(legion_region_requirement_t,
 
 bishop_isa_t bishop_processor_get_isa(legion_processor_t);
 
+legion_memory_t
+bishop_physical_region_get_memory(legion_physical_region_t);
+
+bishop_memory_list_t
+bishop_physical_region_get_memories(legion_physical_region_t);
+
+bishop_field_list_t
+bishop_physical_region_get_fields(legion_physical_region_t);
+
 void bishop_logger_info(const char* msg, ...)
   __attribute__((format (printf, 1, 2)));
 void bishop_logger_warning(const char* msg, ...)
+  __attribute__((format (printf, 1, 2)));
+void bishop_logger_debug(const char* msg, ...)
   __attribute__((format (printf, 1, 2)));
 
 #ifdef __cplusplus

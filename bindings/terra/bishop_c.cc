@@ -30,6 +30,7 @@ using namespace LegionRuntime::HighLevel::MappingUtilities ;
 
 static vector<bishop_task_rule_t> task_rules;
 static vector<bishop_region_rule_t> region_rules;
+static bishop_mapper_state_init_fn_t mapper_init;
 
 extern Logger::Category log_bishop;
 
@@ -41,6 +42,7 @@ bishop_mapper_registration_callback(Machine machine, Runtime *runtime,
        it != local_procs.end(); it++)
   {
     runtime->replace_default_mapper(new BishopMapper(task_rules, region_rules,
+                                                     mapper_init,
                                                      machine, runtime, *it),
                                     *it);
   }
@@ -50,12 +52,14 @@ void
 register_bishop_mappers(bishop_task_rule_t* _task_rules,
                         unsigned _num_task_rules,
                         bishop_region_rule_t* _region_rules,
-                        unsigned _num_region_rules)
+                        unsigned _num_region_rules,
+                        bishop_mapper_state_init_fn_t _mapper_init)
 {
   for (unsigned i = 0; i < _num_task_rules; ++i)
     task_rules.push_back(_task_rules[i]);
   for (unsigned i = 0; i < _num_region_rules; ++i)
     region_rules.push_back(_region_rules[i]);
+  mapper_init = _mapper_init;
 
   HighLevelRuntime::set_registration_callback(
       bishop_mapper_registration_callback);
@@ -69,16 +73,18 @@ bishop_create_##NAME##_list(unsigned size)               \
   l.size = size;                                         \
   if (size > 0)                                          \
     l.list = (BASE*)malloc(sizeof(BASE) * size);         \
+  l.persistent = 0;                                      \
   return l;                                              \
 }                                                        \
 void                                                     \
 bishop_delete_##NAME##_list(TYPE l)                      \
 {                                                        \
-  if (l.size > 0) free(l.list);                          \
+  if (!l.persistent && l.size > 0) free(l.list);         \
 }                                                        \
 
 LIST_OP(processor, bishop_processor_list_t, legion_processor_t)
 LIST_OP(memory, bishop_memory_list_t, legion_memory_t)
+LIST_OP(field, bishop_field_list_t, legion_field_id_t)
 
 bishop_processor_list_t
 bishop_all_processors()
@@ -90,7 +96,13 @@ bishop_all_processors()
   bishop_processor_list_t procs_ = bishop_create_processor_list(procs.size());
   int idx = 0;
   for (set<Processor>::iterator it = procs.begin(); it != procs.end(); ++it)
-    procs_.list[idx++] = CObjectWrapper::wrap(*it);
+  {
+    // FIXME: need to change this if we add more processors useful for
+    // mapping purporses
+    if (it->kind() == Processor::LOC_PROC || it->kind() == Processor::TOC_PROC)
+      procs_.list[idx++] = CObjectWrapper::wrap(*it);
+  }
+  procs_.size = idx;
   return procs_;
 }
 
@@ -255,6 +267,44 @@ bishop_processor_get_isa(legion_processor_t proc_)
   }
 }
 
+legion_memory_t
+bishop_physical_region_get_memory(legion_physical_region_t pr_)
+{
+  set<Memory> memories;
+  PhysicalRegion* pr = CObjectWrapper::unwrap(pr_);
+  pr->get_memories(memories);
+  assert(memories.size() > 0);
+  return CObjectWrapper::wrap(*memories.begin());
+}
+
+bishop_memory_list_t
+bishop_physical_region_get_memories(legion_physical_region_t pr_)
+{
+  set<Memory> memories;
+  PhysicalRegion* pr = CObjectWrapper::unwrap(pr_);
+  pr->get_memories(memories);
+  bishop_memory_list_t memories_ = bishop_create_memory_list(memories.size());
+  unsigned idx = 0;
+  for (set<Memory>::const_iterator it = memories.begin();
+       it != memories.end(); it++)
+    memories_.list[idx++] = CObjectWrapper::wrap(*it);
+  return memories_;
+}
+
+bishop_field_list_t
+bishop_physical_region_get_fields(legion_physical_region_t pr_)
+{
+  vector<FieldID> fields;
+  PhysicalRegion* pr = CObjectWrapper::unwrap(pr_);
+  pr->get_fields(fields);
+  bishop_field_list_t fields_ = bishop_create_field_list(fields.size());
+  unsigned idx = 0;
+  for (vector<FieldID>::const_iterator it = fields.begin();
+       it != fields.end(); it++)
+    fields_.list[idx++] = *it;
+  return fields_;
+}
+
 void
 bishop_logger_info(const char* msg, ...)
 {
@@ -270,5 +320,14 @@ bishop_logger_warning(const char* msg, ...)
   va_list args;
   va_start(args, msg);
   log_bishop.warning().vprintf(msg, args);
+  va_end(args);
+}
+
+void
+bishop_logger_debug(const char* msg, ...)
+{
+  va_list args;
+  va_start(args, msg);
+  log_bishop.debug().vprintf(msg, args);
   va_end(args);
 }

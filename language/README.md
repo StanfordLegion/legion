@@ -5,9 +5,10 @@ below for instructions for installing and running the compiler.
 
 ## Prerequisites
 
-  * Terra-compatible LLVM installation on PATH (tested successfully
-    with LLVM 3.5).
-      * Or you can install Terra yourself; see below for instructions.
+  * Linux, OS X, or another Unix.
+  * Python >= 2.7 (for the self-installer and test suite).
+  * LLVM and Clang **with headers** (as of December 2015 LLVM 3.5 is
+    recommended; 3.6 works but is missing debug symbols).
 
 ## Installing
 
@@ -18,19 +19,19 @@ Run the following command from the `language` directory:
 
 This command:
 
-  * Downloads and builds Terra.
-  * Builds a dynamic library with Legion and Lua bindings.
+  * Downloads and builds [Terra](http://terralang.org/). (Terra will
+    recursively download and build [LuaJIT](http://luajit.org/)).
+  * Builds a dynamic library for [Legion](http://legion.stanford.edu/).
   * (OS X) Patches said dynamic library to avoid hard-coded absolute paths.
   * Sets everything up to run from `regent.py`.
 
 Notes:
 
-  * If you want a debug build of Legion, pass `--debug` to `install.py`.
-  * By default, this script will install Legion's shared-memory
-    low-level runtime. For the general-purpose low-level runtime
-    (required for CUDA and GASNet), pass `--gasnet`.
-  * If you want to use CUDA and/or GASNet, pass `--cuda` and
-    `--gasnet`, respectively. (Requires `--general`.)
+  * Use `--debug` to enable Legion's debug mode. Debug mode includes
+    significantly more safety checks and better error messages, but
+    also runs signficantly slower than release mode.
+  * For CUDA support, use `--cuda`.
+  * For GASNet (networking) support, use `--gasnet`.
   * If you want to build with your own copy of Terra, pass the path to
     the Terra directory via the `--with-terra` flag. You will be
     responsible for building Terra yourself if you do this.
@@ -41,13 +42,8 @@ To use Regent, run:
 
     ./regent.py [SCRIPT]
 
-This starts a Terra shell with the Legion dynamic library on
-LD_LIBRARY_PATH (or DYLD_LIBRARY_PATH on Max OS X). From this shell,
-you can either:
-
-  * Use the Lua bindings via Lua/Terra.
-  * Use the C bindings via Terra or LuaJIT FFI.
-  * Use the language.
+This starts the Regent frontend with the Legion dynamic library on
+`LD_LIBRARY_PATH` (or `DYLD_LIBRARY_PATH` on OS X).
 
 ## Using
 

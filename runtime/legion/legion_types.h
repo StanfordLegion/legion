@@ -607,10 +607,13 @@ namespace LegionRuntime {
     typedef LowLevel::Barrier Barrier;
     typedef ::legion_reduction_op_id_t ReductionOpID;
     typedef LowLevel::ReductionOpUntyped ReductionOp;
+    typedef ::legion_custom_serdez_id_t CustomSerdezID;
+    typedef LowLevel::CustomSerdezUntyped SerdezOp;
     typedef LowLevel::Machine::ProcessorMemoryAffinity ProcessorMemoryAffinity;
     typedef LowLevel::Machine::MemoryMemoryAffinity MemoryMemoryAffinity;
     typedef LowLevel::ElementMask::Enumerator Enumerator;
     typedef LowLevel::IndexSpace::FieldDataDescriptor FieldDataDescriptor;
+    typedef std::map<CustomSerdezID, const LowLevel::CustomSerdezUntyped *> SerdezOpTable;
     typedef std::map<LowLevel::ReductionOpID, 
             const LowLevel::ReductionOpUntyped *> ReductionOpTable;
     typedef void (*SerdezInitFnptr)(const ReductionOp*, void *&, size_t&);

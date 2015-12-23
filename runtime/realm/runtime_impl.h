@@ -188,6 +188,7 @@ namespace Realm {
 
       bool register_task(Processor::TaskFuncID taskid, Processor::TaskFuncPtr taskptr);
       bool register_reduction(ReductionOpID redop_id, const ReductionOpUntyped *redop);
+      bool register_custom_serdez(CustomSerdezID serdez_id, const CustomSerdezUntyped *serdez);
 
       void run(Processor::TaskFuncID task_id = 0, 
 	       Runtime::RunStyle style = Runtime::ONE_TASK_ONLY,
@@ -221,6 +222,7 @@ namespace Realm {
       MachineImpl *machine;
 
       std::map<ReductionOpID, const ReductionOpUntyped *> reduce_op_table;
+      std::map<CustomSerdezID, const CustomSerdezUntyped *> custom_serdez_table;
 
 #ifdef NODE_LOGGING
       static const char *prefix;

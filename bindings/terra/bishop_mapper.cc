@@ -36,7 +36,7 @@ namespace LegionRuntime {
       if (rule.CALLBACK)                                   \
       {                                                    \
         legion_task_t task_ = CObjectWrapper::wrap(task);  \
-        rule.CALLBACK(task_);                              \
+        rule.CALLBACK(mapper_state, task_);                \
       }                                                    \
     }                                                      \
 
@@ -51,7 +51,7 @@ namespace LegionRuntime {
         {                                                            \
           legion_region_requirement_t req_ =                         \
             CObjectWrapper::wrap(&task->regions[idx]);               \
-          rule.CALLBACK(task_, req_, idx);                           \
+          rule.CALLBACK(mapper_state, task_, req_, idx);             \
         }                                                            \
       }                                                              \
     }                                                                \
@@ -59,13 +59,15 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     BishopMapper::BishopMapper(const std::vector<bishop_task_rule_t>& trules,
                                const std::vector<bishop_region_rule_t>& rrules,
+                               bishop_mapper_state_init_fn_t init_fn,
                                Machine machine, HighLevelRuntime *runtime,
                                Processor local_proc)
       : DefaultMapper(machine, runtime, local_proc),
-        task_rules(trules), region_rules(rrules)
+        task_rules(trules), region_rules(rrules), mapper_init(init_fn)
     //--------------------------------------------------------------------------
     {
       log_bishop.info("bishop mapper created");
+      mapper_init(&mapper_state);
     }
 
     //--------------------------------------------------------------------------
@@ -98,7 +100,7 @@ namespace LegionRuntime {
         {
           legion_task_t task_ = CObjectWrapper::wrap(const_cast<Task*>(task));
           // TODO: only supports 1D indexspace launch at the moment
-          if (rule.matches(task_) && domain.get_dim() == 1)
+          if (rule.matches(mapper_state, task_) && domain.get_dim() == 1)
           {
             bool success = true;
             std::vector<DomainSplit> new_slices;
@@ -109,7 +111,7 @@ namespace LegionRuntime {
                 CObjectWrapper::wrap(DomainPoint::from_point<1>(pir.p));
               Processor target =
                 CObjectWrapper::unwrap(
-                    rule.select_target_for_point(task_, dp_));
+                    rule.select_target_for_point(mapper_state, task_, dp_));
               success = success && target != Processor::NO_PROC;
               Arrays::Rect<1> subrect(pir.p, pir.p);
               Mapper::DomainSplit ds(Domain::from_rect<1>(subrect), target,

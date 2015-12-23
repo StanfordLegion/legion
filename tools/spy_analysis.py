@@ -133,7 +133,7 @@ def generate_html_op_label(title, requirements, instances, color, verbose):
                             str(req.region_node.tid))
             lines.append(["Requirement", req_summary])
 
-        if instances <> None:
+        if instances <> None and i in instances:
             lines.append(["Memory", instances[i].memory.dot_memory()])
             lines.append(["Instance", instances[i].dot_instance()])
 

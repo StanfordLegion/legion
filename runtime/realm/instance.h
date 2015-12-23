@@ -24,6 +24,9 @@
 #include "memory.h"
 
 #include "accessor.h"
+#include "custom_serdez.h"
+
+#include <vector>
 
 // we need intptr_t - make it if needed
 #if __cplusplus >= 201103L
@@ -77,6 +80,21 @@ namespace Realm {
     // used for accessor construction
     bool increment_accessor_count(void);
     bool decrement_accessor_count(void);
+
+    struct DestroyedField {
+    public:
+      DestroyedField(void) 
+        : offset(0), size(0), serdez_id(0) { }
+      DestroyedField(unsigned o, unsigned s, CustomSerdezID sid)
+        : offset(o), size(s), serdez_id(sid) { }
+    public:
+      unsigned offset, size;
+      CustomSerdezID serdez_id;
+    };
+
+    // if any fields in the instance need custom destruction, use this version
+    void destroy(const std::vector<DestroyedField>& destroyed_fields,
+		 Event wait_on = Event::NO_EVENT) const;
 
     bool can_get_strided_access_parameters(size_t start, size_t count,
 					   ptrdiff_t field_offset, size_t field_size);

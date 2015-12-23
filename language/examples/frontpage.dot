@@ -1,0 +1,23 @@
+digraph {
+  splines = line;
+
+  a;
+  subgraph cluster0 {
+    style = "invisible";
+    b0 [ label = <b<sub><font point-size="10">0</font></sub>>];
+    b1 [ label = <b<sub><font point-size="10">1</font></sub>>];
+    b2 [ label = <b<sub><font point-size="10">2</font></sub>>];
+  }
+  c;
+  subgraph cluster1 {
+    style = "invisible";
+    d0 [ label = <d<sub><font point-size="10">0</font></sub>>];
+    d1 [ label = <d<sub><font point-size="10">1</font></sub>>];
+    d2 [ label = <d<sub><font point-size="10">2</font></sub>>];
+  }
+
+  a -> {b0, b1, b2, c};
+  {b0, c} -> d0;
+  {b1, c} -> d1;
+  {b2, c} -> d2;
+}

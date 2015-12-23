@@ -41,6 +41,8 @@ namespace LegionRuntime {
     // importing stuff into this namespace for backwards compatibility
     typedef Realm::ReductionOpID ReductionOpID;
     typedef Realm::ReductionOpUntyped ReductionOpUntyped;
+    typedef Realm::CustomSerdezID CustomSerdezID;
+    typedef Realm::CustomSerdezUntyped CustomSerdezUntyped;
     typedef Realm::Event Event;
     typedef Realm::UserEvent UserEvent;
     typedef Realm::Barrier Barrier;
