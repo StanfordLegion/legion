@@ -306,7 +306,9 @@ namespace LegionRuntime{
         XFER_GASNET_WRITE,
         XFER_REMOTE_WRITE,
         XFER_HDF_READ,
-        XFER_HDF_WRITE
+        XFER_HDF_WRITE,
+        XFER_FILE_READ,
+        XFER_FILE_WRITE
       };
     public:
       // a pointer to the DmaRequest that contains this XferDes

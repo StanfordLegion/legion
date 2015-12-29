@@ -138,7 +138,7 @@ bool verify_region_data(Domain domain, RegionInstance inst, std::vector<size_t> 
   return check;
 }
 
-void top_level_task(const void *args, size_t arglen, Processor p)
+void top_level_task(const void *args, size_t arglen, const void *user_data, size_t user_data_len, Processor p)
 {
   printf("top level task - DMA random tests\n");
   std::vector<size_t> field_sizes;
@@ -146,7 +146,7 @@ void top_level_task(const void *args, size_t arglen, Processor p)
     field_sizes.push_back(sizeof(int));
   for (unsigned i = 0; i < NUM_TEST; i++) {
     printf("Test case #%u:\n", i);
-    int dim = i % 3 + 1;
+    int dim = (i + 1) % 3 + 1;
     Domain domain;
     switch (dim) {
       case 0:
@@ -179,19 +179,26 @@ void top_level_task(const void *args, size_t arglen, Processor p)
     int block_size_vec[PATH_LEN];
     for (unsigned j = 0; j < PATH_LEN; j++) {
       // random a memory in which we should create instance
+      // remove HDF memory and File memory
       Machine machine = Machine::get_machine();
       std::set<Memory> mem;
       if(j == 0 || j == PATH_LEN - 1) {
         std::set<Memory> all_mem;
         machine.get_all_memories(all_mem);
         for(std::set<Memory>::iterator it = all_mem.begin(); it != all_mem.end(); it++) {
-          if (gasnet_mynode() == ID(*it).node())
+          if (gasnet_mynode() == ID(*it).node() && it->kind() != Memory::HDF_MEM && it->kind() != Memory::FILE_MEM)
             mem.insert(*it);
         }
       }
       else {
-        machine.get_all_memories(mem);
+        std::set<Memory> all_mem;
+        machine.get_all_memories(all_mem);
+        for(std::set<Memory>::iterator it = all_mem.begin(); it != all_mem.end(); it++) {
+          if (it->kind() != Memory::HDF_MEM && it->kind() != Memory::FILE_MEM)
+            mem.insert(*it);
+        }
       }
+
       int mem_idx = rand() % mem.size();
       std::set<Memory>::iterator it = mem.begin();
       while (mem_idx > 0) {
@@ -201,7 +208,7 @@ void top_level_task(const void *args, size_t arglen, Processor p)
       block_size_vec[j] = rand() % domain.get_volume() + 1;
       inst_vec[j] = domain.create_instance(*it, field_sizes, block_size_vec[j]);
       assert(ID(inst_vec[j]).type() == ID::ID_INSTANCE);
-      // printf("node = %d\n", ID(*it).node());
+      printf("node = %d, kind = %d\n", ID(*it).node(), it->kind());
       // random field order of this region instance
       std::vector<size_t> rand_order;
       rand_order.clear();

@@ -2829,6 +2829,8 @@ namespace LegionRuntime {
             return XferDes::XFER_DISK_WRITE;
           else if (dst_ll_kind == Memory::HDF_MEM)
             return XferDes::XFER_HDF_WRITE;
+          else if (dst_ll_kind == Memory::FILE_MEM)
+            return XferDes::XFER_FILE_WRITE;
           assert(0);
           break;
         case Memory::GPU_FB_MEM:
@@ -2842,6 +2844,11 @@ namespace LegionRuntime {
         case Memory::DISK_MEM:
           if (is_cpu_mem(dst_ll_kind))
             return XferDes::XFER_DISK_READ;
+          else
+            return XferDes::XFER_NONE;
+        case Memory::FILE_MEM:
+          if (is_cpu_mem(dst_ll_kind))
+            return XferDes::XFER_FILE_READ;
           else
             return XferDes::XFER_NONE;
         case Memory::HDF_MEM:
