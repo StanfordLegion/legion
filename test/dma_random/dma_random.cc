@@ -206,9 +206,9 @@ void top_level_task(const void *args, size_t arglen, const void *user_data, size
         mem_idx--;
       }
       block_size_vec[j] = rand() % domain.get_volume() + 1;
+      printf("node = %d, kind = %d\n", ID(*it).node(), it->kind());
       inst_vec[j] = domain.create_instance(*it, field_sizes, block_size_vec[j]);
       assert(ID(inst_vec[j]).type() == ID::ID_INSTANCE);
-      printf("node = %d, kind = %d\n", ID(*it).node(), it->kind());
       // random field order of this region instance
       std::vector<size_t> rand_order;
       rand_order.clear();

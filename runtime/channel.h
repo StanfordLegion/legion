@@ -605,6 +605,7 @@ namespace LegionRuntime{
         while (!available_reqs.empty()) {
           available_reqs.pop();
         }
+        delete li;
         free(requests);
         // trigger complete event
         //if (complete_event.exists()) {
@@ -646,6 +647,7 @@ namespace LegionRuntime{
         while (!available_reqs.empty()) {
           available_reqs.pop();
         }
+        delete li;
         free(requests);
         // trigger completion event
         //if (complete_event.exists()) {
@@ -687,6 +689,7 @@ namespace LegionRuntime{
         while (!available_reqs.empty()) {
           available_reqs.pop();
         }
+        delete li;
         free(requests);
         //if (complete_event.exists()) {
           //get_runtime()->get_genevent_impl(complete_event)->trigger(complete_event.gen, gasnet_mynode());
@@ -728,6 +731,7 @@ namespace LegionRuntime{
         while (!available_reqs.empty()) {
           available_reqs.pop();
         }
+        delete li;
         free(requests);
         // trigger complete event
         //if (complete_event.exists()) {
@@ -770,6 +774,7 @@ namespace LegionRuntime{
         while (!available_reqs.empty()) {
           available_reqs.pop();
         }
+        delete li;
         free(requests);
         // trigger complete event
         //if (complete_event.exists()) {
