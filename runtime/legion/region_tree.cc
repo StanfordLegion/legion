@@ -10652,7 +10652,8 @@ namespace LegionRuntime {
         perform_close_operations(closer, overlap, *it,
                                  next_child, false/*allow next*/,
                                  false/*upgrade*/, false/*leave open*/,
-                                 (it->open_state == OPEN_READ_ONLY),
+                                 false/*read only close*/,
+                                 //(it->open_state == OPEN_READ_ONLY),
                                  false/*record close operations*/,
                                  false/*record closed fields*/,
                                  dummy_states, already_open);
