@@ -10653,6 +10653,7 @@ namespace LegionRuntime {
                                  next_child, false/*allow next*/,
                                  false/*upgrade*/, false/*leave open*/,
                                  false/*read only close*/,
+                                 //(it->open_state == OPEN_READ_ONLY),
                                  false/*record close operations*/,
                                  false/*record closed fields*/,
                                  dummy_states, already_open);
@@ -10683,7 +10684,8 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     void RegionTreeNode::close_logical_node(LogicalCloser &closer,
                                             const FieldMask &closing_mask,
-                                            bool permit_leave_open)
+                                            bool permit_leave_open,
+                                            bool read_only_close)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_PERF
@@ -10715,7 +10717,7 @@ namespace LegionRuntime {
                                  ColorPoint()/*next child*/,
                                  false/*allow next*/, false/*upgrade*/,
                                  permit_leave_open,
-                                 false/*read only close*/,
+                                 read_only_close,
                                  false/*record close operations*/,
                                  false/*record closed fields*/,
                                  new_states, already_open);
@@ -10728,8 +10730,10 @@ namespace LegionRuntime {
       // Merge any new field states
       merge_new_field_states(state, new_states);
       // Record the version numbers that we need
-      closer.record_version_numbers(this, state, 
-                                    closing_mask, permit_leave_open);
+      // If we're doing a read-only close, we don't need the version numbers
+      if (!read_only_close)
+        closer.record_version_numbers(this, state, 
+                                      closing_mask, permit_leave_open);
       // If we're doing a close operation, that means someone is
       // going to be writing to a region that aliases with this one
       // so we need to advance the field version. However, if we're
@@ -11155,7 +11159,8 @@ namespace LegionRuntime {
               // Otherwise we actually need to do the close
               RegionTreeNode *child_node = get_tree_child(finder->first);
               child_node->close_logical_node(closer, close_mask, 
-                                             permit_leave_open);
+                                             permit_leave_open, 
+                                             read_only_close);
               if (record_close_operations)
               {
                 closer.record_closed_child(finder->first, close_mask, 
@@ -11246,7 +11251,8 @@ namespace LegionRuntime {
           }
           // Perform the close operation
           RegionTreeNode *child_node = get_tree_child(it->first);
-          child_node->close_logical_node(closer, close_mask, permit_leave_open);
+          child_node->close_logical_node(closer, close_mask, 
+                                         permit_leave_open, read_only_close);
           if (record_close_operations)
             closer.record_closed_child(it->first, close_mask, 
                                        permit_leave_open, read_only_close);

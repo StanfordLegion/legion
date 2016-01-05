@@ -575,6 +575,9 @@ namespace LegionRuntime {
     protected:
       FenceOp *current_fence;
       GenerationID fence_gen;
+#ifdef LEGION_SPY
+      UniqueID current_fence_uid;
+#endif
     protected:
       // Resources that can build up over a task's lifetime
       LegionDeque<Reservation,TASK_RESERVATION_ALLOC>::tracked context_locks;

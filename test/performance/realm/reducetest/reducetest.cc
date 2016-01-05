@@ -394,9 +394,11 @@ void hist_batch_localize_task(const void *args, size_t arglen,
   }
 
   // now copy the local instance back to the original one
-  Domain(hbargs->region).copy(dst, src).wait();
+  Event done = Domain(hbargs->region).copy(dst, src);
 
-  lclinst.destroy();
+  lclinst.destroy(done);
+
+  done.wait();
 }
   
 template <class REDOP>
@@ -427,9 +429,11 @@ void hist_batch_redfold_task(const void *args, size_t arglen,
   std::vector<Domain::CopySrcDstField> dst;
   src.push_back(Domain::CopySrcDstField(redinst, 0, sizeof(int)));
   dst.push_back(Domain::CopySrcDstField(hbargs->inst, 0, sizeof(int)));
-  Domain(hbargs->region).copy(src, dst, Event::NO_EVENT, REDOP_BUCKET_ADD, false).wait();
+  Event done = Domain(hbargs->region).copy(src, dst, Event::NO_EVENT, REDOP_BUCKET_ADD, false);
 
-  redinst.destroy();
+  redinst.destroy(done);
+
+  done.wait();
 }
   
 template <class REDOP>

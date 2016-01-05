@@ -1500,7 +1500,8 @@ namespace LegionRuntime {
                                  const FieldMask &closing_mask);
       void close_logical_node(LogicalCloser &closer,
                               const FieldMask &closing_mask,
-                              bool permit_leave_open);
+                              bool permit_leave_open,
+                              bool read_only_close);
       void siphon_logical_children(LogicalCloser &closer,
                                    CurrentState &state,
                                    const FieldMask &closing_mask,

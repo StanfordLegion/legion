@@ -2839,22 +2839,29 @@ namespace LegionRuntime {
     {
       if (current_fence != NULL)
       {
-        op->register_dependence(current_fence, fence_gen);
 #ifdef LEGION_SPY
+        // Can't prune when doing legion spy
+        op->register_dependence(current_fence, fence_gen);
         unsigned num_regions = op->get_region_count();
         if (num_regions > 0)
         {
           for (unsigned idx = 0; idx < num_regions; idx++)
           {
             LegionSpy::log_mapping_dependence(
-                get_unique_op_id(), current_fence->get_unique_op_id(), 0,
+                get_unique_op_id(), current_fence_uid, 0,
                 op->get_unique_op_id(), idx, TRUE_DEPENDENCE);
           }
         }
         else
           LegionSpy::log_mapping_dependence(
-              get_unique_op_id(), current_fence->get_unique_op_id(), 0,
+              get_unique_op_id(), current_fence_uid, 0,
               op->get_unique_op_id(), 0, TRUE_DEPENDENCE);
+#else
+        // If we can prune it then go ahead and do so
+        // No need to remove the mapping reference because 
+        // the fence has already been committed
+        if (op->register_dependence(current_fence, fence_gen))
+          current_fence = NULL;
 #endif
       }
     }
@@ -2868,6 +2875,9 @@ namespace LegionRuntime {
       current_fence = op;
       fence_gen = op->get_generation();
       current_fence->add_mapping_reference(fence_gen);
+#ifdef LEGION_SPY
+      current_fence_uid = op->get_unique_op_id();
+#endif
     }
 
     //--------------------------------------------------------------------------

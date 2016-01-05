@@ -1529,7 +1529,7 @@ class Mapping(object):
 
         label = generate_html_op_label(
                 'Mapping in '+self.ctx.name+' (UID: '+str(self.uid)+')',
-                [self.requirement], [self.instance], 'mediumseagreen',
+                [self.requirement], {0 : self.instance}, 'mediumseagreen',
                 self.state.verbose)
 
         printer.println(self.node_name+' [label=<'+label+'>,fontsize=14,'+\
