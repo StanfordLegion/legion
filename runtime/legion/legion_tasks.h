@@ -1140,7 +1140,6 @@ namespace LegionRuntime {
       void enumerate_points(void);
       void record_locally_mapped_slice(SliceTask *local_slice);
     public:
-      void return_virtual_instance(unsigned index, const CompositeRef &ref);
       void return_slice_mapped(unsigned points, long long denom,
                                Event applied_condition);
       void return_slice_complete(unsigned points);
@@ -1273,8 +1272,7 @@ namespace LegionRuntime {
     protected:
       // Temporary storage for future results
       std::map<DomainPoint,std::pair<void*,size_t> > temporary_futures;
-      // Temporary storage for virtual instance references
-      std::deque<std::pair<unsigned,CompositeRef> > temporary_virtual_refs;
+      std::deque<CompositeRef> temporary_virtual_refs;
     };
 
     /**

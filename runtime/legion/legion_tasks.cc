@@ -6800,14 +6800,16 @@ namespace LegionRuntime {
         {
           AddressSpaceID owner_space = runtime->find_address_space(orig_proc);
           for (unsigned idx = 0; idx < version_infos.size(); idx++)
-            version_infos[idx].apply_mapping(get_parent_context(idx).get_id(),
-                                         owner_space, map_applied_conditions);
+            if (!virtual_mapped[idx])
+              version_infos[idx].apply_mapping(get_parent_context(idx).get_id(),
+                                           owner_space, map_applied_conditions);
         }
         else
         {
           for (unsigned idx = 0; idx < version_infos.size(); idx++)
-            version_infos[idx].apply_mapping(get_parent_context(idx).get_id(),
-                              runtime->address_space, map_applied_conditions);
+            if (!virtual_mapped[idx])
+              version_infos[idx].apply_mapping(get_parent_context(idx).get_id(),
+                                runtime->address_space, map_applied_conditions);
         }
         // If we succeeded in mapping and everything was mapped
         // then we get to mark that we are done mapping
@@ -6876,30 +6878,18 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(ref.has_ref());
 #endif
-      if (!is_remote())
-      {
-        CompositeView *composite_view = ref.get_view();
-        if (!ref.is_local())
-          composite_view->make_local(map_applied_conditions);
-        RegionTreeContext virtual_ctx = get_parent_context(index);
-        // Have to control access to the version info data structure
-        AutoLock o_lock(op_lock);
-        runtime->forest->register_virtual_region(virtual_ctx,
-                                            composite_view, regions[index],
-                                            version_infos[index]);
-      }
-      else
-      {
-        // Save it in our list of virtual instances to pass back
-        AutoLock o_lock(op_lock);
-        std::map<unsigned,CompositeRef>::iterator finder = 
-          virtual_instances.find(index);
-        // We should already have a virtual instance from before
+      CompositeView *composite_view = ref.get_view();
+      RegionTreeContext virtual_ctx = get_parent_context(index);
+      // Have to control access to the version info data structure
+      AutoLock o_lock(op_lock);
 #ifdef DEBUG_HIGH_LEVEL
-        assert(finder != virtual_instances.end());
+      assert(virtual_mapped[index]);
 #endif
-        finder->second = ref;
-      }
+      // Overwrite our virtual instances so we keep a reference
+      virtual_instances[index] = ref;
+      runtime->forest->register_virtual_region(virtual_ctx,
+                                          composite_view, regions[index],
+                                          version_infos[index]);
     }
 
     //--------------------------------------------------------------------------
@@ -7099,12 +7089,10 @@ namespace LegionRuntime {
     void IndividualTask::handle_post_mapped(Event mapped_precondition)
     //--------------------------------------------------------------------------
     {
-      if (!is_remote())
-      {
-        complete_mapping(mapped_precondition);
-        return;
-      }
-      if (!mapped_precondition.has_triggered())
+      // If this is either a remote task or we have virtual mappings, then
+      // we need to wait before completing our mapping
+      if ((is_remote() || !virtual_instances.empty()) && 
+          !mapped_precondition.has_triggered())
       {
         SingleTask::DeferredPostMappedArgs args;
         args.hlr_id = HLR_DEFERRED_POST_MAPPED_ID;
@@ -7112,6 +7100,49 @@ namespace LegionRuntime {
         runtime->issue_runtime_meta_task(&args, sizeof(args),
                                          HLR_DEFERRED_POST_MAPPED_ID,
                                          this, mapped_precondition);
+        return;
+      }
+      // If we have any virtual instances then we need to apply
+      // the changes for them now
+      if (!virtual_instances.empty())
+      {
+        if (is_remote())
+        {
+          AddressSpaceID owner_space = runtime->find_address_space(orig_proc);
+          for (std::map<unsigned,CompositeRef>::iterator it = 
+                virtual_instances.begin(); it != virtual_instances.end(); it++)
+          {
+#ifdef DEBUG_HIGH_LEVEL
+            assert(virtual_mapped[it->first]);
+#endif
+            version_infos[it->first].apply_mapping(
+                get_parent_context(it->first).get_id(),
+                owner_space, map_applied_conditions);
+          }
+        }
+        else
+        {
+          for (std::map<unsigned,CompositeRef>::iterator it = 
+                virtual_instances.begin(); it != virtual_instances.end(); it++)
+          {
+#ifdef DEBUG_HIGH_LEVEL
+            assert(virtual_mapped[it->first]);
+#endif
+            version_infos[it->first].apply_mapping(
+                get_parent_context(it->first).get_id(),
+                runtime->address_space, map_applied_conditions);
+          }
+        }
+      }
+      if (!is_remote())
+      {
+        if (!map_applied_conditions.empty())
+        {
+          map_applied_conditions.insert(mapped_precondition);
+          complete_mapping(Event::merge_events(map_applied_conditions));
+        }
+        else 
+          complete_mapping(mapped_precondition);
         return;
       }
       Event applied_condition = Event::NO_EVENT;
@@ -7122,20 +7153,6 @@ namespace LegionRuntime {
       // Only need to send back the pointer to the task instance
       rez.serialize(orig_task);
       rez.serialize(applied_condition);
-      // We should always send back the virtual instances even if
-      // we were locally mapped because these are different than 
-      // the virtual instances that were passed in
-      rez.serialize<size_t>(virtual_instances.size());
-      if (!virtual_instances.empty())
-      {
-        AddressSpaceID target = runtime->find_address_space(orig_proc);
-        for (std::map<unsigned,CompositeRef>::iterator it = 
-              virtual_instances.begin(); it != virtual_instances.end(); it++)
-        {
-          rez.serialize(it->first);
-          it->second.pack_reference(rez, target);
-        }
-      }
       runtime->send_individual_remote_mapped(orig_proc, rez);
       // Now we can complete this task
       complete_mapping(applied_condition);
@@ -7298,29 +7315,6 @@ namespace LegionRuntime {
       derez.deserialize(applied);
       if (applied.exists())
         map_applied_conditions.insert(applied);
-      size_t num_virtual_instances;
-      derez.deserialize(num_virtual_instances);
-      for (unsigned idx = 0; idx < num_virtual_instances; idx++)
-      {
-        unsigned index;
-        derez.deserialize(index);
-        CompositeRef &virtual_ref = virtual_instances[index];
-        virtual_ref.unpack_reference(runtime, derez);
-        if (virtual_ref.has_ref())
-        {
-          // Do what we need to in order to make this view local
-          CompositeView *composite_view = virtual_ref.get_view();
-          // We need to make this local before our mapping is complete
-          composite_view->make_local(map_applied_conditions);
-          // Now we need to register this instance in our parent
-          // task's context as the result of our mapping
-          // Yes this is very dangerous, see the note about why it is 
-          // safe in initialize_region_tree_contexts
-          runtime->forest->register_virtual_region(get_parent_context(index),
-                                              composite_view, regions[index],
-                                              version_infos[index]);
-        }
-      }
       if (!map_applied_conditions.empty())
         complete_mapping(Event::merge_events(map_applied_conditions));
       else
@@ -9742,25 +9736,6 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void IndexTask::return_virtual_instance(unsigned index, 
-                                            const CompositeRef &ref)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(ref.has_ref());
-#endif
-      CompositeView *composite_view = ref.get_view();
-      if (!ref.is_local())
-        composite_view->make_local(map_applied_conditions);
-      RegionTreeContext virtual_ctx = get_parent_context(index);
-      // Have to control access to the version info data structure
-      AutoLock o_lock(op_lock);
-      runtime->forest->register_virtual_region(virtual_ctx,
-                                          composite_view, regions[index],
-                                          version_infos[index]);
-    }
-
-    //--------------------------------------------------------------------------
     void IndexTask::return_slice_mapped(unsigned points, long long denom,
                                         Event applied_condition)
     //--------------------------------------------------------------------------
@@ -9900,16 +9875,6 @@ namespace LegionRuntime {
             derez.deserialize(handles[pidx]);
         }
         // otherwise it was locally mapped so we are already done
-      }
-      size_t num_virtual;
-      derez.deserialize(num_virtual);
-      for (unsigned idx = 0; idx < num_virtual; idx++)
-      {
-        unsigned index;
-        derez.deserialize(index);
-        CompositeRef virtual_ref;
-        virtual_ref.unpack_reference(runtime, derez);
-        return_virtual_instance(index, virtual_ref);
       }
       return_slice_mapped(points, denom, applied_condition);
     }
@@ -10687,18 +10652,23 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void SliceTask::return_virtual_instance(unsigned idx, 
+    void SliceTask::return_virtual_instance(unsigned index, 
                                             const CompositeRef &ref)
     //--------------------------------------------------------------------------
     {
-      if (is_remote())
-      {
-        AutoLock o_lock(op_lock); 
-        temporary_virtual_refs.push_back(
-            std::pair<unsigned,CompositeRef>(idx,ref));
-      }
-      else
-        index_owner->return_virtual_instance(idx, ref);
+      // Add it to our state
+#ifdef DEBUG_HIGH_LEVEL
+      assert(ref.has_ref());
+#endif
+      CompositeView *composite_view = ref.get_view();
+      RegionTreeContext virtual_ctx = get_parent_context(index);
+      // Have to control access to the version info data structure
+      AutoLock o_lock(op_lock);
+      // Hold a reference so it doesn't get deleted
+      temporary_virtual_refs.push_back(ref);
+      runtime->forest->register_virtual_region(virtual_ctx,
+                                          composite_view, regions[index],
+                                          version_infos[index]);
     }
 
     //--------------------------------------------------------------------------
@@ -10821,6 +10791,10 @@ namespace LegionRuntime {
       }
       complete_mapping(applied_condition);
       complete_execution();
+      // Now that we've mapped, we can remove any composite references
+      // that we are holding
+      if (!temporary_virtual_refs.empty())
+        temporary_virtual_refs.clear();
     }
 
     //--------------------------------------------------------------------------
@@ -10887,19 +10861,6 @@ namespace LegionRuntime {
           continue;
         for (unsigned pidx = 0; pidx < points.size(); pidx++)
           rez.serialize(points[pidx]->regions[idx].region);
-      }
-      // Pack any virtual instances
-      rez.serialize<size_t>(temporary_virtual_refs.size());
-      if (!temporary_virtual_refs.empty())
-      {
-        AddressSpaceID target = runtime->find_address_space(orig_proc);
-        for (std::deque<std::pair<unsigned,CompositeRef> >::iterator it =
-              temporary_virtual_refs.begin(); it != 
-              temporary_virtual_refs.end(); it++)
-        {
-          rez.serialize(it->first);
-          it->second.pack_reference(rez, target);
-        }
       }
     }
 
