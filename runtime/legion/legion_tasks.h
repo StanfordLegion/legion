@@ -53,7 +53,11 @@ namespace LegionRuntime {
       virtual Release* as_mappable_release(void) const;
       virtual UniqueID get_unique_mappable_id(void) const;
     public:
-      inline bool is_remote(void) const { return !runtime->is_local(orig_proc);}
+      inline bool is_remote(void) const {
+         if (local_cached) return !is_local;
+         is_local = runtime->is_local(orig_proc); local_cached = true;
+         return !is_local;
+      }
       inline bool is_stolen(void) const { return (steal_count > 0); }
       inline bool is_locally_mapped(void) const { return map_locally; }
       inline bool is_premapped(void) const { return premapped; }
@@ -103,6 +107,8 @@ namespace LegionRuntime {
       virtual bool pack_task(Serializer &rez, Processor target) = 0;
       virtual bool unpack_task(Deserializer &derez, Processor current) = 0;
       virtual void perform_inlining(SingleTask *ctx, InlineFnptr fn) = 0;
+    public:
+      RegionTreeContext get_parent_context(unsigned idx);
     protected:
       void pack_version_infos(Serializer &rez,
                               std::vector<VersionInfo> &infos);
@@ -186,7 +192,6 @@ namespace LegionRuntime {
       // Early mapped regions
       std::map<unsigned/*idx*/,InstanceRef> early_mapped_regions;
     protected:
-      std::deque<RegionTreeContext> enclosing_contexts;
       std::vector<unsigned> parent_req_indexes;
     protected:
       std::set<LogicalRegion>                   created_regions;
@@ -204,6 +209,9 @@ namespace LegionRuntime {
       bool children_commit;
       bool children_complete_invoked;
       bool children_commit_invoked;
+    private:
+      mutable bool is_local;
+      mutable bool local_cached;
     protected:
       AllocManager *arg_manager;
     public:
@@ -472,7 +480,6 @@ namespace LegionRuntime {
       static void process_mapper_profiling(const void *args, size_t arglen);
     public:
       PhysicalManager* get_instance(unsigned idx);
-      void return_virtual_instance(unsigned index, const CompositeRef &ref);
     public:
       virtual void activate(void) = 0;
       virtual void deactivate(void) = 0;
@@ -486,6 +493,8 @@ namespace LegionRuntime {
       virtual bool is_stealable(void) const = 0;
       virtual bool has_restrictions(unsigned idx, LogicalRegion handle) = 0;
       virtual bool can_early_complete(UserEvent &chain_event) = 0;
+      virtual void return_virtual_instance(unsigned index, 
+                                           const CompositeRef &ref) = 0;
     public:
       virtual Event get_task_completion(void) const = 0;
       virtual TaskKind get_task_kind(void) const = 0;
@@ -496,8 +505,7 @@ namespace LegionRuntime {
       virtual void record_remote_instance(AddressSpaceID remote_inst,
                                           RemoteTask *remote_ctx) = 0;
     public:
-      // Has a base implementation but can override
-      virtual RegionTreeContext find_enclosing_context(unsigned idx);
+      RegionTreeContext find_enclosing_context(unsigned idx);
     public:
       // Override these methods from operation class
       virtual bool trigger_execution(void);
@@ -730,6 +738,8 @@ namespace LegionRuntime {
       virtual bool is_stealable(void) const;
       virtual bool has_restrictions(unsigned idx, LogicalRegion handle);
       virtual bool can_early_complete(UserEvent &chain_event);
+      virtual void return_virtual_instance(unsigned index,
+                                           const CompositeRef &ref);
       virtual VersionInfo& get_version_info(unsigned idx);
       virtual RegionTreePath& get_privilege_path(unsigned idx);
       virtual void recapture_version_info(unsigned idx);
@@ -829,6 +839,8 @@ namespace LegionRuntime {
       virtual bool is_stealable(void) const;
       virtual bool has_restrictions(unsigned idx, LogicalRegion handle);
       virtual bool can_early_complete(UserEvent &chain_event);
+      virtual void return_virtual_instance(unsigned index,
+                                           const CompositeRef &ref);
       virtual VersionInfo& get_version_info(unsigned idx);
       virtual void recapture_version_info(unsigned idx);
     public:
@@ -895,6 +907,8 @@ namespace LegionRuntime {
       virtual bool is_stealable(void) const;
       virtual bool has_restrictions(unsigned idx, LogicalRegion handle);
       virtual bool can_early_complete(UserEvent &chain_event);
+      virtual void return_virtual_instance(unsigned index,
+                                           const CompositeRef &ref);
       virtual RemoteTask* find_outermost_context(void) = 0;
     public:
       virtual bool has_remote_state(void) const = 0;
@@ -950,7 +964,6 @@ namespace LegionRuntime {
       virtual void activate(void);
       virtual void deactivate(void);
     public:
-      virtual RegionTreeContext find_enclosing_context(unsigned idx);
       virtual RemoteTask* find_outermost_context(void);
     public:
       virtual bool has_remote_state(void) const;
