@@ -53,11 +53,7 @@ namespace LegionRuntime {
       virtual Release* as_mappable_release(void) const;
       virtual UniqueID get_unique_mappable_id(void) const;
     public:
-      inline bool is_remote(void) const {
-         if (local_cached) return !is_local;
-         is_local = runtime->is_local(orig_proc); local_cached = true;
-         return !is_local;
-      }
+      bool is_remote(void) const;
       inline bool is_stolen(void) const { return (steal_count > 0); }
       inline bool is_locally_mapped(void) const { return map_locally; }
       inline bool is_premapped(void) const { return premapped; }

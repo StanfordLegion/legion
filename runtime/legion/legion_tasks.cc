@@ -99,6 +99,20 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    bool TaskOp::is_remote(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (local_cached)
+        return !is_local;
+      if (!orig_proc.exists())
+        is_local = runtime->is_local(parent_ctx->get_executing_processor());
+      else
+        is_local = runtime->is_local(orig_proc);
+      local_cached = true;
+      return !is_local;
+    }
+
+    //--------------------------------------------------------------------------
     void TaskOp::activate_task(void)
     //--------------------------------------------------------------------------
     {
@@ -111,6 +125,7 @@ namespace LegionRuntime {
       children_commit_invoked = false;
       local_cached = false;
       arg_manager = NULL;
+      orig_proc = Processor::NO_PROC; // for is_remote
     }
 
     //--------------------------------------------------------------------------
