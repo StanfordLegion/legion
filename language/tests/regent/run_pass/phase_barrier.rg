@@ -12,9 +12,9 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
+-- runs-with:
 -- []
 
--- runs-with:
 -- [["-ll:cpu", "2"]]
 
 import "regent"
