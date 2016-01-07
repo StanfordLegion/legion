@@ -49,8 +49,7 @@ def git_update(repo_dir):
 
 def build_terra(terra_dir, thread_count):
     subprocess.check_call(
-        ['make', 'all', '-j', str(thread_count)] +
-        (['LUAJIT_URL=%s' % os.environ['LUAJIT_URL']] if 'LUAJIT_URL' in os.environ else []),
+        ['make', 'all', '-j', str(thread_count)],
         cwd = terra_dir)
 
 def install_terra(terra_dir, external_terra_dir, thread_count):
