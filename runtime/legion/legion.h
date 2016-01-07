@@ -1355,6 +1355,9 @@ namespace LegionRuntime {
         add_constraint(const LaunchConstraint &constraint);
       TaskVariantRegistrar&
         add_constraint(const ColocationConstraint &constraint);
+    public: // Add layout constraint sets
+      TaskVariantRegistrar&
+        add_layout_constraint_set(unsigned index, LayoutDescriptionID desc);
     public: // Set properties
       void set_leaf(bool is_leaf = true);
       void set_inner(bool is_inner = true);
@@ -5727,27 +5730,20 @@ namespace LegionRuntime {
       Future from_value(const void *value, size_t value_size, bool owned);
       const void* get_local_args(Context ctx, DomainPoint &point, 
                                  size_t &local_size);
+      const void* find_user_data(VariantID vid);
     private:
       static ProjectionID register_region_projection_function(
                                     ProjectionID handle, void *func_ptr);
       static ProjectionID register_partition_projection_function(
                                     ProjectionID handle, void *func_ptr);
-      static TaskID update_collection_table(
-                      LowLevelFnptr low_ptr, InlineFnptr inline_ptr,
-                      TaskID uid, Processor::Kind proc_kind, 
-                      bool single_task, bool index_space_task,
-                      VariantID vid, size_t return_size,
-                      const TaskConfigOptions &options,
-                      const char *task_name);
-      static TaskID update_collection_table(
-                      LowLevelFnptr low_ptr, InlineFnptr inline_ptr,
-                      TaskID uid, Processor::Kind proc_kind, 
-                      bool single_task, bool index_space_task,
-                      VariantID vid, size_t return_size,
-                      const TaskConfigOptions &options,
-                      const char *task_name,
-                      const void *user_data, size_t user_data_size);
-      static const void* find_user_data(TaskID tid, VariantID vid);
+    private:
+      VariantID register_variant(const TaskVariantRegistrar &registrar,
+                                 const void *user_data, size_t user_data_size,
+                                 LowLevelFnptr low_ptr, InlineFnptr inline_ptr);
+      static VariantID preregistar_variant(const TaskVariantRegistrar &reg,
+                                 const void *user_data, size_t user_data_size,
+                                 LowLevelFnptr low_ptr, InlineFnptr inline_ptr);
+    private:
       static ReductionOpTable& get_reduction_table(void);
       static SerdezOpTable& get_serdez_table(void);
       static SerdezRedopTable& get_serdez_redop_table(void);

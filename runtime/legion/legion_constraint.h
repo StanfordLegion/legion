@@ -120,28 +120,29 @@ namespace LegionRuntime {
         // Top-level ISA Kinds
         X86_ISA   = 0x00000001,
         ARM_ISA   = 0x00000002,
-        PTX_ISA   = 0x00000004, // auto-launch by runtime
-        CUDA_ISA  = 0x00000008, // run on CPU thread bound to CUDA context
-        LUA_ISA   = 0x00000010, // run on Lua processor
-        TERRA_ISA = 0x00000020, // JIT to target processor kind
-        LLVM_ISA  = 0x00000040, // JIT to target processor kind
-        GL_ISA    = 0x00000080, // run on CPU thread with OpenGL context
+        POW_ISA   = 0x00000004, // Power PC
+        PTX_ISA   = 0x00000008, // auto-launch by runtime
+        CUDA_ISA  = 0x00000010, // run on CPU thread bound to CUDA context
+        LUA_ISA   = 0x00000020, // run on Lua processor
+        TERRA_ISA = 0x00000040, // JIT to target processor kind
+        LLVM_ISA  = 0x00000080, // JIT to target processor kind
+        GL_ISA    = 0x00000100, // run on CPU thread with OpenGL context
         // x86 Vector Instructions
-        SSE_ISA   = 0x00000100,
-        SSE2_ISA  = 0x00000200,
-        SSE3_ISA  = 0x00000400,
-        SSE4_ISA  = 0x00000800,
-        AVX_ISA   = 0x00001000,
-        AVX2_ISA  = 0x00002000,
-        FMA_ISA   = 0x00004000,
-        MIC_ISA   = 0x00008000,
+        SSE_ISA   = 0x00000200,
+        SSE2_ISA  = 0x00000400,
+        SSE3_ISA  = 0x00000800,
+        SSE4_ISA  = 0x00001000,
+        AVX_ISA   = 0x00002000,
+        AVX2_ISA  = 0x00004000,
+        FMA_ISA   = 0x00008000,
+        MIC_ISA   = 0x00010000,
         // GPU variants
-        SM_10_ISA = 0x00010000,
-        SM_20_ISA = 0x00020000,
-        SM_30_ISA = 0x00040000,
-        SM_35_ISA = 0x00080000,
+        SM_10_ISA = 0x00020000,
+        SM_20_ISA = 0x00040000,
+        SM_30_ISA = 0x00080000,
+        SM_35_ISA = 0x00100000,
         // ARM Vector Instructions
-        NEON_ISA  = 0x00100000,
+        NEON_ISA  = 0x00200000,
       };
     public:
       ISAConstraint(uint64_t kinds);

@@ -15436,7 +15436,6 @@ namespace LegionRuntime {
       // Note that the logger isn't initialized until after this call returns 
       // which means any logging that occurs before this has undefined behavior.
       RealmRuntime realm;
-
 #ifndef NDEBUG
       bool ok = 
 #endif

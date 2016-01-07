@@ -3720,6 +3720,13 @@ namespace LegionRuntime {
     {
       return runtime->get_local_args(ctx, point, local_size); 
     }
+
+    //--------------------------------------------------------------------------
+    const void* Runtime::find_user_data(VariantID vid)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->find_user_data(vid);
+    }
     
     //--------------------------------------------------------------------------
     /*static*/ int Runtime::start(int argc, char **argv, 
@@ -3844,42 +3851,25 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ TaskID Runtime::update_collection_table(
-        LowLevelFnptr low_level_ptr, InlineFnptr inline_ptr, TaskID uid,
-        Processor::Kind proc_kind, bool single_task, bool index_space_task,
-        VariantID vid, size_t return_size, 
-        const TaskConfigOptions &options, const char *name)
+    VariantID Runtime::register_variant(const TaskVariantRegistrar &registrar,
+                                  const void *user_data, size_t user_data_size,
+                                  LowLevelFnptr low_ptr, InlineFnptr inline_ptr)
     //--------------------------------------------------------------------------
     {
-      return Internal::update_collection_table(low_level_ptr,inline_ptr,
-                                                    uid,proc_kind,single_task, 
-                                                    index_space_task,vid,
-                                                    return_size,options,name);
+      return runtime->register_variant(registrar, user_data, user_data_size,
+                                       low_ptr, inline_ptr);
     }
-
+    
     //--------------------------------------------------------------------------
-    /*static*/ TaskID Runtime::update_collection_table(
-        LowLevelFnptr low_level_ptr, InlineFnptr inline_ptr, TaskID uid,
-        Processor::Kind proc_kind, bool single_task, bool index_space_task,
-        VariantID vid, size_t return_size, 
-        const TaskConfigOptions &options, const char *name,
-        const void *user_data, size_t user_data_size)
+    /*static*/ VariantID Runtime::preregister_variant(
+                                  const TaskVariantRegistrar &registrar,
+                                  const void *user_data, size_t user_data_size,
+                                  LowLevelFnptr low_ptr, InlineFnptr inline_ptr)
     //--------------------------------------------------------------------------
     {
-      return Internal::update_collection_table(low_level_ptr,inline_ptr,
-                                                    uid,proc_kind,single_task, 
-                                                    index_space_task,vid,
-                                                    return_size,options,name,
-                                                    user_data, user_data_size);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ const void* Runtime::find_user_data(TaskID tid,
-                                                            VariantID vid)
-    //--------------------------------------------------------------------------
-    {
-      return Internal::find_user_data(tid, vid);
-    }
+      return Internal::preregister_variant(registrar, user_data, user_data_size,
+                                           low_ptr, inline_ptr);
+    } 
 
     //--------------------------------------------------------------------------
     /*static*/ void Runtime::enable_profiling(void)

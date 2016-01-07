@@ -1645,8 +1645,8 @@ namespace LegionRuntime {
       assert(arglen == sizeof(Context));
 #endif
       Task *task = reinterpret_cast<Task*>(ctx);
-      const UDT *user_data = (const UDT *)Runtime::find_user_data(
-                                     task->task_id, task->selected_variant);
+      const UDT *user_data = (const UDT *)runtime->find_user_data(
+                                                    task->selected_variant);
 
       const std::vector<PhysicalRegion> &regions = runtime->begin_task(ctx);
 
@@ -1677,8 +1677,8 @@ namespace LegionRuntime {
       assert(arglen == sizeof(Context));
 #endif
       Task *task = reinterpret_cast<Task*>(ctx);
-      const UDT *user_data = (const UDT *)Runtime::find_user_data(
-                                     task->task_id, task->selected_variant);
+      const UDT *user_data = (const UDT *)runtime->find_user_data(
+                                                    task->selected_variant);
 
       const std::vector<PhysicalRegion> &regions = runtime->begin_task(ctx);
 
@@ -1882,8 +1882,8 @@ namespace LegionRuntime {
       // Assert that the return type size is within the required size
       LEGION_STATIC_ASSERT(sizeof(T) <= MAX_RETURN_SIZE);
 
-      const UDT *user_data = (const UDT *)Runtime::find_user_data(
-                                     task->task_id, task->selected_variant);
+      const UDT *user_data = (const UDT *)runtime->find_user_data(
+                                                    task->selected_variant);
 
       T return_value = (*TASK_PTR)(task, regions, ctx, runtime, *user_data);
 
@@ -1903,8 +1903,8 @@ namespace LegionRuntime {
         void *&return_addr, size_t &return_size)
     //--------------------------------------------------------------------------
     {
-      const UDT *user_data = (const UDT *)Runtime::find_user_data(
-                                      task->task_id, task->selected_variant);
+      const UDT *user_data = (const UDT *)runtime->find_user_data(
+                                                   task->selected_variant);
 
       (*TASK_PTR)(task, regions, ctx, runtime, *user_data);
 
@@ -1982,7 +1982,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     template<
-      void (*TASK_PTR)(const void*,size_t,const void*,size_t,const DomainPoint&, 
+      void (*TASK_PTR)(const void*,size_t,const void*,size_t,const DomainPoint&,
                  const std::vector<RegionRequirement>&,
                  const std::vector<PhysicalRegion>&,Context,Runtime*)>
     void LegionTaskWrapper::high_level_inline_index_task_wrapper(
@@ -2004,6 +2004,111 @@ namespace LegionRuntime {
     template<typename T,
       T (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
                     Context, Runtime*)>
+    VariantID Runtime::register_task_variant(
+                                          const TaskVariantRegistrar &registrar)
+    //--------------------------------------------------------------------------
+    {
+      return register_variant(registrar, NULL/*UDT*/, 0/*sizeof(UDT)*/,
+                              LegionWrapper::legion_task_wrapper<T,TASK_PTR>,
+                              LegionWrapper::inline_task_wrapper<T,TASK_PTR>);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T, typename UDT,
+      T (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
+                    Context, Runtime*, const UDT&)>
+    VariantID Runtime::register_task_variant(
+                    const TaskVariantRegistrar &registrar, const UDT &user_data)
+    //--------------------------------------------------------------------------
+    {
+      return register_variant(registrar, &user_data, sizeof(UDT),
+                              LegionWrapper::legion_task_wrapper<T,TASK_PTR>,
+                              LegionWrapper::inline_task_wrapper<T,TASK_PTR>);
+    }
+
+    //--------------------------------------------------------------------------
+    template<
+      void (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
+                       Context, Runtime*)>
+    VariantID Runtime::register_task_variant(
+                                          const TaskVariantRegistrar &registrar)
+    //--------------------------------------------------------------------------
+    {
+      return register_variant(registrar, NULL/*UDT*/, 0/*sizeof(UDT)*/,
+                              LegionWrapper::legion_task_wrapper<TASK_PTR>,
+                              LegionWrapper::inline_task_wrapper<TASK_PTR>);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename UDT,
+      void (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
+                       Context, Runtime*)>
+    VariantID Runtime::register_task_variant(
+                    const TaskVariantRegistrar &registrar, const UDT &user_data)
+    //--------------------------------------------------------------------------
+    {
+      return register_variant(registrar, &user_data, sizeof(UDT),
+                              LegionWrapper::legion_task_wrapper<TASK_PTR>,
+                              LegionWrapper::inline_task_wrapper<TASK_PTR>);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T,
+      T (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
+                    Context, Runtime*)>
+    /*static*/ VariantID Runtime::preregister_task_variant(
+                                          const TaskVariantRegistrar &registrar)
+    //--------------------------------------------------------------------------
+    {
+      return preregister_variant(registrar, NULL/*UDT*/, 0/*sizeof(UDT)*/,
+                              LegionWrapper::legion_task_wrapper<T,TASK_PTR>,
+                              LegionWrapper::inline_task_wrapper<T,TASK_PTR>);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T, typename UDT,
+      T (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
+                    Context, Runtime*, const UDT&)>
+    /*static*/ VariantID Runtime::preregister_task_variant(
+                    const TaskVariantRegistrar &registrar, const UDT &user_data)
+    //--------------------------------------------------------------------------
+    {
+      return preregister_variant(registrar, &user_data, sizeof(UDT),
+                              LegionWrapper::legion_task_wrapper<T,TASK_PTR>,
+                              LegionWrapper::inline_task_wrapper<T,TASK_PTR>);
+    }
+
+    //--------------------------------------------------------------------------
+    template<
+      void (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
+                       Context, Runtime*)>
+    /*static*/ VariantID Runtime::preregister_task_variant(
+                                          const TaskVariantRegistrar &registrar)
+    //--------------------------------------------------------------------------
+    {
+      return preregister_variant(registrar, NULL/*UDT*/, 0/*sizeof(UDT)*/,
+                              LegionWrapper::legion_task_wrapper<TASK_PTR>,
+                              LegionWrapper::inline_task_wrapper<TASK_PTR>);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename UDT,
+      void (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
+                       Context, Runtime*)>
+    /*static*/ VariantID Runtime::preregister_task_variant(
+                    const TaskVariantRegistrar &registrar, const UDT &user_data)
+    //--------------------------------------------------------------------------
+    {
+      return preregister_variant(registrar, &user_data, sizeof(UDT),
+                              LegionWrapper::legion_task_wrapper<TASK_PTR>,
+                              LegionWrapper::inline_task_wrapper<TASK_PTR>);
+    }
+
+
+    //--------------------------------------------------------------------------
+    template<typename T,
+      T (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
+                    Context, Runtime*)>
     /*static*/ TaskID Runtime::register_legion_task(TaskID id,
                                                     Processor::Kind proc_kind,
                                                     bool single, bool index,
@@ -2012,17 +2117,31 @@ namespace LegionRuntime {
                                                     const char *task_name)
     //--------------------------------------------------------------------------
     {
-      if (task_name == NULL)
+      TaskVariantRegistrar registrar(id, task_name);
+      registrar.set_leaf(options.leaf);
+      registrar.set_inner(options.inner);
+      registrar.set_idempotent(options.idempotent);
+      switch (proc_kind)
       {
-        // Has no name, so just call it by 'unnamed_task_<uid>'
-        char *buffer = (char*)malloc(32*sizeof(char));
-        sprintf(buffer,"unnamed_task_%d",id);
-        task_name = buffer;
+        case Processor::LOC_PROC:
+        case Processor::IO_PROC:
+          {
+            registrar.add_constraint(
+                ISAConstraint(X86_ISA | ARM_ISA | POW_ISA));
+            break;
+          }
+        case Processor::TOC_PROC:
+          {
+            registrar.add_constraint(
+                ISAConstraint(CUDA_ISA));
+            break;
+          }
+        default:
+          assert(false); // Not allowed to generate tasks for other kinds 
       }
-      return Runtime::update_collection_table(
-        LegionTaskWrapper::legion_task_wrapper<T,TASK_PTR>, 
-        LegionTaskWrapper::inline_task_wrapper<T,TASK_PTR>, id, proc_kind, 
-                            single, index, vid, sizeof(T), options, task_name);
+      return preregister_variant(registrar, NULL/*UDT*/, 0/*sizeof(UDT)*/,
+                              LegionWrapper::legion_task_wrapper<T,TASK_PTR>,
+                              LegionWrapper::inline_task_wrapper<T,TASK_PTR>);
     }
 
     //--------------------------------------------------------------------------
@@ -2037,19 +2156,31 @@ namespace LegionRuntime {
                                                     const char *task_name)
     //--------------------------------------------------------------------------
     {
-      if (task_name == NULL)
+      TaskVariantRegistrar registrar(id, task_name);
+      registrar.set_leaf(options.leaf);
+      registrar.set_inner(options.inner);
+      registrar.set_idempotent(options.idempotent);
+      switch (proc_kind)
       {
-        // Has no name, so just call it by 'unnamed_task_<uid>'
-        char *buffer = (char*)malloc(32*sizeof(char));
-        sprintf(buffer,"unnamed_task_%d",id);
-        task_name = buffer;
+        case Processor::LOC_PROC:
+        case Processor::IO_PROC:
+          {
+            registrar.add_constraint(
+                ISAConstraint(X86_ISA | ARM_ISA | POW_ISA));
+            break;
+          }
+        case Processor::TOC_PROC:
+          {
+            registrar.add_constraint(
+                ISAConstraint(CUDA_ISA));
+            break;
+          }
+        default:
+          assert(false); // Not allowed to generate tasks for other kinds 
       }
-      else
-        task_name = strdup(task_name);
-      return Runtime::update_collection_table(
-        LegionTaskWrapper::legion_task_wrapper<TASK_PTR>, 
-        LegionTaskWrapper::inline_task_wrapper<TASK_PTR>, id, proc_kind, 
-                            single, index, vid, 0/*size*/, options, task_name);
+      return preregister_variant(registrar, NULL/*UDT*/, 0/*sizeof(UDT)*/,
+                              LegionWrapper::legion_task_wrapper<TASK_PTR>,
+                              LegionWrapper::inline_task_wrapper<TASK_PTR>);
     }
 
     //--------------------------------------------------------------------------
@@ -2065,20 +2196,31 @@ namespace LegionRuntime {
                                                     const char *task_name)
     //--------------------------------------------------------------------------
     {
-      if (task_name == NULL)
+      TaskVariantRegistrar registrar(id, task_name);
+      registrar.set_leaf(options.leaf);
+      registrar.set_inner(options.inner);
+      registrar.set_idempotent(options.idempotent);
+      switch (proc_kind)
       {
-        // Has no name, so just call it by 'unnamed_task_<uid>'
-        char *buffer = (char*)malloc(32*sizeof(char));
-        sprintf(buffer,"unnamed_task_%d",id);
-        task_name = buffer;
+        case Processor::LOC_PROC:
+        case Processor::IO_PROC:
+          {
+            registrar.add_constraint(
+                ISAConstraint(X86_ISA | ARM_ISA | POW_ISA));
+            break;
+          }
+        case Processor::TOC_PROC:
+          {
+            registrar.add_constraint(
+                ISAConstraint(CUDA_ISA));
+            break;
+          }
+        default:
+          assert(false); // Not allowed to generate tasks for other kinds 
       }
-      else
-        task_name = strdup(task_name);
-      return Runtime::update_collection_table(
-        LegionTaskWrapper::legion_udt_task_wrapper<T,UDT,TASK_PTR>,
-        LegionTaskWrapper::inline_udt_task_wrapper<T,UDT,TASK_PTR>, id, 
-                              proc_kind, single, index, vid, sizeof(T), 
-                              options, task_name, &user_data, sizeof(UDT));
+      return preregister_variant(registrar, &user_data, sizeof(UDT),
+                              LegionWrapper::legion_task_wrapper<T,TASK_PTR>,
+                              LegionWrapper::inline_task_wrapper<T,TASK_PTR>);
     }
 
     //--------------------------------------------------------------------------
@@ -2094,20 +2236,31 @@ namespace LegionRuntime {
                                                     const char *task_name)
     //--------------------------------------------------------------------------
     {
-      if (task_name == NULL)
+      TaskVariantRegistrar registrar(id, task_name);
+      registrar.set_leaf(options.leaf);
+      registrar.set_inner(options.inner);
+      registrar.set_idempotent(options.idempotent);
+      switch (proc_kind)
       {
-        // Has no name, so just call it by 'unnamed_task_<uid>'
-        char *buffer = (char*)malloc(32*sizeof(char));
-        sprintf(buffer,"unnamed_task_%d",id);
-        task_name = buffer;
+        case Processor::LOC_PROC:
+        case Processor::IO_PROC:
+          {
+            registrar.add_constraint(
+                ISAConstraint(X86_ISA | ARM_ISA | POW_ISA));
+            break;
+          }
+        case Processor::TOC_PROC:
+          {
+            registrar.add_constraint(
+                ISAConstraint(CUDA_ISA));
+            break;
+          }
+        default:
+          assert(false); // Not allowed to generate tasks for other kinds 
       }
-      else
-        task_name = strdup(task_name);
-      return Runtime::update_collection_table(
-        LegionTaskWrapper::legion_udt_task_wrapper<UDT,TASK_PTR>,
-        LegionTaskWrapper::inline_udt_task_wrapper<UDT,TASK_PTR>, id, proc_kind,
-                                         single, index, vid, 0/*size*/, options, 
-                                         task_name, &user_data, sizeof(UDT));
+      return preregister_variant(registrar, NULL/*UDT*/, 0/*sizeof(UDT)*/,
+                              LegionWrapper::legion_task_wrapper<TASK_PTR>,
+                              LegionWrapper::inline_task_wrapper<TASK_PTR>);
     }
 
     //--------------------------------------------------------------------------

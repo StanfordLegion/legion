@@ -1410,6 +1410,11 @@ namespace LegionRuntime {
                     bool owned);
       const void* get_local_args(Context ctx, DomainPoint &point, 
                                  size_t &local_size);
+      const void* find_user_data(VariantID vid);
+      VariantID register_variant(const TaskVariantRegistrar &registrar,
+                                 const void *user_data, size_t user_data_size,
+                                 LowLevelFnptr low_ptr, InlineFnptr inline_ptr,
+                                 VariantID vid = AUTO_GENERATE_ID); 
     public:
       // Memory manager functions
       MemoryManager* find_memory(Memory mem);
@@ -2167,22 +2172,10 @@ namespace LegionRuntime {
                                     ProjectionID handle, void *func_ptr);
       static ProjectionID register_partition_projection_function(
                                     ProjectionID handle, void *func_ptr);
-      static TaskID update_collection_table(
-                      LowLevelFnptr low_level_ptr, InlineFnptr inline_ptr,
-                      TaskID uid, Processor::Kind proc_kind, 
-                      bool single_task, bool index_space_task,
-                      VariantID &vid, size_t return_size,
-                      const TaskConfigOptions &options,
-                      const char *name);
-      static TaskID update_collection_table(
-                      LowLevelFnptr low_level_ptr, InlineFnptr inline_ptr,
-                      TaskID uid, Processor::Kind proc_kind, 
-                      bool single_task, bool index_space_task,
-                      VariantID vid, size_t return_size,
-                      const TaskConfigOptions &options,
-                      const char *name, 
-                      const void *user_data, size_t user_data_size);
-      static const void* find_user_data(TaskID tid, VariantID vid);
+      static VariantID preregister_variant(
+                      const TaskVariantRegistrar &registrar,
+                      const void *user_data, size_t user_data_size,
+                      LowLevelFnptr low_ptr, InlineFnptr inline_ptr);
       static TaskVariantCollection* get_variant_collection(
                       Processor::TaskFuncID tid);
       static PartitionProjectionFnptr 
