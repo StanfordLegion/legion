@@ -14,19 +14,19 @@
 
 import "regent"
 
-struct p1 {
+fspace p1 {
   a : int,
   b : int,
 }
 
-struct p2 {
+fspace p2 {
   c : int,
   d : int,
   e : p1,
   f : p1,
 }
 
-struct p3 {
+fspace p3 {
   g : int,
   h : int,
   i : p1,
@@ -69,7 +69,6 @@ where
   reads(r.{i.a, j.b, k.{c, e.b}, l.{e.{a, b}, d, c, f.{}}})
 do
 end
-z:compile()
 
 task main()
   regentlib.assert(tf() == 21, "test failed")

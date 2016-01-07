@@ -1036,6 +1036,9 @@ function std.unpack_fields(fs, symbols)
       new_type = std.region(fspace_type)
     else
       new_type = std.type_sub(old_type, mapping)
+      if std.is_fspace_instance(new_type) then
+        new_type = std.unpack_fields(new_type)
+      end
     end
     new_symbol.type = new_type
     new_fields:insert({
@@ -1057,9 +1060,8 @@ function std.unpack_fields(fs, symbols)
     })
   end
 
-  local result_type = terralib.types.newstruct()
+  local result_type = std.ctor(new_fields)
   result_type.is_unpack_result = true
-  result_type.entries = new_fields
 
   return result_type, new_constraints
 end
@@ -1157,11 +1159,7 @@ function std.get_field(t, f)
     end
     return field_type
   elseif std.is_ref(t) then
-    local field_path = terralib.newlist()
-    for _, field in ipairs(t.field_path) do
-      field_path:insert(field)
-    end
-    field_path:insert(f)
+    local field_path = t.field_path .. data.newtuple(f)
     local field_type = std.ref(t, unpack(field_path))
     if not std.as_read(field_type) then
       return nil
