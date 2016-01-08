@@ -202,7 +202,7 @@ namespace Realm {
       std::map<CustomSerdezID, const CustomSerdezUntyped *> custom_serdez_table;
 
 #ifdef NODE_LOGGING
-      static const char *prefix;
+      std::string prefix;
 #endif
 
       Node *nodes;
