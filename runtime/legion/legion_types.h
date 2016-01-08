@@ -296,6 +296,8 @@ namespace LegionRuntime {
       SEND_REDUCTION_CREATION,
       SEND_CREATION_RESPONSE,
       SEND_BACK_LOGICAL_STATE,
+      SEND_TOP_LEVEL_TASK_REQUEST,
+      SEND_TOP_LEVEL_TASK_COMPLETE,
       SEND_SHUTDOWN_NOTIFICATION,
       SEND_SHUTDOWN_RESPONSE,
       LAST_SEND_KIND, // This one must be last
@@ -380,6 +382,8 @@ namespace LegionRuntime {
         "Send Reduction Creation",                                    \
         "Send Creation Response",                                     \
         "Send Back Logical State",                                    \
+        "Top Level Task Request",                                     \
+        "Top Level Task Complete",                                    \
         "Send Shutdown Notification",                                 \
         "Send Shutdown Response",                                     \
       };
