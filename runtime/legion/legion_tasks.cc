@@ -5258,6 +5258,7 @@ namespace LegionRuntime {
         // Record the event for when we are done profiling
         profiling_done = info.profiling_done;
       }
+      runtime->increment_total_outstanding_tasks();
       Event task_launch_event = launch_processor.spawn(low_id, &proxy_this,
                                     sizeof(proxy_this), profiling_requests,
                                     start_condition, task_priority);

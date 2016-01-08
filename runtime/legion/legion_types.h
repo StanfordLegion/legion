@@ -148,6 +148,7 @@ namespace LegionRuntime {
       HLR_FIELD_SEMANTIC_INFO_REQ_TASK_ID,
       HLR_REGION_SEMANTIC_INFO_REQ_TASK_ID,
       HLR_PARTITION_SEMANTIC_INFO_REQ_TASK_ID,
+      HLR_SHUTDOWN_ATTEMPT_TASK_ID, // These three must be before last
       HLR_SHUTDOWN_NOTIFICATION_TASK_ID,
       HLR_SHUTDOWN_RESPONSE_TASK_ID,
       HLR_LAST_TASK_ID, // This one should always be last
@@ -202,6 +203,7 @@ namespace LegionRuntime {
         "Field Semantic Request",                                 \
         "Region Semantic Request",                                \
         "Partition Semantic Request",                             \
+        "Shutdown Attempt",                                       \
         "Shutdown Notification",                                  \
         "Shutdown Response",                                      \
       };

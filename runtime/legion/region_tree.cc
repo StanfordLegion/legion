@@ -10136,17 +10136,38 @@ namespace LegionRuntime {
             state.dirty_below |= new_dirty_fields;
             state.advance_version_numbers(new_dirty_fields);
           }
-          // We already know that all the version numbers have been advanced
-          state.record_version_numbers(user.field_mask, user, version_info, 
-                                 true/*previous*/, true/*path only*/,
-                                 false/*final*/, false/*close top*/,
-                                 report_uninitialized);
+          // Check to see if we've already done a partial close
+          FieldMask partial_close = user.field_mask & state.partially_closed;
+          if (!partial_close)
+          {
+            // We already know that all the version numbers have been advanced
+            state.record_version_numbers(user.field_mask, user, version_info, 
+                                   true/*previous*/, true/*path only*/,
+                                   false/*final*/, false/*close top*/,
+                                   report_uninitialized);
+          }
+          else
+          {
+            // Partially closed fields record the current version
+            state.record_version_numbers(partial_close, user, version_info,
+                                   false/*previous*/, true/*path only*/,
+                                   false/*final*/, false/*close top*/,
+                                   report_uninitialized);
+            FieldMask non_partial = user.field_mask - partial_close;
+            if (!!non_partial)
+              state.record_version_numbers(non_partial, user, version_info,
+                                   true/*previous*/, true/*path only*/,
+                                   false/*final*/, false/*close top*/,
+                                   report_uninitialized);
+          }
         }
         else // read-only case
         {
           // See if there are any dirty fields for which we need to capture
-          // the previous version numbers
-          FieldMask dirty_overlap = user.field_mask & state.dirty_below;
+          // the previous version numbers, these are fields for which we
+          // are dirtly below, but have yet to perform a partial close
+          FieldMask dirty_overlap = 
+            user.field_mask & (state.dirty_below - state.partially_closed);
           if (!dirty_overlap)
           {
             // No dirty fields below, which means we don't have any previous
@@ -10462,17 +10483,37 @@ namespace LegionRuntime {
             state.dirty_below |= new_dirty_fields;
             state.advance_version_numbers(new_dirty_fields);
           }
-          // We already know that we advanced all the version numbers
-          state.record_version_numbers(user.field_mask, user, version_info,
-                                 true/*previous*/, true/*path only*/,
-                                 false/*final*/, false/*close top*/,
-                                 report_uninitialized);
+          // Check to see if we've already done a partial close
+          FieldMask partial_close = user.field_mask & state.partially_closed;
+          if (!partial_close)
+          {
+            // We already know that all the version numbers have been advanced
+            state.record_version_numbers(user.field_mask, user, version_info, 
+                                   true/*previous*/, true/*path only*/,
+                                   false/*final*/, false/*close top*/,
+                                   report_uninitialized);
+          }
+          else
+          {
+            // Partially closed fields record the current version
+            state.record_version_numbers(partial_close, user, version_info,
+                                   false/*previous*/, true/*path only*/,
+                                   false/*final*/, false/*close top*/,
+                                   report_uninitialized);
+            FieldMask non_partial = user.field_mask - partial_close;
+            if (!!non_partial)
+              state.record_version_numbers(non_partial, user, version_info,
+                                   true/*previous*/, true/*path only*/,
+                                   false/*final*/, false/*close top*/,
+                                   report_uninitialized);
+          }
         }
         else // read only case
         {
           // See if there are any dirty fields for which we need to 
           // capture the previous version numbers
-          FieldMask dirty_overlap = user.field_mask & state.dirty_below;
+          FieldMask dirty_overlap = 
+            user.field_mask & (state.dirty_below - state.partially_closed);
           if (!dirty_overlap)
           {
             // No dirty fields below, so we don't need to 

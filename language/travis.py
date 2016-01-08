@@ -64,6 +64,7 @@ if __name__ == '__main__':
     env = install_dependencies()
     env.update({
         'LG_RT_DIR': runtime_dir,
+        'LUAJIT_URL': 'http://legion.stanford.edu/~eslaught/mirror/LuaJIT-2.0.4.tar.gz',
     })
 
     test(root_dir, True, env)
