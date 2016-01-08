@@ -249,10 +249,6 @@ namespace LegionRuntime {
       }
     }
 
-#ifdef NODE_LOGGING
-    /*static*/ const char* RuntimeImpl::prefix = ".";
-#endif
-
 #if 0
     size_t IndexSpaceImpl::instance_size(const ReductionOpUntyped *redop /*= 0*/, off_t list_size /*= -1*/)
     {
