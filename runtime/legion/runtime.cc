@@ -1707,8 +1707,7 @@ namespace LegionRuntime {
         superscalar_width(width), 
         stealing_disabled(no_steal), max_outstanding_steals(max_steals),
         next_local_index(0),
-        task_scheduler_enabled(false), pending_shutdown(false),
-        total_active_contexts(0),
+        task_scheduler_enabled(false), total_active_contexts(0),
         ready_queues(std::vector<std::list<TaskOp*> >(def_mappers)),
         mapper_objects(std::vector<Mapper*>(def_mappers,NULL)),
         mapper_locks(
@@ -1738,8 +1737,7 @@ namespace LegionRuntime {
         proc_kind(Processor::LOC_PROC),
         superscalar_width(0), stealing_disabled(false), 
         max_outstanding_steals(0), next_local_index(0),
-        task_scheduler_enabled(false), pending_shutdown(false),
-        total_active_contexts(0)
+        task_scheduler_enabled(false), total_active_contexts(0)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -2368,7 +2366,7 @@ namespace LegionRuntime {
       // Now re-take the lock and re-check the condition to see 
       // if the next scheduling task should be launched
       AutoLock q_lock(queue_lock);
-      if (!pending_shutdown && (total_active_contexts > 0))
+      if (total_active_contexts > 0)
       {
         task_scheduler_enabled = true;
         launch_task_scheduler();
@@ -2387,14 +2385,6 @@ namespace LegionRuntime {
       runtime->issue_runtime_meta_task(&sched_args, sizeof(sched_args),
                                        HLR_SCHEDULER_ID);
     } 
-
-    //--------------------------------------------------------------------------
-    void ProcessorManager::notify_pending_shutdown(void)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock q_lock(queue_lock);
-      pending_shutdown = true;
-    }
 
     //--------------------------------------------------------------------------
     void ProcessorManager::activate_context(SingleTask *context)
@@ -3990,10 +3980,18 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void ShutdownManager::record_outstanding_tasks(void)
+    //--------------------------------------------------------------------------
+    {
+      // Instant death
+      result = false;
+    }
+
+    //--------------------------------------------------------------------------
     void ShutdownManager::finalize(void)
     //--------------------------------------------------------------------------
     {
-      if (result)
+      if (result && !managers.empty())
       {
         // Check our managers for messages
         for (std::map<AddressSpaceID,MessageManager*>::const_iterator it = 
@@ -4019,8 +4017,8 @@ namespace LegionRuntime {
       else
       {
         // We failed, so try again
-        runtime->initiate_runtime_shutdown(runtime->address_space);
-        log_shutdown.info("FAILED!  Trying again...");
+        log_shutdown.info("FAILED SHUTDOWN!  Trying again...");
+        runtime->issue_runtime_shutdown_attempt();
       }
     }
 
@@ -4138,7 +4136,8 @@ namespace LegionRuntime {
         runtime_stride(address_spaces.size()), profiler(NULL),
         forest(new RegionTreeForest(this)), 
         has_explicit_utility_procs(!local_utilities.empty()), 
-        outstanding_top_level_tasks(1), shutdown_manager(NULL),
+        total_outstanding_tasks(0), outstanding_top_level_tasks(0), 
+        shutdown_manager(NULL),
         shutdown_lock(Reservation::create_reservation()),
 #ifdef SPECIALIZED_UTIL_PROCS
         cleanup_proc(cleanup), gc_proc(gc), message_proc(message),
@@ -4818,6 +4817,7 @@ namespace LegionRuntime {
                                       top_task->get_unique_task_id(),
                                       top_task->variants->name);
 #endif
+        increment_outstanding_top_level_tasks();
         // Put the task in the ready queue
         add_to_ready_queue(proc, top_task, false/*prev failure*/);
       }
@@ -10911,6 +10911,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       ctx->end_task(result, result_size, owned);
+      decrement_total_outstanding_tasks();
     }
 
     //--------------------------------------------------------------------------
@@ -13285,6 +13286,10 @@ namespace LegionRuntime {
                                            Processor target)
     //--------------------------------------------------------------------------
     {
+      // If this is not a task directly related to shutdown, 
+      // then increment the number of outstanding tasks
+      if (tid < HLR_SHUTDOWN_ATTEMPT_TASK_ID)
+        increment_total_outstanding_tasks();
       if (!target.exists())
       {
         // If we don't have a processor to explicitly target, figure
@@ -13430,7 +13435,7 @@ namespace LegionRuntime {
     void Internal::recycle_distributed_id(DistributedID did,Event recycle_event)
     //--------------------------------------------------------------------------
     {
-      if (recycle_event.exists())
+      if (!recycle_event.has_triggered())
       {
         DeferredRecycleArgs deferred_recycle_args;
         deferred_recycle_args.hlr_id = HLR_DEFERRED_RECYCLE_ID;
@@ -13617,32 +13622,68 @@ namespace LegionRuntime {
     void Internal::increment_outstanding_top_level_tasks(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
-#ifndef NDEBUG
-      unsigned previous = 
-#endif
-#endif
-      __sync_fetch_and_add(&outstanding_top_level_tasks,1);
-#ifdef DEBUG_HIGH_LEVEL
-      assert(previous > 0);
-#endif
+      // Check to see if we are on node 0 or not
+      if (address_space != 0)
+      {
+        // Send a message to node 0 requesting permission to 
+        // lauch a new top-level task and wait on an event
+        // to signal that permission has been granted
+        UserEvent grant_event = UserEvent::create_user_event();
+        
+
+        grant_event.wait();
+      }
+      else
+      {
+        __sync_fetch_and_add(&outstanding_top_level_tasks,1);
+      }
     }
 
     //--------------------------------------------------------------------------
     void Internal::decrement_outstanding_top_level_tasks(void)
     //--------------------------------------------------------------------------
     {
-      unsigned previous = __sync_fetch_and_sub(&outstanding_top_level_tasks,1);
-#ifdef DEBUG_HIGH_LEVEL
-      assert(previous > 0);
-#endif
-      // If there was only one left before, we're now at zero so we're done
-      if (previous == 1)
+      // Check to see if we are on node 0 or not
+      if (address_space != 0)
       {
-        log_run.spew("Computation has terminated. "
-                     "Shutting down the Legion runtime...");
-        initiate_runtime_shutdown(address_space);
+        // Send a message to node 0 indicating that we finished
+        // executing a top-level task
       }
+      else
+      {
+        unsigned prev = __sync_fetch_and_sub(&outstanding_top_level_tasks,1);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(prev > 0);
+#endif
+        // Check to see if we have no more outstanding top-level tasks
+        // If we don't launch a task to handle the try to shutdown the runtime 
+        if (prev == 1)
+          issue_runtime_shutdown_attempt();
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void Internal::issue_runtime_shutdown_attempt(void)
+    //--------------------------------------------------------------------------
+    {
+      HLRTaskID hlr_id = HLR_SHUTDOWN_ATTEMPT_TASK_ID; 
+      // Issue this with a low priority so that other meta-tasks
+      // have an opportunity to run
+      issue_runtime_meta_task(&hlr_id, sizeof(hlr_id), hlr_id, NULL,
+                              Event::NO_EVENT, INT_MIN);
+    }
+
+    //--------------------------------------------------------------------------
+    void Internal::attempt_runtime_shutdown(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(address_space == 0); // should only happen on node 0
+#endif
+      // As long as we still don't have any top-level tasks, 
+      // keep trying to shutdown the runtime
+      if (__sync_fetch_and_add(&outstanding_top_level_tasks,0) == 0)
+        initiate_runtime_shutdown(address_space);
     }
 
     //--------------------------------------------------------------------------
@@ -13651,14 +13692,8 @@ namespace LegionRuntime {
     {
       log_shutdown.info("Received notification on node %d from node %d",
                         address_space, source);
-      // Tell all the processor managers that there is a pending shutdown
-      for (std::map<Processor,ProcessorManager*>::const_iterator it = 
-            proc_managers.begin(); it != proc_managers.end(); it++)
-      {
-        it->second->notify_pending_shutdown();
-      }
       // Launch our last garbage collection epoch and wait for it to
-      // finish so that we know all messages have been enqueued
+      // finish so we can try to have no outstanding tasks
       Event gc_done = Event::NO_EVENT;
       {
         AutoLock gc(gc_epoch_lock);
@@ -13670,16 +13705,25 @@ namespace LegionRuntime {
       }
       if (!gc_done.has_triggered())
         gc_done.wait();
-      // Count the number of valid message managers
       ShutdownManager *local_manager = 
         new ShutdownManager(this, source, message_managers[source]);
-      for (unsigned idx = 0; idx < MAX_NUM_NODES; idx++)
+      // First check to see if we have any outstanding tasks
+      // which means we are definitely not done
+      if (!has_outstanding_tasks())
       {
-        if (idx == source)
-          continue;
-        if (message_managers[idx] != NULL)
-          local_manager->add_manager(idx, message_managers[idx]);
+        // If we don't have any outstanding tasks then we
+        // need to figure out which managers we have
+        for (unsigned idx = 0; idx < MAX_NUM_NODES; idx++)
+        {
+          if (idx == source)
+            continue;
+          if (message_managers[idx] != NULL)
+            local_manager->add_manager(idx, message_managers[idx]);
+        }
       }
+      else
+        local_manager->record_outstanding_tasks();
+
       // Check to see if we have any remote nodes
       if (local_manager->has_managers())
       {
@@ -13707,13 +13751,16 @@ namespace LegionRuntime {
       }
       else
       {
-        // Check to see if we are on the owner node or not
-        if (source != address_space)
-          local_manager->send_response();
-        else // local node so just shutdown now
-          RealmRuntime::get_runtime().shutdown();
+        local_manager->finalize();
         delete local_manager;
       }
+    }
+
+    //--------------------------------------------------------------------------
+    bool Internal::has_outstanding_tasks(void)
+    //--------------------------------------------------------------------------
+    {
+      return (__sync_fetch_and_add(&total_outstanding_tasks,0) != 0);
     }
 
     //--------------------------------------------------------------------------
@@ -17036,6 +17083,11 @@ namespace LegionRuntime {
                           req_args->tag, req_args->source);
             break;
           }
+        case HLR_SHUTDOWN_ATTEMPT_TASK_ID:
+          {
+            Internal::get_runtime(p)->attempt_runtime_shutdown();
+            break;
+          }
         case HLR_SHUTDOWN_NOTIFICATION_TASK_ID:
           {
             ShutdownManager::NotificationArgs *notification_args = 
@@ -17060,6 +17112,8 @@ namespace LegionRuntime {
         default:
           assert(false); // should never get here
       }
+      if (tid < HLR_SHUTDOWN_ATTEMPT_TASK_ID)
+        Internal::get_runtime(p)->decrement_total_outstanding_tasks();
     }
 
     //--------------------------------------------------------------------------

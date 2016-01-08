@@ -5374,12 +5374,14 @@ namespace LegionRuntime {
       for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
             valid_views.begin(); it != valid_views.end(); it++)
       {
-        it->first->remove_nested_gc_ref(did);
+        if (it->first->remove_nested_gc_ref(did))
+          LogicalView::delete_logical_view(it->first);
       }
       for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it = 
             reduction_views.begin(); it != reduction_views.end(); it++)
       {
-        it->first->remove_nested_gc_ref(did);
+        if (it->first->remove_nested_gc_ref(did))
+          legion_delete(it->first);
       }
     }
 
