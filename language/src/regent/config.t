@@ -21,6 +21,7 @@ local default_options = {
   ["bounds-checks"] = false,
   ["cached-iterators"] = false,
   ["cuda"] = true,
+  ["debug"] = false,
   ["no-dynamic-branches"] = true,
   ["no-dynamic-branches-assert"] = false,
   ["index-launches"] = true,

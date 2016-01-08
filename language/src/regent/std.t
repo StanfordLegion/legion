@@ -1534,13 +1534,25 @@ local bounded_type = terralib.memoize(function(index_type, ...)
     end
   end
 
-  function st.metamethods.__typename(st)
-    local bounds = st.bounds_symbols
+  if std.config["debug"] then
+    function st.metamethods.__typename(st)
+      local bounds = st.bounds_symbols
 
-    if st.points_to_type then
-      return tostring(st.index_type) .. "(" .. tostring(st.points_to_type) .. ", " .. tostring(bounds:mkstring(", ")) .. ")"
-    else
-      return tostring(st.index_type) .. "(" .. tostring(bounds:mkstring(", ")) .. ")"
+      if st.points_to_type then
+        return tostring(st.index_type) .. "(" .. tostring(st.points_to_type) .. ", " .. tostring(bounds:mkstring(", ")) .. " : " .. tostring(st:bounds():mkstring(", ")) .. ")"
+      else
+        return tostring(st.index_type) .. "(" .. tostring(bounds:mkstring(", ")) .. " : " .. tostring(st:bounds():mkstring(", ")) .. ")"
+      end
+    end
+  else
+    function st.metamethods.__typename(st)
+      local bounds = st.bounds_symbols
+
+      if st.points_to_type then
+        return tostring(st.index_type) .. "(" .. tostring(st.points_to_type) .. ", " .. tostring(bounds:mkstring(", ")) .. ")"
+      else
+        return tostring(st.index_type) .. "(" .. tostring(bounds:mkstring(", ")) .. ")"
+      end
     end
   end
 
@@ -1864,8 +1876,10 @@ function std.region(ispace_symbol, fspace_type)
     return self
   end
 
-  function st.metamethods.__typename(st)
-    return "region(" .. tostring(st.fspace_type) .. ")"
+  if not std.config["debug"] then
+    function st.metamethods.__typename(st)
+      return "region(" .. tostring(st.fspace_type) .. ")"
+    end
   end
 
   return st
@@ -2183,10 +2197,18 @@ std.ref = terralib.memoize(function(pointer_type, ...)
     return self.pointer_type:bounds()
   end
 
-  function st.metamethods.__typename(st)
-    local bounds = st.bounds_symbols
+  if std.config["debug"] then
+    function st.metamethods.__typename(st)
+      local bounds = st.bounds_symbols
 
-    return "ref(" .. tostring(st.refers_to_type) .. ", " .. tostring(bounds:mkstring(", ")) .. ")"
+      return "ref(" .. tostring(st.refers_to_type) .. ", " .. tostring(bounds:mkstring(", ")) .. " : " .. tostring(st:bounds():mkstring(", ")) .. ", " .. tostring(st.field_path) .. ")"
+    end
+  else
+    function st.metamethods.__typename(st)
+      local bounds = st.bounds_symbols
+
+      return "ref(" .. tostring(st.refers_to_type) .. ", " .. tostring(bounds:mkstring(", ")) .. ")"
+    end
   end
 
   return st
