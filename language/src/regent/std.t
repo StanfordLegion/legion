@@ -588,6 +588,10 @@ function std.type_supports_constraints(t)
     std.is_list_of_regions(t)
 end
 
+function std.is_ctor(t)
+  return terralib.types.istype(t) and rawget(t, "is_ctor")
+end
+
 function std.is_fspace(x)
   return getmetatable(x) == fspace
 end
@@ -690,6 +694,10 @@ function std.type_maybe_eq(a, b, mapping)
     return std.type_maybe_eq(a.points_to_type, b.points_to_type, mapping)
   elseif std.is_fspace_instance(a) and std.is_fspace_instance(b) and
     a.fspace == b.fspace
+  then
+    return true
+  elseif (std.is_ctor(a) and std.validate_implicit_cast(a, b)) or
+    (std.is_ctor(b) and std.validate_implicit_cast(b, a))
   then
     return true
   elseif std.is_list(a) and std.is_list(b) then
@@ -2382,6 +2390,7 @@ do
   function std.ctor(fields)
     local st = terralib.types.newstruct()
     st.entries = fields
+    st.is_ctor = true
     st.metamethods.__cast = function(from, to, expr)
       if std.is_index_type(to) then
         return `([to]{ __ptr = [to.impl_type](expr)})
