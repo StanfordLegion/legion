@@ -550,7 +550,7 @@ class FieldSpaceNode(object):
         return field_names
 
     def field_mask_string(self, fields):
-        return ', '.join(self.get_field_names(fields))
+        return ','.join(self.get_field_names(fields))
 
     def print_graph(self, printer):
         if self.name != None:
@@ -790,10 +790,16 @@ class SingleTask(object):
         self.generation = 0
 
     def get_name(self):
+        name = ""
         if self.name <> None:
-            return self.name+" "+str(self.uid)
+            name = self.name
         else:
-            return "task "+str(self.uid)
+            name = "task"
+        if self.enclosing <> None:
+            point = "["+self.point.to_dim_string()+"]"
+            name += point
+        name += " (ID: " + str(self.uid) + ")"
+        return name
 
     def get_op_kind(self):
         return SINGLE_OP
@@ -819,6 +825,9 @@ class SingleTask(object):
             return self.reqs[idx]
         else:
             return None
+
+    def get_num_requirements(self):
+        return len(self.reqs)
 
     def add_req_field(self, idx, fid):
         if not idx in self.reqs:
@@ -894,6 +903,9 @@ class SingleTask(object):
         assert idx in self.instances
         return self.instances[idx]
 
+    def get_all_instances(self):
+        return set(self.instances.values())
+
     def physical_traverse(self, component):
         if self.physical_marked:
             return
@@ -918,19 +930,16 @@ class SingleTask(object):
 
     def print_base_node(self, printer, logical):
         color = "lightskyblue"
-        task_title = self.name
-        point = ""
+        task_title = self.get_name()
         if self.enclosing <> None:
             color = "mediumslateblue"
-            point = "["+self.point.to_dim_string()+"]"
-            task_title += point
 
         if self.ctx <> None:
-            task_title += ' in '+self.ctx.name+" (UID: "+str(self.uid)+")"
+            task_title += ' in ' + self.ctx.get_name()
 
         label = generate_html_op_label(task_title, self.reqs,
-                self.instances if not logical else None,
-                color, self.state.verbose)
+                                       self.instances if not logical else None,
+                                       color, self.state.verbose)
 
         printer.println(self.node_name+' [label=<'+label+'>,fontsize=14,'+\
                 'fontcolor=black,shape=record,penwidth=0];')
@@ -1002,8 +1011,7 @@ class SingleTask(object):
             if not check:
                 print "    ERROR: Failed to compute mapping dependence between "+\
                       "index "+str(adep.idx1)+" of "+adep.op1.get_name()+\
-                      " (ID "+str(adep.op1.uid)+") and index "+str(adep.idx2)+ \
-                      " of "+adep.op2.get_name()+" (ID "+str(adep.op2.uid)+")"
+                      " and index "+str(adep.idx2)+" of "+adep.op2.get_name()
                 if adep.op1.get_op_kind() == FENCE_OP:
                     print "      FENCE OPERATION"
                 else:
@@ -1043,9 +1051,8 @@ class SingleTask(object):
                     continue
                 print "    WARNING: Computed extra mapping dependence "+\
                       "between index "+str(mdep.idx1)+" of "+\
-                      mdep.op1.get_name()+" (ID "+str(mdep.op1.uid)+\
-                      ") and index "+str(mdep.idx2)+ " of "+mdep.op2.get_name()+\
-                      " (ID "+str(mdep.op2.uid)+") in context of task "+\
+                      mdep.op1.get_name()+" and index "+str(mdep.idx2)+\
+                      " of "+mdep.op2.get_name()+" in context of task "+\
                       str(self.name)
                 warnings = warnings + 1
 
@@ -1123,8 +1130,12 @@ class SingleTask(object):
                 for inst1 in dep.op1.op_instances:
                     if inst1.get_op_kind() == FENCE_OP:
                         continue
+                    if inst1.get_num_requirements() == 0:
+                        continue
                     for inst2 in dep.op2.op_instances:
                         if inst2.get_op_kind() == FENCE_OP:
+                            continue
+                        if inst2.get_num_requirements() == 0:
                             continue
                         # Check to see if they are still aliased
                         req1 = inst1.get_requirement(dep.idx1)
@@ -1196,25 +1207,23 @@ class SingleTask(object):
                                 assert len(traverser.field_stack) >= 1
                                 last_field = traverser.field_stack[-1]
 
-                                src_inst = node.get_src_inst()
-                                dst_inst = node.get_dst_inst()
-                                src_fields = node.get_src_fields()
                                 dst_fields = node.get_dst_fields()
-
+                                if not last_field in dst_fields:
+                                    return False
+                                dst_inst = node.get_dst_inst(last_field)
                                 if last_inst <> dst_inst:
                                     return False
+
                                 traverser.found = node == traverser.target
                                 if traverser.found:
                                     return False
-                                if not last_field in dst_fields:
-                                    traverser.field_stack.append(last_field)
-                                    traverser.instance_stack.append(dst_inst)
-                                    return not traverser.found
                                 else:
                                     idx = dst_fields.index(last_field)
+                                    src_fields = node.get_src_fields()
                                     traverser.field_stack.append(src_fields[idx])
+                                    src_inst = node.get_src_inst(src_fields[idx])
                                     traverser.instance_stack.append(src_inst)
-                                    return not traverser.found
+                                    return True
                             def traverse_acquire(node, traverser):
                                 if record_visit(node, traverser):
                                     return False
@@ -1269,11 +1278,10 @@ class SingleTask(object):
                                 # a hack for copy operations
                                 if (isinstance(inst2, CopyOp) or \
                                     isinstance(inst2, Copy)) and \
-                                    dst_inst == inst2.get_src_inst() and \
                                     dst_field in inst2.get_src_fields():
-                                        dst_inst = inst2.get_dst_inst()
                                         idx = inst2.get_src_fields().index(dst_field)
                                         dst_field = inst2.get_dst_fields()[idx]
+                                        dst_inst = inst2.get_dst_inst(dst_field)
                                 traverser.instance_stack.append(dst_inst)
                                 traverser.field_stack.append(dst_field)
                                 # Traverse and see if we find inst1
@@ -1283,9 +1291,9 @@ class SingleTask(object):
                                 if not traverser.found:
                                     print "   ERROR: Unable to find data flow path "+\
                                           "between requirement "+str(dep.idx1)+" of "+\
-                                          inst1.get_name()+" (UID "+str(inst1.uid)+") "+\
-                                          "and requirement "+str(dep.idx2)+" of "+inst2.get_name()+\
-                                          " (UID "+str(inst2.uid)+") for field "+str(f)
+                                          inst1.get_name()+"and requirement "+\
+                                          str(dep.idx2)+" of "+inst2.get_name()+\
+                                          " for field "+str(f)
                                     if self.state.verbose:
                                         print "      First Requirement:"
                                         req1.print_requirement()
@@ -1310,7 +1318,7 @@ class IndexTask(object):
         self.node_name = 'task_node_'+str(self.uid)
 
     def get_name(self):
-        return self.name
+        return self.name + " (ID: " + str(self.uid) + ")"
 
     def get_op_kind(self):
         return INDEX_OP
@@ -1329,6 +1337,9 @@ class IndexTask(object):
     def get_requirement(self, idx):
         assert idx in self.reqs
         return self.reqs[idx]
+
+    def get_num_requirements(self):
+        return len(self.reqs)
 
     def add_req_field(self, idx, fid):
         if not idx in self.reqs:
@@ -1377,11 +1388,8 @@ class IndexTask(object):
                 op.get_reachable(reachable, False)
 
     def print_logical_node(self, printer):
-        color = "mediumslateblue"
-        task_title = self.name + " (UID: "+str(self.uid)+")"
-
-        label = generate_html_op_label(task_title, self.reqs, None, color,
-                self.state.verbose)
+        label = generate_html_op_label(self.get_name(), self.reqs, None,
+                                       "mediumslateblue", self.state.verbose)
 
         printer.println(self.node_name+' [label=<'+label+'>,fontsize=14,'+\
                 'fontcolor=black,shape=record,penwidth=0];')
@@ -1428,7 +1436,7 @@ class Mapping(object):
         self.generation = 0
 
     def get_name(self):
-        return "Mapping "+str(self.uid)
+        return "Mapping (ID: "+str(self.uid)+")"
 
     def get_op_kind(self):
         return MAPPING_OP
@@ -1445,6 +1453,9 @@ class Mapping(object):
         assert idx == 0
         assert self.requirement <> None
         return self.requirement
+
+    def get_num_requirements(self):
+        return 1
 
     def add_req_field(self, idx, fid):
         assert idx == 0
@@ -1502,6 +1513,9 @@ class Mapping(object):
         assert self.instance <> None
         return self.instance
 
+    def get_all_instances(self):
+        return set([self.instance])
+
     def physical_traverse(self, component):
         if self.physical_marked:
             return
@@ -1523,12 +1537,8 @@ class Mapping(object):
         self.print_base_node(printer, False)
 
     def print_base_node(self, printer, logical):
-        lines = [[{
-            "label" : 'Mapping in '+self.ctx.name+' (UID: '+str(self.uid)+')',
-            "colspan" : 2 }]]
-
         label = generate_html_op_label(
-                'Mapping in '+self.ctx.name+' (UID: '+str(self.uid)+')',
+                self.get_name() + ' in '+self.ctx.get_name(),
                 [self.requirement], {0 : self.instance}, 'mediumseagreen',
                 self.state.verbose)
 
@@ -1581,7 +1591,7 @@ class Deletion(object):
         self.node_name = 'deletion_node_'+str(self.uid)
 
     def get_name(self):
-        return "Deletion "+str(self.uid)
+        return "Deletion (ID: "+str(self.uid)+")"
 
     def get_op_kind(self):
         return DELETION_OP
@@ -1618,8 +1628,7 @@ class Deletion(object):
                 op.get_reachable(reachable, False)
 
     def print_logical_node(self, printer):
-        printer.println(self.node_name+' [style=filled,label="'+\
-                'Deletion\\nUnique\ ID\ '+str(self.uid)+\
+        printer.println(self.node_name+' [style=filled,label="'+self.get_name()+\
                 '",fillcolor=dodgerblue3,fontsize=14,fontcolor=black,'+\
                 'shape=record,penwidth=2];')
 
@@ -1665,20 +1674,32 @@ class CopyOp(object):
     def get_ctx(self):
         return self.ctx
 
-    def get_src_inst(self):
-        return self.instances[0]
+    def get_inst(self, idx, field):
+        if field in self.instances[idx]:
+            return self.instances[idx][field]
+        else:
+            return None
 
-    def get_dst_inst(self):
-        return self.instances[1]
+    def get_src_inst(self, field):
+        return self.get_inst(0, field)
+
+    def get_dst_inst(self, field):
+        return self.get_inst(1, field)
+
+    def get_src_field_name(self, field):
+        return self.reqs[0].get_field_name(field)
 
     def get_src_fields(self):
         return self.reqs[0].fields
+
+    def get_dst_field_name(self, field):
+        return self.reqs[1].get_field_name(field)
 
     def get_dst_fields(self):
         return self.reqs[1].fields
 
     def get_name(self):
-        return "Copy Op "+str(self.uid)
+        return "Copy Across (ID: "+str(self.uid)+")"
 
     def get_op_kind(self):
         return COPY_OP
@@ -1690,6 +1711,9 @@ class CopyOp(object):
     def get_requirement(self, idx):
         assert idx in self.reqs
         return self.reqs[idx]
+
+    def get_num_requirements(self):
+        return len(self.reqs)
 
     def add_req_field(self, idx, fid):
         if not idx in self.reqs:
@@ -1744,7 +1768,11 @@ class CopyOp(object):
     
     def add_instance(self, idx, inst):
         assert idx not in self.instances
-        self.instances[idx] = inst
+        req = self.reqs[idx]
+        instances = {}
+        for f in req.fields:
+            instances[f] = inst
+        self.instances[idx] = instances
 
     def add_partial_instance(self, idx, inst, fid):
         instance = dict()
@@ -1757,6 +1785,46 @@ class CopyOp(object):
     def get_instance(self, idx):
         assert idx in self.instances
         return self.instances[idx]
+
+    def get_all_instances(self):
+        all_instances = set()
+        for inst in self.instances.values():
+            for i in inst.values():
+                all_instances.add(i)
+        return all_instances
+
+    def get_instance_pairs_of_nth(self, cidx):
+        pairs = {}
+        src_req = self.reqs[2 * cidx]
+        dst_req = self.reqs[2 * cidx + 1]
+        src_insts = self.instances[2 * cidx]
+        dst_insts = self.instances[2 * cidx + 1]
+        assert len(src_req.fields) == len(dst_req.fields)
+        for idx in range(0, len(src_req.fields)):
+            src_field = src_req.fields[idx]
+            dst_field = dst_req.fields[idx]
+            src_inst = src_insts[src_field]
+            dst_inst = dst_insts[dst_field]
+            pair = (src_inst, dst_inst)
+            fields = []
+            if pair in pairs:
+                fields = pairs[pair]
+            else:
+                pairs[pair] = fields
+            fields.append((src_field, dst_field))
+        return pairs
+
+    def get_all_instance_pairs(self):
+        pairs = {}
+        num_copies = len(self.reqs) / 2
+        for cidx in range(0, num_copies):
+            pairs_of_cidx = self.get_instance_pairs_of_nth(cidx)
+            for pair, fields in pairs_of_cidx.iteritems():
+                if pair in pairs:
+                    pairs[pair].extend[fields]
+                else:
+                    pairs[pair] = fields
+        return pairs
 
     def event_graph_traverse(self, traverser):
         traverser.visit_copy(self)
@@ -1796,7 +1864,7 @@ class CopyOp(object):
         self.print_base_node(printer, False)
 
     def print_base_node(self, printer, logical):
-        title = 'Copy Across '+str(self.uid)+' in '+self.ctx.name
+        title = self.get_name() + ' in '+self.ctx.get_name()
         # TODO: reduction copy-across operations should also be tracked
         #if self.redop <> 0:
         #    title = 'Reduction ' + title
@@ -1810,17 +1878,15 @@ class CopyOp(object):
         #    color = 'tomato 3'
 
         num_copies = len(self.reqs) / 2
-        for i in range(0, num_copies):
-            src_req = self.reqs[i]
-            dst_req = self.reqs[num_copies + i]
-            src_inst = self.instances[i]
-            dst_inst = self.instances[num_copies + i]
+        for cidx in range(0, num_copies):
+            src_req = self.reqs[2 * cidx]
+            dst_req = self.reqs[2 * cidx + 1]
 
             src_region_name = src_req.region_node.get_name()
             dst_region_name = dst_req.region_node.get_name()
 
             if src_region_name <> None or dst_region_name <> None:
-                lines.append(["Region Pair " + str(i),
+                lines.append(["Region Pair " + str(cidx),
                     src_region_name if src_region_name <> None else '',
                     dst_region_name if dst_region_name <> None else ''])
             else:
@@ -1831,47 +1897,31 @@ class CopyOp(object):
                     src_req.to_summary_string(),
                     dst_req.to_summary_string()])
 
-            if isinstance(src_inst, dict):
-                first_line = True
-                num_partial_copies = len(src_inst)
-                for fid, inst in src_inst.iteritems():
-                    if first_line:
-                        lines.append(
-                                [{"label" : "Memory", "rowspan" : num_partial_copies},
-                                    inst.memory.dot_memory(),
-                                    {"label" : dst_inst.memory.dot_memory(),
-                                        "rowspan" : num_partial_copies}])
-                        first_line = False
+            pairs = self.get_instance_pairs_of_nth(cidx)
+
+            for (src_inst, dst_inst), fields in pairs.iteritems():
+                lines.append(["Memory",
+                    src_inst.memory.dot_memory(),
+                    dst_inst.memory.dot_memory()])
+                lines.append(["Instance",
+                    src_inst.dot_instance(),
+                    dst_inst.dot_instance()])
+                if not self.state.verbose: continue
+
+                first_field = True
+                for (src_field, dst_field) in fields:
+                    line = []
+                    if src_field == dst_field:
+                        field_name = self.get_src_field_name(src_field)
+                        line.append({"label" : field_name, "colspan" : 2})
                     else:
-                        lines.append([inst.memory.dot_memory()])
+                        line.append(self.get_src_field_name(src_field))
+                        line.append(self.get_dst_field_name(dst_field))
 
-                first_line = True
-                num_partial_copies = len(src_inst)
-                for fid, inst in src_inst.iteritems():
-                    field_name = self.reqs[0].region_node.field_node.get_field_name(fid)
-                    if field_name == None:
-                        field_name = str(fid)
-
-                    if first_line:
-                        lines.append(
-                                [{"label" : "Instance",
-                                    "rowspan" : num_partial_copies},
-                                    inst.dot_instance()+' for '+field_name,
-                                    {"label" : dst_inst.dot_instance(),
-                                        "rowspan" : num_partial_copies}])
-                        first_line = False
-                    else:
-                        lines.append([inst.dot_instance()+' for '+field_name])
-
-            else:
-                lines.append(
-                        ["Memory",
-                            hex(src_inst.memory.uid),
-                            hex(dst_inst.memory.uid)])
-                lines.append(
-                        ["Instance",
-                            src_inst.dot_instance(),
-                            dst_inst.dot_instance()])
+                    if first_field:
+                        line.insert(0, {"label" : "Fields", "rowspan" : len(fields)})
+                        first_field = False
+                    lines.append(line)
 
             # TODO: reduction copy-across operations should also be tracked
             #if self.redop <> 0:
@@ -1880,20 +1930,6 @@ class CopyOp(object):
             #    if max_blocking > 1 and min_blocking == 1:
             #        color = 'red'
             #        size = 16
-
-            if self.state.verbose:
-                src_field_names = src_req.get_field_names()
-                dst_field_names = dst_req.get_field_names()
-                first_field = True
-                assert(len(src_field_names) == len(dst_field_names))
-                for (f1, f2) in zip(src_field_names, dst_field_names):
-                    line = []
-                    if first_field:
-                        line.append({"label" : "Fields", "rowspan" : len(src_field_names)})
-                    line.append(f1)
-                    line.append(f2)
-                    lines.append(line)
-                    first_field = False
 
         label = '<table border="0" cellborder="1" cellspacing="0" cellpadding="3" bgcolor="%s">' % color + \
                 "".join([wrap_with_trtd(line) for line in lines]) +\
@@ -1935,7 +1971,7 @@ class FillOp(object):
         self.node_name = 'fill_node_'+str(uid)
 
     def get_name(self):
-        return "Fill "+str(self.uid)
+        return "Fill (ID: "+str(self.uid)+")"
 
     def get_op_kind(self):
         return FILL_OP
@@ -1949,6 +1985,9 @@ class FillOp(object):
         assert idx == 0
         assert self.requirement is not None
         return self.requirement
+
+    def get_num_requirements(self):
+        return 1
 
     def add_req_field(self, idx, fid):
         assert idx == 0
@@ -1995,7 +2034,7 @@ class FillOp(object):
 
     def print_base_node(self, printer, logical):
         label = generate_html_op_label(
-                'Fill in '+self.ctx.name+' (UID: '+str(self.uid)+')',
+                self.get_name() + ' in ' + self.ctx.get_name(),
                 [self.requirement], None, 'darkorange1', self.state.verbose)
 
         printer.println(self.node_name+' [label=<'+label+'>,fontsize=14,'+\
@@ -2047,7 +2086,7 @@ class AcquireOp(object):
         self.prev_event_deps = set()
 
     def get_name(self):
-        return "Acquire "+str(self.uid)
+        return "Acquire (ID: "+str(self.uid)+")"
 
     def get_op_kind(self):
         return ACQUIRE_OP
@@ -2062,6 +2101,9 @@ class AcquireOp(object):
     def get_requirement(self, idx):
         assert idx in self.reqs
         return self.reqs[idx]
+
+    def get_num_requirements(self):
+        return len(self.reqs)
 
     def add_req_field(self, idx, fid):
         if not idx in self.reqs:
@@ -2117,6 +2159,9 @@ class AcquireOp(object):
         assert idx in self.instances
         return self.instances[idx]
 
+    def get_all_instances(self):
+        return set(self.instances.values())
+
     def physical_traverse(self, component):
         if self.physical_marked:
             return
@@ -2157,7 +2202,7 @@ class AcquireOp(object):
 
     def print_base_node(self, printer, logical):
         label = generate_html_op_label(
-                'Acquire in '+self.ctx.name+' (UID: '+str(self.uid)+')',
+                self.get_name() + ' in ' + self.ctx.get_name(),
                 self.reqs, self.instances, 'darkolivegreen', self.state.verbose)
 
         printer.println(self.node_name+' [label=<'+label+'>,fontsize=14,'+\
@@ -2195,7 +2240,7 @@ class ReleaseOp(object):
         self.prev_event_deps = set()
 
     def get_name(self):
-        return "Release "+str(self.uid)
+        return "Release (ID: "+str(self.uid)+")"
 
     def get_op_kind(self):
         return RELEASE_OP
@@ -2210,6 +2255,9 @@ class ReleaseOp(object):
     def get_requirement(self, idx):
         assert idx in self.reqs
         return self.reqs[idx]
+
+    def get_num_requirements(self):
+        return len(self.reqs)
 
     def add_req_field(self, idx, fid):
         if not idx in self.reqs:
@@ -2265,6 +2313,9 @@ class ReleaseOp(object):
         assert idx in self.instances
         return self.instances[idx]
 
+    def get_all_instances(self):
+        return set(self.instances.values())
+
     def physical_traverse(self, component):
         if self.physical_marked:
             return
@@ -2305,7 +2356,7 @@ class ReleaseOp(object):
 
     def print_base_node(self, printer, logical):
         label = generate_html_op_label(
-                'Release in '+self.ctx.name+' (UID: '+str(self.uid)+')',
+                self.get_name() + ' in ' + self.ctx.get_name(),
                 self.reqs, self.instances, 'darksalmon', self.state.verbose)
 
         printer.println(self.node_name+' [label=<'+label+'>,fontsize=14,'+\
@@ -2345,7 +2396,7 @@ class DependentPartitionOp(object):
         self.prev_event_deps = set()
 
     def get_name(self):
-        return "Dependent Partition "+str(self.uid)
+        return "Dependent Partition (ID: "+str(self.uid)+")"
 
     def get_op_kind(self):
         return DEPENDENT_PARTITION_OP
@@ -2360,6 +2411,9 @@ class DependentPartitionOp(object):
     def get_requirement(self, idx):
         assert idx in self.reqs
         return self.reqs[idx]
+
+    def get_num_requirements(self):
+        return len(self.reqs)
 
     def add_req_field(self, idx, fid):
         if not idx in self.reqs:
@@ -2415,6 +2469,9 @@ class DependentPartitionOp(object):
     def get_instance(self, idx):
         assert idx in self.instances
         return self.instances[idx]
+
+    def get_all_instances(self):
+        return set(self.instances.values())
 
     def physical_traverse(self, component):
         if self.physical_marked:
@@ -2524,7 +2581,7 @@ class PendingPartitionOp(object):
         self.kind = kind
 
     def get_name(self):
-        return "Pending Partition "+str(self.uid)
+        return "Pending Partition (ID: "+str(self.uid)+")"
 
     def get_op_kind(self):
         return PENDING_PARTITION_OP
@@ -2539,6 +2596,9 @@ class PendingPartitionOp(object):
     def get_requirement(self, idx):
         assert idx in self.reqs
         return self.reqs[idx]
+
+    def get_num_requirements(self):
+        return len(self.reqs)
 
     def add_req_field(self, idx, fid):
         if not idx in self.reqs:
@@ -2594,6 +2654,9 @@ class PendingPartitionOp(object):
     def get_instance(self, idx):
         assert idx in self.instances
         return self.instances[idx]
+
+    def get_all_instances(self):
+        return set(self.instances.values())
 
     def physical_traverse(self, component):
         if self.physical_marked:
@@ -2690,7 +2753,7 @@ class Close(object):
         self.is_inter_close_op = is_inter_close_op
 
     def get_name(self):
-        return "Close "+str(self.uid)
+        return "Close (ID: "+str(self.uid)+")"
 
     def get_op_kind(self):
         return CLOSE_OP
@@ -2707,6 +2770,9 @@ class Close(object):
         assert idx == 0
         assert self.requirement <> None
         return self.requirement
+
+    def get_num_requirements(self):
+        return 1
 
     def add_req_field(self, idx, fid):
         assert idx == 0
@@ -2761,7 +2827,7 @@ class Close(object):
             color = 'red'
 
         label = generate_html_op_label(
-                'Close in '+self.ctx.name+' (UID: '+str(self.uid)+')',
+                self.get_name() + ' in ' + self.ctx.get_name(),
                 [self.requirement], None, color, self.state.verbose)
 
         printer.println(self.node_name+' [label=<'+label+'>,fontsize=14,'+\
@@ -2797,6 +2863,9 @@ class Close(object):
         assert idx == 0
         #assert self.instance <> None
         return self.instance
+
+    def get_all_instances(self):
+        return set([self.instance])
 
     def physical_traverse(self, component):
         if self.physical_marked:
@@ -2838,7 +2907,7 @@ class Fence(object):
         self.node_name = 'fence_node_'+str(self.uid)
 
     def get_name(self):
-        return "Fence "+str(self.uid)
+        return "Fence (ID: "+str(self.uid)+")"
 
     def get_op_kind(self):
         return FENCE_OP
@@ -2892,8 +2961,7 @@ class Fence(object):
         pass
 
     def print_logical_node(self, printer):
-        printer.println(self.node_name+' [style=filled,label="'+\
-                'Fence\\nUnique\ ID\ '+str(self.uid)+\
+        printer.println(self.node_name+' [style=filled,label="'+self.get_name()+
                 '",fillcolor=darkorchid2,fontsize=14,fontcolor=black,'+\
                 'shape=record,penwidth=2];')
 
@@ -2918,19 +2986,35 @@ class Copy(object):
         self.generation = 0
 
     def get_name(self):
-        return "Copy "+str(self.uid)
+        name = "Copy (ID: "+str(self.uid)+")"
+        if self.redop <> 0:
+            name = 'Reduction ' + name
+        return name
 
     def get_ctx(self):
         return None
 
-    def get_src_inst(self):
+    def get_src_inst(self, field):
         return self.src_inst
 
-    def get_dst_inst(self):
+    def get_dst_inst(self, field):
         return self.dst_inst
+
+    def get_all_instances(self):
+        return set([self.src_inst, self.dst_inst])
+
+    def get_all_instance_pairs(self):
+        inst_pair = (self.src_inst, self.dst_inst)
+        return { inst_pair : [(f, f) for f in self.fields] }
+
+    def get_src_field_name(self, field):
+        return self.region.field_node.get_field_name(field)
 
     def get_src_fields(self):
         return self.fields
+
+    def get_dst_field_name(self, field):
+        return get_src_field_name(self, field)
 
     def get_dst_fields(self):
         return self.fields
@@ -2959,10 +3043,7 @@ class Copy(object):
         return self.region.field_node.field_mask_string(self.fields)
 
     def print_physical_node(self, printer):
-        title = 'Copy '+str(self.uid)
-        if self.redop <> 0:
-            title = 'Reduction ' + title
-        lines = [[{ "label" : title, "colspan" : 3 }]]
+        lines = [[{ "label" : self.get_name(), "colspan" : 3 }]]
 
         region_name = self.region.get_name()
         if region_name <> None:
@@ -3324,6 +3405,14 @@ class Requirement(object):
     def to_summary_string(self):
         return 'index:%s,field:%s,tree:%s' % \
                 (hex(self.ispace), hex(self.fspace), str(self.tid))
+
+    def get_field_name(self, field):
+        assert field in self.fields
+        name = self.state.field_space_nodes[self.fspace].get_field_name(field)
+        if name <> None:
+            return name
+        else:
+            return str(field)
 
     def field_mask_string(self):
         return self.state.field_space_nodes[self.fspace].field_mask_string(self.fields)
@@ -3776,13 +3865,7 @@ class ConnectedComponent(object):
 
     def collect_physical_instances(self):
         def collect(op):
-            if isinstance(op, Copy):
-                self.instances.add(op.src_inst)
-                self.instances.add(op.dst_inst)
-            elif isinstance(op, Mapping):
-                self.instances.add(op.instance)
-            else:
-                self.instances = self.instances.union(op.instances.values())
+            self.instances |= op.get_all_instances()
         for t in self.tasks.itervalues():
             collect(t)
         for m in self.maps.itervalues():
@@ -3797,26 +3880,27 @@ class ConnectedComponent(object):
                 key=lambda op: op.iid, reverse=True)
 
     def generate_igraph(self, idx, path):
-        def print_igraph_edges_for_multiple_copies(printer, copies):
-            copy = copies[0]
-            edge_label = 'copy '+hex(copy.uid)+' (fields: '+copy.field_mask_string()+')'
-            for i in range(1, len(copies)):
-                copy = copies[i]
-                edge_label = edge_label + ', copy '+hex(copy.uid)+\
-                        ' (fields: '+copy.field_mask_string()+')'
-            src_inst = None
-            dst_inst = None
-            if isinstance(copy, Copy):
-                src_inst = copy.src_inst
-                dst_inst = copy.dst_inst
-            else:
-                assert(isinstance(copy, CopyOp))
-                src_inst = copy.instances[0]
-                dst_inst = copy.instances[1]
+        def get_field_string(copy, fields):
+            field_strings = []
+            for (src_field, dst_field) in fields:
+                if src_field == dst_field:
+                    field_strings.append(copy.get_src_field_name(src_field))
+                else:
+                    field_strings.append(copy.get_src_field_name(src_field) + \
+                            " \-\> " + \
+                            copy.get_dst_field_name(dst_field))
+            return ",".join(field_strings)
+
+        def print_igraph_edges_for_multiple_copies(printer, pair, copies):
+            (src_inst, dst_inst) = pair
+            copy_strings = [
+                    'copy '+str(copy.uid)+' (fields: '+\
+                            get_field_string(copy, fields)+')'
+                    for (copy,fields) in copies]
             dst_inst.print_incoming_edge(printer,
                     src_inst.node_name,
                     edge_type='dashed',
-                    edge_label=edge_label)
+                    edge_label=", ".join(copy_strings))
 
         self.collect_physical_instances()
         name = 'instance_graph_'+str(idx)
@@ -3837,19 +3921,15 @@ class ConnectedComponent(object):
             m.print_igraph_edges(printer)
         copy_groups = {}
         for c in self.copies.itervalues():
-            if isinstance(c, Copy):
-                inst_pair = (c.src_inst.node_name, c.dst_inst.node_name)
-            else:
-                inst_pair = (c.instances[0].node_name, c.instances[1].node_name)
-            if not inst_pair in copy_groups:
-                copy_groups[inst_pair] = []
-            copy_groups[inst_pair].append(c)
+            inst_pairs = c.get_all_instance_pairs()
+            for inst_pair, fields in inst_pairs.iteritems():
+                if not inst_pair in copy_groups:
+                    copy_groups[inst_pair] = []
+                copy_groups[inst_pair].append((c, fields))
         for inst_pair in copy_groups:
-            copies = copy_groups[inst_pair]
-            if len(copies) == 1:
-                copies[0].print_igraph_edges(printer)
-            else:
-                print_igraph_edges_for_multiple_copies(printer, copies)
+            print_igraph_edges_for_multiple_copies(printer,
+                    inst_pair,
+                    copy_groups[inst_pair])
 
         printer.print_pdf_after_close(True)
 
@@ -4605,7 +4685,7 @@ class State(object):
                 components.append(comp)
             else:
                 comp.unmark_all()
-        print "Found "+str(len(components))+" event graphs"
+        print "Found "+str(len(components))+" instance graphs"
         for idx in range(len(components)):
             components[idx].generate_igraph(idx,path)
             components[idx].unmark_all()
