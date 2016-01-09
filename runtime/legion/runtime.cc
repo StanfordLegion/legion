@@ -12713,6 +12713,29 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void Internal::handle_top_level_task_request(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(address_space == 0); // should only happen on node 0
+#endif
+      UserEvent to_trigger;
+      derez.deserialize(to_trigger);
+      increment_outstanding_top_level_tasks();
+      to_trigger.trigger();
+    }
+
+    //--------------------------------------------------------------------------
+    void Internal::handle_top_level_task_complete(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(address_space == 0); // should only happen on node 0
+#endif
+      decrement_outstanding_top_level_tasks();
+    }
+
+    //--------------------------------------------------------------------------
     void Internal::handle_shutdown_notification(AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -13709,8 +13732,10 @@ namespace LegionRuntime {
         // lauch a new top-level task and wait on an event
         // to signal that permission has been granted
         UserEvent grant_event = UserEvent::create_user_event();
-        
-
+        Serializer rez;
+        rez.serialize(grant_event);
+        find_messenger(0)->send_message(rez, SEND_TOP_LEVEL_TASK_REQUEST,
+                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
         grant_event.wait();
       }
       else
@@ -13728,6 +13753,9 @@ namespace LegionRuntime {
       {
         // Send a message to node 0 indicating that we finished
         // executing a top-level task
+        Serializer rez;
+        find_messenger(0)->send_message(rez, SEND_TOP_LEVEL_TASK_COMPLETE,
+                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
       }
       else
       {

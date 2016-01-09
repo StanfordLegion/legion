@@ -1683,6 +1683,8 @@ namespace LegionRuntime {
       void handle_remote_creation_response(Deserializer &derez);
       void handle_logical_state_return(Deserializer &derez,
                                        AddressSpaceID source);
+      void handle_top_level_task_request(Deserializer &derez);
+      void handle_top_level_task_complete(Deserializer &derez);
       void handle_shutdown_notification(AddressSpaceID source);
       void handle_shutdown_response(Deserializer &derez, AddressSpaceID source);
     public:

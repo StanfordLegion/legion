@@ -491,7 +491,8 @@ function type_check.expr_field_access(cx, node)
         local ptr_type = std.as_read(value_type)
         unpack_type = std.ref(ptr_type.index_type(unpack_type, unpack(ptr_type.bounds_symbols)))
       elseif std.is_ref(value_type) then
-        unpack_type = std.ref(value_type.pointer_type.index_type(unpack_type, unpack(value_type.bounds_symbols)))
+        unpack_type = std.ref(value_type.pointer_type.index_type(unpack_type, unpack(value_type.bounds_symbols)),
+                              unpack(value_type.field_path))
       elseif std.is_rawref(value_type) then
         unpack_type = std.rawref(&unpack_type)
       end

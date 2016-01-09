@@ -588,6 +588,10 @@ function std.type_supports_constraints(t)
     std.is_list_of_regions(t)
 end
 
+function std.is_ctor(t)
+  return terralib.types.istype(t) and rawget(t, "is_ctor")
+end
+
 function std.is_fspace(x)
   return getmetatable(x) == fspace
 end
@@ -690,6 +694,10 @@ function std.type_maybe_eq(a, b, mapping)
     return std.type_maybe_eq(a.points_to_type, b.points_to_type, mapping)
   elseif std.is_fspace_instance(a) and std.is_fspace_instance(b) and
     a.fspace == b.fspace
+  then
+    return true
+  elseif (std.is_ctor(a) and std.validate_implicit_cast(a, b)) or
+    (std.is_ctor(b) and std.validate_implicit_cast(b, a))
   then
     return true
   elseif std.is_list(a) and std.is_list(b) then
@@ -1036,6 +1044,9 @@ function std.unpack_fields(fs, symbols)
       new_type = std.region(fspace_type)
     else
       new_type = std.type_sub(old_type, mapping)
+      if std.is_fspace_instance(new_type) then
+        new_type = std.unpack_fields(new_type)
+      end
     end
     new_symbol.type = new_type
     new_fields:insert({
@@ -1057,9 +1068,8 @@ function std.unpack_fields(fs, symbols)
     })
   end
 
-  local result_type = terralib.types.newstruct()
+  local result_type = std.ctor(new_fields)
   result_type.is_unpack_result = true
-  result_type.entries = new_fields
 
   return result_type, new_constraints
 end
@@ -1157,11 +1167,7 @@ function std.get_field(t, f)
     end
     return field_type
   elseif std.is_ref(t) then
-    local field_path = terralib.newlist()
-    for _, field in ipairs(t.field_path) do
-      field_path:insert(field)
-    end
-    field_path:insert(f)
+    local field_path = t.field_path .. data.newtuple(f)
     local field_type = std.ref(t, unpack(field_path))
     if not std.as_read(field_type) then
       return nil
@@ -1528,13 +1534,25 @@ local bounded_type = terralib.memoize(function(index_type, ...)
     end
   end
 
-  function st.metamethods.__typename(st)
-    local bounds = st.bounds_symbols
+  if std.config["debug"] then
+    function st.metamethods.__typename(st)
+      local bounds = st.bounds_symbols
 
-    if st.points_to_type then
-      return tostring(st.index_type) .. "(" .. tostring(st.points_to_type) .. ", " .. tostring(bounds:mkstring(", ")) .. ")"
-    else
-      return tostring(st.index_type) .. "(" .. tostring(bounds:mkstring(", ")) .. ")"
+      if st.points_to_type then
+        return tostring(st.index_type) .. "(" .. tostring(st.points_to_type) .. ", " .. tostring(bounds:mkstring(", ")) .. " : " .. tostring(st:bounds():mkstring(", ")) .. ")"
+      else
+        return tostring(st.index_type) .. "(" .. tostring(bounds:mkstring(", ")) .. " : " .. tostring(st:bounds():mkstring(", ")) .. ")"
+      end
+    end
+  else
+    function st.metamethods.__typename(st)
+      local bounds = st.bounds_symbols
+
+      if st.points_to_type then
+        return tostring(st.index_type) .. "(" .. tostring(st.points_to_type) .. ", " .. tostring(bounds:mkstring(", ")) .. ")"
+      else
+        return tostring(st.index_type) .. "(" .. tostring(bounds:mkstring(", ")) .. ")"
+      end
     end
   end
 
@@ -1858,8 +1876,10 @@ function std.region(ispace_symbol, fspace_type)
     return self
   end
 
-  function st.metamethods.__typename(st)
-    return "region(" .. tostring(st.fspace_type) .. ")"
+  if not std.config["debug"] then
+    function st.metamethods.__typename(st)
+      return "region(" .. tostring(st.fspace_type) .. ")"
+    end
   end
 
   return st
@@ -2177,10 +2197,18 @@ std.ref = terralib.memoize(function(pointer_type, ...)
     return self.pointer_type:bounds()
   end
 
-  function st.metamethods.__typename(st)
-    local bounds = st.bounds_symbols
+  if std.config["debug"] then
+    function st.metamethods.__typename(st)
+      local bounds = st.bounds_symbols
 
-    return "ref(" .. tostring(st.refers_to_type) .. ", " .. tostring(bounds:mkstring(", ")) .. ")"
+      return "ref(" .. tostring(st.refers_to_type) .. ", " .. tostring(bounds:mkstring(", ")) .. " : " .. tostring(st:bounds():mkstring(", ")) .. ", " .. tostring(st.field_path) .. ")"
+    end
+  else
+    function st.metamethods.__typename(st)
+      local bounds = st.bounds_symbols
+
+      return "ref(" .. tostring(st.refers_to_type) .. ", " .. tostring(bounds:mkstring(", ")) .. ")"
+    end
   end
 
   return st
@@ -2384,6 +2412,7 @@ do
   function std.ctor(fields)
     local st = terralib.types.newstruct()
     st.entries = fields
+    st.is_ctor = true
     st.metamethods.__cast = function(from, to, expr)
       if std.is_index_type(to) then
         return `([to]{ __ptr = [to.impl_type](expr)})
