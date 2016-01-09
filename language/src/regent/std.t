@@ -1028,6 +1028,7 @@ function std.unpack_fields(fs, symbols)
 
   local mapping = {}
   local new_fields = terralib.newlist()
+  local needs_unpack = false
   for i, old_field in ipairs(fs:getentries()) do
     local old_symbol, old_type = old_symbols[i], old_field.type
     local new_symbol
@@ -1042,6 +1043,7 @@ function std.unpack_fields(fs, symbols)
       mapping[old_symbol] = new_symbol
       local fspace_type = std.type_sub(old_type.fspace_type, mapping)
       new_type = std.region(fspace_type)
+      needs_unpack = true
     else
       new_type = std.type_sub(old_type, mapping)
       if std.is_fspace_instance(new_type) then
@@ -1053,6 +1055,10 @@ function std.unpack_fields(fs, symbols)
         field = new_symbol.displayname,
         type = new_type,
     })
+  end
+
+  if not needs_unpack and not symbols then
+    return fs, terralib.newlist()
   end
 
   local constraints = fs:getconstraints()
