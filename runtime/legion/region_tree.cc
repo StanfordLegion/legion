@@ -317,7 +317,7 @@ namespace LegionRuntime {
       IndexPartNode *node1 = get_node(handle1);
       IndexPartNode *node2 = get_node(handle2);
       return new_part->create_by_operation(node1, node2,
-                                           LowLevel::IndexSpace::ISO_UNION);
+                                           Realm::IndexSpace::ISO_UNION);
     }
 
     //--------------------------------------------------------------------------
@@ -330,7 +330,7 @@ namespace LegionRuntime {
       IndexPartNode *node1 = get_node(handle1);
       IndexPartNode *node2 = get_node(handle2);
       return new_part->create_by_operation(node1, node2,
-                                           LowLevel::IndexSpace::ISO_INTERSECT);
+                                           Realm::IndexSpace::ISO_INTERSECT);
     }
 
     //--------------------------------------------------------------------------
@@ -343,7 +343,7 @@ namespace LegionRuntime {
       IndexPartNode *node1 = get_node(handle1);
       IndexPartNode *node2 = get_node(handle2);
       return new_part->create_by_operation(node1, node2,
-                                           LowLevel::IndexSpace::ISO_SUBTRACT);
+                                           Realm::IndexSpace::ISO_SUBTRACT);
     }
 
     //--------------------------------------------------------------------------
@@ -363,7 +363,7 @@ namespace LegionRuntime {
         IndexSpaceNode *child_node = base_node->get_child(child_color);
         IndexPartNode *part_node = get_node(it->second);
         Event ready = part_node->create_by_operation(child_node, source_node,
-                                        LowLevel::IndexSpace::ISO_INTERSECT);
+                                        Realm::IndexSpace::ISO_INTERSECT);
         ready_events.insert(ready);
       }
       return Event::merge_events(ready_events);
@@ -374,14 +374,14 @@ namespace LegionRuntime {
                                                        IndexPartition handle1,
                                                        IndexPartition handle2,
                                                        Domain &color_space,
-                                   LowLevel::IndexSpace::IndexSpaceOperation op)
+                                   Realm::IndexSpace::IndexSpaceOperation op)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
       std::vector<ColorPoint> path;
       switch (op)
       {
-        case LowLevel::IndexSpace::ISO_UNION:
+        case Realm::IndexSpace::ISO_UNION:
           {
             // Check that parent is an ancestor of both partitions
             if (!compute_partition_path(parent, handle1, path))
@@ -403,7 +403,7 @@ namespace LegionRuntime {
             }
             break;
           }
-        case LowLevel::IndexSpace::ISO_INTERSECT:
+        case Realm::IndexSpace::ISO_INTERSECT:
           {
             // Check that parent is an ancestor of one of the partitions
             if (!compute_partition_path(parent, handle1, path))
@@ -422,7 +422,7 @@ namespace LegionRuntime {
             }
             break;
           }
-        case LowLevel::IndexSpace::ISO_SUBTRACT:
+        case Realm::IndexSpace::ISO_SUBTRACT:
           {
             // Check that the parent is an ancestor of the first index partition
             if (!compute_partition_path(parent, handle1, path))
@@ -605,10 +605,10 @@ namespace LegionRuntime {
       }
       // Enumerate the color space so we can get back a different index
       // for each color in the color space
-      std::map<DomainPoint,LowLevel::IndexSpace> subspaces;
+      std::map<DomainPoint,Realm::IndexSpace> subspaces;
       for (Domain::DomainPointIterator itr(color_space); itr; itr++)
       {
-        subspaces[itr.p] = LowLevel::IndexSpace::NO_SPACE;
+        subspaces[itr.p] = Realm::IndexSpace::NO_SPACE;
       }
       // Merge preconditions for all the field data descriptors
       Event precondition = Event::merge_events(preconditions);
@@ -652,7 +652,7 @@ namespace LegionRuntime {
       // Get all the index spaces from the color space in the projection
       std::set<Event> preconditions;
       std::vector<FieldDataDescriptor> field_data;
-      std::map<LowLevel::IndexSpace,LowLevel::IndexSpace> subspaces;
+      std::map<Realm::IndexSpace,Realm::IndexSpace> subspaces;
       for (Domain::DomainPointIterator itr(color_space); itr; itr++)
       {
         FieldMask user_mask;
@@ -672,7 +672,7 @@ namespace LegionRuntime {
                         child_node->row_source->get_domain(child_pre);
         if (child_pre.exists())
           preconditions.insert(child_pre);
-        subspaces[child_dom.get_index_space()] = LowLevel::IndexSpace::NO_SPACE;
+        subspaces[child_dom.get_index_space()] = Realm::IndexSpace::NO_SPACE;
       }
       // Merge the preconditions for all the field descriptors
       Event precondition = Event::merge_events(preconditions);
@@ -729,7 +729,7 @@ namespace LegionRuntime {
                                        field_data, preconditions, version_info);
       }
       // Get all the index spaces from the color space in the projection
-      std::map<LowLevel::IndexSpace,LowLevel::IndexSpace> subspaces;
+      std::map<Realm::IndexSpace,Realm::IndexSpace> subspaces;
       for (Domain::DomainPointIterator itr(color_space); itr; itr++)
       {
         IndexSpaceNode *child_node = 
@@ -738,7 +738,7 @@ namespace LegionRuntime {
         const Domain &child_dom = child_node->get_domain(child_pre);
         if (child_pre.exists())
           preconditions.insert(child_pre);
-        subspaces[child_dom.get_index_space()] = LowLevel::IndexSpace::NO_SPACE;
+        subspaces[child_dom.get_index_space()] = Realm::IndexSpace::NO_SPACE;
       }
       // Merge the preconditions for all the field descriptors
       Event precondition = Event::merge_events(preconditions);
@@ -801,7 +801,7 @@ namespace LegionRuntime {
       IndexPartNode *parent_node = child_node->parent;
       // Compute the new index space 
       std::set<Event> preconditions;
-      std::vector<LowLevel::IndexSpace> spaces(handles.size());
+      std::vector<Realm::IndexSpace> spaces(handles.size());
       unsigned idx = 0;
       for (std::vector<IndexSpace>::const_iterator it = handles.begin();
             it != handles.end(); it++, idx++)
@@ -820,10 +820,10 @@ namespace LegionRuntime {
         preconditions.insert(parent_precondition);
       // Now we can compute the low-level index space
       Event precondition = Event::merge_events(preconditions);
-      LowLevel::IndexSpace result;
-      Event ready = LowLevel::IndexSpace::reduce_index_spaces(
-          is_union ? LowLevel::IndexSpace::ISO_UNION : 
-                     LowLevel::IndexSpace::ISO_INTERSECT, spaces, result, 
+      Realm::IndexSpace result;
+      Event ready = Realm::IndexSpace::reduce_index_spaces(
+          is_union ? Realm::IndexSpace::ISO_UNION : 
+                     Realm::IndexSpace::ISO_INTERSECT, spaces, result, 
           ((parent_node->mode & MUTABLE) != 0)/* allocable */,
           parent_dom.get_index_space(), precondition);
       // Now set the result and trigger the handle ready event
@@ -844,7 +844,7 @@ namespace LegionRuntime {
       IndexPartNode *parent_node = child_node->parent;
       IndexPartNode *reduce_node = get_node(handle);
       std::set<Event> preconditions;
-      std::vector<LowLevel::IndexSpace> 
+      std::vector<Realm::IndexSpace> 
         spaces(reduce_node->color_space.get_volume());
       unsigned idx = 0;
       for (Domain::DomainPointIterator itr(reduce_node->color_space); 
@@ -865,10 +865,10 @@ namespace LegionRuntime {
         preconditions.insert(parent_precondition);
       // Now we can compute the low-level index space
       Event precondition = Event::merge_events(preconditions);
-      LowLevel::IndexSpace result;
-      Event ready = LowLevel::IndexSpace::reduce_index_spaces(
-          is_union ? LowLevel::IndexSpace::ISO_UNION : 
-                     LowLevel::IndexSpace::ISO_INTERSECT, spaces, result,
+      Realm::IndexSpace result;
+      Event ready = Realm::IndexSpace::reduce_index_spaces(
+          is_union ? Realm::IndexSpace::ISO_UNION : 
+                     Realm::IndexSpace::ISO_INTERSECT, spaces, result,
           ((parent_node->mode & MUTABLE) != 0)/* allocable */,
           parent_dom.get_index_space(), precondition);
       // Now set the result and trigger the handle ready event
@@ -888,7 +888,7 @@ namespace LegionRuntime {
       IndexSpaceNode *child_node = get_node(target);
       IndexPartNode *parent_node = child_node->parent;
       std::set<Event> preconditions;
-      std::vector<LowLevel::IndexSpace> spaces(handles.size()+1);
+      std::vector<Realm::IndexSpace> spaces(handles.size()+1);
       IndexSpaceNode *init_node = get_node(initial);
       Event init_precondition;
       const Domain &init_dom = init_node->get_domain(init_precondition);
@@ -913,9 +913,9 @@ namespace LegionRuntime {
         preconditions.insert(parent_precondition);
       // Now we can compute the low-level index space
       Event precondition = Event::merge_events(preconditions);
-      LowLevel::IndexSpace result;
-      Event ready = LowLevel::IndexSpace::reduce_index_spaces(
-                             LowLevel::IndexSpace::ISO_SUBTRACT, spaces, result,
+      Realm::IndexSpace result;
+      Event ready = Realm::IndexSpace::reduce_index_spaces(
+                             Realm::IndexSpace::ISO_SUBTRACT, spaces, result,
           ((parent_node->mode & MUTABLE) != 0)/* allocable */,
           parent_dom.get_index_space(), precondition);
       // Now set the result and trigger the handle ready event
@@ -1384,7 +1384,7 @@ namespace LegionRuntime {
       Domain d = node->get_domain_blocking();
       if (d.get_dim() == 0)
       {
-        const LowLevel::ElementMask &mask = 
+        const Realm::ElementMask &mask = 
           d.get_index_space().get_valid_mask();
         return mask.get_num_elmts();
       }
@@ -4135,13 +4135,13 @@ namespace LegionRuntime {
       {
         case 0:
           {
-            const LowLevel::ElementMask &left_mask = 
+            const Realm::ElementMask &left_mask = 
                                        left.get_index_space().get_valid_mask();
-            const LowLevel::ElementMask &right_mask = 
+            const Realm::ElementMask &right_mask = 
                                        right.get_index_space().get_valid_mask();
-            LowLevel::ElementMask::OverlapResult result = 
+            Realm::ElementMask::OverlapResult result = 
                                             left_mask.overlaps_with(right_mask);
-            if (result != LowLevel::ElementMask::OVERLAP_NO)
+            if (result != Realm::ElementMask::OVERLAP_NO)
               disjoint = false;
             break;
           }
@@ -4733,7 +4733,7 @@ namespace LegionRuntime {
         for (std::set<Domain>::iterator dit = info.intersections.begin();
               dit != info.intersections.end(); dit++)
         {
-          LowLevel::IndexSpace space = dit->get_index_space();
+          Realm::IndexSpace space = dit->get_index_space();
           if (space.exists())
             space.destroy();
         }
@@ -4943,17 +4943,17 @@ namespace LegionRuntime {
       {
         case 0:
           {
-            const LowLevel::ElementMask &left_mask = 
+            const Realm::ElementMask &left_mask = 
                                     left.get_index_space().get_valid_mask();
-            const LowLevel::ElementMask &right_mask = 
+            const Realm::ElementMask &right_mask = 
                                     right.get_index_space().get_valid_mask();
-            LowLevel::ElementMask intersection = left_mask & right_mask;
+            Realm::ElementMask intersection = left_mask & right_mask;
             if (!!intersection)
             {
               non_empty = true;
               if (compute)
                 result = 
-                 Domain(LowLevel::IndexSpace::create_index_space(intersection));
+                 Domain(Realm::IndexSpace::create_index_space(intersection));
             }
             break;
           }
@@ -5021,18 +5021,18 @@ namespace LegionRuntime {
 	//  subtract out the left set members and see if anything is left
 	// If there is, left does NOT dominate right
 	
-	LowLevel::ElementMask *mask = 0;
+	Realm::ElementMask *mask = 0;
 	// We need first to make sure we have an ElementMask that can hold all
 	//  the right_set members, which may have been trimmed
 	if (right_set.size() == 1)
 	{
 	  // just make a copy of the only set member's mask
-	  mask = new LowLevel::ElementMask(right_set.begin()->get_index_space()
+	  mask = new Realm::ElementMask(right_set.begin()->get_index_space()
 					   .get_valid_mask());
 	} else {
 	  std::set<Domain>::const_iterator it = right_set.begin();
 	  assert(it != right_set.end());
-	  const LowLevel::ElementMask *maskp = &(it->get_index_space().get_valid_mask());
+	  const Realm::ElementMask *maskp = &(it->get_index_space().get_valid_mask());
 	  int first_elmt = maskp->first_enabled();
 	  int last_elmt = maskp->last_enabled();
 	  while(++it != right_set.end())
@@ -5049,7 +5049,7 @@ namespace LegionRuntime {
 	  if ((first_elmt > last_elmt) || (last_elmt == -1))
 	    return true;
 	  // Now construct the mask
-	  mask = new LowLevel::ElementMask(last_elmt - first_elmt + 1, first_elmt);
+	  mask = new Realm::ElementMask(last_elmt - first_elmt + 1, first_elmt);
 	  // And copy in the bits from each member set
 	  for (it = right_set.begin(); it != right_set.end(); it++)
 	    *mask |= it->get_index_space().get_valid_mask();
@@ -5687,7 +5687,7 @@ namespace LegionRuntime {
       }
       if (domain.get_dim() == 0)
       {
-        const LowLevel::ElementMask &mask = 
+        const Realm::ElementMask &mask = 
                                   domain.get_index_space().get_valid_mask();
         return mask.get_num_elmts();
       }
@@ -6214,7 +6214,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     Event IndexSpaceNode::create_subspaces_by_field(
                         const std::vector<FieldDataDescriptor> &field_data,
-                        std::map<DomainPoint, LowLevel::IndexSpace> &subspaces,
+                        std::map<DomainPoint, Realm::IndexSpace> &subspaces,
                         bool mutable_results, Event precondition)
     //--------------------------------------------------------------------------
     {
@@ -6229,7 +6229,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     Event IndexSpaceNode::create_subspaces_by_image(
                 const std::vector<FieldDataDescriptor> &field_data,
-                std::map<LowLevel::IndexSpace, LowLevel::IndexSpace> &subspaces,
+                std::map<Realm::IndexSpace, Realm::IndexSpace> &subspaces,
                 bool mutable_results, Event precondition)
     //--------------------------------------------------------------------------
     {
@@ -6244,7 +6244,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     Event IndexSpaceNode::create_subspaces_by_preimage(
                 const std::vector<FieldDataDescriptor> &field_data,
-                std::map<LowLevel::IndexSpace, LowLevel::IndexSpace> &subspaces,
+                std::map<Realm::IndexSpace, Realm::IndexSpace> &subspaces,
                 bool mutable_results, Event precondition)
     //--------------------------------------------------------------------------
     {
@@ -6820,10 +6820,10 @@ namespace LegionRuntime {
         // parent. Determine if it is allocable based on the
         // properties of this partition object.
         const Domain &parent_dom = parent->get_domain_no_wait();
-        LowLevel::IndexSpace parent_space = parent_dom.get_index_space();
-        LowLevel::ElementMask new_mask(get_num_elmts());
-        LowLevel::IndexSpace new_space =  
-          LowLevel::IndexSpace::create_index_space(parent_space, new_mask,
+        Realm::IndexSpace parent_space = parent_dom.get_index_space();
+        Realm::ElementMask new_mask(get_num_elmts());
+        Realm::IndexSpace new_space =  
+          Realm::IndexSpace::create_index_space(parent_space, new_mask,
                                                    (mode & ALLOCABLE));
         IndexSpaceNode *result = context->create_node(is, Domain(new_space),
             this, c, UNSTRUCTURED_KIND, mode);
@@ -7212,7 +7212,7 @@ namespace LegionRuntime {
       if (parent->kind == UNSTRUCTURED_KIND)
       {
         size_t num_subspaces = color_space.get_volume();
-        std::vector<LowLevel::IndexSpace> subspaces(num_subspaces);
+        std::vector<Realm::IndexSpace> subspaces(num_subspaces);
         Event precondition;
         const Domain &parent_dom = parent->get_domain(precondition);
         // Launch the operation down to the low-level runtime
@@ -7258,7 +7258,7 @@ namespace LegionRuntime {
         {
           local_weights[idx] = it->second;
         }
-        std::vector<LowLevel::IndexSpace> subspaces(num_subspaces);
+        std::vector<Realm::IndexSpace> subspaces(num_subspaces);
         Event precondition;
         const Domain &parent_dom = parent->get_domain(precondition);
         // Launch the operation down to the low-level runtime
@@ -7294,13 +7294,13 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     Event IndexPartNode::create_by_operation(IndexPartNode *left, 
                                              IndexPartNode *right,
-                                   LowLevel::IndexSpace::IndexSpaceOperation op)
+                                   Realm::IndexSpace::IndexSpaceOperation op)
     //--------------------------------------------------------------------------
     {
       if (parent->kind == UNSTRUCTURED_KIND)
       {
         size_t num_subspaces = color_space.get_volume();  
-        std::vector<LowLevel::IndexSpace::BinaryOpDescriptor> 
+        std::vector<Realm::IndexSpace::BinaryOpDescriptor> 
                                                     operations(num_subspaces);
         std::set<Event> preconditions;
         Event parent_pre;
@@ -7327,7 +7327,7 @@ namespace LegionRuntime {
         }
         // Merge all the preconditions and issue to the low-level runtime
         Event precondition = Event::merge_events(preconditions);
-        Event result = LowLevel::IndexSpace::compute_index_spaces(operations,
+        Event result = Realm::IndexSpace::compute_index_spaces(operations,
                                                             (mode & ALLOCABLE),
                                                             precondition);
 #ifdef LEGION_SPY
@@ -7357,13 +7357,13 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     Event IndexPartNode::create_by_operation(IndexSpaceNode *left,
                                              IndexPartNode *right,
-                                   LowLevel::IndexSpace::IndexSpaceOperation op)
+                                   Realm::IndexSpace::IndexSpaceOperation op)
     //--------------------------------------------------------------------------
     {
       if (parent->kind == UNSTRUCTURED_KIND)
       {
         size_t num_subspaces = color_space.get_volume();  
-        std::vector<LowLevel::IndexSpace::BinaryOpDescriptor> 
+        std::vector<Realm::IndexSpace::BinaryOpDescriptor> 
                                                     operations(num_subspaces);
         std::set<Event> preconditions;
         Event parent_pre;
@@ -7390,7 +7390,7 @@ namespace LegionRuntime {
         }
         // Merge all the preconditions and issue to the low-level runimte
         Event precondition = Event::merge_events(preconditions);
-        Event result = LowLevel::IndexSpace::compute_index_spaces(operations,
+        Event result = Realm::IndexSpace::compute_index_spaces(operations,
                                                             (mode & ALLOCABLE),
                                                             precondition);
 #ifdef LEGION_SPY
@@ -9117,7 +9117,7 @@ namespace LegionRuntime {
         // and will have less than one reduction per point.
         const size_t num_elmts = node->row_source->get_num_elmts();
         Domain ptr_space = 
-          Domain(LowLevel::IndexSpace::create_index_space(num_elmts));
+          Domain(Realm::IndexSpace::create_index_space(num_elmts));
         std::vector<size_t> element_sizes;
         element_sizes.push_back(sizeof(ptr_t)); // pointer types
         element_sizes.push_back(reduction_op->sizeof_rhs);

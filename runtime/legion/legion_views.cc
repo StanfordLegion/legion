@@ -3898,7 +3898,7 @@ namespace LegionRuntime {
           Event target_pre;
           const Domain &target = 
             it->first->logical_node->get_domain(target_pre);
-          std::vector<LowLevel::IndexSpace> already_handled;
+          std::vector<Realm::IndexSpace> already_handled;
           std::set<Event> already_preconditions;
           it->first->find_field_descriptors(term_event, usage,
                                             user_mask, fid_idx, local_proc, 
@@ -3919,11 +3919,11 @@ namespace LegionRuntime {
                                                const FieldMask &user_mask,
                                                unsigned fid_idx,
                                                Processor local_proc,
-                                               LowLevel::IndexSpace target,
+                                               Realm::IndexSpace target,
                                                Event target_precondition,
                                    std::vector<FieldDataDescriptor> &field_data,
                                    std::set<Event> &preconditions,
-                             std::vector<LowLevel::IndexSpace> &already_handled,
+                             std::vector<Realm::IndexSpace> &already_handled,
                              std::set<Event> &already_preconditions)
     //--------------------------------------------------------------------------
     {
@@ -4778,11 +4778,11 @@ namespace LegionRuntime {
                                                const FieldMask &user_mask,
                                                unsigned fid_idx,
                                                Processor local_proc,
-                                               LowLevel::IndexSpace target,
+                                               Realm::IndexSpace target,
                                                Event target_precondition,
                                    std::vector<FieldDataDescriptor> &field_data,
                                    std::set<Event> &preconditions,
-                             std::vector<LowLevel::IndexSpace> &already_handled,
+                             std::vector<Realm::IndexSpace> &already_handled,
                              std::set<Event> &already_preconditions)
     //--------------------------------------------------------------------------
     {
@@ -4792,7 +4792,7 @@ namespace LegionRuntime {
       // one local instance if it exists.
 
       // Keep track of all the index spaces we've handled below
-      std::vector<LowLevel::IndexSpace> handled_index_spaces;
+      std::vector<Realm::IndexSpace> handled_index_spaces;
       // Keep track of the preconditions for using the handled index spaces
       std::set<Event> handled_preconditions;
       unsigned done_children = 0;
@@ -4813,14 +4813,14 @@ namespace LegionRuntime {
           if (need_child_intersect)
           {
             // Compute the intersection of our target with the child
-            std::vector<LowLevel::IndexSpace::BinaryOpDescriptor> ops(1);
-            ops[0].op = LowLevel::IndexSpace::ISO_INTERSECT;
+            std::vector<Realm::IndexSpace::BinaryOpDescriptor> ops(1);
+            ops[0].op = Realm::IndexSpace::ISO_INTERSECT;
             ops[0].parent = local_domain.get_index_space();
             ops[0].left_operand = target;
             ops[0].right_operand = child_domain.get_index_space();
             Event pre = Event::merge_events(target_precondition, 
                                       child_precondition, domain_precondition);
-            Event child_ready = LowLevel::IndexSpace::compute_index_spaces(ops,
+            Event child_ready = Realm::IndexSpace::compute_index_spaces(ops,
                                                         false/*mutable*/, pre);
             done = it->first->find_field_descriptors(term_event, usage,
                                                    user_mask,fid_idx,local_proc,
@@ -4856,7 +4856,7 @@ namespace LegionRuntime {
       // If we make it here, we weren't able to cover ourselves, so make an 
       // index space for the remaining set of points we need to handle
       // First compute what we did handle
-      LowLevel::IndexSpace local_handled = LowLevel::IndexSpace::NO_SPACE;
+      Realm::IndexSpace local_handled = Realm::IndexSpace::NO_SPACE;
       Event local_precondition = Event::NO_EVENT;
       if (handled_index_spaces.size() == 1)
       {
@@ -4873,8 +4873,8 @@ namespace LegionRuntime {
           handled_preconditions.insert(parent_precondition);
         // Compute the union of all our handled index spaces
         Event handled_pre = Event::merge_events(handled_preconditions);
-        local_precondition = LowLevel::IndexSpace::reduce_index_spaces( 
-                              LowLevel::IndexSpace::ISO_UNION,
+        local_precondition = Realm::IndexSpace::reduce_index_spaces( 
+                              Realm::IndexSpace::ISO_UNION,
                               handled_index_spaces, local_handled,
                               false/*not mutable*/, 
                               parent_dom.get_index_space(), handled_pre);
@@ -4882,19 +4882,19 @@ namespace LegionRuntime {
         local_handled.destroy(term_event);
       }
       // Now we can compute the remaining part of the index space
-      LowLevel::IndexSpace remaining_space = target;
+      Realm::IndexSpace remaining_space = target;
       Event remaining_precondition = target_precondition;
       if (local_handled.exists())
       {
         // Compute the set difference
-        std::vector<LowLevel::IndexSpace::BinaryOpDescriptor> ops(1);
-        ops[0].op = LowLevel::IndexSpace::ISO_SUBTRACT;
+        std::vector<Realm::IndexSpace::BinaryOpDescriptor> ops(1);
+        ops[0].op = Realm::IndexSpace::ISO_SUBTRACT;
         ops[0].parent = local_domain.get_index_space();
         ops[0].left_operand = target;
         ops[0].right_operand = local_handled;
         Event pre = Event::merge_events(target_precondition,
                                         local_precondition,domain_precondition);
-        remaining_precondition = LowLevel::IndexSpace::compute_index_spaces(ops,
+        remaining_precondition = Realm::IndexSpace::compute_index_spaces(ops,
                                                         false/*mutable*/, pre);
         remaining_space = ops[0].result;
         // We also emit the destruction for this temporary index space
@@ -5677,11 +5677,11 @@ namespace LegionRuntime {
                                           const FieldMask &user_mask,
                                           unsigned fid_idx,
                                           Processor local_proc,
-                                          LowLevel::IndexSpace target,
+                                          Realm::IndexSpace target,
                                           Event target_precondition,
                                   std::vector<FieldDataDescriptor> &field_data,
                                           std::set<Event> &preconditions,
-                             std::vector<LowLevel::IndexSpace> &already_handled,
+                             std::vector<Realm::IndexSpace> &already_handled,
                                        std::set<Event> &already_preconditions)
     //--------------------------------------------------------------------------
     {

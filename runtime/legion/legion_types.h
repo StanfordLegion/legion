@@ -22,7 +22,7 @@
  */
 
 #include "legion_config.h"
-#include "lowlevel.h"
+#include "realm.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -88,12 +88,12 @@ namespace LegionRuntime {
 
     // Runtime task numbering 
     enum {
-      INIT_FUNC_ID            = LowLevel::Processor::TASK_ID_PROCESSOR_INIT,
-      SHUTDOWN_FUNC_ID        = LowLevel::Processor::TASK_ID_PROCESSOR_SHUTDOWN,
-      HLR_TASK_ID             = LowLevel::Processor::TASK_ID_FIRST_AVAILABLE,
-      HLR_LEGION_PROFILING_ID = LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+1,
-      HLR_MAPPER_PROFILING_ID = LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+2,
-      TASK_ID_AVAILABLE       = LowLevel::Processor::TASK_ID_FIRST_AVAILABLE+3,
+      INIT_FUNC_ID            = Realm::Processor::TASK_ID_PROCESSOR_INIT,
+      SHUTDOWN_FUNC_ID        = Realm::Processor::TASK_ID_PROCESSOR_SHUTDOWN,
+      HLR_TASK_ID             = Realm::Processor::TASK_ID_FIRST_AVAILABLE,
+      HLR_LEGION_PROFILING_ID = Realm::Processor::TASK_ID_FIRST_AVAILABLE+1,
+      HLR_MAPPER_PROFILING_ID = Realm::Processor::TASK_ID_FIRST_AVAILABLE+2,
+      TASK_ID_AVAILABLE       = Realm::Processor::TASK_ID_FIRST_AVAILABLE+3,
     };
 
     // redop IDs - none used in HLR right now, but 0 isn't allowed
@@ -451,6 +451,8 @@ namespace LegionRuntime {
     class ProcessorManager;
     class MessageManager;
     class GarbageCollectionEpoch;
+    class TaskImpl;
+    class VariantImpl;
     class Internal;
 
     // legion_ops.h
@@ -615,34 +617,35 @@ namespace LegionRuntime {
     class LegionProfiler;
     class LegionProfInstance;
 
-    typedef LowLevel::Runtime RealmRuntime;
-    typedef LowLevel::Machine Machine;
-    typedef LowLevel::Domain Domain;
-    typedef LowLevel::DomainPoint DomainPoint;
-    typedef LowLevel::IndexSpaceAllocator IndexSpaceAllocator;
-    typedef LowLevel::RegionInstance PhysicalInstance;
-    typedef LowLevel::Memory Memory;
-    typedef LowLevel::Processor Processor;
-    typedef LowLevel::Event Event;
-    typedef LowLevel::Event MapperEvent;
-    typedef LowLevel::UserEvent UserEvent;
-    typedef LowLevel::Reservation Reservation;
-    typedef LowLevel::Barrier Barrier;
+    typedef Realm::Runtime RealmRuntime;
+    typedef Realm::Machine Machine;
+    typedef Realm::Domain Domain;
+    typedef Realm::DomainPoint DomainPoint;
+    typedef Realm::IndexSpaceAllocator IndexSpaceAllocator;
+    typedef Realm::RegionInstance PhysicalInstance;
+    typedef Realm::Memory Memory;
+    typedef Realm::Processor Processor;
+    typedef Realm::CodeDescriptor CodeDescriptor;
+    typedef Realm::Event Event;
+    typedef Realm::Event MapperEvent;
+    typedef Realm::UserEvent UserEvent;
+    typedef Realm::Reservation Reservation;
+    typedef Realm::Barrier Barrier;
     typedef ::legion_reduction_op_id_t ReductionOpID;
-    typedef LowLevel::ReductionOpUntyped ReductionOp;
+    typedef Realm::ReductionOpUntyped ReductionOp;
     typedef ::legion_custom_serdez_id_t CustomSerdezID;
-    typedef LowLevel::CustomSerdezUntyped SerdezOp;
-    typedef LowLevel::Machine::ProcessorMemoryAffinity ProcessorMemoryAffinity;
-    typedef LowLevel::Machine::MemoryMemoryAffinity MemoryMemoryAffinity;
-    typedef LowLevel::ElementMask::Enumerator Enumerator;
-    typedef LowLevel::IndexSpace::FieldDataDescriptor FieldDataDescriptor;
-    typedef std::map<CustomSerdezID, const LowLevel::CustomSerdezUntyped *> SerdezOpTable;
-    typedef std::map<LowLevel::ReductionOpID, 
-            const LowLevel::ReductionOpUntyped *> ReductionOpTable;
+    typedef Realm::CustomSerdezUntyped SerdezOp;
+    typedef Realm::Machine::ProcessorMemoryAffinity ProcessorMemoryAffinity;
+    typedef Realm::Machine::MemoryMemoryAffinity MemoryMemoryAffinity;
+    typedef Realm::ElementMask::Enumerator Enumerator;
+    typedef Realm::IndexSpace::FieldDataDescriptor FieldDataDescriptor;
+    typedef std::map<CustomSerdezID, const Realm::CustomSerdezUntyped *> SerdezOpTable;
+    typedef std::map<Realm::ReductionOpID, 
+            const Realm::ReductionOpUntyped *> ReductionOpTable;
     typedef void (*SerdezInitFnptr)(const ReductionOp*, void *&, size_t&);
     typedef void (*SerdezFoldFnptr)(const ReductionOp*, void *&, size_t&,
                                     const void*, bool);
-    typedef std::map<LowLevel::ReductionOpID, SerdezRedopFns> SerdezRedopTable;
+    typedef std::map<Realm::ReductionOpID, SerdezRedopFns> SerdezRedopTable;
     typedef ::legion_address_space_t AddressSpace;
     typedef ::legion_task_priority_t TaskPriority;
     typedef ::legion_color_t Color;
@@ -692,7 +695,7 @@ namespace LegionRuntime {
 				  const void*,size_t,Processor);
     typedef std::map<Processor::TaskFuncID, LowLevelFnptr> TaskIDTable;
     typedef void (*InlineFnptr)(const Task*,const std::vector<PhysicalRegion>&,
-                                Context,Runtime*,void*&,size_t&);
+                                Context,Runtime*,const void*,void*&,size_t&);
     // A little bit of logic here to figure out the 
     // kind of bit mask to use for FieldMask
 

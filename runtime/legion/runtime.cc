@@ -55,7 +55,7 @@ namespace LegionRuntime {
         // Have to bounce this off the Runtime because C++ is stupid 
         HighLevel::Internal::check_bounds(impl, ptr);
       }
-      void check_bounds(void *impl, const LowLevel::DomainPoint &dp)
+      void check_bounds(void *impl, const Realm::DomainPoint &dp)
       {
         // Have to bounce this off the Runtime because C++ is stupid
         HighLevel::Internal::check_bounds(impl, dp);
@@ -4120,6 +4120,72 @@ namespace LegionRuntime {
       // See if we are done
       return (__sync_add_and_fetch(&remaining, -1) == 0);
     }
+
+    /////////////////////////////////////////////////////////////
+    // Pending Registrations 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    PendingVariantRegistration::PendingVariantRegistration(VariantID v,
+                                  const TaskVariantRegistrar &reg, 
+                                  const void *udata, size_t udata_size,
+                                  LowLevelFnptr lptr, InlineFnptr inptr)
+      : vid(v), registrar(reg), low_ptr(lptr), inline_ptr(inptr)
+    //--------------------------------------------------------------------------
+    {
+      // Make sure we own the task variant name
+      if (reg.task_variant_name != NULL)
+        registrar.task_variant_name = strdup(reg.task_variant_name);
+      // We need to own the user data too
+      if (udata != NULL)
+      {
+        user_data_size = udata_size;
+        user_data = malloc(user_data_size);
+        memcpy(user_data,udata,user_data_size);
+      }
+      else
+      {
+        user_data_size = 0;
+        user_data = NULL;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    PendingVariantRegistrar::PendingVariantRegistrar(
+                                             const PendingVariantRegistrar &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    PendingVariantRegistrar::~PendingVariantRegistrar(void)
+    //--------------------------------------------------------------------------
+    {
+      if (registrar.task_variant_name != NULL)
+        free(registrar.task_variant_name);
+      if (user_data != NULL)
+        free(user_data);
+    }
+
+    //--------------------------------------------------------------------------
+    PendingVariantRegistrar& PendingVariantRegistrar::operator=(
+                                             const PendingVariantRegistrar &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void PendingVariantRegistrar::perform_registration(Internal *runtime)
+    //--------------------------------------------------------------------------
+    {
+      runtime->register_variant(registrar, user_data, user_data_size,
+                                low_ptr, inline_ptr, vid);
+    }
     
     /////////////////////////////////////////////////////////////
     // Legion Runtime 
@@ -4338,6 +4404,20 @@ namespace LegionRuntime {
         }
       }
 #endif
+      // Check to see which operations we buffered before the 
+      // runtime started that we now need to do
+      std::deque<PendingVariantRegistration*> &pending_variants = 
+        get_pending_variant_table();
+      if (!pending_variants.empty())
+      {
+        for (std::deque<PendingVariantRegistration*>::const_iterator it =
+              pending_variants.begin(); it != pending_variants.end(); it++)
+        {
+          (*it)->perform_registration(this);
+          delete *it;
+        }
+        pending_variants.clear();
+      }
 
       // Before launching the top level task, see if the user requested
       // a callback to be performed before starting the application
@@ -4973,8 +5053,8 @@ namespace LegionRuntime {
 #ifdef LEGION_SPY
       LegionSpy::log_top_index_space(handle.id);
 #endif
-      LowLevel::IndexSpace space = 
-                      LowLevel::IndexSpace::create_index_space(max_num_elmts);
+      Realm::IndexSpace space = 
+                      Realm::IndexSpace::create_index_space(max_num_elmts);
       forest->create_index_space(handle, Domain(space), 
                                  UNSTRUCTURED_KIND, MUTABLE);
       ctx->register_index_space_creation(handle);
@@ -5217,7 +5297,7 @@ namespace LegionRuntime {
       for (std::map<DomainPoint,ColoredPoints<ptr_t> >::const_iterator it = 
             coloring.begin(); it != coloring.end(); it++)
       {
-        LowLevel::ElementMask child_mask(num_elmts);
+        Realm::ElementMask child_mask(num_elmts);
         const ColoredPoints<ptr_t> &pcoloring = it->second;
         for (std::set<ptr_t>::const_iterator pit = pcoloring.points.begin();
               pit != pcoloring.points.end(); pit++)
@@ -5229,8 +5309,8 @@ namespace LegionRuntime {
         {
           child_mask.enable(pit->first.value, pit->second - pit->first + 1);
         }
-        LowLevel::IndexSpace child_space = 
-          LowLevel::IndexSpace::create_index_space(
+        Realm::IndexSpace child_space = 
+          Realm::IndexSpace::create_index_space(
                           parent_dom.get_index_space(), child_mask, allocable);
         new_index_spaces[it->first] = Domain(child_space);
       }
@@ -5304,7 +5384,7 @@ namespace LegionRuntime {
         parent_dom.get_index_space().get_valid_mask().get_first_element();
       for (GenericPointInRectIterator<1> pir(color_range); pir; pir++)
       {
-        LowLevel::ElementMask child_mask(num_elmts, first_element);
+        Realm::ElementMask child_mask(num_elmts, first_element);
         Color c = pir.p;
         std::map<Color,ColoredPoints<ptr_t> >::const_iterator finder = 
           coloring.find(c);
@@ -5325,12 +5405,12 @@ namespace LegionRuntime {
         }
         // Now make the index space and save the information
 #ifdef ASSUME_UNALLOCABLE
-        LowLevel::IndexSpace child_space = 
-          LowLevel::IndexSpace::create_index_space(
+        Realm::IndexSpace child_space = 
+          Realm::IndexSpace::create_index_space(
               parent_dom.get_index_space(), child_mask, false/*allocable*/);
 #else
-        LowLevel::IndexSpace child_space = 
-          LowLevel::IndexSpace::create_index_space(
+        Realm::IndexSpace child_space = 
+          Realm::IndexSpace::create_index_space(
                           parent_dom.get_index_space(), child_mask);
 #endif
         new_index_spaces[DomainPoint::from_point<1>(
@@ -5684,7 +5764,7 @@ namespace LegionRuntime {
       Accessor::RegionAccessor<Accessor::AccessorType::Generic,int> 
         fa_coloring = field_accessor.typeify<int>();
       {
-        std::map<Color,LowLevel::ElementMask> child_masks;
+        std::map<Color,Realm::ElementMask> child_masks;
         Domain parent_dom = forest->get_index_space_domain(parent);
         size_t parent_elmts = 
           parent_dom.get_index_space().get_valid_mask().get_num_elmts();
@@ -5696,12 +5776,12 @@ namespace LegionRuntime {
           if (c >= 0)
           {
             Color color = (Color)c; 
-            std::map<Color,LowLevel::ElementMask>::iterator finder = 
+            std::map<Color,Realm::ElementMask>::iterator finder = 
               child_masks.find(color);
             // Haven't made an index space for this color yet
             if (finder == child_masks.end())
             {
-              child_masks[color] = LowLevel::ElementMask(parent_elmts);
+              child_masks[color] = Realm::ElementMask(parent_elmts);
               finder = child_masks.find(color);
             }
 #ifdef DEBUG_HIGH_LEVEL
@@ -5721,31 +5801,31 @@ namespace LegionRuntime {
         for (GenericPointInRectIterator<1> pir(color_range); pir; pir++)
         {
           Color c = pir.p;
-          std::map<Color,LowLevel::ElementMask>::const_iterator finder = 
+          std::map<Color,Realm::ElementMask>::const_iterator finder = 
             child_masks.find(c);
-          LowLevel::IndexSpace child_space;
+          Realm::IndexSpace child_space;
           if (finder != child_masks.end())
           {
 #ifdef ASSUME_UNALLOCABLE
             child_space = 
-              LowLevel::IndexSpace::create_index_space(
+              Realm::IndexSpace::create_index_space(
                 parent_dom.get_index_space(), finder->second, false);
 #else
             child_space = 
-              LowLevel::IndexSpace::create_index_space(
+              Realm::IndexSpace::create_index_space(
                     parent_dom.get_index_space(), finder->second);
 #endif
           }
           else
           {
-            LowLevel::ElementMask empty_mask;
+            Realm::ElementMask empty_mask;
 #ifdef ASSUME_UNALLOCABLE
             child_space = 
-              LowLevel::IndexSpace::create_index_space(
+              Realm::IndexSpace::create_index_space(
                     parent_dom.get_index_space(), empty_mask, false);
 #else
             child_space = 
-              LowLevel::IndexSpace::create_index_space(
+              Realm::IndexSpace::create_index_space(
                     parent_dom.get_index_space(), empty_mask);
 #endif
           }
@@ -5840,13 +5920,13 @@ namespace LegionRuntime {
           if (current_colors.find(it2->first) != current_colors.end())
             continue;
           // Otherwise perform the check
-          const LowLevel::ElementMask &em1 = 
+          const Realm::ElementMask &em1 = 
             it1->second.get_index_space().get_valid_mask();
-          const LowLevel::ElementMask &em2 = 
+          const Realm::ElementMask &em2 = 
             it2->second.get_index_space().get_valid_mask();
-          LowLevel::ElementMask::OverlapResult result = 
+          Realm::ElementMask::OverlapResult result = 
             em1.overlaps_with(em2, 1/*effort level*/);
-          if (result == LowLevel::ElementMask::OVERLAP_YES)
+          if (result == Realm::ElementMask::OVERLAP_YES)
           {
             log_run.error("ERROR: colors %d and %d of partition %d "
                             "are not disjoint when they were claimed to be!",
@@ -5854,7 +5934,7 @@ namespace LegionRuntime {
             assert(false);
             exit(ERROR_DISJOINTNESS_TEST_FAILURE);
           }
-          else if (result == LowLevel::ElementMask::OVERLAP_MAYBE)
+          else if (result == Realm::ElementMask::OVERLAP_MAYBE)
           {
             log_run.warning("WARNING: colors %d and %d of partition "
                         "%d may not be disjoint when they were claimed to be!"
@@ -6244,7 +6324,7 @@ namespace LegionRuntime {
         partition_color = ColorPoint(color);
       Domain color_space;
       forest->compute_pending_color_space(parent, handle1, handle2, color_space,
-                                          LowLevel::IndexSpace::ISO_UNION);
+                                          Realm::IndexSpace::ISO_UNION);
       PendingPartitionOp *part_op = get_available_pending_partition_op(true);
       part_op->initialize_union_partition(ctx, pid, handle1, handle2);
       Event handle_ready = part_op->get_handle_ready();
@@ -6321,7 +6401,7 @@ namespace LegionRuntime {
         partition_color = ColorPoint(color);
       Domain color_space;
       forest->compute_pending_color_space(parent, handle1, handle2, color_space,
-                                          LowLevel::IndexSpace::ISO_INTERSECT);
+                                          Realm::IndexSpace::ISO_INTERSECT);
       PendingPartitionOp *part_op = get_available_pending_partition_op(true);
       part_op->initialize_intersection_partition(ctx, pid, handle1, handle2);
       Event handle_ready = part_op->get_handle_ready();
@@ -6398,7 +6478,7 @@ namespace LegionRuntime {
         partition_color = ColorPoint(color);
       Domain color_space;
       forest->compute_pending_color_space(parent, handle1, handle2, color_space,
-                                          LowLevel::IndexSpace::ISO_SUBTRACT);
+                                          Realm::IndexSpace::ISO_SUBTRACT);
       PendingPartitionOp *part_op = get_available_pending_partition_op(true);
       part_op->initialize_difference_partition(ctx, pid, handle1, handle2);
       Event handle_ready = part_op->get_handle_ready();
@@ -10915,13 +10995,13 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    const void* Internal::get_local_args(SingleTask *ctx, 
-                                        DomainPoint &point, size_t &local_size)
+    VariantID Internal::register_variant(const TaskVariantRegistrar &registrar,
+                                  const void *user_data, size_t user_data_size,
+                                  LowLevelFnptr low_ptr, InlineFnptr inline_ptr,
+                                  VariantID vid /*= AUTO_GENERATE_ID*/)
     //--------------------------------------------------------------------------
     {
-      point = ctx->index_point;
-      local_size = ctx->local_arglen;
-      return ctx->local_args;
+
     }
 
     //--------------------------------------------------------------------------
@@ -15409,11 +15489,9 @@ namespace LegionRuntime {
                                       DEFAULT_SUPERSCALAR_WIDTH;
     /*static*/ unsigned Internal::max_message_size = 
                                       DEFAULT_MAX_MESSAGE_SIZE;
-    /*static*/ unsigned Internal::max_filter_size = 
-                                      DEFAULT_MAX_FILTER_SIZE;
     /*static*/ unsigned Internal::gc_epoch_size = 
                                       DEFAULT_GC_EPOCH_SIZE;
-    /*static*/ bool Internal::enable_imprecise_filter = false;
+    /*static*/ bool Internal::runtime_started = false;
     /*static*/ bool Internal::separate_runtime_instances = false;
     /*static*/ bool Internal::record_registration = false;
     /*sattic*/ bool Internal::stealing_disabled = false;
@@ -15478,6 +15556,8 @@ namespace LegionRuntime {
       LEGION_STATIC_ASSERT(DEFAULT_MIN_TASKS_TO_SCHEDULE > 0);
       LEGION_STATIC_ASSERT(DEFAULT_SUPERSCALAR_WIDTH > 0);
       LEGION_STATIC_ASSERT(DEFAULT_MAX_MESSAGE_SIZE > 0);
+      // Once we've made this call, the Legion runtime is started
+      runtime_started = true;
       // Need to pass argc and argv to low-level runtime before we can record 
       // their values as they might be changed by GASNet or MPI or whatever.
       // Note that the logger isn't initialized until after this call returns 
@@ -15488,16 +15568,8 @@ namespace LegionRuntime {
 #endif
         realm.init(&argc, &argv);
       assert(ok);
-
-      // register tasks and reduction ops with Realm 
-      {
-	const TaskIDTable& task_table =
-	  get_task_table(true/*add runtime tasks*/);
-	for(TaskIDTable::const_iterator it = task_table.begin();
-	    it != task_table.end();
-	    it++)
-	  realm.register_task(it->first, it->second);
       
+      {
 	const ReductionOpTable& red_table = get_reduction_table();
 	for(ReductionOpTable::const_iterator it = red_table.begin();
 	    it != red_table.end();
@@ -15540,7 +15612,6 @@ namespace LegionRuntime {
         initial_tasks_to_schedule = DEFAULT_MIN_TASKS_TO_SCHEDULE;
         superscalar_width = DEFAULT_SUPERSCALAR_WIDTH;
         max_message_size = DEFAULT_MAX_MESSAGE_SIZE;
-        max_filter_size = DEFAULT_MAX_FILTER_SIZE;
         gc_epoch_size = DEFAULT_GC_EPOCH_SIZE;
 #ifdef INORDER_EXECUTION
         program_order_execution = true;
@@ -15557,7 +15628,6 @@ namespace LegionRuntime {
 #endif
         for (int i = 1; i < argc; i++)
         {
-          BOOL_ARG("-hl:imprecise",enable_imprecise_filter);
           BOOL_ARG("-hl:separate",separate_runtime_instances);
           BOOL_ARG("-hl:registration",record_registration);
           BOOL_ARG("-hl:nosteal",stealing_disabled);
@@ -15572,7 +15642,6 @@ namespace LegionRuntime {
           INT_ARG("-hl:sched", initial_tasks_to_schedule);
           INT_ARG("-hl:width", superscalar_width);
           INT_ARG("-hl:message",max_message_size);
-          INT_ARG("-hl:filter", max_filter_size);
           INT_ARG("-hl:epoch", gc_epoch_size);
           if (!strcmp(argv[i],"-hl:no_dyn"))
             dynamic_independence_tests = false;
@@ -15716,12 +15785,7 @@ namespace LegionRuntime {
 #endif
       if (Internal::record_registration)
       {
-        log_run.print("High-level runtime initialization task "
-                            "has low-level ID %d", INIT_FUNC_ID);
-        log_run.print("High-level runtime shutdown task has "
-                            "low-level ID %d", SHUTDOWN_FUNC_ID);
-        log_run.print("Internal meta-task has low-level ID %d", 
-                            HLR_TASK_ID);
+        
         std::map<Processor::TaskFuncID,TaskVariantCollection*>& 
           variant_table = Internal::get_collection_table(); 
         for (std::map<Processor::TaskFuncID,TaskVariantCollection*>::
@@ -15739,6 +15803,11 @@ namespace LegionRuntime {
           }
         }
       } 
+      // For the moment, we only need to register our runtime tasks
+      // We'll register everything else once the Legion runtime starts
+      Event tasks_registered = register_runtime_tasks(realm);
+      // Wait for our tasks to be registered
+      tasks_registered.external_wait();
       // Kick off the low-level machine
       realm.run(0, RealmRuntime::ONE_TASK_ONLY, 0, 0, background);
       // We should only make it here if the machine thread is backgrounded
@@ -15972,6 +16041,42 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    /*static*/ std::deque<PendingVariantRegistration*>& 
+                                       Internal::get_pending_variant_table(void)
+    //--------------------------------------------------------------------------
+    {
+      static std::deque<PendingVariantRegistration*> pending_variant_table;
+      return pending_variant_table;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ VariantID Internal::preregister_variant(
+                          const TaskVariantRegistrar &registrar,
+                          const void *user_data, size_t user_data_size,
+                          LowLevelFnptr low_ptr, InlineFnptr inline_ptr)
+    //--------------------------------------------------------------------------
+    {
+      // Report an error if the runtime has already started
+      if (runtime_started)
+      {
+        log_run.error("Illegal call to 'preregister_task_variant' after "
+                      "the runtime has been started!");
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_STATIC_CALL_POST_RUNTIME_START);
+      }
+      std::deque<PendingVariantRegistration*> &pending_table = 
+        get_pending_variant_table();
+      // Offset by one so that we never have a variant ID of zero
+      VariantID vid = pending_table.size() + 1;
+      pending_table.push_back(new PendingVariantRegistration(vid, registrar,
+                              user_data, user_data_size, low_ptr, inline_ptr));
+      return vid;
+    }
+
+#if 0
+    //--------------------------------------------------------------------------
     /*static*/ TaskID Internal::update_collection_table(
                           LowLevelFnptr low_level_ptr,
                           InlineFnptr inline_ptr,
@@ -16124,21 +16229,7 @@ namespace LegionRuntime {
       get_user_data_table()[key] = buffer;
       return result;
     }
-
-    //--------------------------------------------------------------------------
-    /*static*/ const void* Internal::find_user_data(TaskID tid, VariantID vid)
-    //--------------------------------------------------------------------------
-    {
-      std::pair<TaskID,VariantID> key(tid,vid);
-      const std::map<std::pair<TaskID,VariantID>,const void*> 
-        &user_data_table = get_user_data_table();
-      std::map<std::pair<TaskID,VariantID>,const void*>::const_iterator
-        finder = user_data_table.find(key);
-#ifdef DEBUG_HIGH_LEVEL
-      assert(finder != user_data_table.end());
 #endif
-      return finder->second;
-    }
 
     //--------------------------------------------------------------------------
     /*static*/ TaskVariantCollection* Internal::get_variant_collection(
@@ -16343,27 +16434,52 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void Internal::register_runtime_tasks(TaskIDTable &table)
+    /*static*/ Event Internal::register_runtime_tasks(RealmRuntime &realm)
     //--------------------------------------------------------------------------
     {
-      // Check to make sure that nobody has registered any tasks here
-      for (unsigned idx = 0; idx < TASK_ID_AVAILABLE; idx++)
+      // Make the code descriptors for our tasks
+      CodeDescriptor init_task(Internal::initialize_runtime);
+      CodeDescriptor shutdown_task(Internal::shutdown_runtime);
+      CodeDescriptor hlr_task(Internal::high_level_runtime_task);
+      CodeDescriptor rt_profiling_task(Internal::profiling_runtime_task);
+      CodeDescriptor map_profiling_task(Internal::profiling_mapper_task);
+      ProfilingRequestSet no_requests;
+      // We'll just register these on all the processor kinds
+      std::set<Event> registered_events;
+      Processor::Kind kinds[4] = { Processor::TOC_PROC, Processor::LOC_PROC,
+                                   Processor::UTIL_PROC, Processor::IO_PROC };
+      for (unsigned idx = 0; idx < 4; idx++)
       {
-        if (table.find(idx) != table.end())
-        {
-          log_run.error("Task ID %d is reserved for high-level runtime "
-                              "tasks",idx);
-#ifdef DEBUG_HIGH_LEVEL
-          assert(false);
-#endif
-          exit(ERROR_RESERVED_TASK_ID);
-        }
+        registered_events.insert(
+            Processor::register_task_by_kind(kinds[idx], false/*global*/,
+                                         INIT_FUNC_ID, init_task, no_requests));
+        registered_events.insert(
+            Processor::register_task_by_kind(kinds[idx], false/*global*/,
+                                 SHUTDOWN_FUNC_ID, shutdown_task, no_requests));
+        registered_events.insert(
+            Processor::register_task_by_kind(kinds[idx], false/*global*/,
+                                           HLR_TASK_ID, hlr_task, no_requests));
+        registered_events.insert(
+            Processor::register_task_by_kind(kinds[idx], false/*global*/,
+                      HLR_LEGION_PROFILING_ID, rt_profiling_task, no_requests)); 
+        registered_events.insert(
+            Processor::register_task_by_kind(kinds[idx], false/*global*/,
+                     HLR_MAPPER_PROFILING_ID, map_profiling_task, no_requests));
       }
-      table[INIT_FUNC_ID]            = Internal::initialize_runtime;
-      table[SHUTDOWN_FUNC_ID]        = Internal::shutdown_runtime;
-      table[HLR_TASK_ID]             = Internal::high_level_runtime_task;
-      table[HLR_LEGION_PROFILING_ID] = Internal::profiling_runtime_task;
-      table[HLR_MAPPER_PROFILING_ID] = Internal::profiling_mapper_task;
+      if (record_registration)
+      {
+        log_run.print("Legion runtime initialization task "
+                            "has Realm ID %d", INIT_FUNC_ID);
+        log_run.print("Legion runtime shutdown task has "
+                            "Realm ID %d", SHUTDOWN_FUNC_ID);
+        log_run.print("Legion runtime meta-task has Realm ID %d", 
+                      HLR_TASK_ID);
+        log_run.print("Legion runtime profiling task Realm ID %d",
+                      HLR_LEGION_PROFILING_ID);
+        log_run.print("Legion mapper profiling task has Realm ID %d",
+                      HLR_MAPPER_PROFILING_ID);
+      }
+      return Event::merge_events(registered_events);
     }
 
     //--------------------------------------------------------------------------

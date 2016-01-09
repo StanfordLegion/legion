@@ -3714,21 +3714,6 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    const void* Runtime::get_local_args(Context ctx, 
-                                         DomainPoint &point, size_t &local_size)
-    //--------------------------------------------------------------------------
-    {
-      return runtime->get_local_args(ctx, point, local_size); 
-    }
-
-    //--------------------------------------------------------------------------
-    const void* Runtime::find_user_data(VariantID vid)
-    //--------------------------------------------------------------------------
-    {
-      return runtime->find_user_data(vid);
-    }
-    
-    //--------------------------------------------------------------------------
     /*static*/ int Runtime::start(int argc, char **argv, 
                                            bool background)
     //--------------------------------------------------------------------------

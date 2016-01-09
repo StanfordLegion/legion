@@ -883,6 +883,33 @@ namespace LegionRuntime {
     public:
       static void handle_continuation(const void *args);
     }; 
+
+    /**
+     * \class PendingVariantRegistration
+     * A small helper class for deferring the restration of task
+     * variants until the runtime is started.
+     */
+    class PendingVariantRegistration {
+    public:
+      PendingVariantRegistration(VariantID vid, 
+                                 const TaskVariantRegistrar &registrar,
+                                 const void *user_data, size_t user_data_size,
+                                 LowLevelFnptr low_ptr, InlineFnptr inline_ptr);
+      PendingVariantRegistration(const PendingVariantRegistration &rhs);
+      ~PendingVariantRegistration(void);
+    public:
+      PendingVariantRegistration& operator=(
+                                      const PendingVariantRegistration &rhs);
+    public:
+      void perform_registration(Internal *runtime);
+    private:
+      VariantID vid;
+      TaskVariantRegistrar registrar;
+      void *user_data;
+      size_t user_data_size;
+      LowLevelFnptr low_ptr;
+      InlineFnptr inline_ptr;
+    };
  
     /**
      * \class Internal 
@@ -1407,9 +1434,6 @@ namespace LegionRuntime {
       const std::vector<PhysicalRegion>& begin_task(Context ctx);
       void end_task(Context ctx, const void *result, size_t result_size,
                     bool owned);
-      const void* get_local_args(Context ctx, DomainPoint &point, 
-                                 size_t &local_size);
-      const void* find_user_data(VariantID vid);
       VariantID register_variant(const TaskVariantRegistrar &registrar,
                                  const void *user_data, size_t user_data_size,
                                  LowLevelFnptr low_ptr, InlineFnptr inline_ptr,
@@ -1994,6 +2018,11 @@ namespace LegionRuntime {
       // For every processor map it to its address space
       const std::map<Processor,AddressSpaceID> proc_spaces;
     protected:
+      // The task table 
+      Reservation task_variant_lock;
+      std::deque<TaskImpl*> task_table;
+      std::deque<VariantImpl*> variant_table;
+    protected:
       struct MapperInfo {
         MapperInfo(void)
           : proc(Processor::NO_PROC), map_id(0) { }
@@ -2181,6 +2210,8 @@ namespace LegionRuntime {
                                     ProjectionID handle, void *func_ptr);
       static ProjectionID register_partition_projection_function(
                                     ProjectionID handle, void *func_ptr);
+      static std::deque<PendingVariantRegistration*>&
+                                get_pending_variant_table(void);
       static VariantID preregister_variant(
                       const TaskVariantRegistrar &registrar,
                       const void *user_data, size_t user_data_size,
@@ -2212,7 +2243,7 @@ namespace LegionRuntime {
                                             get_user_data_table(void);
       static RegionProjectionTable& get_region_projection_table(void);
       static PartitionProjectionTable& get_partition_projection_table(void);
-      static void register_runtime_tasks(TaskIDTable &table);
+      static Event register_runtime_tasks(RealmRuntime &realm);
       static Processor::TaskFuncID get_next_available_id(void);
       static void log_machine(Machine machine);
 #ifdef SPECIALIZED_UTIL_PROCS
@@ -2230,9 +2261,8 @@ namespace LegionRuntime {
       static unsigned initial_tasks_to_schedule;
       static unsigned superscalar_width;
       static unsigned max_message_size;
-      static unsigned max_filter_size;
       static unsigned gc_epoch_size;
-      static bool enable_imprecise_filter;
+      static bool runtime_started;
       static bool separate_runtime_instances;
       static bool record_registration;
       static bool stealing_disabled;

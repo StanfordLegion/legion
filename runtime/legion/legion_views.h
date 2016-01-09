@@ -668,11 +668,11 @@ namespace LegionRuntime {
                                           const FieldMask &user_mask,
                                           unsigned fid_idx,
                                           Processor local_proc,
-                                          LowLevel::IndexSpace target,
+                                          Realm::IndexSpace target,
                                           Event target_precondition,
                                   std::vector<FieldDataDescriptor> &field_data,
                                   std::set<Event> &preconditions,
-                             std::vector<LowLevel::IndexSpace> &already_handled,
+                             std::vector<Realm::IndexSpace> &already_handled,
                              std::set<Event> &already_preconditions) = 0;
     protected:
       void send_deferred_view_updates(AddressSpaceID target, 
@@ -750,11 +750,11 @@ namespace LegionRuntime {
                                           const FieldMask &user_mask,
                                           unsigned fid_idx,
                                           Processor local_proc,
-                                          LowLevel::IndexSpace target,
+                                          Realm::IndexSpace target,
                                           Event target_precondition,
                                   std::vector<FieldDataDescriptor> &field_data,
                                           std::set<Event> &preconditions,
-                             std::vector<LowLevel::IndexSpace> &already_handled,
+                             std::vector<Realm::IndexSpace> &already_handled,
                                        std::set<Event> &already_preconditions);
     public:
       void add_root(CompositeNode *root, const FieldMask &valid, bool top);
@@ -888,10 +888,10 @@ namespace LegionRuntime {
       bool find_field_descriptors(Event term_event, const RegionUsage &usage,
                                   const FieldMask &user_mask,
                                   unsigned fid_idx, Processor local_proc, 
-                                  LowLevel::IndexSpace target, Event target_pre,
+                                  Realm::IndexSpace target, Event target_pre,
                                   std::vector<FieldDataDescriptor> &field_data,
                                   std::set<Event> &preconditions,
-                             std::vector<LowLevel::IndexSpace> &already_handled,
+                             std::vector<Realm::IndexSpace> &already_handled,
                                   std::set<Event> &already_preconditions);
     public:
       void add_gc_references(void);
@@ -1010,11 +1010,11 @@ namespace LegionRuntime {
                                           const FieldMask &user_mask,
                                           unsigned fid_idx,
                                           Processor local_proc,
-                                          LowLevel::IndexSpace target,
+                                          Realm::IndexSpace target,
                                           Event target_precondition,
                                   std::vector<FieldDataDescriptor> &field_data,
                                           std::set<Event> &preconditions,
-                             std::vector<LowLevel::IndexSpace> &already_handled,
+                             std::vector<Realm::IndexSpace> &already_handled,
                                        std::set<Event> &already_preconditions);
     public:
       static void handle_send_fill_view(Internal *runtime, Deserializer &derez,

@@ -20,7 +20,7 @@
 
 #ifdef LEGION_LOGGING
 
-#include "lowlevel.h"
+#include "realm.h"
 #include "utilities.h"
 #include "legion_types.h"
 #include "legion_utilities.h"

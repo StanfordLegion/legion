@@ -5241,13 +5241,6 @@ namespace LegionRuntime {
        * ---------------------
        *  Dependence Analysis
        * ---------------------
-       * -hl:filter <int> Maximum number of tasks allowed in logical
-       *              or physical epochs.  Default value is 32.
-       * -hl:imprecise Enable imprecise filtering. This improves the
-       *              effectiveness of the previous flag at the cost that
-       *              it may add imprecision to the analysis and introduce
-       *              additional dependences. It is unsafe to use this flag
-       *              with applications that use phase barriers.
        * -hl:no_dyn   Disable dynamic disjointness tests when the runtime
        *              has been compiled with macro DYNAMIC_TESTS defined
        *              which enables dynamic disjointness testing.
@@ -5728,9 +5721,6 @@ namespace LegionRuntime {
       void end_task(Context ctx, const void *result, size_t result_size,
                     bool owned = false);
       Future from_value(const void *value, size_t value_size, bool owned);
-      const void* get_local_args(Context ctx, DomainPoint &point, 
-                                 size_t &local_size);
-      const void* find_user_data(VariantID vid);
     private:
       static ProjectionID register_region_projection_function(
                                     ProjectionID handle, void *func_ptr);
@@ -5740,7 +5730,7 @@ namespace LegionRuntime {
       VariantID register_variant(const TaskVariantRegistrar &registrar,
                                  const void *user_data, size_t user_data_size,
                                  LowLevelFnptr low_ptr, InlineFnptr inline_ptr);
-      static VariantID preregistar_variant(const TaskVariantRegistrar &reg,
+      static VariantID preregister_variant(const TaskVariantRegistrar &reg,
                                  const void *user_data, size_t user_data_size,
                                  LowLevelFnptr low_ptr, InlineFnptr inline_ptr);
     private:

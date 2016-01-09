@@ -106,7 +106,7 @@ namespace LegionRuntime {
                                        IndexPartition handle1,
                                        IndexPartition handle2,
                                        Domain &color_space,
-                         LowLevel::IndexSpace::IndexSpaceOperation op);
+                         Realm::IndexSpace::IndexSpaceOperation op);
       void create_pending_partition(IndexPartition pid,
                                     IndexSpace parent,
                                     const Domain &color_space,
@@ -991,15 +991,15 @@ namespace LegionRuntime {
     public:
       Event create_subspaces_by_field(
           const std::vector<FieldDataDescriptor> &field_data,
-          std::map<DomainPoint, LowLevel::IndexSpace> &subspaces,
+          std::map<DomainPoint, Realm::IndexSpace> &subspaces,
           bool mutable_results, Event precondition);
       Event create_subspaces_by_image(
           const std::vector<FieldDataDescriptor> &field_data,
-          std::map<LowLevel::IndexSpace, LowLevel::IndexSpace> &subpsaces,
+          std::map<Realm::IndexSpace, Realm::IndexSpace> &subpsaces,
           bool mutable_results, Event precondition);
       Event create_subspaces_by_preimage(
           const std::vector<FieldDataDescriptor> &field_data,
-          std::map<LowLevel::IndexSpace, LowLevel::IndexSpace> &subspaces,
+          std::map<Realm::IndexSpace, Realm::IndexSpace> &subspaces,
           bool mutable_results, Event precondition);
     public:
       static void handle_disjointness_test(IndexSpaceNode *parent,
@@ -1137,9 +1137,9 @@ namespace LegionRuntime {
       Event create_weighted_children(const std::map<DomainPoint,int> &weights,
                                      size_t granularity);
       Event create_by_operation(IndexPartNode *left, IndexPartNode *right,
-                                LowLevel::IndexSpace::IndexSpaceOperation op);
+                                Realm::IndexSpace::IndexSpaceOperation op);
       Event create_by_operation(IndexSpaceNode *left, IndexPartNode *right,
-                                LowLevel::IndexSpace::IndexSpaceOperation op);
+                                Realm::IndexSpace::IndexSpaceOperation op);
     public:
       void get_subspace_domain_preconditions(std::set<Event> &preconditions);
       void get_subspace_domains(std::set<Domain> &subspaces);

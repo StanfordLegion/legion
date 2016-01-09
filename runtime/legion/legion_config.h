@@ -88,10 +88,6 @@
 #ifndef DEFAULT_MAX_MESSAGE_SIZE
 #define DEFAULT_MAX_MESSAGE_SIZE        16384
 #endif
-// Maximum number of tasks in logical region node before consolidation
-#ifndef DEFAULT_MAX_FILTER_SIZE
-#define DEFAULT_MAX_FILTER_SIZE         0
-#endif
 // Timeout before checking for whether a logical user
 // should be pruned from the logical region tree data strucutre
 // Making the value less than or equal to zero will
@@ -300,6 +296,7 @@ typedef enum legion_error_t {
   ERROR_TRACE_VIOLATION = 137,
   ERROR_INVALID_TARGET_PROC = 138,
   ERROR_INCOMPLETE_TRACE = 139,
+  ERROR_STATIC_CALL_POST_RUNTIME_START = 140,
 }  legion_error_t;
 
 // enum and namepsaces don't really get along well

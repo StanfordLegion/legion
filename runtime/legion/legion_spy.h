@@ -17,7 +17,7 @@
 #ifndef __LEGION_SPY_H__
 #define __LEGION_SPY_H__
 
-#include "lowlevel.h"
+#include "realm.h"
 #include "utilities.h"
 #include "legion_types.h"
 #include "legion_utilities.h"
@@ -32,7 +32,7 @@ namespace LegionRuntime {
   namespace HighLevel {
     namespace LegionSpy {
 
-      typedef LegionRuntime::LowLevel::IDType IDType;
+      typedef ::legion_lowlevel_id_t IDType;
 
       extern Logger::Category log_spy;
 

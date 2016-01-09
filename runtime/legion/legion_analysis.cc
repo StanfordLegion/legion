@@ -1682,7 +1682,7 @@ namespace LegionRuntime {
         Domain node_domain = node->get_domain_blocking();
         if (node_domain.get_dim() == 0)
         {
-          const LowLevel::ElementMask &mask = 
+          const Realm::ElementMask &mask = 
             node_domain.get_index_space().get_valid_mask();
           info.req.max_blocking_factor = mask.get_num_elmts();
         }
