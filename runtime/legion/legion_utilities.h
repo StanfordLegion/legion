@@ -2332,7 +2332,7 @@ namespace LegionRuntime {
           result[idx] = bit_vector[idx+range];
         }
         // Fill in everything else with zeros
-        for (unsigned idx = (BIT_ELMTS-range); idx < (BIT_ELMTS-1); idx++)
+        for (unsigned idx = (BIT_ELMTS-range); idx < (BIT_ELMTS); idx++)
           result[idx] = 0;
       }
       else
@@ -2407,7 +2407,7 @@ namespace LegionRuntime {
           bit_vector[idx] = bit_vector[idx+range];
         }
         // Fill in everything else with zeros
-        for (unsigned idx = (BIT_ELMTS-range); idx < (BIT_ELMTS-1); idx++)
+        for (unsigned idx = (BIT_ELMTS-range); idx < (BIT_ELMTS); idx++)
           bit_vector[idx] = 0;
       }
       else
@@ -3013,7 +3013,7 @@ namespace LegionRuntime {
           result.sum_mask |= result[idx];
         }
         // Fill in everything else with zeros
-        for (unsigned idx = (BIT_ELMTS-range); idx < (BIT_ELMTS-1); idx++)
+        for (unsigned idx = (BIT_ELMTS-range); idx < (BIT_ELMTS); idx++)
           result[idx] = 0;
       }
       else
@@ -3096,7 +3096,7 @@ namespace LegionRuntime {
           sum_mask |= bit_vector[idx];
         }
         // Fill in everything else with zeros
-        for (unsigned idx = (BIT_ELMTS-range); idx < (BIT_ELMTS-1); idx++)
+        for (unsigned idx = (BIT_ELMTS-range); idx < (BIT_ELMTS); idx++)
           bit_vector[idx] = 0;
       }
       else
@@ -3662,7 +3662,7 @@ namespace LegionRuntime {
           result[idx] = bits.bit_vector[idx+range];
         }
         // Fill in everything else with zeros
-        for (unsigned idx = (BIT_ELMTS-range); idx < (BIT_ELMTS-1); idx++)
+        for (unsigned idx = (BIT_ELMTS-range); idx < (BIT_ELMTS); idx++)
           result[idx] = 0;
       }
       else
@@ -3735,7 +3735,7 @@ namespace LegionRuntime {
           bits.bit_vector[idx] = bits.bit_vector[idx+range];
         }
         // Fill in everything else with zeros
-        for (unsigned idx = (BIT_ELMTS-range); idx < (BIT_ELMTS-1); idx++)
+        for (unsigned idx = (BIT_ELMTS-range); idx < (BIT_ELMTS); idx++)
           bits.bit_vector[idx] = 0;
       }
       else
@@ -4315,7 +4315,7 @@ namespace LegionRuntime {
           result.sum_mask |= result[idx];
         }
         // Fill in everything else with zeros
-        for (unsigned idx = (BIT_ELMTS-range); idx < (BIT_ELMTS-1); idx++)
+        for (unsigned idx = (BIT_ELMTS-range); idx < (BIT_ELMTS); idx++)
           result[idx] = 0;
       }
       else
@@ -4396,7 +4396,7 @@ namespace LegionRuntime {
           sum_mask |= bits.bit_vector[idx];
         }
         // Fill in everything else with zeros
-        for (unsigned idx = (BIT_ELMTS-range); idx < (BIT_ELMTS-1); idx++)
+        for (unsigned idx = (BIT_ELMTS-range); idx < (BIT_ELMTS); idx++)
           bits.bit_vector[idx] = 0;
       }
       else
@@ -5028,7 +5028,7 @@ namespace LegionRuntime {
           result[idx] = bits.bit_vector[idx+range];
         }
         // Fill in everything else with zeros
-        for (unsigned idx = (BIT_ELMTS-range); idx < (BIT_ELMTS-1); idx++)
+        for (unsigned idx = (BIT_ELMTS-range); idx < (BIT_ELMTS); idx++)
           result[idx] = 0;
       }
       else
@@ -5101,7 +5101,7 @@ namespace LegionRuntime {
           bits.bit_vector[idx] = bits.bit_vector[idx+range];
         }
         // Fill in everything else with zeros
-        for (unsigned idx = (BIT_ELMTS-range); idx < (BIT_ELMTS-1); idx++)
+        for (unsigned idx = (BIT_ELMTS-range); idx < (BIT_ELMTS); idx++)
           bits.bit_vector[idx] = 0;
       }
       else
@@ -5778,7 +5778,7 @@ namespace LegionRuntime {
           result.sum_mask |= result[idx];
         }
         // Fill in everything else with zeros
-        for (unsigned idx = (BIT_ELMTS-range); idx < (BIT_ELMTS-1); idx++)
+        for (unsigned idx = (BIT_ELMTS-range); idx < (BIT_ELMTS); idx++)
           result[idx] = 0;
       }
       else
@@ -5859,7 +5859,7 @@ namespace LegionRuntime {
           sum_mask |= bits.bit_vector[idx];
         }
         // Fill in everything else with zeros
-        for (unsigned idx = (BIT_ELMTS-range); idx < (BIT_ELMTS-1); idx++)
+        for (unsigned idx = (BIT_ELMTS-range); idx < (BIT_ELMTS); idx++)
           bits.bit_vector[idx] = 0;
       }
       else
