@@ -826,6 +826,9 @@ class SingleTask(object):
         else:
             return None
 
+    def get_num_requirements(self):
+        return len(self.reqs)
+
     def add_req_field(self, idx, fid):
         if not idx in self.reqs:
             return False
@@ -1008,8 +1011,7 @@ class SingleTask(object):
             if not check:
                 print "    ERROR: Failed to compute mapping dependence between "+\
                       "index "+str(adep.idx1)+" of "+adep.op1.get_name()+\
-                      " (ID "+str(adep.op1.uid)+") and index "+str(adep.idx2)+ \
-                      " of "+adep.op2.get_name()+" (ID "+str(adep.op2.uid)+")"
+                      " and index "+str(adep.idx2)+" of "+adep.op2.get_name()
                 if adep.op1.get_op_kind() == FENCE_OP:
                     print "      FENCE OPERATION"
                 else:
@@ -1049,9 +1051,8 @@ class SingleTask(object):
                     continue
                 print "    WARNING: Computed extra mapping dependence "+\
                       "between index "+str(mdep.idx1)+" of "+\
-                      mdep.op1.get_name()+" (ID "+str(mdep.op1.uid)+\
-                      ") and index "+str(mdep.idx2)+ " of "+mdep.op2.get_name()+\
-                      " (ID "+str(mdep.op2.uid)+") in context of task "+\
+                      mdep.op1.get_name()+" and index "+str(mdep.idx2)+\
+                      " of "+mdep.op2.get_name()+" in context of task "+\
                       str(self.name)
                 warnings = warnings + 1
 
@@ -1129,8 +1130,12 @@ class SingleTask(object):
                 for inst1 in dep.op1.op_instances:
                     if inst1.get_op_kind() == FENCE_OP:
                         continue
+                    if inst1.get_num_requirements() == 0:
+                        continue
                     for inst2 in dep.op2.op_instances:
                         if inst2.get_op_kind() == FENCE_OP:
+                            continue
+                        if inst2.get_num_requirements() == 0:
                             continue
                         # Check to see if they are still aliased
                         req1 = inst1.get_requirement(dep.idx1)
@@ -1202,25 +1207,23 @@ class SingleTask(object):
                                 assert len(traverser.field_stack) >= 1
                                 last_field = traverser.field_stack[-1]
 
-                                src_inst = node.get_src_inst()
-                                dst_inst = node.get_dst_inst()
-                                src_fields = node.get_src_fields()
                                 dst_fields = node.get_dst_fields()
-
+                                if not last_field in dst_fields:
+                                    return False
+                                dst_inst = node.get_dst_inst(last_field)
                                 if last_inst <> dst_inst:
                                     return False
+
                                 traverser.found = node == traverser.target
                                 if traverser.found:
                                     return False
-                                if not last_field in dst_fields:
-                                    traverser.field_stack.append(last_field)
-                                    traverser.instance_stack.append(dst_inst)
-                                    return not traverser.found
                                 else:
                                     idx = dst_fields.index(last_field)
+                                    src_fields = node.get_src_fields()
                                     traverser.field_stack.append(src_fields[idx])
+                                    src_inst = node.get_src_inst(src_fields[idx])
                                     traverser.instance_stack.append(src_inst)
-                                    return not traverser.found
+                                    return True
                             def traverse_acquire(node, traverser):
                                 if record_visit(node, traverser):
                                     return False
@@ -1275,11 +1278,10 @@ class SingleTask(object):
                                 # a hack for copy operations
                                 if (isinstance(inst2, CopyOp) or \
                                     isinstance(inst2, Copy)) and \
-                                    dst_inst == inst2.get_src_inst() and \
                                     dst_field in inst2.get_src_fields():
-                                        dst_inst = inst2.get_dst_inst()
                                         idx = inst2.get_src_fields().index(dst_field)
                                         dst_field = inst2.get_dst_fields()[idx]
+                                        dst_inst = inst2.get_dst_inst(dst_field)
                                 traverser.instance_stack.append(dst_inst)
                                 traverser.field_stack.append(dst_field)
                                 # Traverse and see if we find inst1
@@ -1289,9 +1291,9 @@ class SingleTask(object):
                                 if not traverser.found:
                                     print "   ERROR: Unable to find data flow path "+\
                                           "between requirement "+str(dep.idx1)+" of "+\
-                                          inst1.get_name()+" (UID "+str(inst1.uid)+") "+\
-                                          "and requirement "+str(dep.idx2)+" of "+inst2.get_name()+\
-                                          " (UID "+str(inst2.uid)+") for field "+str(f)
+                                          inst1.get_name()+"and requirement "+\
+                                          str(dep.idx2)+" of "+inst2.get_name()+\
+                                          " for field "+str(f)
                                     if self.state.verbose:
                                         print "      First Requirement:"
                                         req1.print_requirement()
@@ -1335,6 +1337,9 @@ class IndexTask(object):
     def get_requirement(self, idx):
         assert idx in self.reqs
         return self.reqs[idx]
+
+    def get_num_requirements(self):
+        return len(self.reqs)
 
     def add_req_field(self, idx, fid):
         if not idx in self.reqs:
@@ -1448,6 +1453,9 @@ class Mapping(object):
         assert idx == 0
         assert self.requirement <> None
         return self.requirement
+
+    def get_num_requirements(self):
+        return 1
 
     def add_req_field(self, idx, fid):
         assert idx == 0
@@ -1666,11 +1674,17 @@ class CopyOp(object):
     def get_ctx(self):
         return self.ctx
 
+    def get_inst(self, idx, field):
+        if field in self.instances[idx]:
+            return self.instances[idx][field]
+        else:
+            return None
+
     def get_src_inst(self, field):
-        return self.instances[0][field]
+        return self.get_inst(0, field)
 
     def get_dst_inst(self, field):
-        return self.instances[1][field]
+        return self.get_inst(1, field)
 
     def get_src_field_name(self, field):
         return self.reqs[0].get_field_name(field)
@@ -1697,6 +1711,9 @@ class CopyOp(object):
     def get_requirement(self, idx):
         assert idx in self.reqs
         return self.reqs[idx]
+
+    def get_num_requirements(self):
+        return len(self.reqs)
 
     def add_req_field(self, idx, fid):
         if not idx in self.reqs:
@@ -1969,6 +1986,9 @@ class FillOp(object):
         assert self.requirement is not None
         return self.requirement
 
+    def get_num_requirements(self):
+        return 1
+
     def add_req_field(self, idx, fid):
         assert idx == 0
         assert self.requirement <> None
@@ -2081,6 +2101,9 @@ class AcquireOp(object):
     def get_requirement(self, idx):
         assert idx in self.reqs
         return self.reqs[idx]
+
+    def get_num_requirements(self):
+        return len(self.reqs)
 
     def add_req_field(self, idx, fid):
         if not idx in self.reqs:
@@ -2232,6 +2255,9 @@ class ReleaseOp(object):
     def get_requirement(self, idx):
         assert idx in self.reqs
         return self.reqs[idx]
+
+    def get_num_requirements(self):
+        return len(self.reqs)
 
     def add_req_field(self, idx, fid):
         if not idx in self.reqs:
@@ -2385,6 +2411,9 @@ class DependentPartitionOp(object):
     def get_requirement(self, idx):
         assert idx in self.reqs
         return self.reqs[idx]
+
+    def get_num_requirements(self):
+        return len(self.reqs)
 
     def add_req_field(self, idx, fid):
         if not idx in self.reqs:
@@ -2568,6 +2597,9 @@ class PendingPartitionOp(object):
         assert idx in self.reqs
         return self.reqs[idx]
 
+    def get_num_requirements(self):
+        return len(self.reqs)
+
     def add_req_field(self, idx, fid):
         if not idx in self.reqs:
             return False
@@ -2738,6 +2770,9 @@ class Close(object):
         assert idx == 0
         assert self.requirement <> None
         return self.requirement
+
+    def get_num_requirements(self):
+        return 1
 
     def add_req_field(self, idx, fid):
         assert idx == 0

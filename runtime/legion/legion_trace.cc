@@ -294,7 +294,7 @@ namespace LegionRuntime {
               LegionSpy::log_mapping_dependence(
                   close_op->get_parent()->get_unique_op_id(),
                   current_uids[it->operation_idx], it->prev_idx,
-                  close_op->get_unique_op_id(), it->next_idx, it->dtype);
+                  close_op->get_unique_op_id(), 0, it->dtype);
 #endif
             }
           }
