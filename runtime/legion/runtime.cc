@@ -4186,6 +4186,101 @@ namespace LegionRuntime {
       runtime->register_variant(registrar, user_data, user_data_size,
                                 low_ptr, inline_ptr, vid);
     }
+
+    /////////////////////////////////////////////////////////////
+    // Task Impl 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    TaskImpl::TaskImpl(TaskID tid, const char *name/*=NULL*/)
+      : task_id(tid), task_lock(Reservation::create_reservation())
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    TaskImpl::TaskImpl(const TaskImpl &rhs)
+      : task_id(rhs.task_id)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    TaskImpl::~TaskImpl(void)
+    //--------------------------------------------------------------------------
+    {
+      task_lock.destroy_reservation();
+      task_lock = Reservation::NO_RESERVATION;
+    }
+
+    //--------------------------------------------------------------------------
+    TaskImpl& TaskImpl::operator=(const TaskImpl &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void TaskImpl::add_variant(VariantImpl *impl)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(impl->owner == this);
+#endif
+      AutoLock t_lock(task_lock);
+      variants.insert(impl);
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Variant Impl 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    VariantImpl::VariantImpl(VariantID v, TaskImpl *own, 
+                           const TaskVariantRegistrar &registrar,
+                           LowLevelFnptr low_ptr, InlineFnptr inline_ptr,
+                           const void *udata /*=NULL*/, size_t udata_size/*=0*/)
+      : vid(v), owner(own), user_data_size(udata_size)
+    //--------------------------------------------------------------------------
+    {
+      if (udata != NULL)
+      {
+        user_data = malloc(user_data_size);
+        memcpy(user_data, udata, user_data_size);
+      }
+      else
+        user_data = NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    VariantImpl::VariantImpl(const VariantImpl &rhs) 
+      : vid(rhs.vid), owner(rhs.owner)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    VariantImpl::~VariantImpl(void)
+    //--------------------------------------------------------------------------
+    {
+      if (user_data != NULL)
+        free(user_data);
+    }
+
+    //--------------------------------------------------------------------------
+    VariantImpl& VariantImpl::operator=(const VariantImpl &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
     
     /////////////////////////////////////////////////////////////
     // Legion Runtime 
@@ -4220,6 +4315,7 @@ namespace LegionRuntime {
         unique_region_tree_id((unique == 0) ? runtime_stride : unique),
         unique_operation_id((unique == 0) ? runtime_stride : unique),
         unique_field_id((unique == 0) ? runtime_stride : unique),
+        unique_variant_id((unique == 0) ? runtime_stride : unique),
         available_lock(Reservation::create_reservation()), total_contexts(0),
         group_lock(Reservation::create_reservation()),
         distributed_id_lock(Reservation::create_reservation()),
@@ -4410,6 +4506,7 @@ namespace LegionRuntime {
         get_pending_variant_table();
       if (!pending_variants.empty())
       {
+        const size_t num_static_variants = pending_variants.size();
         for (std::deque<PendingVariantRegistration*>::const_iterator it =
               pending_variants.begin(); it != pending_variants.end(); it++)
         {
@@ -4417,6 +4514,15 @@ namespace LegionRuntime {
           delete *it;
         }
         pending_variants.clear();
+        // If we had non-empty registrations, we have to update
+        // the unique_variant_id field
+        // All the runtime instances registered the static variants
+        // starting at 1 and counting by 1, so just increment our
+        // unique_variant_id until it is greater than the
+        // number of static variants, no need to use atomics
+        // here since we are still initializing the runtime
+        while (unique_variant_id <= num_static_variants)
+          unique_variant_id += runtime_stride;
       }
 
       // Before launching the top level task, see if the user requested
@@ -11001,7 +11107,49 @@ namespace LegionRuntime {
                                   VariantID vid /*= AUTO_GENERATE_ID*/)
     //--------------------------------------------------------------------------
     {
+      // See if we need to make a new variant ID
+      if (vid == AUTO_GENERATE_ID) // Make a variant ID to use
+        vid = get_unique_variant_id();
+      // First find the task implementation
+      TaskImpl *task_impl = find_or_create_task_impl(registrar.task_id);
+      // Make the variant 
+      VariantImp *impl = legion_new<VariantImpl>(vid, task_impl, registrar,
+                                                 low_ptr, inline_ptr,
+                                                 user_data, user_data_size);
+      AutoLock tv_lock(task_variant_lock);
+      variant_table.push_back(impl);
+      // Add it to our set of variants 
+      return vid;
+    }
 
+    //--------------------------------------------------------------------------
+    TaskImpl* Internal::find_or_create_task_impl(TaskID task_id)
+    //--------------------------------------------------------------------------
+    {
+      {
+        AutoLock tv_lock(task_variant_lock,1,false/*exclusive*/);
+        std::map<TaskID,TaskImpl*>::const_iterator finder = 
+          task_table.find(task_id);
+        if (finder != task_table.end())
+          return finder->second;
+      }
+      TaskImpl *result = legion_new<TaskImpl>(task_id);
+      AutoLock tv_lock(task_variant_lock);
+      task_table[task_id] = result;
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    TaskImpl* Internal::find_task_impl(TaskID task_id)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock tv_lock(task_variant_lock,1,false/*exclusive*/);
+      std::map<TaskID,TaskImpl*>::const_iterator finder = 
+        task_table.find(task_id);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(finder != task_table.end());
+#endif
+      return finder->second;
     }
 
     //--------------------------------------------------------------------------
@@ -14951,6 +15099,19 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    VariantID Internal::get_unique_variant_id(void)
+    //--------------------------------------------------------------------------
+    {
+      VariantID result = __sync_fetch_and_add(&unique_variant_id,
+                                              runtime_stride);
+#ifdef DEBUG_HIGH_LEVEL
+      // check for overflow
+      assert(result <= unique_variant_id);
+#endif
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     LegionErrorType Internal::verify_requirement(
                                const RegionRequirement &req, FieldID &bad_field)
     //--------------------------------------------------------------------------
@@ -15296,6 +15457,10 @@ namespace LegionRuntime {
           return "Physical State";
         case VERSION_STATE_ALLOC:
           return "Version State";
+        case TASK_IMPL_ALLOC:
+          return "Task Implementation";
+        case VARIANT_IMPL_ALLOC:
+          return "Variant Implementation";
         default:
           assert(false); // should never get here
       }

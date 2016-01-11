@@ -910,6 +910,47 @@ namespace LegionRuntime {
       LowLevelFnptr low_ptr;
       InlineFnptr inline_ptr;
     };
+
+    class TaskImpl {
+    public:
+      static const AllocationType alloc_type = TASK_IMPL_ALLOC;
+    public:
+      TaskImpl(TaskID tid);
+      TaskImpl(const TaskImpl &rhs);
+      ~TaskImpl(void);
+    public:
+      TaskImpl& operator=(const TaskImpl &rhs);
+    public:
+      void add_variant(VariantImpl *impl);
+    public:
+      const TaskID task_id;
+    private:
+      Reservation task_lock;
+      std::set<VariantImpl*> variants;
+      std::map<SemanticTag,SemanticInfo> semantic_info;
+    };
+
+    class VariantImpl {
+    public:
+      static const AllocationType alloc_type = VARIANT_IMPL_ALLOC;
+    public:
+      VariantImpl(VariantID vid, TaskImpl *owner, 
+                  const TaskVariantRegistrar &registrar, 
+                  LowLevelFnptr low_ptr, InlineFnptr inline_ptr,
+                  const void *user_data = NULL, size_t user_data_size = 0);
+      VariantImpl(const VariantImpl &rhs);
+      ~VariantImpl(void);
+    public:
+      VariantImpl& operator=(const VariantImpl &rhs);
+    public:
+      const VariantID vid;
+      TaskImpl *const owner;
+    private:
+      void *user_data;
+      size_t user_data_size;
+      Event ready_event;
+      CodeDescriptor descriptor;
+    };
  
     /**
      * \class Internal 
@@ -1438,6 +1479,8 @@ namespace LegionRuntime {
                                  const void *user_data, size_t user_data_size,
                                  LowLevelFnptr low_ptr, InlineFnptr inline_ptr,
                                  VariantID vid = AUTO_GENERATE_ID); 
+      TaskImpl* find_or_create_task_impl(TaskID task_id);
+      TaskImpl* find_task_impl(TaskID task_id);
     public:
       // Memory manager functions
       MemoryManager* find_memory(Memory mem);
@@ -1932,6 +1975,7 @@ namespace LegionRuntime {
       RegionTreeID     get_unique_region_tree_id(void);
       UniqueID         get_unique_operation_id(void);
       FieldID          get_unique_field_id(void);
+      VariantID        get_unique_variant_id(void);
     public:
       // Verify that a region requirement is valid
       LegionErrorType verify_requirement(const RegionRequirement &req,
@@ -2050,6 +2094,7 @@ namespace LegionRuntime {
       unsigned unique_region_tree_id;
       unsigned unique_operation_id;
       unsigned unique_field_id; 
+      unsigned unique_variant_id;
     protected:
       std::map<ProjectionID,ProjectionFunctor*> projection_functors;
     protected:

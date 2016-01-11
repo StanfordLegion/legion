@@ -388,6 +388,16 @@ namespace LegionRuntime {
         "Send Shutdown Response",                                     \
       };
 
+    enum SemanticInfoKind {
+      INDEX_SPACE_SEMANTIC,
+      INDEX_PARTITION_SEMANTIC,
+      FIELD_SPACE_SEMANTIC,
+      FIELD_SEMANTIC,
+      LOGICAL_REGION_SEMANTIC,
+      LOGICAL_PARTITION_SEMANTIC,
+      TASK_SEMANTIC,
+    };
+
     // Forward declarations for user level objects
     // legion.h
     class FieldSpace;

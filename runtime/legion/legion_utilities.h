@@ -257,6 +257,30 @@ namespace LegionRuntime {
     };
 
     /////////////////////////////////////////////////////////////
+    // Semantic Info 
+    /////////////////////////////////////////////////////////////
+
+    /**
+     * \struct SemanticInfo
+     * A struct for storing semantic information for various things
+     */
+    struct SemanticInfo {
+    public:
+      SemanticInfo(void)
+        : buffer(NULL), size(0) { }  
+      SemanticInfo(void *buf, size_t s) 
+        : buffer(buf), size(s), ready_event(UserEvent::NO_USER_EVENT) { }
+      SemanticInfo(UserEvent ready)
+        : buffer(NULL), size(0), ready_event(ready) { }
+    public:
+      bool is_valid(void) const { return !ready_event.exists(); }
+    public:
+      void *buffer;
+      size_t size;
+      UserEvent ready_event;
+    };
+
+    /////////////////////////////////////////////////////////////
     // ColorPoint 
     /////////////////////////////////////////////////////////////
     class ColorPoint {

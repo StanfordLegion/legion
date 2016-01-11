@@ -777,35 +777,6 @@ namespace LegionRuntime {
 #endif
 
     /**
-     * \struct SemanticInfo
-     * A struct for storing semantic information for various things
-     */
-    struct SemanticInfo {
-    public:
-      SemanticInfo(void)
-        : buffer(NULL), size(0) { }  
-      SemanticInfo(void *buf, size_t s) 
-        : buffer(buf), size(s), ready_event(UserEvent::NO_USER_EVENT) { }
-      SemanticInfo(UserEvent ready)
-        : buffer(NULL), size(0), ready_event(ready) { }
-    public:
-      bool is_valid(void) const { return !ready_event.exists(); }
-    public:
-      void *buffer;
-      size_t size;
-      UserEvent ready_event;
-    };
-
-    enum SemanticInfoKind {
-      INDEX_SPACE_SEMANTIC,
-      INDEX_PARTITION_SEMANTIC,
-      FIELD_SPACE_SEMANTIC,
-      FIELD_SEMANTIC,
-      LOGICAL_REGION_SEMANTIC,
-      LOGICAL_PARTITION_SEMANTIC,
-    };
-
-    /**
      * \class IndexTreeNode
      * The abstract base class for nodes in the index space trees.
      */
