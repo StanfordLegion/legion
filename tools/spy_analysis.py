@@ -985,15 +985,11 @@ class SingleTask(object):
             print "        Computed Dependences:"
             for dep in self.mdeps:
                 print "          index "+str(dep.idx1)+" of "+dep.op1.get_name()+\
-                      " (ID "+str(dep.op1.uid)+") and index "+\
-                      str(dep.idx2)+" of "+dep.op2.get_name()+" (ID "+\
-                      str(dep.op2.uid)+")"
+                      " and index "+str(dep.idx2)+" of "+dep.op2.get_name()
             print "        Actual Dependences:"
             for dep in self.adeps:
                 print "          index "+str(dep.idx1)+" of "+dep.op1.get_name()+\
-                      " (ID "+str(dep.op1.uid)+") and index "+\
-                      str(dep.idx2)+" of "+dep.op2.get_name()+\
-                      " (ID "+str(dep.op2.uid)+")"
+                      " and index "+str(dep.idx2)+" of "+dep.op2.get_name()
         # For all the actual dependences make sure we have a dependence path between the
         # two different operations based on the dependences computed by the runtime
         count = 0
