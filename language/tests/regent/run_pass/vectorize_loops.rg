@@ -14,12 +14,6 @@
 
 import "regent"
 
--- FIXME: Dataflow can't handle this test because field access is
--- downgraded to an rval.
-
--- runs-with:
--- []
-
 struct vec2
 {
   x : float,
