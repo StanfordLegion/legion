@@ -15,6 +15,12 @@
 -- Regent Compiler Passes
 
 local codegen = require("regent/codegen")
+local flow_dead_code_elimination = require("regent/flow_dead_code_elimination")
+local flow_from_ast = require("regent/flow_from_ast")
+local flow_loop_fusion = require("regent/flow_loop_fusion")
+local flow_spmd = require("regent/flow_spmd")
+local flow_task_fusion = require("regent/flow_task_fusion")
+local flow_to_ast = require("regent/flow_to_ast")
 local optimize_config_options = require("regent/optimize_config_options")
 local optimize_divergence = require("regent/optimize_divergence")
 local optimize_futures = require("regent/optimize_futures")
@@ -33,6 +39,12 @@ local passes = {}
 
 function passes.optimize(ast)
   if std.config["task-inlines"] then ast = inline_tasks.entry(ast) end
+  ast = flow_from_ast.entry(ast)
+  ast = flow_spmd.entry(ast)
+  -- ast = flow_loop_fusion.entry(ast)
+  -- ast = flow_task_fusion.entry(ast)
+  -- ast = flow_dead_code_elimination.entry(ast)
+  ast = flow_to_ast.entry(ast)
   if std.config["index-launches"] then ast = optimize_loops.entry(ast) end
   if std.config["futures"] then ast = optimize_futures.entry(ast) end
   if std.config["leaf"] then ast = optimize_config_options.entry(ast) end
