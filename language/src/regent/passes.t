@@ -32,10 +32,22 @@ local type_check = require("regent/type_check")
 local validate = require("regent/validate")
 local vectorize_loops = require("regent/vectorize_loops")
 
+local flow_from_ast, flow_spmd, flow_to_ast
+if std.config["flow"] then
+  flow_from_ast = require("regent/flow_from_ast")
+  flow_spmd = require("regent/flow_spmd")
+  flow_to_ast = require("regent/flow_to_ast")
+end
+
 local passes = {}
 
 function passes.optimize(node)
   if std.config["task-inlines"] then node = inline_tasks.entry(node) end
+  if std.config["flow"] then
+    node = flow_from_ast.entry(node)
+    if std.config["flow-spmd"] then node = flow_spmd.entry(node) end
+    node = flow_to_ast.entry(node)
+  end
   if std.config["index-launches"] then node = optimize_loops.entry(node) end
   if std.config["futures"] then node = optimize_futures.entry(node) end
   if std.config["leaf"] then node = optimize_config_options.entry(node) end
