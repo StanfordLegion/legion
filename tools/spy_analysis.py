@@ -156,10 +156,9 @@ def generate_html_instance_label(title, instance, color, verbose):
     colspan = 2 if len(instance.fields) > 1 and verbose else 1
 
     lines = list()
-    lines.append([{"label" : title, "colspan" : colspan}])
+    if title <> None:
+        lines.append([{"label" : title, "colspan" : colspan}])
     lines.append([{"label" : "Memory: " + instance.memory.dot_memory(),
-        "colspan" : colspan}])
-    lines.append([{"label" : "Instance: " + instance.dot_instance(),
         "colspan" : colspan}])
     lines.append([{"label" : "Instance: " + instance.dot_instance(),
         "colspan" : colspan}])
@@ -3008,7 +3007,11 @@ class Copy(object):
         return { inst_pair : [(f, f) for f in self.fields] }
 
     def get_src_field_name(self, field):
-        return self.region.field_node.get_field_name(field)
+        field_name = self.region.field_node.get_field_name(field)
+        if field_name <> None:
+            return field_name
+        else:
+            return str(field)
 
     def get_src_fields(self):
         return self.fields
