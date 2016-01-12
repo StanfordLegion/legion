@@ -53,8 +53,11 @@ lib_path = (
      bindings_dir,
  ])
 
-terra_exe = os.path.join(terra_dir, 'terra')
 def regent(args, env = {}, **kwargs):
+    terra_exe = os.path.join(terra_dir, 'terra')
+    if not os.path.exists(terra_exe):
+        terra_exe = os.path.join(terra_dir, 'bin', 'terra')
+
     terra_path = (
         ['?.t'] +
         ([os.path.join(os.path.dirname(os.path.realpath(args[0])), '?.t')]
