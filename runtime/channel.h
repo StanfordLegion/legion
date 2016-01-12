@@ -44,10 +44,12 @@ namespace LegionRuntime{
   namespace LowLevel{
     class XferDes;
     class Channel;
-
+    
+#ifdef USE_CUDA
     typedef Realm::Cuda::GPU GPU;
     typedef Realm::Cuda::GPUFBMemory GPUFBMemory;
-
+#endif
+    
     class Buffer {
     public:
       enum MemoryKind {
@@ -1597,7 +1599,9 @@ namespace LegionRuntime{
     };
 
     XferDesQueue* get_xdq_singleton();
+#ifdef USE_GPU
     void register_gpu_in_dma_systems(GPU* gpu);
+#endif
     void start_channel_manager(int count, int max_nr, Realm::CoreReservationSet& crs);
     void stop_channel_manager();
     template<unsigned DIM>
