@@ -4151,8 +4151,8 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    PendingVariantRegistrar::PendingVariantRegistrar(
-                                             const PendingVariantRegistrar &rhs)
+    PendingVariantRegistration::PendingVariantRegistration(
+                                          const PendingVariantRegistration &rhs)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -4160,18 +4160,18 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    PendingVariantRegistrar::~PendingVariantRegistrar(void)
+    PendingVariantRegistration::~PendingVariantRegistration(void)
     //--------------------------------------------------------------------------
     {
       if (registrar.task_variant_name != NULL)
-        free(registrar.task_variant_name);
+        free(const_cast<char*>(registrar.task_variant_name));
       if (user_data != NULL)
         free(user_data);
     }
 
     //--------------------------------------------------------------------------
-    PendingVariantRegistrar& PendingVariantRegistrar::operator=(
-                                             const PendingVariantRegistrar &rhs)
+    PendingVariantRegistration& PendingVariantRegistration::operator=(
+                                          const PendingVariantRegistration &rhs)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -4180,7 +4180,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void PendingVariantRegistrar::perform_registration(Internal *runtime)
+    void PendingVariantRegistration::perform_registration(Internal *runtime)
     //--------------------------------------------------------------------------
     {
       runtime->register_variant(registrar, user_data, user_data_size,
@@ -4192,15 +4192,35 @@ namespace LegionRuntime {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    TaskImpl::TaskImpl(TaskID tid, const char *name/*=NULL*/)
-      : task_id(tid), task_lock(Reservation::create_reservation())
+    TaskImpl::TaskImpl(TaskID tid, Internal *rt, const char *name/*=NULL*/)
+      : task_id(tid), runtime(rt), task_lock(Reservation::create_reservation())
     //--------------------------------------------------------------------------
     {
+      // Always fill in semantic info 0 with a name for the task
+      if (name == NULL)
+      {
+        char *noname = (char*)malloc(64*sizeof(char));
+        snprintf(noname,64,"unnamed_task_%d", task_id);
+        size_t name_size = strlen(noname) + 1; // for \0
+        semantic_info[0] = SemanticInfo(noname, name_size);
+      }
+      else
+      {
+        size_t name_size = strlen(name) + 1; // for \0
+        semantic_info[0] = SemanticInfo(strdup(name), name_size);
+      }
+      // Register this task with the profiler if necessary
+      if (runtime->profiler != NULL)
+      {
+        const SemanticInfo &info = semantic_info[0]; 
+        const char *name = (const char*)info.buffer;
+        runtime->profiler->register_task_kind(task_id, name);
+      }
     }
 
     //--------------------------------------------------------------------------
     TaskImpl::TaskImpl(const TaskImpl &rhs)
-      : task_id(rhs.task_id)
+      : task_id(rhs.task_id), runtime(rhs.runtime)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -4232,7 +4252,20 @@ namespace LegionRuntime {
       assert(impl->owner == this);
 #endif
       AutoLock t_lock(task_lock);
-      variants.insert(impl);
+      variants[impl->vid] = impl;
+    }
+
+    //--------------------------------------------------------------------------
+    VariantImpl* TaskImpl::find_variant_impl(VariantID variant_id)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock t_lock(task_lock,1,false/*exclusive*/);
+      std::map<VariantID,VariantImpl*>::const_iterator finder = 
+        variants.find(variant_id);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(finder != variants.end());
+#endif
+      return finder->second;
     }
 
     /////////////////////////////////////////////////////////////
@@ -4240,11 +4273,17 @@ namespace LegionRuntime {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    VariantImpl::VariantImpl(VariantID v, TaskImpl *own, 
+    VariantImpl::VariantImpl(Internal *rt, VariantID v, TaskImpl *own, 
                            const TaskVariantRegistrar &registrar,
-                           LowLevelFnptr low_ptr, InlineFnptr inline_ptr,
+                           LowLevelFnptr low_ptr, InlineFnptr in_ptr,
                            const void *udata /*=NULL*/, size_t udata_size/*=0*/)
-      : vid(v), owner(own), user_data_size(udata_size)
+      : ExecutionConstraintSet(registrar.execution_constraints),
+        TaskLayoutDescriptionSet(registrar.layout_constraints),
+        vid(v), owner(own), runtime(rt), 
+        user_data_size(udata_size), inline_ptr(in_ptr),
+        leaf_variant(registrar.leaf_variant), 
+        inner_variant(registrar.inner_variant),
+        idempotent_variant(registrar.idempotent_variant)
     //--------------------------------------------------------------------------
     {
       if (udata != NULL)
@@ -4254,11 +4293,51 @@ namespace LegionRuntime {
       }
       else
         user_data = NULL;
+      // Make our code descriptor and register it with Realm
+      descriptor.add_implementation(
+          new Realm::FunctionPointerImplementation((void(*)(void))low_ptr));
+      // Figure out which kind or processors we can use this variant on
+      // and register it against all the local processors of that kind
+      std::vector<Processor::Kind> proc_kinds;
+      isa_constraint.find_proc_kinds(proc_kinds);
+      // If there were no processor kinds just register it on all of them
+      if (proc_kinds.empty())
+      {
+        // Just register it on all types to be sound
+        proc_kinds.push_back(Processor::TOC_PROC);
+        proc_kinds.push_back(Processor::LOC_PROC);
+        proc_kinds.push_back(Processor::IO_PROC);
+        // Just an application task, so don't register with utility procs
+      }
+      std::set<Event> registration_events;
+      Realm::ProfilingRequestSet profiling_requests;
+      for (std::vector<Processor::Kind>::const_iterator it = 
+            proc_kinds.begin(); it != proc_kinds.end(); it++)
+      {
+        registration_events.insert(
+            Processor::register_task_by_kind(*it, false/*global*/,
+                                             vid, descriptor,
+                                             profiling_requests,
+                                             user_data, user_data_size));
+      }
+      ready_event = Event::merge_events(registration_events);
+      // If we have a variant name, then record it
+      if (registrar.task_variant_name == NULL)
+      {
+        variant_name = (char*)malloc(64*sizeof(char));
+        snprintf(variant_name,64,"unnamed_variant_%ld", vid);
+      }
+      else
+        variant_name = strdup(registrar.task_variant_name);
+      // register this with the runtime profiler if we have to
+      if (runtime->profiler != NULL)
+        runtime->profiler->register_task_variant(vid, variant_name);
     }
 
     //--------------------------------------------------------------------------
     VariantImpl::VariantImpl(const VariantImpl &rhs) 
-      : vid(rhs.vid), owner(rhs.owner)
+      : ExecutionConstraintSet(), TaskLayoutDescriptionSet(),
+        vid(rhs.vid), owner(rhs.owner), runtime(rhs.runtime)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -4271,6 +4350,8 @@ namespace LegionRuntime {
     {
       if (user_data != NULL)
         free(user_data);
+      if (variant_name != NULL)
+        free(variant_name);
     }
 
     //--------------------------------------------------------------------------
@@ -4280,6 +4361,38 @@ namespace LegionRuntime {
       // should never be called
       assert(false);
       return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    Event VariantImpl::dispatch_task(Processor target, SingleTask *task, 
+                                     Event precondition, int priority, 
+                                     Realm::ProfilingRequestSet &requests)
+    //--------------------------------------------------------------------------
+    {
+      // Add any profiling requests
+      if (runtime->profiler != NULL)
+        runtime->profiler->add_task_request(requests, vid, task);
+      // Increment the number of outstanding tasks
+      runtime->increment_total_outstanding_tasks();
+      // If our ready event hasn't triggered, include it in the precondition
+      if (!ready_event.has_triggered())
+        return target.spawn(vid, &task, sizeof(task), requests,
+                  Event::merge_events(precondition, ready_event), priority);
+      return target.spawn(vid, &task, sizeof(task), requests, 
+                          precondition, priority);
+    }
+
+    //--------------------------------------------------------------------------
+    void VariantImpl::dispatch_inline(Task *task, SingleTask *parent,
+                                    const std::vector<PhysicalRegion> &regions,
+                                    void *&future_store, size_t &future_size)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(inline_ptr != NULL);
+#endif
+      (*inline_ptr)(task, regions, parent, runtime->high_level, 
+                    user_data, future_store, future_size);
     }
     
     /////////////////////////////////////////////////////////////
@@ -4471,25 +4584,6 @@ namespace LegionRuntime {
         HLR_MESSAGE_DESCRIPTIONS(hlr_message_descriptions);
         profiler->record_message_kinds(hlr_message_descriptions,LAST_SEND_KIND);
 #endif
-        // We also have to register any statically registered task
-        // variants here since the profiler didn't exist before
-        const std::map<Processor::TaskFuncID,TaskVariantCollection*> 
-          &collections = Internal::get_collection_table();
-        for (std::map<Processor::TaskFuncID,TaskVariantCollection*>::
-              const_iterator cit = collections.begin(); cit != 
-              collections.end(); cit++) 
-        {
-          const std::map<VariantID,TaskVariantCollection::Variant> 
-            &variants = cit->second->variants;  
-          profiler->register_task_kind(cit->first, cit->second->name);
-          for (std::map<VariantID,TaskVariantCollection::Variant>::
-                const_iterator it = variants.begin(); it != 
-                variants.end(); it++)
-          {
-            profiler->register_task_variant(cit->second->name,
-                                            it->second);
-          }
-        }
       }
 #ifdef LEGION_GC
       {
@@ -11113,9 +11207,10 @@ namespace LegionRuntime {
       // First find the task implementation
       TaskImpl *task_impl = find_or_create_task_impl(registrar.task_id);
       // Make the variant 
-      VariantImp *impl = legion_new<VariantImpl>(vid, task_impl, registrar,
-                                                 low_ptr, inline_ptr,
-                                                 user_data, user_data_size);
+      VariantImpl *impl = legion_new<VariantImpl>(this, vid, task_impl, 
+                                                  registrar, low_ptr, 
+                                                  inline_ptr, user_data, 
+                                                  user_data_size);
       AutoLock tv_lock(task_variant_lock);
       variant_table.push_back(impl);
       // Add it to our set of variants 
@@ -11133,7 +11228,7 @@ namespace LegionRuntime {
         if (finder != task_table.end())
           return finder->second;
       }
-      TaskImpl *result = legion_new<TaskImpl>(task_id);
+      TaskImpl *result = legion_new<TaskImpl>(task_id, this);
       AutoLock tv_lock(task_variant_lock);
       task_table[task_id] = result;
       return result;
@@ -11150,6 +11245,24 @@ namespace LegionRuntime {
       assert(finder != task_table.end());
 #endif
       return finder->second;
+    }
+
+    //--------------------------------------------------------------------------
+    VariantImpl* Internal::find_variant_impl(TaskID task_id, 
+                                             VariantID variant_id)
+    //--------------------------------------------------------------------------
+    {
+      TaskImpl *owner;
+      {
+        AutoLock tv_lock(task_variant_lock,1,false/*exclusive*/);
+        std::map<TaskID,TaskImpl*>::const_iterator finder = 
+          task_table.find(task_id);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(finder != task_table.end());
+#endif
+        owner = finder->second;
+      }
+      return owner->find_variant_impl(variant_id);
     }
 
     //--------------------------------------------------------------------------
@@ -16484,27 +16597,6 @@ namespace LegionRuntime {
       return finder->second;
     }
 
-    //--------------------------------------------------------------------------
-    /*static*/ InlineFnptr Internal::find_inline_function(
-                                                    Processor::TaskFuncID fid)
-    //--------------------------------------------------------------------------
-    {
-      const std::map<Processor::TaskFuncID,InlineFnptr> &table = 
-                                                            get_inline_table();
-      std::map<Processor::TaskFuncID,InlineFnptr>::const_iterator finder = 
-                                                        table.find(fid);
-      if (finder == table.end())
-      {
-        log_run.error("Unable to find inline function with with "
-                            "inline function ID %d", fid);
-#ifdef DEBUG_HIGH_LEVEL
-        assert(false);
-#endif
-        exit(ERROR_INVALID_INLINE_ID);
-      }
-      return finder->second;
-    }
-
 #if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS)
     //--------------------------------------------------------------------------
     /*static*/ const char* Internal::find_privilege_task_name(void *impl)
@@ -16570,26 +16662,6 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ TaskIDTable& Internal::get_task_table(
-                                              bool add_runtime_tasks /*= true*/)
-    //--------------------------------------------------------------------------
-    {
-      static TaskIDTable table;
-      if (add_runtime_tasks)
-        Internal::register_runtime_tasks(table); 
-      return table;
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ std::map<Processor::TaskFuncID,InlineFnptr>& 
-                                          Internal::get_inline_table(void)
-    //--------------------------------------------------------------------------
-    {
-      static std::map<Processor::TaskFuncID,InlineFnptr> table;
-      return table;
-    }
-
-    //--------------------------------------------------------------------------
     /*static*/ std::map<Processor::TaskFuncID,TaskVariantCollection*>& 
                                       Internal::get_collection_table(void)
     //--------------------------------------------------------------------------
@@ -16597,15 +16669,6 @@ namespace LegionRuntime {
       static std::map<Processor::TaskFuncID,TaskVariantCollection*> 
                                                             collection_table;
       return collection_table;
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ std::map<std::pair<TaskID,VariantID>,const void*>&
-                                      Internal::get_user_data_table(void)
-    //--------------------------------------------------------------------------
-    {
-      static std::map<std::pair<TaskID,VariantID>,const void*> user_data_table;
-      return user_data_table;
     }
 
     //--------------------------------------------------------------------------
@@ -16636,7 +16699,7 @@ namespace LegionRuntime {
       CodeDescriptor hlr_task(Internal::high_level_runtime_task);
       CodeDescriptor rt_profiling_task(Internal::profiling_runtime_task);
       CodeDescriptor map_profiling_task(Internal::profiling_mapper_task);
-      ProfilingRequestSet no_requests;
+      Realm::ProfilingRequestSet no_requests;
       // We'll just register these on all the processor kinds
       std::set<Event> registered_events;
       Processor::Kind kinds[4] = { Processor::TOC_PROC, Processor::LOC_PROC,

@@ -911,30 +911,43 @@ namespace LegionRuntime {
       InlineFnptr inline_ptr;
     };
 
+    /**
+     * \class TaskImpl
+     * This class is used for storing all the meta-data associated 
+     * with a logical task
+     */
     class TaskImpl {
     public:
       static const AllocationType alloc_type = TASK_IMPL_ALLOC;
     public:
-      TaskImpl(TaskID tid);
+      TaskImpl(TaskID tid, Internal *rt, const char *name = NULL);
       TaskImpl(const TaskImpl &rhs);
       ~TaskImpl(void);
     public:
       TaskImpl& operator=(const TaskImpl &rhs);
     public:
       void add_variant(VariantImpl *impl);
+      VariantImpl* find_variant_impl(VariantID variant_id);
     public:
       const TaskID task_id;
+      Internal *const runtime;
     private:
       Reservation task_lock;
-      std::set<VariantImpl*> variants;
+      std::map<VariantID,VariantImpl*> variants;
       std::map<SemanticTag,SemanticInfo> semantic_info;
     };
 
-    class VariantImpl {
+    /**
+     * \class VariantImpl
+     * This class is used for storing all the meta-data associated
+     * with a particular variant implementation of a task
+     */
+    class VariantImpl : 
+      public ExecutionConstraintSet, TaskLayoutDescriptionSet {
     public:
       static const AllocationType alloc_type = VARIANT_IMPL_ALLOC;
     public:
-      VariantImpl(VariantID vid, TaskImpl *owner, 
+      VariantImpl(Internal *runtime, VariantID vid, TaskImpl *owner, 
                   const TaskVariantRegistrar &registrar, 
                   LowLevelFnptr low_ptr, InlineFnptr inline_ptr,
                   const void *user_data = NULL, size_t user_data_size = 0);
@@ -943,13 +956,34 @@ namespace LegionRuntime {
     public:
       VariantImpl& operator=(const VariantImpl &rhs);
     public:
+      inline bool is_leaf(void) const { return leaf_variant; }
+      inline bool is_inner(void) const { return inner_variant; }
+      inline bool is_idempotent(void) const { return idempotent_variant; }
+    public:
+      Event dispatch_task(Processor target, SingleTask *task, 
+                          Event precondition, int priority,
+                          Realm::ProfilingRequestSet &requests);
+      void dispatch_inline(Task *task, SingleTask *parent,
+                           const std::vector<PhysicalRegion> &regions,
+                           void *&future_store, size_t &future_size);
+    public:
       const VariantID vid;
       TaskImpl *const owner;
+      Internal *const runtime;
     private:
       void *user_data;
       size_t user_data_size;
+    private:
+      InlineFnptr inline_ptr;
+    private:
       Event ready_event;
       CodeDescriptor descriptor;
+    private: // properties
+      bool leaf_variant;
+      bool inner_variant;
+      bool idempotent_variant;
+    private:
+      char *variant_name;
     };
  
     /**
@@ -1481,6 +1515,7 @@ namespace LegionRuntime {
                                  VariantID vid = AUTO_GENERATE_ID); 
       TaskImpl* find_or_create_task_impl(TaskID task_id);
       TaskImpl* find_task_impl(TaskID task_id);
+      VariantImpl* find_variant_impl(TaskID task_id, VariantID variant_id);
     public:
       // Memory manager functions
       MemoryManager* find_memory(Memory mem);
@@ -2066,7 +2101,7 @@ namespace LegionRuntime {
     protected:
       // The task table 
       Reservation task_variant_lock;
-      std::deque<TaskImpl*> task_table;
+      std::map<TaskID,TaskImpl*> task_table;
       std::deque<VariantImpl*> variant_table;
     protected:
       struct MapperInfo {
@@ -2269,7 +2304,6 @@ namespace LegionRuntime {
                     find_partition_projection_function(ProjectionID pid);
       static RegionProjectionFnptr
                     find_region_projection_function(ProjectionID pid);
-      static InlineFnptr find_inline_function(Processor::TaskFuncID fid);
 #if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS)
     public:
       static const char* find_privilege_task_name(void *impl);
@@ -2281,13 +2315,8 @@ namespace LegionRuntime {
 #endif
     private:
       static int* get_startup_arrivals(void);
-      static TaskIDTable& get_task_table(bool add_runtime_tasks = true);
-      static std::map<Processor::TaskFuncID,InlineFnptr>& 
-                                            get_inline_table(void);
       static std::map<Processor::TaskFuncID,TaskVariantCollection*>& 
                                             get_collection_table(void);
-      static std::map<std::pair<TaskID,VariantID>,const void*>&
-                                            get_user_data_table(void);
       static RegionProjectionTable& get_region_projection_table(void);
       static PartitionProjectionTable& get_partition_projection_table(void);
       static Event register_runtime_tasks(RealmRuntime &realm);

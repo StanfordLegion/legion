@@ -145,7 +145,11 @@ namespace LegionRuntime {
         NEON_ISA  = 0x00200000,
       };
     public:
+      ISAConstraint(void);
       ISAConstraint(uint64_t kinds);
+    public:
+      bool is_valid(void) const;
+      void find_proc_kinds(std::vector<Processor::Kind> &kinds) const;
     public:
       bool satisfies(const ISAConstraint *other) const;
       bool conflicts(const ISAConstraint *other) const;
@@ -258,7 +262,7 @@ namespace LegionRuntime {
       ExecutionConstraintSet&
         add_constraint(const ColocationConstraint &constraint);
     public:
-      std::deque<ISAConstraint>                isa_constraints;
+      ISAConstraint                             isa_constraint;
       std::deque<ResourceConstraint>      resource_constraints;
       std::deque<LaunchConstraint>          launch_constraints;
       std::deque<ColocationConstraint>  colocation_constraints;

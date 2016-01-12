@@ -2234,6 +2234,8 @@ namespace LegionRuntime {
       max_outstanding_frames = -1;
       min_tasks_to_schedule = Internal::initial_tasks_to_schedule;
       min_frames_to_schedule = 0;
+      leaf_cached = false;
+      inner_cached = false;
     }
 
     //--------------------------------------------------------------------------
@@ -2298,18 +2300,26 @@ namespace LegionRuntime {
     bool SingleTask::is_leaf(void) const
     //--------------------------------------------------------------------------
     {
-      const TaskVariantCollection::Variant &var = 
-        variants->get_variant(selected_variant);
-      return var.leaf;
+      if (!leaf_cached)
+      {
+        VariantImpl *var = runtime->find_variant_impl(task_id,selected_variant);
+        is_leaf_result = var->is_leaf();
+        leaf_cached = true;
+      }
+      return is_leaf_result;
     }
 
     //--------------------------------------------------------------------------
     bool SingleTask::is_inner(void) const
     //--------------------------------------------------------------------------
     {
-      const TaskVariantCollection::Variant &var = 
-        variants->get_variant(selected_variant);
-      return var.inner;
+      if (!inner_cached)
+      {
+        VariantImpl *var = runtime->find_variant_impl(task_id,selected_variant);
+        is_inner_result = var->is_inner();
+        inner_cached = true;
+      }
+      return is_inner_result;
     }
 
     //--------------------------------------------------------------------------
@@ -2431,13 +2441,12 @@ namespace LegionRuntime {
       // Also save the original number of child regions
       unsigned orig_child_regions = inline_task->regions.size();
 
-      // Find the inline function pointer for this task
-      Processor::TaskFuncID low_id = 
-        child->variants->get_variant(child->selected_variant).low_id;
-      InlineFnptr fn = Internal::find_inline_function(low_id);
+      // Find the task variant to use for performing the inlining
+      VariantImpl *variant = 
+        runtime->find_variant_impl(child->task_id, child->selected_variant);
       
       // Do the inlining
-      child->perform_inlining(inline_task, fn);
+      child->perform_inlining(inline_task, variant);
 
       // Now when we pop back out, first see if the child made any new
       // regions and add them onto our copied regions
@@ -4779,10 +4788,8 @@ namespace LegionRuntime {
       assert(regions.size() == virtual_mapped.size());
       assert(physical_regions.empty());
 #endif 
-
-      const TaskVariantCollection::Variant &chosen_variant =  
-                                variants->get_variant(selected_variant);
-      
+      VariantImpl *variant = 
+        runtime->find_variant_impl(task_id, selected_variant);
       // STEP 1: Compute the precondition for the task launch
       std::set<Event> wait_on_events;
       // Get the set of locks that we need and sort them
@@ -4840,7 +4847,7 @@ namespace LegionRuntime {
         {
           // Get the event to wait on unless we are doing the inner
           // task optimization
-          if (!chosen_variant.inner)
+          if (!variant->is_inner())
             wait_on_events.insert(physical_instances[idx].get_ready_event());
           // See if we need a lock for this region
           if (physical_instances[idx].has_required_locks())
@@ -4962,7 +4969,7 @@ namespace LegionRuntime {
             unmap_events[idx].trigger();
 #endif
           }
-          else if (chosen_variant.inner)
+          else if (variant->is_inner())
           {
             // If this is an inner task then we don't map
             // the region with a physical region, but instead
@@ -4995,7 +5002,7 @@ namespace LegionRuntime {
             physical_regions.push_back(PhysicalRegion(
                   legion_new<PhysicalRegion::Impl>(clone_requirements[idx],
                     Event::NO_EVENT/*already mapped*/, true/*mapped*/,
-                    this, map_id, tag, chosen_variant.leaf, runtime)));
+                    this, map_id, tag, variant->is_leaf(), runtime)));
             // Now set the reference for this physical region 
             // which is pretty much a dummy physical reference except
             // it references the same view as the outer reference
@@ -5009,7 +5016,7 @@ namespace LegionRuntime {
         // If we're a leaf task and we have virtual mappings
         // then it's possible for the application to do inline
         // mappings which require a physical context
-        if (!chosen_variant.leaf || !virtual_instances.empty())
+        if (!variant->is_leaf() || !virtual_instances.empty())
         {
           // Request a context from the runtime
           runtime->allocate_context(this);
@@ -5046,7 +5053,7 @@ namespace LegionRuntime {
           // all sub-users should be chained.
           initialize_region_tree_contexts(clone_requirements,
                                           unmap_events, wait_on_events);
-          if (!chosen_variant.inner)
+          if (!variant->is_inner())
           {
             for (unsigned idx = 0; idx < regions.size(); idx++)
             {
@@ -5123,11 +5130,8 @@ namespace LegionRuntime {
         }
       }
       // STEP 3: Finally we get to launch the task
-      // Get the low-level task ID for the selected variant
-      Processor::TaskFuncID low_id = chosen_variant.low_id;
 #ifdef DEBUG_HIGH_LEVEL
       assert(this->executing_processor.exists());
-      assert(low_id > 0);
 #endif
 #if defined(LEGION_LOGGING) || defined(LEGION_SPY)
       for (unsigned idx = 0; idx < regions.size(); idx++)
@@ -5220,10 +5224,9 @@ namespace LegionRuntime {
       // avoid the race.
       bool perform_chaining_optimization = false; 
       UserEvent chain_complete_event;
-      if (chosen_variant.leaf && virtual_instances.empty() &&
+      if (variant->is_leaf() && virtual_instances.empty() &&
           can_early_complete(chain_complete_event))
         perform_chaining_optimization = true;
-      SingleTask *proxy_this = this; // dumb c++
       // Note there is a potential scary race condition to be aware of here: 
       // once we launch this task it's possible for this task to run and 
       // clean up before we finish the execution of this function thereby
@@ -5240,8 +5243,6 @@ namespace LegionRuntime {
         launch_processor = runtime->find_processor_group(additional_procs);
       }
       Realm::ProfilingRequestSet profiling_requests;
-      if (runtime->profiler != NULL)
-        runtime->profiler->add_task_request(profiling_requests, low_id, this);
       // If the mapper requested profiling add that now too
       if (profile_task)
       {
@@ -5257,11 +5258,9 @@ namespace LegionRuntime {
           Realm::ProfilingMeasurements::OperationTimeline>();
         // Record the event for when we are done profiling
         profiling_done = info.profiling_done;
-      }
-      runtime->increment_total_outstanding_tasks();
-      Event task_launch_event = launch_processor.spawn(low_id, &proxy_this,
-                                    sizeof(proxy_this), profiling_requests,
-                                    start_condition, task_priority);
+      } 
+      Event task_launch_event = variant->dispatch_task(launch_processor, this,
+                          start_condition, task_priority, profiling_requests);
       // Finish the chaining optimization if we're doing it
       if (perform_chaining_optimization)
         chain_complete_event.trigger(task_launch_event);
@@ -7276,7 +7275,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void IndividualTask::perform_inlining(SingleTask *ctx, InlineFnptr fn) 
+    void IndividualTask::perform_inlining(SingleTask *ctx, VariantImpl *variant)
     //--------------------------------------------------------------------------
     {
       // See if there is anything that we need to wait on before running
@@ -7309,8 +7308,10 @@ namespace LegionRuntime {
       }
 
       // Run the task  
-      (*fn)(this, ctx->get_physical_regions(), ctx, 
-            runtime->high_level, future_store, future_size);
+      const std::vector<PhysicalRegion> &phy_regions = 
+        ctx->get_physical_regions();
+      variant->dispatch_inline(this, ctx, phy_regions, 
+                               future_store, future_size);
       // Save the future result and trigger it, mark that the
       // future owns the result.
       result.impl->set_result(future_store,future_size,true);
@@ -7672,7 +7673,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void PointTask::perform_inlining(SingleTask *ctx, InlineFnptr fn)
+    void PointTask::perform_inlining(SingleTask *ctx, VariantImpl *variant)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -8010,7 +8011,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void WrapperTask::perform_inlining(SingleTask *ctx, InlineFnptr fn)
+    void WrapperTask::perform_inlining(SingleTask *ctx, VariantImpl *variant)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -8018,7 +8019,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void WrapperTask::handle_future(const void *res, size_t res_size, bool owned)
+    void WrapperTask::handle_future(const void *res, size_t res_size,bool owned)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -9486,7 +9487,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void IndexTask::perform_inlining(SingleTask *ctx, InlineFnptr fn)
+    void IndexTask::perform_inlining(SingleTask *ctx, VariantImpl *variant)
     //--------------------------------------------------------------------------
     {
       // must parallelism not allowed to be inlined
@@ -9543,7 +9544,7 @@ namespace LegionRuntime {
         local_arglen = local.get_size();
         void *result;
         size_t result_size;
-        (*fn)(this, phy_regions, ctx, runtime->high_level, result, result_size);
+        variant->dispatch_inline(this, ctx, phy_regions, result, result_size);
         if (redop == 0)
         {
           Future f = future_map.impl->get_future(index_point);
@@ -10466,7 +10467,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void SliceTask::perform_inlining(SingleTask *ctx, InlineFnptr fn)
+    void SliceTask::perform_inlining(SingleTask *ctx, VariantImpl *variant)
     //--------------------------------------------------------------------------
     {
       // should never be called

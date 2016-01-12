@@ -102,7 +102,7 @@ namespace LegionRuntime {
       // Returns true if the task should be deactivated
       virtual bool pack_task(Serializer &rez, Processor target) = 0;
       virtual bool unpack_task(Deserializer &derez, Processor current) = 0;
-      virtual void perform_inlining(SingleTask *ctx, InlineFnptr fn) = 0;
+      virtual void perform_inlining(SingleTask *ctx, VariantImpl *variant) = 0;
     public:
       RegionTreeContext get_parent_context(unsigned idx);
     protected:
@@ -513,7 +513,7 @@ namespace LegionRuntime {
       virtual bool unpack_task(Deserializer &derez, Processor current) = 0;
       virtual void find_enclosing_local_fields(
       LegionDeque<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::tracked &infos) = 0;
-      virtual void perform_inlining(SingleTask *ctx, InlineFnptr fn) = 0;
+      virtual void perform_inlining(SingleTask *ctx, VariantImpl *variant) = 0;
     public:
       virtual void handle_future(const void *res, 
                                  size_t res_size, bool owned) = 0; 
@@ -567,6 +567,9 @@ namespace LegionRuntime {
       Event last_registration;
       Event dependence_precondition;
       Event profiling_done;
+    protected:
+      mutable bool leaf_cached, is_leaf_result;
+      mutable bool inner_cached, is_inner_result;
     protected:
       // Number of sub-tasks ready to map
       unsigned outstanding_subtasks;
@@ -649,7 +652,7 @@ namespace LegionRuntime {
     public:
       virtual bool pack_task(Serializer &rez, Processor target) = 0;
       virtual bool unpack_task(Deserializer &derez, Processor current) = 0;
-      virtual void perform_inlining(SingleTask *ctx, InlineFnptr fn) = 0;
+      virtual void perform_inlining(SingleTask *ctx, VariantImpl *variant) = 0;
     public:
       virtual SliceTask* clone_as_slice_task(const Domain &d,
           Processor p, bool recurse, bool stealable,
@@ -760,7 +763,7 @@ namespace LegionRuntime {
       virtual bool unpack_task(Deserializer &derez, Processor current);
       virtual void find_enclosing_local_fields(
           LegionDeque<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::tracked &infos);
-      virtual void perform_inlining(SingleTask *ctx, InlineFnptr fn);
+      virtual void perform_inlining(SingleTask *ctx, VariantImpl *variant);
     protected:
       void pack_remote_complete(Serializer &rez);
       void pack_remote_commit(Serializer &rez);
@@ -856,7 +859,7 @@ namespace LegionRuntime {
       virtual bool unpack_task(Deserializer &derez, Processor current);
       virtual void find_enclosing_local_fields(
           LegionDeque<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::tracked &infos);
-      virtual void perform_inlining(SingleTask *ctx, InlineFnptr fn);
+      virtual void perform_inlining(SingleTask *ctx, VariantImpl *variant);
     public:
       virtual void handle_future(const void *res, 
                                  size_t res_size, bool owned);
@@ -922,7 +925,7 @@ namespace LegionRuntime {
       virtual bool unpack_task(Deserializer &derez, Processor current);
       virtual void find_enclosing_local_fields(
       LegionDeque<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::tracked &infos) = 0;
-      virtual void perform_inlining(SingleTask *ctx, InlineFnptr fn);
+      virtual void perform_inlining(SingleTask *ctx, VariantImpl *variant);
     public:
       virtual void handle_future(const void *res, 
                                  size_t res_size, bool owned);
@@ -1123,7 +1126,7 @@ namespace LegionRuntime {
     public:
       virtual bool pack_task(Serializer &rez, Processor target);
       virtual bool unpack_task(Deserializer &derez, Processor current);
-      virtual void perform_inlining(SingleTask *ctx, InlineFnptr fn);
+      virtual void perform_inlining(SingleTask *ctx, VariantImpl *variant);
     public:
       virtual SliceTask* clone_as_slice_task(const Domain &d,
           Processor p, bool recurse, bool stealable,
@@ -1213,7 +1216,7 @@ namespace LegionRuntime {
     public:
       virtual bool pack_task(Serializer &rez, Processor target);
       virtual bool unpack_task(Deserializer &derez, Processor current);
-      virtual void perform_inlining(SingleTask *ctx, InlineFnptr fn);
+      virtual void perform_inlining(SingleTask *ctx, VariantImpl *variant);
     public:
       virtual SliceTask* clone_as_slice_task(const Domain &d,
           Processor p, bool recurse, bool stealable,

@@ -1345,6 +1345,7 @@ namespace LegionRuntime {
      */
     struct TaskVariantRegistrar {
     public:
+      TaskVariantRegistrar(void);
       TaskVariantRegistrar(TaskID task_id, const char *variant_name = NULL);
     public: // Add execution constraints
       TaskVariantRegistrar& 
