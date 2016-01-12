@@ -142,6 +142,7 @@ namespace LegionRuntime {
       HLR_WINDOW_WAIT_TASK_ID,
       HLR_ISSUE_FRAME_TASK_ID,
       HLR_CONTINUATION_TASK_ID,
+      HLR_TASK_IMPL_SEMANTIC_INFO_REQ_TASK_ID,
       HLR_INDEX_SPACE_SEMANTIC_INFO_REQ_TASK_ID,
       HLR_INDEX_PART_SEMANTIC_INFO_REQ_TASK_ID,
       HLR_FIELD_SPACE_SEMANTIC_INFO_REQ_TASK_ID,
@@ -197,6 +198,7 @@ namespace LegionRuntime {
         "Window Wait",                                            \
         "Issue Frame",                                            \
         "Legion Continuation",                                    \
+        "Task Impl Semantic Request",                             \
         "Index Space Semantic Request",                           \
         "Index Partition Semantic Request",                       \
         "Field Space Semantic Request",                           \
@@ -274,12 +276,14 @@ namespace LegionRuntime {
       SEND_UNMAKE_PERSISTENT,
       SEND_MAPPER_MESSAGE,
       SEND_MAPPER_BROADCAST,
+      SEND_TASK_IMPL_SEMANTIC_REQ,
       SEND_INDEX_SPACE_SEMANTIC_REQ,
       SEND_INDEX_PARTITION_SEMANTIC_REQ,
       SEND_FIELD_SPACE_SEMANTIC_REQ,
       SEND_FIELD_SEMANTIC_REQ,
       SEND_LOGICAL_REGION_SEMANTIC_REQ,
       SEND_LOGICAL_PARTITION_SEMANTIC_REQ,
+      SEND_TASK_IMPL_SEMANTIC_INFO,
       SEND_INDEX_SPACE_SEMANTIC_INFO,
       SEND_INDEX_PARTITION_SEMANTIC_INFO,
       SEND_FIELD_SPACE_SEMANTIC_INFO,
@@ -360,12 +364,14 @@ namespace LegionRuntime {
         "Send Unmake Persistent",                                     \
         "Send Mapper Message",                                        \
         "Send Mapper Broadcast",                                      \
+        "Send Task Impl Semantic Req",                                \
         "Send Index Space Semantic Req",                              \
         "Send Index Partition Semantic Req",                          \
         "Send Field Space Semantic Req",                              \
         "Send Field Semantic Req",                                    \
         "Send Logical Region Semantic Req",                           \
         "Send Logical Partition Semantic Req",                        \
+        "Send Task Impl Semantic Info",                               \
         "Send Index Space Semantic Info",                             \
         "Send Index Partition Semantic Info",                         \
         "Send Field Space Semantic Info",                             \

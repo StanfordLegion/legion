@@ -1483,6 +1483,39 @@ namespace LegionRuntime {
     }
 
     /////////////////////////////////////////////////////////////
+    // LayoutDescriptionRegistrar 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    LayoutDescriptionRegistrar::LayoutDescriptionRegistrar(FieldSpace h,
+                                                  const char *layout/*= NULL*/)
+      : handle(h), layout_name(layout)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    /////////////////////////////////////////////////////////////
+    // TaskVariantRegistrar 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    TaskVariantRegistrar::TaskVariantRegistrar(void)
+      : task_id(0), global_registration(true), task_variant_name(NULL), 
+        leaf_variant(false), inner_variant(false), idempotent_variant(false)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    TaskVariantRegistrar::TaskVariantRegistrar(TaskID tid, bool global/*=true*/, 
+                                               const char *name/*= NULL*/)
+      : task_id(tid), global_registration(global), task_variant_name(name), 
+        leaf_variant(false), inner_variant(false), idempotent_variant(false)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    /////////////////////////////////////////////////////////////
     // MPILegionHandshake 
     /////////////////////////////////////////////////////////////
 
@@ -3414,6 +3447,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::attach_semantic_information(TaskID task_id, SemanticTag tag,
+                                              const void *buffer, size_t size)
+    //--------------------------------------------------------------------------
+    {
+      runtime->attach_semantic_information(task_id, tag, buffer, size);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::attach_semantic_information(IndexSpace handle,
                                                        SemanticTag tag,
                                                        const void *buffer,
@@ -3475,6 +3516,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::attach_name(TaskID task_id, const char *name)
+    //--------------------------------------------------------------------------
+    {
+      Runtime::attach_semantic_information(task_id,
+          NAME_SEMANTIC_TAG, name, strlen(name) + 1);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::attach_name(IndexSpace handle, const char *name)
     //--------------------------------------------------------------------------
     {
@@ -3523,6 +3572,14 @@ namespace LegionRuntime {
     {
       Runtime::attach_semantic_information(handle,
           NAME_SEMANTIC_TAG, name, strlen(name) + 1);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::retrieve_semantic_information(TaskID task_id, SemanticTag tag,
+                                              const void *&result, size_t &size)
+    //--------------------------------------------------------------------------
+    {
+      runtime->retrieve_semantic_information(task_id, tag, result, size);
     }
 
     //--------------------------------------------------------------------------
@@ -3584,6 +3641,16 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       runtime->retrieve_semantic_information(part, tag, result, size);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::retrieve_name(TaskID task_id, const char *&result)
+    //--------------------------------------------------------------------------
+    {
+      const void* dummy_ptr; size_t dummy_size;
+      Runtime::retrieve_semantic_information(task_id, NAME_SEMANTIC_TAG,
+                                             dummy_ptr, dummy_size);
+      result = reinterpret_cast<const char*>(dummy_ptr);
     }
 
     //--------------------------------------------------------------------------

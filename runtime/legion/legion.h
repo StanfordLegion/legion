@@ -1311,23 +1311,23 @@ namespace LegionRuntime {
       LayoutDescriptionRegistrar(FieldSpace handle, 
                                  const char *layout_name = NULL);
     public:
-      LayoutDescriptionRegistrar&
+      inline LayoutDescriptionRegistrar&
         add_constraint(const SpecializedConstraint &constraint);
-      LayoutDescriptionRegistrar&
+      inline LayoutDescriptionRegistrar&
         add_constraint(const MemoryConstraint &constraint);
-      LayoutDescriptionRegistrar&
+      inline LayoutDescriptionRegistrar&
         add_constraint(const OrderingConstraint &constraint);
-      LayoutDescriptionRegistrar&
+      inline LayoutDescriptionRegistrar&
         add_constraint(const SplittingConstraint &constraint);
-      LayoutDescriptionRegistrar&
+      inline LayoutDescriptionRegistrar&
         add_constraint(const FieldConstraint &constraint);
-      LayoutDescriptionRegistrar&
+      inline LayoutDescriptionRegistrar&
         add_constraint(const DimensionConstraint &constraint);
-      LayoutDescriptionRegistrar&
+      inline LayoutDescriptionRegistrar&
         add_constraint(const AlignmentConstraint &constraint);
-      LayoutDescriptionRegistrar&
+      inline LayoutDescriptionRegistrar&
         add_constraint(const OffsetConstraint &constraint);
-      LayoutDescriptionRegistrar&
+      inline LayoutDescriptionRegistrar&
         add_constraint(const PointerConstraint &constraint); 
     public:
       FieldSpace                                handle;
@@ -1346,18 +1346,19 @@ namespace LegionRuntime {
     struct TaskVariantRegistrar {
     public:
       TaskVariantRegistrar(void);
-      TaskVariantRegistrar(TaskID task_id, const char *variant_name = NULL);
+      TaskVariantRegistrar(TaskID task_id, bool global = true,
+                           const char *variant_name = NULL);
     public: // Add execution constraints
-      TaskVariantRegistrar& 
+      inline TaskVariantRegistrar& 
         add_constraint(const ISAConstraint &constraint);
-      TaskVariantRegistrar& 
+      inline TaskVariantRegistrar& 
         add_constraint(const ResourceConstraint &constraint);
-      TaskVariantRegistrar&
+      inline TaskVariantRegistrar&
         add_constraint(const LaunchConstraint &constraint);
-      TaskVariantRegistrar&
+      inline TaskVariantRegistrar&
         add_constraint(const ColocationConstraint &constraint);
     public: // Add layout constraint sets
-      TaskVariantRegistrar&
+      inline TaskVariantRegistrar&
         add_layout_constraint_set(unsigned index, LayoutDescriptionID desc);
     public: // Set properties
       void set_leaf(bool is_leaf = true);
@@ -1365,6 +1366,7 @@ namespace LegionRuntime {
       void set_idempotent(bool is_idempotent = true);
     public:
       TaskID                            task_id;
+      bool                              global_registration;
       const char*                       task_variant_name;
     public: // constraints
       ExecutionConstraintSet            execution_constraints; 

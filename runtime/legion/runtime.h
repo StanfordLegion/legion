@@ -920,6 +920,13 @@ namespace LegionRuntime {
     public:
       static const AllocationType alloc_type = TASK_IMPL_ALLOC;
     public:
+      struct SemanticRequestArgs {
+        HLRTaskID hlr_id;
+        TaskImpl *proxy_this;
+        SemanticTag tag;
+        AddressSpaceID source;
+      };
+    public:
       TaskImpl(TaskID tid, Internal *rt, const char *name = NULL);
       TaskImpl(const TaskImpl &rhs);
       ~TaskImpl(void);
@@ -928,6 +935,24 @@ namespace LegionRuntime {
     public:
       void add_variant(VariantImpl *impl);
       VariantImpl* find_variant_impl(VariantID variant_id);
+    public:
+      void attach_semantic_information(SemanticTag tag, AddressSpaceID source,
+                                       const void *buffer, size_t size);
+      void retrieve_semantic_information(SemanticTag tag,
+                                         const void *&buffer, size_t &size);
+      void send_semantic_info(AddressSpaceID target, SemanticTag tag,
+                              const void *value, size_t size);
+      void send_semantic_request(AddressSpaceID target, SemanticTag tag);
+      void process_semantic_request(SemanticTag tag, AddressSpaceID target);
+    public:
+      inline AddressSpaceID get_owner_space(void) const
+        { return get_owner_space(task_id, runtime); }
+      static AddressSpaceID get_owner_space(TaskID task_id, Internal *runtime);
+    public:
+      static void handle_semantic_request(Internal *runtime, 
+                          Deserializer &derez, AddressSpaceID source);
+      static void handle_semantic_info(Internal *runtime,
+                          Deserializer &derez, AddressSpaceID source);
     public:
       const TaskID task_id;
       Internal *const runtime;
@@ -970,6 +995,7 @@ namespace LegionRuntime {
       const VariantID vid;
       TaskImpl *const owner;
       Internal *const runtime;
+      const bool global; // globally valid variant
     private:
       void *user_data;
       size_t user_data_size;
@@ -1467,6 +1493,8 @@ namespace LegionRuntime {
                                        ProjectionFunctor *func);
       ProjectionFunctor* find_projection_functor(ProjectionID pid);
     public:
+      void attach_semantic_information(TaskID task_id, SemanticTag,
+                                       const void *buffer, size_t size);
       void attach_semantic_information(IndexSpace handle, SemanticTag tag,
                                        const void *buffer, size_t size);
       void attach_semantic_information(IndexPartition handle, SemanticTag tag,
@@ -1481,6 +1509,8 @@ namespace LegionRuntime {
       void attach_semantic_information(LogicalPartition handle, SemanticTag tag,
                                        const void *buffer, size_t size);
     public:
+      void retrieve_semantic_information(TaskID task_id, SemanticTag tag,
+                                         const void *&result, size_t &size);
       void retrieve_semantic_information(IndexSpace handle, SemanticTag tag,
                                          const void *&result, size_t &size);
       void retrieve_semantic_information(IndexPartition handle, SemanticTag tag,
@@ -1606,6 +1636,8 @@ namespace LegionRuntime {
       void send_unmake_persistent(AddressSpaceID target, Serializer &rez);
       void send_mapper_message(AddressSpaceID target, Serializer &rez);
       void send_mapper_broadcast(AddressSpaceID target, Serializer &rez);
+      void send_task_impl_semantic_request(AddressSpaceID target, 
+                                           Serializer &rez);
       void send_index_space_semantic_request(AddressSpaceID target, 
                                              Serializer &rez);
       void send_index_partition_semantic_request(AddressSpaceID target,
@@ -1617,6 +1649,8 @@ namespace LegionRuntime {
                                                 Serializer &rez);
       void send_logical_partition_semantic_request(AddressSpaceID target,
                                                    Serializer &rez);
+      void send_task_impl_semantic_info(AddressSpaceID target,
+                                        Serializer &rez);
       void send_index_space_semantic_info(AddressSpaceID target, 
                                           Serializer &rez);
       void send_index_partition_semantic_info(AddressSpaceID target,
@@ -1720,6 +1754,8 @@ namespace LegionRuntime {
       void handle_unmake_persistent(Deserializer &derez, AddressSpaceID source);
       void handle_mapper_message(Deserializer &derez);
       void handle_mapper_broadcast(Deserializer &derez);
+      void handle_task_impl_semantic_request(Deserializer &derez,
+                                             AddressSpaceID source);
       void handle_index_space_semantic_request(Deserializer &derez,
                                                AddressSpaceID source);
       void handle_index_partition_semantic_request(Deserializer &derez,
@@ -1732,6 +1768,8 @@ namespace LegionRuntime {
                                                   AddressSpaceID source);
       void handle_logical_partition_semantic_request(Deserializer &derez,
                                                      AddressSpaceID source);
+      void handle_task_impl_semantic_info(Deserializer &derez,
+                                          AddressSpaceID source);
       void handle_index_space_semantic_info(Deserializer &derez,
                                             AddressSpaceID source);
       void handle_index_partition_semantic_info(Deserializer &derez,

@@ -1059,6 +1059,132 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    inline LayoutDescriptionRegistrar& LayoutDescriptionRegistrar::
+                         add_constraint(const SpecializedConstraint &constraint)
+    //--------------------------------------------------------------------------
+    {
+      layout_constraints.add_constraint(constraint);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    inline LayoutDescriptionRegistrar& LayoutDescriptionRegistrar::
+                              add_constraint(const MemoryConstraint &constraint)
+    //--------------------------------------------------------------------------
+    {
+      layout_constraints.add_constraint(constraint);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    inline LayoutDescriptionRegistrar& LayoutDescriptionRegistrar::
+                            add_constraint(const OrderingConstraint &constraint)
+    //--------------------------------------------------------------------------
+    {
+      layout_constraints.add_constraint(constraint);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    inline LayoutDescriptionRegistrar& LayoutDescriptionRegistrar::
+                           add_constraint(const SplittingConstraint &constraint)
+    //--------------------------------------------------------------------------
+    {
+      layout_constraints.add_constraint(constraint);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    inline LayoutDescriptionRegistrar& LayoutDescriptionRegistrar::
+                               add_constraint(const FieldConstraint &constraint)
+    //--------------------------------------------------------------------------
+    {
+      layout_constraints.add_constraint(constraint);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    inline LayoutDescriptionRegistrar& LayoutDescriptionRegistrar::
+                           add_constraint(const DimensionConstraint &constraint)
+    //--------------------------------------------------------------------------
+    {
+      layout_constraints.add_constraint(constraint);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    inline LayoutDescriptionRegistrar& LayoutDescriptionRegistrar::
+                           add_constraint(const AlignmentConstraint &constraint)
+    //--------------------------------------------------------------------------
+    {
+      layout_constraints.add_constraint(constraint);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    inline LayoutDescriptionRegistrar& LayoutDescriptionRegistrar::
+                              add_constraint(const OffsetConstraint &constraint)
+    //--------------------------------------------------------------------------
+    {
+      layout_constraints.add_constraint(constraint);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    inline LayoutDescriptionRegistrar& LayoutDescriptionRegistrar::
+                             add_constraint(const PointerConstraint &constraint)
+    //--------------------------------------------------------------------------
+    {
+      layout_constraints.add_constraint(constraint);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    inline TaskVariantRegistrar& TaskVariantRegistrar::
+                                 add_constraint(const ISAConstraint &constraint)
+    //--------------------------------------------------------------------------
+    {
+      execution_constraints.add_constraint(constraint);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    inline TaskVariantRegistrar& TaskVariantRegistrar::
+                            add_constraint(const ResourceConstraint &constraint)
+    //--------------------------------------------------------------------------
+    {
+      execution_constraints.add_constraint(constraint);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    inline TaskVariantRegistrar& TaskVariantRegistrar::
+                              add_constraint(const LaunchConstraint &constraint)
+    //--------------------------------------------------------------------------
+    {
+      execution_constraints.add_constraint(constraint);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    inline TaskVariantRegistrar& TaskVariantRegistrar::
+                          add_constraint(const ColocationConstraint &constraint)
+    //--------------------------------------------------------------------------
+    {
+      execution_constraints.add_constraint(constraint);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    inline TaskVariantRegistrar& TaskVariantRegistrar::
+             add_layout_constraint_set(unsigned index, LayoutDescriptionID desc)
+    //--------------------------------------------------------------------------
+    {
+      layout_constraints.add_layout_description(index, desc);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
     template<typename T>
     inline T Future::get_result(void)
     //--------------------------------------------------------------------------

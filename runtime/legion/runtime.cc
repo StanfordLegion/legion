@@ -3530,6 +3530,12 @@ namespace LegionRuntime {
               runtime->handle_mapper_broadcast(derez);
               break;
             }
+          case SEND_TASK_IMPL_SEMANTIC_REQ:
+            {
+              runtime->handle_task_impl_semantic_request(derez, 
+                                                        remote_address_space);
+              break;
+            }
           case SEND_INDEX_SPACE_SEMANTIC_REQ:
             {
               runtime->handle_index_space_semantic_request(derez,
@@ -3564,6 +3570,12 @@ namespace LegionRuntime {
             {
               runtime->handle_logical_partition_semantic_request(derez,
                                                           remote_address_space);
+              break;
+            }
+          case SEND_TASK_IMPL_SEMANTIC_INFO:
+            {
+              runtime->handle_task_impl_semantic_info(derez,
+                                                      remote_address_space);
               break;
             }
           case SEND_INDEX_SPACE_SEMANTIC_INFO:
@@ -4202,17 +4214,17 @@ namespace LegionRuntime {
         char *noname = (char*)malloc(64*sizeof(char));
         snprintf(noname,64,"unnamed_task_%d", task_id);
         size_t name_size = strlen(noname) + 1; // for \0
-        semantic_info[0] = SemanticInfo(noname, name_size);
+        semantic_info[NAME_SEMANTIC_TAG] = SemanticInfo(noname, name_size);
       }
       else
       {
         size_t name_size = strlen(name) + 1; // for \0
-        semantic_info[0] = SemanticInfo(strdup(name), name_size);
+        semantic_info[NAME_SEMANTIC_TAG] = SemanticInfo(strdup(name),name_size);
       }
       // Register this task with the profiler if necessary
       if (runtime->profiler != NULL)
       {
-        const SemanticInfo &info = semantic_info[0]; 
+        const SemanticInfo &info = semantic_info[NAME_SEMANTIC_TAG]; 
         const char *name = (const char*)info.buffer;
         runtime->profiler->register_task_kind(task_id, name);
       }
@@ -4268,6 +4280,259 @@ namespace LegionRuntime {
       return finder->second;
     }
 
+    //--------------------------------------------------------------------------
+    void TaskImpl::attach_semantic_information(SemanticTag tag,
+                                               AddressSpaceID source,
+                                               const void *buffer, size_t size)
+    //--------------------------------------------------------------------------
+    {
+      if ((tag == NAME_SEMANTIC_TAG) && (runtime->profiler != NULL))
+        runtime->profiler->register_task_kind(task_id, (const char*)buffer);
+
+      void *local = legion_malloc(SEMANTIC_INFO_ALLOC, size);
+      memcpy(local, buffer, size);
+      bool added = true;
+      UserEvent to_trigger = UserEvent::NO_USER_EVENT;
+      {
+        AutoLock t_lock(task_lock);
+        std::map<SemanticTag,SemanticInfo>::iterator finder = 
+          semantic_info.find(tag);
+        if (finder != semantic_info.end())
+        {
+          // Check to see if it is valid
+          if (finder->second.is_valid())
+          {
+            // Check to make sure that the bits are the same
+            if (size != finder->second.size)
+            {
+              log_run.error("ERROR: Inconsistent Semantic Tag value "
+                            "for tag %ld with different sizes of %ld"
+                            " and %ld for task impl", 
+                            tag, size, finder->second.size);
+#ifdef DEBUG_HIGH_LEVEL
+              assert(false);
+#endif
+              exit(ERROR_INCONSISTENT_SEMANTIC_TAG);
+            }
+            // Otherwise do a bitwise comparison
+            {
+              const char *orig = (const char*)finder->second.buffer;
+              const char *next = (const char*)buffer;
+              for (unsigned idx = 0; idx < size; idx++)
+              {
+                char diff = orig[idx] ^ next[idx];
+                if (diff)
+                {
+                  log_run.error("ERROR: Inconsistent Semantic Tag value "
+                                "for tag %ld with different values at"
+                                "byte %d for task impl, %x != %x",
+                                tag, idx, orig[idx], next[idx]);
+#ifdef DEBUG_HIGH_LEVEL
+                  assert(false);
+#endif
+                  exit(ERROR_INCONSISTENT_SEMANTIC_TAG);
+                }
+              }
+            }
+            added = false;
+          }
+          else
+          {
+            finder->second.buffer = local;
+            finder->second.size = size;
+            to_trigger = finder->second.ready_event;
+            finder->second.ready_event = UserEvent::NO_USER_EVENT;
+          }
+        }
+        else
+          semantic_info[tag] = SemanticInfo(local, size);
+      }
+      if (to_trigger.exists())
+        to_trigger.trigger();
+      if (added)
+      {
+        AddressSpaceID owner_space = get_owner_space();
+        // if we are not the owner and the message didn't come
+        // from the owner, then send it
+        if ((owner_space != runtime->address_space) && (source != owner_space))
+          send_semantic_info(owner_space, tag, buffer, size);
+      }
+      else
+        legion_free(SEMANTIC_INFO_ALLOC, local, size);
+    }
+
+    //--------------------------------------------------------------------------
+    void TaskImpl::retrieve_semantic_information(SemanticTag tag,
+                                              const void *&result, size_t &size)
+    //--------------------------------------------------------------------------
+    {
+      Event wait_on = Event::NO_EVENT;
+      {
+        AutoLock t_lock(task_lock);
+        std::map<SemanticTag,SemanticInfo>::const_iterator finder = 
+          semantic_info.find(tag);
+        if (finder != semantic_info.end())
+        {
+          // Already have the data so we are done
+          if (finder->second.is_valid())
+          {
+            result = finder->second.buffer;
+            size = finder->second.size;
+            return;
+          }
+          else
+            wait_on = finder->second.ready_event;
+        }
+        else
+        {
+          // Otherwise we make an event to wait on
+          UserEvent ready_event = UserEvent::create_user_event();
+          wait_on = ready_event;
+          semantic_info[tag] = SemanticInfo(ready_event);
+        }
+      }
+      // If we are not the owner, send a request otherwise we are
+      // the owner and the information will get sent here
+      AddressSpaceID owner_space = get_owner_space();
+      if (owner_space != runtime->address_space)
+        send_semantic_request(owner_space, tag); 
+      wait_on.wait();
+      // When we wake up, we should be able to find everything
+      AutoLock t_lock(task_lock,1,false/*exclusive*/);
+      std::map<SemanticTag,SemanticInfo>::const_iterator finder = 
+        semantic_info.find(tag);
+      if (finder == semantic_info.end())
+      {
+        log_run.error("ERROR: invalid semantic tag %ld for "
+                            "task implementation", tag);   
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_INVALID_SEMANTIC_TAG);
+      }
+      result = finder->second.buffer;
+      size = finder->second.size;
+    }
+
+    //--------------------------------------------------------------------------
+    void TaskImpl::send_semantic_info(AddressSpaceID target, SemanticTag tag,
+                                      const void *buffer, size_t size)
+    //--------------------------------------------------------------------------
+    {
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(task_id);
+        rez.serialize(tag);
+        rez.serialize(size);
+        rez.serialize(buffer, size);
+      }
+      runtime->send_task_impl_semantic_info(target, rez);
+    }
+
+    //--------------------------------------------------------------------------
+    void TaskImpl::send_semantic_request(AddressSpaceID target, SemanticTag tag)
+    //--------------------------------------------------------------------------
+    {
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(task_id);
+        rez.serialize(tag);
+      }
+      runtime->send_task_impl_semantic_request(target, rez);
+    }
+
+    //--------------------------------------------------------------------------
+    void TaskImpl::process_semantic_request(SemanticTag tag, 
+                                            AddressSpaceID target)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(get_owner_space() == runtime->address_space);
+#endif
+      Event precondition = Event::NO_EVENT;
+      void *result = NULL;
+      size_t size = 0;
+      {
+        AutoLock t_lock(task_lock);
+        // See if we already have the data
+        std::map<SemanticTag,SemanticInfo>::iterator finder = 
+          semantic_info.find(tag);
+        if (finder != semantic_info.end())
+        {
+          if (finder->second.is_valid())
+          {
+            result = finder->second.buffer;
+            size = finder->second.size;
+          }
+          else
+            precondition = finder->second.ready_event;
+        }
+        else
+        {
+          // Don't have it yet, make a condition and hope that one comes
+          UserEvent ready_event = UserEvent::create_user_event();
+          precondition = ready_event;
+          semantic_info[tag] = SemanticInfo(ready_event);
+        }
+      }
+      if (result == NULL)
+      {
+        // Defer this until the semantic condition is ready
+        SemanticRequestArgs args;
+        args.hlr_id = HLR_TASK_IMPL_SEMANTIC_INFO_REQ_TASK_ID;
+        args.proxy_this = this;
+        args.tag = tag;
+        args.source = target;
+        runtime->issue_runtime_meta_task(&args, sizeof(args),
+                      HLR_TASK_IMPL_SEMANTIC_INFO_REQ_TASK_ID,
+                      NULL/*op*/, precondition);
+      }
+      else
+        send_semantic_info(target, tag, result, size);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void TaskImpl::handle_semantic_request(Internal *runtime,
+                                     Deserializer &derez, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      TaskID task_id;
+      derez.deserialize(task_id);
+      SemanticTag tag;
+      derez.deserialize(tag);
+      TaskImpl *impl = runtime->find_or_create_task_impl(task_id);
+      impl->process_semantic_request(tag, source);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void TaskImpl::handle_semantic_info(Internal *runtime,
+                                     Deserializer &derez, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      TaskID task_id;
+      derez.deserialize(task_id);
+      SemanticTag tag;
+      derez.deserialize(tag);
+      size_t size;
+      derez.deserialize(size);
+      const void *buffer = derez.get_current_pointer();
+      derez.advance_pointer(size);
+      TaskImpl *impl = runtime->find_or_create_task_impl(task_id);
+      impl->attach_semantic_information(tag, source, buffer, size);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ AddressSpaceID TaskImpl::get_owner_space(TaskID task_id,
+                                                        Internal *runtime)
+    //--------------------------------------------------------------------------
+    {
+      return (task_id % runtime->runtime_stride);
+    }
+
     /////////////////////////////////////////////////////////////
     // Variant Impl 
     /////////////////////////////////////////////////////////////
@@ -4279,7 +4544,7 @@ namespace LegionRuntime {
                            const void *udata /*=NULL*/, size_t udata_size/*=0*/)
       : ExecutionConstraintSet(registrar.execution_constraints),
         TaskLayoutDescriptionSet(registrar.layout_constraints),
-        vid(v), owner(own), runtime(rt), 
+        vid(v), owner(own), runtime(rt), global(registrar.global_registration),
         user_data_size(udata_size), inline_ptr(in_ptr),
         leaf_variant(registrar.leaf_variant), 
         inner_variant(registrar.inner_variant),
@@ -4337,7 +4602,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     VariantImpl::VariantImpl(const VariantImpl &rhs) 
       : ExecutionConstraintSet(), TaskLayoutDescriptionSet(),
-        vid(rhs.vid), owner(rhs.owner), runtime(rhs.runtime)
+        vid(rhs.vid), owner(rhs.owner), runtime(rhs.runtime), global(rhs.global)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -10897,6 +11162,15 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void Internal::attach_semantic_information(TaskID task_id, SemanticTag tag,
+                                               const void *buffer, size_t size)
+    //--------------------------------------------------------------------------
+    {
+      TaskImpl *impl = find_or_create_task_impl(task_id);
+      impl->attach_semantic_information(tag, address_space, buffer, size);
+    }
+
+    //--------------------------------------------------------------------------
     void Internal::attach_semantic_information(IndexSpace handle, 
                                               SemanticTag tag,
                                               const void *buffer, size_t size)
@@ -10954,6 +11228,15 @@ namespace LegionRuntime {
     {
       forest->attach_semantic_information(handle, tag, address_space, 
                                           buffer, size);
+    }
+
+    //--------------------------------------------------------------------------
+    void Internal::retrieve_semantic_information(TaskID task_id,SemanticTag tag,
+                                              const void *&result, size_t &size)
+    //--------------------------------------------------------------------------
+    {
+      TaskImpl *impl = find_or_create_task_impl(task_id);
+      impl->retrieve_semantic_information(tag, result, size);
     }
 
     //--------------------------------------------------------------------------
@@ -12095,6 +12378,15 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void Internal::send_task_impl_semantic_request(AddressSpaceID target,
+                                                   Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_TASK_IMPL_SEMANTIC_REQ,
+                                  SEMANTIC_INFO_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Internal::send_index_space_semantic_request(AddressSpaceID target,
                                                     Serializer &rez)
     //--------------------------------------------------------------------------
@@ -12149,6 +12441,15 @@ namespace LegionRuntime {
       find_messenger(target)->send_message(rez,
             SEND_LOGICAL_PARTITION_SEMANTIC_REQ, SEMANTIC_INFO_VIRTUAL_CHANNEL,
                                                                  true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Internal::send_task_impl_semantic_info(AddressSpaceID target,
+                                                Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_TASK_IMPL_SEMANTIC_INFO,
+                                  SEMANTIC_INFO_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -12791,6 +13092,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void Internal::handle_task_impl_semantic_request(Deserializer &derez,
+                                                     AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      TaskImpl::handle_semantic_request(this, derez, source);
+    }
+
+    //--------------------------------------------------------------------------
     void Internal::handle_index_space_semantic_request(Deserializer &derez,
                                                       AddressSpaceID source)
     //--------------------------------------------------------------------------
@@ -12836,6 +13145,14 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       PartitionNode::handle_semantic_request(forest, derez, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Internal::handle_task_impl_semantic_info(Deserializer &derez,
+                                                  AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      TaskImpl::handle_semantic_info(this, derez, source);
     }
 
     //--------------------------------------------------------------------------
@@ -17404,6 +17721,14 @@ namespace LegionRuntime {
         case HLR_CONTINUATION_TASK_ID:
           {
             LegionContinuation::handle_continuation(args);
+            break;
+          }
+        case HLR_TASK_IMPL_SEMANTIC_INFO_REQ_TASK_ID:
+          {
+            TaskImpl::SemanticRequestArgs *req_args = 
+              (TaskImpl::SemanticRequestArgs*)args;
+            req_args->proxy_this->process_semantic_request(
+                          req_args->tag, req_args->source);
             break;
           }
         case HLR_INDEX_SPACE_SEMANTIC_INFO_REQ_TASK_ID:

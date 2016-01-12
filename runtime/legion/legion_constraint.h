@@ -471,6 +471,7 @@ namespace LegionRuntime {
       static const LayoutConstraintKind constraint_kind = 
                                             POINTER_CONSTRAINT;
     public:
+      PointerConstraint(void);
       PointerConstraint(FieldID fid, uintptr_t ptr, Memory memory);
     public:
       bool satisfies(const PointerConstraint *other) const;
