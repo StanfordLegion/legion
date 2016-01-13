@@ -3669,6 +3669,16 @@ namespace LegionRuntime {
               runtime->handle_logical_state_return(derez, remote_address_space);
               break;
             }
+          case SEND_VARIANT_REQUEST:
+            {
+              runtime->handle_variant_request(derez, remote_address_space);
+              break;
+            }
+          case SEND_VARIANT_RESPONSE:
+            {
+              runtime->handle_variant_response(derez, remote_address_space);
+              break;
+            }
           case SEND_SHUTDOWN_NOTIFICATION:
             {
               runtime->handle_shutdown_notification(remote_address_space);
@@ -4271,10 +4281,18 @@ namespace LegionRuntime {
     VariantImpl* TaskImpl::find_variant_impl(VariantID variant_id)
     //--------------------------------------------------------------------------
     {
-      AutoLock t_lock(task_lock,1,false/*exclusive*/);
-      std::map<VariantID,VariantImpl*>::const_iterator finder = 
-        variants.find(variant_id);
-      if (finder == variants.end())
+      // See if we already have the variant
+      {
+        AutoLock t_lock(task_lock,1,false/*exclusive*/);
+        std::map<VariantID,VariantImpl*>::const_iterator finder = 
+          variants.find(variant_id);
+        if (finder != variant.end())
+          return finder->second;
+      }
+      // If we don't have it, see if we can go get it
+      AddressSpaceID owner_space = 
+        VariantImpl::get_owner_space(variant_id, runtime); 
+      if (owner_space == runtime->address_space)
       {
         log_run.error("Unable to find variant %ld of task %s!",
                       variant_id, get_name(false));
@@ -4283,6 +4301,25 @@ namespace LegionRuntime {
 #endif
         exit(ERROR_UNREGISTERED_VARIANT);
       }
+      // Send a request to the owner node for the variant
+      UserEvent wait_on = UserEvent::create_user_event(); 
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(task_id);
+        rez.serialize(variant_id);
+        rez.serialize(wait_on);
+        runtime->send_variant_request(owner_space, rez);
+      }
+      // Wait for the results
+      wait_on.wait();
+      // Now we can re-take the lock and find our variant
+      AutoLock t_lock(task_lock,1,false/*exclusive*/);
+      std::map<VariantID,VariantImpl*>::const_iterator finder = 
+        variants.find(variant_id);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(finder != variants.end());
+#endif
       return finder->second;
     }
 
@@ -4564,6 +4601,23 @@ namespace LegionRuntime {
       return (task_id % runtime->runtime_stride);
     }
 
+    //--------------------------------------------------------------------------
+    /*static*/ void TaskImpl::handle_variant_request(Internal *runtime,
+                                     Deserializer &derez, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez); 
+      TaskID task_id;
+      derez.deserialize(task_id);
+      VariantID variant_id;
+      derez.deserialize(variant_id);
+      UserEvent done_event;
+      derez.deserialize(done_event);
+      TaskID *task_impl = runtime->find_task_impl(task_id);
+      VariantImpl *var_impl = task_impl->find_variant_impl(variant_id);
+      var_impl->send_variant_response(source, done_event);
+    }
+
     /////////////////////////////////////////////////////////////
     // Variant Impl 
     /////////////////////////////////////////////////////////////
@@ -4581,7 +4635,7 @@ namespace LegionRuntime {
         inner_variant(registrar.inner_variant),
         idempotent_variant(registrar.idempotent_variant)
     //--------------------------------------------------------------------------
-    {
+    { 
       if (udata != NULL)
       {
         user_data = malloc(user_data_size);
@@ -4625,6 +4679,17 @@ namespace LegionRuntime {
       // register this with the runtime profiler if we have to
       if (runtime->profiler != NULL)
         runtime->profiler->register_task_variant(vid, variant_name);
+      // Check that global registration has portable implementations
+      if (global && (!realm_descriptor->has_portable_implementation() ||
+                     !inline_descriptor->has_portable_implementation()))
+      {
+        log_run.error("Variant %s requested global registration without "
+                      "a portable implementation.", variant_name);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_ILLEGAL_GLOBAL_VARIANT_REGISTRATION);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -4687,9 +4752,103 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(inline_descriptor != NULL);
 #endif
-      InlineFnptr inline_ptr = inline_descriptor->find_impl();
+      const Realm::FunctionPointerImplementation *fp_impl = 
+        inline_descriptor->find_impl<Realm::FunctionPointerImplementation>();
+#ifdef DEBUG_HIGH_LEVEL
+      assert(fp_impl != NULL);
+#endif
+      InlineFnptr inline_ptr = fp_impl->get_impl<InlineFnptr>();
       (*inline_ptr)(task, regions, parent, runtime->high_level, 
                     user_data, future_store, future_size);
+    }
+
+    //--------------------------------------------------------------------------
+    void VariantImpl::send_variant_response(AddressSpaceID target, Event done)
+    //--------------------------------------------------------------------------
+    {
+      if (!global)
+      {
+        log_run.error("Illegal remote use of variant %s of task %s "
+                      "which was not globally registered.",
+                      variant_name, owner->get_name());
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_ILLEGAL_USE_OF_NON_GLOBAL_VARIANT);
+      }
+      // Package up this variant and send it over to the target 
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(owner->task_id);
+        rez.serialize(vid);
+        // pack the code descriptors 
+        Realm::Serialization::ByteCountSerializer counter;
+        realm_descriptor->serialize(counter);
+        inline_descriptor->serialize(counter);
+        const size_t impl_size = counter.bytes_used();
+        rez.serialize(impl_size);
+        {
+          Realm::Serialization::FixedBufferSerializer 
+            serializer(rez.reserve_space(impl_size), impl_size);
+          realm_descriptor->serialize(serializer);
+          inline_descriptor->serialize(serializer);
+        }
+        rez.serialize(user_data_size);
+        if (user_data_size > 0)
+          rez.serialize(user_data, user_data_size);
+        rez.serialize(leaf_variant);
+        rez.serialize(inner_variant);
+        rez.serialize(idempotent_variant);
+        size_t name_size = strlen(variant_name)+1;
+        rez.serialize(variant_name, name_size);
+        // TODO: pack constraints
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ AddressSpaceID VariantImpl::get_owner_space(VariantID vid,
+                                                           Internal *runtime)
+    //--------------------------------------------------------------------------
+    {
+      return (vid % runtime->address_space);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void VariantImpl::handle_variant_response(Internal *runtime,
+                                                         Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      TaskID task_id;
+      derez.deserialize(task_id);
+      TaskVariantRegistrar registrar(task_id);
+      VariantID variant_id;
+      derez.deserialize(variant_id);
+      size_t impl_size;
+      derez.deserialize(impl_size);
+      Realm::Serialization::FixedBufferDeserializer
+        deserializer(derez.get_current_pointer(), impl_size);
+      derez.advance_pionter(impl_size);
+      CodeDescriptor *realm_desc = new CodeDescriptor();
+      realm_desc->deserialize(deserializer);
+      CodeDescriptor *inline_desc = new CodeDescriptor();
+      inline_desc->deserialize(deserializer);
+      size_t user_data_size;
+      derez.deserialize(user_data_size);
+      const void *user_data = derez.get_current_pointer();
+      derez.advance_pointer(user_data_size);
+      derez.deserialize(registrar.leaf_variant);
+      derez.deserialize(registrar.inner_variant);
+      derez.deserialize(registrar.idempotent_variant);
+      // The last thing will be the name
+      registrar.task_variant_name = (const char*)derez.get_current_pointer();
+      size_t name_size = strlen(name)+1;
+      derez.advance_pointer(name_size);
+      // TODO unpack the constraints
+      // Ask the runtime to perform the registration 
+      runtime->register_variant(registrar, user_data, user_data_size,
+                                realm_desc, inline_desc, variant_id);
     }
     
     /////////////////////////////////////////////////////////////
@@ -12635,6 +12794,22 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void Internal::send_variant_request(AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_VARIANT_REQUEST,
+                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Internal::send_variant_response(AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_VARIANT_RESPONSE,
+                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Internal::handle_task(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
@@ -13323,6 +13498,21 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       RegionTreeNode::handle_logical_state_return(forest, derez, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Internal::handle_variant_request(Deserializer &derez, 
+                                          AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      TaskImpl::handle_variant_request(this, derez, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Internal::handle_variant_response(Deserializer &derez) 
+    //--------------------------------------------------------------------------
+    {
+      VariantImpl::handle_variant_response(this, derez);
     }
 
     //--------------------------------------------------------------------------

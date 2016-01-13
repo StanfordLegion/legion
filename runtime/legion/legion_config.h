@@ -297,6 +297,8 @@ typedef enum legion_error_t {
   ERROR_INVALID_TARGET_PROC = 138,
   ERROR_INCOMPLETE_TRACE = 139,
   ERROR_STATIC_CALL_POST_RUNTIME_START = 140,
+  ERROR_ILLEGAL_GLOBAL_VARIANT_REGISTRATION = 141,
+  ERROR_ILLEGAL_USE_OF_NON_GLOBAL_VARIANT = 142,
 }  legion_error_t;
 
 // enum and namepsaces don't really get along well

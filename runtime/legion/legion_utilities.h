@@ -426,6 +426,7 @@ namespace LegionRuntime {
       inline const void* get_buffer(void) const { return buffer; }
       inline size_t get_buffer_size(void) const { return total_bytes; }
       inline size_t get_used_bytes(void) const { return index; }
+      inline void* reserve_space(size_t size) const;
     private:
       inline void resize(void);
     private:
@@ -1484,6 +1485,20 @@ namespace LegionRuntime {
       index += sizeof(size_t);
       context_bytes = 0;
 #endif
+    }
+
+    //--------------------------------------------------------------------------
+    inline void* Serializer::reserve_bytes(size_t size)
+    //--------------------------------------------------------------------------
+    {
+      while ((index + bytes) > total_bytes)
+        resize();
+      void *result = buffer+index;
+      index += bytes;
+#ifdef DEBUG_HIGH_LEVEL
+      context_bytes += bytes;
+#endif
+      return result;
     }
 
     //--------------------------------------------------------------------------

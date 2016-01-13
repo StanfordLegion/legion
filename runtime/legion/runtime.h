@@ -955,6 +955,8 @@ namespace LegionRuntime {
                           Deserializer &derez, AddressSpaceID source);
       static void handle_semantic_info(Internal *runtime,
                           Deserializer &derez, AddressSpaceID source);
+      static void handle_variant_request(Internal *runtime,
+                          Deserializer &derez, AddressSpaceID source);
     public:
       const TaskID task_id;
       Internal *const runtime;
@@ -993,6 +995,12 @@ namespace LegionRuntime {
       void dispatch_inline(Task *task, SingleTask *parent,
                            const std::vector<PhysicalRegion> &regions,
                            void *&future_store, size_t &future_size);
+    public:
+      void send_variant_response(AddressSpaceID source, Event done_event);
+    public:
+      static AddressSpaceID get_owner_space(VariantID vid, Internal *runtime);
+      static void handle_variant_response(Internal *runtime, 
+                                          Deserializer &derez);
     public:
       const VariantID vid;
       TaskImpl *const owner;
@@ -1675,7 +1683,9 @@ namespace LegionRuntime {
       void send_remote_reduction_creation_request(AddressSpaceID target,
                                                   Serializer &rez);
       void send_remote_creation_response(AddressSpaceID target,Serializer &rez);
-      void send_back_logical_state(AddressSpaceID, Serializer &rez);
+      void send_back_logical_state(AddressSpaceID target, Serializer &rez);
+      void send_variant_request(AddressSpaceID target, Serializer &rez);
+      void send_variant_response(AddressSpaceID target, Serializer &rez);
     public:
       // Complementary tasks for handling messages
       void handle_task(Deserializer &derez);
@@ -1800,6 +1810,8 @@ namespace LegionRuntime {
       void handle_remote_creation_response(Deserializer &derez);
       void handle_logical_state_return(Deserializer &derez,
                                        AddressSpaceID source);
+      void handle_variant_request(Deserializer &derez, AddressSpaceID source);
+      void handle_variant_response(Deserializer &derez);
       void handle_top_level_task_request(Deserializer &derez);
       void handle_top_level_task_complete(Deserializer &derez);
       void handle_shutdown_notification(AddressSpaceID source);
