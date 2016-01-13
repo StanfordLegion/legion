@@ -310,8 +310,8 @@ namespace Realm {
 	if(index >= size) instances.push_back(i_impl);
       }
 
-      log_inst.info("local instance " IDFMT " created in memory " IDFMT " at offset %zd (redop=%d list_size=%zd parent_inst=" IDFMT " block_size=%zd)",
-		    i.id, me.id, inst_offset, redopid, list_size,
+      log_inst.info("local instance " IDFMT " created in memory " IDFMT " at offset %zd+%zd (redop=%d list_size=%zd parent_inst=" IDFMT " block_size=%zd)",
+		    i.id, me.id, inst_offset, bytes_needed, redopid, list_size,
                     parent_inst.id, block_size);
 
       return i;
