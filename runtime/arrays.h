@@ -316,6 +316,16 @@ namespace LegionRuntime {
     }
 
     template <unsigned DIM>
+    inline std::ostream& operator<<(std::ostream& os, const Point<DIM>& p)
+    {
+      os << '(' << p[0];
+      for(unsigned i = 1; i < DIM; i++)
+	os << ',' << p[i];
+      os << ')';
+      return os;
+    }
+
+    template <unsigned DIM>
     class Rect {
     public:
       Rect(void) {}
@@ -394,6 +404,13 @@ namespace LegionRuntime {
   
       Point<DIM> lo, hi;
     };
+
+    template <unsigned DIM>
+    inline std::ostream& operator<<(std::ostream& os, const Rect<DIM>& r)
+    {
+      os << '[' << r.lo << ',' << r.hi << ']';
+      return os;
+    }
 
     template <typename T> class GenericDenseSubrectIterator;
     template <typename T> class GenericLinearSubrectIterator;
