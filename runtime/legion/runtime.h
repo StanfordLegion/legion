@@ -894,7 +894,8 @@ namespace LegionRuntime {
       PendingVariantRegistration(VariantID vid, 
                                  const TaskVariantRegistrar &registrar,
                                  const void *user_data, size_t user_data_size,
-                                 LowLevelFnptr low_ptr, InlineFnptr inline_ptr);
+                                 CodeDescriptor *realm_desc, 
+                                 CodeDescriptor *inline_desc);
       PendingVariantRegistration(const PendingVariantRegistration &rhs);
       ~PendingVariantRegistration(void);
     public:
@@ -907,8 +908,8 @@ namespace LegionRuntime {
       TaskVariantRegistrar registrar;
       void *user_data;
       size_t user_data_size;
-      LowLevelFnptr low_ptr;
-      InlineFnptr inline_ptr;
+      CodeDescriptor *realm_desc; 
+      CodeDescriptor *inline_desc;
     };
 
     /**
@@ -936,6 +937,7 @@ namespace LegionRuntime {
       void add_variant(VariantImpl *impl);
       VariantImpl* find_variant_impl(VariantID variant_id);
     public:
+      const char* get_name(bool needs_lock = true) const;
       void attach_semantic_information(SemanticTag tag, AddressSpaceID source,
                                        const void *buffer, size_t size);
       void retrieve_semantic_information(SemanticTag tag,
@@ -974,7 +976,7 @@ namespace LegionRuntime {
     public:
       VariantImpl(Internal *runtime, VariantID vid, TaskImpl *owner, 
                   const TaskVariantRegistrar &registrar, 
-                  LowLevelFnptr low_ptr, InlineFnptr inline_ptr,
+                  CodeDescriptor *realm_desc, CodeDescriptor *inline_desc,
                   const void *user_data = NULL, size_t user_data_size = 0);
       VariantImpl(const VariantImpl &rhs);
       ~VariantImpl(void);
@@ -996,14 +998,13 @@ namespace LegionRuntime {
       TaskImpl *const owner;
       Internal *const runtime;
       const bool global; // globally valid variant
+    public:
+      CodeDescriptor *const realm_descriptor;
+      CodeDescriptor *const inline_descriptor;
     private:
       void *user_data;
       size_t user_data_size;
-    private:
-      InlineFnptr inline_ptr;
-    private:
       Event ready_event;
-      CodeDescriptor descriptor;
     private: // properties
       bool leaf_variant;
       bool inner_variant;
@@ -1541,7 +1542,7 @@ namespace LegionRuntime {
                     bool owned);
       VariantID register_variant(const TaskVariantRegistrar &registrar,
                                  const void *user_data, size_t user_data_size,
-                                 LowLevelFnptr low_ptr, InlineFnptr inline_ptr,
+                                 CodeDescriptor *realm, CodeDescriptor *indesc,
                                  VariantID vid = AUTO_GENERATE_ID); 
       TaskImpl* find_or_create_task_impl(TaskID task_id);
       TaskImpl* find_task_impl(TaskID task_id);
@@ -2335,7 +2336,7 @@ namespace LegionRuntime {
       static VariantID preregister_variant(
                       const TaskVariantRegistrar &registrar,
                       const void *user_data, size_t user_data_size,
-                      LowLevelFnptr low_ptr, InlineFnptr inline_ptr);
+                      CodeDescriptor *realm_desc, CodeDescriptor *inline_desc);
       static TaskVariantCollection* get_variant_collection(
                       Processor::TaskFuncID tid);
       static PartitionProjectionFnptr 

@@ -5732,10 +5732,10 @@ namespace LegionRuntime {
     private:
       VariantID register_variant(const TaskVariantRegistrar &registrar,
                                  const void *user_data, size_t user_data_size,
-                                 LowLevelFnptr low_ptr, InlineFnptr inline_ptr);
+                                 CodeDescriptor *realm, CodeDescriptor *indesc);
       static VariantID preregister_variant(const TaskVariantRegistrar &reg,
                                  const void *user_data, size_t user_data_size,
-                                 LowLevelFnptr low_ptr, InlineFnptr inline_ptr);
+                                 CodeDescriptor *realm, CodeDescriptor *indesc);
     private:
       static ReductionOpTable& get_reduction_table(void);
       static SerdezOpTable& get_serdez_table(void);

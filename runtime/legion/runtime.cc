@@ -4141,8 +4141,8 @@ namespace LegionRuntime {
     PendingVariantRegistration::PendingVariantRegistration(VariantID v,
                                   const TaskVariantRegistrar &reg, 
                                   const void *udata, size_t udata_size,
-                                  LowLevelFnptr lptr, InlineFnptr inptr)
-      : vid(v), registrar(reg), low_ptr(lptr), inline_ptr(inptr)
+                                  CodeDescriptor *realm, CodeDescriptor *app)
+      : vid(v), registrar(reg), realm_desc(realm), inline_desc(app)
     //--------------------------------------------------------------------------
     {
       // Make sure we own the task variant name
@@ -4196,7 +4196,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       runtime->register_variant(registrar, user_data, user_data_size,
-                                low_ptr, inline_ptr, vid);
+                                realm_desc, inline_desc, vid);
     }
 
     /////////////////////////////////////////////////////////////
@@ -4274,10 +4274,41 @@ namespace LegionRuntime {
       AutoLock t_lock(task_lock,1,false/*exclusive*/);
       std::map<VariantID,VariantImpl*>::const_iterator finder = 
         variants.find(variant_id);
+      if (finder == variants.end())
+      {
+        log_run.error("Unable to find variant %d of task %s!",
+                      variant_id, get_name(false));
 #ifdef DEBUG_HIGH_LEVEL
-      assert(finder != variants.end());
+        assert(false);
 #endif
+        exit(ERROR_UNREGISTERED_VARIANT);
+      }
       return finder->second;
+    }
+
+    //--------------------------------------------------------------------------
+    const char* TaskImpl::get_name(bool needs_lock /*= true*/) const
+    //--------------------------------------------------------------------------
+    {
+      if (needs_lock)
+      {
+        AutoLock t_lock(task_lock,1,false/*exclusive*/);
+        std::map<SemanticTag,SemanticInfo>::const_iterator finder = 
+          semantic_info.find(NAME_SEMANTIC_TAG);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(finder != semantic_info.end());
+#endif
+        return reinterpret_cast<const char*>(finder->second.buffer);
+      }
+      else
+      {
+        std::map<SemanticTag,SemanticInfo>::const_iterator finder = 
+          semantic_info.find(NAME_SEMANTIC_TAG);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(finder != semantic_info.end());
+#endif
+        return reinterpret_cast<const char*>(finder->second.buffer);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -4540,13 +4571,13 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     VariantImpl::VariantImpl(Internal *rt, VariantID v, TaskImpl *own, 
                            const TaskVariantRegistrar &registrar,
-                           LowLevelFnptr low_ptr, InlineFnptr in_ptr,
+                           CodeDescriptor *realm, CodeDescriptor *app,
                            const void *udata /*=NULL*/, size_t udata_size/*=0*/)
       : ExecutionConstraintSet(registrar.execution_constraints),
         TaskLayoutDescriptionSet(registrar.layout_constraints),
         vid(v), owner(own), runtime(rt), global(registrar.global_registration),
-        user_data_size(udata_size), inline_ptr(in_ptr),
-        leaf_variant(registrar.leaf_variant), 
+        realm_descriptor(realm), inline_descriptor(app), 
+        user_data_size(udata_size), leaf_variant(registrar.leaf_variant), 
         inner_variant(registrar.inner_variant),
         idempotent_variant(registrar.idempotent_variant)
     //--------------------------------------------------------------------------
@@ -4558,9 +4589,6 @@ namespace LegionRuntime {
       }
       else
         user_data = NULL;
-      // Make our code descriptor and register it with Realm
-      descriptor.add_implementation(
-          new Realm::FunctionPointerImplementation((void(*)(void))low_ptr));
       // Figure out which kind or processors we can use this variant on
       // and register it against all the local processors of that kind
       std::vector<Processor::Kind> proc_kinds;
@@ -4602,7 +4630,8 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     VariantImpl::VariantImpl(const VariantImpl &rhs) 
       : ExecutionConstraintSet(), TaskLayoutDescriptionSet(),
-        vid(rhs.vid), owner(rhs.owner), runtime(rhs.runtime), global(rhs.global)
+        vid(rhs.vid), owner(rhs.owner), runtime(rhs.runtime), 
+        global(rhs.global), realm_descriptor(NULL), inline_descriptor(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -4613,6 +4642,8 @@ namespace LegionRuntime {
     VariantImpl::~VariantImpl(void)
     //--------------------------------------------------------------------------
     {
+      delete realm_descriptor;
+      delete inline_descriptor;
       if (user_data != NULL)
         free(user_data);
       if (variant_name != NULL)
@@ -11480,7 +11511,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     VariantID Internal::register_variant(const TaskVariantRegistrar &registrar,
                                   const void *user_data, size_t user_data_size,
-                                  LowLevelFnptr low_ptr, InlineFnptr inline_ptr,
+                                  CodeDescriptor *realm, CodeDescriptor *indesc,
                                   VariantID vid /*= AUTO_GENERATE_ID*/)
     //--------------------------------------------------------------------------
     {
@@ -11489,14 +11520,13 @@ namespace LegionRuntime {
         vid = get_unique_variant_id();
       // First find the task implementation
       TaskImpl *task_impl = find_or_create_task_impl(registrar.task_id);
-      // Make the variant 
+      // Make our variant and add it to the set of variants
       VariantImpl *impl = legion_new<VariantImpl>(this, vid, task_impl, 
                                                   registrar, low_ptr, 
-                                                  inline_ptr, user_data, 
+                                                  realm, indesc, user_data,
                                                   user_data_size);
       AutoLock tv_lock(task_variant_lock);
       variant_table.push_back(impl);
-      // Add it to our set of variants 
       return vid;
     }
 
@@ -11535,16 +11565,7 @@ namespace LegionRuntime {
                                              VariantID variant_id)
     //--------------------------------------------------------------------------
     {
-      TaskImpl *owner;
-      {
-        AutoLock tv_lock(task_variant_lock,1,false/*exclusive*/);
-        std::map<TaskID,TaskImpl*>::const_iterator finder = 
-          task_table.find(task_id);
-#ifdef DEBUG_HIGH_LEVEL
-        assert(finder != task_table.end());
-#endif
-        owner = finder->second;
-      }
+      TaskImpl *owner = find_or_create_task_impl(task_id);
       return owner->find_variant_impl(variant_id);
     }
 
@@ -16676,7 +16697,7 @@ namespace LegionRuntime {
     /*static*/ VariantID Internal::preregister_variant(
                           const TaskVariantRegistrar &registrar,
                           const void *user_data, size_t user_data_size,
-                          LowLevelFnptr low_ptr, InlineFnptr inline_ptr)
+                          CodeDescriptor *realm, CodeDescriptor *inline_desc)
     //--------------------------------------------------------------------------
     {
       // Report an error if the runtime has already started
@@ -16694,7 +16715,7 @@ namespace LegionRuntime {
       // Offset by one so that we never have a variant ID of zero
       VariantID vid = pending_table.size() + 1;
       pending_table.push_back(new PendingVariantRegistration(vid, registrar,
-                              user_data, user_data_size, low_ptr, inline_ptr));
+                              user_data, user_data_size, realm, inline_desc));
       return vid;
     }
 

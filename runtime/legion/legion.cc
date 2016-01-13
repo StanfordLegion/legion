@@ -3905,22 +3905,22 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     VariantID Runtime::register_variant(const TaskVariantRegistrar &registrar,
                                   const void *user_data, size_t user_data_size,
-                                  LowLevelFnptr low_ptr, InlineFnptr inline_ptr)
+                                  CodeDescriptor *realm, CodeDescriptor *indesc)
     //--------------------------------------------------------------------------
     {
       return runtime->register_variant(registrar, user_data, user_data_size,
-                                       low_ptr, inline_ptr);
+                                       realm, indesc);
     }
     
     //--------------------------------------------------------------------------
     /*static*/ VariantID Runtime::preregister_variant(
                                   const TaskVariantRegistrar &registrar,
                                   const void *user_data, size_t user_data_size,
-                                  LowLevelFnptr low_ptr, InlineFnptr inline_ptr)
+                                  CodeDescriptor *realm, CodeDescriptor *indesc)
     //--------------------------------------------------------------------------
     {
       return Internal::preregister_variant(registrar, user_data, user_data_size,
-                                           low_ptr, inline_ptr);
+                                           realm, indesc);
     } 
 
     //--------------------------------------------------------------------------
