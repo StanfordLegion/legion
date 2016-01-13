@@ -4276,7 +4276,7 @@ namespace LegionRuntime {
         variants.find(variant_id);
       if (finder == variants.end())
       {
-        log_run.error("Unable to find variant %d of task %s!",
+        log_run.error("Unable to find variant %ld of task %s!",
                       variant_id, get_name(false));
 #ifdef DEBUG_HIGH_LEVEL
         assert(false);
@@ -4609,7 +4609,7 @@ namespace LegionRuntime {
       {
         registration_events.insert(
             Processor::register_task_by_kind(*it, false/*global*/,
-                                             vid, descriptor,
+                                             vid, *realm_descriptor,
                                              profiling_requests,
                                              user_data, user_data_size));
       }
@@ -4685,8 +4685,9 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
-      assert(inline_ptr != NULL);
+      assert(inline_descriptor != NULL);
 #endif
+      InlineFnptr inline_ptr = inline_descriptor->find_impl();
       (*inline_ptr)(task, regions, parent, runtime->high_level, 
                     user_data, future_store, future_size);
     }
@@ -5275,6 +5276,20 @@ namespace LegionRuntime {
       available_timing_ops.clear();
       timing_op_lock.destroy_reservation();
       timing_op_lock = Reservation::NO_RESERVATION;
+      for (std::map<TaskID,TaskImpl*>::const_iterator it = 
+            task_table.begin(); it != task_table.end(); it++)
+      {
+        legion_delete(it->second);
+      }
+      task_table.clear();
+      for (std::deque<VariantImpl*>::const_iterator it = 
+            variant_table.begin(); it != variant_table.end(); it++)
+      {
+        legion_delete(*it);
+      }
+      variant_table.clear();
+      task_variant_lock.destroy_reservation();
+      task_variant_lock = Reservation::NO_RESERVATION;
 
       delete forest;
 
@@ -11522,9 +11537,8 @@ namespace LegionRuntime {
       TaskImpl *task_impl = find_or_create_task_impl(registrar.task_id);
       // Make our variant and add it to the set of variants
       VariantImpl *impl = legion_new<VariantImpl>(this, vid, task_impl, 
-                                                  registrar, low_ptr, 
-                                                  realm, indesc, user_data,
-                                                  user_data_size);
+                                                  registrar, realm, indesc, 
+                                                  user_data, user_data_size);
       AutoLock tv_lock(task_variant_lock);
       variant_table.push_back(impl);
       return vid;
