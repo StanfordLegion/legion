@@ -775,7 +775,7 @@ class SingleTask(object):
         self.reqs = dict()
         self.logical_incoming = set()
         self.logical_outgoing = set()
-        self.logical_mark = 0
+        self.logical_mark = dict()
         self.enclosing = None
         self.point = None
         self.start_event = None
@@ -842,17 +842,22 @@ class SingleTask(object):
         if op <> self:
             self.logical_outgoing.add(op)
 
+    def get_logical_mark(self, idx):
+        if idx not in self.logical_mark:
+            self.logical_mark[idx] = 0
+        return self.logical_mark[idx]
+
     def has_logical_path(self, idx, target, target_idx, mark):
         if target == self and idx == target_idx:
             return True
-        if self.logical_mark == mark:
+        if self.get_logical_mark(idx) == mark:
             return False
         # Otherwise check all the outgoing edges
         sources = self.ctx.find_logically_dependent_sources(self, idx)
         for (src_op, src_idx) in sources:
             if src_op.has_logical_path(src_idx, target, target_idx, mark):
                 return True
-        self.logical_mark = mark
+        self.logical_mark[idx] = mark
         return False
 
     def get_reachable(self, reachable, forward):
@@ -1305,7 +1310,7 @@ class IndexTask(object):
         self.points = set()
         self.logical_incoming = set()
         self.logical_outgoing = set()
-        self.logical_mark = 0 
+        self.logical_mark = dict()
         self.reqs = dict()
         self.op_instances = set()
         self.node_name = 'task_node_'+str(self.uid)
@@ -1357,17 +1362,22 @@ class IndexTask(object):
         assert op <> self
         self.logical_outgoing.add(op)
 
+    def get_logical_mark(self, idx):
+        if idx not in self.logical_mark:
+            self.logical_mark[idx] = 0
+        return self.logical_mark[idx]
+
     def has_logical_path(self, idx, target, target_idx, mark):
         if target == self and idx == target_idx:
             return True
-        if self.logical_mark == mark:
+        if self.get_logical_mark(idx) == mark:
             return False
         # Otherwise check all the outgoing edges
         sources = self.ctx.find_logically_dependent_sources(self, idx)
         for (src_op, src_idx) in sources:
             if src_op.has_logical_path(src_idx, target, target_idx, mark):
                 return True
-        self.logical_mark = mark
+        self.logical_mark[idx] = mark
         return False
 
     def get_reachable(self, reachable, forward):
@@ -1418,7 +1428,7 @@ class Mapping(object):
         self.requirement = None
         self.logical_incoming = set()
         self.logical_outgoing = set()
-        self.logical_mark = 0 
+        self.logical_mark = dict()
         self.start_event = None
         self.term_event = None
         self.op_instances = set()
@@ -1465,17 +1475,22 @@ class Mapping(object):
         assert self <> op
         self.logical_outgoing.add(op)
 
+    def get_logical_mark(self, idx):
+        if idx not in self.logical_mark:
+            self.logical_mark[idx] = 0
+        return self.logical_mark[idx]
+
     def has_logical_path(self, idx, target, target_idx, mark):
         if target == self and idx == target_idx:
             return True
-        if self.logical_mark == mark:
+        if self.get_logical_mark(idx) == mark:
             return False
         # Otherwise check all the outgoing edges
         sources = self.ctx.find_logically_dependent_sources(self, idx)
         for (src_op, src_idx) in sources:
             if src_op.has_logical_path(src_idx, target, target_idx, mark):
                 return True
-        self.logical_mark = mark
+        self.logical_mark[idx] = mark
         return False
 
     def get_reachable(self, reachable, forward):
@@ -1581,7 +1596,7 @@ class Deletion(object):
         self.uid = uid
         self.ctx = ctx
         self.logical_outgoing = set()
-        self.logical_mark = 0 
+        self.logical_mark = dict()
         self.op_instances = set()
         self.node_name = 'deletion_node_'+str(self.uid)
 
@@ -1599,17 +1614,22 @@ class Deletion(object):
         assert self <> op
         self.logical_outgoing.add(op)
 
+    def get_logical_mark(self, idx):
+        if idx not in self.logical_mark:
+            self.logical_mark[idx] = 0
+        return self.logical_mark[idx]
+
     def has_logical_path(self, idx, target, target_idx, mark):
         if target == self and idx == target_idx:
             return True
-        if self.logical_mark == mark:
+        if self.get_logical_mark(idx) == mark:
             return False
         # Otherwise check all the outgoing edges
         sources = self.ctx.find_logically_dependent_sources(self, idx)
         for (src_op, src_idx) in sources:
             if src_op.has_logical_path(src_idx, target, target_idx, mark):
                 return True
-        self.logical_mark = mark
+        self.logical_mark[idx] = mark
         return False
 
     def get_reachable(self, reachable, forward):
@@ -1656,7 +1676,7 @@ class CopyOp(object):
         self.reqs = dict()
         self.logical_incoming = set()
         self.logical_outgoing = set()
-        self.logical_mark = 0 
+        self.logical_mark = dict()
         self.op_instances = set()
         self.op_instances.add(self)
         self.instances = dict()
@@ -1725,17 +1745,22 @@ class CopyOp(object):
         assert self <> op
         self.logical_outgoing.add(op)
 
+    def get_logical_mark(self, idx):
+        if idx not in self.logical_mark:
+            self.logical_mark[idx] = 0
+        return self.logical_mark[idx]
+
     def has_logical_path(self, idx, target, target_idx, mark):
         if target == self and idx == target_idx:
             return True
-        if self.logical_mark == mark:
+        if self.get_logical_mark(idx) == mark:
             return False
         # Otherwise check all the outgoing edges
         sources = self.ctx.find_logically_dependent_sources(self, idx)
         for (src_op, src_idx) in sources:
             if src_op.has_logical_path(src_idx, target, target_idx, mark):
                 return True
-        self.logical_mark = mark
+        self.logical_mark[idx] = mark
         return False
 
     def get_reachable(self, reachable, forward):
@@ -1963,7 +1988,7 @@ class FillOp(object):
         self.requirement = None
         self.logical_incoming = set() 
         self.logical_outgoing = set()
-        self.logical_mark = 0
+        self.logical_mark = dict()
         self.op_instances = set()
         self.node_name = 'fill_node_'+str(uid)
 
@@ -2000,17 +2025,22 @@ class FillOp(object):
         assert self <> op
         self.logical_outgoing.add(op)
 
+    def get_logical_mark(self, idx):
+        if idx not in self.logical_mark:
+            self.logical_mark[idx] = 0
+        return self.logical_mark[idx]
+
     def has_logical_path(self, idx, target, target_idx, mark):
         if target == self and idx == target_idx:
             return True
-        if self.logical_mark == mark:
+        if self.get_logical_mark(idx) == mark:
             return False
         # Otherwise check all the outgoing edges
         sources = self.ctx.find_logically_dependent_sources(self, idx)
         for (src_op, src_idx) in sources:
             if src_op.has_logical_path(src_idx, target, target_idx, mark):
                 return True
-        self.logical_mark = mark
+        self.logical_mark[idx] = mark
         return False
 
     def get_reachable(self, reachable, forward):
@@ -2072,7 +2102,7 @@ class AcquireOp(object):
         self.reqs = dict()
         self.logical_incoming = set()
         self.logical_outgoing = set()
-        self.logical_mark = 0
+        self.logical_mark = dict()
         self.op_instances = set()
         self.op_instances.add(self)
         self.instances = dict()
@@ -2117,17 +2147,22 @@ class AcquireOp(object):
         assert op <> self
         self.logical_outgoing.add(op)
 
+    def get_logical_mark(self, idx):
+        if idx not in self.logical_mark:
+            self.logical_mark[idx] = 0
+        return self.logical_mark[idx]
+
     def has_logical_path(self, idx, target, target_idx, mark):
         if target == self and idx == target_idx:
             return True
-        if self.logical_mark == mark:
+        if self.get_logical_mark(idx) == mark:
             return False
         # Otherwise check all the outgoing edges
         sources = self.ctx.find_logically_dependent_sources(self, idx)
         for (src_op, src_idx) in sources:
             if src_op.has_logical_path(src_idx, target, target_idx, mark):
                 return True
-        self.logical_mark = mark
+        self.logical_mark[idx] = mark
         return False
 
     def get_reachable(self, reachable, forward):
@@ -2227,7 +2262,7 @@ class ReleaseOp(object):
         self.reqs = dict()
         self.logical_incoming = set()
         self.logical_outgoing = set()
-        self.logical_mark = 0 
+        self.logical_mark = dict()
         self.op_instances = set()
         self.op_instances.add(self)
         self.instances = dict()
@@ -2272,17 +2307,22 @@ class ReleaseOp(object):
         assert op <> self
         self.logical_outgoing.add(op)
 
+    def get_logical_mark(self, idx):
+        if idx not in self.logical_mark:
+            self.logical_mark[idx] = 0
+        return self.logical_mark[idx]
+
     def has_logical_path(self, idx, target, target_idx, mark):
         if target == self and idx == target_idx:
             return True
-        if self.logical_mark == mark:
+        if self.get_logical_mark(idx) == mark:
             return False
         # Otherwise check all the outgoing edges
         sources = self.ctx.find_logically_dependent_sources(self, idx)
         for (src_op, src_idx) in sources:
             if src_op.has_logical_path(src_idx, target, target_idx, mark):
                 return True
-        self.logical_mark = mark
+        self.logical_mark[idx] = mark
         return False
 
     def get_reachable(self, reachable, forward):
@@ -2384,7 +2424,7 @@ class DependentPartitionOp(object):
         self.reqs = dict()
         self.logical_incoming = set()
         self.logical_outgoing = set()
-        self.logical_mark = 0 
+        self.logical_mark = dict()
         self.op_instances = set()
         self.op_instances.add(self)
         self.instances = dict()
@@ -2429,17 +2469,22 @@ class DependentPartitionOp(object):
         assert op <> self
         self.logical_outgoing.add(op)
 
+    def get_logical_mark(self, idx):
+        if idx not in self.logical_mark:
+            self.logical_mark[idx] = 0
+        return self.logical_mark[idx]
+
     def has_logical_path(self, idx, target, target_idx, mark):
         if target == self and idx == target_idx:
             return True
-        if self.logical_mark == mark:
+        if self.get_logical_mark(idx) == mark:
             return False
         # Otherwise check all the outgoing edges
         sources = self.ctx.find_logically_dependent_sources(self, idx)
         for (src_op, src_idx) in sources:
             if src_op.has_logical_path(src_idx, target, target_idx, mark):
                 return True
-        self.logical_mark = mark 
+        self.logical_mark[idx] = mark
         return False
 
     def get_reachable(self, reachable, forward):
@@ -2562,7 +2607,7 @@ class PendingPartitionOp(object):
         self.reqs = dict()
         self.logical_incoming = set()
         self.logical_outgoing = set()
-        self.logical_mark = 0 
+        self.logical_mark = dict()
         self.op_instances = set()
         self.op_instances.add(self)
         self.instances = dict()
@@ -2615,17 +2660,22 @@ class PendingPartitionOp(object):
         assert op <> self
         self.logical_outgoing.add(op)
 
+    def get_logical_mark(self, idx):
+        if idx not in self.logical_mark:
+            self.logical_mark[idx] = 0
+        return self.logical_mark[idx]
+
     def has_logical_path(self, idx, target, target_idx, mark):
         if target == self and idx == target_idx:
             return True
-        if self.logical_mark == mark:
+        if self.get_logical_mark(idx) == mark:
             return False
         # Otherwise check all the outgoing edges
         sources = self.ctx.find_logically_dependent_sources(self, idx)
         for (src_op, src_idx) in sources:
             if src_op.has_logical_path(src_idx, target, target_idx, mark):
                 return True
-        self.logical_mark = mark
+        self.logical_mark[idx] = mark
         return False
 
     def get_reachable(self, reachable, forward):
@@ -2742,7 +2792,7 @@ class Close(object):
         self.requirement = None
         self.logical_incoming = set()
         self.logical_outgoing = set()
-        self.logical_mark = 0 
+        self.logical_mark = dict()
         self.start_event = None
         self.term_event = None
         self.op_instances = set()
@@ -2792,20 +2842,22 @@ class Close(object):
         assert self <> op
         self.logical_outgoing.add(op)
 
+    def get_logical_mark(self, idx):
+        if idx not in self.logical_mark:
+            self.logical_mark[idx] = 0
+        return self.logical_mark[idx]
+
     def has_logical_path(self, idx, target, target_idx, mark):
         if target == self and idx == target_idx:
             return True
-        if self.logical_mark == mark:
+        if self.get_logical_mark(idx) == mark:
             return False
         # Otherwise check all the outgoing edges
         sources = self.ctx.find_logically_dependent_sources(self, idx)
-        print "  " + self.get_name() + " has " + str(len(sources)) + " sources:"
-        for (src_op, src_idx) in sources:
-            print "      index " + str(src_idx) + " of " + src_op.get_name()
         for (src_op, src_idx) in sources:
             if src_op.has_logical_path(src_idx, target, target_idx, mark):
                 return True
-        self.logical_mark = mark
+        self.logical_mark[idx] = mark
         return False
 
     def get_reachable(self, reachable, forward):
@@ -2927,7 +2979,7 @@ class Fence(object):
         self.ctx = ctx
         self.logical_incoming = set()
         self.logical_outgoing = set()
-        self.logical_mark = 0 
+        self.logical_mark = dict()
         self.op_instances = set()
         self.op_instances.add(self)
         self.node_name = 'fence_node_'+str(self.uid)
@@ -2946,17 +2998,22 @@ class Fence(object):
         assert self <> op
         self.logical_outgoing.add(op)
 
+    def get_logical_mark(self, idx):
+        if idx not in self.logical_mark:
+            self.logical_mark[idx] = 0
+        return self.logical_mark[idx]
+
     def has_logical_path(self, idx, target, target_idx, mark):
         if target == self and idx == target_idx:
             return True
-        if self.logical_mark == mark:
+        if self.get_logical_mark(idx) == mark:
             return False
         # Otherwise check all the outgoing edges
         sources = self.ctx.find_logically_dependent_sources(self, idx)
         for (src_op, src_idx) in sources:
             if src_op.has_logical_path(src_idx, target, target_idx, mark):
                 return True
-        self.logical_mark = mark 
+        self.logical_mark[idx] = mark
         return False
 
     def get_reachable(self, reachable, forward):
