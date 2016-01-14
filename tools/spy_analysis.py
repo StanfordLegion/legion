@@ -762,68 +762,40 @@ class PartitionNode(object):
 #   Operations
 #########################################################
 
-class SingleTask(object):
-    def __init__(self, state, uid, tid, ctx, name):
+class Operation(object):
+    def __init__(self, state, uid, ctx, kind, name, node_name):
         self.state = state
         self.uid = uid
         self.ctx = ctx
-        self.tid = tid
-        self.name = name
-        self.mdeps = list()
-        self.adeps = list()
-        self.ops = list()
+        self.kind = kind
         self.reqs = dict()
         self.logical_incoming = set()
         self.logical_outgoing = set()
         self.logical_mark = dict()
-        self.enclosing = None
-        self.point = None
         self.start_event = None
         self.term_event = None
         self.op_instances = set()
         self.op_instances.add(self)
         self.instances = dict()
         self.physical_marked = False
-        self.node_name = 'task_node_'+str(self.uid)
+        self.name = name
+        self.node_name = node_name + str(self.uid)
         self.prev_event_deps = set()
         self.generation = 0
 
     def get_name(self):
-        name = ""
-        if self.name <> None:
-            name = self.name
-        else:
-            name = "task"
-        if self.enclosing <> None:
-            point = "["+self.point.to_dim_string()+"]"
-            name += point
-        name += " (ID: " + str(self.uid) + ")"
-        return name
+        return self.name + " (ID: " + str(self.uid) + ")"
 
     def get_op_kind(self):
-        return SINGLE_OP
-
-    def get_inst_kind(self):
-        return TASK_INST
-
-    def set_enclosing(self, enc, point):
-        self.enclosing = enc
-        self.point = point
-
-    def add_operation(self, op):
-        self.ops.append(op)
+        return self.kind
 
     def add_requirement(self, idx, req):
-        # Should only happen to individual tasks
-        assert self.enclosing == None
         assert idx not in self.reqs
         self.reqs[idx] = req
 
     def get_requirement(self, idx):
-        if idx in self.reqs:
-            return self.reqs[idx]
-        else:
-            return None
+        assert idx in self.reqs
+        return self.reqs[idx]
 
     def get_num_requirements(self):
         return len(self.reqs)
@@ -835,12 +807,12 @@ class SingleTask(object):
         return True
 
     def add_logical_incoming(self, op):
-        if op <> self:
-            self.logical_incoming.add(op)
+        assert op <> self
+        self.logical_incoming.add(op)
 
     def add_logical_outgoing(self, op):
-        if op <> self:
-            self.logical_outgoing.add(op)
+        assert op <> self
+        self.logical_outgoing.add(op)
 
     def get_logical_mark(self, idx):
         if idx not in self.logical_mark:
@@ -871,6 +843,87 @@ class SingleTask(object):
             for op in self.logical_incoming:
                 op.get_reachable(reachable, False)
 
+    def add_events(self, start, term):
+        assert self.start_event == None
+        assert self.term_event == None
+        self.start_event = start
+        self.term_event = term
+
+    def add_instance(self, idx, inst):
+        assert idx not in self.instances
+        self.instances[idx] = inst
+
+    def get_instance(self, idx):
+        assert idx in self.instances
+        return self.instances[idx]
+
+    def get_all_instances(self):
+        return set(self.instances.values())
+
+    def physical_traverse(self, component):
+        if self.physical_marked:
+            return
+        self.physical_marked = True
+        self.add_to_component(component)
+        self.start_event.physical_traverse(component)
+        self.term_event.physical_traverse(component)
+
+    def physical_unmark(self):
+        self.physical_marked = False
+
+    def print_dataflow(self, path, simplify):
+        return 0
+
+    def compute_dependence_diff(self, verbose):
+        pass
+
+    def find_dependences(self, op):
+        for idx, req in self.reqs.iteritems():
+            op.find_individual_dependences(self, req)
+
+    def find_individual_dependences(self, other_op, other_req):
+        for idx, req in self.reqs.iteritems():
+            dtype = self.state.compute_dependence(other_req, req)
+            if is_mapping_dependence(dtype):
+                self.ctx.add_adep(other_op, self, other_req.index, req.index, dtype)
+
+    def check_data_flow(self):
+        pass
+
+class SingleTask(Operation):
+    def __init__(self, state, uid, tid, ctx, name):
+        Operation.__init__(self, state, uid, ctx, SINGLE_OP, name, "task_node_")
+        self.tid = tid
+        self.mdeps = list()
+        self.adeps = list()
+        self.ops = list()
+        self.enclosing = None
+        self.point = None
+
+    def get_name(self):
+        name = ""
+        if self.name <> None:
+            name = self.name
+        else:
+            name = "task"
+        if self.enclosing <> None:
+            point = "["+self.point.to_dim_string()+"]"
+            name += point
+        name += " (ID: " + str(self.uid) + ")"
+        return name
+
+    def set_enclosing(self, enc, point):
+        self.enclosing = enc
+        self.point = point
+
+    def add_operation(self, op):
+        self.ops.append(op)
+
+    def add_requirement(self, idx, req):
+        # Should only happen to individual tasks
+        assert self.enclosing == None
+        Operation.add_requirement(self, idx, req)
+
     def add_mdep(self, op1, op2, idx1, idx2, dtype):
         assert isinstance(op1, Fence) or op1 in self.ops
         assert isinstance(op2, Fence) or op2 in self.ops
@@ -897,40 +950,6 @@ class SingleTask(object):
             return False
         self.reqs[idx] = self.enclosing.get_child_req(idx, index)
         return True
-
-    def add_events(self, start, term):
-        assert self.start_event == None
-        assert self.term_event == None
-        self.start_event = start
-        self.term_event = term
-
-    def event_graph_traverse(self, traverser):
-        traverser.visit_task(self)
-
-    def add_instance(self, idx, inst):
-        assert idx not in self.instances
-        self.instances[idx] = inst
-
-    def get_instance(self, idx):
-        assert idx in self.instances
-        return self.instances[idx]
-
-    def get_all_instances(self):
-        return set(self.instances.values())
-
-    def physical_traverse(self, component):
-        if self.physical_marked:
-            return
-        self.physical_marked = True
-        component.add_task(self)
-        self.start_event.physical_traverse(component)
-        self.term_event.physical_traverse(component)
-
-    def physical_unmark(self):
-        self.physical_marked = False
-
-    def print_dataflow(self, path, simplify):
-        return 0
 
     def print_logical_node(self, printer):
         # This better be an individual task
@@ -964,6 +983,12 @@ class SingleTask(object):
             printer.println(self.node_name+' -> '+later_name+
                 ' [style=solid,color=black,penwidth=2];')
             self.prev_event_deps.add(later_name)
+
+    def event_graph_traverse(self, traverser):
+        traverser.visit_task(self)
+
+    def add_to_component(self, component):
+        component.add_task(self)
 
     def print_igraph_node(self, printer):
         self.print_base_node(printer, False)
@@ -1058,16 +1083,6 @@ class SingleTask(object):
             print "    Mapping Dependence Errors: "+str(errors)
             print "    Mapping Dependence Warnings: "+str(warnings)
 
-    def find_dependences(self, op):
-        for idx,req in self.reqs.iteritems():
-            op.find_individual_dependences(self, req)
-
-    def find_individual_dependences(self, other_op, other_req):
-        for idx,req in self.reqs.iteritems():
-            dtype = self.state.compute_dependence(other_req, req)
-            if is_mapping_dependence(dtype):
-                self.ctx.add_adep(other_op, self, other_req.index, req.index, dtype)
-
     def print_dataflow(self, path, simplify_graphs):
         if len(self.ops) < 2:
             return 0
@@ -1141,7 +1156,7 @@ class SingleTask(object):
                         def is_empty_inter_close_op(op):
                             return isinstance(op, Close) and \
                                     op.is_inter_close_op and \
-                                    op.get_instance(0) == None
+                                    len(op.get_all_instances()) == 0
                         if is_empty_inter_close_op(inst1) or \
                                 is_empty_inter_close_op(inst2):
                             # this is an InterCloseOp that uses no physical instance
@@ -1297,29 +1312,23 @@ class SingleTask(object):
                                         req1.print_requirement()
                                         print "      Second Requirement:"
                                         req2.print_requirement()
-    
 
-class IndexTask(object):
+class IndexTask(Operation):
     def __init__(self, state, uid, tid, ctx, name):
         assert ctx <> None
-        self.state = state
-        self.uid = uid
-        self.ctx = ctx
+        Operation.__init__(self, state, uid, ctx, INDEX_OP, name, "task_node_")
         self.tid = tid
-        self.name = name
         self.points = set()
-        self.logical_incoming = set()
-        self.logical_outgoing = set()
-        self.logical_mark = dict()
-        self.reqs = dict()
-        self.op_instances = set()
-        self.node_name = 'task_node_'+str(self.uid)
+        self.op_instances.remove(self)
 
     def get_name(self):
-        return self.name + " (ID: " + str(self.uid) + ")"
-
-    def get_op_kind(self):
-        return INDEX_OP
+        name = ""
+        if self.name <> None:
+            name = self.name
+        else:
+            name = "index task"
+        name += " (ID: " + str(self.uid) + ")"
+        return name
 
     def add_point(self, uid, point):
         point_task = SingleTask(self.state, uid, self.tid, self.ctx, self.name)
@@ -1327,23 +1336,6 @@ class IndexTask(object):
         self.points.add(point_task)
         self.op_instances.add(point_task)
         return point_task
-
-    def add_requirement(self, idx, req):
-        assert idx not in self.reqs
-        self.reqs[idx] = req
-
-    def get_requirement(self, idx):
-        assert idx in self.reqs
-        return self.reqs[idx]
-
-    def get_num_requirements(self):
-        return len(self.reqs)
-
-    def add_req_field(self, idx, fid):
-        if not idx in self.reqs:
-            return False
-        self.reqs[idx].add_field(fid)
-        return True
 
     def get_child_req(self, idx, index):
         assert idx in self.reqs
@@ -1354,43 +1346,6 @@ class IndexTask(object):
             result.add_field(f)
         return result
 
-    def add_logical_incoming(self, op):
-        assert op <> self
-        self.logical_incoming.add(op)
-
-    def add_logical_outgoing(self, op):
-        assert op <> self
-        self.logical_outgoing.add(op)
-
-    def get_logical_mark(self, idx):
-        if idx not in self.logical_mark:
-            self.logical_mark[idx] = 0
-        return self.logical_mark[idx]
-
-    def has_logical_path(self, idx, target, target_idx, mark):
-        if target == self and idx == target_idx:
-            return True
-        if self.get_logical_mark(idx) == mark:
-            return False
-        # Otherwise check all the outgoing edges
-        sources = self.ctx.find_logically_dependent_sources(self, idx)
-        for (src_op, src_idx) in sources:
-            if src_op.has_logical_path(src_idx, target, target_idx, mark):
-                return True
-        self.logical_mark[idx] = mark
-        return False
-
-    def get_reachable(self, reachable, forward):
-        if self in reachable:
-            return
-        reachable.add(self)
-        if forward:
-            for op in self.logical_outgoing:
-                op.get_reachable(reachable, True)
-        else:
-            for op in self.logical_incoming:
-                op.get_reachable(reachable, False)
-
     def print_logical_node(self, printer):
         label = generate_html_op_label(self.get_name(), self.reqs, None,
                                        "mediumslateblue", self.state.verbose)
@@ -1398,150 +1353,30 @@ class IndexTask(object):
         printer.println(self.node_name+' [label=<'+label+'>,fontsize=14,'+\
                 'fontcolor=black,shape=record,penwidth=0];')
 
-    def print_dataflow(self, path, simplify):
-        return 0
-
-    def compute_dependence_diff(self, verbose):
-        # No need to do anything
-        pass
-
-    def find_dependences(self, op):
-        for idx,req in self.reqs.iteritems():
-            op.find_individual_dependences(self, req)
-
-    def find_individual_dependences(self, other_op, other_req):
-        for idx,req in self.reqs.iteritems():
-            dtype = self.state.compute_dependence(other_req, req)
-            if is_mapping_dependence(dtype):
-                self.ctx.add_adep(other_op, self, other_req.index, req.index, dtype)
-
-    def check_data_flow(self):
-        # No need to do anything
-        pass
-
-class Mapping(object):
+class Mapping(Operation):
     def __init__(self, state, uid, ctx):
         assert ctx <> None
-        self.state = state
-        self.uid = uid
-        self.ctx = ctx
-        self.requirement = None
-        self.logical_incoming = set()
-        self.logical_outgoing = set()
-        self.logical_mark = dict()
-        self.start_event = None
-        self.term_event = None
-        self.op_instances = set()
-        self.op_instances.add(self)
-        self.instance = None
-        self.physical_marked = False
-        self.node_name = 'mapping_node_'+str(uid)
-        self.prev_event_deps = set()
-        self.generation = 0
-
-    def get_name(self):
-        return "Mapping (ID: "+str(self.uid)+")"
-
-    def get_op_kind(self):
-        return MAPPING_OP
-
-    def get_inst_kind(self):
-        return MAPPING_INST
+        Operation.__init__(self, state, uid, ctx, MAPPING_OP,
+                "Mapping", "mapping_node_")
 
     def add_requirement(self, idx, req):
         assert idx == 0
-        assert self.requirement == None
-        self.requirement = req
+        Operation.add_requirement(self, idx, req)
 
     def get_requirement(self, idx):
         assert idx == 0
-        assert self.requirement <> None
-        return self.requirement
-
-    def get_num_requirements(self):
-        return 1
-
-    def add_req_field(self, idx, fid):
-        assert idx == 0
-        assert self.requirement <> None
-        self.requirement.add_field(fid)
-        return True
-
-    def add_logical_incoming(self, op):
-        assert self <> op
-        self.logical_incoming.add(op)
-
-    def add_logical_outgoing(self, op):
-        assert self <> op
-        self.logical_outgoing.add(op)
-
-    def get_logical_mark(self, idx):
-        if idx not in self.logical_mark:
-            self.logical_mark[idx] = 0
-        return self.logical_mark[idx]
-
-    def has_logical_path(self, idx, target, target_idx, mark):
-        if target == self and idx == target_idx:
-            return True
-        if self.get_logical_mark(idx) == mark:
-            return False
-        # Otherwise check all the outgoing edges
-        sources = self.ctx.find_logically_dependent_sources(self, idx)
-        for (src_op, src_idx) in sources:
-            if src_op.has_logical_path(src_idx, target, target_idx, mark):
-                return True
-        self.logical_mark[idx] = mark
-        return False
-
-    def get_reachable(self, reachable, forward):
-        if self in reachable:
-            return
-        reachable.add(self)
-        if forward:
-            for op in self.logical_outgoing:
-                op.get_reachable(reachable, True)
-        else:
-            for op in self.logical_incoming:
-                op.get_reachable(reachable, False)
-
-    def add_events(self, start, term):
-        assert self.start_event == None
-        assert self.term_event == None
-        self.start_event = start
-        self.term_event = term
-
-    def event_graph_traverse(self, traverser):
-        traverser.visit_mapping(self)
+        return Operation.get_requirement(self, idx)
 
     def add_instance(self, idx, inst):
         assert idx == 0
-        assert self.instance == None
-        self.instance = inst
+        Operation.add_instance(self, idx, inst)
 
     def get_instance(self, idx):
         assert idx == 0
-        assert self.instance <> None
-        return self.instance
-
-    def get_all_instances(self):
-        return set([self.instance])
-
-    def physical_traverse(self, component):
-        if self.physical_marked:
-            return
-        self.physical_marked = True
-        component.add_map(self)
-        self.start_event.physical_traverse(component)
-        self.term_event.physical_traverse(component)
-
-    def physical_unmark(self):
-        self.physical_marked = False
+        return Operation.get_instance(self, idx)
 
     def print_logical_node(self, printer):
         self.print_base_node(printer, True)
-
-    def print_dataflow(self, path, simplify):
-        return 0
 
     def print_physical_node(self, printer):
         self.print_base_node(printer, False)
@@ -1549,7 +1384,8 @@ class Mapping(object):
     def print_base_node(self, printer, logical):
         label = generate_html_op_label(
                 self.get_name() + ' in '+self.ctx.get_name(),
-                [self.requirement], {0 : self.instance}, 'mediumseagreen',
+                [self.get_requirement(0)],
+                {0 : self.get_instance(0)}, 'mediumseagreen',
                 self.state.verbose)
 
         printer.println(self.node_name+' [label=<'+label+'>,fontsize=14,'+\
@@ -1564,6 +1400,12 @@ class Mapping(object):
                 ' [style=solid,color=black,penwidth=2];')
             self.prev_event_deps.add(later_name)
 
+    def event_graph_traverse(self, traverser):
+        traverser.visit_mapping(self)
+
+    def add_to_component(self, component):
+        component.add_map(self)
+
     def print_igraph_node(self, printer):
         printer.println(self.node_name+' [style=filled,label="'+\
                 'Map (UID: '+str(self.uid)+') in '+self.ctx.name+'",'+\
@@ -1571,89 +1413,22 @@ class Mapping(object):
                 'shape=record,penwidth=2];')
 
     def print_igraph_edges(self, printer):
-        self.instance.print_incoming_edge(printer, self.node_name)
+        self.get_instance(0).print_incoming_edge(printer, self.node_name)
 
-    def compute_dependence_diff(self, verbose):
-        # No need to do anything
-        pass
-
-    def find_dependences(self, op):
-        op.find_individual_dependences(self, self.requirement)
-
-    def find_individual_dependences(self, other_op, other_req):
-        dtype = self.state.compute_dependence(other_req, self.requirement)
-        if is_mapping_dependence(dtype):
-            self.ctx.add_adep(other_op, self, other_req.index, self.requirement.index, dtype)
-
-    def check_data_flow(self):
-        # No need to do anything
-        pass
-
-class Deletion(object):
+class Deletion(Operation):
     def __init__(self, state, uid, ctx):
         assert ctx <> None
-        self.state = state
-        self.uid = uid
-        self.ctx = ctx
-        self.logical_outgoing = set()
-        self.logical_mark = dict()
-        self.op_instances = set()
-        self.node_name = 'deletion_node_'+str(self.uid)
-
-    def get_name(self):
-        return "Deletion (ID: "+str(self.uid)+")"
-
-    def get_op_kind(self):
-        return DELETION_OP
+        Operation.__init__(self, state, uid, ctx, DELETION_OP,
+                "Deletion", "deletion_node_")
 
     def add_logical_incoming(self, op):
         # Should never happen
         assert False
 
-    def add_logical_outgoing(self, op):
-        assert self <> op
-        self.logical_outgoing.add(op)
-
-    def get_logical_mark(self, idx):
-        if idx not in self.logical_mark:
-            self.logical_mark[idx] = 0
-        return self.logical_mark[idx]
-
-    def has_logical_path(self, idx, target, target_idx, mark):
-        if target == self and idx == target_idx:
-            return True
-        if self.get_logical_mark(idx) == mark:
-            return False
-        # Otherwise check all the outgoing edges
-        sources = self.ctx.find_logically_dependent_sources(self, idx)
-        for (src_op, src_idx) in sources:
-            if src_op.has_logical_path(src_idx, target, target_idx, mark):
-                return True
-        self.logical_mark[idx] = mark
-        return False
-
-    def get_reachable(self, reachable, forward):
-        if self in reachable:
-            return
-        reachable.add(self)
-        if forward:
-            for op in self.logical_outgoing:
-                op.get_reachable(reachable, True)
-        else:
-            for op in self.logical_incoming:
-                op.get_reachable(reachable, False)
-
     def print_logical_node(self, printer):
         printer.println(self.node_name+' [style=filled,label="'+self.get_name()+\
                 '",fillcolor=dodgerblue3,fontsize=14,fontcolor=black,'+\
                 'shape=record,penwidth=2];')
-
-    def print_dataflow(self, path, simplify):
-        return 0
-
-    def compute_dependence_diff(self, verbose):
-        # No need to do anything
-        pass
 
     def find_dependences(self, op):
         # No need to do anything
@@ -1663,28 +1438,11 @@ class Deletion(object):
         # TODO: implement this for deletion
         pass
 
-    def check_data_flow(self):
-        # No need to do anything
-        pass
-
-class CopyOp(object):
+class CopyOp(Operation):
     def __init__(self, state, uid, ctx):
         assert ctx is not None
-        self.state = state
-        self.uid = uid
-        self.ctx = ctx
-        self.reqs = dict()
-        self.logical_incoming = set()
-        self.logical_outgoing = set()
-        self.logical_mark = dict()
-        self.op_instances = set()
-        self.op_instances.add(self)
-        self.instances = dict()
-        self.generation = 0
-        self.start_event = None
-        self.term_event = None
-        self.physical_marked = False
-        self.node_name = 'copy_across_'+str(self.uid)
+        Operation.__init__(self, state, uid, ctx, COPY_OP,
+                "Copy Across", "copy_across_")
         self.prev_event_deps = set()
 
     def get_ctx(self):
@@ -1714,55 +1472,6 @@ class CopyOp(object):
     def get_dst_fields(self):
         return self.reqs[1].fields
 
-    def get_name(self):
-        return "Copy Across (ID: "+str(self.uid)+")"
-
-    def get_op_kind(self):
-        return COPY_OP
-
-    def add_requirement(self, idx, req):
-        assert idx not in self.reqs
-        self.reqs[idx] = req
-
-    def get_requirement(self, idx):
-        assert idx in self.reqs
-        return self.reqs[idx]
-
-    def get_num_requirements(self):
-        return len(self.reqs)
-
-    def add_req_field(self, idx, fid):
-        if not idx in self.reqs:
-            return False
-        self.reqs[idx].add_field(fid)
-        return True
-
-    def add_logical_incoming(self, op):
-        assert self <> op
-        self.logical_incoming.add(op)
-
-    def add_logical_outgoing(self, op):
-        assert self <> op
-        self.logical_outgoing.add(op)
-
-    def get_logical_mark(self, idx):
-        if idx not in self.logical_mark:
-            self.logical_mark[idx] = 0
-        return self.logical_mark[idx]
-
-    def has_logical_path(self, idx, target, target_idx, mark):
-        if target == self and idx == target_idx:
-            return True
-        if self.get_logical_mark(idx) == mark:
-            return False
-        # Otherwise check all the outgoing edges
-        sources = self.ctx.find_logically_dependent_sources(self, idx)
-        for (src_op, src_idx) in sources:
-            if src_op.has_logical_path(src_idx, target, target_idx, mark):
-                return True
-        self.logical_mark[idx] = mark
-        return False
-
     def get_reachable(self, reachable, forward):
         if self in reachable:
             return
@@ -1774,20 +1483,6 @@ class CopyOp(object):
             for op in self.logical_incoming:
                 op.get_reachable(reachable, False)
 
-    def compute_dependence_diff(self, verbose):
-        # No need to do anything
-        pass
-
-    def find_dependences(self, op):
-        for idx,req in self.reqs.iteritems():
-            op.find_individual_dependences(self, req)
-
-    def find_individual_dependences(self, other_op, other_req):
-        for idx,req in self.reqs.iteritems():
-            dtype = self.state.compute_dependence(other_req, req)
-            if is_mapping_dependence(dtype):
-                self.ctx.add_adep(other_op, self, other_req.index, req.index, dtype)
-    
     def add_instance(self, idx, inst):
         assert idx not in self.instances
         req = self.reqs[idx]
@@ -1848,39 +1543,12 @@ class CopyOp(object):
                     pairs[pair] = fields
         return pairs
 
-    def event_graph_traverse(self, traverser):
-        traverser.visit_copy(self)
-        
-    def add_events(self, start, term):
-        assert self.start_event == None
-        assert self.term_event == None
-        self.start_event = start
-        self.term_event = term
-
-    def check_data_flow(self):
-        # No need to do anything
-        pass
-
-    def physical_traverse(self, component):
-        if self.physical_marked:
-            return
-        self.physical_marked = True
-        component.add_copy(self)
-        self.start_event.physical_traverse(component)
-        self.term_event.physical_traverse(component)
-
-    def physical_unmark(self):
-        self.physical_marked = False
-
     def field_mask_string(self):
         return self.reqs[0].field_mask_string()+' \-\> '+\
                 self.reqs[1].field_mask_string()
 
     def print_logical_node(self, printer):
         self.print_base_node(printer, True)
-
-    def print_dataflow(self, path, simplify):
-        return 0
 
     def print_physical_node(self, printer):
         self.print_base_node(printer, False)
@@ -1971,6 +1639,12 @@ class CopyOp(object):
             self.prev_event_deps.add(later_name)
         self.start_event.print_prev_event_dependences(printer, later_name)
 
+    def event_graph_traverse(self, traverser):
+        traverser.visit_copy(self)
+
+    def add_to_component(self, component):
+        component.add_copy(self)
+
     def print_igraph_edges(self, printer):
         fields = self.reqs[0].field_mask_string()+\
                 ' \-\> '+\
@@ -1980,85 +1654,24 @@ class CopyOp(object):
                 edge_type='dashed',
                 edge_label='copy across '+hex(self.uid)+' (fields: '+fields+')')
 
-class FillOp(object):
+class FillOp(Operation):
     def __init__(self, state, uid, ctx):
-        self.state = state
-        self.uid = uid
-        self.ctx = ctx
-        self.requirement = None
-        self.logical_incoming = set() 
-        self.logical_outgoing = set()
-        self.logical_mark = dict()
-        self.op_instances = set()
-        self.node_name = 'fill_node_'+str(uid)
-
-    def get_name(self):
-        return "Fill (ID: "+str(self.uid)+")"
-
-    def get_op_kind(self):
-        return FILL_OP
+        Operation.__init__(self, state, uid, ctx, FILL_OP, "Fill", "fill_node_")
 
     def add_requirement(self, idx, req):
         assert idx == 0
-        assert self.requirement is None
-        self.requirement = req
+        Operation.add_requirement(self, idx, req)
 
     def get_requirement(self, idx):
         assert idx == 0
-        assert self.requirement is not None
-        return self.requirement
-
-    def get_num_requirements(self):
-        return 1
+        return Operation.get_requirement(self, idx)
 
     def add_req_field(self, idx, fid):
         assert idx == 0
-        assert self.requirement <> None
-        self.requirement.add_field(fid)
-        return True
-
-    def add_logical_incoming(self, op):
-        assert self <> op
-        self.logical_incoming.add(op)
-
-    def add_logical_outgoing(self, op):
-        assert self <> op
-        self.logical_outgoing.add(op)
-
-    def get_logical_mark(self, idx):
-        if idx not in self.logical_mark:
-            self.logical_mark[idx] = 0
-        return self.logical_mark[idx]
-
-    def has_logical_path(self, idx, target, target_idx, mark):
-        if target == self and idx == target_idx:
-            return True
-        if self.get_logical_mark(idx) == mark:
-            return False
-        # Otherwise check all the outgoing edges
-        sources = self.ctx.find_logically_dependent_sources(self, idx)
-        for (src_op, src_idx) in sources:
-            if src_op.has_logical_path(src_idx, target, target_idx, mark):
-                return True
-        self.logical_mark[idx] = mark
-        return False
-
-    def get_reachable(self, reachable, forward):
-        if self in reachable:
-            return
-        reachable.add(self)
-        if forward:
-            for op in self.logical_outgoing:
-                op.get_reachable(reachable, True)
-        else:
-            for op in self.logical_incoming:
-                op.get_reachable(reachable, False)
+        return Operation.add_req_field(self, idx, fid)
 
     def print_logical_node(self, printer):
         self.print_base_node(printer, True)
-
-    def print_dataflow(self, path, simplify):
-        return 0
 
     def print_base_node(self, printer, logical):
         label = generate_html_op_label(
@@ -2077,159 +1690,14 @@ class FillOp(object):
     def print_igraph_edges(self, printer):
         self.instance.print_incoming_edge(printer, self.node_name)
 
-    def compute_dependence_diff(self, verbose):
-        # No need to do anything
-        pass
-
-    def find_dependences(self, op):
-        op.find_individual_dependences(self, self.requirement)
-
-    def find_individual_dependences(self, other_op, other_req):
-        dtype = self.state.compute_dependence(other_req, self.requirement)
-        if is_mapping_dependence(dtype):
-            self.ctx.add_adep(other_op, self, other_req.index, self.requirement.index, dtype)
-
-    def check_data_flow(self):
-        # No need to do anything
-        pass
-
-class AcquireOp(object):
+class AcquireOp(Operation):
     def __init__(self, state, uid, ctx):
         assert ctx is not None
-        self.state = state
-        self.uid = uid
-        self.ctx = ctx
-        self.reqs = dict()
-        self.logical_incoming = set()
-        self.logical_outgoing = set()
-        self.logical_mark = dict()
-        self.op_instances = set()
-        self.op_instances.add(self)
-        self.instances = dict()
-        self.generation = 0
-        self.start_event = None
-        self.term_event = None
-        self.physical_marked = False
-        self.node_name = 'acquire_node_'+str(self.uid)
-        self.prev_event_deps = set()
-
-    def get_name(self):
-        return "Acquire (ID: "+str(self.uid)+")"
-
-    def get_op_kind(self):
-        return ACQUIRE_OP
-
-    def get_inst_kind(self):
-        return ACQUIRE_INST
-
-    def add_requirement(self, idx, req):
-        assert idx not in self.reqs
-        self.reqs[idx] = req
-
-    def get_requirement(self, idx):
-        assert idx in self.reqs
-        return self.reqs[idx]
-
-    def get_num_requirements(self):
-        return len(self.reqs)
-
-    def add_req_field(self, idx, fid):
-        if not idx in self.reqs:
-            return False
-        self.reqs[idx].add_field(fid)
-        return True
-
-    def add_logical_incoming(self, op):
-        assert op <> self
-        self.logical_incoming.add(op)
-
-    def add_logical_outgoing(self, op):
-        assert op <> self
-        self.logical_outgoing.add(op)
-
-    def get_logical_mark(self, idx):
-        if idx not in self.logical_mark:
-            self.logical_mark[idx] = 0
-        return self.logical_mark[idx]
-
-    def has_logical_path(self, idx, target, target_idx, mark):
-        if target == self and idx == target_idx:
-            return True
-        if self.get_logical_mark(idx) == mark:
-            return False
-        # Otherwise check all the outgoing edges
-        sources = self.ctx.find_logically_dependent_sources(self, idx)
-        for (src_op, src_idx) in sources:
-            if src_op.has_logical_path(src_idx, target, target_idx, mark):
-                return True
-        self.logical_mark[idx] = mark
-        return False
-
-    def get_reachable(self, reachable, forward):
-        if self in reachable:
-            return
-        reachable.add(self)
-        if forward:
-            for op in self.logical_outgoing:
-                op.get_reachable(reachable, True)
-        else:
-            for op in self.logical_incoming:
-                op.get_reachable(reachable, False)
-
-    def add_events(self, start, term):
-        assert self.start_event == None
-        assert self.term_event == None
-        self.start_event = start
-        self.term_event = term
-
-    def event_graph_traverse(self, traverser):
-        traverser.visit_acquire(self)
-
-    def add_instance(self, idx, inst):
-        assert idx not in self.instances
-        self.instances[idx] = inst
-
-    def get_instance(self, idx):
-        assert idx in self.instances
-        return self.instances[idx]
-
-    def get_all_instances(self):
-        return set(self.instances.values())
-
-    def physical_traverse(self, component):
-        if self.physical_marked:
-            return
-        self.physical_marked = True
-        component.add_acquire(self)
-        self.start_event.physical_traverse(component)
-        self.term_event.physical_traverse(component)
-
-    def physical_unmark(self):
-        self.physical_marked = False
-
-    def find_dependences(self, op):
-        for idx,req in self.reqs.iteritems():
-            op.find_individual_dependences(self, req)
-
-    def find_individual_dependences(self, other_op, other_req):
-        for idx,req in self.reqs.iteritems():
-            dtype = self.state.compute_dependence(other_req, req)
-            if is_mapping_dependence(dtype):
-                self.ctx.add_adep(other_op, self, other_req.index, req.index, dtype)
-
-    def compute_dependence_diff(self, verbose):
-        # do nothing for the moment
-        pass
-
-    def check_data_flow(self):
-        # do nothing for the moment
-        pass
+        Operation.__init__(self, state, uid, ctx, ACQUIRE_OP,
+                "Acquire", "acquire_node_")
 
     def print_logical_node(self, printer):
         self.print_base_node(printer, True)
-
-    def print_dataflow(self, path, simplify):
-        return 0
 
     def print_physical_node(self, printer):
         self.print_base_node(printer, False)
@@ -2244,7 +1712,6 @@ class AcquireOp(object):
 
     def print_event_dependences(self, printer):
         self.start_event.print_prev_event_dependences(printer, self.node_name)
-        pass
 
     def print_prev_event_dependences(self, printer, later_name):
         if later_name not in self.prev_event_deps:
@@ -2253,143 +1720,20 @@ class AcquireOp(object):
             self.prev_event_deps.add(later_name)
         self.start_event.print_prev_event_dependences(printer, later_name)
 
-class ReleaseOp(object):
+    def event_graph_traverse(self, traverser):
+        traverser.visit_acquire(self)
+
+    def add_to_component(self, component):
+        component.add_acquire(self)
+
+class ReleaseOp(Operation):
     def __init__(self, state, uid, ctx):
         assert ctx is not None
-        self.state = state
-        self.uid = uid
-        self.ctx = ctx
-        self.reqs = dict()
-        self.logical_incoming = set()
-        self.logical_outgoing = set()
-        self.logical_mark = dict()
-        self.op_instances = set()
-        self.op_instances.add(self)
-        self.instances = dict()
-        self.generation = 0
-        self.start_event = None
-        self.term_event = None
-        self.physical_marked = False
-        self.node_name = 'release_node_'+str(self.uid)
-        self.prev_event_deps = set()
-
-    def get_name(self):
-        return "Release (ID: "+str(self.uid)+")"
-
-    def get_op_kind(self):
-        return RELEASE_OP
-
-    def get_inst_kind(self):
-        return RELEASE_INST
-
-    def add_requirement(self, idx, req):
-        assert idx not in self.reqs
-        self.reqs[idx] = req
-
-    def get_requirement(self, idx):
-        assert idx in self.reqs
-        return self.reqs[idx]
-
-    def get_num_requirements(self):
-        return len(self.reqs)
-
-    def add_req_field(self, idx, fid):
-        if not idx in self.reqs:
-            return False
-        self.reqs[idx].add_field(fid)
-        return True
-
-    def add_logical_incoming(self, op):
-        assert op <> self
-        self.logical_incoming.add(op)
-
-    def add_logical_outgoing(self, op):
-        assert op <> self
-        self.logical_outgoing.add(op)
-
-    def get_logical_mark(self, idx):
-        if idx not in self.logical_mark:
-            self.logical_mark[idx] = 0
-        return self.logical_mark[idx]
-
-    def has_logical_path(self, idx, target, target_idx, mark):
-        if target == self and idx == target_idx:
-            return True
-        if self.get_logical_mark(idx) == mark:
-            return False
-        # Otherwise check all the outgoing edges
-        sources = self.ctx.find_logically_dependent_sources(self, idx)
-        for (src_op, src_idx) in sources:
-            if src_op.has_logical_path(src_idx, target, target_idx, mark):
-                return True
-        self.logical_mark[idx] = mark
-        return False
-
-    def get_reachable(self, reachable, forward):
-        if self in reachable:
-            return
-        reachable.add(self)
-        if forward:
-            for op in self.logical_outgoing:
-                op.get_reachable(reachable, True)
-        else:
-            for op in self.logical_incoming:
-                op.get_reachable(reachable, False)
-
-    def add_events(self, start, term):
-        assert self.start_event == None
-        assert self.term_event == None
-        self.start_event = start
-        self.term_event = term
-
-    def event_graph_traverse(self, traverser):
-        traverser.visit_release(self)
-
-    def add_instance(self, idx, inst):
-        assert idx not in self.instances
-        self.instances[idx] = inst
-
-    def get_instance(self, idx):
-        assert idx in self.instances
-        return self.instances[idx]
-
-    def get_all_instances(self):
-        return set(self.instances.values())
-
-    def physical_traverse(self, component):
-        if self.physical_marked:
-            return
-        self.physical_marked = True
-        component.add_release(self)
-        self.start_event.physical_traverse(component)
-        self.term_event.physical_traverse(component)
-
-    def physical_unmark(self):
-        self.physical_marked = False
-
-    def find_dependences(self, op):
-        for idx,req in self.reqs.iteritems():
-            op.find_individual_dependences(self, req)
-
-    def find_individual_dependences(self, other_op, other_req):
-        for idx,req in self.reqs.iteritems():
-            dtype = self.state.compute_dependence(other_req, req)
-            if is_mapping_dependence(dtype):
-                self.ctx.add_adep(other_op, self, other_req.index, req.index, dtype)
-
-    def compute_dependence_diff(self, verbose):
-        # do nothing for the moment
-        pass
-
-    def check_data_flow(self):
-        # do nothing for the moment
-        pass
+        Operation.__init__(self, state, uid, ctx, RELEASE_OP,
+                "Release", "release_node_")
 
     def print_logical_node(self, printer):
         self.print_base_node(printer, True)
-
-    def print_dataflow(self, printer, simplify):
-        return 0
 
     def print_physical_node(self, printer):
         self.print_base_node(printer, False)
@@ -2404,7 +1748,6 @@ class ReleaseOp(object):
 
     def print_event_dependences(self, printer):
         self.start_event.print_prev_event_dependences(printer, self.node_name)
-        pass
 
     def print_prev_event_dependences(self, printer, later_name):
         if later_name not in self.prev_event_deps:
@@ -2413,146 +1756,22 @@ class ReleaseOp(object):
             self.prev_event_deps.add(later_name)
         self.start_event.print_prev_event_dependences(printer, later_name)
 
-class DependentPartitionOp(object):
+    def event_graph_traverse(self, traverser):
+        traverser.visit_release(self)
+
+    def add_to_component(self, component):
+        component.add_release(self)
+
+class DependentPartitionOp(Operation):
     def __init__(self, state, uid, ctx, part, kind):
         assert ctx is not None
-        self.state = state
-        self.uid = uid
-        self.ctx = ctx
+        Operation.__init__(self, state, uid, ctx, DEPENDENT_PARTITION_OP,
+                "Dependent Partition", "dep_partition_node_")
         self.partition_kind = kind
         self.index_partition_node = part
-        self.reqs = dict()
-        self.logical_incoming = set()
-        self.logical_outgoing = set()
-        self.logical_mark = dict()
-        self.op_instances = set()
-        self.op_instances.add(self)
-        self.instances = dict()
-        self.generation = 0
-        self.start_event = None
-        self.term_event = None
-        self.physical_marked = False
-        self.node_name = 'dep_partition_node_'+str(self.uid)
-        self.prev_event_deps = set()
-
-    def get_name(self):
-        return "Dependent Partition (ID: "+str(self.uid)+")"
-
-    def get_op_kind(self):
-        return DEPENDENT_PARTITION_OP
-
-    def get_inst_kind(self):
-        return DEPENDENT_PARTITION_INST
-
-    def add_requirement(self, idx, req):
-        assert idx not in self.reqs
-        self.reqs[idx] = req
-
-    def get_requirement(self, idx):
-        assert idx in self.reqs
-        return self.reqs[idx]
-
-    def get_num_requirements(self):
-        return len(self.reqs)
-
-    def add_req_field(self, idx, fid):
-        if not idx in self.reqs:
-            return False
-        self.reqs[idx].add_field(fid)
-        return True
-
-    def add_logical_incoming(self, op):
-        assert op <> self
-        self.logical_incoming.add(op)
-
-    def add_logical_outgoing(self, op):
-        assert op <> self
-        self.logical_outgoing.add(op)
-
-    def get_logical_mark(self, idx):
-        if idx not in self.logical_mark:
-            self.logical_mark[idx] = 0
-        return self.logical_mark[idx]
-
-    def has_logical_path(self, idx, target, target_idx, mark):
-        if target == self and idx == target_idx:
-            return True
-        if self.get_logical_mark(idx) == mark:
-            return False
-        # Otherwise check all the outgoing edges
-        sources = self.ctx.find_logically_dependent_sources(self, idx)
-        for (src_op, src_idx) in sources:
-            if src_op.has_logical_path(src_idx, target, target_idx, mark):
-                return True
-        self.logical_mark[idx] = mark
-        return False
-
-    def get_reachable(self, reachable, forward):
-        if self in reachable:
-            return
-        reachable.add(self)
-        if forward:
-            for op in self.logical_outgoing:
-                op.get_reachable(reachable, True)
-        else:
-            for op in self.logical_incoming:
-                op.get_reachable(reachable, False)
-
-    def add_events(self, start, term):
-        assert self.start_event == None
-        assert self.term_event == None
-        self.start_event = start
-        self.term_event = term
-
-    def event_graph_traverse(self, traverser):
-        pass
-        #traverser.visit_partition_op(self)
-
-    def add_instance(self, idx, inst):
-        assert idx not in self.instances
-        self.instances[idx] = inst
-
-    def get_instance(self, idx):
-        assert idx in self.instances
-        return self.instances[idx]
-
-    def get_all_instances(self):
-        return set(self.instances.values())
-
-    def physical_traverse(self, component):
-        if self.physical_marked:
-            return
-        self.physical_marked = True
-        component.add_partition_op(self)
-        self.start_event.physical_traverse(component)
-        self.term_event.physical_traverse(component)
-
-    def physical_unmark(self):
-        self.physical_marked = False
-
-    def find_dependences(self, op):
-        for idx,req in self.reqs.iteritems():
-            op.find_individual_dependences(self, req)
-
-    def find_individual_dependences(self, other_op, other_req):
-        for idx,req in self.reqs.iteritems():
-            dtype = self.state.compute_dependence(other_req, req)
-            if is_mapping_dependence(dtype):
-                self.ctx.add_adep(other_op, self, other_req.index, req.index, dtype)
-
-    def compute_dependence_diff(self, verbose):
-        # do nothing for the moment
-        pass
-
-    def check_data_flow(self):
-        # do nothing for the moment
-        pass
 
     def print_logical_node(self, printer):
         self.print_base_node(printer)
-
-    def print_dataflow(self, path, simplify):
-        return 0
 
     def print_physical_node(self, printer):
         self.print_base_node(printer)
@@ -2589,7 +1808,6 @@ class DependentPartitionOp(object):
 
     def print_event_dependences(self, printer):
         self.start_event.print_prev_event_dependences(printer, self.node_name)
-        pass
 
     def print_prev_event_dependences(self, printer, later_name):
         if later_name not in self.prev_event_deps:
@@ -2598,25 +1816,15 @@ class DependentPartitionOp(object):
             self.prev_event_deps.add(later_name)
         self.start_event.print_prev_event_dependences(printer, later_name)
 
-class PendingPartitionOp(object):
+    def event_graph_traverse(self, traverser):
+        pass
+        #traverser.visit_partition_op(self)
+
+class PendingPartitionOp(Operation):
     def __init__(self, state, uid, ctx):
         assert ctx is not None
-        self.state = state
-        self.uid = uid
-        self.ctx = ctx
-        self.reqs = dict()
-        self.logical_incoming = set()
-        self.logical_outgoing = set()
-        self.logical_mark = dict()
-        self.op_instances = set()
-        self.op_instances.add(self)
-        self.instances = dict()
-        self.generation = 0
-        self.start_event = None
-        self.term_event = None
-        self.physical_marked = False
-        self.node_name = 'pending_partition_node_'+str(self.uid)
-        self.prev_event_deps = set()
+        Operation.__init__(self, state, uid, ctx, PENDING_PARTITION_OP,
+                "Pending Partition", "pending_partition_node_")
         self.index_partition_node = None
         self.kind = None
 
@@ -2626,124 +1834,8 @@ class PendingPartitionOp(object):
     def set_pending_partition_kind(self, kind):
         self.kind = kind
 
-    def get_name(self):
-        return "Pending Partition (ID: "+str(self.uid)+")"
-
-    def get_op_kind(self):
-        return PENDING_PARTITION_OP
-
-    def get_inst_kind(self):
-        return PENDING_PARTITION_INST
-
-    def add_requirement(self, idx, req):
-        assert idx not in self.reqs
-        self.reqs[idx] = req
-
-    def get_requirement(self, idx):
-        assert idx in self.reqs
-        return self.reqs[idx]
-
-    def get_num_requirements(self):
-        return len(self.reqs)
-
-    def add_req_field(self, idx, fid):
-        if not idx in self.reqs:
-            return False
-        self.reqs[idx].add_field(fid)
-        return True
-
-    def add_logical_incoming(self, op):
-        assert op <> self
-        self.logical_incoming.add(op)
-
-    def add_logical_outgoing(self, op):
-        assert op <> self
-        self.logical_outgoing.add(op)
-
-    def get_logical_mark(self, idx):
-        if idx not in self.logical_mark:
-            self.logical_mark[idx] = 0
-        return self.logical_mark[idx]
-
-    def has_logical_path(self, idx, target, target_idx, mark):
-        if target == self and idx == target_idx:
-            return True
-        if self.get_logical_mark(idx) == mark:
-            return False
-        # Otherwise check all the outgoing edges
-        sources = self.ctx.find_logically_dependent_sources(self, idx)
-        for (src_op, src_idx) in sources:
-            if src_op.has_logical_path(src_idx, target, target_idx, mark):
-                return True
-        self.logical_mark[idx] = mark
-        return False
-
-    def get_reachable(self, reachable, forward):
-        if self in reachable:
-            return
-        reachable.add(self)
-        if forward:
-            for op in self.logical_outgoing:
-                op.get_reachable(reachable, True)
-        else:
-            for op in self.logical_incoming:
-                op.get_reachable(reachable, False)
-
-    def add_events(self, start, term):
-        assert self.start_event == None
-        assert self.term_event == None
-        self.start_event = start
-        self.term_event = term
-
-    def event_graph_traverse(self, traverser):
-        pass
-        #traverser.visit_partition_op(self)
-
-    def add_instance(self, idx, inst):
-        assert idx not in self.instances
-        self.instances[idx] = inst
-
-    def get_instance(self, idx):
-        assert idx in self.instances
-        return self.instances[idx]
-
-    def get_all_instances(self):
-        return set(self.instances.values())
-
-    def physical_traverse(self, component):
-        if self.physical_marked:
-            return
-        self.physical_marked = True
-        component.add_partition_op(self)
-        self.start_event.physical_traverse(component)
-        self.term_event.physical_traverse(component)
-
-    def physical_unmark(self):
-        self.physical_marked = False
-
-    def find_dependences(self, op):
-        for idx,req in self.reqs.iteritems():
-            op.find_individual_dependences(self, req)
-
-    def find_individual_dependences(self, other_op, other_req):
-        for idx,req in self.reqs.iteritems():
-            dtype = self.state.compute_dependence(other_req, req)
-            if is_mapping_dependence(dtype):
-                self.ctx.add_adep(other_op, self, other_req.index, req.index, dtype)
-
-    def compute_dependence_diff(self, verbose):
-        # do nothing for the moment
-        pass
-
-    def check_data_flow(self):
-        # do nothing for the moment
-        pass
-
     def print_logical_node(self, printer):
         self.print_base_node(printer)
-
-    def print_dataflow(self, path, simplify):
-        return 0
 
     def print_physical_node(self, printer):
         self.print_base_node(printer)
@@ -2783,99 +1875,28 @@ class PendingPartitionOp(object):
             self.prev_event_deps.add(later_name)
         self.start_event.print_prev_event_dependences(printer, later_name)
 
-class Close(object):
+class Close(Operation):
     def __init__(self, state, uid, ctx, is_inter_close_op):
         assert ctx is not None
-        self.state = state
-        self.uid = uid
-        self.ctx = ctx
-        self.requirement = None
-        self.logical_incoming = set()
-        self.logical_outgoing = set()
-        self.logical_mark = dict()
-        self.start_event = None
-        self.term_event = None
-        self.op_instances = set()
-        self.op_instances.add(self)
-        self.instance = None
-        self.physical_marked = False
-        self.node_name = 'close_op_'+str(self.uid)
-        self.prev_event_deps = set()
-        self.generation = 0
+        Operation.__init__(self, state, uid, ctx, CLOSE_OP, "Close", "close_node_")
         self.is_inter_close_op = is_inter_close_op
         self.creator = None
         self.creator_req_idx = None
 
-    def get_name(self):
-        return "Close (ID: "+str(self.uid)+")"
-
-    def get_op_kind(self):
-        return CLOSE_OP
-
-    def get_inst_kind(self):
-        return CLOSE_INST
-
     def add_requirement(self, idx, req):
         assert idx == 0
-        assert self.requirement == None
-        self.requirement = req
+        Operation.add_requirement(self, idx, req)
 
     def get_requirement(self, idx):
         assert idx == 0
-        assert self.requirement <> None
-        return self.requirement
-
-    def get_num_requirements(self):
-        return 1
+        return Operation.get_requirement(self, idx)
 
     def add_req_field(self, idx, fid):
         assert idx == 0
-        assert self.requirement <> None
-        self.requirement.add_field(fid)
-        return True
-
-    def add_logical_incoming(self, op):
-        assert self <> op
-        self.logical_incoming.add(op)
-
-    def add_logical_outgoing(self, op):
-        assert self <> op
-        self.logical_outgoing.add(op)
-
-    def get_logical_mark(self, idx):
-        if idx not in self.logical_mark:
-            self.logical_mark[idx] = 0
-        return self.logical_mark[idx]
-
-    def has_logical_path(self, idx, target, target_idx, mark):
-        if target == self and idx == target_idx:
-            return True
-        if self.get_logical_mark(idx) == mark:
-            return False
-        # Otherwise check all the outgoing edges
-        sources = self.ctx.find_logically_dependent_sources(self, idx)
-        for (src_op, src_idx) in sources:
-            if src_op.has_logical_path(src_idx, target, target_idx, mark):
-                return True
-        self.logical_mark[idx] = mark
-        return False
-
-    def get_reachable(self, reachable, forward):
-        if self in reachable:
-            return
-        reachable.add(self)
-        if forward:
-            for op in self.logical_outgoing:
-                op.get_reachable(reachable, True)
-        else:
-            for op in self.logical_incoming:
-                op.get_reachable(reachable, False)
+        return Operation.add_req_field(self, idx, fid)
 
     def print_logical_node(self, printer):
         self.print_base_node(printer)
-
-    def print_dataflow(self, path, simplify):
-        return 0
 
     def print_physical_node(self, printer):
         if self.state.verbose:
@@ -2888,7 +1909,7 @@ class Close(object):
 
         label = generate_html_op_label(
                 self.get_name() + ' in ' + self.ctx.get_name(),
-                [self.requirement], None, color, self.state.verbose)
+                [self.get_requirement(0)], None, color, self.state.verbose)
 
         printer.println(self.node_name+' [label=<'+label+'>,fontsize=14,'+\
                 'fontcolor=black,shape=record,penwidth=0];')
@@ -2905,48 +1926,22 @@ class Close(object):
                 self.prev_event_deps.add(later_name)
             self.start_event.print_prev_event_dependences(printer, later_name)
 
-    def add_events(self, start, term):
-        assert self.start_event == None
-        assert self.term_event == None
-        self.start_event = start
-        self.term_event = term
-
     def event_graph_traverse(self, traverser):
         traverser.visit_close(self)
 
+    def add_to_component(self, component):
+        component.add_close(self)
+
     def add_instance(self, idx, inst):
         assert idx == 0
-        assert self.instance == None
-        self.instance = inst
+        Operation.add_instance(self, idx, inst)
 
     def get_instance(self, idx):
         assert idx == 0
-        #assert self.instance <> None
-        return self.instance
-
-    def get_all_instances(self):
-        return set([self.instance])
-
-    def physical_traverse(self, component):
-        if self.physical_marked:
-            return
-        self.physical_marked = True
-        component.add_close(self)
-        self.start_event.physical_traverse(component)
-        self.term_event.physical_traverse(component)
-
-    def physical_unmark(self):
-        self.physical_marked = False
-
-    def compute_dependence_diff(self, verbose):
-        # No need to do anything
-        pass
-
-    def find_dependences(self, op):
-        op.find_individual_dependences(self, self.requirement)
+        return Operation.get_instance(self, idx)
 
     def find_individual_dependences(self, other_op, other_req):
-        req = self.requirement
+        req = self.get_requirement(0)
         dtype = self.state.compute_dependence(other_req, req)
         if not is_mapping_dependence(dtype):
             return
@@ -2960,75 +1955,21 @@ class Close(object):
             req = self.creator.get_requirement(self.creator_req_idx)
             dtype = self.state.compute_dependence(other_req, req)
             if dtype == TRUE_DEPENDENCE:
-                self.ctx.add_adep(other_op, self, other_req.index, self.requirement.index, dtype)
+                self.ctx.add_adep(other_op, self, other_req.index, 0, dtype)
             elif dtype == ANTI_DEPENDENCE:
                 inode1 = self.state.get_index_node(other_req.is_reg, other_req.ispace)
                 inode2 = self.state.get_index_node(req.is_reg, req.ispace)
                 if self.state.is_aliased(inode1, inode2) and \
                         not self.state.is_subtree(inode1, inode2):
-                            self.ctx.add_adep(other_op, self, other_req.index, self.requirement.index, dtype)
+                            self.ctx.add_adep(other_op, self, other_req.index, 0, dtype)
 
-    def check_data_flow(self):
-        # No need to do anything
-        pass
-
-class Fence(object):
+class Fence(Operation):
     def __init__(self, state, uid, ctx):
-        self.state = state
-        self.uid = uid
-        self.ctx = ctx
-        self.logical_incoming = set()
-        self.logical_outgoing = set()
-        self.logical_mark = dict()
-        self.op_instances = set()
-        self.op_instances.add(self)
-        self.node_name = 'fence_node_'+str(self.uid)
-
-    def get_name(self):
-        return "Fence (ID: "+str(self.uid)+")"
-
-    def get_op_kind(self):
-        return FENCE_OP
-
-    def add_logical_incoming(self, op):
-        assert self <> op
-        self.logical_incoming.add(op)
-
-    def add_logical_outgoing(self, op):
-        assert self <> op
-        self.logical_outgoing.add(op)
-
-    def get_logical_mark(self, idx):
-        if idx not in self.logical_mark:
-            self.logical_mark[idx] = 0
-        return self.logical_mark[idx]
-
-    def has_logical_path(self, idx, target, target_idx, mark):
-        if target == self and idx == target_idx:
-            return True
-        if self.get_logical_mark(idx) == mark:
-            return False
-        # Otherwise check all the outgoing edges
-        sources = self.ctx.find_logically_dependent_sources(self, idx)
-        for (src_op, src_idx) in sources:
-            if src_op.has_logical_path(src_idx, target, target_idx, mark):
-                return True
-        self.logical_mark[idx] = mark
-        return False
-
-    def get_reachable(self, reachable, forward):
-        if self in reachable:
-            return
-        reachable.add(self)
-        if forward:
-            for op in self.logical_outgoing:
-                op.get_reachable(reachable, True)
-        else:
-            for op in self.logical_incoming:
-                op.get_reachable(reachable, False)
+        Operation.__init__(self, state, uid, ctx, FENCE_OP,
+                "Fence", "fence_node_")
 
     def find_dependences(self, op):
-        # Everybody who comes after us has a dependence on us 
+        # Everybody who comes after us has a dependence on us
         #self.ctx.add_adep(self, op, 0, 0, TRUE_DEPENDENCE)
         pass
 
@@ -3037,20 +1978,10 @@ class Fence(object):
         #self.ctx.add_adep(other_op, self, other_req.index, 0, TRUE_DEPENDENCE)
         pass
 
-    def compute_dependence_diff(self, verbose):
-        # No need to do anything
-        pass
-
-    def check_data_flow(self):
-        pass
-
     def print_logical_node(self, printer):
         printer.println(self.node_name+' [style=filled,label="'+self.get_name()+
                 '",fillcolor=darkorchid2,fontsize=14,fontcolor=black,'+\
                 'shape=record,penwidth=2];')
-
-    def print_dataflow(self, printer, simplify_graphs):
-        return 0
 
 class Copy(object):
     def __init__(self, state, srcman, dstman, start_event, term_event,
