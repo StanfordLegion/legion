@@ -1,4 +1,4 @@
-/* Copyright 2015 Stanford University, NVIDIA Corporation
+/* Copyright 2016 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -438,18 +438,17 @@ namespace LegionRuntime {
 	domain(_domain), oas_by_inst(_oas_by_inst),
 	before_copy(_before_copy)
     {
-      log_dma.info("dma request %p created - " IDFMT "[%zd]->" IDFMT "[%zd]:%d (+%zd) (" IDFMT ") " IDFMT "/%d " IDFMT "/%d",
-		   this,
-		   oas_by_inst->begin()->first.first.id, 
-		   oas_by_inst->begin()->second[0].src_offset,
-		   oas_by_inst->begin()->first.second.id, 
-		   oas_by_inst->begin()->second[0].dst_offset,
-		   oas_by_inst->begin()->second[0].size,
-		   oas_by_inst->begin()->second.size() - 1,
-		   domain.is_id,
-		   before_copy.id, before_copy.gen,
-		   get_finish_event().id, get_finish_event().gen);
-
+      log_dma.info() << "dma request " << (void *)this << " created - is="
+		     << domain << " before=" << before_copy << " after=" << get_finish_event();
+      for(OASByInst::const_iterator it = oas_by_inst->begin();
+	  it != oas_by_inst->end();
+	  it++)
+	for(OASVec::const_iterator it2 = it->second.begin();
+	    it2 != it->second.end();
+	    it2++)
+	  log_dma.info() << "dma request " << (void *)this << " field: " <<
+	    it->first.first << "[" << it2->src_offset << "]->" <<
+	    it->first.second << "[" << it2->dst_offset << "] size=" << it2->size;
 #ifdef LEGION_LOGGING
       log_timing_event(Processor::NO_PROC, after_copy, COPY_INIT);
 #endif
