@@ -580,6 +580,24 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    const std::vector<PhysicalRegion>& TaskOp::begin_inline_task(void)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *(reinterpret_cast<std::vector<PhysicalRegion>*>(NULL));
+    }
+
+    //--------------------------------------------------------------------------
+    void TaskOp::end_inline_task(const void *result, 
+                                 size_t result_size, bool owned)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
     RegionTreeContext TaskOp::get_parent_context(unsigned idx)
     //--------------------------------------------------------------------------
     {
@@ -7308,21 +7326,31 @@ namespace LegionRuntime {
       }
 
       // Run the task  
-      const std::vector<PhysicalRegion> &phy_regions = 
-        ctx->get_physical_regions();
-      variant->dispatch_inline(this, ctx, phy_regions, 
-                               future_store, future_size);
-      // Save the future result and trigger it, mark that the
-      // future owns the result.
-      result.impl->set_result(future_store,future_size,true);
-      future_store = NULL;
-      future_size = 0;
-      result.impl->complete_future();
+      Processor current = parent_ctx->get_executing_processor();
+      // Set the context to be the current inline context
+      parent_ctx = ctx;
+      variant->dispatch_inline(current, this); 
+    }  
 
+    //--------------------------------------------------------------------------
+    const std::vector<PhysicalRegion>& IndividualTask::begin_inline_task(void)
+    //--------------------------------------------------------------------------
+    {
+      return parent_ctx->get_physical_regions();
+    }
+
+    //--------------------------------------------------------------------------
+    void IndividualTask::end_inline_task(const void *res, 
+                                         size_t res_size, bool owned) 
+    //--------------------------------------------------------------------------
+    {
+      // Save the future result and trigger it
+      result.impl->set_result(res, res_size, owned);
+      result.impl->complete_future();
       // Trigger our completion event
       completion_event.trigger();
       // Now we're done, someone else will deactivate us
-    }  
+    }
 
     //--------------------------------------------------------------------------
     void IndividualTask::unpack_remote_mapped(Deserializer &derez)
@@ -9532,8 +9560,9 @@ namespace LegionRuntime {
 
       // Enumerate all of the points of our index space and run
       // the task for each one of them either saving or reducing their futures
-      const std::vector<PhysicalRegion> &phy_regions = 
-                                                  ctx->get_physical_regions();
+      Processor current = parent_ctx->get_executing_processor();
+      // Save the context to be the current inline context
+      parent_ctx = ctx;
       for (Domain::DomainPointIterator itr(index_domain); itr; itr++)
       {
         index_point = itr.p; 
@@ -9542,17 +9571,7 @@ namespace LegionRuntime {
         TaskArgument local = argument_map.impl->get_point(index_point);
         local_args = local.get_ptr();
         local_arglen = local.get_size();
-        void *result;
-        size_t result_size;
-        variant->dispatch_inline(this, ctx, phy_regions, result, result_size);
-        if (redop == 0)
-        {
-          Future f = future_map.impl->get_future(index_point);
-          f.impl->set_result(result,result_size,true/*owner*/);
-        }
-        else
-          fold_reduction_future(result, result_size, 
-                                true/*owner*/, true/*exclusive*/);
+        variant->dispatch_inline(current, this);
       }
       if (redop == 0)
         future_map.impl->complete_all_futures();
@@ -9564,6 +9583,26 @@ namespace LegionRuntime {
       }
       // Trigger all our events event
       completion_event.trigger();
+    }
+
+    //--------------------------------------------------------------------------
+    const std::vector<PhysicalRegion>& IndexTask::begin_inline_task(void)
+    //--------------------------------------------------------------------------
+    {
+      return parent_ctx->get_physical_regions();
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexTask::end_inline_task(const void *res, size_t res_size,bool owned)
+    //--------------------------------------------------------------------------
+    {
+      if (redop == 0)
+      {
+        Future f = future_map.impl->get_future(index_point);
+        f.impl->set_result(res, res_size, owned);
+      }
+      else
+        fold_reduction_future(res, res_size, owned, true/*exclusive*/);
     }
 
     //--------------------------------------------------------------------------

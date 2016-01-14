@@ -104,6 +104,10 @@ namespace LegionRuntime {
       virtual bool unpack_task(Deserializer &derez, Processor current) = 0;
       virtual void perform_inlining(SingleTask *ctx, VariantImpl *variant) = 0;
     public:
+      virtual const std::vector<PhysicalRegion>& begin_inline_task(void);
+      virtual void end_inline_task(const void *result, 
+                                   size_t result_size, bool owned);
+    public:
       RegionTreeContext get_parent_context(unsigned idx);
     protected:
       void pack_version_infos(Serializer &rez,
@@ -764,6 +768,9 @@ namespace LegionRuntime {
       virtual void find_enclosing_local_fields(
           LegionDeque<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::tracked &infos);
       virtual void perform_inlining(SingleTask *ctx, VariantImpl *variant);
+      virtual const std::vector<PhysicalRegion>& begin_inline_task(void);
+      virtual void end_inline_task(const void *result, 
+                                   size_t result_size, bool owned);
     protected:
       void pack_remote_complete(Serializer &rez);
       void pack_remote_commit(Serializer &rez);
@@ -1127,6 +1134,9 @@ namespace LegionRuntime {
       virtual bool pack_task(Serializer &rez, Processor target);
       virtual bool unpack_task(Deserializer &derez, Processor current);
       virtual void perform_inlining(SingleTask *ctx, VariantImpl *variant);
+      virtual const std::vector<PhysicalRegion>& begin_inline_task(void);
+      virtual void end_inline_task(const void *result, 
+                                   size_t result_size, bool owned);
     public:
       virtual SliceTask* clone_as_slice_task(const Domain &d,
           Processor p, bool recurse, bool stealable,

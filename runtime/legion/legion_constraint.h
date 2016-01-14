@@ -522,7 +522,7 @@ namespace LegionRuntime {
     };
 
     /**
-     * \class TaskLayoutDescriptionSet
+     * \class TaskLayoutConstraintSet
      * Provide a class to describe the layout descriptions for
      * all the regions in a task. Since a region requirement
      * can be satisfied by more than one instance, we allow
@@ -530,12 +530,12 @@ namespace LegionRuntime {
      * same region requirement.  The desriptions for a region
      * requirement should not describe any of the same fields.
      */
-    class TaskLayoutDescriptionSet {
+    class TaskLayoutConstraintSet {
     public:
-      TaskLayoutDescriptionSet&
-        add_layout_description(unsigned idx, LayoutDescriptionID desc);
+      TaskLayoutConstraintSet&
+        add_layout_description(unsigned idx, LayoutConstraintID desc);
     public:
-      std::multimap<unsigned,LayoutDescriptionID> layouts;
+      std::multimap<unsigned,LayoutConstraintID> layouts;
     };
 
   }; // namesapce HighLevel

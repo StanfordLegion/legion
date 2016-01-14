@@ -1359,7 +1359,7 @@ namespace LegionRuntime {
         add_constraint(const ColocationConstraint &constraint);
     public: // Add layout constraint sets
       inline TaskVariantRegistrar&
-        add_layout_constraint_set(unsigned index, LayoutDescriptionID desc);
+        add_layout_constraint_set(unsigned index, LayoutConstraintID desc);
     public: // Set properties
       void set_leaf(bool is_leaf = true);
       void set_inner(bool is_inner = true);
@@ -1370,7 +1370,7 @@ namespace LegionRuntime {
       const char*                       task_variant_name;
     public: // constraints
       ExecutionConstraintSet            execution_constraints; 
-      TaskLayoutDescriptionSet          layout_constraints;
+      TaskLayoutConstraintSet           layout_constraints;
     public: // properties
       bool                              leaf_variant;
       bool                              inner_variant;
@@ -5455,9 +5455,9 @@ namespace LegionRuntime {
        * @param layout_id an optional layout ID to use
        * @return the layout ID specified
        */
-      LayoutDescriptionID register_layout(
+      LayoutConstraintID register_layout(
                              const LayoutDescriptionRegistrar &registrar,
-                             LayoutDescriptionID layout_id = AUTO_GENERATE_ID);
+                             LayoutConstraintID layout_id = AUTO_GENERATE_ID);
 
       /**
        * A static version of the method above to register layout
@@ -5468,7 +5468,7 @@ namespace LegionRuntime {
        * @param layout_id the ID to associate with the description
        * @param registrar a layout description registrar
        */
-      static void register_layout(LayoutDescriptionID layout_id,
+      static void register_layout(LayoutConstraintID layout_id,
                              const LayoutDescriptionRegistrar &registrar);
 
       /**
@@ -5477,14 +5477,14 @@ namespace LegionRuntime {
        * @return the field space handle for the layout description
        */
       FieldSpace get_layout_description_field_space(
-                                  LayoutDescriptionID layout_id);
+                                  LayoutConstraintID layout_id);
 
       /**
        * Get the constraints for a specific layout description
        * @param layout_id the layout ID for which to obtain the constraints
        * @param layout_constraints a LayoutConstraintSet to populate
        */
-      void get_layout_description(LayoutDescriptionID layout_id,
+      void get_layout_description(LayoutConstraintID layout_id,
                                   LayoutConstraintSet &layout_constraints);
 
       /**
@@ -5492,7 +5492,7 @@ namespace LegionRuntime {
        * @param layout_id the layout ID for which to obtain the name
        * @return a pointer to a string of the name of the layou description
        */
-      const char* get_layout_description_name(LayoutDescriptionID layout_id);
+      const char* get_layout_description_name(LayoutConstraintID layout_id);
     public:
       //------------------------------------------------------------------------
       // Task Registration Operations
@@ -5721,8 +5721,11 @@ namespace LegionRuntime {
       friend class LegionTaskWrapper;
       friend class LegionSerialization;
       const std::vector<PhysicalRegion>& begin_task(Context ctx);
+      const std::vector<PhysicalRegion>& begin_inline_task(Context ctx);
       void end_task(Context ctx, const void *result, size_t result_size,
                     bool owned = false);
+      void end_inline_task(Context ctx, const void *result, size_t result_size,
+                           bool owned = false);
       Future from_value(const void *value, size_t value_size, bool owned);
     private:
       static ProjectionID register_region_projection_function(

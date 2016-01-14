@@ -610,7 +610,7 @@ namespace LegionRuntime {
     class OffsetConstraint;
     class PointerConstraint;
     class LayoutConstraintSet;
-    class TaskLayoutDescriptionSet;
+    class TaskLayoutConstraintSet;
 
     // legion_utilities.h
     struct RegionUsage;
@@ -695,7 +695,7 @@ namespace LegionRuntime {
     typedef ::legion_unique_id_t UniqueID;
     typedef ::legion_version_id_t VersionID;
     typedef ::legion_task_id_t TaskID;
-    typedef ::legion_layout_description_id_t LayoutDescriptionID;
+    typedef ::legion_layout_constraint_id_t LayoutConstraintID;
     typedef SingleTask* Context;
     typedef std::map<Color,ColoredPoints<ptr_t> > Coloring;
     typedef std::map<Color,Domain> DomainColoring;
@@ -717,8 +717,6 @@ namespace LegionRuntime {
       PartitionProjectionTable;
     typedef void (*RealmFnptr)(const void*,size_t,
 			       const void*,size_t,Processor);
-    typedef void (*InlineFnptr)(const Task*,const std::vector<PhysicalRegion>&,
-                                Context,Runtime*,const void*,void*&,size_t&);
     // A little bit of logic here to figure out the 
     // kind of bit mask to use for FieldMask
 

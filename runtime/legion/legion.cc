@@ -3760,11 +3760,26 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    const std::vector<PhysicalRegion>& Runtime::begin_inline_task(Context ctx)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->begin_inline_task(ctx);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::end_task(Context ctx, const void *result, 
                                     size_t result_size, bool owned /*= false*/)
     //--------------------------------------------------------------------------
     {
       runtime->end_task(ctx, result, result_size, owned);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::end_inline_task(Context ctx, const void *result,
+                                  size_t result_size, bool owned /*= false*/)
+    //--------------------------------------------------------------------------
+    {
+      runtime->end_inline_task(ctx, result, result_size, owned);
     }
 
     //--------------------------------------------------------------------------

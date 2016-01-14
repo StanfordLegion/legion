@@ -971,8 +971,7 @@ namespace LegionRuntime {
      * This class is used for storing all the meta-data associated
      * with a particular variant implementation of a task
      */
-    class VariantImpl : 
-      public ExecutionConstraintSet, TaskLayoutDescriptionSet {
+    class VariantImpl { 
     public:
       static const AllocationType alloc_type = VARIANT_IMPL_ALLOC;
     public:
@@ -992,9 +991,7 @@ namespace LegionRuntime {
       Event dispatch_task(Processor target, SingleTask *task, 
                           Event precondition, int priority,
                           Realm::ProfilingRequestSet &requests);
-      void dispatch_inline(Task *task, SingleTask *parent,
-                           const std::vector<PhysicalRegion> &regions,
-                           void *&future_store, size_t &future_size);
+      void dispatch_inline(Processor current, Task *task);
     public:
       void send_variant_response(AddressSpaceID source, Event done_event);
     public:
@@ -1009,6 +1006,9 @@ namespace LegionRuntime {
     public:
       CodeDescriptor *const realm_descriptor;
       CodeDescriptor *const inline_descriptor;
+    private:
+      ExecutionConstraintSet execution_constraints;
+      TaskLayoutConstraintSet   layout_constraints;
     private:
       void *user_data;
       size_t user_data_size;
@@ -1546,8 +1546,11 @@ namespace LegionRuntime {
                        const std::set<FieldID> &to_free);
     public:
       const std::vector<PhysicalRegion>& begin_task(Context ctx);
+      const std::vector<PhysicalRegion>& begin_inline_task(Context ctx);
       void end_task(Context ctx, const void *result, size_t result_size,
                     bool owned);
+      void end_inline_task(Context ctx, const void *result, size_t result_size,
+                           bool owned);
       VariantID register_variant(const TaskVariantRegistrar &registrar,
                                  const void *user_data, size_t user_data_size,
                                  CodeDescriptor *realm, CodeDescriptor *indesc,

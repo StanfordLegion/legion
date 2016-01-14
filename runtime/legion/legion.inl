@@ -48,10 +48,14 @@ namespace LegionRuntime {
     public:
       // A helper method for getting access to the runtime's
       // end_task method with private access
+      template<bool INLINE>
       static inline void end_helper(Runtime *rt, Context ctx,
           const void *result, size_t result_size, bool owned)
       {
-        rt->end_task(ctx, result, result_size, owned);
+        if (INLINE)
+          rt->end_inline_task(ctx, result, result_size, owned);
+        else
+          rt->end_task(ctx, result, result_size, owned);
       }
       static inline Future from_value_helper(Runtime *rt, 
           const void *value, size_t value_size, bool owned)
@@ -68,13 +72,14 @@ namespace LegionRuntime {
       
       template<typename T, bool HAS_SERIALIZE>
       struct NonPODSerializer {
+        template<bool INLINE>
         static inline void end_task(Runtime *rt, Context ctx, 
                                     T *result)
         {
           size_t buffer_size = result->legion_buffer_size();
           void *buffer = malloc(buffer_size);
           result->legion_serialize(buffer);
-          end_helper(rt, ctx, buffer, buffer_size, true/*owned*/);
+          end_helper<INLINE>(rt, ctx, buffer, buffer_size, true/*owned*/);
           // No need to free the buffer, the Legion runtime owns it now
         }
         static inline Future from_value(Runtime *rt, const T *value)
@@ -94,10 +99,11 @@ namespace LegionRuntime {
 
       template<typename T>
       struct NonPODSerializer<T,false> {
+        template<bool INLINE>
         static inline void end_task(Runtime *rt, Context ctx, 
                                     T *result)
         {
-          end_helper(rt, ctx, (void*)result, sizeof(T), false/*owned*/);
+          end_helper<INLINE>(rt, ctx, (void*)result, sizeof(T), false/*owned*/);
         }
         static inline Future from_value(Runtime *rt, const T *value)
         {
@@ -133,12 +139,13 @@ namespace LegionRuntime {
 
       template<typename T, bool IS_STRUCT>
       struct StructHandler {
+        template<bool INLINE>
         static inline void end_task(Runtime *rt, 
                                     Context ctx, T *result)
         {
           // Otherwise this is a struct, so see if it has serialization methods 
-          NonPODSerializer<T,HasSerialize<T>::value>::end_task(rt, ctx, 
-                                                               result);
+          NonPODSerializer<T,HasSerialize<T>::value>::template end_task<INLINE>(
+                                                               rt, ctx, result);
         }
         static inline Future from_value(Runtime *rt, const T *value)
         {
@@ -153,10 +160,11 @@ namespace LegionRuntime {
       // False case of template specialization
       template<typename T>
       struct StructHandler<T,false> {
+        template<bool INLINE>
         static inline void end_task(Runtime *rt, Context ctx, 
                                     T *result)
         {
-          end_helper(rt, ctx, (void*)result, sizeof(T), false/*owned*/);
+          end_helper<INLINE>(rt, ctx, (void*)result, sizeof(T), false/*owned*/);
         }
         static inline Future from_value(Runtime *rt, const T *value)
         {
@@ -183,11 +191,11 @@ namespace LegionRuntime {
 
       // Figure out whether this is a struct or not 
       // and call the appropriate Finisher
-      template<typename T>
+      template<typename T, bool INLINE>
       static inline void end_task(Runtime *rt, Context ctx, T *result)
       {
-        StructHandler<T,IsAStruct<T>::value>::end_task(rt, ctx, 
-                                                       result); 
+        StructHandler<T,IsAStruct<T>::value>::template end_task<INLINE>(
+                                                        rt, ctx, result);
       }
 
       template<typename T>
@@ -1177,7 +1185,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     inline TaskVariantRegistrar& TaskVariantRegistrar::
-             add_layout_constraint_set(unsigned index, LayoutDescriptionID desc)
+             add_layout_constraint_set(unsigned index, LayoutConstraintID desc)
     //--------------------------------------------------------------------------
     {
       layout_constraints.add_layout_description(index, desc);
@@ -1575,58 +1583,32 @@ namespace LegionRuntime {
     class LegionTaskWrapper {
     public: 
       // Non-void return type for new legion task types
-      template<typename T,
+      template<typename T, bool INLINE_TASK,
         T (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
                       Context, Runtime*)>
       static void legion_task_wrapper(const void*, size_t, 
                                       const void*, size_t, Processor);
-      template<typename T, typename UDT,
+      template<typename T, typename UDT, bool INLINE_TASK,
         T (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
                       Context, Runtime*, const UDT&)>
       static void legion_udt_task_wrapper(const void*, size_t, 
                                           const void*, size_t, Processor);
     public:
       // Void return type for new legion task types
-      template<
+      template<bool INLINE_TASK,
         void (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
                          Context, Runtime*)>
       static void legion_task_wrapper(const void*, size_t, 
                                       const void*, size_t, Processor);
-      template<typename UDT,
+      template<typename UDT, bool INLINE_TASK,
         void (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
                          Context, Runtime*, const UDT&)>
       static void legion_udt_task_wrapper(const void*, size_t, 
                                           const void*, size_t, Processor);
-    public: // INLINE VERSIONS OF THE ABOVE METHODS
-      template<typename T,
-        T (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
-                      Context, Runtime*)>
-      static void inline_task_wrapper(const Task*, 
-          const std::vector<PhysicalRegion>&, Context, Runtime*,
-          const void*, void*&, size_t&);
-      template<typename T, typename UDT,
-        T (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
-                      Context, Runtime*, const UDT&)>
-      static void inline_udt_task_wrapper(const Task*,
-          const std::vector<PhysicalRegion>&, Context, Runtime*,
-          const void*, void*&, size_t&);
-    public:
-      template<
-        void (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
-                         Context, Runtime*)>
-      static void inline_task_wrapper(const Task*,
-          const std::vector<PhysicalRegion>&, Context, Runtime*,
-          const void*, void*&, size_t&);
-      template<typename UDT,
-        void (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
-                         Context, Runtime*, const UDT&)>
-      static void inline_udt_task_wrapper(const Task*,
-          const std::vector<PhysicalRegion>&, Context, Runtime*,
-          const void*, void*&, size_t&);
     };
     
     //--------------------------------------------------------------------------
-    template<typename T,
+    template<typename T, bool INLINE_TASK,
       T (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
                     Context, Runtime*)>
     void LegionTaskWrapper::legion_task_wrapper(const void *args, 
@@ -1650,18 +1632,20 @@ namespace LegionRuntime {
 #endif
       Context ctx = *((const Context*)args);
 
-      const std::vector<PhysicalRegion> &regions = runtime->begin_task(ctx);
+      const std::vector<PhysicalRegion> &regions = 
+        (INLINE_TASK ? runtime->begin_inline_task(ctx) : 
+                       runtime->begin_task(ctx));
 
       // Invoke the task with the given context
       T return_value = 
         (*TASK_PTR)(reinterpret_cast<Task*>(ctx),regions,ctx,runtime);
 
       // Send the return value back
-      LegionSerialization::end_task<T>(runtime, ctx, &return_value);
+      LegionSerialization::end_task<T,INLINE_TASK>(runtime, ctx, &return_value);
     }
 
     //--------------------------------------------------------------------------
-    template<
+    template<bool INLINE_TASK,
       void (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
                        Context, Runtime*)>
     void LegionTaskWrapper::legion_task_wrapper(const void *args, 
@@ -1680,16 +1664,21 @@ namespace LegionRuntime {
 #endif
       Context ctx = *((const Context*)args);
 
-      const std::vector<PhysicalRegion> &regions = runtime->begin_task(ctx);
+      const std::vector<PhysicalRegion> &regions = 
+        (INLINE_TASK ? runtime->begin_inline_task(ctx) :
+                       runtime->begin_task(ctx));
 
       (*TASK_PTR)(reinterpret_cast<Task*>(ctx), regions, ctx, runtime);
 
       // Send an empty return value back
-      runtime->end_task(ctx, NULL, 0);
+      if (INLINE_TASK)
+        runtime->end_inline_task(ctx, NULL, 0);
+      else
+        runtime->end_task(ctx, NULL, 0);
     }
 
     //--------------------------------------------------------------------------
-    template<typename T, typename UDT,
+    template<typename T, typename UDT, bool INLINE_TASK,
       T (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
                     Context, Runtime*, const UDT&)>
     void LegionTaskWrapper::legion_udt_task_wrapper(const void *args,
@@ -1716,17 +1705,19 @@ namespace LegionRuntime {
       Task *task = reinterpret_cast<Task*>(ctx);
       const UDT *user_data = reinterpret_cast<const UDT*>(userdata);
 
-      const std::vector<PhysicalRegion> &regions = runtime->begin_task(ctx);
+      const std::vector<PhysicalRegion> &regions = 
+        (INLINE_TASK ? runtime->begin_inline_task(ctx) :
+                       runtime->begin_task(ctx));
 
       // Invoke the task with the given context
       T return_value = (*TASK_PTR)(task, regions, ctx, runtime, *user_data);
 
       // Send the return value back
-      LegionSerialization::end_task<T>(runtime, ctx, &return_value);
+      LegionSerialization::end_task<T,INLINE_TASK>(runtime, ctx, &return_value);
     }
 
     //--------------------------------------------------------------------------
-    template<typename UDT,
+    template<typename UDT, bool INLINE_TASK,
       void (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
                        Context, Runtime*, const UDT&)>
     void LegionTaskWrapper::legion_udt_task_wrapper(const void *args,
@@ -1748,96 +1739,17 @@ namespace LegionRuntime {
       Task *task = reinterpret_cast<Task*>(ctx);
       const UDT *user_data = reinterpret_cast<const UDT*>(userdata);
 
-      const std::vector<PhysicalRegion> &regions = runtime->begin_task(ctx);
+      const std::vector<PhysicalRegion> &regions = 
+        (INLINE_TASK ? runtime->begin_inline_task(ctx) :
+                       runtime->begin_task(ctx));
 
       (*TASK_PTR)(task, regions, ctx, runtime, *user_data);
 
       // Send an empty return value back
-      runtime->end_task(ctx, NULL, 0);
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename T,
-        T (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
-                      Context, Runtime*)>
-    void LegionTaskWrapper::inline_task_wrapper(const Task *task, 
-          const std::vector<PhysicalRegion> &regions, 
-          Context ctx, Runtime *runtime, const void *userdata,
-          void *&return_addr, size_t &return_size)
-    //--------------------------------------------------------------------------
-    {
-      // Assert that we aren't returning Futures or FutureMaps
-      LEGION_STATIC_ASSERT((LegionTypeInequality<T,Future>::value));
-      LEGION_STATIC_ASSERT((LegionTypeInequality<T,FutureMap>::value));
-      // Assert that the return type size is within the required size
-      LEGION_STATIC_ASSERT(sizeof(T) <= MAX_RETURN_SIZE);
-
-      T return_value = (*TASK_PTR)(task, regions, ctx, runtime);
-
-      // Send the return value back, no need to pack it
-      return_size = sizeof(return_value);
-      return_addr = malloc(return_size);
-      memcpy(return_addr,&return_value,return_size);
-    }
-
-    //--------------------------------------------------------------------------
-    template<
-      void (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
-                       Context, Runtime*)>
-    void LegionTaskWrapper::inline_task_wrapper(const Task *task,
-          const std::vector<PhysicalRegion> &regions, 
-          Context ctx, Runtime *runtime, const void *userdata,
-          void *&return_addr, size_t &return_size)
-    //--------------------------------------------------------------------------
-    {
-      (*TASK_PTR)(task, regions, ctx, runtime);
-
-      return_size = 0;
-      return_addr = 0;
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename T, typename UDT,
-      T (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
-                    Context, Runtime*, const UDT&)>
-    void LegionTaskWrapper::inline_udt_task_wrapper(const Task *task,
-          const std::vector<PhysicalRegion> &regions,
-          Context ctx, Runtime *runtime, const void *userdata,
-          void *&return_addr, size_t &return_size)
-    //--------------------------------------------------------------------------
-    {
-      // Assert that we aren't returning Futures or FutureMaps
-      LEGION_STATIC_ASSERT((LegionTypeInequality<T,Future>::value));
-      LEGION_STATIC_ASSERT((LegionTypeInequality<T,FutureMap>::value));
-      // Assert that the return type size is within the required size
-      LEGION_STATIC_ASSERT(sizeof(T) <= MAX_RETURN_SIZE);
-
-      const UDT *user_data = reinterpret_cast<const UDT*>(userdata);
-
-      T return_value = (*TASK_PTR)(task, regions, ctx, runtime, *user_data);
-
-      // Send the return value back, no need to pack it
-      return_size = sizeof(return_value);
-      return_addr = malloc(return_size);
-      memcpy(return_addr,&return_value,return_size);
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename UDT,
-      void (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
-                       Context, Runtime*, const UDT&)>
-    void LegionTaskWrapper::inline_udt_task_wrapper(const Task *task,
-        const std::vector<PhysicalRegion> &regions,
-        Context ctx, Runtime *runtime, const void *userdata,
-        void *&return_addr, size_t &return_size)
-    //--------------------------------------------------------------------------
-    {
-      const UDT *user_data = reinterpret_cast<const UDT*>(userdata);
-
-      (*TASK_PTR)(task, regions, ctx, runtime, *user_data);
-
-      return_size = 0;
-      return_addr = 0;
+      if (INLINE_TASK)
+        runtime->end_inline_task(ctx, NULL, 0);
+      else
+        runtime->end_task(ctx, NULL, 0);
     }
 
     //--------------------------------------------------------------------------
@@ -1849,9 +1761,9 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       CodeDescriptor *realm_desc = new CodeDescriptor(
-           LegionTaskWrapper::legion_task_wrapper<T,TASK_PTR>);
+           LegionTaskWrapper::legion_task_wrapper<T,false/*inline*/,TASK_PTR>);
       CodeDescriptor *inline_desc = new CodeDescriptor(
-           LegionTaskWrapper::inline_task_wrapper<T,TASK_PTR>);
+           LegionTaskWrapper::legion_task_wrapper<T,true/*inline*/,TASK_PTR>);
       return register_variant(registrar, NULL/*UDT*/, 0/*sizeof(UDT)*/,
                               realm_desc, inline_desc);
     }
@@ -1865,9 +1777,9 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       CodeDescriptor *realm_desc = new CodeDescriptor(
-           LegionTaskWrapper::legion_udt_task_wrapper<T,UDT,TASK_PTR>);
+           LegionTaskWrapper::legion_udt_task_wrapper<T,UDT,false,TASK_PTR>);
       CodeDescriptor *inline_desc = new CodeDescriptor(
-           LegionTaskWrapper::inline_udt_task_wrapper<T,UDT,TASK_PTR>);
+           LegionTaskWrapper::legion_udt_task_wrapper<T,UDT,true,TASK_PTR>);
       return register_variant(registrar, &user_data, sizeof(UDT),
                               realm_desc, inline_desc);
     }
@@ -1881,9 +1793,9 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       CodeDescriptor *realm_desc = new CodeDescriptor(
-            LegionTaskWrapper::legion_task_wrapper<TASK_PTR>);
+            LegionTaskWrapper::legion_task_wrapper<false,TASK_PTR>);
       CodeDescriptor *inline_desc = new CodeDescriptor(
-            LegionTaskWrapper::inline_task_wrapper<TASK_PTR>);
+            LegionTaskWrapper::legion_task_wrapper<true,TASK_PTR>);
       return register_variant(registrar, NULL/*UDT*/, 0/*sizeof(UDT)*/,
                               realm_desc, inline_desc);
     }
@@ -1897,9 +1809,9 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       CodeDescriptor *realm_desc = new CodeDescriptor(
-            LegionTaskWrapper::legion_udt_task_wrapper<UDT,TASK_PTR>);
+            LegionTaskWrapper::legion_udt_task_wrapper<UDT,false,TASK_PTR>);
       CodeDescriptor *inline_desc = new CodeDescriptor(
-            LegionTaskWrapper::inline_udt_task_wrapper<UDT,TASK_PTR>);
+            LegionTaskWrapper::legion_udt_task_wrapper<UDT,true,TASK_PTR>);
       return register_variant(registrar, &user_data, sizeof(UDT),
                               realm_desc, inline_desc);
     }
@@ -1913,9 +1825,9 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       CodeDescriptor *realm_desc = new CodeDescriptor(
-          LegionTaskWrapper::legion_task_wrapper<T,TASK_PTR>);
+          LegionTaskWrapper::legion_task_wrapper<T,false,TASK_PTR>);
       CodeDescriptor *inline_desc = new CodeDescriptor(
-          LegionTaskWrapper::inline_task_wrapper<T,TASK_PTR>);
+          LegionTaskWrapper::legion_task_wrapper<T,true,TASK_PTR>);
       return preregister_variant(registrar, NULL/*UDT*/, 0/*sizeof(UDT)*/,
                                  realm_desc, inline_desc);
     }
@@ -1929,9 +1841,9 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       CodeDescriptor *realm_desc = new CodeDescriptor(
-          LegionTaskWrapper::legion_udt_task_wrapper<T,UDT,TASK_PTR>);
+          LegionTaskWrapper::legion_udt_task_wrapper<T,UDT,false,TASK_PTR>);
       CodeDescriptor *inline_desc = new CodeDescriptor(
-          LegionTaskWrapper::inline_udt_task_wrapper<T,UDT,TASK_PTR>);
+          LegionTaskWrapper::legion_udt_task_wrapper<T,UDT,true,TASK_PTR>);
       return preregister_variant(registrar, &user_data, sizeof(UDT),
                                  realm_desc, inline_desc);
     }
@@ -1945,9 +1857,9 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       CodeDescriptor *realm_desc = new CodeDescriptor(
-            LegionTaskWrapper::legion_udt_task_wrapper<TASK_PTR>);
+            LegionTaskWrapper::legion_udt_task_wrapper<false,TASK_PTR>);
       CodeDescriptor *inline_desc = new CodeDescriptor(
-            LegionTaskWrapper::inline_udt_task_wrapper<TASK_PTR>);
+            LegionTaskWrapper::legion_udt_task_wrapper<true,TASK_PTR>);
       return preregister_variant(registrar, NULL/*UDT*/, 0/*sizeof(UDT)*/,
                                  realm_desc, inline_desc); 
     }
@@ -1961,9 +1873,9 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       CodeDescriptor *realm_desc = new CodeDescriptor(
-            LegionTaskWrapper::legion_udt_task_wrapper<UDT,TASK_PTR>);
+            LegionTaskWrapper::legion_udt_task_wrapper<UDT,false,TASK_PTR>);
       CodeDescriptor *inline_desc = new CodeDescriptor(
-            LegionTaskWrapper::inline_udt_task_wrapper<UDT,TASK_PTR>);
+            LegionTaskWrapper::legion_udt_task_wrapper<UDT,true,TASK_PTR>);
       return preregister_variant(registrar, &user_data, sizeof(UDT),
                                  realm_desc, inline_desc);
     }
@@ -2006,9 +1918,9 @@ namespace LegionRuntime {
           assert(false); // Not allowed to generate tasks for other kinds 
       }
       CodeDescriptor *realm_desc = new CodeDescriptor(
-          LegionTaskWrapper::legion_task_wrapper<T,TASK_PTR>);
+          LegionTaskWrapper::legion_task_wrapper<T,false,TASK_PTR>);
       CodeDescriptor *inline_desc = new CodeDescriptor(
-          LegionTaskWrapper::inline_task_wrapper<T,TASK_PTR>);
+          LegionTaskWrapper::legion_task_wrapper<T,true,TASK_PTR>);
       return preregister_variant(registrar, NULL/*UDT*/, 0/*sizeof(UDT)*/,
                                  realm_desc, inline_desc); 
     }
@@ -2050,9 +1962,9 @@ namespace LegionRuntime {
           assert(false); // Not allowed to generate tasks for other kinds 
       }
       CodeDescriptor *realm_desc = new CodeDescriptor(
-            LegionTaskWrapper::legion_task_wrapper<TASK_PTR>);
+            LegionTaskWrapper::legion_task_wrapper<false,TASK_PTR>);
       CodeDescriptor *inline_desc = new CodeDescriptor(
-            LegionTaskWrapper::inline_task_wrapper<TASK_PTR>);
+            LegionTaskWrapper::legion_task_wrapper<true,TASK_PTR>);
       return preregister_variant(registrar, NULL/*UDT*/, 0/*sizeof(UDT)*/,
                                  realm_desc, inline_desc);
     }
@@ -2095,9 +2007,9 @@ namespace LegionRuntime {
           assert(false); // Not allowed to generate tasks for other kinds 
       }
       CodeDescriptor *realm_desc = new CodeDescriptor(
-            LegionTaskWrapper::legion_udt_task_wrapper<T,UDT,TASK_PTR>);
+            LegionTaskWrapper::legion_udt_task_wrapper<T,UDT,false,TASK_PTR>);
       CodeDescriptor *inline_desc = new CodeDescriptor(
-            LegionTaskWrapper::inline_udt_task_wrapper<T,UDT,TASK_PTR>);
+            LegionTaskWrapper::legion_udt_task_wrapper<T,UDT,true,TASK_PTR>);
       return preregister_variant(registrar, &user_data, sizeof(UDT),
                                  realm_desc, inline_desc);
     }
@@ -2140,9 +2052,9 @@ namespace LegionRuntime {
           assert(false); // Not allowed to generate tasks for other kinds 
       }
       CodeDescriptor *realm_desc = new CodeDescriptor(
-            LegionTaskWrapper::legion_udt_task_wrapper<UDT,TASK_PTR>);
+            LegionTaskWrapper::legion_udt_task_wrapper<UDT,false,TASK_PTR>);
       CodeDescriptor *inline_desc = new CodeDescriptor(
-            LegionTaskWrapper::inline_udt_task_wrapper<UDT,TASK_PTR>);
+            LegionTaskWrapper::legion_udt_task_wrapper<UDT,true,TASK_PTR>);
       return preregister_variant(registrar, &user_data, sizeof(UDT),
                                  realm_desc, inline_desc);
     }

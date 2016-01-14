@@ -426,7 +426,7 @@ namespace LegionRuntime {
       inline const void* get_buffer(void) const { return buffer; }
       inline size_t get_buffer_size(void) const { return total_bytes; }
       inline size_t get_used_bytes(void) const { return index; }
-      inline void* reserve_space(size_t size) const;
+      inline void* reserve_bytes(size_t size);
     private:
       inline void resize(void);
     private:
@@ -1488,7 +1488,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    inline void* Serializer::reserve_bytes(size_t size)
+    inline void* Serializer::reserve_bytes(size_t bytes)
     //--------------------------------------------------------------------------
     {
       while ((index + bytes) > total_bytes)

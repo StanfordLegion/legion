@@ -3676,7 +3676,7 @@ namespace LegionRuntime {
             }
           case SEND_VARIANT_RESPONSE:
             {
-              runtime->handle_variant_response(derez, remote_address_space);
+              runtime->handle_variant_response(derez);
               break;
             }
           case SEND_SHUTDOWN_NOTIFICATION:
@@ -4286,7 +4286,7 @@ namespace LegionRuntime {
         AutoLock t_lock(task_lock,1,false/*exclusive*/);
         std::map<VariantID,VariantImpl*>::const_iterator finder = 
           variants.find(variant_id);
-        if (finder != variant.end())
+        if (finder != variants.end())
           return finder->second;
       }
       // If we don't have it, see if we can go get it
@@ -4613,7 +4613,7 @@ namespace LegionRuntime {
       derez.deserialize(variant_id);
       UserEvent done_event;
       derez.deserialize(done_event);
-      TaskID *task_impl = runtime->find_task_impl(task_id);
+      TaskImpl *task_impl = runtime->find_task_impl(task_id);
       VariantImpl *var_impl = task_impl->find_variant_impl(variant_id);
       var_impl->send_variant_response(source, done_event);
     }
@@ -4627,9 +4627,7 @@ namespace LegionRuntime {
                            const TaskVariantRegistrar &registrar,
                            CodeDescriptor *realm, CodeDescriptor *app,
                            const void *udata /*=NULL*/, size_t udata_size/*=0*/)
-      : ExecutionConstraintSet(registrar.execution_constraints),
-        TaskLayoutDescriptionSet(registrar.layout_constraints),
-        vid(v), owner(own), runtime(rt), global(registrar.global_registration),
+      : vid(v), owner(own), runtime(rt), global(registrar.global_registration),
         realm_descriptor(realm), inline_descriptor(app), 
         user_data_size(udata_size), leaf_variant(registrar.leaf_variant), 
         inner_variant(registrar.inner_variant),
@@ -4646,7 +4644,7 @@ namespace LegionRuntime {
       // Figure out which kind or processors we can use this variant on
       // and register it against all the local processors of that kind
       std::vector<Processor::Kind> proc_kinds;
-      isa_constraint.find_proc_kinds(proc_kinds);
+      execution_constraints.isa_constraint.find_proc_kinds(proc_kinds);
       // If there were no processor kinds just register it on all of them
       if (proc_kinds.empty())
       {
@@ -4680,8 +4678,8 @@ namespace LegionRuntime {
       if (runtime->profiler != NULL)
         runtime->profiler->register_task_variant(vid, variant_name);
       // Check that global registration has portable implementations
-      if (global && (!realm_descriptor->has_portable_implementation() ||
-                     !inline_descriptor->has_portable_implementation()))
+      if (global && (!realm_descriptor->has_portable_implementations() ||
+                     !inline_descriptor->has_portable_implementations()))
       {
         log_run.error("Variant %s requested global registration without "
                       "a portable implementation.", variant_name);
@@ -4694,8 +4692,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     VariantImpl::VariantImpl(const VariantImpl &rhs) 
-      : ExecutionConstraintSet(), TaskLayoutDescriptionSet(),
-        vid(rhs.vid), owner(rhs.owner), runtime(rhs.runtime), 
+      : vid(rhs.vid), owner(rhs.owner), runtime(rhs.runtime), 
         global(rhs.global), realm_descriptor(NULL), inline_descriptor(NULL)
     //--------------------------------------------------------------------------
     {
@@ -4744,9 +4741,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void VariantImpl::dispatch_inline(Task *task, SingleTask *parent,
-                                    const std::vector<PhysicalRegion> &regions,
-                                    void *&future_store, size_t &future_size)
+    void VariantImpl::dispatch_inline(Processor current, Task *task)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -4757,9 +4752,8 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(fp_impl != NULL);
 #endif
-      InlineFnptr inline_ptr = fp_impl->get_impl<InlineFnptr>();
-      (*inline_ptr)(task, regions, parent, runtime->high_level, 
-                    user_data, future_store, future_size);
+      RealmFnptr inline_ptr = fp_impl->get_impl<RealmFnptr>();
+      (*inline_ptr)(&task, sizeof(task), user_data, user_data_size, current);
     }
 
     //--------------------------------------------------------------------------
@@ -4784,15 +4778,15 @@ namespace LegionRuntime {
         rez.serialize(vid);
         // pack the code descriptors 
         Realm::Serialization::ByteCountSerializer counter;
-        realm_descriptor->serialize(counter);
-        inline_descriptor->serialize(counter);
+        realm_descriptor->serialize(counter, true/*portable*/);
+        inline_descriptor->serialize(counter, true/*portable*/);
         const size_t impl_size = counter.bytes_used();
         rez.serialize(impl_size);
         {
           Realm::Serialization::FixedBufferSerializer 
-            serializer(rez.reserve_space(impl_size), impl_size);
-          realm_descriptor->serialize(serializer);
-          inline_descriptor->serialize(serializer);
+            serializer(rez.reserve_bytes(impl_size), impl_size);
+          realm_descriptor->serialize(serializer, true/*portable*/);
+          inline_descriptor->serialize(serializer, true/*portable*/);
         }
         rez.serialize(user_data_size);
         if (user_data_size > 0)
@@ -4829,7 +4823,7 @@ namespace LegionRuntime {
       derez.deserialize(impl_size);
       Realm::Serialization::FixedBufferDeserializer
         deserializer(derez.get_current_pointer(), impl_size);
-      derez.advance_pionter(impl_size);
+      derez.advance_pointer(impl_size);
       CodeDescriptor *realm_desc = new CodeDescriptor();
       realm_desc->deserialize(deserializer);
       CodeDescriptor *inline_desc = new CodeDescriptor();
@@ -4843,7 +4837,7 @@ namespace LegionRuntime {
       derez.deserialize(registrar.idempotent_variant);
       // The last thing will be the name
       registrar.task_variant_name = (const char*)derez.get_current_pointer();
-      size_t name_size = strlen(name)+1;
+      size_t name_size = strlen(registrar.task_variant_name)+1;
       derez.advance_pointer(name_size);
       // TODO unpack the constraints
       // Ask the runtime to perform the registration 
@@ -11674,12 +11668,32 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    const std::vector<PhysicalRegion>& Internal::begin_inline_task(
+                                                                SingleTask *ctx)
+    //--------------------------------------------------------------------------
+    {
+      // It's possible we lied about this being a single task :)
+      TaskOp *task = ctx;
+      return task->begin_inline_task();
+    }
+
+    //--------------------------------------------------------------------------
     void Internal::end_task(SingleTask *ctx, const void *result, 
                                  size_t result_size, bool owned)
     //--------------------------------------------------------------------------
     {
       ctx->end_task(result, result_size, owned);
       decrement_total_outstanding_tasks();
+    }
+
+    //--------------------------------------------------------------------------
+    void Internal::end_inline_task(SingleTask *ctx, const void *result,
+                                   size_t result_size, bool owned)
+    //--------------------------------------------------------------------------
+    {
+      // It's possible we lied about this being a single task :)
+      TaskOp *task = ctx;
+      task->end_inline_task(result, result_size, owned);
     }
 
     //--------------------------------------------------------------------------
