@@ -5415,14 +5415,17 @@ namespace LegionRuntime {
           if (IS_READ_ONLY(regions[idx]) || IS_NO_ACCESS(regions[idx]) ||
               region_deleted[idx])
             continue;
-          if (!virtual_mapped[idx] && !is_leaf())
+          if (!virtual_mapped[idx])
           {
+            if (!is_leaf())
+            {
 #ifdef DEBUG_HIGH_LEVEL
-            assert(local_instances[idx].has_ref());
+              assert(local_instances[idx].has_ref());
 #endif
-            PostCloseOp *close_op = runtime->get_available_post_close_op(true);
-            close_op->initialize(this, idx, local_instances[idx]);
-            runtime->add_to_dependence_queue(executing_processor, close_op);
+              PostCloseOp *close_op = runtime->get_available_post_close_op(true);
+              close_op->initialize(this, idx, local_instances[idx]);
+              runtime->add_to_dependence_queue(executing_processor, close_op);
+            }
           }
           else
           {
