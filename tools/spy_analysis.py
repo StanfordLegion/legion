@@ -842,14 +842,15 @@ class SingleTask(object):
         if op <> self:
             self.logical_outgoing.add(op)
 
-    def has_logical_path(self, target, mark):
-        if target == self:
+    def has_logical_path(self, idx, target, target_idx, mark):
+        if target == self and idx == target_idx:
             return True
         if self.logical_mark == mark:
             return False
         # Otherwise check all the outgoing edges
-        for op in self.logical_outgoing:
-            if op.has_logical_path(target, mark):
+        sources = self.ctx.find_logically_dependent_sources(self, idx)
+        for (src_op, src_idx) in sources:
+            if src_op.has_logical_path(src_idx, target, target_idx, mark):
                 return True
         self.logical_mark = mark
         return False
@@ -869,6 +870,13 @@ class SingleTask(object):
         assert isinstance(op1, Fence) or op1 in self.ops
         assert isinstance(op2, Fence) or op2 in self.ops
         self.mdeps.append(MappingDependence(self, op1, op2, idx1, idx2, dtype))
+
+    def find_logically_dependent_sources(self, op, idx):
+        result = set()
+        for mdep in self.mdeps:
+            if mdep.op2 == op and mdep.idx2 == idx:
+                result.add((mdep.op1, mdep.idx1))
+        return result
 
     def add_adep(self, op1, op2, idx1, idx2, dtype):
         assert isinstance(op1, Fence) or op1 in self.ops
@@ -996,12 +1004,8 @@ class SingleTask(object):
         errors = 0
         for adep in self.adeps:
             sys.stdout.write("    Checking dependence: %d \r" % (count))
-            check = adep.op2.has_logical_path(adep.op1, self.state.get_next_logical_mark())
-            if not check and isinstance(adep.op2, Close) and \
-                   adep.op2.is_inter_close_op:
-                check = adep.op1.has_logical_path(adep.op2, self.state.get_next_logical_mark())
-                if check:
-                    adep.is_reversed = True
+            check = adep.op2.has_logical_path(adep.idx2, adep.op1, adep.idx1,
+                    self.state.get_next_logical_mark())
 
             if not check:
                 print "    ERROR: Failed to compute mapping dependence between "+\
@@ -1027,13 +1031,7 @@ class SingleTask(object):
         for mdep in self.mdeps:
             found = False
             for adep in self.adeps:
-                adep_ = adep
-                if adep.is_reversed:
-                    req1 = adep.op2.get_requirement(adep.idx2)
-                    req2 = adep.op1.get_requirement(adep.idx1)
-                    dtype = self.state.compute_dependence(req1, req2)
-                    adep_ = MappingDependence(adep.ctx, adep.op2, adep.op1, adep.idx2, adep.idx1, dtype)
-                if adep_ == mdep:
+                if adep == mdep:
                     found = True
                     break
             if not found:
@@ -1359,14 +1357,15 @@ class IndexTask(object):
         assert op <> self
         self.logical_outgoing.add(op)
 
-    def has_logical_path(self, target, mark):
-        if target == self:
+    def has_logical_path(self, idx, target, target_idx, mark):
+        if target == self and idx == target_idx:
             return True
         if self.logical_mark == mark:
             return False
         # Otherwise check all the outgoing edges
-        for op in self.logical_outgoing:
-            if op.has_logical_path(target, mark):
+        sources = self.ctx.find_logically_dependent_sources(self, idx)
+        for (src_op, src_idx) in sources:
+            if src_op.has_logical_path(src_idx, target, target_idx, mark):
                 return True
         self.logical_mark = mark
         return False
@@ -1466,14 +1465,15 @@ class Mapping(object):
         assert self <> op
         self.logical_outgoing.add(op)
 
-    def has_logical_path(self, target, mark):
-        if target == self:
+    def has_logical_path(self, idx, target, target_idx, mark):
+        if target == self and idx == target_idx:
             return True
         if self.logical_mark == mark:
             return False
         # Otherwise check all the outgoing edges
-        for op in self.logical_outgoing:
-            if op.has_logical_path(target, mark):
+        sources = self.ctx.find_logically_dependent_sources(self, idx)
+        for (src_op, src_idx) in sources:
+            if src_op.has_logical_path(src_idx, target, target_idx, mark):
                 return True
         self.logical_mark = mark
         return False
@@ -1599,14 +1599,15 @@ class Deletion(object):
         assert self <> op
         self.logical_outgoing.add(op)
 
-    def has_logical_path(self, target, mark):
-        if target == self:
+    def has_logical_path(self, idx, target, target_idx, mark):
+        if target == self and idx == target_idx:
             return True
         if self.logical_mark == mark:
             return False
         # Otherwise check all the outgoing edges
-        for op in self.logical_outgoing:
-            if op.has_logical_path(target, mark):
+        sources = self.ctx.find_logically_dependent_sources(self, idx)
+        for (src_op, src_idx) in sources:
+            if src_op.has_logical_path(src_idx, target, target_idx, mark):
                 return True
         self.logical_mark = mark
         return False
@@ -1724,14 +1725,15 @@ class CopyOp(object):
         assert self <> op
         self.logical_outgoing.add(op)
 
-    def has_logical_path(self, target, mark):
-        if target == self:
+    def has_logical_path(self, idx, target, target_idx, mark):
+        if target == self and idx == target_idx:
             return True
         if self.logical_mark == mark:
             return False
         # Otherwise check all the outgoing edges
-        for op in self.logical_outgoing:
-            if op.has_logical_path(target, mark):
+        sources = self.ctx.find_logically_dependent_sources(self, idx)
+        for (src_op, src_idx) in sources:
+            if src_op.has_logical_path(src_idx, target, target_idx, mark):
                 return True
         self.logical_mark = mark
         return False
@@ -1998,14 +2000,15 @@ class FillOp(object):
         assert self <> op
         self.logical_outgoing.add(op)
 
-    def has_logical_path(self, target, mark):
-        if target == self:
+    def has_logical_path(self, idx, target, target_idx, mark):
+        if target == self and idx == target_idx:
             return True
         if self.logical_mark == mark:
             return False
         # Otherwise check all the outgoing edges
-        for op in self.logical_outgoing:
-            if op.has_logical_path(target, mark):
+        sources = self.ctx.find_logically_dependent_sources(self, idx)
+        for (src_op, src_idx) in sources:
+            if src_op.has_logical_path(src_idx, target, target_idx, mark):
                 return True
         self.logical_mark = mark
         return False
@@ -2114,14 +2117,15 @@ class AcquireOp(object):
         assert op <> self
         self.logical_outgoing.add(op)
 
-    def has_logical_path(self, target, mark):
-        if target == self:
+    def has_logical_path(self, idx, target, target_idx, mark):
+        if target == self and idx == target_idx:
             return True
         if self.logical_mark == mark:
             return False
         # Otherwise check all the outgoing edges
-        for op in self.logical_outgoing:
-            if op.has_logical_path(target, mark):
+        sources = self.ctx.find_logically_dependent_sources(self, idx)
+        for (src_op, src_idx) in sources:
+            if src_op.has_logical_path(src_idx, target, target_idx, mark):
                 return True
         self.logical_mark = mark
         return False
@@ -2268,14 +2272,15 @@ class ReleaseOp(object):
         assert op <> self
         self.logical_outgoing.add(op)
 
-    def has_logical_path(self, target, mark):
-        if target == self:
+    def has_logical_path(self, idx, target, target_idx, mark):
+        if target == self and idx == target_idx:
             return True
         if self.logical_mark == mark:
             return False
         # Otherwise check all the outgoing edges
-        for op in self.logical_outgoing:
-            if op.has_logical_path(target, mark):
+        sources = self.ctx.find_logically_dependent_sources(self, idx)
+        for (src_op, src_idx) in sources:
+            if src_op.has_logical_path(src_idx, target, target_idx, mark):
                 return True
         self.logical_mark = mark
         return False
@@ -2424,14 +2429,15 @@ class DependentPartitionOp(object):
         assert op <> self
         self.logical_outgoing.add(op)
 
-    def has_logical_path(self, target, mark):
-        if target == self:
+    def has_logical_path(self, idx, target, target_idx, mark):
+        if target == self and idx == target_idx:
             return True
         if self.logical_mark == mark:
             return False
         # Otherwise check all the outgoing edges
-        for op in self.logical_outgoing:
-            if op.has_logical_path(target, mark):
+        sources = self.ctx.find_logically_dependent_sources(self, idx)
+        for (src_op, src_idx) in sources:
+            if src_op.has_logical_path(src_idx, target, target_idx, mark):
                 return True
         self.logical_mark = mark 
         return False
@@ -2609,14 +2615,15 @@ class PendingPartitionOp(object):
         assert op <> self
         self.logical_outgoing.add(op)
 
-    def has_logical_path(self, target, mark):
-        if target == self:
+    def has_logical_path(self, idx, target, target_idx, mark):
+        if target == self and idx == target_idx:
             return True
         if self.logical_mark == mark:
             return False
         # Otherwise check all the outgoing edges
-        for op in self.logical_outgoing:
-            if op.has_logical_path(target, mark):
+        sources = self.ctx.find_logically_dependent_sources(self, idx)
+        for (src_op, src_idx) in sources:
+            if src_op.has_logical_path(src_idx, target, target_idx, mark):
                 return True
         self.logical_mark = mark
         return False
@@ -2746,6 +2753,8 @@ class Close(object):
         self.prev_event_deps = set()
         self.generation = 0
         self.is_inter_close_op = is_inter_close_op
+        self.creator = None
+        self.creator_req_idx = None
 
     def get_name(self):
         return "Close (ID: "+str(self.uid)+")"
@@ -2783,14 +2792,18 @@ class Close(object):
         assert self <> op
         self.logical_outgoing.add(op)
 
-    def has_logical_path(self, target, mark):
-        if target == self:
+    def has_logical_path(self, idx, target, target_idx, mark):
+        if target == self and idx == target_idx:
             return True
         if self.logical_mark == mark:
             return False
         # Otherwise check all the outgoing edges
-        for op in self.logical_outgoing:
-            if op.has_logical_path(target, mark):
+        sources = self.ctx.find_logically_dependent_sources(self, idx)
+        print "  " + self.get_name() + " has " + str(len(sources)) + " sources:"
+        for (src_op, src_idx) in sources:
+            print "      index " + str(src_idx) + " of " + src_op.get_name()
+        for (src_op, src_idx) in sources:
+            if src_op.has_logical_path(src_idx, target, target_idx, mark):
                 return True
         self.logical_mark = mark
         return False
@@ -2881,9 +2894,27 @@ class Close(object):
         op.find_individual_dependences(self, self.requirement)
 
     def find_individual_dependences(self, other_op, other_req):
-        dtype = self.state.compute_dependence(other_req, self.requirement)
-        if is_mapping_dependence(dtype):
-            self.ctx.add_adep(other_op, self, other_req.index, self.requirement.index, dtype)
+        req = self.requirement
+        dtype = self.state.compute_dependence(other_req, req)
+        if not is_mapping_dependence(dtype):
+            return
+        if self.creator == None:
+            self.ctx.add_adep(other_op, self, other_req.index, req.index, dtype)
+            return
+
+        if self.creator == other_op:
+            other_op.find_individual_dependences(self, req)
+        else:
+            req = self.creator.get_requirement(self.creator_req_idx)
+            dtype = self.state.compute_dependence(other_req, req)
+            if dtype == TRUE_DEPENDENCE:
+                self.ctx.add_adep(other_op, self, other_req.index, self.requirement.index, dtype)
+            elif dtype == ANTI_DEPENDENCE:
+                inode1 = self.state.get_index_node(other_req.is_reg, other_req.ispace)
+                inode2 = self.state.get_index_node(req.is_reg, req.ispace)
+                if self.state.is_aliased(inode1, inode2) and \
+                        not self.state.is_subtree(inode1, inode2):
+                            self.ctx.add_adep(other_op, self, other_req.index, self.requirement.index, dtype)
 
     def check_data_flow(self):
         # No need to do anything
@@ -2915,14 +2946,15 @@ class Fence(object):
         assert self <> op
         self.logical_outgoing.add(op)
 
-    def has_logical_path(self, target, mark):
-        if target == self:
+    def has_logical_path(self, idx, target, target_idx, mark):
+        if target == self and idx == target_idx:
             return True
         if self.logical_mark == mark:
             return False
         # Otherwise check all the outgoing edges
-        for op in self.logical_outgoing:
-            if op.has_logical_path(target, mark):
+        sources = self.ctx.find_logically_dependent_sources(self, idx)
+        for (src_op, src_idx) in sources:
+            if src_op.has_logical_path(src_idx, target, target_idx, mark):
                 return True
         self.logical_mark = mark 
         return False
@@ -3428,7 +3460,12 @@ class MappingDependence(object):
         self.is_reversed = False
 
     def __eq__(self,other):
-        return (self.ctx == other.ctx) and (self.op1 is other.op1) and (self.op2 is other.op2) and (self.idx1 == other.idx1) and (self.idx2 == other.idx2) and (self.dtype == other.dtype)
+        return (self.ctx == other.ctx) and \
+                (self.op1 is other.op1) and \
+                (self.op2 is other.op2) and \
+                (self.idx1 == other.idx1) and \
+                (self.idx2 == other.idx2) and \
+                (self.dtype == other.dtype)
 
     def print_dataflow_edge(self, printer, previous_pairs):
         pair = (self.op1,self.op2)
@@ -4196,6 +4233,22 @@ class State(object):
         self.ops[ctx].add_operation(self.ops[uid])
         return True
 
+    def set_close_creator(self, uid, cuid, idx):
+        if uid not in self.ops:
+            return False
+        if cuid not in self.ops:
+            return False
+        close_op = self.ops[uid]
+        assert close_op.is_inter_close_op
+        creator_op = self.ops[cuid]
+        parent_op = close_op.ctx
+        close_op.creator = creator_op
+        close_op.creator_req_idx = idx
+        parent_op.ops.remove(close_op)
+        idx = parent_op.ops.index(creator_op)
+        parent_op.ops.insert(idx, close_op)
+        return True
+
     def add_fence(self, ctx, uid):
         assert uid not in self.ops
         if ctx not in self.ops:
@@ -4560,6 +4613,24 @@ class State(object):
             return NO_DEPENDENCE
         # Otherwise check the coherence and the privilege
         return compute_dependence_type(req1, req2)
+
+    def is_subtree(self, inode1, inode2):
+        orig1 = inode1
+        orig2 = inode2
+        # We need to find their common ancestor 
+        if inode1.depth <> inode2.depth:
+            if inode1.depth > inode2.depth:
+                while inode1.depth > inode2.depth:
+                    inode1 = inode1.parent
+            else:
+                while inode2.depth > inode1.depth:
+                    inode2 = inode2.parent
+        assert inode1.depth == inode2.depth
+        # Handle the case where one is a subset of the other
+        if (inode1 is orig2) or (inode2 is orig1):
+            return True
+        else:
+            return False
 
     def is_aliased(self, inode1, inode2):
         orig1 = inode1

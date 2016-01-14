@@ -50,6 +50,7 @@ single_task_pat          = re.compile(prefix+"Individual Task (?P<ctx>[0-9]+) (?
 index_task_pat           = re.compile(prefix+"Index Task (?P<ctx>[0-9]+) (?P<tid>[0-9]+) (?P<uid>[0-9]+) (?P<name>[-\w. ]+)")
 mapping_pat              = re.compile(prefix+"Mapping Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
 close_pat                = re.compile(prefix+"Close Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+) (?P<is_inter>[0-1])")
+close_creator_pat        = re.compile(prefix+"Close Operation Creator (?P<uid>[0-9]+) (?P<cuid>[0-9]+) (?P<idx>[0-9]+)")
 fence_pat                = re.compile(prefix+"Fence Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
 copy_op_pat              = re.compile(prefix+"Copy Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
 fill_op_pat              = re.compile(prefix+"Fill Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
@@ -185,6 +186,10 @@ def parse_log_line(line, state):
     m = close_pat.match(line)
     if m <> None:
         if state.add_close(int(m.group('ctx')), int(m.group('uid')), True if int(m.group('is_inter')) == 1 else False):
+            return True
+    m = close_creator_pat.match(line)
+    if m <> None:
+        if state.set_close_creator(int(m.group('uid')), int(m.group('cuid')), int(m.group('idx'))):
             return True
     m = fence_pat.match(line)
     if m <> None:
