@@ -763,7 +763,7 @@ class PartitionNode(object):
 #########################################################
 
 class Operation(object):
-    def __init__(self, state, uid, ctx, kind, name, node_name):
+    def __init__(self, state, uid, ctx, kind, name, node_name, color):
         self.state = state
         self.uid = uid
         self.ctx = ctx
@@ -780,6 +780,7 @@ class Operation(object):
         self.physical_marked = False
         self.name = name
         self.node_name = node_name + str(self.uid)
+        self.color = color
         self.prev_event_deps = set()
         self.generation = 0
 
@@ -871,9 +872,6 @@ class Operation(object):
     def physical_unmark(self):
         self.physical_marked = False
 
-    def print_dataflow(self, path, simplify):
-        return 0
-
     def compute_dependence_diff(self, verbose):
         pass
 
@@ -890,9 +888,41 @@ class Operation(object):
     def check_data_flow(self):
         pass
 
+    def print_dataflow(self, path, simplify):
+        return 0
+
+    def print_logical_node(self, printer):
+        self.print_base_node(printer, True)
+
+    def print_physical_node(self, printer):
+        self.print_base_node(printer, False)
+
+    def print_base_node(self, printer, logical):
+        title = self.get_name()
+        if self.ctx <> None:
+            title += ' in ' + self.ctx.get_name()
+        label = generate_html_op_label(title, self.reqs,
+                                       self.instances if not logical else None,
+                                       self.color, self.state.verbose)
+        printer.println(self.node_name+' [label=<'+label+'>,fontsize=14,'+\
+                'fontcolor=black,shape=record,penwidth=0];')
+
+    def print_igraph_node(self, printer):
+        self.print_base_node(printer, False)
+
+    def print_event_dependences(self, printer):
+        self.start_event.print_prev_event_dependences(printer, self.node_name)
+
+    def print_prev_event_dependences(self, printer, later_name):
+        if later_name not in self.prev_event_deps:
+            printer.println(self.node_name+' -> '+later_name+
+                ' [style=solid,color=black,penwidth=2];')
+            self.prev_event_deps.add(later_name)
+
 class SingleTask(Operation):
     def __init__(self, state, uid, tid, ctx, name):
-        Operation.__init__(self, state, uid, ctx, SINGLE_OP, name, "task_node_")
+        Operation.__init__(self, state, uid, ctx, SINGLE_OP, name,
+                "task_node_", "lightskyblue")
         self.tid = tid
         self.mdeps = list()
         self.adeps = list()
@@ -914,6 +944,7 @@ class SingleTask(Operation):
 
     def set_enclosing(self, enc, point):
         self.enclosing = enc
+        self.color = "mediumslateblue"
         self.point = point
 
     def add_operation(self, op):
@@ -951,47 +982,11 @@ class SingleTask(Operation):
         self.reqs[idx] = self.enclosing.get_child_req(idx, index)
         return True
 
-    def print_logical_node(self, printer):
-        # This better be an individual task
-        assert self.enclosing is None
-        self.print_base_node(printer, True)
-
-    def print_physical_node(self, printer):
-        self.print_base_node(printer, False)
-
-    def print_base_node(self, printer, logical):
-        color = "lightskyblue"
-        task_title = self.get_name()
-        if self.enclosing <> None:
-            color = "mediumslateblue"
-
-        if self.ctx <> None:
-            task_title += ' in ' + self.ctx.get_name()
-
-        label = generate_html_op_label(task_title, self.reqs,
-                                       self.instances if not logical else None,
-                                       color, self.state.verbose)
-
-        printer.println(self.node_name+' [label=<'+label+'>,fontsize=14,'+\
-                'fontcolor=black,shape=record,penwidth=0];')
-
-    def print_event_dependences(self, printer):
-        self.start_event.print_prev_event_dependences(printer, self.node_name)
-
-    def print_prev_event_dependences(self, printer, later_name):
-        if later_name not in self.prev_event_deps:
-            printer.println(self.node_name+' -> '+later_name+
-                ' [style=solid,color=black,penwidth=2];')
-            self.prev_event_deps.add(later_name)
-
     def event_graph_traverse(self, traverser):
         traverser.visit_task(self)
 
     def add_to_component(self, component):
         component.add_task(self)
-
-    def print_igraph_node(self, printer):
-        self.print_base_node(printer, False)
 
     def print_igraph_edges(self, printer):
         for idx, inst in self.instances.iteritems():
@@ -1071,6 +1066,15 @@ class SingleTask(Operation):
                     continue
                 # Skip fences too
                 if mdep.op1.get_op_kind() == FENCE_OP or mdep.op2.get_op_kind() == FENCE_OP:
+                    continue
+                # TODO: need to track mapping dependencies from futures
+                if not mdep.idx1 in mdep.op1.reqs:
+                    continue
+                if not mdep.idx2 in mdep.op2.reqs:
+                    continue
+                req1 = mdep.op1.get_requirement(mdep.idx1)
+                req2 = mdep.op2.get_requirement(mdep.idx2)
+                if req1.tid <> req2.tid:
                     continue
                 print "    WARNING: Computed extra mapping dependence "+\
                       "between index "+str(mdep.idx1)+" of "+\
@@ -1166,7 +1170,11 @@ class SingleTask(Operation):
                         # reduction instance
                         if req2.priv == REDUCE or req2.priv == WRITE_ONLY:
                             continue
-                        assert req1.tid == req2.tid
+                        # A mapping dependence between different region trees
+                        # comes from futures, which does not involve any data flow
+                        # between physical instances.
+                        if req1.tid <> req2.tid:
+                            continue
                         index1 = self.state.get_index_node(True, req1.ispace)
                         index2 = self.state.get_index_node(True, req2.ispace)
                         if self.state.is_aliased(index1, index2):
@@ -1304,7 +1312,7 @@ class SingleTask(Operation):
                                 if not traverser.found:
                                     print "   ERROR: Unable to find data flow path "+\
                                           "between requirement "+str(dep.idx1)+" of "+\
-                                          inst1.get_name()+"and requirement "+\
+                                          inst1.get_name()+" and requirement "+\
                                           str(dep.idx2)+" of "+inst2.get_name()+\
                                           " for field "+str(f)
                                     if self.state.verbose:
@@ -1316,7 +1324,8 @@ class SingleTask(Operation):
 class IndexTask(Operation):
     def __init__(self, state, uid, tid, ctx, name):
         assert ctx <> None
-        Operation.__init__(self, state, uid, ctx, INDEX_OP, name, "task_node_")
+        Operation.__init__(self, state, uid, ctx, INDEX_OP, name,
+                "task_node_", "mediumslateblue")
         self.tid = tid
         self.points = set()
         self.op_instances.remove(self)
@@ -1346,18 +1355,11 @@ class IndexTask(Operation):
             result.add_field(f)
         return result
 
-    def print_logical_node(self, printer):
-        label = generate_html_op_label(self.get_name(), self.reqs, None,
-                                       "mediumslateblue", self.state.verbose)
-
-        printer.println(self.node_name+' [label=<'+label+'>,fontsize=14,'+\
-                'fontcolor=black,shape=record,penwidth=0];')
-
 class Mapping(Operation):
     def __init__(self, state, uid, ctx):
         assert ctx <> None
-        Operation.__init__(self, state, uid, ctx, MAPPING_OP,
-                "Mapping", "mapping_node_")
+        Operation.__init__(self, state, uid, ctx, MAPPING_OP, "Mapping",
+                "mapping_node_", "mediumseagreen")
 
     def add_requirement(self, idx, req):
         assert idx == 0
@@ -1375,42 +1377,11 @@ class Mapping(Operation):
         assert idx == 0
         return Operation.get_instance(self, idx)
 
-    def print_logical_node(self, printer):
-        self.print_base_node(printer, True)
-
-    def print_physical_node(self, printer):
-        self.print_base_node(printer, False)
-
-    def print_base_node(self, printer, logical):
-        label = generate_html_op_label(
-                self.get_name() + ' in '+self.ctx.get_name(),
-                [self.get_requirement(0)],
-                {0 : self.get_instance(0)}, 'mediumseagreen',
-                self.state.verbose)
-
-        printer.println(self.node_name+' [label=<'+label+'>,fontsize=14,'+\
-                'fontcolor=black,shape=record,penwidth=0];')
-
-    def print_event_dependences(self, printer):
-        self.start_event.print_prev_event_dependences(printer, self.node_name)
-
-    def print_prev_event_dependences(self, printer, later_name):
-        if later_name not in self.prev_event_deps:
-            printer.println(self.node_name+' -> '+later_name+
-                ' [style=solid,color=black,penwidth=2];')
-            self.prev_event_deps.add(later_name)
-
     def event_graph_traverse(self, traverser):
         traverser.visit_mapping(self)
 
     def add_to_component(self, component):
         component.add_map(self)
-
-    def print_igraph_node(self, printer):
-        printer.println(self.node_name+' [style=filled,label="'+\
-                'Map (UID: '+str(self.uid)+') in '+self.ctx.name+'",'+\
-                'fillcolor=mediumseagreen,fontsize=14,fontcolor=black,'+\
-                'shape=record,penwidth=2];')
 
     def print_igraph_edges(self, printer):
         self.get_instance(0).print_incoming_edge(printer, self.node_name)
@@ -1418,17 +1389,12 @@ class Mapping(Operation):
 class Deletion(Operation):
     def __init__(self, state, uid, ctx):
         assert ctx <> None
-        Operation.__init__(self, state, uid, ctx, DELETION_OP,
-                "Deletion", "deletion_node_")
+        Operation.__init__(self, state, uid, ctx, DELETION_OP, "Deletion",
+                "deletion_node_", "dodgerblue3")
 
     def add_logical_incoming(self, op):
         # Should never happen
         assert False
-
-    def print_logical_node(self, printer):
-        printer.println(self.node_name+' [style=filled,label="'+self.get_name()+\
-                '",fillcolor=dodgerblue3,fontsize=14,fontcolor=black,'+\
-                'shape=record,penwidth=2];')
 
     def find_dependences(self, op):
         # No need to do anything
@@ -1441,8 +1407,8 @@ class Deletion(Operation):
 class CopyOp(Operation):
     def __init__(self, state, uid, ctx):
         assert ctx is not None
-        Operation.__init__(self, state, uid, ctx, COPY_OP,
-                "Copy Across", "copy_across_")
+        Operation.__init__(self, state, uid, ctx, COPY_OP, "Copy Across",
+                "copy_across_", "darkgoldenrod3")
         self.prev_event_deps = set()
 
     def get_ctx(self):
@@ -1547,12 +1513,6 @@ class CopyOp(Operation):
         return self.reqs[0].field_mask_string()+' \-\> '+\
                 self.reqs[1].field_mask_string()
 
-    def print_logical_node(self, printer):
-        self.print_base_node(printer, True)
-
-    def print_physical_node(self, printer):
-        self.print_base_node(printer, False)
-
     def print_base_node(self, printer, logical):
         title = self.get_name() + ' in '+self.ctx.get_name()
         # TODO: reduction copy-across operations should also be tracked
@@ -1580,7 +1540,7 @@ class CopyOp(Operation):
                     src_region_name if src_region_name <> None else '',
                     dst_region_name if dst_region_name <> None else ''])
             else:
-                lines.append([{"label" : "Region Pair " + str(i), "colspan" : 3}])
+                lines.append([{"label" : "Region Pair " + str(cidx), "colspan" : 3}])
 
             if self.state.verbose:
                 lines.append(["Requirement",
@@ -1628,17 +1588,6 @@ class CopyOp(Operation):
         printer.println(self.node_name+' [label=<'+label+'>,fontsize='+str(size)+\
                 ',fontcolor=black,shape=record,penwidth=0];')
 
-    def print_event_dependences(self, printer):
-        self.start_event.print_prev_event_dependences(printer, self.node_name)
-        pass
-
-    def print_prev_event_dependences(self, printer, later_name):
-        if later_name not in self.prev_event_deps:
-            printer.println(self.node_name+' -> '+later_name+
-                ' [style=solid,color=black,penwidth=2];')
-            self.prev_event_deps.add(later_name)
-        self.start_event.print_prev_event_dependences(printer, later_name)
-
     def event_graph_traverse(self, traverser):
         traverser.visit_copy(self)
 
@@ -1656,7 +1605,8 @@ class CopyOp(Operation):
 
 class FillOp(Operation):
     def __init__(self, state, uid, ctx):
-        Operation.__init__(self, state, uid, ctx, FILL_OP, "Fill", "fill_node_")
+        Operation.__init__(self, state, uid, ctx, FILL_OP, "Fill",
+                "fill_node_", "darkorange1")
 
     def add_requirement(self, idx, req):
         assert idx == 0
@@ -1670,55 +1620,14 @@ class FillOp(Operation):
         assert idx == 0
         return Operation.add_req_field(self, idx, fid)
 
-    def print_logical_node(self, printer):
-        self.print_base_node(printer, True)
-
-    def print_base_node(self, printer, logical):
-        label = generate_html_op_label(
-                self.get_name() + ' in ' + self.ctx.get_name(),
-                [self.requirement], None, 'darkorange1', self.state.verbose)
-
-        printer.println(self.node_name+' [label=<'+label+'>,fontsize=14,'+\
-                'fontcolor=black,shape=record,penwidth=0];')
-
-    def print_igraph_node(self, printer):
-        printer.println(self.node_name+' [style=filled,label="'+\
-                'Fill (UID: '+str(self.uid)+') in '+self.ctx.name+'",'+\
-                'fillcolor=darkorange1,fontsize=14,fontcolor=black,'+\
-                'shape=record,penwidth=2];')
-
     def print_igraph_edges(self, printer):
         self.instance.print_incoming_edge(printer, self.node_name)
 
 class AcquireOp(Operation):
     def __init__(self, state, uid, ctx):
         assert ctx is not None
-        Operation.__init__(self, state, uid, ctx, ACQUIRE_OP,
-                "Acquire", "acquire_node_")
-
-    def print_logical_node(self, printer):
-        self.print_base_node(printer, True)
-
-    def print_physical_node(self, printer):
-        self.print_base_node(printer, False)
-
-    def print_base_node(self, printer, logical):
-        label = generate_html_op_label(
-                self.get_name() + ' in ' + self.ctx.get_name(),
-                self.reqs, self.instances, 'darkolivegreen', self.state.verbose)
-
-        printer.println(self.node_name+' [label=<'+label+'>,fontsize=14,'+\
-                'fontcolor=black,shape=record,penwidth=0];')
-
-    def print_event_dependences(self, printer):
-        self.start_event.print_prev_event_dependences(printer, self.node_name)
-
-    def print_prev_event_dependences(self, printer, later_name):
-        if later_name not in self.prev_event_deps:
-            printer.println(self.node_name+' -> '+later_name+
-                ' [style=solid,color=black,penwidth=2];')
-            self.prev_event_deps.add(later_name)
-        self.start_event.print_prev_event_dependences(printer, later_name)
+        Operation.__init__(self, state, uid, ctx, ACQUIRE_OP, "Acquire",
+                "acquire_node_", "darkolivegreen")
 
     def event_graph_traverse(self, traverser):
         traverser.visit_acquire(self)
@@ -1729,32 +1638,8 @@ class AcquireOp(Operation):
 class ReleaseOp(Operation):
     def __init__(self, state, uid, ctx):
         assert ctx is not None
-        Operation.__init__(self, state, uid, ctx, RELEASE_OP,
-                "Release", "release_node_")
-
-    def print_logical_node(self, printer):
-        self.print_base_node(printer, True)
-
-    def print_physical_node(self, printer):
-        self.print_base_node(printer, False)
-
-    def print_base_node(self, printer, logical):
-        label = generate_html_op_label(
-                self.get_name() + ' in ' + self.ctx.get_name(),
-                self.reqs, self.instances, 'darksalmon', self.state.verbose)
-
-        printer.println(self.node_name+' [label=<'+label+'>,fontsize=14,'+\
-                'fontcolor=black,shape=record,penwidth=0];')
-
-    def print_event_dependences(self, printer):
-        self.start_event.print_prev_event_dependences(printer, self.node_name)
-
-    def print_prev_event_dependences(self, printer, later_name):
-        if later_name not in self.prev_event_deps:
-            printer.println(self.node_name+' -> '+later_name+
-                ' [style=solid,color=black,penwidth=2];')
-            self.prev_event_deps.add(later_name)
-        self.start_event.print_prev_event_dependences(printer, later_name)
+        Operation.__init__(self, state, uid, ctx, RELEASE_OP, "Release",
+                "release_node_", "darksalmon")
 
     def event_graph_traverse(self, traverser):
         traverser.visit_release(self)
@@ -1766,17 +1651,11 @@ class DependentPartitionOp(Operation):
     def __init__(self, state, uid, ctx, part, kind):
         assert ctx is not None
         Operation.__init__(self, state, uid, ctx, DEPENDENT_PARTITION_OP,
-                "Dependent Partition", "dep_partition_node_")
+                "Dependent Partition", "dep_partition_node_", "steelblue")
         self.partition_kind = kind
         self.index_partition_node = part
 
-    def print_logical_node(self, printer):
-        self.print_base_node(printer)
-
-    def print_physical_node(self, printer):
-        self.print_base_node(printer)
-
-    def print_base_node(self, printer):
+    def print_base_node(self, printer, logical):
         field_names = []
         fspace = self.state.field_space_nodes[self.reqs[0].fspace]
         for f in self.reqs[0].fields:
@@ -1806,16 +1685,6 @@ class DependentPartitionOp(Operation):
                 '",fillcolor=steelblue,fontsize=14,fontcolor=black,'+\
                 'shape=record,penwidth=2];')
 
-    def print_event_dependences(self, printer):
-        self.start_event.print_prev_event_dependences(printer, self.node_name)
-
-    def print_prev_event_dependences(self, printer, later_name):
-        if later_name not in self.prev_event_deps:
-            printer.println(self.node_name+' -> '+later_name+
-                ' [style=solid,color=black,penwidth=2];')
-            self.prev_event_deps.add(later_name)
-        self.start_event.print_prev_event_dependences(printer, later_name)
-
     def event_graph_traverse(self, traverser):
         pass
         #traverser.visit_partition_op(self)
@@ -1824,7 +1693,7 @@ class PendingPartitionOp(Operation):
     def __init__(self, state, uid, ctx):
         assert ctx is not None
         Operation.__init__(self, state, uid, ctx, PENDING_PARTITION_OP,
-                "Pending Partition", "pending_partition_node_")
+                "Pending Partition", "pending_partition_node_", "honeydew")
         self.index_partition_node = None
         self.kind = None
 
@@ -1833,12 +1702,6 @@ class PendingPartitionOp(Operation):
 
     def set_pending_partition_kind(self, kind):
         self.kind = kind
-
-    def print_logical_node(self, printer):
-        self.print_base_node(printer)
-
-    def print_physical_node(self, printer):
-        self.print_base_node(printer)
 
     def print_base_node(self, printer):
         kind_str = None
@@ -1864,21 +1727,14 @@ class PendingPartitionOp(Operation):
                 dst+'",fillcolor=honeydew,fontsize=14,fontcolor=black,'+\
                 'shape=record,penwidth=2];')
 
-    def print_event_dependences(self, printer):
-        self.start_event.print_prev_event_dependences(printer, self.node_name)
-        pass
-
-    def print_prev_event_dependences(self, printer, later_name):
-        if later_name not in self.prev_event_deps:
-            printer.println(self.node_name+' -> '+later_name+
-                ' [style=solid,color=black,penwidth=2];')
-            self.prev_event_deps.add(later_name)
-        self.start_event.print_prev_event_dependences(printer, later_name)
-
 class Close(Operation):
     def __init__(self, state, uid, ctx, is_inter_close_op):
         assert ctx is not None
-        Operation.__init__(self, state, uid, ctx, CLOSE_OP, "Close", "close_node_")
+        color = "orangered"
+        if is_inter_close_op:
+            color = "red"
+        Operation.__init__(self, state, uid, ctx, CLOSE_OP, "Close",
+                "close_node_", color)
         self.is_inter_close_op = is_inter_close_op
         self.creator = None
         self.creator_req_idx = None
@@ -1894,37 +1750,6 @@ class Close(Operation):
     def add_req_field(self, idx, fid):
         assert idx == 0
         return Operation.add_req_field(self, idx, fid)
-
-    def print_logical_node(self, printer):
-        self.print_base_node(printer)
-
-    def print_physical_node(self, printer):
-        if self.state.verbose:
-            self.print_base_node(printer)
-
-    def print_base_node(self, printer):
-        color = 'orangered'
-        if self.is_inter_close_op:
-            color = 'red'
-
-        label = generate_html_op_label(
-                self.get_name() + ' in ' + self.ctx.get_name(),
-                [self.get_requirement(0)], None, color, self.state.verbose)
-
-        printer.println(self.node_name+' [label=<'+label+'>,fontsize=14,'+\
-                'fontcolor=black,shape=record,penwidth=0];')
-
-    def print_event_dependences(self, printer):
-        if self.state.verbose:
-            self.start_event.print_prev_event_dependences(printer, self.node_name)
-
-    def print_prev_event_dependences(self, printer, later_name):
-        if self.state.verbose:
-            if later_name not in self.prev_event_deps:
-                printer.println(self.node_name+' -> '+later_name+
-                    ' [style=solid,color=black,penwidth=2];')
-                self.prev_event_deps.add(later_name)
-            self.start_event.print_prev_event_dependences(printer, later_name)
 
     def event_graph_traverse(self, traverser):
         traverser.visit_close(self)
@@ -1966,7 +1791,7 @@ class Close(Operation):
 class Fence(Operation):
     def __init__(self, state, uid, ctx):
         Operation.__init__(self, state, uid, ctx, FENCE_OP,
-                "Fence", "fence_node_")
+                "Fence", "fence_node_", "darkorchid2")
 
     def find_dependences(self, op):
         # Everybody who comes after us has a dependence on us
@@ -2426,7 +2251,6 @@ class Requirement(object):
                 (hex(self.ispace), hex(self.fspace), str(self.tid))
 
     def get_field_name(self, field):
-        assert field in self.fields
         name = self.state.field_space_nodes[self.fspace].get_field_name(field)
         if name <> None:
             return name
