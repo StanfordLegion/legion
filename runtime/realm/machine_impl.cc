@@ -246,7 +246,7 @@ namespace Realm {
       for(std::vector<Machine::ProcessorMemoryAffinity>::const_iterator it = proc_mem_affinities.begin();
 	  it != proc_mem_affinities.end();
 	  it++) {
-	if((*it).p == p)
+	if((*it).p == p && (*it).m.capacity() > 0)
 	  mset.insert((*it).m);
       }
     }
@@ -259,10 +259,10 @@ namespace Realm {
       for(std::vector<Machine::MemoryMemoryAffinity>::const_iterator it = mem_mem_affinities.begin();
 	  it != mem_mem_affinities.end();
 	  it++) {
-	if((*it).m1 == m)
+	if((*it).m1 == m && (*it).m2.capacity() > 0)
 	  mset.insert((*it).m2);
 	
-	if((*it).m2 == m)
+	if((*it).m2 == m && (*it).m1.capacity() > 0)
 	  mset.insert((*it).m1);
       }
     }
