@@ -607,7 +607,7 @@ namespace Realm {
     FunctionPointerImplementation *fpi = new FunctionPointerImplementation((void(*)())(fnptr));
     m_impls.push_back(fpi);
 #if defined(REALM_USE_DLFCN) && defined(REALM_USE_DLADDR)
-    DSOReferenceImplementation *dsoref = cvt_fnptr_to_dsoref(fpi);
+    DSOReferenceImplementation *dsoref = cvt_fnptr_to_dsoref(fpi, true /*quiet*/);
     if(dsoref)
       m_impls.push_back(dsoref);
 #endif
@@ -665,9 +665,22 @@ namespace Realm {
   bool CodeDescriptor::serialize(S& s, bool portable) const
   {
     if(!(s << m_type)) return false;
-    if(!(s << m_impls.size())) return false;
-    for(size_t i = 0; i < m_impls.size(); i++)
-      if(!(s << *m_impls[i])) return false;
+    if(portable) {
+      // only count and serialize portable implementations
+      size_t n = 0;
+      for(size_t i = 0; i < m_impls.size(); i++)
+	if(m_impls[i]->is_portable())
+	  n++;
+      if(!(s << n)) return false;
+      for(size_t i = 0; i < m_impls.size(); i++)
+	if(m_impls[i]->is_portable())
+	  if(!(s << *m_impls[i])) return false;
+    } else {
+      // just do all the implementations
+      if(!(s << m_impls.size())) return false;
+      for(size_t i = 0; i < m_impls.size(); i++)
+	if(!(s << *m_impls[i])) return false;
+    }
 
     return true;
   }

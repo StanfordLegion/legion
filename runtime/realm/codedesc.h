@@ -421,7 +421,7 @@ namespace Realm {
 
   FunctionPointerImplementation *cvt_dsoref_to_fnptr(const DSOReferenceImplementation *dso);
 #ifdef REALM_USE_DLADDR
-  DSOReferenceImplementation *cvt_fnptr_to_dsoref(const FunctionPointerImplementation *fpi);
+  DSOReferenceImplementation *cvt_fnptr_to_dsoref(const FunctionPointerImplementation *fpi, bool quiet = false);
 #endif
 #endif
 
