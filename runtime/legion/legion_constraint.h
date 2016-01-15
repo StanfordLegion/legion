@@ -1,4 +1,4 @@
-/* Copyright 2015 Stanford University, NVIDIA Corporation
+/* Copyright 2016 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -145,8 +145,7 @@ namespace LegionRuntime {
         NEON_ISA  = 0x00200000,
       };
     public:
-      ISAConstraint(void);
-      ISAConstraint(uint64_t kinds);
+      ISAConstraint(uint64_t prop = 0);
     public:
       bool is_valid(void) const;
       void find_proc_kinds(std::vector<Processor::Kind> &kinds) const;
@@ -154,7 +153,7 @@ namespace LegionRuntime {
       bool satisfies(const ISAConstraint *other) const;
       bool conflicts(const ISAConstraint *other) const;
     protected:
-      uint64_t isa_kinds;
+      uint64_t isa_prop;
     };
 
     /**
@@ -217,13 +216,14 @@ namespace LegionRuntime {
       };
     public:
       LaunchConstraint(LaunchKind kind, size_t value);
-      LaunchConstraint(LaunchKind kind, size_t *value, size_t dims);
+      LaunchConstraint(LaunchKind kind, const size_t *value, int dims);
     public:
       bool satisfies(const LaunchConstraint *other) const;
       bool conflicts(const LaunchConstraint *other) const;
     protected:
       LaunchKind launch_kind;
       size_t values[3];
+      int dims;
     };
 
     /**
@@ -262,10 +262,10 @@ namespace LegionRuntime {
       ExecutionConstraintSet&
         add_constraint(const ColocationConstraint &constraint);
     public:
-      ISAConstraint                             isa_constraint;
-      std::deque<ResourceConstraint>      resource_constraints;
-      std::deque<LaunchConstraint>          launch_constraints;
-      std::deque<ColocationConstraint>  colocation_constraints;
+      ISAConstraint                              isa_constraint;
+      std::vector<ResourceConstraint>      resource_constraints;
+      std::vector<LaunchConstraint>          launch_constraints;
+      std::vector<ColocationConstraint>  colocation_constraints;
     };
 
     /**
@@ -440,8 +440,8 @@ namespace LegionRuntime {
       bool conflicts(const AlignmentConstraint *other) const;
     protected:
       FieldID fid;
-      EqualityKind kind;
-      size_t  alignment;
+      EqualityKind eqk;
+      size_t alignment;
     };
 
     /**
@@ -510,15 +510,15 @@ namespace LegionRuntime {
       LayoutConstraintSet&
         add_constraint(const PointerConstraint &constraint);
     public:
-      SpecializedConstraint           specialized_constraint;
-      MemoryConstraint                memory_constraint;
-      PointerConstraint               pointer_constraint;
-      std::deque<OrderingConstraint>  ordering_constraints;
-      std::deque<SplittingConstraint> splitting_constraints;
-      std::deque<FieldConstraint>     field_constraints; 
-      std::deque<DimensionConstraint> dimension_constraints;
-      std::deque<AlignmentConstraint> alignment_constraint; 
-      std::deque<OffsetConstraint>    offset_constraints;
+      SpecializedConstraint            specialized_constraint;
+      MemoryConstraint                 memory_constraint;
+      PointerConstraint                pointer_constraint;
+      std::vector<OrderingConstraint>  ordering_constraints;
+      std::vector<SplittingConstraint> splitting_constraints;
+      std::vector<FieldConstraint>     field_constraints; 
+      std::vector<DimensionConstraint> dimension_constraints;
+      std::vector<AlignmentConstraint> alignment_constraints; 
+      std::vector<OffsetConstraint>    offset_constraints;
     };
 
     /**
