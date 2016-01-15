@@ -26,6 +26,13 @@ TRUE_DEPENDENCE = 1
 ANTI_DEPENDENCE = 2
 ATOMIC_DEPENDENCE = 3
 SIMULTANEOUS_DEPENDENCE = 4
+DEPENDENCE_TYPES = [
+"no",
+"true",
+"anti",
+"atomic",
+"simultaneous",
+]
 
 NO_ACCESS  = 0x00000000
 READ_ONLY  = 0x00000001
@@ -197,9 +204,9 @@ def compute_dependence_type(req1, req2):
             else:
                 return check_for_anti_dependence(req1,req2,TRUE_DEPENDENCE)
         elif req1.is_simult() or req2.is_simult():
-            return check_for_anti_dependence(req1,req2,SIMULTANEOUS_DEPENDENCE)
+            return SIMULTANEOUS_DEPENDENCE
         elif req1.is_relaxed() and req2.is_relaxed():
-            return check_for_anti_dependence(req1,req2,SIMULTANEOUS_DEPENDENCE)
+            return req1,req2,SIMULTANEOUS_DEPENDENCE
         # Should never get here
         assert False
         return NO_DEPENDENCE
@@ -1023,12 +1030,10 @@ class SingleTask(Operation):
         if verbose:
             print "        Computed Dependences:"
             for dep in self.mdeps:
-                print "          index "+str(dep.idx1)+" of "+dep.op1.get_name()+\
-                      " and index "+str(dep.idx2)+" of "+dep.op2.get_name()
+                print "          " + str(dep)
             print "        Actual Dependences:"
             for dep in self.adeps:
-                print "          index "+str(dep.idx1)+" of "+dep.op1.get_name()+\
-                      " and index "+str(dep.idx2)+" of "+dep.op2.get_name()
+                print "          " + str(dep)
         # For all the actual dependences make sure we have a dependence path between the
         # two different operations based on the dependences computed by the runtime
         count = 0
@@ -1039,9 +1044,7 @@ class SingleTask(Operation):
                     self.state.get_next_logical_mark())
 
             if not check:
-                print "    ERROR: Failed to compute mapping dependence between "+\
-                      "index "+str(adep.idx1)+" of "+adep.op1.get_name()+\
-                      " and index "+str(adep.idx2)+" of "+adep.op2.get_name()
+                print "    ERROR: Failed to compute mapping dependence between "+str(adep)
                 if adep.op1.get_op_kind() == FENCE_OP:
                     print "      FENCE OPERATION"
                 else:
@@ -1082,11 +1085,8 @@ class SingleTask(Operation):
                 req2 = mdep.op2.get_requirement(mdep.idx2)
                 if req1.tid <> req2.tid:
                     continue
-                print "    WARNING: Computed extra mapping dependence "+\
-                      "between index "+str(mdep.idx1)+" of "+\
-                      mdep.op1.get_name()+" and index "+str(mdep.idx2)+\
-                      " of "+mdep.op2.get_name()+" in context of task "+\
-                      str(self.name)
+                print "    WARNING: Computed extra mapping dependence between "+str(mdep)+\
+                      " in context of task "+str(self.name)
                 warnings = warnings + 1
 
         if (self.mdeps > 0) or (errors > 0) or (warnings > 0):
@@ -2303,6 +2303,13 @@ class MappingDependence(object):
                 (self.idx1 == other.idx1) and \
                 (self.idx2 == other.idx2) and \
                 (self.dtype == other.dtype)
+
+    def __repr__(self):
+        return "index %d of %s and index %d of %s (type: %s)" % \
+                (self.idx1, self.op1.get_name(),
+                 self.idx2, self.op2.get_name(),
+                 DEPENDENCE_TYPES[self.dtype])
+
 
     def print_dataflow_edge(self, printer, previous_pairs):
         pair = (self.op1,self.op2)
@@ -3540,7 +3547,9 @@ class State(object):
                         for req1 in reqs1:
                             for op2, reqs2 in op_users.iteritems():
                                 for req2 in reqs2:
-                                    if op1 != op2 and self.compute_dependence(req1, req2) in (TRUE_DEPENDENCE, ANTI_DEPENDENCE):
+                                    if op1 != op2 and \
+                                            self.compute_dependence(req1, req2) in \
+                                            (TRUE_DEPENDENCE, ANTI_DEPENDENCE):
                                         def traverse_event(node, traverser):
                                             if traverser.found:
                                                 return False
