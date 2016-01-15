@@ -14,6 +14,8 @@
 
 -- Legion AST
 
+local data = require("regent/data")
+
 local ast_factory = {}
 
 local function make_factory(name)
@@ -22,6 +24,7 @@ local function make_factory(name)
       parent = false,
       name = name,
       expected_fields = false,
+      expected_field_set = false,
       print_collapsed = false,
       print_hidden = false,
     },
@@ -108,6 +111,16 @@ function ast_node:type()
   return self.node_type
 end
 
+function ast_node:fields()
+  local result = {}
+  for k, v in pairs(self) do
+    if k ~= "node_type" then
+      result[k] = v
+    end
+  end
+  return result
+end
+
 function ast_node:__call(fields_to_update)
   local ctor = rawget(self, "node_type")
   local values = {}
@@ -156,6 +169,11 @@ function ast_ctor:__call(node)
       error(tostring(self) .. " missing required argument '" .. f .. "'", 2)
     end
   end
+  for f, _ in pairs(node) do
+    if rawget(self.expected_field_set, f) == nil then
+      error(tostring(self) .. " does not require argument '" .. f .. "'", 2)
+    end
+  end
   rawset(node, "node_type", self)
   setmetatable(node, ast_node)
   return node
@@ -197,11 +215,13 @@ function ast_factory:__index(field)
 end
 
 function ast_factory:inner(ctor_name, expected_fields, print_collapsed, print_hidden)
+  local fields = merge_fields(self.expected_fields, expected_fields)
   local ctor = setmetatable(
     {
       parent = self,
       name = ctor_name,
-      expected_fields = merge_fields(self.expected_fields, expected_fields),
+      expected_fields = fields,
+      expected_field_set = data.set(fields),
       print_collapsed = (print_collapsed == nil and self.print_collapsed) or print_collapsed or false,
       print_hidden = (print_hidden == nil and self.print_hidden) or print_hidden or false,
     }, ast_factory)
@@ -213,11 +233,13 @@ function ast_factory:inner(ctor_name, expected_fields, print_collapsed, print_hi
 end
 
 function ast_factory:leaf(ctor_name, expected_fields, print_collapsed, print_hidden)
+  local fields = merge_fields(self.expected_fields, expected_fields)
   local ctor = setmetatable(
     {
       parent = self,
       name = ctor_name,
-      expected_fields = merge_fields(self.expected_fields, expected_fields),
+      expected_fields = fields,
+      expected_field_set = data.set(fields),
       print_collapsed = (print_collapsed == nil and self.print_collapsed) or print_collapsed or false,
       print_hidden = (print_hidden == nil and self.print_hidden) or print_hidden or false,
     }, ast_ctor)
@@ -616,7 +638,7 @@ ast.typed.expr:leaf("ID", {"value"})
 ast.typed.expr:leaf("FieldAccess", {"value", "field_name"})
 ast.typed.expr:leaf("IndexAccess", {"value", "index"})
 ast.typed.expr:leaf("MethodCall", {"value", "method_name", "args"})
-ast.typed.expr:leaf("Call", {"fn", "args"})
+ast.typed.expr:leaf("Call", {"fn", "args", "conditions"})
 ast.typed.expr:leaf("Cast", {"fn", "arg"})
 ast.typed.expr:leaf("Ctor", {"fields", "named"})
 ast.typed.expr:leaf("CtorListField", {"value"})
