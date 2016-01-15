@@ -3429,11 +3429,16 @@ class State(object):
         else:
             handle = EventHandle(id, gen)
 
-        if handle in self.events:
-            return self.events[handle]
-        else:
+        if not handle in self.events:
             self.events[handle] = Event(self, handle)
-            return self.events[handle]
+
+        ev = self.events[handle]
+        if EventHandle(id, gen - 1) in self.events:
+            prev_ev = self.events[EventHandle(id, gen - 1)]
+            prev_ev.add_physical_outgoing(ev)
+            ev.add_physical_incoming(prev_ev)
+
+        return ev
 
     def get_index_node(self, is_reg, iid):
         if is_reg:
