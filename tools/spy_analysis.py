@@ -1980,6 +1980,7 @@ class PhysicalInstance(object):
         self.igraph_outgoing_deps = set()
         self.igraph_incoming_deps = set()
         self.fields = list()
+        self.simultaneous = False
 
     def get_field_name(self, field):
         field_name = self.region.field_node.get_field_name(field)
@@ -1987,6 +1988,12 @@ class PhysicalInstance(object):
             return field_name
         else:
             return str(field)
+
+    def mark_simultaneous(self):
+        self.simultaneous = True
+
+    def is_simultaneous(self):
+        return self.simultaneous
 
     def add_op_user(self, op, idx):
         req = op.get_requirement(idx)
@@ -1998,6 +2005,8 @@ class PhysicalInstance(object):
             if op not in self.op_users[field]:
                 self.op_users[field][op] = list()
             self.op_users[field][op].append(req)
+        if req.is_simult():
+            self.mark_simultaneous()
         return True
 
     def add_field(self, fid):
@@ -2040,6 +2049,7 @@ class ReductionInstance(object):
         self.igraph_outgoing_deps = set()
         self.igraph_incoming_deps = set()
         self.fields = list()
+        self.simultaneous = False
 
     def get_field_name(self, field):
         field_name = self.region.field_node.get_field_name(field)
@@ -2047,6 +2057,12 @@ class ReductionInstance(object):
             return field_name
         else:
             return str(field)
+
+    def mark_simultaneous(self):
+        self.simultaneous = True
+
+    def is_simultaneous(self):
+        return self.simultaneous
 
     def add_op_user(self, op, idx):
         req = op.get_requirement(idx)
@@ -2058,6 +2074,8 @@ class ReductionInstance(object):
             if op not in self.op_users[field]:
                 self.op_users[field][op] = list()
             self.op_users[field][op].append(req)
+        if req.is_simult():
+            self.mark_simultaneous()
         return True
 
     def add_field(self, fid):
@@ -3541,7 +3559,9 @@ class State(object):
     def check_instance_dependences(self):
         for versions in self.instances.itervalues():
             for instance in versions:
-                print "Checking physical instance "+str(instance.iid)+"..."
+                if instance.is_simultaneous():
+                    continue
+                print "Checking physical instance "+hex(instance.iid)+"..."
                 for field, op_users in instance.op_users.iteritems():
                     for op1, reqs1 in op_users.iteritems():
                         for req1 in reqs1:
