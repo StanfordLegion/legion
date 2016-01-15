@@ -1151,12 +1151,14 @@ class SingleTask(Operation):
                 # Handle cross product of instances
                 # in case we have multiple instances for an op
                 for inst1 in dep.op1.op_instances:
-                    if inst1.get_op_kind() == FENCE_OP:
+                    if inst1.get_op_kind() == FENCE_OP or \
+                            inst1.get_op_kind() == FILL_OP:
                         continue
                     if inst1.get_num_requirements() == 0:
                         continue
                     for inst2 in dep.op2.op_instances:
-                        if inst2.get_op_kind() == FENCE_OP:
+                        if inst2.get_op_kind() == FENCE_OP or \
+                                inst2.get_op_kind() == FILL_OP:
                             continue
                         if inst2.get_num_requirements() == 0:
                             continue
@@ -3562,10 +3564,9 @@ class State(object):
                                             if not traverser.found:
                                                 print "   ERROR: Potential data race between "+\
                                                         "requirement "+str(req1.index)+" of "+\
-                                                        op1.get_name()+" (UID "+str(op1.uid)+") "+\
-                                                        "and requirement "+str(req2.index)+" of "+\
-                                                        op2.get_name()+" (UID "+str(op2.uid)+") "+\
-                                                        "for field "+str(field)
+                                                        op1.get_name()+" and requirement "+\
+                                                        str(req2.index)+" of "+op2.get_name()+\
+                                                        " for field "+str(field)
                                                 if self.verbose:
                                                     print "      First Requirement:"
                                                     req1.print_requirement()
