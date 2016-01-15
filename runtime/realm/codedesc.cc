@@ -143,6 +143,13 @@ namespace Realm {
   //
   // class FunctionPointerImplementation
 
+  /*static*/ Serialization::PolymorphicSerdezSubclass<CodeImplementation,
+						      FunctionPointerImplementation> FunctionPointerImplementation::serdez_subclass;
+
+  FunctionPointerImplementation::FunctionPointerImplementation(void)
+    : fnptr(0)
+  {}
+
   FunctionPointerImplementation::FunctionPointerImplementation(void (*_fnptr)())
     : fnptr(_fnptr)
   {}
@@ -161,9 +168,16 @@ namespace Realm {
   }
 
 
+#ifdef REALM_USE_DLFCN
   ////////////////////////////////////////////////////////////////////////
   //
   // class DSOReferenceImplementation
+
+  /*static*/ Serialization::PolymorphicSerdezSubclass<CodeImplementation,
+						      DSOReferenceImplementation> DSOReferenceImplementation::serdez_subclass;
+
+  DSOReferenceImplementation::DSOReferenceImplementation(void)
+  {}
 
   DSOReferenceImplementation::DSOReferenceImplementation(const std::string& _dso_name,
 							 const std::string& _symbol_name)
@@ -182,7 +196,7 @@ namespace Realm {
   {
     return true;
   }
-
+#endif
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -190,6 +204,7 @@ namespace Realm {
 
   Logger log_codetrans("codetrans");
 
+#ifdef REALM_USE_DLFCN
   FunctionPointerImplementation *cvt_dsoref_to_fnptr(const DSOReferenceImplementation *dso)
   {
     // TODO: once this moves to a "code translator" object with state, actually keep
@@ -210,6 +225,7 @@ namespace Realm {
     return new FunctionPointerImplementation((void(*)())ptr);
   }
 
+#ifdef REALM_USE_DLADDR
   DSOReferenceImplementation *cvt_fnptr_to_dsoref(const FunctionPointerImplementation *fpi)
   {
     // if dladdr() gives us something with the same base pointer, assume that's portable
@@ -231,5 +247,7 @@ namespace Realm {
 
     return new DSOReferenceImplementation(inf.dli_fname, inf.dli_sname);
   }
+#endif
+#endif
 
 };
