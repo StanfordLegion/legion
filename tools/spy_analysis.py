@@ -3458,10 +3458,10 @@ class State(object):
             self.events[handle] = Event(self, handle)
 
         ev = self.events[handle]
-        if EventHandle(id, gen - 1) in self.events:
-            prev_ev = self.events[EventHandle(id, gen - 1)]
-            prev_ev.add_physical_outgoing(ev)
-            ev.add_physical_incoming(prev_ev)
+        #if EventHandle(id, gen - 1) in self.events:
+        #    prev_ev = self.events[EventHandle(id, gen - 1)]
+        #    prev_ev.add_physical_outgoing(ev)
+        #    ev.add_physical_incoming(prev_ev)
 
         return ev
 
