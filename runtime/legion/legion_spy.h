@@ -1,4 +1,4 @@
-/* Copyright 2015 Stanford University, NVIDIA Corporation
+/* Copyright 2016 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -215,6 +215,14 @@ namespace LegionRuntime {
       {
         log_spy.info("Close Operation %llu %llu %u",
             context, unique_id, is_intermediate_close_op ? 1 : 0);
+      }
+
+      static inline void log_close_op_creator(UniqueID close_op_id,
+                                              UniqueID creator_op_id,
+                                              int idx)
+      {
+        log_spy.info("Close Operation Creator %llu %llu %d",
+            close_op_id, creator_op_id, idx);
       }
 
       static inline void log_fence_operation(UniqueID context,

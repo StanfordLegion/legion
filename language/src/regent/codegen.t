@@ -1,4 +1,4 @@
--- Copyright 2015 Stanford University, NVIDIA Corporation
+-- Copyright 2016 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -2309,10 +2309,15 @@ function codegen.expr_call(cx, node)
   local fn = codegen.expr(cx, node.fn):read(cx)
   local args = node.args:map(
     function(arg) return codegen.expr(cx, arg):read(cx, arg.expr_type) end)
+  local conditions = node.conditions:map(
+    function(condition)
+      return codegen.expr_condition(cx, condition)
+    end)
 
   local actions = quote
     [fn.actions];
     [args:map(function(arg) return arg.actions end)];
+    [conditions:map(function(condition) return condition.actions end)];
     [emit_debuginfo(node)]
   end
 
@@ -2358,9 +2363,9 @@ function codegen.expr_call(cx, node)
       end
     end
 
-    -- Pass phase barriers.
-    local conditions = fn.value:get_conditions()
-    for condition, args_enabled in pairs(conditions) do
+    -- Pass phase barriers (from annotations on parameters).
+    local param_conditions = fn.value:get_conditions()
+    for condition, args_enabled in pairs(param_conditions) do
       for i, arg_type in ipairs(arg_types) do
         if args_enabled[i] then
           assert(std.is_phase_barrier(arg_type) or
@@ -2370,6 +2375,16 @@ function codegen.expr_call(cx, node)
             cx, fn.value, arg_value, condition,
             launcher, false, args_setup, arg_type)
         end
+      end
+    end
+
+    -- Pass phase barriers (from extra conditions).
+    for i, condition in ipairs(node.conditions) do
+      local condition_expr = conditions[i]
+      for _, condition_kind in ipairs(condition.conditions) do
+        expr_call_setup_phase_barrier_arg(
+          cx, fn.value, condition_expr.value, condition_kind,
+          launcher, false, args_setup, std.as_read(condition.expr_type))
       end
     end
 
@@ -4304,9 +4319,8 @@ function codegen.expr_unary(cx, node)
         options = ast.default_options(),
         span = node.span,
       },
-      inline = "allow",
-      fn_unspecialized = false,
       args = terralib.newlist({node.rhs}),
+      conditions = terralib.newlist(),
       expr_type = expr_type,
       options = node.options,
       span = node.span,
@@ -4379,9 +4393,8 @@ function codegen.expr_binary(cx, node)
         options = ast.default_options(),
         span = node.span,
       },
-      inline = "allow",
-      fn_unspecialized = false,
       args = terralib.newlist({node.lhs, node.rhs}),
+      conditions = terralib.newlist(),
       expr_type = expr_type,
       options = node.options,
       span = node.span,
@@ -5198,6 +5211,10 @@ function codegen.stat_index_launch(cx, node)
     end
     args_partitions:insert(partition)
   end
+  local conditions = node.call.conditions:map(
+    function(condition)
+      return codegen.expr_condition(cx, condition)
+    end)
 
   local actions = quote
     [domain[1].actions];
@@ -5220,7 +5237,8 @@ function codegen.stat_index_launch(cx, node)
          end
 
          return arg_actions
-       end)]
+       end)];
+    [conditions:map(function(condition) return condition.actions end)]
   end
 
   local arg_types = terralib.newlist()
@@ -5271,8 +5289,8 @@ function codegen.stat_index_launch(cx, node)
   end
 
   -- Pass phase barriers.
-  local conditions = fn.value:get_conditions()
-  for condition, args_enabled in pairs(conditions) do
+  local param_conditions = fn.value:get_conditions()
+  for condition, args_enabled in pairs(param_conditions) do
     for i, arg_type in ipairs(arg_types) do
       if args_enabled[i] then
         assert(std.is_phase_barrier(arg_type))
@@ -5281,6 +5299,16 @@ function codegen.stat_index_launch(cx, node)
           cx, fn.value, arg_value, condition,
           launcher, true, args_setup, arg_type)
       end
+    end
+  end
+
+  -- Pass phase barriers (from extra conditions).
+  for i, condition in ipairs(node.call.conditions) do
+    local condition_expr = conditions[i]
+    for _, condition_kind in ipairs(condition.conditions) do
+      expr_call_setup_phase_barrier_arg(
+        cx, fn.value, condition_expr.value, condition_kind,
+        launcher, false, args_setup, std.as_read(condition.expr_type))
     end
   end
 

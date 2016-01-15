@@ -1,4 +1,4 @@
-/* Copyright 2015 Stanford University, NVIDIA Corporation
+/* Copyright 2016 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -5434,12 +5434,15 @@ namespace LegionRuntime {
             continue;
           if (!virtual_mapped[idx])
           {
+            if (!is_leaf())
+            {
 #ifdef DEBUG_HIGH_LEVEL
-            assert(local_instances[idx].has_ref());
+              assert(local_instances[idx].has_ref());
 #endif
-            PostCloseOp *close_op = runtime->get_available_post_close_op(true);
-            close_op->initialize(this, idx, local_instances[idx]);
-            runtime->add_to_dependence_queue(executing_processor, close_op);
+              PostCloseOp *close_op = runtime->get_available_post_close_op(true);
+              close_op->initialize(this, idx, local_instances[idx]);
+              runtime->add_to_dependence_queue(executing_processor, close_op);
+            }
           }
           else
           {
