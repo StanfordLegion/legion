@@ -1777,11 +1777,14 @@ namespace LegionRuntime {
       // If we are restricted we know the answer
       if (restrict_info.has_restrictions())
       {
+        InstanceRef target_inst = privilege_path.translate_ref(
+            parent_ctx->get_local_reference(parent_req_index));
         map_ref = runtime->forest->map_restricted_region(physical_ctx,
                                                          requirement,
                                                          0/*idx*/,
                                                          version_info,
-                                                         local_proc
+                                                         local_proc,
+                                                         target_inst
 #ifdef DEBUG_HIGH_LEVEL
                                                          , get_logging_name()
                                                          , unique_op_id
@@ -2732,12 +2735,14 @@ namespace LegionRuntime {
         // map wherever the existing physical instance was
         if (src_restrictions[idx].has_restrictions())
         {
+          InstanceRef target_inst = src_privilege_paths[idx].translate_ref(
+            parent_ctx->get_local_reference(src_parent_indexes[idx]));
           src_mapping_refs[idx] = runtime->forest->map_restricted_region(
                                                         src_contexts[idx],
                                                         src_requirements[idx],
                                                         idx, 
                                                         src_versions[idx],
-                                                        local_proc
+                                                        local_proc, target_inst
 #ifdef DEBUG_HIGH_LEVEL
                                                         , get_logging_name()
                                                         , unique_op_id
@@ -2782,35 +2787,37 @@ namespace LegionRuntime {
           // we actually want to map to a normal instance, so make it look
           // like the privileges are read-write while selecting the instance
           // and then switch back after we are done
+          InstanceRef target_inst = dst_privilege_paths[idx].translate_ref(
+            parent_ctx->get_local_reference(dst_parent_indexes[idx]));
           if (IS_REDUCE(dst_requirements[idx]))
           {
             dst_requirements[idx].privilege = READ_WRITE;
             dst_mapping_refs[idx] = runtime->forest->map_restricted_region(
-                                                      dst_contexts[idx],
-                                                      dst_requirements[idx],
-                                                      src_requirements.size()+idx,
-                                                      dst_versions[idx],
-                                                      local_proc
+                                                    dst_contexts[idx],
+                                                    dst_requirements[idx],
+                                                    src_requirements.size()+idx,
+                                                    dst_versions[idx],
+                                                    local_proc, target_inst
 #ifdef DEBUG_HIGH_LEVEL
-                                                      , get_logging_name()
-                                                      , unique_op_id
+                                                    , get_logging_name()
+                                                    , unique_op_id
 #endif
-                                                      );
+                                                    );
             // Switch the privileges back
             dst_requirements[idx].privilege = REDUCE;
           }
           else // The normal thing
             dst_mapping_refs[idx] = runtime->forest->map_restricted_region(
-                                                      dst_contexts[idx],
-                                                      dst_requirements[idx],
-                                                      src_requirements.size()+idx,
-                                                      dst_versions[idx],
-                                                      local_proc
+                                                    dst_contexts[idx],
+                                                    dst_requirements[idx],
+                                                    src_requirements.size()+idx,
+                                                    dst_versions[idx],
+                                                    local_proc, target_inst
 #ifdef DEBUG_HIGH_LEVEL
-                                                      , get_logging_name()
-                                                      , unique_op_id
+                                                    , get_logging_name()
+                                                    , unique_op_id
 #endif
-                                                      );
+                                                    );
 #ifdef DEBUG_HIGH_LEVEL
           assert(dst_mapping_refs[idx].has_ref());
 #endif
@@ -4418,11 +4425,14 @@ namespace LegionRuntime {
       MappingRef target;
       if (restrict_info.has_restrictions())
       {
+        InstanceRef target_inst = privilege_path.translate_ref( 
+            parent_ctx->get_local_reference(parent_req_index));
         target = runtime->forest->map_restricted_region(physical_ctx,
                                                         requirement,
                                                         0/*idx*/,
                                                         version_info,
-                                                        local_proc
+                                                        local_proc,
+                                                        target_inst
 #ifdef DEBUG_HIGH_LEVEL
                                                         , get_logging_name()
                                                         , unique_op_id
@@ -5187,11 +5197,14 @@ namespace LegionRuntime {
       
       // Map this is a restricted region. We already know the 
       // physical region that we want to map.
+      InstanceRef target_inst = privilege_path.translate_ref( 
+          parent_ctx->get_local_reference(parent_req_index));
       MappingRef map_ref = runtime->forest->map_restricted_region(physical_ctx,
                                                                   requirement,
                                                                   0/*idx*/,
                                                                   version_info,
-                                                                  local_proc
+                                                                  local_proc,
+                                                                  target_inst
 #ifdef DEBUG_HIGH_LEVEL
                                                           , get_logging_name()
                                                           , unique_op_id

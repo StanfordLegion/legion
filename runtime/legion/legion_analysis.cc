@@ -1700,9 +1700,10 @@ namespace LegionRuntime {
     MappingTraverser::MappingTraverser(RegionTreePath &p, 
                                        const MappableInfo &i,
                                        const RegionUsage &u, const FieldMask &m,
-                                       Processor proc, unsigned idx, bool res)
+                                       Processor proc, unsigned idx, 
+                                       InstanceView *view /*= NULL*/)
       : PathTraverser(p), info(i), usage(u), user_mask(m), 
-        target_proc(proc), index(idx), restricted(res)
+        target_proc(proc), index(idx), target(view)
     //--------------------------------------------------------------------------
     {
     }
@@ -1710,8 +1711,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     MappingTraverser::MappingTraverser(const MappingTraverser &rhs)
       : PathTraverser(rhs.path), info(rhs.info), usage(RegionUsage()),
-        user_mask(FieldMask()), target_proc(rhs.target_proc), 
-        index(rhs.index), restricted(rhs.restricted)
+        user_mask(FieldMask()), target_proc(rhs.target_proc), index(rhs.index)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -1739,25 +1739,20 @@ namespace LegionRuntime {
     {
       if (!has_child)
       {
+        // If we already have a target because this is restricted
+        // coherence then we know what the answer needs to be
+        if (target != NULL)
+        {
+          // Restricted coherence must already be valid for all fields
+          result = MappingRef(target, FieldMask());
+          return true;
+        }
         // Now we're ready to map this instance
         // Separate paths for reductions and non-reductions
         if (!IS_REDUCE(info.req))
-        {
-          // See if we can get or make a physical instance
-          // that we can use
-          if (restricted)
-            return map_restricted_physical(node);
-          else
-            return map_physical_region(node);
-        }
+          return map_physical_region(node);
         else
-        {
-          // See if we can make or use an existing reduction instance
-          if (restricted)
-            return map_restricted_reduction(node);
-          else
-            return map_reduction_region(node);
-        }
+          return map_reduction_region(node);
       }
       else
       {
@@ -1806,6 +1801,9 @@ namespace LegionRuntime {
         state->children.open_children[next_child] = info.traversal_mask;
       else
         finder->second |= info.traversal_mask;
+      // If we have a target node, we need to get the child view
+      if (target != NULL)
+        target = target->get_subview(next_child);
     }
 
     //--------------------------------------------------------------------------
@@ -2147,72 +2145,6 @@ namespace LegionRuntime {
       if (chosen_inst != NULL)
         result = MappingRef(chosen_inst,FieldMask());
       return (chosen_inst != NULL);
-    }
-
-    //--------------------------------------------------------------------------
-    bool MappingTraverser::map_restricted_physical(RegionNode *node)
-    //--------------------------------------------------------------------------
-    {
-      // Grab the set of valid instances, we should find exactly one
-      // that matches all the fields, if not that is very bad
-      LegionMap<LogicalView*,FieldMask>::aligned valid_instances;
-      PhysicalState *state = node->get_physical_state(info.ctx,
-                                                      info.version_info);
-      node->find_valid_instance_views(info.ctx, state, user_mask,
-                                      user_mask, info.version_info,
-                                      false/*space*/, valid_instances);
-      InstanceView *chosen_inst = NULL;
-      for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
-            valid_instances.begin(); it != valid_instances.end(); it++)
-      {
-        // Skip any deferred views
-        if (it->first->is_deferred_view())
-          continue;
-#ifdef DEBUG_HIGH_LEVEL
-        assert(it->first->is_instance_view());
-#endif
-        InstanceView *inst_view = it->first->as_instance_view();
-        FieldMask uncovered = user_mask - it->second;
-        // If all the fields were valid, record it
-        if (!uncovered)
-        {
-          if (chosen_inst != NULL)
-          {
-            for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it2=
-                  valid_instances.begin(); it2 != valid_instances.end(); it2++)
-            {
-              LogicalView *view = it2->first;
-              FieldMask mask = it2->second;
-              printf("%p, %p\n", view, &mask);
-            }
-            log_run.error("Multiple valid instances for restricted cohernece! "
-                          "This is almost certainly a runtime bug. Please "
-                          "create a minimal test case and report it.");
-            assert(false);
-          }
-          else
-            chosen_inst = inst_view;
-        }
-      }
-      if (chosen_inst == NULL)
-      {
-        log_run.error("No single instance is valid for restricted coherence! "
-                      "Need support for multiple instances. This is currently "
-                      "a pending feature. Please report your use case.");
-        assert(false);
-      }
-      // We know we don't need any fields to be brought up to date
-      result = MappingRef(chosen_inst, FieldMask());
-      return (chosen_inst != NULL);
-    }
-
-    //--------------------------------------------------------------------------
-    bool MappingTraverser::map_restricted_reduction(RegionNode *node)
-    //--------------------------------------------------------------------------
-    {
-      // TODO: implement this later
-      assert(false);
-      return false;
     }
 
     /////////////////////////////////////////////////////////////
@@ -6604,6 +6536,23 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       return ((max_depth-min_depth)+1); 
+    }
+
+    //--------------------------------------------------------------------------
+    InstanceRef RegionTreePath::translate_ref(const InstanceRef &ref) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(ref.has_ref());
+#endif
+      LogicalView *view = ref.get_instance_view();
+      // Note we don't need to do the last depth
+      for (unsigned idx = min_depth; idx < max_depth; idx++)
+        view = view->get_subview(path[idx]);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(view->is_instance_view());
+#endif
+      return InstanceRef(ref.get_ready_event(), view->as_instance_view());
     }
 
     /////////////////////////////////////////////////////////////

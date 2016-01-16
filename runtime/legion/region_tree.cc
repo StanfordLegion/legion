@@ -1798,7 +1798,7 @@ namespace LegionRuntime {
       RegionTreePath single_path;
       single_path.initialize(child_node->get_depth(), child_node->get_depth());
       MappingTraverser traverser(single_path, info, RegionUsage(req), user_mask,
-                                 target_proc, index, false/*restrict*/);
+                                 target_proc, index);
 #ifdef DEBUG_HIGH_LEVEL
       TreeStateLogger::capture_state(runtime, &req, index, log_name, uid,
                                      start_node, ctx.get_id(), 
@@ -1866,7 +1866,8 @@ namespace LegionRuntime {
                                                       RegionRequirement &req,
                                                       unsigned index,
                                                       VersionInfo &version_info,
-                                                      Processor target_proc
+                                                      Processor target_proc,
+                                                      const InstanceRef &target
 #ifdef DEBUG_HIGH_LEVEL
                                                       , const char *log_name
                                                       , UniqueID uid
@@ -1877,6 +1878,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(ctx.exists());
       assert(req.handle_type == SINGULAR);
+      assert(target.has_ref());
 #endif
 #ifdef DEBUG_PERF
       begin_perf_trace(MAP_PHYSICAL_REGION_ANALYSIS);
@@ -1891,7 +1893,8 @@ namespace LegionRuntime {
       MappableInfo info(ctx.get_id(), NULL, Processor::NO_PROC, 
                         req, version_info, user_mask);
       MappingTraverser traverser(single_path, info, RegionUsage(req), 
-                             user_mask, target_proc, index, true/*restricted*/);
+                             user_mask, target_proc, index, 
+                             target.get_instance_view());
 #ifdef DEBUG_HIGH_LEVEL
       TreeStateLogger::capture_state(runtime, &req, index, log_name, uid,
                                      child_node, ctx.get_id(), 
@@ -1901,6 +1904,7 @@ namespace LegionRuntime {
 #endif
       bool result = traverser.traverse(child_node);
 #ifdef DEBUG_HIGH_LEVEL
+      assert(result);
       TreeStateLogger::capture_state(runtime, &req, index, log_name, uid,
                                      child_node, ctx.get_id(), 
                                      false/*before*/, false/*premap*/, 

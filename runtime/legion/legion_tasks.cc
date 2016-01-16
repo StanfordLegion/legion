@@ -4488,11 +4488,12 @@ namespace LegionRuntime {
         // Check to see if we have to do a restricted mapping
         if (has_restrictions(idx, regions[idx].region))
         {
+          InstanceRef target_inst = find_restricted_instance(idx);
           mapping_refs[idx] = runtime->forest->map_restricted_region(
                                           enclosing_contexts[idx],
                                                     regions[idx],
                                                     idx, get_version_info(idx),
-                                                    target
+                                                    target, target_inst
 #ifdef DEBUG_HIGH_LEVEL
                                                     , get_logging_name()
                                                     , unique_op_id
@@ -7178,6 +7179,29 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    InstanceRef IndividualTask::find_restricted_instance(unsigned index)
+    //--------------------------------------------------------------------------
+    {
+      if (is_remote())
+      {
+        // TODO: support remote tracking of restricted instances
+        assert(false);
+        return InstanceRef();
+      }
+      else
+      {
+#ifdef DEBUG_HIGH_LEVEL
+        assert(index < privilege_paths.size());
+        assert(index < parent_req_indexes.size());
+#endif
+        InstanceRef parent_ref = 
+          parent_ctx->get_local_reference(parent_req_indexes[index]);
+        // Now get the proper sub-view for our privilege path
+        return privilege_paths[index].translate_ref(parent_ref);
+      }
+    }
+
+    //--------------------------------------------------------------------------
     bool IndividualTask::pack_task(Serializer &rez, Processor target)
     //--------------------------------------------------------------------------
     {
@@ -7846,6 +7870,13 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    InstanceRef PointTask::find_restricted_instance(unsigned index)
+    //--------------------------------------------------------------------------
+    {
+      return slice_owner->find_restricted_instance(index);
+    }
+
+    //--------------------------------------------------------------------------
     void PointTask::initialize_point(SliceTask *owner, MinimalPoint *mp)
     //--------------------------------------------------------------------------
     {
@@ -8021,7 +8052,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void WrapperTask::handle_future(const void *res, size_t res_size, bool owned)
+    void WrapperTask::handle_future(const void *res, size_t res_size,bool owned)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -8034,6 +8065,15 @@ namespace LegionRuntime {
     {
       // should never be called
       assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    InstanceRef WrapperTask::find_restricted_instance(unsigned index)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return InstanceRef();
     }
 
     //--------------------------------------------------------------------------
@@ -9622,6 +9662,20 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    InstanceRef IndexTask::find_restricted_instance(unsigned index)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(index < privilege_paths.size());
+      assert(index < parent_req_indexes.size());
+#endif
+      InstanceRef parent_ref = 
+        parent_ctx->get_local_reference(parent_req_indexes[index]);
+      // Now get the proper sub-view for our privilege path
+      return privilege_paths[index].translate_ref(parent_ref);
+    }
+
+    //--------------------------------------------------------------------------
     void IndexTask::register_must_epoch(void)
     //--------------------------------------------------------------------------
     {
@@ -10541,6 +10595,22 @@ namespace LegionRuntime {
       }
       else
         index_owner->handle_future(point, result, result_size, owner);
+    }
+
+    //--------------------------------------------------------------------------
+    InstanceRef SliceTask::find_restricted_instance(unsigned index)
+    //--------------------------------------------------------------------------
+    {
+      if (is_remote())
+      {
+        // TODO: support remote mapping of restricted instances
+        assert(false);
+        return InstanceRef();
+      }
+      else
+      {
+        return index_owner->find_restricted_instance(index);
+      }
     }
 
     //--------------------------------------------------------------------------
