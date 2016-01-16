@@ -1,4 +1,4 @@
-/* Copyright 2015 Stanford University, NVIDIA Corporation
+/* Copyright 2016 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,7 +20,6 @@
 #include "legion_tasks.h"
 #include "region_tree.h"
 #include "legion_spy.h"
-#include "legion_logging.h"
 #include "legion_profiling.h"
 #include "legion_instances.h"
 #include "legion_views.h"
@@ -2461,32 +2460,6 @@ namespace LegionRuntime {
       Event copy_pre = Event::merge_events(src_ref.get_ready_event(),
                                            dst_ref.get_ready_event(),
                                            precondition, dom_precondition);
-#if defined(LEGION_LOGGING) || defined(LEGION_SPY)
-      if (!copy_pre.exists())
-      {
-        UserEvent new_copy_pre = UserEvent::create_user_event();
-        new_copy_pre.trigger();
-        copy_pre = new_copy_pre;
-      }
-#endif
-#ifdef LEGION_LOGGING
-      {
-        Processor exec_proc = Processor::get_executing_processor();
-        LegionLogging::log_event_dependence(exec_proc, 
-            src_ref.get_ready_event(), copy_pre);
-        LegionLogging::log_event_dependence(exec_proc,
-            dst_ref.get_ready_event(), copy_pre);
-        LegionLogging::log_event_dependence(exec_proc,
-            precondition, copy_pre);
-      }
-#endif
-#if 0
-#ifdef LEGION_SPY
-      LegionSpy::log_event_dependence(src_ref.get_ready_event(), copy_pre);
-      LegionSpy::log_event_dependence(dst_ref.get_ready_event(), copy_pre);
-      LegionSpy::log_event_dependence(precondition, copy_pre);
-#endif
-#endif
       std::set<Event> result_events;
       for (std::set<Domain>::const_iterator it = dst_domains.begin();
             it != dst_domains.end(); it++)
@@ -2499,32 +2472,6 @@ namespace LegionRuntime {
       Event result = Event::merge_events(result_events);
       // Note we don't need to add the copy users because
       // we already mapped these regions as part of the CopyOp.
-#if 0
-#ifdef LEGION_SPY
-      if (!result.exists())
-      {
-        UserEvent new_result = UserEvent::create_user_event();
-        new_result.trigger();
-        result = new_result;
-      }
-      {
-        RegionNode *src_node = get_node(src_req.region);
-        FieldMask src_mask = 
-          src_node->column_source->get_field_mask(src_req.privilege_fields);
-        FieldMask dst_mask = 
-          dst_node->column_source->get_field_mask(dst_req.privilege_fields);
-        char *field_mask = src_node->column_source->to_string(src_mask);
-        LegionSpy::log_copy_operation(src_view->manager->get_instance().id,
-                                      dst_view->manager->get_instance().id,
-                                      src_node->handle.index_space.id,
-                                      src_node->handle.field_space.id,
-                                      src_node->handle.tree_id,
-                                      copy_pre, result, src_req.redop,
-                                      field_mask);
-        free(field_mask);
-      }
-#endif
-#endif
 #ifdef DEBUG_PERF
       end_perf_trace(Internal::perf_trace_tolerance);
 #endif
@@ -10136,17 +10083,38 @@ namespace LegionRuntime {
             state.dirty_below |= new_dirty_fields;
             state.advance_version_numbers(new_dirty_fields);
           }
-          // We already know that all the version numbers have been advanced
-          state.record_version_numbers(user.field_mask, user, version_info, 
-                                 true/*previous*/, true/*path only*/,
-                                 false/*final*/, false/*close top*/,
-                                 report_uninitialized);
+          // Check to see if we've already done a partial close
+          FieldMask partial_close = user.field_mask & state.partially_closed;
+          if (!partial_close)
+          {
+            // We already know that all the version numbers have been advanced
+            state.record_version_numbers(user.field_mask, user, version_info, 
+                                   true/*previous*/, true/*path only*/,
+                                   false/*final*/, false/*close top*/,
+                                   report_uninitialized);
+          }
+          else
+          {
+            // Partially closed fields record the current version
+            state.record_version_numbers(partial_close, user, version_info,
+                                   false/*previous*/, true/*path only*/,
+                                   false/*final*/, false/*close top*/,
+                                   report_uninitialized);
+            FieldMask non_partial = user.field_mask - partial_close;
+            if (!!non_partial)
+              state.record_version_numbers(non_partial, user, version_info,
+                                   true/*previous*/, true/*path only*/,
+                                   false/*final*/, false/*close top*/,
+                                   report_uninitialized);
+          }
         }
         else // read-only case
         {
           // See if there are any dirty fields for which we need to capture
-          // the previous version numbers
-          FieldMask dirty_overlap = user.field_mask & state.dirty_below;
+          // the previous version numbers, these are fields for which we
+          // are dirtly below, but have yet to perform a partial close
+          FieldMask dirty_overlap = 
+            user.field_mask & (state.dirty_below - state.partially_closed);
           if (!dirty_overlap)
           {
             // No dirty fields below, which means we don't have any previous
@@ -10462,17 +10430,37 @@ namespace LegionRuntime {
             state.dirty_below |= new_dirty_fields;
             state.advance_version_numbers(new_dirty_fields);
           }
-          // We already know that we advanced all the version numbers
-          state.record_version_numbers(user.field_mask, user, version_info,
-                                 true/*previous*/, true/*path only*/,
-                                 false/*final*/, false/*close top*/,
-                                 report_uninitialized);
+          // Check to see if we've already done a partial close
+          FieldMask partial_close = user.field_mask & state.partially_closed;
+          if (!partial_close)
+          {
+            // We already know that all the version numbers have been advanced
+            state.record_version_numbers(user.field_mask, user, version_info, 
+                                   true/*previous*/, true/*path only*/,
+                                   false/*final*/, false/*close top*/,
+                                   report_uninitialized);
+          }
+          else
+          {
+            // Partially closed fields record the current version
+            state.record_version_numbers(partial_close, user, version_info,
+                                   false/*previous*/, true/*path only*/,
+                                   false/*final*/, false/*close top*/,
+                                   report_uninitialized);
+            FieldMask non_partial = user.field_mask - partial_close;
+            if (!!non_partial)
+              state.record_version_numbers(non_partial, user, version_info,
+                                   true/*previous*/, true/*path only*/,
+                                   false/*final*/, false/*close top*/,
+                                   report_uninitialized);
+          }
         }
         else // read only case
         {
           // See if there are any dirty fields for which we need to 
           // capture the previous version numbers
-          FieldMask dirty_overlap = user.field_mask & state.dirty_below;
+          FieldMask dirty_overlap = 
+            user.field_mask & (state.dirty_below - state.partially_closed);
           if (!dirty_overlap)
           {
             // No dirty fields below, so we don't need to 
@@ -10653,6 +10641,7 @@ namespace LegionRuntime {
                                  next_child, false/*allow next*/,
                                  false/*upgrade*/, false/*leave open*/,
                                  false/*read only close*/,
+                                 //(it->open_state == OPEN_READ_ONLY),
                                  false/*record close operations*/,
                                  false/*record closed fields*/,
                                  dummy_states, already_open);
@@ -10683,7 +10672,8 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     void RegionTreeNode::close_logical_node(LogicalCloser &closer,
                                             const FieldMask &closing_mask,
-                                            bool permit_leave_open)
+                                            bool permit_leave_open,
+                                            bool read_only_close)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_PERF
@@ -10715,7 +10705,7 @@ namespace LegionRuntime {
                                  ColorPoint()/*next child*/,
                                  false/*allow next*/, false/*upgrade*/,
                                  permit_leave_open,
-                                 false/*read only close*/,
+                                 read_only_close,
                                  false/*record close operations*/,
                                  false/*record closed fields*/,
                                  new_states, already_open);
@@ -10728,8 +10718,10 @@ namespace LegionRuntime {
       // Merge any new field states
       merge_new_field_states(state, new_states);
       // Record the version numbers that we need
-      closer.record_version_numbers(this, state, 
-                                    closing_mask, permit_leave_open);
+      // If we're doing a read-only close, we don't need the version numbers
+      if (!read_only_close)
+        closer.record_version_numbers(this, state, 
+                                      closing_mask, permit_leave_open);
       // If we're doing a close operation, that means someone is
       // going to be writing to a region that aliases with this one
       // so we need to advance the field version. However, if we're
@@ -11155,7 +11147,8 @@ namespace LegionRuntime {
               // Otherwise we actually need to do the close
               RegionTreeNode *child_node = get_tree_child(finder->first);
               child_node->close_logical_node(closer, close_mask, 
-                                             permit_leave_open);
+                                             permit_leave_open, 
+                                             read_only_close);
               if (record_close_operations)
               {
                 closer.record_closed_child(finder->first, close_mask, 
@@ -11246,7 +11239,8 @@ namespace LegionRuntime {
           }
           // Perform the close operation
           RegionTreeNode *child_node = get_tree_child(it->first);
-          child_node->close_logical_node(closer, close_mask, permit_leave_open);
+          child_node->close_logical_node(closer, close_mask, 
+                                         permit_leave_open, read_only_close);
           if (record_close_operations)
             closer.record_closed_child(it->first, close_mask, 
                                        permit_leave_open, read_only_close);
@@ -11538,13 +11532,6 @@ namespace LegionRuntime {
       {
         if (!(it->field_mask * field_mask))
         {
-#ifdef LEGION_LOGGING
-          LegionLogging::log_mapping_dependence(
-              Processor::get_executing_processor(),
-              op->get_parent()->get_unique_task_id(),
-              it->uid, it->idx, op->get_unique_op_id(),
-              0/*idx*/, TRUE_DEPENDENCE);
-#endif
 #ifdef LEGION_SPY
           LegionSpy::log_mapping_dependence(
               op->get_parent()->get_unique_task_id(),
@@ -11574,13 +11561,6 @@ namespace LegionRuntime {
       {
         if (!(it->field_mask * field_mask))
         {
-#ifdef LEGION_LOGGING
-          LegionLogging::log_mapping_dependence(
-              Processor::get_executing_processor(),
-              op->get_parent()->get_unique_task_id(),
-              it->uid, it->idx, op->get_unique_op_id(),
-              0/*idx*/, TRUE_DEPENDENCE);
-#endif
 #ifdef LEGION_SPY
           LegionSpy::log_mapping_dependence(
               op->get_parent()->get_unique_task_id(),
@@ -13211,20 +13191,13 @@ namespace LegionRuntime {
         // Now that we've got our offsets ready, we
         // can now issue the copy to the low-level runtime
         Event copy_pre = Event::merge_events(pre_set.preconditions);
-#if defined(LEGION_LOGGING) || defined(LEGION_SPY)
+#ifdef LEGION_SPY
         if (!copy_pre.exists())
         {
           UserEvent new_copy_pre = UserEvent::create_user_event();
           new_copy_pre.trigger();
           copy_pre = new_copy_pre;
         }
-#endif
-#ifdef LEGION_LOGGING
-        LegionLogging::log_event_dependences(
-            Processor::get_executing_processor(), 
-            pre_set.preconditions, copy_pre);
-#endif
-#ifdef LEGION_SPY
         LegionSpy::log_event_dependences(pre_set.preconditions, copy_pre);
 #endif
         std::set<Event> post_events;
@@ -13235,7 +13208,7 @@ namespace LegionRuntime {
                                                  dst_fields, copy_pre));
         }
         Event copy_post = Event::merge_events(post_events);
-#if defined(LEGION_LOGGING) || defined(LEGION_SPY)
+#ifdef LEGION_SPY
         if (!copy_post.exists())
         {
           UserEvent new_copy_post = UserEvent::create_user_event();
@@ -13259,7 +13232,7 @@ namespace LegionRuntime {
           }
           postconditions[copy_post] = pre_set.set_mask;
         }
-#if defined(LEGION_SPY) || defined(LEGION_LOGGING)
+#ifdef LEGION_SPY
         IndexSpaceID index_space_id;
         if (dst->logical_node->is_region())
           index_space_id =
@@ -13271,23 +13244,6 @@ namespace LegionRuntime {
         for (LegionMap<MaterializedView*,FieldMask>::aligned::const_iterator 
               it = update_views.begin(); it != update_views.end(); it++)
         {
-#ifdef LEGION_LOGGING
-          {
-            std::set<FieldID> copy_fields;
-            RegionNode *manager_node = dst->manager->region_node;
-            manager_node->column_source->to_field_set(it->second,
-                                                      copy_fields);
-            LegionLogging::log_lowlevel_copy(
-                Processor::get_executing_processor(),
-                it->first->manager->get_instance(),
-                dst->manager->get_instance(),
-                index_space_id,
-                manager_node->column_source->handle,
-                manager_node->handle.tree_id,
-                copy_pre, copy_post, copy_fields, 0/*redop*/);
-          }
-#endif
-#ifdef LEGION_SPY
           RegionNode *manager_node = dst->manager->region_node;
           char *string_mask = 
             manager_node->column_source->to_string(it->second);
@@ -13303,7 +13259,6 @@ namespace LegionRuntime {
                 0/*redop*/, field_set);
           }
           free(string_mask);
-#endif
         }
 #endif
       }
@@ -13965,13 +13920,6 @@ namespace LegionRuntime {
               }
             case TRUE_DEPENDENCE:
               {
-#ifdef LEGION_LOGGING
-                if (dtype != PROMOTED_DEPENDENCE)
-                  LegionLogging::log_mapping_dependence(
-                      Processor::get_executing_processor(),
-                      user.op->get_parent()->get_unique_task_id(),
-                      it->uid, it->idx, user.uid, user.idx, dtype);
-#endif
 #ifdef LEGION_SPY
                 if (dtype != PROMOTED_DEPENDENCE)
                   LegionSpy::log_mapping_dependence(
@@ -13990,7 +13938,7 @@ namespace LegionRuntime {
                                                         dtype, validate,
                                                         overlap))
                 {
-#if !defined(LEGION_LOGGING) && !defined(LEGION_SPY)
+#ifndef LEGION_SPY
                   // Now we can prune it from the list and continue
                   it = prev_users.erase(it);
 #else
@@ -14024,7 +13972,7 @@ namespace LegionRuntime {
             // Otherwise reset its timeout and continue.
             if (it->op->is_operation_committed(it->gen))
             {
-#if !defined(LEGION_LOGGING) && !defined(LEGION_SPY)
+#ifndef LEGION_SPY
               it = prev_users.erase(it);
 #else
               // Can't prune things early for these cases
@@ -14237,13 +14185,6 @@ namespace LegionRuntime {
           // the closing user
           DependenceType dtype = check_dependence_type(it->usage, 
                                                      closer.user.usage);
-#ifdef LEGION_LOGGING
-          if ((dtype != NO_DEPENDENCE) && (dtype != PROMOTED_DEPENDENCE))
-            LegionLogging::log_mapping_dependence(
-                Processor::get_executing_processor(),
-                closer.user.op->get_parent()->get_unique_task_id(),
-                it->uid, it->idx, closer.user.uid, closer.user.idx, dtype);
-#endif
 #ifdef LEGION_SPY
           if ((dtype != NO_DEPENDENCE) && (dtype != PROMOTED_DEPENDENCE))
             LegionSpy::log_mapping_dependence(
@@ -14257,7 +14198,7 @@ namespace LegionRuntime {
                                                          closer.validates,
                                                          overlap))
           {
-#if !defined(LEGION_LOGGING) && !defined(LEGION_SPY)
+#ifndef LEGION_SPY
             it = users.erase(it);
             continue;
 #endif
@@ -14823,12 +14764,6 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
         assert(result != NULL);
 #endif
-#ifdef LEGION_LOGGING
-        LegionLogging::log_physical_instance(
-            Processor::get_executing_processor(),
-            manager->get_instance(), manager->memory,
-            handle.index_space, handle.field_space, handle.tree_id);
-#endif
 #ifdef LEGION_SPY
         LegionSpy::log_physical_instance(manager->get_instance().id,
             manager->memory.id, handle.index_space.id,
@@ -14863,13 +14798,6 @@ namespace LegionRuntime {
         result = manager->create_view(); 
 #ifdef DEBUG_HIGH_LEVEL
         assert(result != NULL);
-#endif
-#ifdef LEGION_LOGGING
-        LegionLogging::log_physical_instance(
-            Processor::get_executing_processor(),
-            manager->get_instance(), manager->memory,
-            handle.index_space, handle.field_space, handle.tree_id,
-            redop, !reduction_list, manager->get_pointer_space());
 #endif
 #ifdef LEGION_SPY
         Domain ptr_space = manager->get_pointer_space();

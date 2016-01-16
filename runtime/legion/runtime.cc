@@ -1,4 +1,4 @@
-/* Copyright 2015 Stanford University, NVIDIA Corporation
+/* Copyright 2016 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,7 +23,6 @@
 #include "region_tree.h"
 #include "default_mapper.h"
 #include "legion_spy.h"
-#include "legion_logging.h"
 #include "legion_profiling.h"
 #include "legion_instances.h"
 #include "legion_views.h"
@@ -457,28 +456,10 @@ namespace LegionRuntime {
       if (!ready_event.has_triggered())
       {
         Processor exec_proc = Processor::get_executing_processor();
-#ifdef LEGION_LOGGING
-        LegionLogging::log_future_wait_begin(exec_proc,
-                              producer_op->get_parent()->get_unique_task_id(),
-                              producer_op->get_unique_op_id());
-#endif
         runtime->pre_wait(exec_proc);
         ready_event.wait();
         runtime->post_wait(exec_proc);
-#ifdef LEGION_LOGGING
-        LegionLogging::log_future_wait_end(exec_proc,
-                               producer_op->get_parent()->get_unique_task_id(),
-                               producer_op->get_unique_op_id());
-#endif
       }
-#ifdef LEGION_LOGGING
-      else {
-        Processor exec_proc = Processor::get_executing_processor();
-        LegionLogging::log_future_nowait(exec_proc,
-                               producer_op->get_parent()->get_unique_task_id(),
-                               producer_op->get_unique_op_id());
-      }
-#endif
       if (empty)
       {
         if (producer_op != NULL)
@@ -499,28 +480,10 @@ namespace LegionRuntime {
       if (!ready_event.has_triggered())
       {
         Processor exec_proc = Processor::get_executing_processor();
-#ifdef LEGION_LOGGING
-        LegionLogging::log_future_wait_begin(exec_proc,
-                               producer_op->get_parent()->get_unique_task_id(),
-                               producer_op->get_unique_op_id());
-#endif
         runtime->pre_wait(exec_proc);
         ready_event.wait();
         runtime->post_wait(exec_proc);
-#ifdef LEGION_LOGGING
-        LegionLogging::log_future_wait_end(exec_proc,
-                               producer_op->get_parent()->get_unique_task_id(),
-                               producer_op->get_unique_op_id());
-#endif
       }
-#ifdef LEGION_LOGGING
-      else {
-        Processor exec_proc = Processor::get_executing_processor();
-        LegionLogging::log_future_nowait(exec_proc,
-                               prodcuer_op->get_parent()->get_unique_task_id(),
-                               producer_op->get_unique_op_id());
-      }
-#endif
       if (empty)
       {
         if (producer_op != NULL)
@@ -551,28 +514,10 @@ namespace LegionRuntime {
       if (block && !ready_event.has_triggered())
       {
         Processor exec_proc = Processor::get_executing_processor();
-#ifdef LEGION_LOGGING
-        LegionLogging::log_future_wait_begin(exec_proc,
-                               producer_op->get_parent()->get_unique_task_id(),
-                               producer_op->get_unique_op_id());
-#endif
         runtime->pre_wait(exec_proc);
         ready_event.wait();
         runtime->post_wait(exec_proc);
-#ifdef LEGION_LOGGING
-        LegionLogging::log_future_wait_end(exec_proc,
-                               producer_op->get_parent()->get_unique_task_id(),
-                               producer_op->get_unique_op_id());
-#endif
       }
-#ifdef LEGION_LOGGING
-      else if (block) {
-        Processor exec_proc = Processor::get_executing_processor();
-        LegionLogging::log_future_nowait(exec_proc,
-                               producer_op->get_parent()->get_unique_task_id(),
-                               producer_op->get_unique_op_id());
-      }
-#endif
       if (block)
         mark_sampled();
       return empty;
@@ -1041,20 +986,9 @@ namespace LegionRuntime {
         if (!ready_event.has_triggered())
         {
           Processor proc = context->get_executing_processor();
-#ifdef LEGION_LOGGING
-          Processor exec_proc = Processor::get_executing_processor();
-          LegionLogging::log_future_wait_begin(exec_proc,
-                                          context->get_unique_task_id(),
-                                          task->get_unique_task_id());
-#endif
           runtime->pre_wait(proc);
           ready_event.wait();
           runtime->post_wait(proc);
-#ifdef LEGION_LOGGING
-          LegionLogging::log_future_wait_end(exec_proc,
-                                          context->get_unique_task_id(),
-                                          task->get_unique_task_id());
-#endif
         }
       }
     }
@@ -1179,39 +1113,15 @@ namespace LegionRuntime {
         // wait on this value which will pre-empt the
         // executing tasks
         Processor proc = context->get_executing_processor();
-#ifdef LEGION_LOGGING
-        LegionLogging::log_inline_wait_begin(proc,
-                                             context->get_unique_task_id(),
-                                             ready_event);
-#endif
         runtime->pre_wait(proc);
         ready_event.wait();
         runtime->post_wait(proc);
-#ifdef LEGION_LOGGING
-        LegionLogging::log_inline_wait_end(proc,
-                                           context->get_unique_task_id(),
-                                           ready_event);
-#endif
       }
-#ifdef LEGION_LOGGING
-      else
-      {
-        Processor proc = context->get_executing_processor();
-        LegionLogging::log_inline_nowait(proc,
-                                         context->get_unique_task_id(),
-                                         ready_event);
-      }
-#endif
       // Now wait for the reference to be ready
       Event ref_ready = reference.get_ready_event();
       if (!ref_ready.has_triggered())
       {
         Processor proc = context->get_executing_processor();
-#ifdef LEGION_LOGGING
-        LegionLogging::log_inline_wait_begin(proc,
-                                             context->get_unique_task_id(),
-                                             ref_ready);
-#endif
         runtime->pre_wait(proc);
         // If we need a lock for this instance taken it
         // once the reference event is ready, we can also issue
@@ -1233,21 +1143,7 @@ namespace LegionRuntime {
         else
           ref_ready.wait();
         runtime->post_wait(proc);
-#ifdef LEGION_LOGGING
-        LegionLogging::log_inline_wait_end(proc,
-                                           context->get_unique_task_id(),
-                                           ref_ready);
-#endif
       }
-#ifdef LEGION_LOGGING
-      else
-      {
-        Processor proc = context->get_executing_processor();
-        LegionLogging::log_inline_nowait(proc,
-                                         context->get_unique_task_id(),
-                                         ref_ready);
-      }
-#endif
       valid = true;
     }
 
@@ -1707,8 +1603,7 @@ namespace LegionRuntime {
         superscalar_width(width), 
         stealing_disabled(no_steal), max_outstanding_steals(max_steals),
         next_local_index(0),
-        task_scheduler_enabled(false), pending_shutdown(false),
-        total_active_contexts(0),
+        task_scheduler_enabled(false), total_active_contexts(0),
         ready_queues(std::vector<std::list<TaskOp*> >(def_mappers)),
         mapper_objects(std::vector<Mapper*>(def_mappers,NULL)),
         mapper_locks(
@@ -1738,8 +1633,7 @@ namespace LegionRuntime {
         proc_kind(Processor::LOC_PROC),
         superscalar_width(0), stealing_disabled(false), 
         max_outstanding_steals(0), next_local_index(0),
-        task_scheduler_enabled(false), pending_shutdown(false),
-        total_active_contexts(0)
+        task_scheduler_enabled(false), total_active_contexts(0)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -2368,7 +2262,7 @@ namespace LegionRuntime {
       // Now re-take the lock and re-check the condition to see 
       // if the next scheduling task should be launched
       AutoLock q_lock(queue_lock);
-      if (!pending_shutdown && (total_active_contexts > 0))
+      if (total_active_contexts > 0)
       {
         task_scheduler_enabled = true;
         launch_task_scheduler();
@@ -2387,14 +2281,6 @@ namespace LegionRuntime {
       runtime->issue_runtime_meta_task(&sched_args, sizeof(sched_args),
                                        HLR_SCHEDULER_ID);
     } 
-
-    //--------------------------------------------------------------------------
-    void ProcessorManager::notify_pending_shutdown(void)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock q_lock(queue_lock);
-      pending_shutdown = true;
-    }
 
     //--------------------------------------------------------------------------
     void ProcessorManager::activate_context(SingleTask *context)
@@ -3990,10 +3876,18 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void ShutdownManager::record_outstanding_tasks(void)
+    //--------------------------------------------------------------------------
+    {
+      // Instant death
+      result = false;
+    }
+
+    //--------------------------------------------------------------------------
     void ShutdownManager::finalize(void)
     //--------------------------------------------------------------------------
     {
-      if (result)
+      if (result && !managers.empty())
       {
         // Check our managers for messages
         for (std::map<AddressSpaceID,MessageManager*>::const_iterator it = 
@@ -4019,8 +3913,8 @@ namespace LegionRuntime {
       else
       {
         // We failed, so try again
-        runtime->initiate_runtime_shutdown(runtime->address_space);
-        log_shutdown.info("FAILED!  Trying again...");
+        log_shutdown.info("FAILED SHUTDOWN!  Trying again...");
+        runtime->issue_runtime_shutdown_attempt();
       }
     }
 
@@ -4138,7 +4032,8 @@ namespace LegionRuntime {
         runtime_stride(address_spaces.size()), profiler(NULL),
         forest(new RegionTreeForest(this)), 
         has_explicit_utility_procs(!local_utilities.empty()), 
-        outstanding_top_level_tasks(1), shutdown_manager(NULL),
+        total_outstanding_tasks(0), outstanding_top_level_tasks(0), 
+        shutdown_manager(NULL),
         shutdown_lock(Reservation::create_reservation()),
 #ifdef SPECIALIZED_UTIL_PROCS
         cleanup_proc(cleanup), gc_proc(gc), message_proc(message),
@@ -4199,14 +4094,6 @@ namespace LegionRuntime {
     {
       log_run.debug("Initializing high-level runtime in address space %x",
                             address_space);
-#ifdef LEGION_LOGGING
-      // Initialize a logger if we have one
-      {
-        std::set<Processor> all_locals(local_procs.begin(), local_procs.end());
-        all_locals.insert(local_utils.begin(), local_utils.end());
-        LegionLogging::initialize_legion_logging(unique, all_locals);
-      }
-#endif
       // Construct a local utility processor group
       if (local_utils.empty())
       {
@@ -4367,14 +4254,6 @@ namespace LegionRuntime {
     Internal::~Internal(void)
     //--------------------------------------------------------------------------
     {
-#ifdef LEGION_LOGGING
-      {
-        std::set<Processor> all_procs;
-        all_procs.insert(local_procs.begin(), local_procs.end());
-        all_procs.insert(local_utils.begin(), local_utils.end());
-        LegionLogging::finalize_legion_logging(all_procs);
-      }
-#endif
       if (profiler != NULL)
       {
         profiler->finalize();
@@ -4783,9 +4662,6 @@ namespace LegionRuntime {
       // the local processors
       if ((address_space == 0) && (proc == *(local_procs.begin())))
       {
-#ifdef LEGION_LOGGING
-        perform_one_time_logging();
-#endif
         // Get an individual task to be the top-level task
         IndividualTask *top_task = get_available_individual_task(false);
         // Get a remote task to serve as the top of the top-level task
@@ -4808,16 +4684,13 @@ namespace LegionRuntime {
 #endif
         proc_managers[proc]->invoke_mapper_set_task_options(top_task);
         invoke_mapper_configure_context(proc, top_task);
-#ifdef LEGION_LOGGING
-        LegionLogging::log_top_level_task(Internal::legion_main_id,
-                                          top_task->get_unique_task_id());
-#endif
 #ifdef LEGION_SPY
         Internal::log_machine(machine);
         LegionSpy::log_top_level_task(Internal::legion_main_id,
                                       top_task->get_unique_task_id(),
                                       top_task->variants->name);
 #endif
+        increment_outstanding_top_level_tasks();
         // Put the task in the ready queue
         add_to_ready_queue(proc, top_task, false/*prev failure*/);
       }
@@ -4871,77 +4744,6 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Internal::perform_one_time_logging(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef LEGION_LOGGING
-      // First log information about the machine 
-      std::set<Processor> all_procs;
-      machine.get_all_processors(all_procs);
-      // Log all the memories
-      std::set<Memory> all_mems;
-      machine.get_all_memories(all_mems);
-      for (std::set<Memory>::const_iterator it = all_mems.begin();
-            it != all_mems.end(); it++)
-      {
-        Memory::Kind kind = (*it).kind();
-        size_t mem_size = (*it).capacity();
-        LegionLogging::log_memory(*it, kind, mem_size);
-      }
-      // Log processor-memory affinities
-      for (std::set<Processor>::const_iterator pit = all_procs.begin();
-            pit != all_procs.end(); pit++)
-      {
-        std::vector<ProcessorMemoryAffinity> affinities;
-        machine.get_proc_mem_affinity(affinities, *pit);
-        for (std::vector<ProcessorMemoryAffinity>::const_iterator it = 
-              affinities.begin(); it != affinities.end(); it++)
-        {
-          LegionLogging::log_proc_mem_affinity(*pit, it->m,
-                                               it->bandwidth,
-                                               it->latency);
-        }
-      }
-      // Log Mem-Mem Affinity
-      for (std::set<Memory>::const_iterator mit = all_mems.begin();
-            mit != all_mems.begin(); mit++)
-      {
-        std::vector<MemoryMemoryAffinity> affinities;
-        machine.get_mem_mem_affinity(affinities, *mit);
-        for (std::vector<MemoryMemoryAffinity>::const_iterator it = 
-              affinities.begin(); it != affinities.end(); it++)
-        {
-          LegionLogging::log_mem_mem_affinity(it->m1, it->m2,
-                                              it->bandwidth,
-                                              it->latency);
-        }
-      }
-      // Log information about tasks and their variants
-      const std::map<Processor::TaskFuncID,TaskVariantCollection*> &table = 
-        Internal::get_collection_table();
-      for (std::map<Processor::TaskFuncID,TaskVariantCollection*>::
-            const_iterator it = table.begin(); it != table.end(); it++)
-      {
-        // Leaf task properties are now on variants and not collections
-        LegionLogging::log_task_collection(it->first, false/*leaf*/,
-                                           it->second->idempotent,
-                                           it->second->name);
-        const std::map<VariantID,TaskVariantCollection::Variant> &all_vars = 
-                                          it->second->get_all_variants();
-        for (std::map<VariantID,TaskVariantCollection::Variant>::const_iterator 
-              vit = all_vars.begin(); vit != all_vars.end(); vit++)
-        {
-          LegionLogging::log_task_variant(it->first,
-                                          vit->second.proc_kind,
-                                          vit->second.single_task,
-                                          vit->second.index_space,
-                                          vit->first);
-        }
-      }
-#endif
-    }
-
-    //--------------------------------------------------------------------------
     IndexSpace Internal::create_index_space(Context ctx, size_t max_num_elmts)
     //--------------------------------------------------------------------------
     {
@@ -4965,10 +4767,6 @@ namespace LegionRuntime {
         assert(false);
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
-#endif
-#ifdef LEGION_LOGGING
-      LegionLogging::log_top_index_space(ctx->get_executing_processor(),
-                                         handle);
 #endif
 #ifdef LEGION_SPY
       LegionSpy::log_top_index_space(handle.id);
@@ -5008,10 +4806,6 @@ namespace LegionRuntime {
         assert(false);
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
-#endif
-#ifdef LEGION_LOGGING
-      LegionLogging::log_top_index_space(ctx->get_executing_processor(),
-                                         handle);
 #endif
 #ifdef LEGION_SPY
       LegionSpy::log_top_index_space(handle.id);
@@ -5115,10 +4909,6 @@ namespace LegionRuntime {
                             "(ID %lld) for domain", 
                             handle.id, ctx->variants->name,
                             ctx->get_unique_task_id());
-#endif
-#ifdef LEGION_LOGGING
-      LegionLogging::log_top_index_space(ctx->get_executing_processor(),
-                                         handle);
 #endif
 #ifdef LEGION_SPY
       LegionSpy::log_top_index_space(handle.id);
@@ -5385,19 +5175,6 @@ namespace LegionRuntime {
                                      new_index_spaces, color_space,
                                      disjoint ? DISJOINT_KIND : ALIASED_KIND,
                                      MUTABLE);
-#ifdef LEGION_LOGGING
-      part_color = forest->get_index_partition_color(pid);
-      LegionLogging::log_index_partition(ctx->get_executing_processor(),
-                                         parent, pid, disjoint,
-                                         part_color);
-      for (std::map<ColorPoint,Domain>::const_iterator it = 
-            new_index_spaces.begin(); it != new_index_spaces.end(); it++)
-      {
-        LegionLogging::log_index_subspace(ctx->get_executing_processor(),
-                                          pid, it->second.get_index_space(),
-                                          it->first.get_index());
-      }
-#endif
       return pid;
     }
 
@@ -5500,20 +5277,6 @@ namespace LegionRuntime {
                                      new_subspaces, color_space,
                                      disjoint ? DISJOINT_KIND : ALIASED_KIND,
                                      NO_MEMORY);
-#ifdef LEGION_LOGGING
-      part_color = forest->get_index_partition_color(pid);
-      LegionLogging::log_index_partition(ctx->get_executing_processor(),
-                                         parent, pid, disjoint,
-                                         part_color);
-      for (std::map<Color,Domain>::const_iterator it = 
-            coloring.begin(); it != coloring.end(); it++)
-      {
-        IndexSpace subspace = get_index_subspace(ctx, pid, it->first);
-        LegionLogging::log_index_subspace(ctx->get_executing_processor(),
-                                          pid, subspace,
-                                          it->first);
-      }
-#endif 
       return pid;
     }
 
@@ -5631,20 +5394,6 @@ namespace LegionRuntime {
                                      color_space,
                                      disjoint ? DISJOINT_KIND : ALIASED_KIND,
                                      NO_MEMORY);
-#ifdef LEGION_LOGGING
-      part_color = forest->get_index_partition_color(pid);
-      LegionLogging::log_index_partition(ctx->get_executing_processor(),
-                                         parent, pid, disjoint,
-                                         part_color);
-      for (std::map<Color,std::set<Domain> >::const_iterator it = 
-            coloring.begin(); it != coloring.end(); it++)
-      {
-        IndexSpace subspace = get_index_subspace(ctx, pid, it->first);
-        LegionLogging::log_index_subspace(ctx->get_executing_processor(),
-                                          pid, subspace,
-                                          it->first);
-      }
-#endif 
       return pid;
     }
 
@@ -5759,19 +5508,6 @@ namespace LegionRuntime {
       forest->create_index_partition(pid, parent, partition_color,
                                      new_index_spaces, color_space,
                                      DISJOINT_KIND, MUTABLE);
-#ifdef LEGION_LOGGING
-      part_color = forest->get_index_partition_color(pid);
-      LegionLogging::log_index_partition(ctx->get_executing_processor(),
-                                         parent, pid, true/*disjoint*/,
-                                         part_color);
-      for (std::map<DomainPoint,Domain>::const_iterator it = 
-            new_index_spaces.begin(); it != new_index_spaces.end(); it++)
-      {
-        IndexSpace subspace = get_index_subspace(ctx, pid, it->first);
-        LegionLogging::log_index_subspace(ctx->get_executing_processor(),
-                                          pid, subspace, it->first);
-      }
-#endif
       return pid;
     }
 
@@ -6556,19 +6292,9 @@ namespace LegionRuntime {
         Event mapped_event = Event::merge_events(mapped_events);
         if (!mapped_event.has_triggered())
         {
-#ifdef LEGION_LOGGING
-          LegionLogging::log_inline_wait_begin(proc,
-                                               ctx->get_unique_task_id(), 
-                                               mapped_event);
-#endif
           pre_wait(proc);
           mapped_event.wait();
           post_wait(proc);
-#ifdef LEGION_LOGGING
-          LegionLogging::log_inline_wait_end(proc,
-                                             ctx->get_unique_task_id(),
-                                             mapped_event);
-#endif
         }
       }
 #ifdef INORDER_EXECUTION
@@ -6654,19 +6380,9 @@ namespace LegionRuntime {
         Event mapped_event = Event::merge_events(mapped_events);
         if (!mapped_event.has_triggered())
         {
-#ifdef LEGION_LOGGING
-          LegionLogging::log_inline_wait_begin(proc,
-                                               ctx->get_unique_task_id(), 
-                                               mapped_event);
-#endif
           pre_wait(proc);
           mapped_event.wait();
           post_wait(proc);
-#ifdef LEGION_LOGGING
-          LegionLogging::log_inline_wait_end(proc,
-                                             ctx->get_unique_task_id(),
-                                             mapped_event);
-#endif
         }
       }
 #ifdef INORDER_EXECUTION
@@ -6753,19 +6469,9 @@ namespace LegionRuntime {
         Event mapped_event = Event::merge_events(mapped_events);
         if (!mapped_event.has_triggered())
         {
-#ifdef LEGION_LOGGING
-          LegionLogging::log_inline_wait_begin(proc,
-                                               ctx->get_unique_task_id(), 
-                                               mapped_event);
-#endif
           pre_wait(proc);
           mapped_event.wait();
           post_wait(proc);
-#ifdef LEGION_LOGGING
-          LegionLogging::log_inline_wait_end(proc,
-                                             ctx->get_unique_task_id(),
-                                             mapped_event);
-#endif
         }
       }
 #ifdef INORDER_EXECUTION
@@ -7519,9 +7225,6 @@ namespace LegionRuntime {
 #endif
       forest->create_field_space(space);
       ctx->register_field_space_creation(space);
-#ifdef LEGION_LOGGING
-      LegionLogging::log_field_space(ctx->get_executing_processor(), space);
-#endif
       return space;
     }
 
@@ -7646,10 +7349,6 @@ namespace LegionRuntime {
 #endif
 #ifdef LEGION_SPY
       LegionSpy::log_top_region(index_space.id, field_space.id, tid);
-#endif
-#ifdef LEGION_LOGGING
-      LegionLogging::log_top_region(ctx->get_executing_processor(),
-                                    index_space, field_space, tid);
 #endif
       forest->create_logical_region(region);
       // Register the creation of a top-level region with the context
@@ -8807,27 +8506,10 @@ namespace LegionRuntime {
         Event mapped_event = Event::merge_events(mapped_events);
         if (!mapped_event.has_triggered())
         {
-#ifdef LEGION_LOGGING
-          LegionLogging::log_inline_wait_begin(proc,
-                                               ctx->get_unique_task_id(), 
-                                               mapped_event);
-#endif
           pre_wait(proc);
           mapped_event.wait();
           post_wait(proc);
-#ifdef LEGION_LOGGING
-          LegionLogging::log_inline_wait_end(proc,
-                                             ctx->get_unique_task_id(),
-                                             mapped_event);
-#endif
         }
-#ifdef LEGION_LOGGING
-        else {
-          LegionLogging::log_inline_nowait(proc,
-                                           ctx->get_unique_task_id(),
-                                           mapped_event);
-        }
-#endif
       }
     }
 
@@ -8904,27 +8586,10 @@ namespace LegionRuntime {
         Event mapped_event = Event::merge_events(mapped_events);
         if (!mapped_event.has_triggered())
         {
-#ifdef LEGION_LOGGING
-          LegionLogging::log_inline_wait_begin(proc,
-                                               ctx->get_unique_task_id(), 
-                                               mapped_event);
-#endif
           pre_wait(proc);
           mapped_event.wait();
           post_wait(proc);
-#ifdef LEGION_LOGGING
-          LegionLogging::log_inline_wait_end(proc,
-                                             ctx->get_unique_task_id(),
-                                             mapped_event);
-#endif
         }
-#ifdef LEGION_LOGGING
-        else {
-          LegionLogging::log_inline_nowait(proc,
-                                           ctx->get_unique_task_id(),
-                                           mapped_event);
-        }
-#endif
       }
     }
 
@@ -9003,27 +8668,10 @@ namespace LegionRuntime {
         Event mapped_event = Event::merge_events(mapped_events);
         if (!mapped_event.has_triggered())
         {
-#ifdef LEGION_LOGGING
-          LegionLogging::log_inline_wait_begin(proc,
-                                               ctx->get_unique_task_id(), 
-                                               mapped_event);
-#endif
           pre_wait(proc);
           mapped_event.wait();
           post_wait(proc);
-#ifdef LEGION_LOGGING
-          LegionLogging::log_inline_wait_end(proc,
-                                             ctx->get_unique_task_id(),
-                                             mapped_event);
-#endif
         }
-#ifdef LEGION_LOGGING
-        else {
-          LegionLogging::log_inline_nowait(proc,
-                                           ctx->get_unique_task_id(),
-                                           mapped_event);
-        }
-#endif
       }
     }
 
@@ -9101,27 +8749,10 @@ namespace LegionRuntime {
         Event mapped_event = Event::merge_events(mapped_events);
         if (!mapped_event.has_triggered())
         {
-#ifdef LEGION_LOGGING
-          LegionLogging::log_inline_wait_begin(proc,
-                                               ctx->get_unique_task_id(), 
-                                               mapped_event);
-#endif
           pre_wait(proc);
           mapped_event.wait();
           post_wait(proc);
-#ifdef LEGION_LOGGING
-          LegionLogging::log_inline_wait_end(proc,
-                                             ctx->get_unique_task_id(),
-                                             mapped_event);
-#endif
         }
-#ifdef LEGION_LOGGING
-        else {
-          LegionLogging::log_inline_nowait(proc,
-                                           ctx->get_unique_task_id(),
-                                           mapped_event);
-        }
-#endif
       }
     }
 
@@ -9439,27 +9070,10 @@ namespace LegionRuntime {
         Event mapped_event = Event::merge_events(mapped_events);
         if (!mapped_event.has_triggered())
         {
-#ifdef LEGION_LOGGING
-          LegionLogging::log_inline_wait_begin(proc,
-                                               ctx->get_unique_task_id(), 
-                                               mapped_event);
-#endif
           pre_wait(proc);
           mapped_event.wait();
           post_wait(proc);
-#ifdef LEGION_LOGGING
-          LegionLogging::log_inline_wait_end(proc,
-                                             ctx->get_unique_task_id(),
-                                             mapped_event);
-#endif
         }
-#ifdef LEGION_LOGGING
-        else {
-          LegionLogging::log_inline_nowait(proc,
-                                           ctx->get_unique_task_id(),
-                                           mapped_event);
-        }
-#endif
       }
     }
 
@@ -9954,27 +9568,10 @@ namespace LegionRuntime {
         Event mapped_event = Event::merge_events(mapped_events);
         if (!mapped_event.has_triggered())
         {
-#ifdef LEGION_LOGGING
-          LegionLogging::log_inline_wait_begin(proc,
-                                               ctx->get_unique_task_id(), 
-                                               mapped_event);
-#endif
           pre_wait(proc);
           mapped_event.wait();
           post_wait(proc);
-#ifdef LEGION_LOGGING
-          LegionLogging::log_inline_wait_end(proc,
-                                             ctx->get_unique_task_id(),
-                                             mapped_event);
-#endif
         }
-#ifdef LEGION_LOGGING
-        else {
-          LegionLogging::log_inline_nowait(proc,
-                                           ctx->get_unique_task_id(),
-                                           mapped_event);
-        }
-#endif
       }
 #ifdef INORDER_EXECUTION
       if (program_order_execution && !term_event.has_triggered())
@@ -10045,27 +9642,10 @@ namespace LegionRuntime {
         Event mapped_event = Event::merge_events(mapped_events);
         if (!mapped_event.has_triggered())
         {
-#ifdef LEGION_LOGGING
-          LegionLogging::log_inline_wait_begin(proc,
-                                               ctx->get_unique_task_id(), 
-                                               mapped_event);
-#endif
           pre_wait(proc);
           mapped_event.wait();
           post_wait(proc);
-#ifdef LEGION_LOGGING
-          LegionLogging::log_inline_wait_end(proc,
-                                             ctx->get_unique_task_id(),
-                                             mapped_event);
-#endif
         }
-#ifdef LEGION_LOGGING
-        else {
-          LegionLogging::log_inline_nowait(proc,
-                                           ctx->get_unique_task_id(),
-                                           mapped_event);
-        }
-#endif
       }
 #ifdef INORDER_EXECUTION
       if (program_order_execution && !term_event.has_triggered())
@@ -10311,28 +9891,10 @@ namespace LegionRuntime {
         Event mapped_event = Event::merge_events(mapped_events);
         if (!mapped_event.has_triggered())
         {
-#ifdef LEGION_LOGGING
-          LegionLogging::log_inline_wait_begin(proc,
-                                               ctx->get_unique_task_id(), 
-                                               mapped_event);
-#endif
           pre_wait(proc);
           mapped_event.wait();
           post_wait(proc);
-#ifdef LEGION_LOGGING
-          LegionLogging::log_inline_wait_end(proc,
-                                             ctx->get_unique_task_id(),
-                                             mapped_event);
-#endif
         }
-#ifdef LEGION_LOGGING
-        else
-        {
-          LegionLogging::log_inline_nowait(proc,
-                                           ctx->get_unique_task_id(), 
-                                           mapped_event);
-        }
-#endif
       }
 #ifdef INORDER_EXECUTION
       if (program_order_execution)
@@ -10763,10 +10325,6 @@ namespace LegionRuntime {
 #ifdef LEGION_SPY
       LegionSpy::log_field_creation(space.id, fid);
 #endif
-#ifdef LEGION_LOGGING
-      LegionLogging::log_field_creation(ctx->get_executing_processor(),
-                                        space, fid, local);
-#endif
       if (local)
         ctx->add_local_field(space, fid, field_size, serdez_id);
       else
@@ -10846,10 +10404,6 @@ namespace LegionRuntime {
 #ifdef LEGION_SPY
         LegionSpy::log_field_creation(space.id, resulting_fields[idx]);
 #endif
-#ifdef LEGION_LOGGING
-        LegionLogging::log_field_creation(ctx->get_executing_processor(),
-                                          space, resulting_fields[idx], local);
-#endif
       }
       if (local)
         ctx->add_local_fields(space, resulting_fields, sizes, serdez_id);
@@ -10911,6 +10465,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       ctx->end_task(result, result_size, owned);
+      decrement_total_outstanding_tasks();
     }
 
     //--------------------------------------------------------------------------
@@ -12632,6 +12187,29 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void Internal::handle_top_level_task_request(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(address_space == 0); // should only happen on node 0
+#endif
+      UserEvent to_trigger;
+      derez.deserialize(to_trigger);
+      increment_outstanding_top_level_tasks();
+      to_trigger.trigger();
+    }
+
+    //--------------------------------------------------------------------------
+    void Internal::handle_top_level_task_complete(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(address_space == 0); // should only happen on node 0
+#endif
+      decrement_outstanding_top_level_tasks();
+    }
+
+    //--------------------------------------------------------------------------
     void Internal::handle_shutdown_notification(AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -12707,12 +12285,6 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(local_procs.find(proc) != local_procs.end());
 #endif
-#ifdef LEGION_LOGGING
-      // Note we can't actually trust the 'proc' variable here since
-      // it may be the utility processor making this call
-      LegionLogging::log_timing_event(Processor::get_executing_processor(),
-                                      0/*unique id*/, BEGIN_SCHEDULING);
-#endif
       log_run.debug("Running scheduler on processor " IDFMT "", proc.id);
       ProcessorManager *manager = proc_managers[proc];
       manager->perform_scheduling();
@@ -12721,10 +12293,6 @@ namespace LegionRuntime {
         __sync_fetch_and_add(&allocation_tracing_count,1); 
       if ((trace_count % TRACE_ALLOCATION_FREQUENCY) == 0)
         dump_allocation_info();
-#endif
-#ifdef LEGION_LOGGING
-      LegionLogging::log_timing_event(Processor::get_executing_processor(),
-                                      0/*unique id*/, END_SCHEDULING);
 #endif
     }
 
@@ -12823,28 +12391,10 @@ namespace LegionRuntime {
           Event mapped_event = Event::merge_events(mapped_events);
           if (!mapped_event.has_triggered())
           {
-#ifdef LEGION_LOGGING
-            LegionLogging::log_inline_wait_begin(proc,
-                                                 ctx->get_unique_task_id(), 
-                                                 mapped_event);
-#endif
             pre_wait(proc);
             mapped_event.wait();
             post_wait(proc);
-#ifdef LEGION_LOGGING
-            LegionLogging::log_inline_wait_end(proc,
-                                               ctx->get_unique_task_id(),
-                                               mapped_event);
-#endif
           }
-#ifdef LEGION_LOGGING
-          else
-          {
-            LegionLogging::log_inline_nowait(proc,
-                                             ctx->get_unique_task_id(), 
-                                             mapped_event);
-          }
-#endif
         }
       }
     }
@@ -13285,6 +12835,10 @@ namespace LegionRuntime {
                                            Processor target)
     //--------------------------------------------------------------------------
     {
+      // If this is not a task directly related to shutdown, 
+      // then increment the number of outstanding tasks
+      if (tid < HLR_SHUTDOWN_ATTEMPT_TASK_ID)
+        increment_total_outstanding_tasks();
       if (!target.exists())
       {
         // If we don't have a processor to explicitly target, figure
@@ -13430,7 +12984,7 @@ namespace LegionRuntime {
     void Internal::recycle_distributed_id(DistributedID did,Event recycle_event)
     //--------------------------------------------------------------------------
     {
-      if (recycle_event.exists())
+      if (!recycle_event.has_triggered())
       {
         DeferredRecycleArgs deferred_recycle_args;
         deferred_recycle_args.hlr_id = HLR_DEFERRED_RECYCLE_ID;
@@ -13617,32 +13171,73 @@ namespace LegionRuntime {
     void Internal::increment_outstanding_top_level_tasks(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
-#ifndef NDEBUG
-      unsigned previous = 
-#endif
-#endif
-      __sync_fetch_and_add(&outstanding_top_level_tasks,1);
-#ifdef DEBUG_HIGH_LEVEL
-      assert(previous > 0);
-#endif
+      // Check to see if we are on node 0 or not
+      if (address_space != 0)
+      {
+        // Send a message to node 0 requesting permission to 
+        // lauch a new top-level task and wait on an event
+        // to signal that permission has been granted
+        UserEvent grant_event = UserEvent::create_user_event();
+        Serializer rez;
+        rez.serialize(grant_event);
+        find_messenger(0)->send_message(rez, SEND_TOP_LEVEL_TASK_REQUEST,
+                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+        grant_event.wait();
+      }
+      else
+      {
+        __sync_fetch_and_add(&outstanding_top_level_tasks,1);
+      }
     }
 
     //--------------------------------------------------------------------------
     void Internal::decrement_outstanding_top_level_tasks(void)
     //--------------------------------------------------------------------------
     {
-      unsigned previous = __sync_fetch_and_sub(&outstanding_top_level_tasks,1);
-#ifdef DEBUG_HIGH_LEVEL
-      assert(previous > 0);
-#endif
-      // If there was only one left before, we're now at zero so we're done
-      if (previous == 1)
+      // Check to see if we are on node 0 or not
+      if (address_space != 0)
       {
-        log_run.spew("Computation has terminated. "
-                     "Shutting down the Legion runtime...");
-        initiate_runtime_shutdown(address_space);
+        // Send a message to node 0 indicating that we finished
+        // executing a top-level task
+        Serializer rez;
+        find_messenger(0)->send_message(rez, SEND_TOP_LEVEL_TASK_COMPLETE,
+                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
       }
+      else
+      {
+        unsigned prev = __sync_fetch_and_sub(&outstanding_top_level_tasks,1);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(prev > 0);
+#endif
+        // Check to see if we have no more outstanding top-level tasks
+        // If we don't launch a task to handle the try to shutdown the runtime 
+        if (prev == 1)
+          issue_runtime_shutdown_attempt();
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void Internal::issue_runtime_shutdown_attempt(void)
+    //--------------------------------------------------------------------------
+    {
+      HLRTaskID hlr_id = HLR_SHUTDOWN_ATTEMPT_TASK_ID; 
+      // Issue this with a low priority so that other meta-tasks
+      // have an opportunity to run
+      issue_runtime_meta_task(&hlr_id, sizeof(hlr_id), hlr_id, NULL,
+                              Event::NO_EVENT, INT_MIN);
+    }
+
+    //--------------------------------------------------------------------------
+    void Internal::attempt_runtime_shutdown(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(address_space == 0); // should only happen on node 0
+#endif
+      // As long as we still don't have any top-level tasks, 
+      // keep trying to shutdown the runtime
+      if (__sync_fetch_and_add(&outstanding_top_level_tasks,0) == 0)
+        initiate_runtime_shutdown(address_space);
     }
 
     //--------------------------------------------------------------------------
@@ -13651,14 +13246,8 @@ namespace LegionRuntime {
     {
       log_shutdown.info("Received notification on node %d from node %d",
                         address_space, source);
-      // Tell all the processor managers that there is a pending shutdown
-      for (std::map<Processor,ProcessorManager*>::const_iterator it = 
-            proc_managers.begin(); it != proc_managers.end(); it++)
-      {
-        it->second->notify_pending_shutdown();
-      }
       // Launch our last garbage collection epoch and wait for it to
-      // finish so that we know all messages have been enqueued
+      // finish so we can try to have no outstanding tasks
       Event gc_done = Event::NO_EVENT;
       {
         AutoLock gc(gc_epoch_lock);
@@ -13670,16 +13259,25 @@ namespace LegionRuntime {
       }
       if (!gc_done.has_triggered())
         gc_done.wait();
-      // Count the number of valid message managers
       ShutdownManager *local_manager = 
         new ShutdownManager(this, source, message_managers[source]);
-      for (unsigned idx = 0; idx < MAX_NUM_NODES; idx++)
+      // First check to see if we have any outstanding tasks
+      // which means we are definitely not done
+      if (!has_outstanding_tasks())
       {
-        if (idx == source)
-          continue;
-        if (message_managers[idx] != NULL)
-          local_manager->add_manager(idx, message_managers[idx]);
+        // If we don't have any outstanding tasks then we
+        // need to figure out which managers we have
+        for (unsigned idx = 0; idx < MAX_NUM_NODES; idx++)
+        {
+          if (idx == source)
+            continue;
+          if (message_managers[idx] != NULL)
+            local_manager->add_manager(idx, message_managers[idx]);
+        }
       }
+      else
+        local_manager->record_outstanding_tasks();
+
       // Check to see if we have any remote nodes
       if (local_manager->has_managers())
       {
@@ -13707,13 +13305,16 @@ namespace LegionRuntime {
       }
       else
       {
-        // Check to see if we are on the owner node or not
-        if (source != address_space)
-          local_manager->send_response();
-        else // local node so just shutdown now
-          RealmRuntime::get_runtime().shutdown();
+        local_manager->finalize();
         delete local_manager;
       }
+    }
+
+    //--------------------------------------------------------------------------
+    bool Internal::has_outstanding_tasks(void)
+    //--------------------------------------------------------------------------
+    {
+      return (__sync_fetch_and_add(&total_outstanding_tasks,0) != 0);
     }
 
     //--------------------------------------------------------------------------
@@ -17036,6 +16637,11 @@ namespace LegionRuntime {
                           req_args->tag, req_args->source);
             break;
           }
+        case HLR_SHUTDOWN_ATTEMPT_TASK_ID:
+          {
+            Internal::get_runtime(p)->attempt_runtime_shutdown();
+            break;
+          }
         case HLR_SHUTDOWN_NOTIFICATION_TASK_ID:
           {
             ShutdownManager::NotificationArgs *notification_args = 
@@ -17060,6 +16666,8 @@ namespace LegionRuntime {
         default:
           assert(false); // should never get here
       }
+      if (tid < HLR_SHUTDOWN_ATTEMPT_TASK_ID)
+        Internal::get_runtime(p)->decrement_total_outstanding_tasks();
     }
 
     //--------------------------------------------------------------------------

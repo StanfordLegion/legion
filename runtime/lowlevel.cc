@@ -1,4 +1,4 @@
-/* Copyright 2015 Stanford University, NVIDIA Corporation
+/* Copyright 2016 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -248,10 +248,6 @@ namespace LegionRuntime {
 	gasnet_barrier();
       }
     }
-
-#ifdef NODE_LOGGING
-    /*static*/ const char* RuntimeImpl::prefix = ".";
-#endif
 
 #if 0
     size_t IndexSpaceImpl::instance_size(const ReductionOpUntyped *redop /*= 0*/, off_t list_size /*= -1*/)

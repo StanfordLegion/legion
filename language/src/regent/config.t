@@ -1,4 +1,4 @@
--- Copyright 2015 Stanford University
+-- Copyright 2016 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@ local default_options = {
   ["bounds-checks"] = false,
   ["cached-iterators"] = false,
   ["cuda"] = true,
+  ["debug"] = false,
   ["no-dynamic-branches"] = true,
   ["no-dynamic-branches-assert"] = false,
   ["index-launches"] = true,

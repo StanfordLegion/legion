@@ -1,5 +1,5 @@
-/* Copyright 2015 Stanford University, NVIDIA Corporation
- * Copyright 2015 Los Alamos National Laboratory
+/* Copyright 2016 Stanford University, NVIDIA Corporation
+ * Copyright 2016 Los Alamos National Laboratory
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -41,12 +41,6 @@
 } while(0)
 
 using namespace LegionRuntime::Accessor;
-
-#ifdef LEGION_LOGGING
-#include "legion_logging.h"
-
-using namespace LegionRuntime::HighLevel::LegionLogging;
-#endif
 
 #include "atomics.h"
 
@@ -408,21 +402,17 @@ namespace LegionRuntime {
 	domain(_domain), oas_by_inst(_oas_by_inst),
 	before_copy(_before_copy)
     {
-      log_dma.info("dma request %p created - " IDFMT "[%zd]->" IDFMT "[%zd]:%d (+%zd) (" IDFMT ") " IDFMT "/%d " IDFMT "/%d",
-		   this,
-		   oas_by_inst->begin()->first.first.id, 
-		   oas_by_inst->begin()->second[0].src_offset,
-		   oas_by_inst->begin()->first.second.id, 
-		   oas_by_inst->begin()->second[0].dst_offset,
-		   oas_by_inst->begin()->second[0].size,
-		   oas_by_inst->begin()->second.size() - 1,
-		   domain.is_id,
-		   before_copy.id, before_copy.gen,
-		   get_finish_event().id, get_finish_event().gen);
-
-#ifdef LEGION_LOGGING
-      log_timing_event(Processor::NO_PROC, after_copy, COPY_INIT);
-#endif
+      log_dma.info() << "dma request " << (void *)this << " created - is="
+		     << domain << " before=" << before_copy << " after=" << get_finish_event();
+      for(OASByInst::const_iterator it = oas_by_inst->begin();
+	  it != oas_by_inst->end();
+	  it++)
+	for(OASVec::const_iterator it2 = it->second.begin();
+	    it2 != it->second.end();
+	    it2++)
+	  log_dma.info() << "dma request " << (void *)this << " field: " <<
+	    it->first.first << "[" << it2->src_offset << "]->" <<
+	    it->first.second << "[" << it2->dst_offset << "] size=" << it2->size;
     }
  
     CopyRequest::~CopyRequest(void)
@@ -625,10 +615,6 @@ namespace LegionRuntime {
 	// </NEWDMA>
 	assert(rq != 0);
 	log_dma.info("request %p enqueued", this);
-
-#ifdef LEGION_LOGGING
-	log_timing_event(Processor::NO_PROC, after_copy, COPY_READY);
-#endif
 
 	// once we're enqueued, we may be deleted at any time, so no more
 	//  references
@@ -3480,40 +3466,10 @@ namespace LegionRuntime {
       }
     }
 
-#ifdef LEGION_LOGGING
-    class CopyCompletionLogger : public EventWaiter {
-    public:
-      CopyCompletionLogger(Event _event) : event(_event) {}
-
-      virtual ~CopyCompletionLogger(void) { }
-
-      virtual bool event_triggered(void)
-      {
-	log_timing_event(Processor::NO_PROC, event, COPY_END);
-	return true;
-      }
-
-      virtual void print_info(FILE *f)
-      {
-	fprintf(f,"copy completion logger - " IDFMT "/%d\n", event.id, event.gen);
-      }
-
-    protected:
-      Event event;
-    };
-#endif
-
     void CopyRequest::perform_dma(void)
     {
       log_dma.info("request %p executing", this);
 
-#ifdef LEGION_LOGGING
-      log_timing_event(Processor::NO_PROC, after_copy, COPY_BEGIN);
-
-      // the copy might not actually finish in this thread, so set up an event waiter
-      //  to log the completion
-      EventImpl::add_waiter(after_copy, new CopyCompletionLogger(after_copy));
-#endif
       DetailedTimer::ScopedPush sp(TIME_COPY);
 
       // create a copier for the memory used by all of these instance pairs
@@ -3973,10 +3929,6 @@ namespace LegionRuntime {
 		   domain.is_id,
 		   before_copy.id, before_copy.gen,
 		   get_finish_event().id, get_finish_event().gen);
-
-#ifdef LEGION_LOGGING
-      log_timing_event(Processor::NO_PROC, after_copy, COPY_INIT);
-#endif
     }
 
     ReduceRequest::~ReduceRequest(void)
@@ -4161,10 +4113,6 @@ namespace LegionRuntime {
 	assert(rq != 0);
 	log_dma.info("request %p enqueued", this);
 
-#ifdef LEGION_LOGGING
-	log_timing_event(Processor::NO_PROC, after_copy, COPY_READY);
-#endif
-
 	// once we're enqueued, we may be deleted at any time, so no more
 	//  references
 	rq->enqueue_request(this);
@@ -4278,13 +4226,6 @@ namespace LegionRuntime {
     {
       log_dma.info("request %p executing", this);
 
-#ifdef LEGION_LOGGING
-      log_timing_event(Processor::NO_PROC, after_copy, COPY_BEGIN);
-
-      // the copy might not actually finish in this thread, so set up an event waiter
-      //  to log the completion
-      EventImpl::add_waiter(after_copy, new CopyCompletionLogger(after_copy));
-#endif
       DetailedTimer::ScopedPush sp(TIME_COPY);
 
       // code assumes a single source field for now

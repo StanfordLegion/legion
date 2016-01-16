@@ -1,4 +1,4 @@
-/* Copyright 2015 Stanford University, NVIDIA Corporation
+/* Copyright 2016 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,7 +19,6 @@
 #include "legion_tasks.h"
 #include "region_tree.h"
 #include "legion_spy.h"
-#include "legion_logging.h"
 #include "legion_profiling.h"
 #include "legion_instances.h"
 #include "legion_views.h"
@@ -37,7 +36,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     LogicalUser::LogicalUser(void)
       : GenericUser(), op(NULL), idx(0), gen(0), timeout(TIMEOUT)
-#if defined(LEGION_LOGGING) || defined(LEGION_SPY)
+#ifdef LEGION_SPY
         , uid(0)
 #endif
     //--------------------------------------------------------------------------
@@ -49,7 +48,7 @@ namespace LegionRuntime {
                              const FieldMask &m)
       : GenericUser(u, m), op(o), idx(id), 
         gen(o->get_generation()), timeout(TIMEOUT)
-#if defined(LEGION_LOGGING) || defined(LEGION_SPY)
+#ifdef LEGION_SPY
         , uid(o->get_unique_op_id())
 #endif
     //--------------------------------------------------------------------------
@@ -5374,12 +5373,14 @@ namespace LegionRuntime {
       for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
             valid_views.begin(); it != valid_views.end(); it++)
       {
-        it->first->remove_nested_gc_ref(did);
+        if (it->first->remove_nested_gc_ref(did))
+          LogicalView::delete_logical_view(it->first);
       }
       for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it = 
             reduction_views.begin(); it != reduction_views.end(); it++)
       {
-        it->first->remove_nested_gc_ref(did);
+        if (it->first->remove_nested_gc_ref(did))
+          legion_delete(it->first);
       }
     }
 

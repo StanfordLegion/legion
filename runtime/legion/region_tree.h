@@ -1,4 +1,4 @@
-/* Copyright 2015 Stanford University, NVIDIA Corporation
+/* Copyright 2016 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -1500,7 +1500,8 @@ namespace LegionRuntime {
                                  const FieldMask &closing_mask);
       void close_logical_node(LogicalCloser &closer,
                               const FieldMask &closing_mask,
-                              bool permit_leave_open);
+                              bool permit_leave_open,
+                              bool read_only_close);
       void siphon_logical_children(LogicalCloser &closer,
                                    CurrentState &state,
                                    const FieldMask &closing_mask,

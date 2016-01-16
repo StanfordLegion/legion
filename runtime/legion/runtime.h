@@ -1,4 +1,4 @@
-/* Copyright 2015 Stanford University, NVIDIA Corporation
+/* Copyright 2016 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -535,7 +535,6 @@ namespace LegionRuntime {
     public:
       void perform_scheduling(void);
       void launch_task_scheduler(void);
-      void notify_pending_shutdown(void);
     public:
       void activate_context(SingleTask *context);
       void deactivate_context(SingleTask *context);
@@ -580,7 +579,6 @@ namespace LegionRuntime {
       // Scheduling state
       Reservation queue_lock;
       bool task_scheduler_enabled;
-      bool pending_shutdown;
       unsigned total_active_contexts;
       struct ContextState {
       public:
@@ -795,6 +793,7 @@ namespace LegionRuntime {
       void send_notifications(void);
       void send_response(void);
       bool handle_response(AddressSpaceID sender, bool result);
+      void record_outstanding_tasks(void);
       void finalize(void);
     public:
       Internal *const runtime;
@@ -961,7 +960,6 @@ namespace LegionRuntime {
       Event launch_mapper_task(Mapper *mapper, Processor proc, 
                                Processor::TaskFuncID tid,
                                const TaskArgument &arg, MapperID map_id);
-      void perform_one_time_logging(void);
     public:
       IndexSpace create_index_space(Context ctx, size_t max_num_elmts);
       IndexSpace create_index_space(Context ctx, Domain domain);
@@ -1655,6 +1653,8 @@ namespace LegionRuntime {
       void handle_remote_creation_response(Deserializer &derez);
       void handle_logical_state_return(Deserializer &derez,
                                        AddressSpaceID source);
+      void handle_top_level_task_request(Deserializer &derez);
+      void handle_top_level_task_complete(Deserializer &derez);
       void handle_shutdown_notification(AddressSpaceID source);
       void handle_shutdown_response(Deserializer &derez, AddressSpaceID source);
     public:
@@ -1777,7 +1777,16 @@ namespace LegionRuntime {
     public:
       void increment_outstanding_top_level_tasks(void);
       void decrement_outstanding_top_level_tasks(void);
+    public:
+      void issue_runtime_shutdown_attempt(void);
+      void attempt_runtime_shutdown(void);
       void initiate_runtime_shutdown(AddressSpaceID source);
+    public:
+      bool has_outstanding_tasks(void);
+      inline void increment_total_outstanding_tasks(void)
+        { __sync_fetch_and_add(&total_outstanding_tasks,1); }
+      inline void decrement_total_outstanding_tasks(void)
+        { __sync_fetch_and_sub(&total_outstanding_tasks,1); }
     public:
       template<typename T>
       inline T* get_available(Reservation reservation,
@@ -1952,6 +1961,7 @@ namespace LegionRuntime {
       Processor utility_group;
       const bool has_explicit_utility_procs;
     protected:
+      unsigned total_outstanding_tasks;
       unsigned outstanding_top_level_tasks;
       ShutdownManager *shutdown_manager;
       Reservation shutdown_lock;

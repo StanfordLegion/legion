@@ -1,4 +1,4 @@
--- Copyright 2015 Stanford University
+-- Copyright 2016 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -175,6 +175,14 @@ function data.dict(list)
   local result = {}
   for _, pair in ipairs(list) do
     result[pair[1]] = pair[2]
+  end
+  return result
+end
+
+function data.set(list)
+  local result = {}
+  for _, k in ipairs(list) do
+    result[k] = true
   end
   return result
 end

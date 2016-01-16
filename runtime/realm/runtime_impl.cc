@@ -1,4 +1,4 @@
-/* Copyright 2015 Stanford University, NVIDIA Corporation
+/* Copyright 2016 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -313,7 +313,11 @@ namespace Realm {
     static size_t stack_size_in_mb;
   
     RuntimeImpl::RuntimeImpl(void)
-      : machine(0), nodes(0), global_memory(0),
+      : machine(0), 
+#ifdef NODE_LOGGING
+	prefix("."),
+#endif
+	nodes(0), global_memory(0),
 	local_event_free_list(0), local_barrier_free_list(0),
 	local_reservation_free_list(0), local_index_space_free_list(0),
 	local_proc_group_free_list(0), background_pthread(0),

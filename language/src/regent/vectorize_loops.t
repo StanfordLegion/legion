@@ -1,4 +1,4 @@
--- Copyright 2015 Stanford University
+-- Copyright 2016 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -177,10 +177,7 @@ function flip_types.stat(cx, simd_width, symbol, node)
 end
 
 function flip_types.expr(cx, simd_width, symbol, node)
-  local new_node = {}
-  for k, v in pairs(node) do
-    new_node[k] = v
-  end
+  local new_node = node:fields()
   if node:is(ast.typed.expr.FieldAccess) then
     new_node.value = flip_types.expr(cx, simd_width, symbol, node.value)
 
@@ -214,8 +211,8 @@ function flip_types.expr(cx, simd_width, symbol, node)
       }
       return ast.typed.expr.Call {
         fn = fn_node,
-        inline = "allow",
         args = args,
+        conditions = terralib.newlist(),
         expr_type = rval_type,
         options = node.options,
         span = node.span,

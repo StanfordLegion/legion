@@ -1,4 +1,4 @@
-/* Copyright 2015 Stanford University, NVIDIA Corporation
+/* Copyright 2016 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -989,6 +989,18 @@ namespace Realm {
 		 Event wait_on = Event::NO_EVENT,
 		 ReductionOpID redop_id = 0, bool red_fold = false) const;
     };
+
+    inline std::ostream& operator<<(std::ostream& os, Domain d) 
+    {
+      switch(d.get_dim()) {
+      case 0: return os << d.get_index_space();
+      case 1: return os << d.get_rect<1>();
+      case 2: return os << d.get_rect<2>();
+      case 3: return os << d.get_rect<3>();
+      default: assert(0);
+      }
+      return os;
+    }
 
     class IndexSpaceAllocator {
     protected:

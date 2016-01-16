@@ -1,4 +1,4 @@
-/* Copyright 2015 Stanford University, NVIDIA Corporation
+/* Copyright 2016 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,7 +17,6 @@
 #include "legion.h"
 #include "runtime.h"
 #include "legion_ops.h"
-#include "legion_logging.h"
 #include "legion_profiling.h"
 #include "legion_allocation.h"
 
@@ -41,24 +40,6 @@ namespace LegionRuntime {
 #ifdef LEGION_SPY
     namespace LegionSpy {
       Logger::Category log_spy("legion_spy");
-    };
-#endif
-
-#ifdef LEGION_LOGGING
-    namespace LegionLogging {
-      Logger::Category log_logging("legion_logging");
-      std::list<ProcessorProfiler *> processor_profilers;
-      pthread_key_t pthread_profiler_key;
-      pthread_mutex_t profiler_mutex = PTHREAD_MUTEX_INITIALIZER;
-      std::deque<LogMsgProcessor> msgs_processor;
-      std::deque<LogMsgMemory> msgs_memory;
-      std::deque<LogMsgProcMemAffinity> msgs_proc_mem_affinity;
-      std::deque<LogMsgMemMemAffinity> msgs_mem_mem_affinity;
-      std::deque<LogMsgTaskCollection> msgs_task_collection;
-      std::deque<LogMsgTaskVariant> msgs_task_variant;
-      std::deque<LogMsgTopLevelTask> msgs_top_level_task;
-      unsigned long long init_time;
-      AddressSpaceID address_space;
     };
 #endif
 

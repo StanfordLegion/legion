@@ -1,4 +1,4 @@
-/* Copyright 2015 Stanford University, NVIDIA Corporation
+/* Copyright 2016 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -148,6 +148,7 @@ namespace LegionRuntime {
       HLR_FIELD_SEMANTIC_INFO_REQ_TASK_ID,
       HLR_REGION_SEMANTIC_INFO_REQ_TASK_ID,
       HLR_PARTITION_SEMANTIC_INFO_REQ_TASK_ID,
+      HLR_SHUTDOWN_ATTEMPT_TASK_ID, // These three must be before last
       HLR_SHUTDOWN_NOTIFICATION_TASK_ID,
       HLR_SHUTDOWN_RESPONSE_TASK_ID,
       HLR_LAST_TASK_ID, // This one should always be last
@@ -202,6 +203,7 @@ namespace LegionRuntime {
         "Field Semantic Request",                                 \
         "Region Semantic Request",                                \
         "Partition Semantic Request",                             \
+        "Shutdown Attempt",                                       \
         "Shutdown Notification",                                  \
         "Shutdown Response",                                      \
       };
@@ -294,6 +296,8 @@ namespace LegionRuntime {
       SEND_REDUCTION_CREATION,
       SEND_CREATION_RESPONSE,
       SEND_BACK_LOGICAL_STATE,
+      SEND_TOP_LEVEL_TASK_REQUEST,
+      SEND_TOP_LEVEL_TASK_COMPLETE,
       SEND_SHUTDOWN_NOTIFICATION,
       SEND_SHUTDOWN_RESPONSE,
       LAST_SEND_KIND, // This one must be last
@@ -378,6 +382,8 @@ namespace LegionRuntime {
         "Send Reduction Creation",                                    \
         "Send Creation Response",                                     \
         "Send Back Logical State",                                    \
+        "Top Level Task Request",                                     \
+        "Top Level Task Complete",                                    \
         "Send Shutdown Notification",                                 \
         "Send Shutdown Response",                                     \
       };
@@ -585,7 +591,7 @@ namespace LegionRuntime {
     template<typename T, unsigned LOG2MAX> class BitPermutation;
     template<typename IT, typename DT, bool BIDIR = false> class IntegerSet;
 
-    // legion_logging.h
+    // legion_spy.h
     class TreeStateLogger;
 
     // legion_profiling.h
