@@ -43,7 +43,9 @@ namespace LegionRuntime {
 #endif /*USE_DISK*/
 
       // TODO: currently we use dma_all_gpus to track the set of GPU* created
+#ifdef USE_GPU
       std::vector<GPU*> dma_all_gpus;
+#endif
       // we use a single queue for all xferDes
       static XferDesQueue *xferDes_queue = 0;
 
@@ -1929,12 +1931,12 @@ namespace LegionRuntime {
       {
         return xferDes_queue;
       }
-
+#ifdef USE_GPU
       void register_gpu_in_dma_systems(GPU* gpu)
       {
         dma_all_gpus.push_back(gpu);
       }
-
+#endif
       void start_channel_manager(int count, int max_nr, Realm::CoreReservationSet& crs)
       {
         xferDes_queue = new XferDesQueue(crs);
