@@ -346,7 +346,7 @@ namespace LegionRuntime {
           off_t src_start, dst_start;
           size_t nbytes;
           simple_get_request<DIM>(src_start, dst_start, nbytes, li, offset_idx, min(available_reqs.size(), nr - idx));
-          //printf("[MemcpyXferDes] offset_idx = %d, oas_vec.size() = %lu\n", offset_idx, oas_vec.size());
+          //printf("[MemcpyXferDes] offset_idx = %d, oas_vec.size() = %lu, nbytes = %lu\n", offset_idx, oas_vec.size(), nbytes);
           if (nbytes == 0)
             break;
           while (nbytes > 0) {
@@ -2031,6 +2031,8 @@ namespace LegionRuntime {
                            XferDesFence* _complete_fence, RegionInstance inst)
       {
         if (ID(_src_buf.memory).node() == gasnet_mynode()) {
+          log_new_dma.info("Create local XferDes: id(%lx), pre(%lx), next(%lx), type(%d)",
+                           _guid, _pre_xd_guid, _next_xd_guid, _kind);
           XferDes* xd;
           switch (_kind) {
           case XferDes::XFER_MEM_CPY:
@@ -2092,6 +2094,8 @@ namespace LegionRuntime {
         }
         xferDes_queue->enqueue_xferDes_local(xd);
       } else {
+        log_new_dma.info("Create remote XferDes: id(%lx), pre(%lx), next(%lx), type(%d)",
+                         _guid, _pre_xd_guid, _next_xd_guid, _kind);
         XferDesCreateMessage::send_request(ID(_src_buf.memory).node(), _dma_request, _launch_node,
                                            _guid, _pre_xd_guid, _next_xd_guid,
                                            _src_buf, _dst_buf, _domain, _oas_vec,
@@ -2102,6 +2106,7 @@ namespace LegionRuntime {
 
     void destroy_xfer_des(XferDesID _guid)
     {
+      log_new_dma.info("Destroy XferDes: id(%lx)", _guid);
       gasnet_node_t execution_node = _guid >> (XferDesQueue::NODE_BITS + XferDesQueue::INDEX_BITS);
       if (execution_node == gasnet_mynode()) {
         xferDes_queue->destroy_xferDes(_guid);
