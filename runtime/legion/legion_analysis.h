@@ -62,7 +62,7 @@ namespace LegionRuntime {
       // test to be performed whenever the timeout
       // reaches zero.
       int timeout;
-#if defined(LEGION_LOGGING) || defined(LEGION_SPY)
+#ifdef LEGION_SPY
       UniqueID uid;
 #endif
     public:

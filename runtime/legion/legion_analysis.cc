@@ -19,7 +19,6 @@
 #include "legion_tasks.h"
 #include "region_tree.h"
 #include "legion_spy.h"
-#include "legion_logging.h"
 #include "legion_profiling.h"
 #include "legion_instances.h"
 #include "legion_views.h"
@@ -37,7 +36,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     LogicalUser::LogicalUser(void)
       : GenericUser(), op(NULL), idx(0), gen(0), timeout(TIMEOUT)
-#if defined(LEGION_LOGGING) || defined(LEGION_SPY)
+#ifdef LEGION_SPY
         , uid(0)
 #endif
     //--------------------------------------------------------------------------
@@ -49,7 +48,7 @@ namespace LegionRuntime {
                              const FieldMask &m)
       : GenericUser(u, m), op(o), idx(id), 
         gen(o->get_generation()), timeout(TIMEOUT)
-#if defined(LEGION_LOGGING) || defined(LEGION_SPY)
+#ifdef LEGION_SPY
         , uid(o->get_unique_op_id())
 #endif
     //--------------------------------------------------------------------------

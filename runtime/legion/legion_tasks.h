@@ -596,7 +596,7 @@ namespace LegionRuntime {
     protected:
       // Information for tracking restrictions
       LegionMap<RegionTreeID,FieldMask>::aligned restricted_trees;
-#if defined(LEGION_LOGGING) || defined(LEGION_SPY)
+#ifdef LEGION_SPY
     protected:
       Event legion_spy_start;
     public:
@@ -991,7 +991,7 @@ namespace LegionRuntime {
     protected:
       bool is_top_level_context;
       std::map<AddressSpaceID,RemoteTask*> remote_instances;
-#if defined(LEGION_LOGGING) || defined(LEGION_SPY)
+#ifdef LEGION_SPY
     protected:
       Event remote_legion_spy_completion;
 #endif

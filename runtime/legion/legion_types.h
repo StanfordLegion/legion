@@ -591,7 +591,7 @@ namespace LegionRuntime {
     template<typename T, unsigned LOG2MAX> class BitPermutation;
     template<typename IT, typename DT, bool BIDIR = false> class IntegerSet;
 
-    // legion_logging.h
+    // legion_spy.h
     class TreeStateLogger;
 
     // legion_profiling.h

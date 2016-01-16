@@ -179,6 +179,14 @@ function data.dict(list)
   return result
 end
 
+function data.set(list)
+  local result = {}
+  for _, k in ipairs(list) do
+    result[k] = true
+  end
+  return result
+end
+
 -- #####################################
 -- ## Tuples
 -- #################
