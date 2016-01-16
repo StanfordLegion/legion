@@ -5290,6 +5290,12 @@ namespace LegionRuntime {
        * -------------
        *  Profiling
        * -------------
+       * -hl:spy      Enable light-weight logging for Legion Spy which
+       *              is valuable for understanding properties of an
+       *              application such as the shapes of region trees
+       *              and the kinds of tasks/operations that are created.
+       *              Checking of the runtime with Legion Spy will still
+       *              require the runtime to be compiled with -DLEGION_SPY.
        * -hl:prof <int> Specify the number of nodes on which to enable
        *              profiling information to be collected.  By default
        *              all nodes are enabled.  Zero will disable all

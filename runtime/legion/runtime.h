@@ -1097,7 +1097,6 @@ namespace LegionRuntime {
       Event launch_mapper_task(Mapper *mapper, Processor proc, 
                                Processor::TaskFuncID tid,
                                const TaskArgument &arg, MapperID map_id);
-      void perform_one_time_logging(void);
     public:
       IndexSpace create_index_space(Context ctx, size_t max_num_elmts);
       IndexSpace create_index_space(Context ctx, Domain domain);
@@ -2399,6 +2398,7 @@ namespace LegionRuntime {
       static bool resilient_mode;
       static bool unsafe_launch;
       static bool dynamic_independence_tests;
+      static bool legion_spy_enabled;
       static unsigned shutdown_counter;
       static int mpi_rank;
       static unsigned mpi_rank_table[MAX_NUM_NODES];

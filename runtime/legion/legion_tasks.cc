@@ -18,7 +18,6 @@
 #include "legion_tasks.h"
 #include "legion_spy.h"
 #include "legion_trace.h"
-#include "legion_logging.h"
 #include "legion_profiling.h"
 #include "legion_instances.h"
 #include "legion_views.h"
@@ -1577,14 +1576,6 @@ namespace LegionRuntime {
         // Note it is imperative we do this off the new barrier
         // generated after updating the arrival count.
         arrive_barriers.back().phase_barrier.arrive(1, get_task_completion());
-#ifdef LEGION_LOGGING
-        LegionLogging::log_event_dependence(
-            Processor::get_executing_processor(),
-            it->phase_barrier, arrive_barriers.back().phase_barrier);
-        LegionLogging::log_event_dependence(
-            Processor::get_executing_processor(),
-            get_task_completion(), arrive_barriers.back().phase_barrier);
-#endif
 #ifdef LEGION_SPY
         LegionSpy::log_event_dependence(it->phase_barrier,
                                         arrive_barriers.back().phase_barrier); 
@@ -2173,25 +2164,9 @@ namespace LegionRuntime {
                                             const RegionRequirement &req)
     //--------------------------------------------------------------------------
     {
-#if defined(LEGION_LOGGING) || defined(LEGION_SPY)
       const bool reg = (req.handle_type == SINGULAR) ||
                  (req.handle_type == REG_PROJECTION);
-#endif
-#ifdef LEGION_LOGGING
-      LegionLogging::log_logical_requirement(
-                                           Processor::get_executing_processor(),
-                                           uid, idx, reg,
-                                           reg ? req.region.index_space.id :
-                                                 req.partition.index_partition,
-                                           reg ? req.region.field_space.id :
-                                                 req.partition.field_space.id,
-                                           reg ? req.region.tree_id : 
-                                                 req.partition.tree_id,
-                                           req.privilege, req.prop, req.redop,
-                                           req.privilege_fields);
-#endif
-#ifdef LEGION_SPY
-      
+
       LegionSpy::log_logical_requirement(uid, idx, reg,
           reg ? req.region.index_space.id :
                 req.partition.index_partition.id,
@@ -2201,7 +2176,6 @@ namespace LegionRuntime {
                 req.partition.tree_id,
           req.privilege, req.prop, req.redop);
       LegionSpy::log_requirement_fields(uid, idx, req.privilege_fields);
-#endif
     }
 
     /////////////////////////////////////////////////////////////
@@ -2610,7 +2584,7 @@ namespace LegionRuntime {
       rez.serialize(num_local);
       for (unsigned idx = 0; idx < locals.size(); idx++)
         rez.serialize(locals[idx]);
-#if defined(LEGION_LOGGING) || defined(LEGION_SPY)
+#ifdef LEGION_SPY
       rez.serialize(legion_spy_start);
       rez.serialize(get_task_completion());
 #endif
@@ -4446,11 +4420,6 @@ namespace LegionRuntime {
       std::vector<RegionTreeContext> enclosing_contexts(regions.size());
       for (unsigned idx = 0; idx < regions.size(); idx++)
         enclosing_contexts[idx] = get_parent_context(idx);
-#ifdef LEGION_LOGGING
-      LegionLogging::log_timing_event(Processor::get_executing_processor(),
-                                      get_unique_task_id(),
-                                      BEGIN_MAPPING);
-#endif
       bool map_success = true; 
       // Initialize all the region information
       for (unsigned idx = 0; idx < regions.size(); idx++)
@@ -4515,11 +4484,12 @@ namespace LegionRuntime {
         // Check to see if we have to do a restricted mapping
         if (has_restrictions(idx, regions[idx].region))
         {
+          InstanceRef target_inst = find_restricted_instance(idx);
           mapping_refs[idx] = runtime->forest->map_restricted_region(
                                           enclosing_contexts[idx],
                                                     regions[idx],
                                                     idx, get_version_info(idx),
-                                                    target
+                                                    target, target_inst
 #ifdef DEBUG_HIGH_LEVEL
                                                     , get_logging_name()
                                                     , unique_op_id
@@ -4648,11 +4618,6 @@ namespace LegionRuntime {
         if (post_map_task)
           perform_post_mapping(target);
       }
-#ifdef LEGION_LOGGING
-      LegionLogging::log_timing_event(Processor::get_executing_processor(),
-                                      get_unique_task_id(),
-                                      END_MAPPING);
-#endif
       return map_success;
     }  
 
@@ -4982,10 +4947,6 @@ namespace LegionRuntime {
             // Don't switch coherence modes since we virtually
             // mapped it which means we will map in the parent's
             // context
-#ifdef LEGION_LOGGING
-            unmap_events[idx] = UserEvent::create_user_event();
-            unmap_events[idx].trigger();
-#endif
           }
           else if (variant->is_inner())
           {
@@ -5100,20 +5061,15 @@ namespace LegionRuntime {
       }
       // Merge together all the events for the start condition 
       Event start_condition = Event::merge_events(wait_on_events);
-#if defined(LEGION_LOGGING) || defined(LEGION_SPY)
+#ifdef LEGION_SPY
       if (!start_condition.exists())
       {
         UserEvent new_start = UserEvent::create_user_event();
         new_start.trigger();
         start_condition = new_start;
       }
-#endif
+
       // Record the dependences
-#ifdef LEGION_LOGGING
-      LegionLogging::log_event_dependences(
-        Processor::get_executing_processor(), wait_on_events, start_condition);
-#endif
-#ifdef LEGION_SPY
       LegionSpy::log_event_dependences(wait_on_events, start_condition);
 #endif
       // Take all the locks in order in the proper way
@@ -5129,19 +5085,14 @@ namespace LegionRuntime {
           else
             next = it->first.acquire(1, false/*exclusive*/,
                                          start_condition);
-#if defined(LEGION_LOGGING) || defined(LEGION_SPY)
+#if LEGION_SPY
           if (!next.exists())
           {
             UserEvent new_next = UserEvent::create_user_event();
             new_next.trigger();
             next = new_next;
           }
-#endif
-#ifdef LEGION_LOGGING
-          LegionLogging::log_event_dependence(
-              Processor::get_executing_processor(), start_condition, next);
-#endif
-#ifdef LEGION_SPY
+
           LegionSpy::log_event_dependence(start_condition, next);
 #endif
           start_condition = next;
@@ -5151,19 +5102,11 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(this->executing_processor.exists());
 #endif
-#if defined(LEGION_LOGGING) || defined(LEGION_SPY)
+#ifdef LEGION_SPY
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
-#ifdef LEGION_LOGGING
-        LegionLogging::log_task_instance_requirement(
-                                 Processor::get_executing_processor(),
-                                 get_unique_task_id(), idx, 
-                                 regions[idx].region.get_index_space());
-#endif
-#ifdef LEGION_SPY
         LegionSpy::log_task_instance_requirement(get_unique_task_id(), idx,
                                  regions[idx].region.get_index_space().id);
-#endif
       }
       {
         std::set<Event> unmap_set;
@@ -5179,61 +5122,29 @@ namespace LegionRuntime {
           new_all_unmap.trigger();
           all_unmap_event = new_all_unmap;
         }
-#ifdef LEGION_LOGGING
-        // we don't log a dependence on the parent's start event, because
-        // log_individual_task and log_index_space_task log this relationship
-        LegionLogging::log_operation_events(
-                                  Processor::get_executing_processor(),
-                                  get_unique_task_id(),
-                                  start_condition, get_task_completion());
-#endif
-#ifdef LEGION_SPY
         // Log an implicit dependence on the parent's start event
         LegionSpy::log_implicit_dependence(parent_ctx->get_start_event(),
                                            start_condition);
         LegionSpy::log_op_events(get_unique_task_id(), 
                                  start_condition, all_unmap_event);
-#endif
         this->legion_spy_start = start_condition; 
         // Record the start
         for (unsigned idx = 0; idx < regions.size(); idx++)
         {
           if (!virtual_mapped[idx])
           {
-#ifdef LEGION_LOGGING
-            LegionLogging::log_event_dependence(
-                                  Processor::get_executing_processor(),
-                                  all_unmap_event, unmap_events[idx]);
-            LegionLogging::log_event_dependence(
-                                  Processor::get_executing_processor(),
-                                  unmap_events[idx], get_task_completion());
-#endif
-#ifdef LEGION_SPY
             LegionSpy::log_event_dependence(all_unmap_event, unmap_events[idx]);
             // Log an implicit dependence on the parent's start event
             LegionSpy::log_event_dependence(unmap_events[idx],
                                                get_task_completion());
-#endif
           }
         }
-#ifdef LEGION_LOGGING
-        // as with the start event, we don't log a dependence between the
-        // completion events of task/subtask, because
-        // log_individual_task and log_index_space_task log this relationship
-#endif
-#ifdef LEGION_SPY
         LegionSpy::log_implicit_dependence(get_task_completion(),
                                            parent_ctx->get_task_completion());
-#endif
       }
 #endif
       // Mark that we have an outstanding task in this context 
       parent_ctx->increment_pending();
-#ifdef LEGION_LOGGING
-      LegionLogging::log_timing_event(Processor::get_executing_processor(),
-                                      get_unique_task_id(),
-                                      LAUNCH_TASK);
-#endif
       // If this is a leaf task and we have no virtual instances
       // and the SingleTask sub-type says it is ok
       // we can trigger the task's completion event as soon as
@@ -5311,17 +5222,6 @@ namespace LegionRuntime {
       // Switch over the executing processor to the one
       // that has actually been assigned to run this task.
       executing_processor = Processor::get_executing_processor();
-#ifdef LEGION_LOGGING
-      for (unsigned idx = 0; idx < physical_instances.size(); idx++)
-      {
-        if (physical_instances[idx].has_ref())
-        {
-          LegionLogging::log_physical_user(executing_processor,
-            physical_instances[idx].get_manager()->get_instance(), 
-            get_unique_task_id(), idx);
-        }
-      }
-#endif
 #ifdef LEGION_SPY
       for (unsigned idx = 0; idx < physical_instances.size(); idx++)
       {
@@ -5335,11 +5235,6 @@ namespace LegionRuntime {
         Processor proc = Processor::get_executing_processor();
         LegionSpy::log_op_proc_user(unique_op_id, proc.id);
       }
-#endif
-#ifdef LEGION_LOGGING
-      LegionLogging::log_timing_event(Processor::get_executing_processor(),
-                                      get_unique_task_id(),
-                                      BEGIN_EXECUTION);
 #endif
       // Issue a utility task to decrement the number of outstanding
       // tasks now that this task has started running
@@ -5465,11 +5360,6 @@ namespace LegionRuntime {
         }
       } 
 
-#ifdef LEGION_LOGGING
-      LegionLogging::log_timing_event(Processor::get_executing_processor(),
-                                      get_unique_task_id(),
-                                      END_EXECUTION);
-#endif
       // See if we want to move the rest of this computation onto
       // the utility processor. We also need to be sure that we have 
       // registered all of our operations before we can do the post end task
@@ -5499,12 +5389,6 @@ namespace LegionRuntime {
     void SingleTask::post_end_task(const void *res, size_t res_size, bool owned)
     //--------------------------------------------------------------------------
     {
-#ifdef LEGION_LOGGING
-      UniqueID local_id = get_unique_task_id();
-      LegionLogging::log_timing_event(Processor::get_executing_processor(),
-                                      local_id,
-                                      BEGIN_POST_EXEC);
-#endif
       // Handle the future result
       handle_future(res, res_size, owned);
       // If we weren't a leaf task, compute the conditions for being mapped
@@ -5598,11 +5482,6 @@ namespace LegionRuntime {
         trigger_children_complete();
       if (need_commit)
         trigger_children_committed();
-#ifdef LEGION_LOGGING
-      LegionLogging::log_timing_event(Processor::get_executing_processor(),
-                                      local_id,
-                                      END_POST_EXEC);
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -5697,11 +5576,6 @@ namespace LegionRuntime {
     {
 #ifdef DEBUG_HIGH_LEVEL
       assert(!sliced);
-#endif
-#ifdef LEGION_LOGGING
-      LegionLogging::log_timing_event(Processor::get_executing_processor(),
-                                      get_unique_task_id(),
-                                      BEGIN_SLICING);
 #endif
       sliced = true;
       spawn_task = false; // cannot steal something that has been sliced
@@ -5822,14 +5696,7 @@ namespace LegionRuntime {
       }
       else
         minimal_points.clear();
-#ifdef LEGION_LOGGING
-      UniqueID local_id = get_unique_task_id();
-#endif
       bool success = trigger_slices(); 
-#ifdef LEGION_LOGGING
-      LegionLogging::log_timing_event(Processor::get_executing_processor(),
-                                      local_id, END_SLICING);
-#endif
       // If we succeeded and this is an intermediate slice task
       // then we can reclaim it, otherwise, if it is the original
       // index task then we want to keep it around. Note it is safe
@@ -6401,23 +6268,17 @@ namespace LegionRuntime {
             runtime->get_available_distributed_id(!top_level_task), 
             runtime->address_space, runtime->address_space, this));
       check_empty_field_requirements();
-#ifdef LEGION_LOGGING
-      LegionLogging::log_individual_task(parent_ctx->get_executing_processor(),
-                                         parent_ctx->get_unique_task_id(),
-                                         unique_op_id, task_id, tag);
-#endif
-#ifdef LEGION_SPY
-      LegionSpy::log_individual_task(parent_ctx->get_unique_task_id(),
-                                     unique_op_id,
-                                     task_id,
-                                     variants->name);
-#endif
-#if defined(LEGION_LOGGING) || defined(LEGION_SPY)
-      for (unsigned idx = 0; idx < regions.size(); idx++)
+      if (Internal::legion_spy_enabled)
       {
-        log_requirement(unique_op_id, idx, regions[idx]);
+        LegionSpy::log_individual_task(parent_ctx->get_unique_task_id(),
+                                       unique_op_id,
+                                       task_id,
+                                       variants->name);
+        for (unsigned idx = 0; idx < regions.size(); idx++)
+        {
+          log_requirement(unique_op_id, idx, regions[idx]);
+        }
       }
-#endif
       return result;
     }
 
@@ -6466,23 +6327,17 @@ namespace LegionRuntime {
             runtime->get_available_distributed_id(!top_level_task), 
             runtime->address_space, runtime->address_space, this));
       check_empty_field_requirements();
-#ifdef LEGION_LOGGING
-      LegionLogging::log_individual_task(parent_ctx->get_executing_processor(),
-                                         parent_ctx->get_unique_task_id(),
-                                         unique_op_id, task_id, tag);
-#endif
-#ifdef LEGION_SPY
-      LegionSpy::log_individual_task(parent_ctx->get_unique_task_id(),
-                                     unique_op_id,
-                                     task_id,
-                                     variants->name);
-#endif
-#if defined(LEGION_LOGGING) || defined(LEGION_SPY)
-      for (unsigned idx = 0; idx < regions.size(); idx++)
+      if (Internal::legion_spy_enabled)
       {
-        log_requirement(unique_op_id, idx, regions[idx]);
+        LegionSpy::log_individual_task(parent_ctx->get_unique_task_id(),
+                                       unique_op_id,
+                                       task_id,
+                                       variants->name);
+        for (unsigned idx = 0; idx < regions.size(); idx++)
+        {
+          log_requirement(unique_op_id, idx, regions[idx]);
+        }
       }
-#endif
       return result;
     }  
 
@@ -6513,11 +6368,6 @@ namespace LegionRuntime {
     {
 #ifdef DEBUG_HIGH_LEVEL
       assert(privilege_paths.size() == regions.size());
-#endif
-#ifdef LEGION_LOGGING
-      LegionLogging::log_timing_event(Processor::get_executing_processor(),
-                                      get_unique_task_id(), 
-                                      BEGIN_DEPENDENCE_ANALYSIS);
 #endif
       // First compute the parent indexes
       compute_parent_indexes();
@@ -6589,11 +6439,6 @@ namespace LegionRuntime {
         }
       }
       end_dependence_analysis();
-#ifdef LEGION_LOGGING
-      LegionLogging::log_timing_event(Processor::get_executing_processor(),
-                                      get_unique_task_id(),
-                                      END_DEPENDENCE_ANALYSIS);
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -6816,12 +6661,6 @@ namespace LegionRuntime {
         exit(ERROR_INVALID_VARIANT_SELECTION);
       }
 #endif
-#ifdef LEGION_LOGGING
-      LegionLogging::log_task_instance_variant(
-                                  Processor::get_executing_processor(),
-                                  get_unique_task_id(),
-                                  selected_variant);
-#endif
       // Now try to do the mapping, we can just use our completion
       // event since we know this task will object will be active
       // throughout the duration of the computation
@@ -7016,10 +6855,6 @@ namespace LegionRuntime {
     void IndividualTask::trigger_task_complete(void)
     //--------------------------------------------------------------------------
     {
-#ifdef LEGION_LOGGING
-      LegionLogging::log_timing_event(Processor::get_executing_processor(),
-                                      unique_op_id, COMPLETE_OPERATION);
-#endif
       if (!is_remote())
       {
         // Pass back our created and deleted operations
@@ -7195,6 +7030,29 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    InstanceRef IndividualTask::find_restricted_instance(unsigned index)
+    //--------------------------------------------------------------------------
+    {
+      if (is_remote())
+      {
+        // TODO: support remote tracking of restricted instances
+        assert(false);
+        return InstanceRef();
+      }
+      else
+      {
+#ifdef DEBUG_HIGH_LEVEL
+        assert(index < privilege_paths.size());
+        assert(index < parent_req_indexes.size());
+#endif
+        InstanceRef parent_ref = 
+          parent_ctx->get_local_reference(parent_req_indexes[index]);
+        // Now get the proper sub-view for our privilege path
+        return privilege_paths[index].translate_ref(parent_ref);
+      }
+    }
+
+    //--------------------------------------------------------------------------
     bool IndividualTask::pack_task(Serializer &rez, Processor target)
     //--------------------------------------------------------------------------
     {
@@ -7271,14 +7129,8 @@ namespace LegionRuntime {
         complete_mapping();
       // If we're remote, we've already resolved speculation for now
       resolve_speculation();
-#ifdef LEGION_LOGGING
-      LegionLogging::log_point_point(Processor::get_executing_processor(),
-                                     remote_unique_id,
-                                     get_unique_task_id());
-#endif
-#ifdef LEGION_SPY
-      LegionSpy::log_point_point(remote_unique_id, get_unique_task_id());
-#endif
+      if (Internal::legion_spy_enabled)
+        LegionSpy::log_point_point(remote_unique_id, get_unique_task_id());
       // Return true to add ourselves to the ready queue
       return true;
     }
@@ -7752,10 +7604,6 @@ namespace LegionRuntime {
     void PointTask::trigger_task_complete(void)
     //--------------------------------------------------------------------------
     {
-#ifdef LEGION_LOGGING
-      LegionLogging::log_timing_event(Processor::get_executing_processor(),
-                                      unique_op_id, COMPLETE_OPERATION);
-#endif
       // Pass back our created and deleted operations 
       slice_owner->return_privileges(this);
 
@@ -7828,11 +7676,6 @@ namespace LegionRuntime {
         slice_owner->record_child_mapped();
         complete_mapping();
       }
-#ifdef LEGION_LOGGING
-      LegionLogging::log_slice_point(Processor::get_executing_processor(),
-                                     slice_owner->get_unique_task_id(),
-                                     get_unique_task_id(), index_point);
-#endif
       return false;
     }
 
@@ -7872,6 +7715,13 @@ namespace LegionRuntime {
       slice_owner->record_child_mapped();
       // Now we can complete this point task
       complete_mapping();
+    }
+
+    //--------------------------------------------------------------------------
+    InstanceRef PointTask::find_restricted_instance(unsigned index)
+    //--------------------------------------------------------------------------
+    {
+      return slice_owner->find_restricted_instance(index);
     }
 
     //--------------------------------------------------------------------------
@@ -8066,6 +7916,15 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    InstanceRef WrapperTask::find_restricted_instance(unsigned index)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return InstanceRef();
+    }
+
+    //--------------------------------------------------------------------------
     void WrapperTask::activate_wrapper(void)
     //--------------------------------------------------------------------------
     {
@@ -8196,7 +8055,7 @@ namespace LegionRuntime {
         derez.deserialize(temp_local[idx]);
         allocate_local_field(temp_local[idx]);
       }
-#if defined(LEGION_LOGGING) || defined(LEGION_SPY)
+#ifdef LEGION_SPY
       derez.deserialize(legion_spy_start);
       derez.deserialize(remote_legion_spy_completion);
 #endif
@@ -8251,7 +8110,7 @@ namespace LegionRuntime {
     Event RemoteTask::get_task_completion(void) const
     //--------------------------------------------------------------------------
     {
-#if !defined(LEGION_LOGGING) && !defined(LEGION_SPY)
+#ifndef LEGION_SPY
       // should never be called
       assert(false);
       return Event::NO_EVENT;
@@ -8636,22 +8495,16 @@ namespace LegionRuntime {
       future_map.impl->add_valid_domain(index_domain);
 #endif
       check_empty_field_requirements();
-#ifdef LEGION_LOGGING
-      LegionLogging::log_index_space_task(parent_ctx->get_executing_processor(),
-                                          parent_ctx->get_unique_task_id(),
-                                          unique_op_id, task_id, tag);
-#endif
-#ifdef LEGION_SPY
-      LegionSpy::log_index_task(parent_ctx->get_unique_task_id(),
-                                unique_op_id, task_id,
-                                variants->name);
-#endif
-#if defined(LEGION_LOGGING) || defined(LEGION_SPY)
-      for (unsigned idx = 0; idx < regions.size(); idx++)
+      if (Internal::legion_spy_enabled)
       {
-        TaskOp::log_requirement(unique_op_id, idx, regions[idx]);
+        LegionSpy::log_index_task(parent_ctx->get_unique_task_id(),
+                                  unique_op_id, task_id,
+                                  variants->name);
+        for (unsigned idx = 0; idx < regions.size(); idx++)
+        {
+          TaskOp::log_requirement(unique_op_id, idx, regions[idx]);
+        }
       }
-#endif
       return future_map;
     }
 
@@ -8721,22 +8574,16 @@ namespace LegionRuntime {
             true/*register*/, runtime->get_available_distributed_id(true), 
             runtime->address_space, runtime->address_space, this));
       check_empty_field_requirements();
-#ifdef LEGION_LOGGING
-      LegionLogging::log_index_space_task(parent_ctx->get_executing_processor(),
-                                          parent_ctx->get_unique_task_id(),
-                                          unique_op_id, task_id, tag);
-#endif
-#ifdef LEGION_SPY
-      LegionSpy::log_index_task(parent_ctx->get_unique_task_id(),
-                                unique_op_id, task_id,
-                                variants->name);
-#endif
-#if defined(LEGION_LOGGING) || defined(LEGION_SPY)
-      for (unsigned idx = 0; idx < regions.size(); idx++)
+      if (Internal::legion_spy_enabled)
       {
-        TaskOp::log_requirement(unique_op_id, idx, regions[idx]);
+        LegionSpy::log_index_task(parent_ctx->get_unique_task_id(),
+                                  unique_op_id, task_id,
+                                  variants->name);
+        for (unsigned idx = 0; idx < regions.size(); idx++)
+        {
+          TaskOp::log_requirement(unique_op_id, idx, regions[idx]);
+        }
       }
-#endif
       return reduction_future;
     }
 
@@ -8790,22 +8637,16 @@ namespace LegionRuntime {
       future_map.impl->add_valid_domain(index_domain);
 #endif
       check_empty_field_requirements();
-#ifdef LEGION_LOGGING
-      LegionLogging::log_index_space_task(parent_ctx->get_executing_processor(),
-                                          parent_ctx->get_unique_task_id(),
-                                          unique_op_id, task_id, tag);
-#endif
-#ifdef LEGION_SPY
-      LegionSpy::log_index_task(parent_ctx->get_unique_task_id(),
-                                unique_op_id, task_id,
-                                variants->name);
-#endif
-#if defined(LEGION_LOGGING) || defined(LEGION_SPY)
-      for (unsigned idx = 0; idx < regions.size(); idx++)
+      if (Internal::legion_spy_enabled)
       {
-        TaskOp::log_requirement(unique_op_id, idx, regions[idx]);
+        LegionSpy::log_index_task(parent_ctx->get_unique_task_id(),
+                                  unique_op_id, task_id,
+                                  variants->name);
+        for (unsigned idx = 0; idx < regions.size(); idx++)
+        {
+          TaskOp::log_requirement(unique_op_id, idx, regions[idx]);
+        }
       }
-#endif
       return future_map;
     }
     
@@ -8875,22 +8716,16 @@ namespace LegionRuntime {
             true/*register*/, runtime->get_available_distributed_id(true), 
             runtime->address_space, runtime->address_space, this));
       check_empty_field_requirements();
-#ifdef LEGION_LOGGING
-      LegionLogging::log_index_space_task(parent_ctx->get_executing_processor(),
-                                          parent_ctx->get_unique_task_id(),
-                                          unique_op_id, task_id, tag);
-#endif
-#ifdef LEGION_SPY
-      LegionSpy::log_index_task(parent_ctx->get_unique_task_id(),
-                                unique_op_id, task_id,
-                                variants->name);
-#endif
-#if defined(LEGION_LOGGING) || defined(LEGION_SPY)
-      for (unsigned idx = 0; idx < regions.size(); idx++)
+      if (Internal::legion_spy_enabled)
       {
-        TaskOp::log_requirement(unique_op_id, idx, regions[idx]);
+        LegionSpy::log_index_task(parent_ctx->get_unique_task_id(),
+                                  unique_op_id, task_id,
+                                  variants->name);
+        for (unsigned idx = 0; idx < regions.size(); idx++)
+        {
+          TaskOp::log_requirement(unique_op_id, idx, regions[idx]);
+        }
       }
-#endif
       return reduction_future;
     }
 
@@ -8980,11 +8815,6 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(privilege_paths.size() == regions.size());
 #endif
-#ifdef LEGION_LOGGING
-      LegionLogging::log_timing_event(Processor::get_executing_processor(),
-                                      get_unique_task_id(), 
-                                      BEGIN_DEPENDENCE_ANALYSIS);
-#endif
       // First compute the parent indexes
       compute_parent_indexes();
       // Enumerate our points
@@ -9057,11 +8887,6 @@ namespace LegionRuntime {
         }
       }
       end_dependence_analysis();
-#ifdef LEGION_LOGGING
-      LegionLogging::log_timing_event(Processor::get_executing_processor(),
-                                      get_unique_task_id(),
-                                      END_DEPENDENCE_ANALYSIS);
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -9453,15 +9278,6 @@ namespace LegionRuntime {
     void IndexTask::trigger_task_complete(void)
     //--------------------------------------------------------------------------
     {
-#ifdef LEGION_LOGGING
-      LegionLogging::log_timing_event(Processor::get_executing_processor(),
-                                      unique_op_id, COMPLETE_OPERATION);
-      LegionLogging::log_operation_events(
-                                  Processor::get_executing_processor(),
-                                  get_unique_task_id(),
-                                  Event::NO_EVENT, get_task_completion());
-#endif
-
       // Return back our privileges
       return_privilege_state(parent_ctx);
 
@@ -9629,14 +9445,9 @@ namespace LegionRuntime {
       result->index_owner = this;
       result->remote_owner_uid = parent_ctx->get_unique_task_id();
       result->remote_parent_ctx = parent_ctx;
-#ifdef LEGION_LOGGING
-      LegionLogging::log_index_slice(Processor::get_executing_processor(),
-                                     unique_op_id, result->get_unique_op_id());
-#endif
-#ifdef LEGION_SPY
-      LegionSpy::log_index_slice(get_unique_task_id(), 
-                                 result->get_unique_task_id());
-#endif
+      if (Internal::legion_spy_enabled)
+        LegionSpy::log_index_slice(get_unique_task_id(), 
+                                   result->get_unique_task_id());
       return result;
     }
 
@@ -9659,6 +9470,20 @@ namespace LegionRuntime {
         else
           must_epoch->set_future(point, result, result_size, owner);
       }
+    }
+
+    //--------------------------------------------------------------------------
+    InstanceRef IndexTask::find_restricted_instance(unsigned index)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(index < privilege_paths.size());
+      assert(index < parent_req_indexes.size());
+#endif
+      InstanceRef parent_ref = 
+        parent_ctx->get_local_reference(parent_req_indexes[index]);
+      // Now get the proper sub-view for our privilege path
+      return privilege_paths[index].translate_ref(parent_ref);
     }
 
     //--------------------------------------------------------------------------
@@ -10475,13 +10300,8 @@ namespace LegionRuntime {
         parent_ctx = index_owner->parent_ctx;
       else
         parent_ctx = remote_ctx;
-#ifdef LEGION_LOGGING
-      LegionLogging::log_slice_slice(Processor::get_executing_processor(),
-                                     remote_unique_id, get_unique_task_id());
-#endif
-#ifdef LEGION_SPY
-      LegionSpy::log_slice_slice(remote_unique_id, get_unique_task_id());
-#endif
+      if (Internal::legion_spy_enabled)
+        LegionSpy::log_slice_slice(remote_unique_id, get_unique_task_id());
       num_unmapped_points = num_points;
       num_uncomplete_points = num_points;
       num_uncommitted_points = num_points;
@@ -10492,17 +10312,10 @@ namespace LegionRuntime {
         point->unpack_task(derez, current);
         point->parent_ctx = parent_ctx;
         points.push_back(point);
-#ifdef LEGION_LOGGING
-        LegionLogging::log_slice_point(Processor::get_executing_processor(),
-                                       get_unique_task_id(),
-                                       point->get_unique_task_id(),
-                                       point->index_point);
-#endif
-#ifdef LEGION_SPY
-        LegionSpy::log_slice_point(get_unique_task_id(), 
-                                   point->get_unique_task_id(),
-                                   point->index_point);
-#endif
+        if (Internal::legion_spy_enabled)
+          LegionSpy::log_slice_point(get_unique_task_id(), 
+                                     point->get_unique_task_id(),
+                                     point->index_point);
       }
       // Return true to add this to the ready queue
       return true;
@@ -10533,14 +10346,9 @@ namespace LegionRuntime {
       result->index_owner = this->index_owner;
       result->remote_owner_uid = this->remote_owner_uid;
       result->remote_parent_ctx = this->remote_parent_ctx;
-#ifdef LEGION_LOGGING
-      LegionLogging::log_slice_slice(Processor::get_executing_processor(),
-                                     unique_op_id, result->get_unique_op_id());
-#endif
-#ifdef LEGION_SPY
-      LegionSpy::log_slice_slice(get_unique_task_id(), 
-                                 result->get_unique_task_id());
-#endif
+      if (Internal::legion_spy_enabled)
+        LegionSpy::log_slice_slice(get_unique_task_id(), 
+                                   result->get_unique_task_id());
       return result;
     }
 
@@ -10584,6 +10392,22 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    InstanceRef SliceTask::find_restricted_instance(unsigned index)
+    //--------------------------------------------------------------------------
+    {
+      if (is_remote())
+      {
+        // TODO: support remote mapping of restricted instances
+        assert(false);
+        return InstanceRef();
+      }
+      else
+      {
+        return index_owner->find_restricted_instance(index);
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void SliceTask::register_must_epoch(void)
     //--------------------------------------------------------------------------
     {
@@ -10618,17 +10442,10 @@ namespace LegionRuntime {
       result->index_point = p;
       // Now figure out our local point information
       result->initialize_point(this, mp);
-#ifdef LEGION_LOGGING
-      LegionLogging::log_slice_point(Processor::get_executing_processor(),
-                                     unique_op_id,
-                                     result->get_unique_op_id(),
-                                     result->index_point);
-#endif
-#ifdef LEGION_SPY
-      LegionSpy::log_slice_point(get_unique_task_id(), 
-                                 result->get_unique_task_id(),
-                                 result->index_point);
-#endif
+      if (Internal::legion_spy_enabled)
+        LegionSpy::log_slice_point(get_unique_task_id(), 
+                                   result->get_unique_task_id(),
+                                   result->index_point);
       return result;
     }
 
@@ -10650,12 +10467,6 @@ namespace LegionRuntime {
         assert(false);
         exit(ERROR_INVALID_VARIANT_SELECTION);
       }
-#endif
-#ifdef LEGION_LOGGING
-      LegionLogging::log_task_instance_variant(
-                                  Processor::get_executing_processor(),
-                                  get_unique_task_id(),
-                                  selected_variant);
 #endif
 #ifdef DEBUG_HIGH_LEVEL
       assert(index_domain.get_volume() > 0);
@@ -10684,10 +10495,6 @@ namespace LegionRuntime {
     void SliceTask::trigger_task_complete(void)
     //--------------------------------------------------------------------------
     {
-#ifdef LEGION_LOGGING
-      LegionLogging::log_timing_event(Processor::get_executing_processor(),
-                                      unique_op_id, COMPLETE_OPERATION);
-#endif
       trigger_slice_complete();
     }
 

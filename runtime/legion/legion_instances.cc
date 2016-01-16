@@ -19,7 +19,6 @@
 #include "legion_tasks.h"
 #include "region_tree.h"
 #include "legion_spy.h"
-#include "legion_logging.h"
 #include "legion_profiling.h"
 #include "legion_instances.h"
 #include "legion_views.h"

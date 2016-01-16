@@ -39,12 +39,6 @@
 
 using namespace LegionRuntime::Accessor;
 
-#ifdef LEGION_LOGGING
-#include "legion_logging.h"
-
-using namespace LegionRuntime::HighLevel::LegionLogging;
-#endif
-
 #include "atomics.h"
 
 #include "realm/timers.h"
@@ -449,9 +443,6 @@ namespace LegionRuntime {
 	  log_dma.info() << "dma request " << (void *)this << " field: " <<
 	    it->first.first << "[" << it2->src_offset << "]->" <<
 	    it->first.second << "[" << it2->dst_offset << "] size=" << it2->size;
-#ifdef LEGION_LOGGING
-      log_timing_event(Processor::NO_PROC, after_copy, COPY_INIT);
-#endif
     }
  
     CopyRequest::~CopyRequest(void)
@@ -642,10 +633,6 @@ namespace LegionRuntime {
 	state = STATE_QUEUED;
 	assert(rq != 0);
 	log_dma.info("request %p enqueued", this);
-
-#ifdef LEGION_LOGGING
-	log_timing_event(Processor::NO_PROC, after_copy, COPY_READY);
-#endif
 
 	// once we're enqueued, we may be deleted at any time, so no more
 	//  references
@@ -2865,40 +2852,10 @@ namespace LegionRuntime {
       }
     }
 
-#ifdef LEGION_LOGGING
-    class CopyCompletionLogger : public EventWaiter {
-    public:
-      CopyCompletionLogger(Event _event) : event(_event) {}
-
-      virtual ~CopyCompletionLogger(void) { }
-
-      virtual bool event_triggered(void)
-      {
-	log_timing_event(Processor::NO_PROC, event, COPY_END);
-	return true;
-      }
-
-      virtual void print_info(FILE *f)
-      {
-	fprintf(f,"copy completion logger - " IDFMT "/%d\n", event.id, event.gen);
-      }
-
-    protected:
-      Event event;
-    };
-#endif
-
     void CopyRequest::perform_dma(void)
     {
       log_dma.info("request %p executing", this);
 
-#ifdef LEGION_LOGGING
-      log_timing_event(Processor::NO_PROC, after_copy, COPY_BEGIN);
-
-      // the copy might not actually finish in this thread, so set up an event waiter
-      //  to log the completion
-      EventImpl::add_waiter(after_copy, new CopyCompletionLogger(after_copy));
-#endif
       DetailedTimer::ScopedPush sp(TIME_COPY);
 
       // create a copier for the memory used by all of these instance pairs
@@ -3324,10 +3281,6 @@ namespace LegionRuntime {
 		   domain.is_id,
 		   before_copy.id, before_copy.gen,
 		   get_finish_event().id, get_finish_event().gen);
-
-#ifdef LEGION_LOGGING
-      log_timing_event(Processor::NO_PROC, after_copy, COPY_INIT);
-#endif
     }
 
     ReduceRequest::~ReduceRequest(void)
@@ -3507,10 +3460,6 @@ namespace LegionRuntime {
 	assert(rq != 0);
 	log_dma.info("request %p enqueued", this);
 
-#ifdef LEGION_LOGGING
-	log_timing_event(Processor::NO_PROC, after_copy, COPY_READY);
-#endif
-
 	// once we're enqueued, we may be deleted at any time, so no more
 	//  references
 	rq->enqueue_request(this);
@@ -3624,13 +3573,6 @@ namespace LegionRuntime {
     {
       log_dma.info("request %p executing", this);
 
-#ifdef LEGION_LOGGING
-      log_timing_event(Processor::NO_PROC, after_copy, COPY_BEGIN);
-
-      // the copy might not actually finish in this thread, so set up an event waiter
-      //  to log the completion
-      EventImpl::add_waiter(after_copy, new CopyCompletionLogger(after_copy));
-#endif
       DetailedTimer::ScopedPush sp(TIME_COPY);
 
       // code assumes a single source field for now

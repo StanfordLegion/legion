@@ -16,7 +16,6 @@
 
 #include "lowlevel.h"
 #include "accessor.h"
-#include "legion_logging.h"
 #include "realm/profiling.h"
 #include "realm/timers.h"
 #include "realm/custom_serdez.h"
@@ -5878,11 +5877,6 @@ namespace LegionRuntime {
 
     Event CopyOperation::register_copy(Event wait_on)
     {
-#ifdef LEGION_LOGGING
-      LegionRuntime::HighLevel::LegionLogging::log_timing_event(
-                                    Processor::get_executing_processor(),
-                                    done_event->get_event(), COPY_INIT);
-#endif
       Event result = done_event->get_event();
       if (wait_on.exists()) {
         EventImpl *event_impl = RuntimeImpl::get_runtime()->get_event_impl(wait_on);
@@ -5896,11 +5890,6 @@ namespace LegionRuntime {
     void CopyOperation::perform(void)
     {
       DetailedTimer::ScopedPush sp(TIME_COPY); 
-#ifdef LEGION_LOGGING
-      LegionRuntime::HighLevel::LegionLogging::log_timing_event(
-                                    Processor::NO_PROC,
-                                    done_event->get_event(), COPY_BEGIN);
-#endif
       // A little bit of a hack for the shared lowlevel profiling
       if (capture_usage && !srcs.empty() && !dsts.empty()) {
         usage.source = srcs[0].inst.get_location();
@@ -5948,11 +5937,6 @@ namespace LegionRuntime {
           }
         }
       }
-#ifdef LEGION_LOGGING
-      LegionRuntime::HighLevel::LegionLogging::log_timing_event(
-                                      Processor::NO_PROC,
-                                      done_event->get_event(), COPY_END);
-#endif
       // Trigger the event indicating that we are done
       done_event->trigger();
     }
@@ -6193,12 +6177,6 @@ namespace LegionRuntime {
 				 ReductionOpID redop_id /*= 0*/, bool red_fold /*= false*/)
     {
       EventImpl *done_event = NULL;
-#ifdef LEGION_LOGGING
-      done_event = RuntimeImpl::get_runtime()->get_free_event(); 
-      LegionRuntime::HighLevel::LegionLogging::log_timing_event(
-                                      Processor::get_executing_processor(),
-                                      done_event->get_event(), COPY_INIT);
-#endif
       CopyOperation *co = new CopyOperation(srcs, dsts, 
 					    domain, //get_element_mask(), get_element_mask(),
 					    redop_id, red_fold,
@@ -6214,12 +6192,6 @@ namespace LegionRuntime {
                                  ReductionOpID redop_id, bool red_fold)
     {
       EventImpl *done_event = NULL;
-#ifdef LEGION_LOGGING
-      done_event = RuntimeImpl::get_runtime()->get_free_event(); 
-      LegionRuntime::HighLevel::LegionLogging::log_timing_event(
-                                      Processor::get_executing_processor(),
-                                      done_event->get_event(), COPY_INIT);
-#endif
       CopyOperation *co = new CopyOperation(srcs, dsts, requests, 
 					    domain, redop_id, red_fold,
 					    done_event);
