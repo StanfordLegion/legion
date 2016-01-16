@@ -1604,7 +1604,7 @@ namespace LegionRuntime{
     };
 
     XferDesQueue* get_xdq_singleton();
-#ifdef USE_GPU
+#ifdef USE_CUDA
     void register_gpu_in_dma_systems(GPU* gpu);
 #endif
     void start_channel_manager(int count, int max_nr, Realm::CoreReservationSet& crs);

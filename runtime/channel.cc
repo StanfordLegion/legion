@@ -43,7 +43,7 @@ namespace LegionRuntime {
 #endif /*USE_DISK*/
 
       // TODO: currently we use dma_all_gpus to track the set of GPU* created
-#ifdef USE_GPU
+#ifdef USE_CUDA
       std::vector<GPU*> dma_all_gpus;
 #endif
       // we use a single queue for all xferDes
@@ -1931,7 +1931,7 @@ namespace LegionRuntime {
       {
         return xferDes_queue;
       }
-#ifdef USE_GPU
+#ifdef USE_CUDA
       void register_gpu_in_dma_systems(GPU* gpu)
       {
         dma_all_gpus.push_back(gpu);
