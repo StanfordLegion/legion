@@ -330,6 +330,7 @@ namespace LegionRuntime {
         }
       }
 
+#ifdef LEGION_SPY
       static inline void log_mapping_dependence(UniqueID context, 
                 UniqueID prev_id, unsigned prev_idx, UniqueID next_id, 
                 unsigned next_idx, unsigned dep_type)
@@ -459,6 +460,7 @@ namespace LegionRuntime {
         log_spy.info("Op Processor User %llu " IDFMT "",
                               user, proc_id);
       }
+#endif
 
     };
 

@@ -31,10 +31,7 @@
 #include <signal.h>
 #include <execinfo.h>
 #endif
-#if defined(DEBUG_HIGH_LEVEL) || defined(LEGION_SPY) || \
-    defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS)
 #include <unistd.h> // sleep for warnings
-#endif
 
 namespace LegionRuntime {
 
@@ -4684,12 +4681,13 @@ namespace LegionRuntime {
 #endif
         proc_managers[proc]->invoke_mapper_set_task_options(top_task);
         invoke_mapper_configure_context(proc, top_task);
-#ifdef LEGION_SPY
-        Internal::log_machine(machine);
-        LegionSpy::log_top_level_task(Internal::legion_main_id,
-                                      top_task->get_unique_task_id(),
-                                      top_task->variants->name);
-#endif
+        if (legion_spy_enabled)
+        {
+          Internal::log_machine(machine);
+          LegionSpy::log_top_level_task(Internal::legion_main_id,
+                                        top_task->get_unique_task_id(),
+                                        top_task->variants->name);
+        }
         increment_outstanding_top_level_tasks();
         // Put the task in the ready queue
         add_to_ready_queue(proc, top_task, false/*prev failure*/);
@@ -4768,9 +4766,9 @@ namespace LegionRuntime {
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
 #endif
-#ifdef LEGION_SPY
-      LegionSpy::log_top_index_space(handle.id);
-#endif
+      if (legion_spy_enabled)
+        LegionSpy::log_top_index_space(handle.id);
+
       LowLevel::IndexSpace space = 
                       LowLevel::IndexSpace::create_index_space(max_num_elmts);
       forest->create_index_space(handle, Domain(space), 
@@ -4807,9 +4805,9 @@ namespace LegionRuntime {
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
 #endif
-#ifdef LEGION_SPY
-      LegionSpy::log_top_index_space(handle.id);
-#endif
+      if (legion_spy_enabled)
+        LegionSpy::log_top_index_space(handle.id);
+
       forest->create_index_space(handle, domain, DENSE_ARRAY_KIND, NO_MEMORY);
       ctx->register_index_space_creation(handle);
       return handle;
@@ -4910,9 +4908,9 @@ namespace LegionRuntime {
                             handle.id, ctx->variants->name,
                             ctx->get_unique_task_id());
 #endif
-#ifdef LEGION_SPY
-      LegionSpy::log_top_index_space(handle.id);
-#endif
+      if (legion_spy_enabled)
+        LegionSpy::log_top_index_space(handle.id);
+
       forest->create_index_space(handle, hull, domains,
                                  DENSE_ARRAY_KIND, NO_MEMORY);
       ctx->register_index_space_creation(handle);
@@ -7220,9 +7218,9 @@ namespace LegionRuntime {
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
 #endif
-#ifdef LEGION_SPY
-      LegionSpy::log_field_space(space.id);
-#endif
+      if (legion_spy_enabled)
+        LegionSpy::log_field_space(space.id);
+
       forest->create_field_space(space);
       ctx->register_field_space_creation(space);
       return space;
@@ -7347,9 +7345,9 @@ namespace LegionRuntime {
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
 #endif
-#ifdef LEGION_SPY
-      LegionSpy::log_top_region(index_space.id, field_space.id, tid);
-#endif
+      if (legion_spy_enabled)
+        LegionSpy::log_top_region(index_space.id, field_space.id, tid);
+
       forest->create_logical_region(region);
       // Register the creation of a top-level region with the context
       ctx->register_region_creation(region);
@@ -10322,9 +10320,10 @@ namespace LegionRuntime {
 #endif
       if (fid == AUTO_GENERATE_ID)
         fid = get_unique_field_id();
-#ifdef LEGION_SPY
-      LegionSpy::log_field_creation(space.id, fid);
-#endif
+
+      if (legion_spy_enabled)
+        LegionSpy::log_field_creation(space.id, fid);
+
       if (local)
         ctx->add_local_field(space, fid, field_size, serdez_id);
       else
@@ -10401,9 +10400,9 @@ namespace LegionRuntime {
       {
         if (resulting_fields[idx] == AUTO_GENERATE_ID)
           resulting_fields[idx] = get_unique_field_id();
-#ifdef LEGION_SPY
-        LegionSpy::log_field_creation(space.id, resulting_fields[idx]);
-#endif
+
+        if (legion_spy_enabled)
+          LegionSpy::log_field_creation(space.id, resulting_fields[idx]);
       }
       if (local)
         ctx->add_local_fields(space, resulting_fields, sizes, serdez_id);
@@ -14974,6 +14973,7 @@ namespace LegionRuntime {
     /*static*/ bool Internal::resilient_mode = false;
     /*static*/ bool Internal::unsafe_launch = false;
     /*static*/ bool Internal::dynamic_independence_tests = true;
+    /*static*/ bool Internal::legion_spy_enabled = false;
     /*static*/ unsigned Internal::shutdown_counter = 0;
     /*static*/ int Internal::mpi_rank = -1;
     /*static*/ unsigned Internal::mpi_rank_table[MAX_NUM_NODES];
@@ -15090,6 +15090,11 @@ namespace LegionRuntime {
         // We always turn this on as the Legion Spy will 
         // now understand how to handle it.
         dynamic_independence_tests = true;
+#ifdef LEGION_SPY
+        legion_spy_enabled = true;
+#else
+        legion_spy_enabled = false;
+#endif
         initial_task_window_size = DEFAULT_MAX_TASK_WINDOW;
         initial_task_window_hysteresis = DEFAULT_TASK_WINDOW_HYSTERESIS;
         initial_tasks_to_schedule = DEFAULT_MIN_TASKS_TO_SCHEDULE;
@@ -15131,6 +15136,7 @@ namespace LegionRuntime {
           INT_ARG("-hl:epoch", gc_epoch_size);
           if (!strcmp(argv[i],"-hl:no_dyn"))
             dynamic_independence_tests = false;
+          BOOL_ARG("-hl:spy",legion_spy_enabled);
 #ifdef DEBUG_HIGH_LEVEL
           BOOL_ARG("-hl:tree",logging_region_tree_state);
           BOOL_ARG("-hl:verbose",verbose_logging);
@@ -15201,6 +15207,30 @@ namespace LegionRuntime {
         fprintf(stderr,"!!! YOU ARE PROFILING WITH LegionSpy ENABLED  !!!\n");
         fprintf(stderr,"!!! SERIOUS PERFORMANCE DEGRADATION WILL OCCUR!!!\n");
         fprintf(stderr,"!!! COMPILE WITHOUT -DLEGION_SPY FOR PROFILING!!!\n");
+        for (int i = 0; i < 2; i++)
+          fprintf(stderr,"!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
+        for (int i = 0; i < 4; i++)
+          fprintf(stderr,"!WARNING WARNING WARNING WARNING WARNING WARNING!\n");
+        for (int i = 0; i < 2; i++)
+          fprintf(stderr,"!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
+        fprintf(stderr,"\n");
+        fprintf(stderr,"SLEEPING FOR 5 SECONDS SO YOU READ THIS WARNING...\n");
+        fflush(stderr);
+        sleep(5);
+      }
+#else
+      if (legion_spy_enabled && (num_profiling_nodes > 0))
+      {
+        // Give a massive warning about profiling with Legion Spy enabled
+        for (int i = 0; i < 2; i++)
+          fprintf(stderr,"!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
+        for (int i = 0; i < 4; i++)
+          fprintf(stderr,"!WARNING WARNING WARNING WARNING WARNING WARNING!\n");
+        for (int i = 0; i < 2; i++)
+          fprintf(stderr,"!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
+        fprintf(stderr,"!!! YOU ARE PROFILING WITH LegionSpy ENABLED  !!!\n");
+        fprintf(stderr,"!!! SERIOUS PERFORMANCE DEGRADATION WILL OCCUR!!!\n");
+        fprintf(stderr,"!!! RUN WITHOUT -hl:spy flag FOR PROFILING    !!!\n");
         for (int i = 0; i < 2; i++)
           fprintf(stderr,"!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
         for (int i = 0; i < 4; i++)
@@ -15933,7 +15963,8 @@ namespace LegionRuntime {
     /*static*/ void Internal::log_machine(Machine machine)
     //--------------------------------------------------------------------------
     {
-#ifdef LEGION_SPY
+      if (!legion_spy_enabled)
+        return;
       std::set<Processor> all_procs;
       machine.get_all_processors(all_procs);
       // Log processors
@@ -15978,7 +16009,6 @@ namespace LegionRuntime {
                                           it->bandwidth, it->latency);
         }
       }
-#endif
     }
 
 #ifdef SPECIALIZED_UTIL_PROCS

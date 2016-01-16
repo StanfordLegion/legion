@@ -2146,7 +2146,6 @@ namespace LegionRuntime {
                                             const RegionRequirement &req)
     //--------------------------------------------------------------------------
     {
-#ifdef LEGION_SPY
       const bool reg = (req.handle_type == SINGULAR) ||
                  (req.handle_type == REG_PROJECTION);
 
@@ -2159,7 +2158,6 @@ namespace LegionRuntime {
                 req.partition.tree_id,
           req.privilege, req.prop, req.redop);
       LegionSpy::log_requirement_fields(uid, idx, req.privilege_fields);
-#endif
     }
 
     /////////////////////////////////////////////////////////////
@@ -6253,16 +6251,17 @@ namespace LegionRuntime {
             runtime->get_available_distributed_id(!top_level_task), 
             runtime->address_space, runtime->address_space, this));
       check_empty_field_requirements();
-#ifdef LEGION_SPY
-      LegionSpy::log_individual_task(parent_ctx->get_unique_task_id(),
-                                     unique_op_id,
-                                     task_id,
-                                     variants->name);
-      for (unsigned idx = 0; idx < regions.size(); idx++)
+      if (Internal::legion_spy_enabled)
       {
-        log_requirement(unique_op_id, idx, regions[idx]);
+        LegionSpy::log_individual_task(parent_ctx->get_unique_task_id(),
+                                       unique_op_id,
+                                       task_id,
+                                       variants->name);
+        for (unsigned idx = 0; idx < regions.size(); idx++)
+        {
+          log_requirement(unique_op_id, idx, regions[idx]);
+        }
       }
-#endif
       return result;
     }
 
@@ -6311,16 +6310,17 @@ namespace LegionRuntime {
             runtime->get_available_distributed_id(!top_level_task), 
             runtime->address_space, runtime->address_space, this));
       check_empty_field_requirements();
-#ifdef LEGION_SPY
-      LegionSpy::log_individual_task(parent_ctx->get_unique_task_id(),
-                                     unique_op_id,
-                                     task_id,
-                                     variants->name);
-      for (unsigned idx = 0; idx < regions.size(); idx++)
+      if (Internal::legion_spy_enabled)
       {
-        log_requirement(unique_op_id, idx, regions[idx]);
+        LegionSpy::log_individual_task(parent_ctx->get_unique_task_id(),
+                                       unique_op_id,
+                                       task_id,
+                                       variants->name);
+        for (unsigned idx = 0; idx < regions.size(); idx++)
+        {
+          log_requirement(unique_op_id, idx, regions[idx]);
+        }
       }
-#endif
       return result;
     }  
 
@@ -7112,9 +7112,8 @@ namespace LegionRuntime {
         complete_mapping();
       // If we're remote, we've already resolved speculation for now
       resolve_speculation();
-#ifdef LEGION_SPY
-      LegionSpy::log_point_point(remote_unique_id, get_unique_task_id());
-#endif
+      if (Internal::legion_spy_enabled)
+        LegionSpy::log_point_point(remote_unique_id, get_unique_task_id());
       // Return true to add ourselves to the ready queue
       return true;
     }
@@ -8467,15 +8466,16 @@ namespace LegionRuntime {
       future_map.impl->add_valid_domain(index_domain);
 #endif
       check_empty_field_requirements();
-#ifdef LEGION_SPY
-      LegionSpy::log_index_task(parent_ctx->get_unique_task_id(),
-                                unique_op_id, task_id,
-                                variants->name);
-      for (unsigned idx = 0; idx < regions.size(); idx++)
+      if (Internal::legion_spy_enabled)
       {
-        TaskOp::log_requirement(unique_op_id, idx, regions[idx]);
+        LegionSpy::log_index_task(parent_ctx->get_unique_task_id(),
+                                  unique_op_id, task_id,
+                                  variants->name);
+        for (unsigned idx = 0; idx < regions.size(); idx++)
+        {
+          TaskOp::log_requirement(unique_op_id, idx, regions[idx]);
+        }
       }
-#endif
       return future_map;
     }
 
@@ -8545,15 +8545,16 @@ namespace LegionRuntime {
             true/*register*/, runtime->get_available_distributed_id(true), 
             runtime->address_space, runtime->address_space, this));
       check_empty_field_requirements();
-#ifdef LEGION_SPY
-      LegionSpy::log_index_task(parent_ctx->get_unique_task_id(),
-                                unique_op_id, task_id,
-                                variants->name);
-      for (unsigned idx = 0; idx < regions.size(); idx++)
+      if (Internal::legion_spy_enabled)
       {
-        TaskOp::log_requirement(unique_op_id, idx, regions[idx]);
+        LegionSpy::log_index_task(parent_ctx->get_unique_task_id(),
+                                  unique_op_id, task_id,
+                                  variants->name);
+        for (unsigned idx = 0; idx < regions.size(); idx++)
+        {
+          TaskOp::log_requirement(unique_op_id, idx, regions[idx]);
+        }
       }
-#endif
       return reduction_future;
     }
 
@@ -8607,15 +8608,16 @@ namespace LegionRuntime {
       future_map.impl->add_valid_domain(index_domain);
 #endif
       check_empty_field_requirements();
-#ifdef LEGION_SPY
-      LegionSpy::log_index_task(parent_ctx->get_unique_task_id(),
-                                unique_op_id, task_id,
-                                variants->name);
-      for (unsigned idx = 0; idx < regions.size(); idx++)
+      if (Internal::legion_spy_enabled)
       {
-        TaskOp::log_requirement(unique_op_id, idx, regions[idx]);
+        LegionSpy::log_index_task(parent_ctx->get_unique_task_id(),
+                                  unique_op_id, task_id,
+                                  variants->name);
+        for (unsigned idx = 0; idx < regions.size(); idx++)
+        {
+          TaskOp::log_requirement(unique_op_id, idx, regions[idx]);
+        }
       }
-#endif
       return future_map;
     }
     
@@ -8685,15 +8687,16 @@ namespace LegionRuntime {
             true/*register*/, runtime->get_available_distributed_id(true), 
             runtime->address_space, runtime->address_space, this));
       check_empty_field_requirements();
-#ifdef LEGION_SPY
-      LegionSpy::log_index_task(parent_ctx->get_unique_task_id(),
-                                unique_op_id, task_id,
-                                variants->name);
-      for (unsigned idx = 0; idx < regions.size(); idx++)
+      if (Internal::legion_spy_enabled)
       {
-        TaskOp::log_requirement(unique_op_id, idx, regions[idx]);
+        LegionSpy::log_index_task(parent_ctx->get_unique_task_id(),
+                                  unique_op_id, task_id,
+                                  variants->name);
+        for (unsigned idx = 0; idx < regions.size(); idx++)
+        {
+          TaskOp::log_requirement(unique_op_id, idx, regions[idx]);
+        }
       }
-#endif
       return reduction_future;
     }
 
@@ -9402,10 +9405,9 @@ namespace LegionRuntime {
       result->index_owner = this;
       result->remote_owner_uid = parent_ctx->get_unique_task_id();
       result->remote_parent_ctx = parent_ctx;
-#ifdef LEGION_SPY
-      LegionSpy::log_index_slice(get_unique_task_id(), 
-                                 result->get_unique_task_id());
-#endif
+      if (Internal::legion_spy_enabled)
+        LegionSpy::log_index_slice(get_unique_task_id(), 
+                                   result->get_unique_task_id());
       return result;
     }
 
@@ -10258,9 +10260,8 @@ namespace LegionRuntime {
         parent_ctx = index_owner->parent_ctx;
       else
         parent_ctx = remote_ctx;
-#ifdef LEGION_SPY
-      LegionSpy::log_slice_slice(remote_unique_id, get_unique_task_id());
-#endif
+      if (Internal::legion_spy_enabled)
+        LegionSpy::log_slice_slice(remote_unique_id, get_unique_task_id());
       num_unmapped_points = num_points;
       num_uncomplete_points = num_points;
       num_uncommitted_points = num_points;
@@ -10271,11 +10272,10 @@ namespace LegionRuntime {
         point->unpack_task(derez, current);
         point->parent_ctx = parent_ctx;
         points.push_back(point);
-#ifdef LEGION_SPY
-        LegionSpy::log_slice_point(get_unique_task_id(), 
-                                   point->get_unique_task_id(),
-                                   point->index_point);
-#endif
+        if (Internal::legion_spy_enabled)
+          LegionSpy::log_slice_point(get_unique_task_id(), 
+                                     point->get_unique_task_id(),
+                                     point->index_point);
       }
       // Return true to add this to the ready queue
       return true;
@@ -10306,10 +10306,9 @@ namespace LegionRuntime {
       result->index_owner = this->index_owner;
       result->remote_owner_uid = this->remote_owner_uid;
       result->remote_parent_ctx = this->remote_parent_ctx;
-#ifdef LEGION_SPY
-      LegionSpy::log_slice_slice(get_unique_task_id(), 
-                                 result->get_unique_task_id());
-#endif
+      if (Internal::legion_spy_enabled)
+        LegionSpy::log_slice_slice(get_unique_task_id(), 
+                                   result->get_unique_task_id());
       return result;
     }
 
@@ -10403,11 +10402,10 @@ namespace LegionRuntime {
       result->index_point = p;
       // Now figure out our local point information
       result->initialize_point(this, mp);
-#ifdef LEGION_SPY
-      LegionSpy::log_slice_point(get_unique_task_id(), 
-                                 result->get_unique_task_id(),
-                                 result->index_point);
-#endif
+      if (Internal::legion_spy_enabled)
+        LegionSpy::log_slice_point(get_unique_task_id(), 
+                                   result->get_unique_task_id(),
+                                   result->index_point);
       return result;
     }
 

@@ -2247,6 +2247,7 @@ namespace LegionRuntime {
       static bool resilient_mode;
       static bool unsafe_launch;
       static bool dynamic_independence_tests;
+      static bool legion_spy_enabled;
       static unsigned shutdown_counter;
       static int mpi_rank;
       static unsigned mpi_rank_table[MAX_NUM_NODES];

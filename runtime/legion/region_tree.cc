@@ -145,11 +145,13 @@ namespace LegionRuntime {
       else
         new_part = create_node(pid, parent_node, part_color, color_space, 
                                (part_kind == DISJOINT_KIND), mode);
-#ifdef LEGION_SPY
-      bool disjoint = (part_kind == DISJOINT_KIND);
-      LegionSpy::log_index_partition(parent.id, pid.id, disjoint,
-          part_color.get_point());
-#endif
+
+      if (Internal::legion_spy_enabled)
+      {
+        bool disjoint = (part_kind == DISJOINT_KIND);
+        LegionSpy::log_index_partition(parent.id, pid.id, disjoint,
+            part_color.get_point());
+      }
       // Now do all the child nodes
       for (std::map<DomainPoint,Domain>::const_iterator it = 
             coloring.begin(); it != coloring.end(); it++)
@@ -169,9 +171,9 @@ namespace LegionRuntime {
                           pid.get_tree_id());
         create_node(handle, it->second, new_part, ColorPoint(it->first),
                     parent_node->kind, mode);
-#ifdef LEGION_SPY
-        LegionSpy::log_index_subspace(pid.id, handle.id, it->first);
-#endif
+
+        if (Internal::legion_spy_enabled)
+          LegionSpy::log_index_subspace(pid.id, handle.id, it->first);
       } 
       if (part_kind == COMPUTE_KIND)
       {
@@ -211,11 +213,13 @@ namespace LegionRuntime {
       else
         new_part = create_node(pid, parent_node, part_color, color_space, 
                                             (part_kind == DISJOINT_KIND), mode);
-#ifdef LEGION_SPY
-      bool disjoint = (part_kind == DISJOINT_KIND);
-      LegionSpy::log_index_partition(parent.id, pid.id, disjoint,
-          part_color.get_point());
-#endif
+
+      if (Internal::legion_spy_enabled)
+      {
+        bool disjoint = (part_kind == DISJOINT_KIND);
+        LegionSpy::log_index_partition(parent.id, pid.id, disjoint,
+            part_color.get_point());
+      }
       // Now do all the child nodes
       std::map<DomainPoint,std::set<Domain> >::const_iterator comp_it = 
         component_domains.begin();
@@ -239,9 +243,9 @@ namespace LegionRuntime {
                                             new_part, ColorPoint(it->first),
                                             parent_node->kind, mode);
         child->update_component_domains(comp_it->second);
-#ifdef LEGION_SPY
-        LegionSpy::log_index_subspace(pid.id, handle.id, it->first);
-#endif
+
+        if (Internal::legion_spy_enabled)
+          LegionSpy::log_index_subspace(pid.id, handle.id, it->first);
       }
       if (part_kind == COMPUTE_KIND)
       {
@@ -462,7 +466,7 @@ namespace LegionRuntime {
       IndexSpaceNode *parent_node = get_node(parent);
       if (!partition_color.is_valid())
         partition_color = ColorPoint(DomainPoint::from_point<1>(
-                              Arrays::Point<1>(parent_node->generate_color()))); 
+                              Arrays::Point<1>(parent_node->generate_color())));
       UserEvent disjointness_event = UserEvent::NO_USER_EVENT;
       IndexPartNode *partition_node;
       if (part_kind == COMPUTE_KIND)
@@ -476,11 +480,13 @@ namespace LegionRuntime {
         partition_node = create_node(pid, parent_node, partition_color,
                                      color_space, (part_kind == DISJOINT_KIND),
                                      allocable ? MUTABLE : NO_MEMORY);
-#ifdef LEGION_SPY
-      bool disjoint = (part_kind == DISJOINT_KIND);
-      LegionSpy::log_index_partition(parent.id, pid.id, disjoint,
-          partition_color.get_point());
-#endif
+
+      if (Internal::legion_spy_enabled)
+      {
+        bool disjoint = (part_kind == DISJOINT_KIND);
+        LegionSpy::log_index_partition(parent.id, pid.id, disjoint,
+            partition_color.get_point());
+      }
       // We also need to explicitly instantiate all the children so
       // that they know the domains will be ready at a later time.
       // We instantiate them with an empty domain that will be filled in later
@@ -507,9 +513,8 @@ namespace LegionRuntime {
           create_node(is, handle_ready, domain_ready,
                       partition_node, child_color, parent_node->kind, 
                       allocable ? MUTABLE : NO_MEMORY);
-#ifdef LEGION_SPY
-        LegionSpy::log_index_subspace(pid.id, is.id, itr.p);
-#endif
+        if (Internal::legion_spy_enabled)
+          LegionSpy::log_index_subspace(pid.id, is.id, itr.p);
       }
       // If we need to compute the disjointness, only do that
       // after the partition is actually ready
@@ -3922,11 +3927,9 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       get_node(handle)->attach_semantic_information(tag, source, buffer, size);
-#ifdef LEGION_SPY
-      if (NAME_SEMANTIC_TAG == tag)
+      if (Internal::legion_spy_enabled && (NAME_SEMANTIC_TAG == tag))
         LegionSpy::log_index_space_name(handle.id,
             reinterpret_cast<const char*>(buffer));
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -3938,11 +3941,9 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       get_node(handle)->attach_semantic_information(tag, source, buffer, size);
-#ifdef LEGION_SPY
-      if (NAME_SEMANTIC_TAG == tag)
+      if (Internal::legion_spy_enabled && (NAME_SEMANTIC_TAG == tag))
         LegionSpy::log_index_partition_name(handle.id,
             reinterpret_cast<const char*>(buffer));
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -3954,11 +3955,9 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       get_node(handle)->attach_semantic_information(tag, source, buffer, size);
-#ifdef LEGION_SPY
-      if (NAME_SEMANTIC_TAG == tag)
+      if (Internal::legion_spy_enabled && (NAME_SEMANTIC_TAG == tag))
         LegionSpy::log_field_space_name(handle.id,
             reinterpret_cast<const char*>(buffer));
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -3971,11 +3970,9 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       get_node(handle)->attach_semantic_information(fid, tag, src, buf, size);
-#ifdef LEGION_SPY
-      if (NAME_SEMANTIC_TAG == tag)
+      if (Internal::legion_spy_enabled && (NAME_SEMANTIC_TAG == tag))
         LegionSpy::log_field_name(handle.id, fid,
             reinterpret_cast<const char*>(buf));
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -3987,12 +3984,10 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       get_node(handle)->attach_semantic_information(tag, source, buffer, size);
-#ifdef LEGION_SPY
-      if (NAME_SEMANTIC_TAG == tag)
+      if (Internal::legion_spy_enabled && (NAME_SEMANTIC_TAG == tag))
         LegionSpy::log_logical_region_name(handle.index_space.id,
             handle.field_space.id, handle.tree_id,
             reinterpret_cast<const char*>(buffer));
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -4004,12 +3999,10 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       get_node(handle)->attach_semantic_information(tag, source, buffer, size);
-#ifdef LEGION_SPY
-      if (NAME_SEMANTIC_TAG == tag)
+      if (Internal::legion_spy_enabled && (NAME_SEMANTIC_TAG == tag))
         LegionSpy::log_logical_partition_name(handle.index_partition.id,
             handle.field_space.id, handle.tree_id,
             reinterpret_cast<const char*>(buffer));
-#endif
     }
 
     //--------------------------------------------------------------------------
