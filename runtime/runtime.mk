@@ -33,8 +33,6 @@ endif
 CONDUIT ?= udp
 ifdef GASNET_ROOT
 GASNET ?= $(GASNET_ROOT)
-else
-GASNET ?= $(LG_RT_DIR)/gasnet/release
 endif
 
 # generate libraries for Legion and Realm
@@ -139,12 +137,14 @@ endif
 # Flags for running in the general low-level runtime
 ifeq ($(strip $(SHARED_LOWLEVEL)),0)
 
-# general low-level uses CUDA by default
-USE_CUDA ?= 1
-ifeq ($(strip $(USE_CUDA)),1)
-  ifndef CUDA
+# general low-level uses CUDA if requested
+ifeq ($(strip $(CUDA)),)
+  USE_CUDA ?= 0
+  ifeq ($(strip $(USE_CUDA)),1)
     $(error CUDA variable is not defined, aborting build)
   endif
+else
+  USE_CUDA ?= 1
 endif
 
 # General CUDA variables
@@ -179,13 +179,17 @@ endif
 NVCC_FLAGS	+= -Xptxas "-v" #-abi=no"
 endif
 
-# general low-level uses GASNet by default
-USE_GASNET ?= 1
-ifeq ($(strip $(USE_GASNET)),1)
-  ifndef GASNET
+# general low-level uses GASNet if requested
+ifeq ($(strip $(GASNET)),)
+  USE_GASNET ?= 0
+  ifeq ($(strip $(USE_GASNET)),1)
     $(error GASNET variable is not defined, aborting build)
   endif
+else
+  USE_GASNET ?= 1
+endif
 
+ifeq ($(strip $(USE_GASNET)),1)
   # General GASNET variables
   INC_FLAGS	+= -I$(GASNET)/include
   ifneq ($(shell uname -s),Darwin)
