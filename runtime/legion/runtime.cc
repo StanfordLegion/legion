@@ -4049,6 +4049,9 @@ namespace LegionRuntime {
         realm_desc(realm), inline_desc(app)
     //--------------------------------------------------------------------------
     {
+      // If we're doing a pending registration, this is a static
+      // registration so we don't have to register it globally
+      registrar.global_registration = false;
       // Make sure we own the task variant name
       if (reg.task_variant_name != NULL)
         registrar.task_variant_name = strdup(reg.task_variant_name);
