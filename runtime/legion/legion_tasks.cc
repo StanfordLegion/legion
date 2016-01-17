@@ -9251,9 +9251,9 @@ namespace LegionRuntime {
     bool IndexTask::has_restrictions(unsigned idx, LogicalRegion handle)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(idx < restrict_infos.size());
-#endif
+      // Handle the case of inline tasks
+      if (restrict_infos.empty())
+        return false;
       if (restrict_infos[idx].has_restrictions())
         return runtime->forest->has_restrictions(handle, restrict_infos[idx],
                                                  regions[idx].privilege_fields);
