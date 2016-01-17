@@ -836,6 +836,7 @@ namespace LegionRuntime {
 #define FRIEND_ALL_RUNTIME_CLASSES                \
     friend class Runtime;                         \
     friend class Internal;                        \
+    friend class TaskImpl;                        \
     friend class FuturePredicate;                 \
     friend class NotPredicate;                    \
     friend class AndPredicate;                    \

@@ -98,6 +98,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    const char* TaskOp::get_task_name(void) const
+    //--------------------------------------------------------------------------
+    {
+      TaskImpl *impl = runtime->find_or_create_task_impl(task_id);
+      return impl->get_name();
+    }
+
+    //--------------------------------------------------------------------------
     bool TaskOp::is_remote(void) const
     //--------------------------------------------------------------------------
     {
@@ -317,7 +325,7 @@ namespace LegionRuntime {
       derez.deserialize(depth);
       derez.deserialize(speculated);
       derez.deserialize(premapped);
-      variants = Internal::get_variant_collection(task_id);
+      variants = runtime->find_or_create_task_impl(task_id)->get_collection();
       derez.deserialize(selected_variant);
       derez.deserialize(target_proc);
       size_t num_additional_procs;
@@ -405,7 +413,7 @@ namespace LegionRuntime {
       depth = parent_ctx->depth+1;
       speculated = false;
       premapped = false;
-      variants = Internal::get_variant_collection(tid);
+      variants = runtime->find_or_create_task_impl(task_id)->get_collection();
       selected_variant = 0;
       target_proc = orig_proc;
       inline_task = false;

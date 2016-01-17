@@ -4042,10 +4042,11 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     PendingVariantRegistration::PendingVariantRegistration(VariantID v,
-                                  const TaskVariantRegistrar &reg, 
+                                  bool has_ret, const TaskVariantRegistrar &reg,
                                   const void *udata, size_t udata_size,
                                   CodeDescriptor *realm, CodeDescriptor *app)
-      : vid(v), registrar(reg), realm_desc(realm), inline_desc(app)
+      : vid(v), has_return(has_ret), registrar(reg), 
+        realm_desc(realm), inline_desc(app)
     //--------------------------------------------------------------------------
     {
       // Make sure we own the task variant name
@@ -4099,7 +4100,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       runtime->register_variant(registrar, user_data, user_data_size,
-                                realm_desc, inline_desc, vid);
+                                realm_desc, inline_desc, has_return, vid);
     }
 
     /////////////////////////////////////////////////////////////
@@ -4108,7 +4109,8 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     TaskImpl::TaskImpl(TaskID tid, Internal *rt, const char *name/*=NULL*/)
-      : task_id(tid), runtime(rt), task_lock(Reservation::create_reservation())
+      : task_id(tid), runtime(rt), task_lock(Reservation::create_reservation()), 
+        has_return_type(false), all_idempotent(false)
     //--------------------------------------------------------------------------
     {
       // Always fill in semantic info 0 with a name for the task
@@ -4131,6 +4133,8 @@ namespace LegionRuntime {
         const char *name = (const char*)info.buffer;
         runtime->profiler->register_task_kind(task_id, name);
       }
+      collection = new TaskVariantCollection(task_id, get_name(), 
+                                             false/*idempotent*/, 0);
     }
 
     //--------------------------------------------------------------------------
@@ -4148,6 +4152,7 @@ namespace LegionRuntime {
     {
       task_lock.destroy_reservation();
       task_lock = Reservation::NO_RESERVATION;
+      delete collection;
     }
 
     //--------------------------------------------------------------------------
@@ -4167,7 +4172,43 @@ namespace LegionRuntime {
       assert(impl->owner == this);
 #endif
       AutoLock t_lock(task_lock);
+      if (!variants.empty())
+      {
+        // Make sure that all the variants agree whether there is 
+        // a return type or not
+        if (has_return_type != impl->returns_value())
+        {
+          log_run.error("Variants of task %s (ID %d) disagree on whether "
+                        "there is a return type or not. All variants "
+                        "of a task must agree on whether there is a "
+                        "return type.", get_name(false/*need lock*/),
+                        task_id);
+#ifdef DEBUG_HIGH_LEVEL
+          assert(false);
+#endif
+          exit(ERROR_RETURN_SIZE_MISMATCH);
+        }
+        if (all_idempotent != impl->is_idempotent())
+        {
+          log_run.error("Variants of task %s (ID %d) have different idempotent "
+                        "options.  All variants of the same task must "
+                        "all be either idempotent or non-idempotent.",
+                        get_name(false/*need lock*/), task_id);
+#ifdef DEBUG_HIGH_LEVEL
+          assert(false);
+#endif
+          exit(ERROR_IDEMPOTENT_MISMATCH);
+        }
+      }
+      else
+      {
+        has_return_type = impl->returns_value();
+        all_idempotent  = impl->is_idempotent();
+      }
       variants[impl->vid] = impl;
+      collection->add_variant(impl->vid, Processor::LOC_PROC,
+                              true/*single*/, true/*index*/,
+                              impl->is_inner(), impl->is_leaf(), impl->vid); 
     }
 
     //--------------------------------------------------------------------------
@@ -4217,6 +4258,13 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    TaskVariantCollection* TaskImpl::get_collection(void)
+    //--------------------------------------------------------------------------
+    {
+      return collection;
+    }
+
+    //--------------------------------------------------------------------------
     const char* TaskImpl::get_name(bool needs_lock /*= true*/) const
     //--------------------------------------------------------------------------
     {
@@ -4252,6 +4300,8 @@ namespace LegionRuntime {
 
       void *local = legion_malloc(SEMANTIC_INFO_ALLOC, size);
       memcpy(local, buffer, size);
+      if (tag == NAME_SEMANTIC_TAG)
+        collection->name = (const char*)local;
       bool added = true;
       UserEvent to_trigger = UserEvent::NO_USER_EVENT;
       {
@@ -4517,11 +4567,11 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     VariantImpl::VariantImpl(Internal *rt, VariantID v, TaskImpl *own, 
-                           const TaskVariantRegistrar &registrar,
+                           const TaskVariantRegistrar &registrar, bool ret,
                            CodeDescriptor *realm, CodeDescriptor *app,
                            const void *udata /*=NULL*/, size_t udata_size/*=0*/)
       : vid(v), owner(own), runtime(rt), global(registrar.global_registration),
-        realm_descriptor(realm), inline_descriptor(app), 
+        has_return_value(ret), realm_descriptor(realm), inline_descriptor(app), 
         user_data_size(udata_size), leaf_variant(registrar.leaf_variant), 
         inner_variant(registrar.inner_variant),
         idempotent_variant(registrar.idempotent_variant)
@@ -4581,12 +4631,28 @@ namespace LegionRuntime {
 #endif
         exit(ERROR_ILLEGAL_GLOBAL_VARIANT_REGISTRATION);
       }
+      if (leaf_variant && inner_variant)
+      {
+        log_run.error("Task variant %s (ID %ld) of task %s (ID %d) is not "
+                      "permitted to be both inner and leaf tasks "
+                      "simultaneously.", variant_name, vid,
+                      owner->get_name(), owner->task_id);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_INNER_LEAF_MISMATCH);
+      }
+      if (Internal::record_registration)
+        log_run.print("Task variant %s of task %s (ID %d) has Realm ID %ld",
+                      variant_name, owner->get_name(), owner->task_id, vid);
     }
 
     //--------------------------------------------------------------------------
     VariantImpl::VariantImpl(const VariantImpl &rhs) 
       : vid(rhs.vid), owner(rhs.owner), runtime(rhs.runtime), 
-        global(rhs.global), realm_descriptor(NULL), inline_descriptor(NULL)
+        global(rhs.global), has_return_value(rhs.has_return_value),
+        realm_descriptor(rhs.realm_descriptor), 
+        inline_descriptor(rhs.inline_descriptor)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -4669,6 +4735,7 @@ namespace LegionRuntime {
         RezCheck z(rez);
         rez.serialize(owner->task_id);
         rez.serialize(vid);
+        rez.serialize(has_return_value);
         // pack the code descriptors 
         Realm::Serialization::ByteCountSerializer counter;
         realm_descriptor->serialize(counter, true/*portable*/);
@@ -4712,6 +4779,8 @@ namespace LegionRuntime {
       TaskVariantRegistrar registrar(task_id);
       VariantID variant_id;
       derez.deserialize(variant_id);
+      bool has_return;
+      derez.deserialize(has_return);
       size_t impl_size;
       derez.deserialize(impl_size);
       Realm::Serialization::FixedBufferDeserializer
@@ -4735,7 +4804,7 @@ namespace LegionRuntime {
       // TODO unpack the constraints
       // Ask the runtime to perform the registration 
       runtime->register_variant(registrar, user_data, user_data_size,
-                                realm_desc, inline_desc, variant_id);
+                                realm_desc, inline_desc, has_return,variant_id);
     }
     
     /////////////////////////////////////////////////////////////
@@ -4763,6 +4832,7 @@ namespace LegionRuntime {
         memory_manager_lock(Reservation::create_reservation()),
         message_manager_lock(Reservation::create_reservation()),
         proc_spaces(processor_spaces),
+        task_variant_lock(Reservation::create_reservation()),
         mapper_info_lock(Reservation::create_reservation()),
         unique_index_space_id((unique == 0) ? runtime_stride : unique),
         unique_index_partition_id((unique == 0) ? runtime_stride : unique), 
@@ -4933,9 +5003,10 @@ namespace LegionRuntime {
       // runtime started that we now need to do
       std::deque<PendingVariantRegistration*> &pending_variants = 
         get_pending_variant_table();
+      const size_t num_static_variants = 
+        TASK_ID_AVAILABLE + pending_variants.size();
       if (!pending_variants.empty())
       {
-        const size_t num_static_variants = pending_variants.size();
         for (std::deque<PendingVariantRegistration*>::const_iterator it =
               pending_variants.begin(); it != pending_variants.end(); it++)
         {
@@ -4943,16 +5014,14 @@ namespace LegionRuntime {
           delete *it;
         }
         pending_variants.clear();
-        // If we had non-empty registrations, we have to update
-        // the unique_variant_id field
-        // All the runtime instances registered the static variants
-        // starting at 1 and counting by 1, so just increment our
-        // unique_variant_id until it is greater than the
-        // number of static variants, no need to use atomics
-        // here since we are still initializing the runtime
-        while (unique_variant_id <= num_static_variants)
-          unique_variant_id += runtime_stride;
       }
+      // All the runtime instances registered the static variants
+      // starting at 1 and counting by 1, so just increment our
+      // unique_variant_id until it is greater than the
+      // number of static variants, no need to use atomics
+      // here since we are still initializing the runtime
+      while (unique_variant_id <= num_static_variants)
+        unique_variant_id += runtime_stride;
 
       // Before launching the top level task, see if the user requested
       // a callback to be performed before starting the application
@@ -5514,7 +5583,7 @@ namespace LegionRuntime {
         LegionSpy::log_top_index_space(handle.id);
 
       Realm::IndexSpace space = 
-                      LowLevel::IndexSpace::create_index_space(max_num_elmts);
+                      Realm::IndexSpace::create_index_space(max_num_elmts);
       forest->create_index_space(handle, Domain(space), 
                                  UNSTRUCTURED_KIND, MUTABLE);
       ctx->register_index_space_creation(handle);
@@ -8499,20 +8568,19 @@ namespace LegionRuntime {
         {
           // We need to check to make sure that the task actually
           // does expect to have a void return type
-          TaskVariantCollection *variants = 
-            get_variant_collection(launcher.task_id);
-          if (variants->return_size > 0)
+          TaskImpl *impl = find_or_create_task_impl(launcher.task_id);
+          if (impl->returns_value())
           {
             log_run.error("Predicated task launch for task %s "
-                                "in parent task %s (UID %lld) has non-void "
-                                "return type but no default value for its "
-                                "future if the task predicate evaluates to "
-                                "false.  Please set either the "
-                                "'predicate_false_result' or "
-                                "'predicate_false_future' fields of the "
-                                "TaskLauncher struct.",
-                                variants->name, ctx->variants->name,
-                                ctx->get_unique_task_id());
+                          "in parent task %s (UID %lld) has non-void "
+                          "return type but no default value for its "
+                          "future if the task predicate evaluates to "
+                          "false.  Please set either the "
+                          "'predicate_false_result' or "
+                          "'predicate_false_future' fields of the "
+                          "TaskLauncher struct.",
+                          impl->get_name(), ctx->get_task_name(),
+                          ctx->get_unique_task_id());
 #ifdef DEBUG_HIGH_LEVEL
             assert(false);
 #endif
@@ -8622,20 +8690,19 @@ namespace LegionRuntime {
         {
           // Check to make sure the task actually does expect to
           // have a void return type
-          TaskVariantCollection *variants = 
-            get_variant_collection(launcher.task_id);
-          if (variants->return_size > 0)
+          TaskImpl *impl = find_or_create_task_impl(launcher.task_id);
+          if (impl->returns_value())
           {
             log_run.error("Predicated index task launch for task %s "
-                                "in parent task %s (UID %lld) has non-void "
-                                "return type but no default value for its "
-                                "future if the task predicate evaluates to "
-                                "false.  Please set either the "
-                                "'predicate_false_result' or "
-                                "'predicate_false_future' fields of the "
-                                "IndexLauncher struct.",
-                                variants->name, ctx->variants->name,
-                                ctx->get_unique_task_id());
+                          "in parent task %s (UID %lld) has non-void "
+                          "return type but no default value for its "
+                          "future if the task predicate evaluates to "
+                          "false.  Please set either the "
+                          "'predicate_false_result' or "
+                          "'predicate_false_future' fields of the "
+                          "IndexLauncher struct.",
+                          impl->get_name(), ctx->get_task_name(),
+                          ctx->get_unique_task_id());
 #ifdef DEBUG_HIGH_LEVEL
             assert(false);
 #endif
@@ -8720,9 +8787,8 @@ namespace LegionRuntime {
         {
           // We need to check to make sure that the task actually
           // does expect to have a void return type
-          TaskVariantCollection *variants = 
-            get_variant_collection(launcher.task_id);
-          if (variants->return_size > 0)
+          TaskImpl *impl = find_or_create_task_impl(launcher.task_id);
+          if (impl->returns_value())
           {
             log_run.error("Predicated index task launch for task %s "
                                 "in parent task %s (UID %lld) has non-void "
@@ -8732,7 +8798,7 @@ namespace LegionRuntime {
                                 "'predicate_false_result' or "
                                 "'predicate_false_future' fields of the "
                                 "IndexLauncher struct.",
-                                variants->name, ctx->variants->name,
+                                impl->get_name(), ctx->get_task_name(),
                                 ctx->get_unique_task_id());
 #ifdef DEBUG_HIGH_LEVEL
             assert(false);
@@ -11253,7 +11319,7 @@ namespace LegionRuntime {
     VariantID Internal::register_variant(const TaskVariantRegistrar &registrar,
                                   const void *user_data, size_t user_data_size,
                                   CodeDescriptor *realm, CodeDescriptor *indesc,
-                                  VariantID vid /*= AUTO_GENERATE_ID*/)
+                                  bool ret,VariantID vid /*= AUTO_GENERATE_ID*/)
     //--------------------------------------------------------------------------
     {
       // See if we need to make a new variant ID
@@ -11263,7 +11329,7 @@ namespace LegionRuntime {
       TaskImpl *task_impl = find_or_create_task_impl(registrar.task_id);
       // Make our variant and add it to the set of variants
       VariantImpl *impl = legion_new<VariantImpl>(this, vid, task_impl, 
-                                                  registrar, realm, indesc, 
+                                                  registrar, ret, realm, indesc,
                                                   user_data, user_data_size);
       AutoLock tv_lock(task_variant_lock);
       variant_table.push_back(impl);
@@ -11307,6 +11373,14 @@ namespace LegionRuntime {
     {
       TaskImpl *owner = find_or_create_task_impl(task_id);
       return owner->find_variant_impl(variant_id);
+    }
+
+    //--------------------------------------------------------------------------
+    TaskVariantCollection* Internal::get_collection(TaskID task_id)
+    //--------------------------------------------------------------------------
+    {
+      TaskImpl *impl = find_task_impl(task_id);
+      return impl->get_collection();
     }
 
     //--------------------------------------------------------------------------
@@ -16201,26 +16275,6 @@ namespace LegionRuntime {
 #ifdef HANG_TRACE
       signal(SIGTERM, catch_hang); 
 #endif
-      if (Internal::record_registration)
-      {
-        
-        std::map<Processor::TaskFuncID,TaskVariantCollection*>& 
-          variant_table = Internal::get_collection_table(); 
-        for (std::map<Processor::TaskFuncID,TaskVariantCollection*>::
-              const_iterator vit = variant_table.begin(); vit !=
-              variant_table.end(); vit++)
-        {
-          TaskVariantCollection *collection = vit->second;
-          for (std::map<VariantID,TaskVariantCollection::Variant>::
-                const_iterator it = collection->variants.begin(); it != 
-                collection->variants.end(); it++)
-          {
-            log_run.print("Task variant %s (ID %ld) is mapped to "
-                                "low-level task ID %d", collection->name, 
-                                it->first, it->second.low_id);
-          }
-        }
-      } 
       // For the moment, we only need to register our runtime tasks
       // We'll register everything else once the Legion runtime starts
       Event tasks_registered = register_runtime_tasks(realm);
@@ -16468,7 +16522,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ VariantID Internal::preregister_variant(
+    /*static*/ VariantID Internal::preregister_variant(bool has_ret,
                           const TaskVariantRegistrar &registrar,
                           const void *user_data, size_t user_data_size,
                           CodeDescriptor *realm, CodeDescriptor *inline_desc)
@@ -16486,189 +16540,12 @@ namespace LegionRuntime {
       }
       std::deque<PendingVariantRegistration*> &pending_table = 
         get_pending_variant_table();
-      // Offset by one so that we never have a variant ID of zero
-      VariantID vid = pending_table.size() + 1;
-      pending_table.push_back(new PendingVariantRegistration(vid, registrar,
-                              user_data, user_data_size, realm, inline_desc));
+      // Offset by the runtime tasks
+      VariantID vid = TASK_ID_AVAILABLE + pending_table.size();
+      pending_table.push_back(new PendingVariantRegistration(vid, has_ret,
+                              registrar, user_data, user_data_size, 
+                              realm, inline_desc));
       return vid;
-    }
-
-#if 0
-    //--------------------------------------------------------------------------
-    /*static*/ TaskID Internal::update_collection_table(
-                          LowLevelFnptr low_level_ptr,
-                          InlineFnptr inline_ptr,
-                          TaskID uid, Processor::Kind proc_kind, 
-                          bool single_task, bool index_space_task,
-                          VariantID &vid, size_t return_size,
-                          const TaskConfigOptions &options,
-                          const char *name)
-    //--------------------------------------------------------------------------
-    {
-      std::map<Processor::TaskFuncID,TaskVariantCollection*>& table = 
-                                        Internal::get_collection_table();
-      // See if the user wants us to find a new ID
-      if (uid == AUTO_GENERATE_ID)
-      {
-#ifdef DEBUG_HIGH_LEVEL
-#ifndef NDEBUG
-        bool found = false; 
-#endif
-#endif
-        for (unsigned idx = 0; idx < uid; idx++)
-        {
-          if (table.find(idx) == table.end())
-          {
-            uid = idx;
-#ifdef DEBUG_HIGH_LEVEL
-#ifndef NDEBUG
-            found = true;
-#endif
-#endif
-            break;
-          }
-        }
-#ifdef DEBUG_HIGH_LEVEL
-        assert(found); // If not we ran out of task ID's 2^32 tasks!
-#endif
-      }
-      // First update the low-level task table
-      Processor::TaskFuncID low_id = Internal::get_next_available_id();
-      // Add it to the low level table
-      Internal::get_task_table(false)[low_id] = low_level_ptr;
-      Internal::get_inline_table()[low_id] = inline_ptr;
-      // Now see if an entry already exists in the attribute 
-      // table for this uid
-      if (table.find(uid) == table.end())
-      {
-        if (options.leaf && options.inner)
-        {
-          log_run.error("Task variant %s (ID %d) is not permitted to "
-                              "be both inner and leaf tasks simultaneously.",
-                              name, uid);
-#ifdef DEBUG_HIGH_LEVEL
-          assert(false);
-#endif
-          exit(ERROR_INNER_LEAF_MISMATCH);
-        }
-        TaskVariantCollection *collec = 
-          new TaskVariantCollection(uid, name, 
-                options.idempotent, return_size);
-#ifdef DEBUG_HIGH_LEVEL
-        assert(collec != NULL);
-#endif
-        table[uid] = collec;
-        collec->add_variant(low_id, proc_kind, 
-                            single_task, index_space_task, 
-#ifdef LEGION_SPY
-                            false, // no inner optimizations for analysis
-#else
-                            false, // disabling this for now
-                            // See github issue #102
-                            //options.inner, 
-#endif
-                            options.leaf, 
-                            vid);
-      }
-      else
-      {
-        if (table[uid]->idempotent != options.idempotent)
-        {
-          log_run.error("Tasks of variant %s have different idempotent "
-                              "options.  All tasks of the same variant must "
-                              "all be either idempotent or non-idempotent.",
-                              table[uid]->name);
-#ifdef DEBUG_HIGH_LEVEL
-          assert(false);
-#endif
-          exit(ERROR_IDEMPOTENT_MISMATCH);
-        }
-        if (table[uid]->return_size != return_size)
-        {
-          log_run.error("Tasks of variant %s have different return "
-                              "type sizes of %ld and %ld.  All variants "
-                              "must have the same return type size.",
-                              table[uid]->name, table[uid]->return_size,
-                              return_size);
-#ifdef DEBUG_HIGH_LEVEL
-          assert(false);
-#endif
-          exit(ERROR_RETURN_SIZE_MISMATCH);
-        }
-        if ((name != NULL) && 
-            (strcmp(table[uid]->name,name) != 0))
-        {
-          log_run.warning("WARNING: name mismatch between variants of "
-                                "task %d.  Differing names: %s %s",
-                                uid, table[uid]->name, name);
-        }
-        if ((vid != AUTO_GENERATE_ID) && table[uid]->has_variant(vid))
-        {
-          log_run.warning("WARNING: Task variant collection for task %s "
-                                "(ID %d) already has variant %d.  It will be "
-                                "overwritten.", table[uid]->name, uid, 
-                                unsigned(vid)/*dumb compiler warnings*/);
-        }
-        // Update the variants for the attribute
-        table[uid]->add_variant(low_id, proc_kind, 
-                                single_task, index_space_task, 
-#ifdef LEGION_SPY
-                                false, // no inner optimizations for analysis
-#else
-                                false, // disabling this for now
-                                // See github issue #102
-                                //options.inner,
-#endif
-                                options.leaf, 
-                                vid);
-      }
-      return uid;
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ TaskID Internal::update_collection_table(
-                          LowLevelFnptr low_level_ptr,
-                          InlineFnptr inline_ptr,
-                          TaskID tid, Processor::Kind proc_kind, 
-                          bool single_task, bool index_space_task,
-                          VariantID vid, size_t return_size,
-                          const TaskConfigOptions &options,
-                          const char *name,
-                          const void *user_data, size_t user_data_size)
-    //--------------------------------------------------------------------------
-    {
-      TaskID result = update_collection_table(low_level_ptr, inline_ptr,
-                                              tid, proc_kind, 
-                                              single_task, index_space_task,
-                                              vid, return_size, options, name);
-      std::pair<TaskID,VariantID> key(tid,vid);
-      void *buffer = malloc(user_data_size);
-      memcpy(buffer, user_data, user_data_size);
-      get_user_data_table()[key] = buffer;
-      return result;
-    }
-#endif
-
-    //--------------------------------------------------------------------------
-    /*static*/ TaskVariantCollection* Internal::get_variant_collection(
-                                                      Processor::TaskFuncID tid)
-    //--------------------------------------------------------------------------
-    {
-      std::map<Processor::TaskFuncID,TaskVariantCollection*> &task_table = 
-        Internal::get_collection_table();
-      std::map<Processor::TaskFuncID,TaskVariantCollection*>::const_iterator
-        finder = task_table.find(tid);
-      if (finder == task_table.end())
-      {
-        log_run.error("Unable to find entry for Task ID %d in "
-                            "the task collection table.  Did you forget "
-                            "to register a task?", tid);
-#ifdef DEBUG_HIGH_LEVEL
-        assert(false);
-#endif
-        exit(ERROR_INVALID_TASK_ID);
-      }
-      return finder->second;
     }
 
     //--------------------------------------------------------------------------
@@ -16771,16 +16648,6 @@ namespace LegionRuntime {
     {
       static int startup_arrivals = 0;
       return &startup_arrivals;
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ std::map<Processor::TaskFuncID,TaskVariantCollection*>& 
-                                      Internal::get_collection_table(void)
-    //--------------------------------------------------------------------------
-    {
-      static std::map<Processor::TaskFuncID,TaskVariantCollection*> 
-                                                            collection_table;
-      return collection_table;
     }
 
     //--------------------------------------------------------------------------

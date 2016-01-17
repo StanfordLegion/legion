@@ -2007,7 +2007,7 @@ namespace LegionRuntime {
                                             Processor::Kind kind, 
                                             bool single, bool index,
                                             bool inner, bool leaf,
-                                            VariantID &vid)
+                                            VariantID vid)
     //--------------------------------------------------------------------------
     {
       if (vid == AUTO_GENERATE_ID)
@@ -3898,23 +3898,24 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     VariantID Runtime::register_variant(const TaskVariantRegistrar &registrar,
-                                  const void *user_data, size_t user_data_size,
-                                  CodeDescriptor *realm, CodeDescriptor *indesc)
+                  bool has_return, const void *user_data, size_t user_data_size,
+                  CodeDescriptor *realm, CodeDescriptor *indesc)
     //--------------------------------------------------------------------------
     {
       return runtime->register_variant(registrar, user_data, user_data_size,
-                                       realm, indesc);
+                                       realm, indesc, has_return);
     }
     
     //--------------------------------------------------------------------------
     /*static*/ VariantID Runtime::preregister_variant(
                                   const TaskVariantRegistrar &registrar,
                                   const void *user_data, size_t user_data_size,
-                                  CodeDescriptor *realm, CodeDescriptor *indesc)
+                                  CodeDescriptor *realm, CodeDescriptor *indesc,
+                                  bool has_return)
     //--------------------------------------------------------------------------
     {
-      return Internal::preregister_variant(registrar, user_data, user_data_size,
-                                           realm, indesc);
+      return Internal::preregister_variant(has_return, registrar, user_data, 
+                                           user_data_size, realm, indesc);
     } 
 
     //--------------------------------------------------------------------------

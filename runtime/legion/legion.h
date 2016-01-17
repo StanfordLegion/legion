@@ -1361,9 +1361,9 @@ namespace LegionRuntime {
       inline TaskVariantRegistrar&
         add_layout_constraint_set(unsigned index, LayoutConstraintID desc);
     public: // Set properties
-      void set_leaf(bool is_leaf = true);
-      void set_inner(bool is_inner = true);
-      void set_idempotent(bool is_idempotent = true);
+      inline void set_leaf(bool is_leaf = true);
+      inline void set_inner(bool is_inner = true);
+      inline void set_idempotent(bool is_idempotent = true);
     public:
       TaskID                            task_id;
       bool                              global_registration;
@@ -1698,7 +1698,7 @@ namespace LegionRuntime {
       Task(void);
     public:
       // Task argument information
-      Processor::TaskFuncID task_id; 
+      Processor::TaskFuncID               task_id; 
       std::vector<IndexSpaceRequirement>  indexes;
       std::vector<RegionRequirement>      regions;
       std::vector<Future>                 futures;
@@ -1763,6 +1763,7 @@ namespace LegionRuntime {
       virtual Acquire* as_mappable_acquire(void) const = 0;
       virtual Release* as_mappable_release(void) const = 0;
       virtual UniqueID get_unique_mappable_id(void) const = 0;
+      virtual const char* get_task_name(void) const = 0;
       virtual unsigned get_depth(void) const;
     };
 
@@ -1946,7 +1947,7 @@ namespace LegionRuntime {
                        Processor::Kind kind, 
                        bool single, bool index,
                        bool inner, bool leaf,
-                       VariantID &vid);
+                       VariantID vid);
       const Variant& select_variant(bool single, bool index, 
                                     Processor::Kind kind);
     public:
@@ -5739,12 +5740,13 @@ namespace LegionRuntime {
       static ProjectionID register_partition_projection_function(
                                     ProjectionID handle, void *func_ptr);
     private:
-      VariantID register_variant(const TaskVariantRegistrar &registrar,
+      VariantID register_variant(const TaskVariantRegistrar &registrar,bool ret,
                                  const void *user_data, size_t user_data_size,
                                  CodeDescriptor *realm, CodeDescriptor *indesc);
       static VariantID preregister_variant(const TaskVariantRegistrar &reg,
                                  const void *user_data, size_t user_data_size,
-                                 CodeDescriptor *realm, CodeDescriptor *indesc);
+                                 CodeDescriptor *realm, CodeDescriptor *indesc,
+                                 bool has_return);
     private:
       static ReductionOpTable& get_reduction_table(void);
       static SerdezOpTable& get_serdez_table(void);

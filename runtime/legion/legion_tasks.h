@@ -52,6 +52,7 @@ namespace LegionRuntime {
       virtual Acquire* as_mappable_acquire(void) const;
       virtual Release* as_mappable_release(void) const;
       virtual UniqueID get_unique_mappable_id(void) const;
+      virtual const char* get_task_name(void) const;
     public:
       bool is_remote(void) const;
       inline bool is_stolen(void) const { return (steal_count > 0); }
@@ -190,9 +191,9 @@ namespace LegionRuntime {
       virtual void trigger_task_commit(void) = 0;
     protected:
       // Early mapped regions
-      std::map<unsigned/*idx*/,InstanceRef> early_mapped_regions;
+      std::map<unsigned/*idx*/,InstanceRef>     early_mapped_regions;
     protected:
-      std::vector<unsigned> parent_req_indexes;
+      std::vector<unsigned>                     parent_req_indexes;
     protected:
       std::set<LogicalRegion>                   created_regions;
       std::set<std::pair<FieldSpace,FieldID> >  created_fields;

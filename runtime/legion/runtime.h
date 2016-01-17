@@ -891,7 +891,7 @@ namespace LegionRuntime {
      */
     class PendingVariantRegistration {
     public:
-      PendingVariantRegistration(VariantID vid, 
+      PendingVariantRegistration(VariantID vid, bool has_return,
                                  const TaskVariantRegistrar &registrar,
                                  const void *user_data, size_t user_data_size,
                                  CodeDescriptor *realm_desc, 
@@ -905,6 +905,7 @@ namespace LegionRuntime {
       void perform_registration(Internal *runtime);
     private:
       VariantID vid;
+      bool has_return;
       TaskVariantRegistrar registrar;
       void *user_data;
       size_t user_data_size;
@@ -934,8 +935,13 @@ namespace LegionRuntime {
     public:
       TaskImpl& operator=(const TaskImpl &rhs);
     public:
+      inline bool returns_value(void) const { return has_return_type; }
+    public:
       void add_variant(VariantImpl *impl);
       VariantImpl* find_variant_impl(VariantID variant_id);
+    public:
+      // For backwards compatibility only
+      TaskVariantCollection* get_collection(void); 
     public:
       const char* get_name(bool needs_lock = true) const;
       void attach_semantic_information(SemanticTag tag, AddressSpaceID source,
@@ -964,6 +970,13 @@ namespace LegionRuntime {
       Reservation task_lock;
       std::map<VariantID,VariantImpl*> variants;
       std::map<SemanticTag,SemanticInfo> semantic_info;
+      // Track whether all these variants have a return type or not
+      bool has_return_type;
+      // Track whether all these variants are idempotent or not
+      bool all_idempotent;
+    private:
+      // This is for backwards compatibility only
+      TaskVariantCollection *collection;
     };
 
     /**
@@ -976,7 +989,7 @@ namespace LegionRuntime {
       static const AllocationType alloc_type = VARIANT_IMPL_ALLOC;
     public:
       VariantImpl(Internal *runtime, VariantID vid, TaskImpl *owner, 
-                  const TaskVariantRegistrar &registrar, 
+                  const TaskVariantRegistrar &registrar, bool ret_val, 
                   CodeDescriptor *realm_desc, CodeDescriptor *inline_desc,
                   const void *user_data = NULL, size_t user_data_size = 0);
       VariantImpl(const VariantImpl &rhs);
@@ -987,6 +1000,7 @@ namespace LegionRuntime {
       inline bool is_leaf(void) const { return leaf_variant; }
       inline bool is_inner(void) const { return inner_variant; }
       inline bool is_idempotent(void) const { return idempotent_variant; }
+      inline bool returns_value(void) const { return has_return_value; }
     public:
       Event dispatch_task(Processor target, SingleTask *task, 
                           Event precondition, int priority,
@@ -1003,6 +1017,7 @@ namespace LegionRuntime {
       TaskImpl *const owner;
       Internal *const runtime;
       const bool global; // globally valid variant
+      const bool has_return_value; // has a return value
     public:
       CodeDescriptor *const realm_descriptor;
       CodeDescriptor *const inline_descriptor;
@@ -1018,7 +1033,7 @@ namespace LegionRuntime {
       bool inner_variant;
       bool idempotent_variant;
     private:
-      char *variant_name;
+      char *variant_name; 
     };
  
     /**
@@ -1553,10 +1568,12 @@ namespace LegionRuntime {
       VariantID register_variant(const TaskVariantRegistrar &registrar,
                                  const void *user_data, size_t user_data_size,
                                  CodeDescriptor *realm, CodeDescriptor *indesc,
-                                 VariantID vid = AUTO_GENERATE_ID); 
+                                 bool ret, VariantID vid = AUTO_GENERATE_ID);
       TaskImpl* find_or_create_task_impl(TaskID task_id);
       TaskImpl* find_task_impl(TaskID task_id);
       VariantImpl* find_variant_impl(TaskID task_id, VariantID variant_id);
+      // For backwards compatiblity only
+      TaskVariantCollection* get_collection(TaskID task_id);
     public:
       // Memory manager functions
       MemoryManager* find_memory(Memory mem);
@@ -2347,12 +2364,10 @@ namespace LegionRuntime {
                                     ProjectionID handle, void *func_ptr);
       static std::deque<PendingVariantRegistration*>&
                                 get_pending_variant_table(void);
-      static VariantID preregister_variant(
+      static VariantID preregister_variant(bool has_return,
                       const TaskVariantRegistrar &registrar,
                       const void *user_data, size_t user_data_size,
                       CodeDescriptor *realm_desc, CodeDescriptor *inline_desc);
-      static TaskVariantCollection* get_variant_collection(
-                      Processor::TaskFuncID tid);
       static PartitionProjectionFnptr 
                     find_partition_projection_function(ProjectionID pid);
       static RegionProjectionFnptr
@@ -2368,8 +2383,6 @@ namespace LegionRuntime {
 #endif
     private:
       static int* get_startup_arrivals(void);
-      static std::map<Processor::TaskFuncID,TaskVariantCollection*>& 
-                                            get_collection_table(void);
       static RegionProjectionTable& get_region_projection_table(void);
       static PartitionProjectionTable& get_partition_projection_table(void);
       static Event register_runtime_tasks(RealmRuntime &realm);
