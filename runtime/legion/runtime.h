@@ -895,7 +895,8 @@ namespace LegionRuntime {
                                  const TaskVariantRegistrar &registrar,
                                  const void *user_data, size_t user_data_size,
                                  CodeDescriptor *realm_desc, 
-                                 CodeDescriptor *inline_desc);
+                                 CodeDescriptor *inline_desc,
+                                 const char *task_name);
       PendingVariantRegistration(const PendingVariantRegistration &rhs);
       ~PendingVariantRegistration(void);
     public:
@@ -911,6 +912,7 @@ namespace LegionRuntime {
       size_t user_data_size;
       CodeDescriptor *realm_desc; 
       CodeDescriptor *inline_desc;
+      char *logical_task_name; // optional semantic info to attach to the task
     };
 
     /**
@@ -2364,10 +2366,11 @@ namespace LegionRuntime {
                                     ProjectionID handle, void *func_ptr);
       static std::deque<PendingVariantRegistration*>&
                                 get_pending_variant_table(void);
-      static VariantID preregister_variant(bool has_return,
+      static VariantID preregister_variant(
                       const TaskVariantRegistrar &registrar,
                       const void *user_data, size_t user_data_size,
-                      CodeDescriptor *realm_desc, CodeDescriptor *inline_desc);
+                      CodeDescriptor *realm_desc, CodeDescriptor *inline_desc,
+                      bool has_ret, const char *task_name);
       static PartitionProjectionFnptr 
                     find_partition_projection_function(ProjectionID pid);
       static RegionProjectionFnptr

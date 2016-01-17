@@ -4044,9 +4044,10 @@ namespace LegionRuntime {
     PendingVariantRegistration::PendingVariantRegistration(VariantID v,
                                   bool has_ret, const TaskVariantRegistrar &reg,
                                   const void *udata, size_t udata_size,
-                                  CodeDescriptor *realm, CodeDescriptor *app)
+                                  CodeDescriptor *realm, CodeDescriptor *app,
+                                  const char *task_name)
       : vid(v), has_return(has_ret), registrar(reg), 
-        realm_desc(realm), inline_desc(app)
+        realm_desc(realm), inline_desc(app), logical_task_name(NULL)
     //--------------------------------------------------------------------------
     {
       // If we're doing a pending registration, this is a static
@@ -4067,6 +4068,8 @@ namespace LegionRuntime {
         user_data_size = 0;
         user_data = NULL;
       }
+      if (task_name != NULL)
+        logical_task_name = strdup(task_name);
     }
 
     //--------------------------------------------------------------------------
@@ -4086,6 +4089,8 @@ namespace LegionRuntime {
         free(const_cast<char*>(registrar.task_variant_name));
       if (user_data != NULL)
         free(user_data);
+      if (logical_task_name != NULL)
+        free(logical_task_name);
     }
 
     //--------------------------------------------------------------------------
@@ -4104,6 +4109,10 @@ namespace LegionRuntime {
     {
       runtime->register_variant(registrar, user_data, user_data_size,
                                 realm_desc, inline_desc, has_return, vid);
+      // If we have a logical task name, attach the name info
+      if (logical_task_name != NULL)
+        runtime->attach_semantic_information(registrar.task_id, 
+             NAME_SEMANTIC_TAG, logical_task_name, strlen(logical_task_name)+1);
     }
 
     /////////////////////////////////////////////////////////////
@@ -16527,10 +16536,11 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ VariantID Internal::preregister_variant(bool has_ret,
+    /*static*/ VariantID Internal::preregister_variant(
                           const TaskVariantRegistrar &registrar,
                           const void *user_data, size_t user_data_size,
-                          CodeDescriptor *realm, CodeDescriptor *inline_desc)
+                          CodeDescriptor *realm, CodeDescriptor *inline_desc,
+                          bool has_ret, const char *task_name)
     //--------------------------------------------------------------------------
     {
       // Report an error if the runtime has already started
@@ -16549,7 +16559,7 @@ namespace LegionRuntime {
       VariantID vid = TASK_ID_AVAILABLE + pending_table.size();
       pending_table.push_back(new PendingVariantRegistration(vid, has_ret,
                               registrar, user_data, user_data_size, 
-                              realm, inline_desc));
+                              realm, inline_desc, task_name));
       return vid;
     }
 

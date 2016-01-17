@@ -5558,13 +5558,15 @@ namespace LegionRuntime {
        * must be made on all nodes and it will fail if done after the
        * Runtime::start method has been invoked.
        * @param registrar the task variant registrar for describing the task
+       * @param task_name an optional name to assign to the logical task
        * @return variant ID for the task
        */
       template<typename T,
         T (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
                       Context, Runtime*)>
       static VariantID preregister_task_variant(
-                                    const TaskVariantRegistrar &registrar);
+                                    const TaskVariantRegistrar &registrar,
+                                    const char *task_name = NULL);
 
       /**
        * Statically register a new task variant with the runtime with
@@ -5573,13 +5575,15 @@ namespace LegionRuntime {
        * fail if done after the Runtime::start method has been invoked.
        * @param registrar the task variant registrar for describing the task
        * @param user_data the user data to associate with the task variant
+       * @param task_name an optional name to assign to the logical task
        * @return variant ID for the task
        */
       template<typename T, typename UDT,
         T (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
                       Context, Runtime*, const UDT&)>
       static VariantID preregister_task_variant(
-              const TaskVariantRegistrar &registrar, const UDT &user_data);
+                      const TaskVariantRegistrar &registrar, 
+                      const UDT &user_data, const char *task_name = NULL);
        
       /**
        * Statically register a new task variant with the runtime with
@@ -5587,13 +5591,15 @@ namespace LegionRuntime {
        * must be made on all nodes and it will fail if done after the
        * Runtime::start method has been invoked.
        * @param registrar the task variant registrar for describing the task
+       * @param an optional name to assign to the logical task
        * @return variant ID for the task
        */
       template<
         void (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
                          Context, Runtime*)>
       static VariantID preregister_task_variant(
-                                    const TaskVariantRegistrar &registrar);
+                                    const TaskVariantRegistrar &registrar,
+                                    const char *task_name = NULL);
 
       /**
        * Statically register a new task variant with the runtime with
@@ -5602,13 +5608,15 @@ namespace LegionRuntime {
        * after the Runtime::start method has been invoked.
        * @param registrar the task variant registrar for describing the task
        * @param user_data the user data to associate with the task variant
+       * @param an optional name to assign to the logical task
        * @return variant ID for the task
        */
       template<typename UDT,
         void (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
                          Context, Runtime*)>
       static VariantID preregister_task_variant(
-              const TaskVariantRegistrar &registrar, const UDT &user_data);
+              const TaskVariantRegistrar &registrar, 
+              const UDT &user_data, const char *task_name = NULL);
 
     public:
       // ------------------ Deprecated task registration -----------------------
@@ -5746,7 +5754,7 @@ namespace LegionRuntime {
       static VariantID preregister_variant(const TaskVariantRegistrar &reg,
                                  const void *user_data, size_t user_data_size,
                                  CodeDescriptor *realm, CodeDescriptor *indesc,
-                                 bool has_return);
+                                 bool has_return, const char *task_name);
     private:
       static ReductionOpTable& get_reduction_table(void);
       static SerdezOpTable& get_serdez_table(void);

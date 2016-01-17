@@ -1842,7 +1842,7 @@ namespace LegionRuntime {
       T (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
                     Context, Runtime*)>
     /*static*/ VariantID Runtime::preregister_task_variant(
-                                          const TaskVariantRegistrar &registrar)
+        const TaskVariantRegistrar &registrar, const char *task_name /*= NULL*/)
     //--------------------------------------------------------------------------
     {
       CodeDescriptor *realm_desc = new CodeDescriptor(
@@ -1850,7 +1850,7 @@ namespace LegionRuntime {
       CodeDescriptor *inline_desc = new CodeDescriptor(
           LegionTaskWrapper::legion_task_wrapper<T,true,TASK_PTR>);
       return preregister_variant(registrar, NULL/*UDT*/, 0/*sizeof(UDT)*/,
-                                 realm_desc, inline_desc, true/*ret*/);
+                               realm_desc, inline_desc, true/*ret*/, task_name);
     }
 
     //--------------------------------------------------------------------------
@@ -1858,7 +1858,8 @@ namespace LegionRuntime {
       T (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
                     Context, Runtime*, const UDT&)>
     /*static*/ VariantID Runtime::preregister_task_variant(
-                    const TaskVariantRegistrar &registrar, const UDT &user_data)
+                    const TaskVariantRegistrar &registrar, 
+                    const UDT &user_data, const char *task_name /*= NULL*/)
     //--------------------------------------------------------------------------
     {
       CodeDescriptor *realm_desc = new CodeDescriptor(
@@ -1866,7 +1867,7 @@ namespace LegionRuntime {
       CodeDescriptor *inline_desc = new CodeDescriptor(
           LegionTaskWrapper::legion_udt_task_wrapper<T,UDT,true,TASK_PTR>);
       return preregister_variant(registrar, &user_data, sizeof(UDT),
-                                 realm_desc, inline_desc, true/*ret*/);
+                               realm_desc, inline_desc, true/*ret*/, task_name);
     }
 
     //--------------------------------------------------------------------------
@@ -1874,7 +1875,7 @@ namespace LegionRuntime {
       void (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
                        Context, Runtime*)>
     /*static*/ VariantID Runtime::preregister_task_variant(
-                                          const TaskVariantRegistrar &registrar)
+        const TaskVariantRegistrar &registrar, const char *task_name /*= NULL*/)
     //--------------------------------------------------------------------------
     {
       CodeDescriptor *realm_desc = new CodeDescriptor(
@@ -1882,7 +1883,7 @@ namespace LegionRuntime {
       CodeDescriptor *inline_desc = new CodeDescriptor(
             LegionTaskWrapper::legion_udt_task_wrapper<true,TASK_PTR>);
       return preregister_variant(registrar, NULL/*UDT*/,0/*sizeof(UDT)*/,
-                                 realm_desc, inline_desc, false/*ret*/); 
+                             realm_desc, inline_desc, false/*ret*/, task_name);
     }
 
     //--------------------------------------------------------------------------
@@ -1890,7 +1891,8 @@ namespace LegionRuntime {
       void (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
                        Context, Runtime*)>
     /*static*/ VariantID Runtime::preregister_task_variant(
-                    const TaskVariantRegistrar &registrar, const UDT &user_data)
+                    const TaskVariantRegistrar &registrar, 
+                    const UDT &user_data, const char *task_name /*= NULL*/)
     //--------------------------------------------------------------------------
     {
       CodeDescriptor *realm_desc = new CodeDescriptor(
@@ -1898,7 +1900,7 @@ namespace LegionRuntime {
       CodeDescriptor *inline_desc = new CodeDescriptor(
             LegionTaskWrapper::legion_udt_task_wrapper<UDT,true,TASK_PTR>);
       return preregister_variant(registrar, &user_data, sizeof(UDT),
-                                 realm_desc, inline_desc, false/*ret*/);
+                             realm_desc, inline_desc, false/*ret*/, task_name);
     }
 
 
@@ -1943,7 +1945,7 @@ namespace LegionRuntime {
       CodeDescriptor *inline_desc = new CodeDescriptor(
           LegionTaskWrapper::legion_task_wrapper<T,true,TASK_PTR>);
       return preregister_variant(registrar, NULL/*UDT*/, 0/*sizeof(UDT)*/,
-                                 realm_desc, inline_desc, true/*ret*/); 
+                               realm_desc, inline_desc, true/*ret*/, task_name);
     }
 
     //--------------------------------------------------------------------------
@@ -1987,7 +1989,7 @@ namespace LegionRuntime {
       CodeDescriptor *inline_desc = new CodeDescriptor(
             LegionTaskWrapper::legion_task_wrapper<true,TASK_PTR>);
       return preregister_variant(registrar, NULL/*UDT*/, 0/*sizeof(UDT)*/,
-                                 realm_desc, inline_desc, false/*ret*/);
+                             realm_desc, inline_desc, false/*ret*/, task_name);
     }
 
     //--------------------------------------------------------------------------
@@ -2032,7 +2034,7 @@ namespace LegionRuntime {
       CodeDescriptor *inline_desc = new CodeDescriptor(
             LegionTaskWrapper::legion_udt_task_wrapper<T,UDT,true,TASK_PTR>);
       return preregister_variant(registrar, &user_data, sizeof(UDT),
-                                 realm_desc, inline_desc, true/*ret*/);
+                               realm_desc, inline_desc, true/*ret*/, task_name);
     }
 
     //--------------------------------------------------------------------------
@@ -2077,7 +2079,7 @@ namespace LegionRuntime {
       CodeDescriptor *inline_desc = new CodeDescriptor(
             LegionTaskWrapper::legion_udt_task_wrapper<UDT,true,TASK_PTR>);
       return preregister_variant(registrar, &user_data, sizeof(UDT),
-                                 realm_desc, inline_desc, false/*ret*/);
+                             realm_desc, inline_desc, false/*ret*/, task_name);
     }
 
     //--------------------------------------------------------------------------
