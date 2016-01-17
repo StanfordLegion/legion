@@ -4754,6 +4754,7 @@ namespace LegionRuntime {
                   }
                 }
               }
+              added = false;
             }
             else
             {
@@ -4765,7 +4766,6 @@ namespace LegionRuntime {
               finder->second.ready_event = UserEvent::NO_USER_EVENT;
               finder->second.is_mutable = is_mutable;
             }
-            added = false;
           }
           else
           {
@@ -7956,6 +7956,7 @@ namespace LegionRuntime {
                   }
                 }
               }
+              added = false;
             }
             else
             {
@@ -7967,7 +7968,6 @@ namespace LegionRuntime {
               finder->second.ready_event = UserEvent::NO_USER_EVENT;
               finder->second.is_mutable = is_mutable;
             }
-            added = false;
           }
           else
           {
@@ -8056,6 +8056,7 @@ namespace LegionRuntime {
                   }
                 }
               }
+              added = false;
             }
             else
             {
@@ -8067,7 +8068,6 @@ namespace LegionRuntime {
               finder->second.ready_event = UserEvent::NO_USER_EVENT;
               finder->second.is_mutable = is_mutable;
             }
-            added = false;
           }
           else
           {
@@ -9897,6 +9897,7 @@ namespace LegionRuntime {
                   }
                 }
               }
+              added = false;
             }
             else
             {
@@ -9908,7 +9909,6 @@ namespace LegionRuntime {
               finder->second.ready_event = UserEvent::NO_USER_EVENT;
               finder->second.is_mutable = is_mutable;
             }
-            added = false;
           }
           else
           {
