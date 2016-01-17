@@ -2441,6 +2441,9 @@ namespace LegionRuntime {
       // Also save the original number of child regions
       unsigned orig_child_regions = inline_task->regions.size();
 
+      // Pick a variant to use for executing this task
+      runtime->invoke_mapper_select_variant(executing_processor, child);
+
       // Find the task variant to use for performing the inlining
       VariantImpl *variant = 
         runtime->find_variant_impl(child->task_id, child->selected_variant);
@@ -8201,6 +8204,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       enclosing = enc;
+      parent_ctx = enclosing; 
       indexes = clone->indexes;
       regions = clone->regions;
       physical_regions.resize(regions.size());
