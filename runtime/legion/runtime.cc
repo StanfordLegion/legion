@@ -4129,22 +4129,24 @@ namespace LegionRuntime {
       // Always fill in semantic info 0 with a name for the task
       if (name == NULL)
       {
-        char *noname = (char*)malloc(64*sizeof(char));
-        snprintf(noname,64,"unnamed_task_%d", task_id);
-        size_t name_size = strlen(noname) + 1; // for \0
-        semantic_info[NAME_SEMANTIC_TAG] = 
+        const size_t name_size = 64 * sizeof(char);
+        char *noname = (char*)legion_malloc(SEMANTIC_INFO_ALLOC, name_size);
+        snprintf(noname,name_size,"unnamed_task_%d", task_id);
+        semantic_infos[NAME_SEMANTIC_TAG] = 
           SemanticInfo(noname, name_size, true/*mutable*/);
       }
       else
       {
-        size_t name_size = strlen(name) + 1; // for \0
-        semantic_info[NAME_SEMANTIC_TAG] = 
-          SemanticInfo(strdup(name), name_size, false/*mutable*/);
+        const size_t name_size = strlen(name) + 1; // for \0
+        char *name_copy = (char*)legion_malloc(SEMANTIC_INFO_ALLOC, name_size);
+        memcpy(name_copy, name, name_size);
+        semantic_infos[NAME_SEMANTIC_TAG] = 
+          SemanticInfo(name_copy, name_size, false/*mutable*/);
       }
       // Register this task with the profiler if necessary
       if (runtime->profiler != NULL)
       {
-        const SemanticInfo &info = semantic_info[NAME_SEMANTIC_TAG]; 
+        const SemanticInfo &info = semantic_infos[NAME_SEMANTIC_TAG]; 
         const char *name = (const char*)info.buffer;
         runtime->profiler->register_task_kind(task_id, name);
       }
@@ -4167,6 +4169,13 @@ namespace LegionRuntime {
     {
       task_lock.destroy_reservation();
       task_lock = Reservation::NO_RESERVATION;
+      for (std::map<SemanticTag,SemanticInfo>::const_iterator it = 
+            semantic_infos.begin(); it != semantic_infos.end(); it++)
+      {
+        legion_free(SEMANTIC_INFO_ALLOC, it->second.buffer,
+                    it->second.size);
+      }
+      semantic_infos.clear();
       delete collection;
     }
 
@@ -4287,18 +4296,18 @@ namespace LegionRuntime {
       {
         AutoLock t_lock(task_lock,1,false/*exclusive*/);
         std::map<SemanticTag,SemanticInfo>::const_iterator finder = 
-          semantic_info.find(NAME_SEMANTIC_TAG);
+          semantic_infos.find(NAME_SEMANTIC_TAG);
 #ifdef DEBUG_HIGH_LEVEL
-        assert(finder != semantic_info.end());
+        assert(finder != semantic_infos.end());
 #endif
         return reinterpret_cast<const char*>(finder->second.buffer);
       }
       else
       {
         std::map<SemanticTag,SemanticInfo>::const_iterator finder = 
-          semantic_info.find(NAME_SEMANTIC_TAG);
+          semantic_infos.find(NAME_SEMANTIC_TAG);
 #ifdef DEBUG_HIGH_LEVEL
-        assert(finder != semantic_info.end());
+        assert(finder != semantic_infos.end());
 #endif
         return reinterpret_cast<const char*>(finder->second.buffer);
       }
@@ -4323,8 +4332,8 @@ namespace LegionRuntime {
       {
         AutoLock t_lock(task_lock);
         std::map<SemanticTag,SemanticInfo>::iterator finder = 
-          semantic_info.find(tag);
-        if (finder != semantic_info.end())
+          semantic_infos.find(tag);
+        if (finder != semantic_infos.end())
         {
           // Check to see if it is valid
           if (finder->second.is_valid())
@@ -4387,7 +4396,7 @@ namespace LegionRuntime {
           }
         }
         else
-          semantic_info[tag] = SemanticInfo(local, size, is_mutable);
+          semantic_infos[tag] = SemanticInfo(local, size, is_mutable);
       }
       if (to_trigger.exists())
         to_trigger.trigger();
@@ -4412,8 +4421,8 @@ namespace LegionRuntime {
       {
         AutoLock t_lock(task_lock);
         std::map<SemanticTag,SemanticInfo>::const_iterator finder = 
-          semantic_info.find(tag);
-        if (finder != semantic_info.end())
+          semantic_infos.find(tag);
+        if (finder != semantic_infos.end())
         {
           // Already have the data so we are done
           if (finder->second.is_valid())
@@ -4430,7 +4439,7 @@ namespace LegionRuntime {
           // Otherwise we make an event to wait on
           UserEvent ready_event = UserEvent::create_user_event();
           wait_on = ready_event;
-          semantic_info[tag] = SemanticInfo(ready_event);
+          semantic_infos[tag] = SemanticInfo(ready_event);
         }
       }
       // If we are not the owner, send a request otherwise we are
@@ -4442,8 +4451,8 @@ namespace LegionRuntime {
       // When we wake up, we should be able to find everything
       AutoLock t_lock(task_lock,1,false/*exclusive*/);
       std::map<SemanticTag,SemanticInfo>::const_iterator finder = 
-        semantic_info.find(tag);
-      if (finder == semantic_info.end())
+        semantic_infos.find(tag);
+      if (finder == semantic_infos.end())
       {
         log_run.error("ERROR: invalid semantic tag %ld for "
                             "task implementation", tag);   
@@ -4502,8 +4511,8 @@ namespace LegionRuntime {
         AutoLock t_lock(task_lock);
         // See if we already have the data
         std::map<SemanticTag,SemanticInfo>::iterator finder = 
-          semantic_info.find(tag);
-        if (finder != semantic_info.end())
+          semantic_infos.find(tag);
+        if (finder != semantic_infos.end())
         {
           if (finder->second.is_valid())
           {
@@ -4519,7 +4528,7 @@ namespace LegionRuntime {
           // Don't have it yet, make a condition and hope that one comes
           UserEvent ready_event = UserEvent::create_user_event();
           precondition = ready_event;
-          semantic_info[tag] = SemanticInfo(ready_event);
+          semantic_infos[tag] = SemanticInfo(ready_event);
         }
       }
       if (result == NULL)

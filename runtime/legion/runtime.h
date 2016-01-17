@@ -971,7 +971,7 @@ namespace LegionRuntime {
     private:
       Reservation task_lock;
       std::map<VariantID,VariantImpl*> variants;
-      std::map<SemanticTag,SemanticInfo> semantic_info;
+      std::map<SemanticTag,SemanticInfo> semantic_infos;
       // Track whether all these variants have a return type or not
       bool has_return_type;
       // Track whether all these variants are idempotent or not
