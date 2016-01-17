@@ -4909,18 +4909,21 @@ namespace LegionRuntime {
        * @param tag the semantic tag
        * @param buffer pointer to a buffer
        * @param size size of the buffer to save
+       * @param is_mutable can the tag value be changed later
        */
       void attach_semantic_information(TaskID task_id, SemanticTag tag,
-                                       const void *buffer, size_t size);
+                     const void *buffer, size_t size, bool is_mutable = false);
+
       /**
        * Attach semantic information to an index space
        * @param handle index space handle
        * @param tag semantic tag
        * @param buffer pointer to a buffer
        * @param size size of the buffer to save
+       * @param is_mutable can the tag value be changed later
        */
       void attach_semantic_information(IndexSpace handle, SemanticTag tag,
-                                       const void *buffer, size_t size);
+                     const void *buffer, size_t size, bool is_mutable = false);
 
       /**
        * Attach semantic information to an index partition 
@@ -4928,9 +4931,10 @@ namespace LegionRuntime {
        * @param tag semantic tag
        * @param buffer pointer to a buffer
        * @param size size of the buffer to save
+       * @param is_mutable can the tag value be changed later
        */
       void attach_semantic_information(IndexPartition handle, SemanticTag tag,
-                                       const void *buffer, size_t size);
+                     const void *buffer, size_t size, bool is_mutable = false);
 
       /**
        * Attach semantic information to a field space
@@ -4938,9 +4942,10 @@ namespace LegionRuntime {
        * @param tag semantic tag
        * @param buffer pointer to a buffer
        * @param size size of the buffer to save
+       * @param is_mutable can the tag value be changed later
        */
       void attach_semantic_information(FieldSpace handle, SemanticTag tag,
-                                       const void *buffer, size_t size);
+                     const void *buffer, size_t size, bool is_mutable = false);
 
       /**
        * Attach semantic information to a specific field 
@@ -4949,10 +4954,11 @@ namespace LegionRuntime {
        * @param tag semantic tag
        * @param buffer pointer to a buffer
        * @param size size of the buffer to save
+       * @param is_mutable can the tag value be changed later
        */
       void attach_semantic_information(FieldSpace handle, FieldID fid, 
-                                       SemanticTag tag,
-                                       const void *buffer, size_t size);
+                                       SemanticTag tag, const void *buffer, 
+                                       size_t size, bool is_mutable = false);
 
       /**
        * Attach semantic information to a logical region 
@@ -4960,9 +4966,10 @@ namespace LegionRuntime {
        * @param tag semantic tag
        * @param buffer pointer to a buffer
        * @param size size of the buffer to save
+       * @param is_mutable can the tag value be changed later
        */
       void attach_semantic_information(LogicalRegion handle, SemanticTag tag,
-                                       const void *buffer, size_t size);
+                     const void *buffer, size_t size, bool is_mutable = false);
       
       /**
        * Attach semantic information to a logical partition 
@@ -4970,60 +4977,75 @@ namespace LegionRuntime {
        * @param tag semantic tag
        * @param buffer pointer to a buffer
        * @param size size of the buffer to save
+       * @param is_mutable can the tag value be changed later
        */
       void attach_semantic_information(LogicalPartition handle, 
-                                       SemanticTag tag,
-                                       const void *buffer, size_t size);
+                                       SemanticTag tag, const void *buffer, 
+                                       size_t size, bool is_mutable = false);
 
       /**
        * Attach a name to a task
        * @param task_id the ID of the task
        * @param name pointer to the name
+       * @param is_mutable can the name be changed later
        */
-      void attach_name(TaskID task_id, const char *name);
+      void attach_name(TaskID task_id, const char *name, 
+                       bool is_mutable = false);
 
       /**
        * Attach a name to an index space
        * @param handle index space handle
        * @param name pointer to a name
+       * @param is_mutable can the name be changed later
        */
-      void attach_name(IndexSpace handle, const char *name);
+      void attach_name(IndexSpace handle, const char *name,
+                       bool is_mutable = false);
 
       /**
        * Attach a name to an index partition
        * @param handle index partition handle
        * @param name pointer to a name
+       * @param is_mutable can the name be changed later
        */
-      void attach_name(IndexPartition handle, const char *name);
+      void attach_name(IndexPartition handle, const char *name,
+                       bool is_mutable = false);
 
       /**
        * Attach a name to a field space
        * @param handle field space handle
        * @param name pointer to a name
+       * @param is_mutable can the name be changed later
        */
-      void attach_name(FieldSpace handle, const char *name);
+      void attach_name(FieldSpace handle, const char *name,
+                       bool is_mutable = false);
 
       /**
        * Attach a name to a specific field
        * @param handle field space handle
        * @param fid field ID
        * @param name pointer to a name
+       * @param is_mutable can the name be changed later
        */
-      void attach_name(FieldSpace handle, FieldID fid, const char *name);
+      void attach_name(FieldSpace handle, FieldID fid, 
+                       const char *name, bool is_mutable = false);
 
       /**
        * Attach a name to a logical region
        * @param handle logical region handle
        * @param name pointer to a name
+       * @param is_mutable can the name be changed later
        */
-      void attach_name(LogicalRegion handle, const char *name);
+      void attach_name(LogicalRegion handle, const char *name,
+                       bool is_mutable = false);
 
       /**
        * Attach a name to a logical partition
        * @param handle logical partition handle
        * @param name pointer to a name
+       * @param is_mutable can the name be changed later
        */
-      void attach_name(LogicalPartition handle, const char *name);
+      void attach_name(LogicalPartition handle, const char *name,
+                       bool is_mutable = false);
 
       /**
        * Retrieve semantic information for a task

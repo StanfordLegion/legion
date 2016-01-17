@@ -4112,7 +4112,8 @@ namespace LegionRuntime {
       // If we have a logical task name, attach the name info
       if (logical_task_name != NULL)
         runtime->attach_semantic_information(registrar.task_id, 
-             NAME_SEMANTIC_TAG, logical_task_name, strlen(logical_task_name)+1);
+                          NAME_SEMANTIC_TAG, logical_task_name, 
+                          strlen(logical_task_name)+1, false/*mutable*/);
     }
 
     /////////////////////////////////////////////////////////////
@@ -4131,12 +4132,14 @@ namespace LegionRuntime {
         char *noname = (char*)malloc(64*sizeof(char));
         snprintf(noname,64,"unnamed_task_%d", task_id);
         size_t name_size = strlen(noname) + 1; // for \0
-        semantic_info[NAME_SEMANTIC_TAG] = SemanticInfo(noname, name_size);
+        semantic_info[NAME_SEMANTIC_TAG] = 
+          SemanticInfo(noname, name_size, true/*mutable*/);
       }
       else
       {
         size_t name_size = strlen(name) + 1; // for \0
-        semantic_info[NAME_SEMANTIC_TAG] = SemanticInfo(strdup(name),name_size);
+        semantic_info[NAME_SEMANTIC_TAG] = 
+          SemanticInfo(strdup(name), name_size, false/*mutable*/);
       }
       // Register this task with the profiler if necessary
       if (runtime->profiler != NULL)
@@ -4304,7 +4307,8 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     void TaskImpl::attach_semantic_information(SemanticTag tag,
                                                AddressSpaceID source,
-                                               const void *buffer, size_t size)
+                                               const void *buffer, size_t size,
+                                               bool is_mutable)
     //--------------------------------------------------------------------------
     {
       if ((tag == NAME_SEMANTIC_TAG) && (runtime->profiler != NULL))
@@ -4325,37 +4329,51 @@ namespace LegionRuntime {
           // Check to see if it is valid
           if (finder->second.is_valid())
           {
-            // Check to make sure that the bits are the same
-            if (size != finder->second.size)
+            // See if it is mutable or not
+            if (!finder->second.is_mutable)
             {
-              log_run.error("ERROR: Inconsistent Semantic Tag value "
-                            "for tag %ld with different sizes of %ld"
-                            " and %ld for task impl", 
-                            tag, size, finder->second.size);
-#ifdef DEBUG_HIGH_LEVEL
-              assert(false);
-#endif
-              exit(ERROR_INCONSISTENT_SEMANTIC_TAG);
-            }
-            // Otherwise do a bitwise comparison
-            {
-              const char *orig = (const char*)finder->second.buffer;
-              const char *next = (const char*)buffer;
-              for (unsigned idx = 0; idx < size; idx++)
+              // Note mutable so check to make sure that the bits are the same
+              if (size != finder->second.size)
               {
-                char diff = orig[idx] ^ next[idx];
-                if (diff)
-                {
-                  log_run.error("ERROR: Inconsistent Semantic Tag value "
-                                "for tag %ld with different values at"
-                                "byte %d for task impl, %x != %x",
-                                tag, idx, orig[idx], next[idx]);
+                log_run.error("ERROR: Inconsistent Semantic Tag value "
+                              "for tag %ld with different sizes of %ld"
+                              " and %ld for task impl", 
+                              tag, size, finder->second.size);
 #ifdef DEBUG_HIGH_LEVEL
-                  assert(false);
+                assert(false);
 #endif
-                  exit(ERROR_INCONSISTENT_SEMANTIC_TAG);
+                exit(ERROR_INCONSISTENT_SEMANTIC_TAG);
+              }
+              // Otherwise do a bitwise comparison
+              {
+                const char *orig = (const char*)finder->second.buffer;
+                const char *next = (const char*)buffer;
+                for (unsigned idx = 0; idx < size; idx++)
+                {
+                  char diff = orig[idx] ^ next[idx];
+                  if (diff)
+                  {
+                    log_run.error("ERROR: Inconsistent Semantic Tag value "
+                                  "for tag %ld with different values at"
+                                  "byte %d for task impl, %x != %x",
+                                  tag, idx, orig[idx], next[idx]);
+#ifdef DEBUG_HIGH_LEVEL
+                    assert(false);
+#endif
+                    exit(ERROR_INCONSISTENT_SEMANTIC_TAG);
+                  }
                 }
               }
+            }
+            else
+            {
+              // It is mutable so just overwrite it
+              legion_free(SEMANTIC_INFO_ALLOC, 
+                          finder->second.buffer, finder->second.size);
+              finder->second.buffer = local;
+              finder->second.size = size;
+              finder->second.ready_event = UserEvent::NO_USER_EVENT;
+              finder->second.is_mutable = is_mutable;
             }
             added = false;
           }
@@ -4365,10 +4383,11 @@ namespace LegionRuntime {
             finder->second.size = size;
             to_trigger = finder->second.ready_event;
             finder->second.ready_event = UserEvent::NO_USER_EVENT;
+            finder->second.is_mutable = is_mutable;
           }
         }
         else
-          semantic_info[tag] = SemanticInfo(local, size);
+          semantic_info[tag] = SemanticInfo(local, size, is_mutable);
       }
       if (to_trigger.exists())
         to_trigger.trigger();
@@ -4378,7 +4397,7 @@ namespace LegionRuntime {
         // if we are not the owner and the message didn't come
         // from the owner, then send it
         if ((owner_space != runtime->address_space) && (source != owner_space))
-          send_semantic_info(owner_space, tag, buffer, size);
+          send_semantic_info(owner_space, tag, buffer, size, is_mutable);
       }
       else
         legion_free(SEMANTIC_INFO_ALLOC, local, size);
@@ -4439,7 +4458,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void TaskImpl::send_semantic_info(AddressSpaceID target, SemanticTag tag,
-                                      const void *buffer, size_t size)
+                               const void *buffer, size_t size, bool is_mutable)
     //--------------------------------------------------------------------------
     {
       Serializer rez;
@@ -4449,6 +4468,7 @@ namespace LegionRuntime {
         rez.serialize(tag);
         rez.serialize(size);
         rez.serialize(buffer, size);
+        rez.serialize(is_mutable);
       }
       runtime->send_task_impl_semantic_info(target, rez);
     }
@@ -4477,6 +4497,7 @@ namespace LegionRuntime {
       Event precondition = Event::NO_EVENT;
       void *result = NULL;
       size_t size = 0;
+      bool is_mutable = false;
       {
         AutoLock t_lock(task_lock);
         // See if we already have the data
@@ -4488,6 +4509,7 @@ namespace LegionRuntime {
           {
             result = finder->second.buffer;
             size = finder->second.size;
+            is_mutable = finder->second.is_mutable;
           }
           else
             precondition = finder->second.ready_event;
@@ -4513,7 +4535,7 @@ namespace LegionRuntime {
                       NULL/*op*/, precondition);
       }
       else
-        send_semantic_info(target, tag, result, size);
+        send_semantic_info(target, tag, result, size, is_mutable);
     }
 
     //--------------------------------------------------------------------------
@@ -4544,8 +4566,10 @@ namespace LegionRuntime {
       derez.deserialize(size);
       const void *buffer = derez.get_current_pointer();
       derez.advance_pointer(size);
+      bool is_mutable;
+      derez.deserialize(is_mutable);
       TaskImpl *impl = runtime->find_or_create_task_impl(task_id);
-      impl->attach_semantic_information(tag, source, buffer, size);
+      impl->attach_semantic_information(tag, source, buffer, size, is_mutable);
     }
 
     //--------------------------------------------------------------------------
@@ -11000,71 +11024,78 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void Internal::attach_semantic_information(TaskID task_id, SemanticTag tag,
-                                               const void *buffer, size_t size)
+                               const void *buffer, size_t size, bool is_mutable)
     //--------------------------------------------------------------------------
     {
       TaskImpl *impl = find_or_create_task_impl(task_id);
-      impl->attach_semantic_information(tag, address_space, buffer, size);
+      impl->attach_semantic_information(tag, address_space, 
+                                        buffer, size, is_mutable);
     }
 
     //--------------------------------------------------------------------------
     void Internal::attach_semantic_information(IndexSpace handle, 
                                               SemanticTag tag,
-                                              const void *buffer, size_t size)
+                                              const void *buffer, size_t size,
+                                              bool is_mutable)
     //--------------------------------------------------------------------------
     {
       forest->attach_semantic_information(handle, tag, address_space, 
-                                          buffer, size);
+                                          buffer, size, is_mutable);
     }
 
     //--------------------------------------------------------------------------
     void Internal::attach_semantic_information(IndexPartition handle, 
                                               SemanticTag tag,
-                                              const void *buffer, size_t size)
+                                              const void *buffer, size_t size,
+                                              bool is_mutable)
     //--------------------------------------------------------------------------
     {
       forest->attach_semantic_information(handle, tag, address_space, 
-                                          buffer, size);
+                                          buffer, size, is_mutable);
     }
 
     //--------------------------------------------------------------------------
     void Internal::attach_semantic_information(FieldSpace handle, 
                                               SemanticTag tag,
-                                              const void *buffer, size_t size)
+                                              const void *buffer, size_t size,
+                                              bool is_mutable)
     //--------------------------------------------------------------------------
     {
       forest->attach_semantic_information(handle, tag, address_space, 
-                                          buffer, size);
+                                          buffer, size, is_mutable);
     }
 
     //--------------------------------------------------------------------------
     void Internal::attach_semantic_information(FieldSpace handle, FieldID fid,
                                               SemanticTag tag,
-                                              const void *buffer, size_t size)
+                                              const void *buffer, size_t size,
+                                              bool is_mutable)
     //--------------------------------------------------------------------------
     {
-      forest->attach_semantic_information(handle, fid, tag, 
-                                          address_space, buffer, size);
+      forest->attach_semantic_information(handle, fid, tag, address_space, 
+                                          buffer, size, is_mutable);
     }
 
     //--------------------------------------------------------------------------
     void Internal::attach_semantic_information(LogicalRegion handle, 
                                               SemanticTag tag,
-                                              const void *buffer, size_t size)
+                                              const void *buffer, size_t size,
+                                              bool is_mutable)
     //--------------------------------------------------------------------------
     {
       forest->attach_semantic_information(handle, tag, address_space, 
-                                          buffer, size);
+                                          buffer, size, is_mutable);
     }
 
     //--------------------------------------------------------------------------
     void Internal::attach_semantic_information(LogicalPartition handle, 
                                               SemanticTag tag,
-                                              const void *buffer, size_t size)
+                                              const void *buffer, size_t size,
+                                              bool is_mutable)
     //--------------------------------------------------------------------------
     {
       forest->attach_semantic_information(handle, tag, address_space, 
-                                          buffer, size);
+                                          buffer, size, is_mutable);
     }
 
     //--------------------------------------------------------------------------

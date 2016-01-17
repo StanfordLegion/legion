@@ -947,11 +947,11 @@ namespace LegionRuntime {
     public:
       const char* get_name(bool needs_lock = true) const;
       void attach_semantic_information(SemanticTag tag, AddressSpaceID source,
-                                       const void *buffer, size_t size);
+                             const void *buffer, size_t size, bool is_mutable);
       void retrieve_semantic_information(SemanticTag tag,
                                          const void *&buffer, size_t &size);
       void send_semantic_info(AddressSpaceID target, SemanticTag tag,
-                              const void *value, size_t size);
+                              const void *value, size_t size, bool is_mutable);
       void send_semantic_request(AddressSpaceID target, SemanticTag tag);
       void process_semantic_request(SemanticTag tag, AddressSpaceID target);
     public:
@@ -1519,20 +1519,20 @@ namespace LegionRuntime {
       ProjectionFunctor* find_projection_functor(ProjectionID pid);
     public:
       void attach_semantic_information(TaskID task_id, SemanticTag,
-                                       const void *buffer, size_t size);
+                       const void *buffer, size_t size, bool is_mutable);
       void attach_semantic_information(IndexSpace handle, SemanticTag tag,
-                                       const void *buffer, size_t size);
+                       const void *buffer, size_t size, bool is_mutable);
       void attach_semantic_information(IndexPartition handle, SemanticTag tag,
-                                       const void *buffer, size_t size);
+                       const void *buffer, size_t size, bool is_mutable);
       void attach_semantic_information(FieldSpace handle, SemanticTag tag,
-                                       const void *buffer, size_t size);
+                       const void *buffer, size_t size, bool is_mutable);
       void attach_semantic_information(FieldSpace handle, FieldID fid,
-                                       SemanticTag tag,
-                                       const void *buffer, size_t size);
+                                       SemanticTag tag, const void *buffer, 
+                                       size_t size, bool is_mutable);
       void attach_semantic_information(LogicalRegion handle, SemanticTag tag,
-                                       const void *buffer, size_t size);
+                       const void *buffer, size_t size, bool is_mutable);
       void attach_semantic_information(LogicalPartition handle, SemanticTag tag,
-                                       const void *buffer, size_t size);
+                       const void *buffer, size_t size, bool is_mutable);
     public:
       void retrieve_semantic_information(TaskID task_id, SemanticTag tag,
                                          const void *&result, size_t &size);

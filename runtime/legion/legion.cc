@@ -3427,40 +3427,40 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void Runtime::attach_semantic_information(TaskID task_id, SemanticTag tag,
-                                              const void *buffer, size_t size)
+                                   const void *buffer, size_t size, bool is_mut)
     //--------------------------------------------------------------------------
     {
-      runtime->attach_semantic_information(task_id, tag, buffer, size);
+      runtime->attach_semantic_information(task_id, tag, buffer, size, is_mut);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::attach_semantic_information(IndexSpace handle,
                                                        SemanticTag tag,
                                                        const void *buffer,
-                                                       size_t size)
+                                                       size_t size, bool is_mut)
     //--------------------------------------------------------------------------
     {
-      runtime->attach_semantic_information(handle, tag, buffer, size);
+      runtime->attach_semantic_information(handle, tag, buffer, size, is_mut);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::attach_semantic_information(IndexPartition handle,
                                                        SemanticTag tag,
                                                        const void *buffer,
-                                                       size_t size)
+                                                       size_t size, bool is_mut)
     //--------------------------------------------------------------------------
     {
-      runtime->attach_semantic_information(handle, tag, buffer, size);
+      runtime->attach_semantic_information(handle, tag, buffer, size, is_mut);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::attach_semantic_information(FieldSpace handle,
                                                        SemanticTag tag,
                                                        const void *buffer,
-                                                       size_t size)
+                                                       size_t size, bool is_mut)
     //--------------------------------------------------------------------------
     {
-      runtime->attach_semantic_information(handle, tag, buffer, size);
+      runtime->attach_semantic_information(handle, tag, buffer, size, is_mut);
     }
 
     //--------------------------------------------------------------------------
@@ -3468,89 +3468,89 @@ namespace LegionRuntime {
                                                        FieldID fid,
                                                        SemanticTag tag,
                                                        const void *buffer,
-                                                       size_t size)
+                                                       size_t size, bool is_mut)
     //--------------------------------------------------------------------------
     {
-      runtime->attach_semantic_information(handle, fid, tag, buffer, size);
+      runtime->attach_semantic_information(handle, fid, tag, buffer, 
+                                           size, is_mut);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::attach_semantic_information(LogicalRegion handle,
                                                        SemanticTag tag,
                                                        const void *buffer,
-                                                       size_t size)
+                                                       size_t size, bool is_mut)
     //--------------------------------------------------------------------------
     {
-      runtime->attach_semantic_information(handle, tag, buffer, size);
+      runtime->attach_semantic_information(handle, tag, buffer, size, is_mut);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::attach_semantic_information(LogicalPartition handle,
                                                        SemanticTag tag,
                                                        const void *buffer,
-                                                       size_t size)
+                                                       size_t size, bool is_mut)
     //--------------------------------------------------------------------------
     {
-      runtime->attach_semantic_information(handle, tag, buffer, size);
+      runtime->attach_semantic_information(handle, tag, buffer, size, is_mut);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::attach_name(TaskID task_id, const char *name)
+    void Runtime::attach_name(TaskID task_id, const char *name, bool is_mutable)
     //--------------------------------------------------------------------------
     {
       Runtime::attach_semantic_information(task_id,
-          NAME_SEMANTIC_TAG, name, strlen(name) + 1);
+          NAME_SEMANTIC_TAG, name, strlen(name) + 1, is_mutable);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::attach_name(IndexSpace handle, const char *name)
+    void Runtime::attach_name(IndexSpace handle, const char *name, bool is_mut)
     //--------------------------------------------------------------------------
     {
       Runtime::attach_semantic_information(handle,
-          NAME_SEMANTIC_TAG, name, strlen(name) + 1);
+          NAME_SEMANTIC_TAG, name, strlen(name) + 1, is_mut);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::attach_name(IndexPartition handle, const char *name)
+    void Runtime::attach_name(IndexPartition handle, const char *name, bool ism)
     //--------------------------------------------------------------------------
     {
       Runtime::attach_semantic_information(handle,
-          NAME_SEMANTIC_TAG, name, strlen(name) + 1);
+          NAME_SEMANTIC_TAG, name, strlen(name) + 1, ism);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::attach_name(FieldSpace handle, const char *name)
+    void Runtime::attach_name(FieldSpace handle, const char *name, bool is_mut)
     //--------------------------------------------------------------------------
     {
       Runtime::attach_semantic_information(handle,
-          NAME_SEMANTIC_TAG, name, strlen(name) + 1);
+          NAME_SEMANTIC_TAG, name, strlen(name) + 1, is_mut);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::attach_name(FieldSpace handle,
                                        FieldID fid,
-                                       const char *name)
+                                       const char *name, bool is_mutable)
     //--------------------------------------------------------------------------
     {
       Runtime::attach_semantic_information(handle, fid,
-          NAME_SEMANTIC_TAG, name, strlen(name) + 1);
+          NAME_SEMANTIC_TAG, name, strlen(name) + 1, is_mutable);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::attach_name(LogicalRegion handle, const char *name)
+    void Runtime::attach_name(LogicalRegion handle, const char *name, bool ism)
     //--------------------------------------------------------------------------
     {
       Runtime::attach_semantic_information(handle,
-          NAME_SEMANTIC_TAG, name, strlen(name) + 1);
+          NAME_SEMANTIC_TAG, name, strlen(name) + 1, ism);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::attach_name(LogicalPartition handle,
-                                       const char *name)
+    void Runtime::attach_name(LogicalPartition handle, const char *name, bool m)
     //--------------------------------------------------------------------------
     {
       Runtime::attach_semantic_information(handle,
-          NAME_SEMANTIC_TAG, name, strlen(name) + 1);
+          NAME_SEMANTIC_TAG, name, strlen(name) + 1, m);
     }
 
     //--------------------------------------------------------------------------

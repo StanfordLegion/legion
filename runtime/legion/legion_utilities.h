@@ -268,16 +268,18 @@ namespace LegionRuntime {
     public:
       SemanticInfo(void)
         : buffer(NULL), size(0) { }  
-      SemanticInfo(void *buf, size_t s) 
-        : buffer(buf), size(s), ready_event(UserEvent::NO_USER_EVENT) { }
+      SemanticInfo(void *buf, size_t s, bool is_mut = true) 
+        : buffer(buf), size(s), 
+          ready_event(UserEvent::NO_USER_EVENT), is_mutable(is_mut) { }
       SemanticInfo(UserEvent ready)
-        : buffer(NULL), size(0), ready_event(ready) { }
+        : buffer(NULL), size(0), ready_event(ready), is_mutable(true) { }
     public:
-      bool is_valid(void) const { return !ready_event.exists(); }
+      inline bool is_valid(void) const { return !ready_event.exists(); }
     public:
       void *buffer;
       size_t size;
       UserEvent ready_event;
+      bool is_mutable;
     };
 
     /////////////////////////////////////////////////////////////
