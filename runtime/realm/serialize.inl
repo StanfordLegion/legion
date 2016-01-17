@@ -23,6 +23,8 @@
 #include <assert.h>
 #include <stdint.h>
 
+#include <iostream>
+
 // base integer/float types are all serializable
 TYPE_IS_SERIALIZABLE(bool);
 TYPE_IS_SERIALIZABLE(char);
@@ -598,6 +600,114 @@ namespace Realm {
       str.assign((const char *)p, len);
       return s.extract_bytes(0, len);
     }      
+
+
+    ////////////////////////////////////////////////////////////////////////
+    //
+    // PolymorphicSerdezHelper<T>
+    //
+
+    template <typename T>
+    inline /*static*/ typename PolymorphicSerdezHelper<T>::SubclassMap& PolymorphicSerdezHelper<T>::get_subclasses(void)
+    {
+      static SubclassMap map;
+      //std::cout << "returning " << &map << std::endl;
+      return map;
+    }
+
+    template <typename T>
+    inline /*static*/ bool PolymorphicSerdezHelper<T>::serialize(FixedBufferSerializer& serializer, const T& obj)
+    {
+      const char *type_name = typeid(obj).name();
+      assert(get_subclasses().by_typename.count(type_name) != 0);
+      const PolymorphicSerdezIntfc<T> *sc = get_subclasses().by_typename[typeid(obj).name()];
+      return (serializer << sc->tag) && sc->serialize(serializer, obj);
+    }
+
+    template <typename T>
+    inline /*static*/ bool PolymorphicSerdezHelper<T>::serialize(DynamicBufferSerializer& serializer, const T& obj)
+    {
+      const char *type_name = typeid(obj).name();
+      assert(get_subclasses().by_typename.count(type_name) != 0);
+      const PolymorphicSerdezIntfc<T> *sc = get_subclasses().by_typename[typeid(obj).name()];
+      return (serializer << sc->tag) && sc->serialize(serializer, obj);
+    }
+
+    template <typename T>
+    inline /*static*/ bool PolymorphicSerdezHelper<T>::serialize(ByteCountSerializer& serializer, const T& obj)
+    {
+      const char *type_name = typeid(obj).name();
+      assert(get_subclasses().by_typename.count(type_name) != 0);
+      const PolymorphicSerdezIntfc<T> *sc = get_subclasses().by_typename[typeid(obj).name()];
+      return (serializer << sc->tag) && sc->serialize(serializer, obj);
+    }
+
+    template <typename T>
+    inline /*static*/ T *PolymorphicSerdezHelper<T>::deserialize_new(FixedBufferDeserializer& deserializer)
+    {
+      TypeTag tag;
+      if(!(deserializer >> tag)) return 0;
+      assert(get_subclasses().by_tag.count(tag) != 0);
+      return get_subclasses().by_tag[tag]->deserialize_new(deserializer);
+    }
+  
+
+    ////////////////////////////////////////////////////////////////////////
+    //
+    // PolymorphicSerdezIntfc<T>
+    //
+
+    template <typename T>
+    inline PolymorphicSerdezIntfc<T>::PolymorphicSerdezIntfc(const char *type_name)
+    {
+      tag = 0;
+      const char *s = type_name;
+      while(*s)
+	tag = tag * 73 + *s++;
+      //std::cout << "type: " << type_name << " -> tag = " << tag << std::endl;
+      typename PolymorphicSerdezHelper<T>::SubclassMap& scmap = PolymorphicSerdezHelper<T>::get_subclasses();
+      scmap.by_typename[type_name] = this;
+      scmap.by_tag[tag] = this;
+    }
+
+    template <typename T>
+    inline PolymorphicSerdezIntfc<T>::~PolymorphicSerdezIntfc(void) {}
+
+
+    ////////////////////////////////////////////////////////////////////////
+    //
+    // PolymorphicSerdezSubclass<T1,T2>
+    //
+
+    template <typename T1, typename T2>
+    inline PolymorphicSerdezSubclass<T1,T2>::PolymorphicSerdezSubclass(void)
+      : PolymorphicSerdezIntfc<T1>(typeid(T2).name())
+    {}
+
+    template <typename T1, typename T2>
+    inline bool PolymorphicSerdezSubclass<T1,T2>::serialize(FixedBufferSerializer& serializer, const T1& obj) const
+    {
+      return static_cast<const T2&>(obj).serialize(serializer);
+    }
+
+    template <typename T1, typename T2>
+    inline bool PolymorphicSerdezSubclass<T1,T2>::serialize(DynamicBufferSerializer& serializer, const T1& obj) const
+    {
+      return static_cast<const T2&>(obj).serialize(serializer);
+    }
+
+    template <typename T1, typename T2>
+    inline bool PolymorphicSerdezSubclass<T1,T2>::serialize(ByteCountSerializer& serializer, const T1& obj) const
+    {
+      return static_cast<const T2&>(obj).serialize(serializer);
+    }
+      
+    template <typename T1, typename T2>
+    inline T1 *PolymorphicSerdezSubclass<T1,T2>::deserialize_new(FixedBufferDeserializer& deserializer) const
+    {
+      return T2::deserialize_new(deserializer);
+    }
+
     
   }; // namespace Serialization
 }; // namespace Realm

@@ -56,7 +56,7 @@ namespace Realm {
       virtual void add_to_group(ProcessorGroup *group) = 0;
 
       virtual void register_task(Processor::TaskFuncID func_id,
-				 const CodeDescriptor& codedesc,
+				 CodeDescriptor& codedesc,
 				 const ByteArrayRef& user_data);
 
     protected:
@@ -86,7 +86,7 @@ namespace Realm {
                               int priority);
 
       virtual void register_task(Processor::TaskFuncID func_id,
-				 const CodeDescriptor& codedesc,
+				 CodeDescriptor& codedesc,
 				 const ByteArrayRef& user_data);
 
       // blocks until things are cleaned up
@@ -230,6 +230,16 @@ namespace Realm {
       ByteArray userdata;
     };
 
+    class RemoteTaskRegistration : public Operation::AsyncWorkItem {
+    public:
+      RemoteTaskRegistration(TaskRegistration *reg_op, int _target_node);
+
+      virtual void request_cancellation(void);
+
+    protected:
+      int target_node;
+    };
+
     // active messages
 
     struct SpawnTaskMessage {
@@ -259,6 +269,45 @@ namespace Realm {
 			       int priority);
     };
     
+    struct RegisterTaskMessage {
+      struct RequestArgs : public BaseMedium {
+	gasnet_node_t sender;
+	Processor::TaskFuncID func_id;
+	Processor::Kind kind;
+	RemoteTaskRegistration *reg_op;
+      };
+
+      static void handle_request(RequestArgs args, const void *data, size_t datalen);
+
+      typedef ActiveMessageMediumNoReply<REGISTER_TASK_MSGID,
+ 	                                 RequestArgs,
+ 	                                 handle_request> Message;
+
+      static void send_request(gasnet_node_t target,
+			       Processor::TaskFuncID func_id,
+			       Processor::Kind kind,
+			       const std::vector<Processor>& procs,
+			       const CodeDescriptor& codedesc,
+			       const void *userdata, size_t userlen,
+			       RemoteTaskRegistration *reg_op);
+    };
+    
+    struct RegisterTaskCompleteMessage {
+      struct RequestArgs {
+	gasnet_node_t sender;
+	RemoteTaskRegistration *reg_op;
+      };
+
+      static void handle_request(RequestArgs args);
+
+      typedef ActiveMessageShortNoReply<REGISTER_TASK_COMPLETE_MSGID,
+					RequestArgs,
+					handle_request> Message;
+
+      static void send_request(gasnet_node_t target,
+			       RemoteTaskRegistration *reg_op);
+    };
+
 }; // namespace Realm
 
 #endif // ifndef REALM_PROC_IMPL_H
