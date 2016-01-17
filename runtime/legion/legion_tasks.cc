@@ -9394,8 +9394,22 @@ namespace LegionRuntime {
       Processor current = parent_ctx->get_executing_processor();
       // Save the context to be the current inline context
       parent_ctx = ctx;
+      // Make a copy of our region requirements
+      std::vector<RegionRequirement> copy_requirements(regions.size());
+      for (unsigned idx = 0; idx < regions.size(); idx++)
+        copy_requirements[idx].copy_without_mapping_info(regions[idx]);
+      bool first = true;
       for (Domain::DomainPointIterator itr(index_domain); itr; itr++)
       {
+        // If this is not the first we have to restore the region
+        // requirements from copy that we made before hand
+        if (!first)
+        {
+          for (unsigned idx = 0; idx < regions.size(); idx++)
+            regions[idx].copy_without_mapping_info(copy_requirements[idx]);
+        }
+        else
+          first = false;
         index_point = itr.p; 
         compute_point_region_requirements();
         // Get our local args
