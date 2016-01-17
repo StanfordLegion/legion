@@ -11331,6 +11331,8 @@ namespace LegionRuntime {
       VariantImpl *impl = legion_new<VariantImpl>(this, vid, task_impl, 
                                                   registrar, ret, realm, indesc,
                                                   user_data, user_data_size);
+      // Add this variant to the owner
+      task_impl->add_variant(impl);
       AutoLock tv_lock(task_variant_lock);
       variant_table.push_back(impl);
       return vid;
