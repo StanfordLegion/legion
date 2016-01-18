@@ -3572,6 +3572,21 @@ namespace LegionRuntime {
               runtime->handle_variant_response(derez);
               break;
             }
+          case SEND_CONSTRAINT_REQUEST:
+            {
+              runtime->handle_constraint_request(derez, remote_address_space);
+              break;
+            }
+          case SEND_CONSTRAINT_RESPONSE:
+            {
+              runtime->handle_constraint_response(derez);
+              break;
+            }
+          case SEND_CONSTRAINT_RELEASE:
+            {
+              runtime->handle_constraint_release(derez, remote_address_space);
+              break;
+            }
           case SEND_SHUTDOWN_NOTIFICATION:
             {
               runtime->handle_shutdown_notification(remote_address_space);
@@ -4851,7 +4866,191 @@ namespace LegionRuntime {
       runtime->register_variant(registrar, user_data, user_data_size,
                                 realm_desc, inline_desc, has_return,variant_id);
     }
-    
+
+    /////////////////////////////////////////////////////////////
+    // Layout Constraints 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    LayoutConstraints::LayoutConstraints(LayoutConstraintID id, Internal *rt,
+                                     const LayoutConstraintRegistrar &registrar)
+      : LayoutConstraintSet(registrar.layout_constraints), layout_id(id), 
+        runtime(rt), handle(registrar.handle), ready_event(Event::NO_EVENT)
+    //--------------------------------------------------------------------------
+    {
+      if (registrar.layout_name == NULL)
+      {
+        constraints_name = (char*)malloc(64*sizeof(char));
+        snprintf(constraints_name,64,"layout constraints %ld", layout_id);
+      }
+      else
+        constraints_name = strdup(registrar.layout_name);
+    }
+
+    //--------------------------------------------------------------------------
+    LayoutConstraints::LayoutConstraints(LayoutConstraintID id, Internal *rt)
+      : layout_id(id), runtime(rt), constraints_name(NULL)
+    //--------------------------------------------------------------------------
+    {
+      // Make a user event for the result and send the request
+      UserEvent done_event = UserEvent::create_user_event();
+      // Save the done event as the ready event
+      ready_event = done_event;
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(layout_id);
+        rez.serialize(done_event);
+      }
+      AddressSpaceID target = get_owner();
+      runtime->send_constraint_request(target, rez);
+    }
+
+    //--------------------------------------------------------------------------
+    LayoutConstraints::LayoutConstraints(const LayoutConstraints &rhs)
+      : layout_id(rhs.layout_id), runtime(rhs.runtime)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    LayoutConstraints::~LayoutConstraints(void)
+    //--------------------------------------------------------------------------
+    {
+      if (constraints_name != NULL)
+        free(constraints_name);
+    }
+
+    //--------------------------------------------------------------------------
+    LayoutConstraints& LayoutConstraints::operator=(const LayoutConstraints &rh)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void LayoutConstraints::ReleaseFunctor::apply(AddressSpaceID target)
+    //--------------------------------------------------------------------------
+    {
+      if (target != to_skip)
+        runtime->send_constraint_release(target, rez);
+    }
+
+    //--------------------------------------------------------------------------
+    void LayoutConstraints::release_constraints(AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      const AddressSpaceID owner = get_owner();
+      // See if this is the owner node or not 
+      if (owner == runtime->address_space)
+      {
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(layout_id);
+        }
+        ReleaseFunctor functor(rez, source, runtime);
+        remote_instances.map(functor);
+      }
+      else if (source != owner)
+      {
+        // Send notification to the owner to do the release
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(layout_id);
+        }
+        runtime->send_constraint_release(owner, rez);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void LayoutConstraints::send_constraints(AddressSpaceID target,
+                                             UserEvent done_event)
+    //--------------------------------------------------------------------------
+    {
+      // Record where we have sent constraints
+      remote_instances.add(target);
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(layout_id);
+        // pack the constraints
+
+        // pack the done events
+        rez.serialize(done_event);
+      }
+      runtime->send_constraint_response(target, rez);
+    }
+
+    //--------------------------------------------------------------------------
+    void LayoutConstraints::update_constraints(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      // Unpack the constraints
+
+      // Then trigger the event
+      UserEvent done_event;
+      derez.deserialize(done_event);
+      done_event.trigger();
+    }
+
+    //--------------------------------------------------------------------------
+    AddressSpaceID LayoutConstraints::get_owner(void) const
+    //--------------------------------------------------------------------------
+    {
+      return get_owner(layout_id, runtime);
+    }
+
+    //--------------------------------------------------------------------------
+    AddressSpaceID LayoutConstraints::get_owner(LayoutConstraintID layout_id,
+                                                Internal *runtime)
+    //--------------------------------------------------------------------------
+    {
+      return (layout_id % runtime->runtime_stride);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void LayoutConstraints::process_request(Internal *runtime,
+                                     Deserializer &derez, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      LayoutConstraintID lay_id;
+      derez.deserialize(lay_id);
+      UserEvent done_event;
+      derez.deserialize(done_event);
+      LayoutConstraints *constraints = runtime->find_layout_constraints(lay_id);
+      constraints->send_constraints(source, done_event);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void LayoutConstraints::process_response(Internal *runtime,
+                                                        Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      LayoutConstraintID lay_id;
+      derez.deserialize(lay_id);
+      LayoutConstraints *constraints = runtime->find_layout_constraints(lay_id);
+      constraints->update_constraints(derez);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void LayoutConstraints::process_release(Internal *runtime,
+                                     Deserializer &derez, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      LayoutConstraintID lay_id;
+      derez.deserialize(lay_id);
+      runtime->release_layout(lay_id, source);
+    }
+
     /////////////////////////////////////////////////////////////
     // Legion Runtime 
     /////////////////////////////////////////////////////////////
@@ -4878,6 +5077,7 @@ namespace LegionRuntime {
         message_manager_lock(Reservation::create_reservation()),
         proc_spaces(processor_spaces),
         task_variant_lock(Reservation::create_reservation()),
+        layout_constraints_lock(Reservation::create_reservation()),
         mapper_info_lock(Reservation::create_reservation()),
         unique_index_space_id((unique == 0) ? runtime_stride : unique),
         unique_index_partition_id((unique == 0) ? runtime_stride : unique), 
@@ -4887,6 +5087,7 @@ namespace LegionRuntime {
         unique_operation_id((unique == 0) ? runtime_stride : unique),
         unique_field_id((unique == 0) ? runtime_stride : unique),
         unique_variant_id((unique == 0) ? runtime_stride : unique),
+        unique_constraint_id((unique == 0) ? runtime_stride : unique),
         available_lock(Reservation::create_reservation()), total_contexts(0),
         group_lock(Reservation::create_reservation()),
         distributed_id_lock(Reservation::create_reservation()),
@@ -5067,6 +5268,24 @@ namespace LegionRuntime {
       // here since we are still initializing the runtime
       while (unique_variant_id <= num_static_variants)
         unique_variant_id += runtime_stride;
+      // Register any pending constraint sets
+      std::map<LayoutConstraintID,LayoutConstraintRegistrar> 
+        &pending_constraints = get_pending_constraint_table();
+      if (!pending_constraints.empty())
+      {
+        // Update the next available constraint
+        while (pending_constraints.find(unique_constraint_id) !=
+                pending_constraints.end())
+          unique_constraint_id += runtime_stride;
+        // Now do the registrations
+        for (std::map<LayoutConstraintID,LayoutConstraintRegistrar>::
+              const_iterator it = pending_constraints.begin(); 
+              it != pending_constraints.end(); it++)
+        {
+          register_layout(it->second, it->first);
+        }
+        pending_constraints.clear();
+      } 
 
       // Before launching the top level task, see if the user requested
       // a callback to be performed before starting the application
@@ -5434,6 +5653,14 @@ namespace LegionRuntime {
       variant_table.clear();
       task_variant_lock.destroy_reservation();
       task_variant_lock = Reservation::NO_RESERVATION;
+      for (std::map<LayoutConstraintID,LayoutConstraints*>::const_iterator
+            it = layout_constraints_table.begin(); it != 
+            layout_constraints_table.end(); it++)
+      {
+        legion_delete(it->second);
+      }
+      layout_constraints_lock.destroy_reservation();
+      layout_constraints_lock = Reservation::NO_RESERVATION;
 
       delete forest;
 
@@ -12505,6 +12732,33 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void Internal::send_constraint_request(AddressSpaceID target, 
+                                           Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_CONSTRAINT_REQUEST,
+                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Internal::send_constraint_response(AddressSpaceID target, 
+                                            Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_CONSTRAINT_RESPONSE,
+                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Internal::send_constraint_release(AddressSpaceID target,
+                                           Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_CONSTRAINT_RELEASE,
+                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Internal::handle_task(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
@@ -13208,6 +13462,29 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       VariantImpl::handle_variant_response(this, derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Internal::handle_constraint_request(Deserializer &derez,
+                                             AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      LayoutConstraints::process_request(this, derez, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Internal::handle_constraint_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      LayoutConstraints::process_response(this, derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Internal::handle_constraint_release(Deserializer &derez,
+                                             AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      LayoutConstraints::process_release(this, derez, source);
     }
 
     //--------------------------------------------------------------------------
@@ -15434,6 +15711,19 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    LayoutConstraintID Internal::get_unique_constraint_id(void)
+    //--------------------------------------------------------------------------
+    {
+      LayoutConstraintID result = __sync_fetch_and_add(&unique_constraint_id,
+                                                       runtime_stride);
+#ifdef DEBUG_HIGH_LEVEL
+      // check for overflow
+      assert(result <= unique_constraint_id);
+#endif
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     LegionErrorType Internal::verify_requirement(
                                const RegionRequirement &req, FieldID &bad_field)
     //--------------------------------------------------------------------------
@@ -15783,6 +16073,8 @@ namespace LegionRuntime {
           return "Task Implementation";
         case VARIANT_IMPL_ALLOC:
           return "Variant Implementation";
+        case LAYOUT_CONSTRAINTS_ALLOC:
+          return "Layout Constraints";
         default:
           assert(false); // should never get here
       }
@@ -15989,6 +16281,176 @@ namespace LegionRuntime {
       fflush(f);
     }
 #endif
+
+    //--------------------------------------------------------------------------
+    LayoutConstraintID Internal::register_layout(
+                                     const LayoutConstraintRegistrar &registrar,
+                                     LayoutConstraintID layout_id)
+    //--------------------------------------------------------------------------
+    {
+      if (layout_id == AUTO_GENERATE_ID)
+        layout_id = get_unique_constraint_id();
+      // Now make our entry and then return the result
+      LayoutConstraints *constraints = 
+        legion_new<LayoutConstraints>(layout_id, this, registrar);
+      AutoLock l_lock(layout_constraints_lock);
+      if (layout_constraints_table.find(layout_id) == 
+          layout_constraints_table.end())
+      {
+        log_run.error("Illegal duplicate use of layout constraint ID %ld", 
+                      layout_id);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_DUPLICATE_CONSTRAINT_ID);
+      }
+      layout_constraints_table[layout_id] = constraints;
+      return layout_id;
+    }
+
+    //--------------------------------------------------------------------------
+    void Internal::release_layout(LayoutConstraintID layout_id,
+                                  AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      LayoutConstraints *constraints = find_layout_constraints(layout_id);
+      constraints->release_constraints(source);
+      {
+        AutoLock l_lock(layout_constraints_lock);
+        std::map<LayoutConstraintID,LayoutConstraints*>::const_iterator
+          finder = layout_constraints_table.find(layout_id);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(finder != layout_constraints_table.end());
+#endif
+        layout_constraints_table.erase(finder);
+      }
+      legion_delete(constraints);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ LayoutConstraintID Internal::preregister_layout(
+                                     const LayoutConstraintRegistrar &registrar,
+                                     LayoutConstraintID layout_id)
+    //--------------------------------------------------------------------------
+    { 
+      if (runtime_started)
+      {
+        log_run.error("Illegal call to 'preregister_layout' after "
+                      "the runtime has started!");
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_STATIC_CALL_POST_RUNTIME_START);
+      }
+      std::map<LayoutConstraintID,LayoutConstraintRegistrar> 
+        &pending_constraints = get_pending_constraint_table();
+      // See if we have to generate an ID
+      if (layout_id == AUTO_GENERATE_ID)
+      {
+        // Find the first available layout ID
+        layout_id = 1;
+        for (std::map<LayoutConstraintID,LayoutConstraintRegistrar>::
+              const_iterator it = pending_constraints.begin(); 
+              it != pending_constraints.end(); it++)
+        {
+          if (layout_id != it->first)
+          {
+            // We've found a free one, so we can use it
+            break;
+          }
+          else
+            layout_id++;
+        }
+      }
+      else
+      {
+        if (layout_id == 0)
+        {
+          log_run.error("Illegal use of reserved constraint ID 0");
+#ifdef DEBUG_HIGH_LEVEL
+          assert(false);
+#endif
+          exit(ERROR_RESERVED_CONSTRAINT_ID);
+        }
+        // Check to make sure it is not already used
+        std::map<LayoutConstraintID,LayoutConstraintRegistrar>::const_iterator
+          finder = pending_constraints.find(layout_id);
+        if (finder != pending_constraints.end())
+        {
+          log_run.error("Duplicate use of constraint ID %ld", layout_id);
+#ifdef DEBUG_HIGH_LEVEL
+          assert(false);
+#endif
+          exit(ERROR_DUPLICATE_CONSTRAINT_ID);
+        }
+      }
+      pending_constraints[layout_id] = registrar;
+      return layout_id;
+    }
+
+    //--------------------------------------------------------------------------
+    FieldSpace Internal::get_layout_constraint_field_space(
+                                                   LayoutConstraintID layout_id)
+    //--------------------------------------------------------------------------
+    {
+      LayoutConstraints *constraints = find_layout_constraints(layout_id);
+      return constraints->get_field_space();
+    }
+
+    //--------------------------------------------------------------------------
+    void Internal::get_layout_constraints(LayoutConstraintID layout_id,
+                                        LayoutConstraintSet &layout_constraints)
+    //--------------------------------------------------------------------------
+    {
+      LayoutConstraints *constraints = find_layout_constraints(layout_id);
+      layout_constraints = *constraints;
+    }
+
+    //--------------------------------------------------------------------------
+    const char* Internal::get_layout_constraints_name(
+                                                   LayoutConstraintID layout_id)
+    //--------------------------------------------------------------------------
+    {
+      LayoutConstraints *constraints = find_layout_constraints(layout_id);
+      return constraints->get_name();
+    }
+
+    //--------------------------------------------------------------------------
+    LayoutConstraints* Internal::find_layout_constraints(
+                                                   LayoutConstraintID layout_id)
+    //--------------------------------------------------------------------------
+    {
+      // See if we can find it first
+      Event wait_on = Event::NO_EVENT;
+      {
+        AutoLock l_lock(layout_constraints_lock);
+        std::map<LayoutConstraintID,LayoutConstraints*>::const_iterator
+          finder = layout_constraints_table.find(layout_id);
+        if (finder != layout_constraints_table.end())
+        {
+          wait_on = finder->second->get_ready_event();
+          if (wait_on.has_triggered())
+            return finder->second;
+        }
+        else // make a place holder which will request the actual constraints
+        {
+          LayoutConstraints *constraints = 
+            legion_new<LayoutConstraints>(layout_id, this);
+          layout_constraints_table[layout_id] = constraints; 
+          wait_on = constraints->get_ready_event();
+        }
+      }
+      // If we didn't find it send a remote request for the constraints
+      wait_on.wait();
+      // When we wake up, the result should be there
+      AutoLock l_lock(layout_constraints_lock);
+      std::map<LayoutConstraintID,LayoutConstraints*>::const_iterator
+          finder = layout_constraints_table.find(layout_id);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(finder != layout_constraints_table.end());
+#endif
+      return finder->second;
+    }
 
     /*static*/ Internal *Internal::runtime_map[(MAX_NUM_PROCS+1)];
     /*static*/ volatile RegistrationCallbackFnptr Internal::
@@ -16573,6 +17035,16 @@ namespace LegionRuntime {
     {
       static std::deque<PendingVariantRegistration*> pending_variant_table;
       return pending_variant_table;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ std::map<LayoutConstraintID,LayoutConstraintRegistrar>&
+                                    Internal::get_pending_constraint_table(void)
+    //--------------------------------------------------------------------------
+    {
+      static std::map<LayoutConstraintID,LayoutConstraintRegistrar>
+                                                    pending_constraint_table;
+      return pending_constraint_table;
     }
 
     //--------------------------------------------------------------------------

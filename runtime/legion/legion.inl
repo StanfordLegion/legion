@@ -1067,7 +1067,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    inline LayoutDescriptionRegistrar& LayoutDescriptionRegistrar::
+    inline LayoutConstraintRegistrar& LayoutConstraintRegistrar::
                          add_constraint(const SpecializedConstraint &constraint)
     //--------------------------------------------------------------------------
     {
@@ -1076,7 +1076,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    inline LayoutDescriptionRegistrar& LayoutDescriptionRegistrar::
+    inline LayoutConstraintRegistrar& LayoutConstraintRegistrar::
                               add_constraint(const MemoryConstraint &constraint)
     //--------------------------------------------------------------------------
     {
@@ -1085,7 +1085,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    inline LayoutDescriptionRegistrar& LayoutDescriptionRegistrar::
+    inline LayoutConstraintRegistrar& LayoutConstraintRegistrar::
                             add_constraint(const OrderingConstraint &constraint)
     //--------------------------------------------------------------------------
     {
@@ -1094,7 +1094,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    inline LayoutDescriptionRegistrar& LayoutDescriptionRegistrar::
+    inline LayoutConstraintRegistrar& LayoutConstraintRegistrar::
                            add_constraint(const SplittingConstraint &constraint)
     //--------------------------------------------------------------------------
     {
@@ -1103,7 +1103,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    inline LayoutDescriptionRegistrar& LayoutDescriptionRegistrar::
+    inline LayoutConstraintRegistrar& LayoutConstraintRegistrar::
                                add_constraint(const FieldConstraint &constraint)
     //--------------------------------------------------------------------------
     {
@@ -1112,7 +1112,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    inline LayoutDescriptionRegistrar& LayoutDescriptionRegistrar::
+    inline LayoutConstraintRegistrar& LayoutConstraintRegistrar::
                            add_constraint(const DimensionConstraint &constraint)
     //--------------------------------------------------------------------------
     {
@@ -1121,7 +1121,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    inline LayoutDescriptionRegistrar& LayoutDescriptionRegistrar::
+    inline LayoutConstraintRegistrar& LayoutConstraintRegistrar::
                            add_constraint(const AlignmentConstraint &constraint)
     //--------------------------------------------------------------------------
     {
@@ -1130,7 +1130,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    inline LayoutDescriptionRegistrar& LayoutDescriptionRegistrar::
+    inline LayoutConstraintRegistrar& LayoutConstraintRegistrar::
                               add_constraint(const OffsetConstraint &constraint)
     //--------------------------------------------------------------------------
     {
@@ -1139,7 +1139,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    inline LayoutDescriptionRegistrar& LayoutDescriptionRegistrar::
+    inline LayoutConstraintRegistrar& LayoutConstraintRegistrar::
                              add_constraint(const PointerConstraint &constraint)
     //--------------------------------------------------------------------------
     {

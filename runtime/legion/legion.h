@@ -1297,7 +1297,7 @@ namespace LegionRuntime {
     //==========================================================================
 
     /**
-     * \struct LayoutDescriptionRegistrar
+     * \struct LayoutConstraintRegistrar
      * A layout description registrar is the mechanism by which application
      * can register a set of constraints with a specific ID. This ID can
      * then be used globally to refer to this set of constraints. All 
@@ -1306,28 +1306,29 @@ namespace LegionRuntime {
      * NO_SPACE if there are no field constraints. All the rest of the 
      * constraints can be optionally specified.
      */
-    struct LayoutDescriptionRegistrar {
+    struct LayoutConstraintRegistrar {
     public:
-      LayoutDescriptionRegistrar(FieldSpace handle, 
+      LayoutConstraintRegistrar(void);
+      LayoutConstraintRegistrar(FieldSpace handle, 
                                  const char *layout_name = NULL);
     public:
-      inline LayoutDescriptionRegistrar&
+      inline LayoutConstraintRegistrar&
         add_constraint(const SpecializedConstraint &constraint);
-      inline LayoutDescriptionRegistrar&
+      inline LayoutConstraintRegistrar&
         add_constraint(const MemoryConstraint &constraint);
-      inline LayoutDescriptionRegistrar&
+      inline LayoutConstraintRegistrar&
         add_constraint(const OrderingConstraint &constraint);
-      inline LayoutDescriptionRegistrar&
+      inline LayoutConstraintRegistrar&
         add_constraint(const SplittingConstraint &constraint);
-      inline LayoutDescriptionRegistrar&
+      inline LayoutConstraintRegistrar&
         add_constraint(const FieldConstraint &constraint);
-      inline LayoutDescriptionRegistrar&
+      inline LayoutConstraintRegistrar&
         add_constraint(const DimensionConstraint &constraint);
-      inline LayoutDescriptionRegistrar&
+      inline LayoutConstraintRegistrar&
         add_constraint(const AlignmentConstraint &constraint);
-      inline LayoutDescriptionRegistrar&
+      inline LayoutConstraintRegistrar&
         add_constraint(const OffsetConstraint &constraint);
-      inline LayoutDescriptionRegistrar&
+      inline LayoutConstraintRegistrar&
         add_constraint(const PointerConstraint &constraint); 
     public:
       FieldSpace                                handle;
@@ -5476,17 +5477,22 @@ namespace LegionRuntime {
       // Layout Registration Operations
       //------------------------------------------------------------------------
       /**
-       * Register a new layout description with the runtime. The ID for this
-       * layout can either be specified by the application (in which case
-       * it must be globally unique) or the application can ask the runtime
-       * to make a unique layout ID.
+       * Register a new layout description with the runtime. The runtime will
+       * return an ID that is a globally unique name for this set of 
+       * constraints and can be used anywhere in the machine. Once this set 
+       * of constraints is set, it cannot be changed.
        * @param registrar a layout description registrar 
-       * @param layout_id an optional layout ID to use
-       * @return the layout ID specified
+       * @return a unique layout ID assigned to this set of constraints 
        */
       LayoutConstraintID register_layout(
-                             const LayoutDescriptionRegistrar &registrar,
-                             LayoutConstraintID layout_id = AUTO_GENERATE_ID);
+                                    const LayoutConstraintRegistrar &registrar);
+
+      /**
+       * Release the set of constraints associated the given layout ID.
+       * This promises that this set of constraints will never be used again.
+       * @param layout_id the name for the set of constraints to release
+       */
+      void release_layout(LayoutConstraintID layout_id);
 
       /**
        * A static version of the method above to register layout
@@ -5494,18 +5500,21 @@ namespace LegionRuntime {
        * use this method after the runtime starts will result in a 
        * failure. All of the calls to this method must specifiy layout
        * descriptions that are not associated with a field space.
-       * @param layout_id the ID to associate with the description
+       * This call must be made symmetrically across all nodes.
        * @param registrar a layout description registrar
+       * @param layout_id the ID to associate with the description
+       * @return the layout id assigned to the set of constraints
        */
-      static void register_layout(LayoutConstraintID layout_id,
-                             const LayoutDescriptionRegistrar &registrar);
+      static LayoutConstraintID preregister_layout(
+                               const LayoutConstraintRegistrar &registrar,
+                               LayoutConstraintID layout_id = AUTO_GENERATE_ID);
 
       /**
        * Get the field space for a specific layout description
        * @param layout_id the layout ID for which to obtain the field space
        * @return the field space handle for the layout description
        */
-      FieldSpace get_layout_description_field_space(
+      FieldSpace get_layout_constraint_field_space(
                                   LayoutConstraintID layout_id);
 
       /**
@@ -5513,7 +5522,7 @@ namespace LegionRuntime {
        * @param layout_id the layout ID for which to obtain the constraints
        * @param layout_constraints a LayoutConstraintSet to populate
        */
-      void get_layout_description(LayoutConstraintID layout_id,
+      void get_layout_constraints(LayoutConstraintID layout_id,
                                   LayoutConstraintSet &layout_constraints);
 
       /**
@@ -5521,7 +5530,7 @@ namespace LegionRuntime {
        * @param layout_id the layout ID for which to obtain the name
        * @return a pointer to a string of the name of the layou description
        */
-      const char* get_layout_description_name(LayoutConstraintID layout_id);
+      const char* get_layout_constraints_name(LayoutConstraintID layout_id);
     public:
       //------------------------------------------------------------------------
       // Task Registration Operations

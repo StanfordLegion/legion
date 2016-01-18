@@ -133,6 +133,7 @@ namespace LegionRuntime {
       VERSION_STATE_ALLOC,
       TASK_IMPL_ALLOC,
       VARIANT_IMPL_ALLOC,
+      LAYOUT_CONSTRAINTS_ALLOC,
       LAST_ALLOC, // must be last
     };
 

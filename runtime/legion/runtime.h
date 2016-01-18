@@ -1037,7 +1037,63 @@ namespace LegionRuntime {
     private:
       char *variant_name; 
     };
- 
+
+    /**
+     * \class LayoutConstraints
+     * A class for tracking a long-lived set of constraints
+     */
+    class LayoutConstraints : public LayoutConstraintSet {
+    public:
+      static const AllocationType alloc_type = LAYOUT_CONSTRAINTS_ALLOC; 
+    public:
+      struct ReleaseFunctor {
+      public:
+        ReleaseFunctor(Serializer &r, AddressSpaceID skip, Internal *rt) 
+          : rez(r), to_skip(skip), runtime(rt) { }
+      public:
+        void apply(AddressSpaceID target);
+      private:
+        Serializer &rez;
+        AddressSpaceID to_skip;
+        Internal *runtime;
+      };
+    public:
+      LayoutConstraints(LayoutConstraintID layout_id, Internal *runtime, 
+                        const LayoutConstraintRegistrar &registrar);
+      LayoutConstraints(LayoutConstraintID layout_id, Internal *runtime);
+      LayoutConstraints(const LayoutConstraints &rhs);
+      ~LayoutConstraints(void);
+    public:
+      LayoutConstraints& operator=(const LayoutConstraints &rhs);
+    public:
+      inline FieldSpace get_field_space(void) const { return handle; }
+      inline Event get_ready_event(void) const { return ready_event; }
+      inline const char* get_name(void) const { return constraints_name; }
+    public:
+      void release_constraints(AddressSpaceID source);
+      void send_constraints(AddressSpaceID source, UserEvent done_event);
+      void update_constraints(Deserializer &derez);
+    public:
+      AddressSpaceID get_owner(void) const;
+      static AddressSpaceID get_owner(LayoutConstraintID layout_id,
+                                      Internal *runtime);
+    public:
+      static void process_request(Internal *runtime, Deserializer &derez,
+                                  AddressSpaceID source);
+      static void process_response(Internal *runtime, Deserializer &derez);
+      static void process_release(Internal *runtime, Deserializer &derez,
+                                  AddressSpaceID source);
+    public:
+      const LayoutConstraintID layout_id;
+      Internal *const runtime;
+    protected:
+      FieldSpace handle;
+      Event ready_event;
+      char *constraints_name;
+    protected:
+      NodeSet remote_instances; // only valid on the owner node
+    };
+
     /**
      * \class Internal 
      * This is the actual implementation of the Legion runtime functionality
@@ -1707,6 +1763,9 @@ namespace LegionRuntime {
       void send_back_logical_state(AddressSpaceID target, Serializer &rez);
       void send_variant_request(AddressSpaceID target, Serializer &rez);
       void send_variant_response(AddressSpaceID target, Serializer &rez);
+      void send_constraint_request(AddressSpaceID target, Serializer &rez);
+      void send_constraint_response(AddressSpaceID target, Serializer &rez);
+      void send_constraint_release(AddressSpaceID target, Serializer &rez);
     public:
       // Complementary tasks for handling messages
       void handle_task(Deserializer &derez);
@@ -1833,6 +1892,9 @@ namespace LegionRuntime {
                                        AddressSpaceID source);
       void handle_variant_request(Deserializer &derez, AddressSpaceID source);
       void handle_variant_response(Deserializer &derez);
+      void handle_constraint_request(Deserializer &derez,AddressSpaceID source);
+      void handle_constraint_response(Deserializer &derez);
+      void handle_constraint_release(Deserializer &derez,AddressSpaceID source);
       void handle_top_level_task_request(Deserializer &derez);
       void handle_top_level_task_complete(Deserializer &derez);
       void handle_shutdown_notification(AddressSpaceID source);
@@ -2075,14 +2137,15 @@ namespace LegionRuntime {
       bool is_local(Processor proc) const;
       Processor find_utility_processor(Processor proc);
     public:
-      IndexSpaceID     get_unique_index_space_id(void);
-      IndexPartitionID get_unique_index_partition_id(void);
-      FieldSpaceID     get_unique_field_space_id(void);
-      IndexTreeID      get_unique_index_tree_id(void);
-      RegionTreeID     get_unique_region_tree_id(void);
-      UniqueID         get_unique_operation_id(void);
-      FieldID          get_unique_field_id(void);
-      VariantID        get_unique_variant_id(void);
+      IndexSpaceID       get_unique_index_space_id(void);
+      IndexPartitionID   get_unique_index_partition_id(void);
+      FieldSpaceID       get_unique_field_space_id(void);
+      IndexTreeID        get_unique_index_tree_id(void);
+      RegionTreeID       get_unique_region_tree_id(void);
+      UniqueID           get_unique_operation_id(void);
+      FieldID            get_unique_field_id(void);
+      VariantID          get_unique_variant_id(void);
+      LayoutConstraintID get_unique_constraint_id(void);
     public:
       // Verify that a region requirement is valid
       LegionErrorType verify_requirement(const RegionRequirement &req,
@@ -2176,6 +2239,10 @@ namespace LegionRuntime {
       std::map<TaskID,TaskImpl*> task_table;
       std::deque<VariantImpl*> variant_table;
     protected:
+      // Constraint sets
+      Reservation layout_constraints_lock;
+      std::map<LayoutConstraintID,LayoutConstraints*> layout_constraints_table;
+    protected:
       struct MapperInfo {
         MapperInfo(void)
           : proc(Processor::NO_PROC), map_id(0) { }
@@ -2202,6 +2269,7 @@ namespace LegionRuntime {
       unsigned unique_operation_id;
       unsigned unique_field_id; 
       unsigned unique_variant_id;
+      unsigned unique_constraint_id;
     protected:
       std::map<ProjectionID,ProjectionFunctor*> projection_functors;
     protected:
@@ -2346,6 +2414,19 @@ namespace LegionRuntime {
       void print_outstanding_tasks(FILE *f = stdout, int cnt = -1);
 #endif
     public:
+      LayoutConstraintID register_layout(
+          const LayoutConstraintRegistrar &registrar, 
+          LayoutConstraintID id);
+      void release_layout(LayoutConstraintID layout_id, AddressSpaceID source);
+      static LayoutConstraintID preregister_layout(
+                                     const LayoutConstraintRegistrar &registrar,
+                                     LayoutConstraintID layout_id);
+      FieldSpace get_layout_constraint_field_space(LayoutConstraintID id);
+      void get_layout_constraints(LayoutConstraintID layout_id,
+                                  LayoutConstraintSet &layout_constraints);
+      const char* get_layout_constraints_name(LayoutConstraintID layout_id);
+      LayoutConstraints* find_layout_constraints(LayoutConstraintID layout_id);
+    public:
       // Static methods for start-up and callback phases
       static int start(int argc, char **argv, bool background);
       static void wait_for_shutdown(void);
@@ -2366,6 +2447,8 @@ namespace LegionRuntime {
                                     ProjectionID handle, void *func_ptr);
       static std::deque<PendingVariantRegistration*>&
                                 get_pending_variant_table(void);
+      static std::map<LayoutConstraintID,LayoutConstraintRegistrar>&
+                                get_pending_constraint_table(void);
       static VariantID preregister_variant(
                       const TaskVariantRegistrar &registrar,
                       const void *user_data, size_t user_data_size,

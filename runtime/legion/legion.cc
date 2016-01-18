@@ -1462,11 +1462,18 @@ namespace LegionRuntime {
     }
 
     /////////////////////////////////////////////////////////////
-    // LayoutDescriptionRegistrar 
+    // LayoutConstraintRegistrar
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    LayoutDescriptionRegistrar::LayoutDescriptionRegistrar(FieldSpace h,
+    LayoutConstraintRegistrar::LayoutConstraintRegistrar(void)
+      : handle(FieldSpace::NO_SPACE), layout_name(NULL)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    LayoutConstraintRegistrar::LayoutConstraintRegistrar(FieldSpace h,
                                                   const char *layout/*= NULL*/)
       : handle(h), layout_name(layout)
     //--------------------------------------------------------------------------
@@ -3934,6 +3941,53 @@ namespace LegionRuntime {
     /*static*/ void Runtime::dump_profiling(void)
     //--------------------------------------------------------------------------
     {
+    }
+
+    //--------------------------------------------------------------------------
+    LayoutConstraintID Runtime::register_layout(
+                                     const LayoutConstraintRegistrar &registrar)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->register_layout(registrar, AUTO_GENERATE_ID);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::release_layout(LayoutConstraintID layout_id)
+    //--------------------------------------------------------------------------
+    {
+      runtime->release_layout(layout_id, runtime->address_space/*local*/);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ LayoutConstraintID Runtime::preregister_layout(
+                                     const LayoutConstraintRegistrar &registrar,
+                                     LayoutConstraintID layout_id)
+    //--------------------------------------------------------------------------
+    {
+      return Internal::preregister_layout(registrar, layout_id);
+    }
+
+    //--------------------------------------------------------------------------
+    FieldSpace Runtime::get_layout_constraint_field_space(
+                                                   LayoutConstraintID layout_id)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_layout_constraint_field_space(layout_id);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::get_layout_constraints(LayoutConstraintID layout_id,
+                                        LayoutConstraintSet &layout_constraints)   
+    //--------------------------------------------------------------------------
+    {
+      runtime->get_layout_constraints(layout_id, layout_constraints);
+    }
+
+    //--------------------------------------------------------------------------
+    const char* Runtime::get_layout_constraints_name(LayoutConstraintID id)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_layout_constraints_name(id);
     }
 
     /////////////////////////////////////////////////////////////

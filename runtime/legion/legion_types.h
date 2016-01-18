@@ -302,6 +302,9 @@ namespace LegionRuntime {
       SEND_BACK_LOGICAL_STATE,
       SEND_VARIANT_REQUEST,
       SEND_VARIANT_RESPONSE,
+      SEND_CONSTRAINT_REQUEST,
+      SEND_CONSTRAINT_RESPONSE,
+      SEND_CONSTRAINT_RELEASE,
       SEND_TOP_LEVEL_TASK_REQUEST,
       SEND_TOP_LEVEL_TASK_COMPLETE,
       SEND_SHUTDOWN_NOTIFICATION,
@@ -392,6 +395,9 @@ namespace LegionRuntime {
         "Send Back Logical State",                                    \
         "Send Task Variant Request",                                  \
         "Send Task Variant Response",                                 \
+        "Send Constraint Request",                                    \
+        "Send Constraint Response",                                   \
+        "Send Constraint Release",                                    \
         "Top Level Task Request",                                     \
         "Top Level Task Complete",                                    \
         "Send Shutdown Notification",                                 \
@@ -430,7 +436,7 @@ namespace LegionRuntime {
     struct CopyLauncher;
     struct AcquireLauncher;
     struct ReleaseLauncher;
-    struct LayoutDescriptionRegistrar;
+    struct LayoutConstraintRegistrar;
     struct TaskVariantRegistrar;
     class Future;
     class FutureMap;
@@ -477,6 +483,7 @@ namespace LegionRuntime {
     class GarbageCollectionEpoch;
     class TaskImpl;
     class VariantImpl;
+    class LayoutConstraints;
     class Internal;
 
     // legion_ops.h
