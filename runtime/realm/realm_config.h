@@ -29,4 +29,8 @@
 #define REALM_USE_KERNEL_AIO
 #endif
 
+// dynamic loading via dlfcn and a not-completely standard dladdr extension
+#define REALM_USE_DLFCN
+#define REALM_USE_DLADDR
+
 #endif

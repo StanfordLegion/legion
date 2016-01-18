@@ -43,6 +43,7 @@ typedef int legion_lowlevel_custom_serdez_id_t;
 // Different Processor types
 // Keep this in sync with Processor::Kind in lowlevel.h
 typedef enum legion_lowlevel_processor_kind_t {
+  NO_KIND,
   TOC_PROC, // Throughput core
   LOC_PROC, // Latency core
   UTIL_PROC, // Utility core
