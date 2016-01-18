@@ -2282,17 +2282,6 @@ namespace LegionRuntime {
                                         Event pre)
     //--------------------------------------------------------------------------
     {
-#ifdef LEGION_SPY
-      CopyOp* copy_op = dynamic_cast<CopyOp*>(op);
-      int src_req_idx = -1;
-      for (unsigned i = 0; i < copy_op->src_requirements.size(); ++i)
-        if (copy_op->src_requirements[i] == src_req)
-        {
-          src_req_idx = i;
-          break;
-        }
-      assert(src_req_idx != -1);
-#endif
  #ifdef DEBUG_PERF
       begin_perf_trace(COPY_ACROSS_ANALYSIS);
 #endif
@@ -2381,13 +2370,6 @@ namespace LegionRuntime {
             // we've already mapped it.
             local_results.insert(copy_post);
             found = true;
-#ifdef LEGION_SPY
-            assert(src_fields.size() == 1);
-            LegionSpy::log_op_user_with_field(
-                copy_op->get_unique_mappable_id(),
-                src_req_idx, src_fields[0].inst.id,
-                src_req.instance_fields[idx]);
-#endif
             break;
           }
         }

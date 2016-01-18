@@ -133,18 +133,17 @@ def generate_html_op_label(title, requirements, instances, color, verbose):
         else:
             line = [{"label" : "Region "+str(i)+" (priv:"+priv+")", "colspan" : 2}]
         lines.append(line)
-        if verbose:
-            req_summary = 'index:%s,field:%s,tree:%s' % \
-                    (hex(req.region_node.index_node.uid),
-                            hex(req.region_node.field_node.uid),
-                            str(req.region_node.tid))
-            lines.append(["Requirement", req_summary])
-
-        if instances <> None and i in instances:
-            lines.append(["Memory", instances[i].memory.dot_memory()])
-            lines.append(["Instance", instances[i].dot_instance()])
+        req_summary = 'index:%s,field:%s,tree:%s' % \
+                (hex(req.region_node.index_node.uid),
+                        hex(req.region_node.field_node.uid),
+                        str(req.region_node.tid))
+        lines.append(["Requirement", req_summary])
 
         if verbose:
+            if instances <> None and i in instances:
+                lines.append(["Memory", instances[i].memory.dot_memory()])
+                lines.append(["Instance", instances[i].dot_instance()])
+
             field_names = req.get_field_names()
             first_field = True
             for f in field_names:
@@ -1152,13 +1151,15 @@ class SingleTask(Operation):
                 # in case we have multiple instances for an op
                 for inst1 in dep.op1.op_instances:
                     if inst1.get_op_kind() == FENCE_OP or \
-                            inst1.get_op_kind() == FILL_OP:
+                            inst1.get_op_kind() == FILL_OP or \
+                            inst1.get_op_kind() == COPY_OP:
                         continue
                     if inst1.get_num_requirements() == 0:
                         continue
                     for inst2 in dep.op2.op_instances:
                         if inst2.get_op_kind() == FENCE_OP or \
-                                inst2.get_op_kind() == FILL_OP:
+                                inst2.get_op_kind() == FILL_OP or \
+                                inst2.get_op_kind() == COPY_OP:
                             continue
                         if inst2.get_num_requirements() == 0:
                             continue
@@ -1418,115 +1419,6 @@ class CopyOp(Operation):
     def get_index_pair(self, cidx):
         return (cidx, cidx + self.get_num_copies())
 
-    def find_index(self, offset, inst, field):
-        num_copies = self.get_num_copies()
-        for idx in range(0, num_copies):
-            instance = self.get_instance(offset + idx, field)
-            if instance <> None:
-                return offset + idx
-
-    def find_src_index(self, inst, field):
-        return self.find_index(0, inst, field)
-
-    def find_dst_index(self, inst, field):
-        return self.find_index(self.get_num_copies(), inst, field)
-
-    def find_src_by_dst(self, dst_inst, dst_field):
-        dst_idx = self.find_dst_index(dst_inst, dst_field)
-        if dst_idx == None:
-            return None
-        field_idx = self.get_fields(dst_idx).index(dst_field)
-        src_idx = dst_idx - self.get_num_copies()
-        src_field = self.get_fields(src_idx)[field_idx]
-        src_inst = self.get_instance(src_idx, src_field)
-        return (src_inst, src_field)
-
-    def find_dst_by_src(self, src_inst, src_field):
-        src_idx = self.find_src_index(src_inst, src_field)
-        if src_idx == None:
-            return None
-        field_idx = self.get_fields(src_idx).index(src_field)
-        dst_idx = src_idx + self.get_num_copies()
-        dst_field = self.get_fields(dst_idx)[field_idx]
-        dst_inst = self.get_instance(dst_idx, dst_field)
-        return (dst_inst, dst_field)
-
-    def get_instance(self, idx, field):
-        if field in self.instances[idx]:
-            return self.instances[idx][field]
-        else:
-            return None
-
-    def get_reachable(self, reachable, forward):
-        if self in reachable:
-            return
-        reachable.add(self)
-        if forward:
-            for op in self.logical_outgoing:
-                op.get_reachable(reachable, True)
-        else:
-            for op in self.logical_incoming:
-                op.get_reachable(reachable, False)
-
-    def add_instance(self, idx, inst):
-        assert idx not in self.instances
-        req = self.reqs[idx]
-        instances = {}
-        for f in req.fields:
-            instances[f] = inst
-        self.instances[idx] = instances
-
-    def add_partial_instance(self, idx, inst, fid):
-        instance = dict()
-        if idx in self.instances:
-            instance = self.instances[idx]
-        assert not fid in instance
-        instance[fid] = inst
-        self.instances[idx] = instance
-
-    def get_all_instances(self):
-        all_instances = set()
-        for inst in self.instances.values():
-            for i in inst.values():
-                all_instances.add(i)
-        return all_instances
-
-    def get_instance_pairs_of_nth(self, cidx):
-        pairs = {}
-        (src_idx, dst_idx) = self.get_index_pair(cidx)
-        src_req = self.get_requirement(src_idx)
-        dst_req = self.get_requirement(dst_idx)
-        assert len(src_req.fields) == len(dst_req.fields)
-        for idx in range(0, len(src_req.fields)):
-            src_field = src_req.fields[idx]
-            dst_field = dst_req.fields[idx]
-            src_inst = self.get_instance(src_idx, src_field)
-            dst_inst = self.get_instance(dst_idx, dst_field)
-            pair = (src_inst, dst_inst)
-            fields = []
-            if pair in pairs:
-                fields = pairs[pair]
-            else:
-                pairs[pair] = fields
-            fields.append((src_field, dst_field))
-        return pairs
-
-    def get_all_instance_pairs(self):
-        pairs = {}
-        num_copies = self.get_num_copies()
-        for cidx in range(0, num_copies):
-            pairs_of_cidx = self.get_instance_pairs_of_nth(cidx)
-            for pair, fields in pairs_of_cidx.iteritems():
-                if pair in pairs:
-                    pairs[pair].extend[fields]
-                else:
-                    pairs[pair] = fields
-        return pairs
-
-    def field_mask_string(self):
-        return self.reqs[0].field_mask_string()+' \-\> '+\
-                self.reqs[1].field_mask_string()
-
     def print_base_node(self, printer, logical):
         title = self.get_name() + ' in '+self.ctx.get_name()
         # TODO: reduction copy-across operations should also be tracked
@@ -1562,21 +1454,14 @@ class CopyOp(Operation):
                     src_req.to_summary_string(),
                     dst_req.to_summary_string()])
 
-            pairs = self.get_instance_pairs_of_nth(cidx)
-
-            for (src_inst, dst_inst), fields in pairs.iteritems():
-                if not logical:
-                    lines.append(["Memory",
-                        src_inst.memory.dot_memory(),
-                        dst_inst.memory.dot_memory()])
-                    lines.append(["Instance",
-                        src_inst.dot_instance(),
-                        dst_inst.dot_instance()])
-                if not self.state.verbose: continue
+                num_fields = len(src_req.fields)
+                assert num_fields == len(dst_req.fields)
 
                 first_field = True
-                for (src_field, dst_field) in fields:
+                for fidx in range(0, num_fields):
                     line = []
+                    src_field = src_req.fields[fidx]
+                    dst_field = dst_req.fields[fidx]
                     if src_field == dst_field:
                         field_name = self.get_field_name(src_idx, src_field)
                         line.append({"label" : field_name, "colspan" : 2})
@@ -1585,7 +1470,8 @@ class CopyOp(Operation):
                         line.append(self.get_field_name(dst_idx, dst_field))
 
                     if first_field:
-                        line.insert(0, {"label" : "Fields", "rowspan" : len(fields)})
+                        line.insert(0, {"label" : "Fields",
+                                        "rowspan" : num_fields})
                         first_field = False
                     lines.append(line)
 
