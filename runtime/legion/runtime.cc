@@ -16317,7 +16317,7 @@ namespace LegionRuntime {
       constraints->release_constraints(source);
       {
         AutoLock l_lock(layout_constraints_lock);
-        std::map<LayoutConstraintID,LayoutConstraints*>::const_iterator
+        std::map<LayoutConstraintID,LayoutConstraints*>::iterator
           finder = layout_constraints_table.find(layout_id);
 #ifdef DEBUG_HIGH_LEVEL
         assert(finder != layout_constraints_table.end());
