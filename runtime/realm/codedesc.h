@@ -18,6 +18,10 @@
 #ifndef REALM_CODEDESC_H
 #define REALM_CODEDESC_H
 
+#include "realm_config.h"
+
+#include "serialize.h"
+
 #include <cstddef>
 #include <vector>
 #include <iostream>
@@ -279,6 +283,9 @@ namespace Realm {
     template <typename T>
     const T *find_impl(void) const;
 
+    // pretty-printing
+    friend std::ostream& operator<<(std::ostream& os, const CodeDescriptor& cd);
+
     // serialization/deserialization - note that the standard << serializer will
     //  not serialize non-portable implementations
     template <typename S>
@@ -301,7 +308,6 @@ namespace Realm {
   template <typename S>
   bool deserialize(S& deserializer, CodeDescriptor& cd);
 
-
   // this is the interface that actual CodeImplementations must follow
   class CodeImplementation {
   protected:
@@ -316,8 +322,21 @@ namespace Realm {
     // is this implementation meaningful in another address space?
     virtual bool is_portable(void) const = 0;
 
-    // TODO: serialization/deserialization stuff
+    //template <typename S>
+    //bool serialize(S& serializer) const;
+
+    template <typename S>
+    static CodeImplementation *deserialize_new(S& deserializer);
+
+    // pretty-printing
+    friend std::ostream& operator<<(std::ostream& os, const CodeImplementation& ci);
+
+  protected:
+    virtual void print(std::ostream& os) const = 0;
   };
+
+  template <typename S>
+  bool serialize(S& serializer, const CodeImplementation& ci);
 
   // this is the interface that actual CodePropertys must follow
   class CodeProperty {
@@ -352,10 +371,24 @@ namespace Realm {
 
     virtual bool is_portable(void) const;
 
+    template <typename S>
+    bool serialize(S& serializer) const;
+
+    template <typename S>
+    static CodeImplementation *deserialize_new(S& deserializer);
+
+  protected:
+    FunctionPointerImplementation(void);
+
+    static Serialization::PolymorphicSerdezSubclass<CodeImplementation, FunctionPointerImplementation> serdez_subclass;
+
+    virtual void print(std::ostream& os) const;
+
   public:
     void (*fnptr)();
   };
 
+#ifdef REALM_USE_DLFCN
   class DSOReferenceImplementation : public CodeImplementation {
   public:
     DSOReferenceImplementation(const std::string& _dso_name,
@@ -367,6 +400,19 @@ namespace Realm {
 
     virtual bool is_portable(void) const;
 
+    template <typename S>
+    bool serialize(S& serializer) const;
+
+    template <typename S>
+    static CodeImplementation *deserialize_new(S& deserializer);
+
+  protected:
+    DSOReferenceImplementation(void);
+
+    static Serialization::PolymorphicSerdezSubclass<CodeImplementation, DSOReferenceImplementation> serdez_subclass;
+
+    virtual void print(std::ostream& os) const;
+
   public:
     std::string dso_name, symbol_name;
   };
@@ -374,8 +420,10 @@ namespace Realm {
   // TODO: encapsulate these as "code translations"
 
   FunctionPointerImplementation *cvt_dsoref_to_fnptr(const DSOReferenceImplementation *dso);
-  DSOReferenceImplementation *cvt_fnptr_to_dsoref(const FunctionPointerImplementation *fpi);
-
+#ifdef REALM_USE_DLADDR
+  DSOReferenceImplementation *cvt_fnptr_to_dsoref(const FunctionPointerImplementation *fpi, bool quiet = false);
+#endif
+#endif
 
 }; // namespace Realm
 

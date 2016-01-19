@@ -26,6 +26,7 @@
 #include <set>
 #include <map>
 #include <string>
+#include <typeinfo>
 
 // To add serializability for a new data type, do one of the following:
 //
@@ -240,6 +241,65 @@ namespace Realm {
 
     template <typename S>
       bool deserialize(S& s, std::string& str);
+
+    template <typename T>
+    class PolymorphicSerdezIntfc;
+
+    template <typename T>
+    class PolymorphicSerdezHelper {
+    public:
+      // not templated because we have to get through a virtual method
+      static bool serialize(FixedBufferSerializer& serializer, const T& obj);
+      static bool serialize(DynamicBufferSerializer& serializer, const T& obj);
+      static bool serialize(ByteCountSerializer& serializer, const T& obj);
+
+      static T *deserialize_new(FixedBufferDeserializer& deserializer);
+
+    protected:
+      typedef int TypeTag;
+      struct SubclassMap {
+	std::map<const char *, const PolymorphicSerdezIntfc<T> *> by_typename;
+	std::map<TypeTag, const PolymorphicSerdezIntfc<T> *> by_tag;
+      };
+
+      friend class PolymorphicSerdezIntfc<T>;
+
+      template <typename T1, typename T2>
+      friend class PolymorphicSerdezSubclass;
+
+      static SubclassMap& get_subclasses(void);
+    };
+
+    template <typename T>
+    class PolymorphicSerdezIntfc {
+    public:
+      PolymorphicSerdezIntfc(const char *type_name);
+      virtual ~PolymorphicSerdezIntfc(void);
+
+      virtual bool serialize(FixedBufferSerializer& serializer, const T& obj) const = 0;
+      virtual bool serialize(DynamicBufferSerializer& serializer, const T& obj) const = 0;
+      virtual bool serialize(ByteCountSerializer& serializer, const T& obj) const = 0;
+      
+      virtual T *deserialize_new(FixedBufferDeserializer& deserializer) const = 0;
+
+    protected:
+      friend class PolymorphicSerdezHelper<T>;
+
+      typename PolymorphicSerdezHelper<T>::TypeTag tag;
+    };
+
+    template <typename T1, typename T2>
+    class PolymorphicSerdezSubclass : public PolymorphicSerdezIntfc<T1> {
+    public:
+      PolymorphicSerdezSubclass(void);
+      
+      virtual bool serialize(FixedBufferSerializer& serializer, const T1& obj) const;
+      virtual bool serialize(DynamicBufferSerializer& serializer, const T1& obj) const;
+      virtual bool serialize(ByteCountSerializer& serializer, const T1& obj) const;
+      
+      virtual T1 *deserialize_new(FixedBufferDeserializer& deserializer) const;
+    };
+
   }; // namespace Serialization
 
 }; // namespace Realm

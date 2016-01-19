@@ -330,7 +330,8 @@ namespace LegionRuntime {
                                        RegionRequirement &req,
                                        unsigned index,
                                        VersionInfo &version_info,
-                                       Processor target_proc
+                                       Processor target_proc,
+                                       const InstanceRef &result
 #ifdef DEBUG_HIGH_LEVEL
                                        , const char *log_name
                                        , UniqueID uid

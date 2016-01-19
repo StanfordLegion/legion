@@ -518,6 +518,8 @@ namespace LegionRuntime {
       virtual void handle_future(const void *res, 
                                  size_t res_size, bool owned) = 0; 
       virtual void handle_post_mapped(Event pre = Event::NO_EVENT) = 0;
+    public:
+      virtual InstanceRef find_restricted_instance(unsigned index) = 0;
     protected:
       std::vector<RegionTreePath> mapping_paths;
       // Boolean for each region saying if it is virtual mapped
@@ -756,6 +758,8 @@ namespace LegionRuntime {
                                  size_t res_size, bool owned);
       virtual void handle_post_mapped(Event pre = Event::NO_EVENT);
     public:
+      virtual InstanceRef find_restricted_instance(unsigned index);
+    public:
       virtual bool pack_task(Serializer &rez, Processor target);
       virtual bool unpack_task(Deserializer &derez, Processor current);
       virtual void find_enclosing_local_fields(
@@ -862,6 +866,8 @@ namespace LegionRuntime {
                                  size_t res_size, bool owned);
       virtual void handle_post_mapped(Event pre = Event::NO_EVENT);
     public:
+      virtual InstanceRef find_restricted_instance(unsigned index);
+    public:
       void initialize_point(SliceTask *owner, MinimalPoint *mp);
       void send_back_created_state(AddressSpaceID target, unsigned start,
                                    RegionTreeContext remote_outermost_context);
@@ -927,6 +933,8 @@ namespace LegionRuntime {
       virtual void handle_future(const void *res, 
                                  size_t res_size, bool owned);
       virtual void handle_post_mapped(Event pre = Event::NO_EVENT);
+    public:
+      virtual InstanceRef find_restricted_instance(unsigned index);
     public:
       void activate_wrapper(void);
       void deactivate_wrapper(void);
@@ -1131,6 +1139,9 @@ namespace LegionRuntime {
     public:
       virtual void handle_future(const DomainPoint &point, const void *result,
                                  size_t result_size, bool owner);
+    public:
+      InstanceRef find_restricted_instance(unsigned index);
+    public:
       virtual void register_must_epoch(void);
     public:
       void enumerate_points(void);
@@ -1220,6 +1231,9 @@ namespace LegionRuntime {
           long long scale_denominator);
       virtual void handle_future(const DomainPoint &point, const void *result,
                                  size_t result_size, bool owner);
+    public:
+      InstanceRef find_restricted_instance(unsigned index);
+    public:
       virtual void register_must_epoch(void);
       PointTask* clone_as_point_task(const DomainPoint &p,
                                      MinimalPoint *mp);

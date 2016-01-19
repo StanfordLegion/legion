@@ -604,7 +604,13 @@ namespace Realm {
     : m_type(TypeConv::from_cpp_type<T>())
   {
     assert(m_type.is<FunctionPointerType>());
-    m_impls.push_back(new FunctionPointerImplementation((void(*)())(fnptr)));
+    FunctionPointerImplementation *fpi = new FunctionPointerImplementation((void(*)())(fnptr));
+    m_impls.push_back(fpi);
+#if defined(REALM_USE_DLFCN) && defined(REALM_USE_DLADDR)
+    DSOReferenceImplementation *dsoref = cvt_fnptr_to_dsoref(fpi, true /*quiet*/);
+    if(dsoref)
+      m_impls.push_back(dsoref);
+#endif
   }
 
   inline CodeDescriptor& CodeDescriptor::set_type(const Type& _t)
@@ -658,13 +664,39 @@ namespace Realm {
   template <typename S>
   bool CodeDescriptor::serialize(S& s, bool portable) const
   {
-    return (s << m_type);
+    if(!(s << m_type)) return false;
+    if(portable) {
+      // only count and serialize portable implementations
+      size_t n = 0;
+      for(size_t i = 0; i < m_impls.size(); i++)
+	if(m_impls[i]->is_portable())
+	  n++;
+      if(!(s << n)) return false;
+      for(size_t i = 0; i < m_impls.size(); i++)
+	if(m_impls[i]->is_portable())
+	  if(!(s << *m_impls[i])) return false;
+    } else {
+      // just do all the implementations
+      if(!(s << m_impls.size())) return false;
+      for(size_t i = 0; i < m_impls.size(); i++)
+	if(!(s << *m_impls[i])) return false;
+    }
+
+    return true;
   }
 
   template <typename S>
   bool CodeDescriptor::deserialize(S& s)
   {
-    return (s >> m_type);
+    if(!(s >> m_type)) return false;
+    size_t n;
+    if(!(s >> n)) return false;
+    m_impls.clear();
+    m_impls.resize(n);
+    for(size_t i = 0; i < n; i++)
+      m_impls[i] = CodeImplementation::deserialize_new(s);
+
+    return true;
   }
 
   template <typename S>
@@ -679,6 +711,19 @@ namespace Realm {
     return cd.deserialize(s);
   }
 
+  inline std::ostream& operator<<(std::ostream& os, const CodeDescriptor& cd)
+  {
+    os << "CD{ type=" << cd.m_type << ", impls = [";
+    if(!cd.m_impls.empty()) {
+      os << " " << *cd.m_impls[0];
+      for(size_t i = 1; i < cd.m_impls.size(); i++)
+	os << ", " << *cd.m_impls[i];
+      os << " ";
+    }
+    os << "] }";
+    return os;
+  }
+
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -689,6 +734,78 @@ namespace Realm {
 
   inline CodeImplementation::~CodeImplementation(void)
   {}
+
+  inline std::ostream& operator<<(std::ostream& os, const CodeImplementation& ci)
+  {
+    ci.print(os);
+    return os;
+  }
+
+  template <typename S>
+  //inline bool CodeImplementation::serialize(S& serializer) const
+  inline bool serialize(S& serializer, const CodeImplementation& ci)
+  {
+    return Serialization::PolymorphicSerdezHelper<CodeImplementation>::serialize(serializer, ci);
+  }
+
+  template <typename S>
+  /*static*/ inline CodeImplementation *CodeImplementation::deserialize_new(S& deserializer)
+  {
+    return Serialization::PolymorphicSerdezHelper<CodeImplementation>::deserialize_new(deserializer);
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class FunctionPointerImplementation
+
+  inline void FunctionPointerImplementation::print(std::ostream& os) const
+  {
+    os << "fnptr(0x" << std::hex << reinterpret_cast<intptr_t>(fnptr) << std::dec << ")";
+  }
+
+  template <typename S>
+  inline bool FunctionPointerImplementation::serialize(S& serializer) const
+  {
+    intptr_t as_int = reinterpret_cast<intptr_t>(fnptr);
+    return serializer << as_int;
+  }
+
+  template <typename S>
+  inline /*static*/ CodeImplementation *FunctionPointerImplementation::deserialize_new(S& deserializer)
+  {
+    intptr_t as_int;
+    if(!(deserializer >> as_int)) return 0;
+    return new FunctionPointerImplementation(reinterpret_cast<void(*)()>(as_int));
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class DSOReferenceImplementation
+
+  inline void DSOReferenceImplementation::print(std::ostream& os) const
+  {
+    os << "dsoref(" << dso_name << "," << symbol_name << ")";
+  }
+
+  template <typename S>
+  inline bool DSOReferenceImplementation::serialize(S& serializer) const
+  {
+    return (serializer << dso_name) && (serializer << symbol_name);
+  }
+
+  template <typename S>
+  inline /*static*/ CodeImplementation *DSOReferenceImplementation::deserialize_new(S& deserializer)
+  {
+    DSOReferenceImplementation *dsoref = new DSOReferenceImplementation;
+    if((deserializer >> dsoref->dso_name) && (deserializer >> dsoref->symbol_name)) {
+      return dsoref;
+    } else {
+      delete dsoref;
+      return 0;
+    }
+  }
 
 
 }; // namespace Realm
