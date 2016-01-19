@@ -5819,15 +5819,15 @@ namespace LegionRuntime {
         tracker->add_copy_event(reduce_post);
 #ifdef LEGION_SPY
       {
-        std::set<FieldID> field_set;
-        manager->region_node->column_source->to_field_set(reduce_mask,
-            field_set);
-        LegionSpy::log_copy_operation(manager->get_instance().id,
-            target->get_manager()->get_instance().id,
+        std::vector<FieldID> fids;
+        manager->region_node->column_source->get_field_ids(reduce_mask,
+            fids);
+        LegionSpy::log_copy_events(manager->get_instance().id,
+            target->get_manager()->get_instance().id, true,
             reduce_index_space.get_id(),
             manager->region_node->column_source->handle.id,
             manager->region_node->handle.tree_id, reduce_pre, reduce_post,
-            manager->redop, field_set);
+            manager->redop, fids);
       }
 #endif
     } 
@@ -5897,14 +5897,14 @@ namespace LegionRuntime {
         reduce_post = new_reduce_post;
       }
       {
-        std::set<FieldID> field_set;
-        manager->region_node->column_source->to_field_set(red_mask, field_set);
-        LegionSpy::log_copy_operation(manager->get_instance().id,
-            target->get_manager()->get_instance().id,
+        std::vector<FieldID> fids;
+        manager->region_node->column_source->get_field_ids(red_mask, fids);
+        LegionSpy::log_copy_events(manager->get_instance().id,
+            target->get_manager()->get_instance().id, true,
             reduce_index_space.get_id(),
             manager->region_node->column_source->handle.id,
             manager->region_node->handle.tree_id, reduce_pre, reduce_post,
-            manager->redop, field_set);
+            manager->redop, fids);
       }
 #endif
       return reduce_post;
@@ -5977,14 +5977,14 @@ namespace LegionRuntime {
         reduce_post = new_reduce_post;
       }
       {
-        std::set<FieldID> field_set;
-        manager->region_node->column_source->to_field_set(red_mask, field_set);
-        LegionSpy::log_copy_operation(manager->get_instance().id,
-            target->get_manager()->get_instance().id,
+        std::vector<FieldID> fids;
+        manager->region_node->column_source->get_field_ids(red_mask, fids);
+        LegionSpy::log_copy_events(manager->get_instance().id,
+            target->get_manager()->get_instance().id, true,
             reduce_index_space.get_id(),
             manager->region_node->column_source->handle.id,
             manager->region_node->handle.tree_id, reduce_pre, reduce_post,
-            manager->redop, field_set);
+            manager->redop, fids);
       }
 #endif
       return reduce_post;

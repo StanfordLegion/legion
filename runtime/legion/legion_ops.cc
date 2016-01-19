@@ -2362,7 +2362,7 @@ namespace LegionRuntime {
                                              req.privilege,
                                              req.prop, req.redop);
           LegionSpy::log_requirement_fields(unique_op_id, idx, 
-                                            req.privilege_fields);
+                                            req.instance_fields);
         }
         for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
         {
@@ -2377,7 +2377,7 @@ namespace LegionRuntime {
                                              req.prop, req.redop);
           LegionSpy::log_requirement_fields(unique_op_id, 
                                             src_requirements.size()+idx, 
-                                            req.privilege_fields);
+                                            req.instance_fields);
         }
       }
     }

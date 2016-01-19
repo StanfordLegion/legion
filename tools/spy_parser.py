@@ -84,8 +84,11 @@ task_inst_req_pat       = re.compile(prefix+"Task Instance Requirement (?P<uid>[
 event_event_pat         = re.compile(prefix+"Event Event (?P<idone>[0-9a-f]+) (?P<genone>[0-9]+) (?P<idtwo>[0-9a-f]+) (?P<gentwo>[0-9]+)")
 implicit_event_pat      = re.compile(prefix+"Implicit Event (?P<idone>[0-9a-f]+) (?P<genone>[0-9]+) (?P<idtwo>[0-9a-f]+) (?P<gentwo>[0-9]+)")
 op_event_pat            = re.compile(prefix+"Op Events (?P<uid>[0-9]+) (?P<startid>[0-9a-f]+) (?P<startgen>[0-9]+) (?P<termid>[0-9a-f]+) (?P<termgen>[0-9]+)")
-copy_event_pat          = re.compile(prefix+"Copy Events (?P<srcman>[0-9a-f]+) (?P<dstman>[0-9a-f]+) (?P<index>[0-9a-f]+) (?P<field>[0-9]+) (?P<tree>[0-9]+) (?P<startid>[0-9a-f]+) (?P<startgen>[0-9]+) (?P<termid>[0-9a-f]+) (?P<termgen>[0-9]+) (?P<redop>[0-9]+)")
-copy_field_pat          = re.compile(prefix+"Copy Field (?P<startid>[0-9a-f]+) (?P<startgen>[0-9]+) (?P<termid>[0-9a-f]+) (?P<termgen>[0-9]+) (?P<fid>[0-9]+)")
+copy_event_pat          = re.compile(prefix+"Copy Events (?P<startid>[0-9a-f]+) (?P<startgen>[0-9]+) (?P<termid>[0-9a-f]+) (?P<termgen>[0-9]+)")
+copy_req_pat            = re.compile(prefix+"Copy Requirement (?P<startid>[0-9a-f]+) (?P<startgen>[0-9]+) (?P<termid>[0-9a-f]+) (?P<termgen>[0-9]+) (?P<index>[0-9]+) (?P<is_reg>[0-1]) (?P<ispace>[0-9a-f]+) (?P<fspace>[0-9]+) (?P<tid>[0-9]+) (?P<priv>[0-9]+) (?P<coher>[0-9]+) (?P<redop>[0-9]+)")
+copy_field_pat          = re.compile(prefix+"Copy Field (?P<startid>[0-9a-f]+) (?P<startgen>[0-9]+) (?P<termid>[0-9a-f]+) (?P<termgen>[0-9]+) (?P<index>[0-9]+) (?P<fid>[0-9]+)")
+copy_inst_pat           = re.compile(prefix+"Copy Instance (?P<startid>[0-9a-f]+) (?P<startgen>[0-9]+) (?P<termid>[0-9a-f]+) (?P<termgen>[0-9]+) (?P<index>[0-9]+) (?P<iid>[0-9a-f]+)")
+copy_ctx_pat            = re.compile(prefix+"Copy Context (?P<startid>[0-9a-f]+) (?P<startgen>[0-9]+) (?P<termid>[0-9a-f]+) (?P<termgen>[0-9]+) (?P<ctx>[0-9]+)")
 
 # Logger calls for physical instance usage 
 physical_inst_pat       = re.compile(prefix+"Physical Instance (?P<iid>[0-9a-f]+) (?P<mid>[0-9a-f]+) (?P<index>[0-9a-f]+) (?P<field>[0-9]+) (?P<tid>[0-9]+) (?P<blocking>[0-9]+)")
@@ -290,11 +293,23 @@ def parse_log_line(line, state):
             return True
     m = copy_event_pat.match(line)
     if m <> None:
-        if state.add_copy_events(int(m.group('srcman'),16), int(m.group('dstman'),16), int(m.group('index'),16), int(m.group('field')), int(m.group('tree')), int(m.group('startid'),16), int(m.group('startgen')), int(m.group('termid'),16), int(m.group('termgen')), int(m.group('redop'))):
+        if state.add_copy_event(int(m.group('startid'),16), int(m.group('startgen')), int(m.group('termid'),16), int(m.group('termgen'))):
+            return True
+    m = copy_req_pat.match(line)
+    if m <> None:
+        if state.add_copy_req(int(m.group('startid'),16), int(m.group('startgen')), int(m.group('termid'),16), int(m.group('termgen')), int(m.group('index')), True if (int(m.group('is_reg')))==1 else False, int(m.group('ispace'),16), int(m.group('fspace')), int(m.group('tid')), int(m.group('priv')), int(m.group('coher')), int(m.group('redop'))):
             return True
     m = copy_field_pat.match(line)
     if m <> None:
-        if state.add_copy_field_to_copy_event(int(m.group('startid'),16), int(m.group('startgen')), int(m.group('termid'),16), int(m.group('termgen')), int(m.group('fid'))):
+        if state.add_copy_field(int(m.group('startid'),16), int(m.group('startgen')), int(m.group('termid'),16), int(m.group('termgen')), int(m.group('index')), int(m.group('fid'))):
+            return True
+    m = copy_inst_pat.match(line)
+    if m <> None:
+        if state.add_copy_instance(int(m.group('startid'),16), int(m.group('startgen')), int(m.group('termid'),16), int(m.group('termgen')), int(m.group('index')), int(m.group('iid'),16)):
+            return True
+    m = copy_ctx_pat.match(line)
+    if m <> None:
+        if state.add_copy_context(int(m.group('startid'),16), int(m.group('startgen')), int(m.group('termid'),16), int(m.group('termgen')), int(m.group('ctx'))):
             return True
     # Physical instance usage
     m = physical_inst_pat.match(line)

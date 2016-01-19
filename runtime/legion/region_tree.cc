@@ -2361,6 +2361,20 @@ namespace LegionRuntime {
             Event copy_pre = Event::merge_events(preconditions);
             Event copy_post = dst_node->perform_copy_operation(op,
                                   copy_pre, src_fields, dst_fields);
+#ifdef LEGION_SPY
+            {
+              LegionSpy::log_event_dependences(preconditions, copy_pre);
+              std::vector<FieldID> src_fields, dst_fields;
+              src_fields.push_back(src_req.instance_fields[idx]);
+              dst_fields.push_back(dst_req.instance_fields[idx]);
+              LegionSpy::log_copy_across_events(op->get_unique_op_id(),
+                  copy_pre, copy_post,
+                  src_req, dst_req,
+                  src_fields, dst_fields,
+                  sit->first->get_manager()->get_instance().id,
+                  dst_view->get_manager()->get_instance().id);
+            }
+#endif
             // Register the users of the post condition
             FieldMask local_src; local_src.set_bit(src_index);
             sit->first->add_copy_user(0/*redop*/, copy_post,
@@ -2403,6 +2417,9 @@ namespace LegionRuntime {
         }
       }
       Event result = Event::merge_events(result_events);
+#ifdef LEGION_SPY
+      LegionSpy::log_event_dependences(result_events, result);
+#endif
 #ifdef DEBUG_PERF
       end_perf_trace(Internal::perf_trace_tolerance);
 #endif
@@ -2459,8 +2476,23 @@ namespace LegionRuntime {
                                        dst_fields, copy_pre);
         if (copy_result.exists())
           result_events.insert(copy_result);
+#ifdef LEGION_SPY
+        LegionSpy::log_event_dependence(src_ref.get_ready_event(), copy_pre);
+        LegionSpy::log_event_dependence(dst_ref.get_ready_event(), copy_pre);
+        LegionSpy::log_event_dependence(precondition, copy_pre);
+        LegionSpy::log_event_dependence(dom_precondition, copy_pre);
+        LegionSpy::log_copy_across_events(op->get_unique_op_id(),
+            copy_pre, copy_result,
+            src_req, dst_req,
+            src_req.instance_fields, dst_req.instance_fields,
+            src_view->get_manager()->get_instance().id,
+            dst_view->get_manager()->get_instance().id);
+#endif
       }
       Event result = Event::merge_events(result_events);
+#ifdef LEGION_SPY
+      LegionSpy::log_event_dependences(result_events, result);
+#endif
       // Note we don't need to add the copy users because
       // we already mapped these regions as part of the CopyOp.
 #ifdef DEBUG_PERF
@@ -9514,8 +9546,8 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void FieldSpaceNode::to_field_set(const FieldMask &mask,
-                                      std::set<FieldID> &field_set) const
+    void FieldSpaceNode::get_field_ids(const FieldMask &mask,
+                                       std::vector<FieldID> &field_ids) const
     //--------------------------------------------------------------------------
     {
       AutoLock n_lock(node_lock,1,false/*exclusive*/);
@@ -9527,11 +9559,11 @@ namespace LegionRuntime {
       {
         if (mask.is_set(it->second.idx))
         {
-          field_set.insert(it->first);
+          field_ids.push_back(it->first);
         }
       }
 #ifdef DEBUG_HIGH_LEVEL
-      assert(!field_set.empty()); // we should have found something
+      assert(!field_ids.empty()); // we should have found something
 #endif
     }
 
@@ -13212,32 +13244,30 @@ namespace LegionRuntime {
           postconditions[copy_post] = pre_set.set_mask;
         }
 #ifdef LEGION_SPY
-        IndexSpaceID index_space_id;
-        if (dst->logical_node->is_region())
-          index_space_id =
-            dst->logical_node->as_region_node()->row_source->handle.get_id();
-        else
-          index_space_id =
-            dst->logical_node->as_partition_node()->row_source->handle.get_id();
-
-        for (LegionMap<MaterializedView*,FieldMask>::aligned::const_iterator 
-              it = update_views.begin(); it != update_views.end(); it++)
         {
-          RegionNode *manager_node = dst->manager->region_node;
-          char *string_mask = 
-            manager_node->column_source->to_string(it->second);
+          bool is_region = dst->logical_node->is_region();
+          LowLevel::IDType ispace;
+          if (is_region)
+            ispace =
+              dst->logical_node->as_region_node()->row_source->handle.get_id();
+          else
+            ispace =
+              dst->logical_node->as_partition_node()->row_source
+                ->handle.get_id();
+
+          for (LegionMap<MaterializedView*,FieldMask>::aligned::const_iterator
+                it = update_views.begin(); it != update_views.end(); it++)
           {
-            std::set<FieldID> field_set;
-            manager_node->column_source->to_field_set(it->second, field_set);
-            LegionSpy::log_copy_operation(
-                it->first->manager->get_instance().id,
-                dst->manager->get_instance().id,
-                index_space_id,
-                manager_node->column_source->handle.id,
-                manager_node->handle.tree_id, copy_pre, copy_post,
-                0/*redop*/, field_set);
+            RegionNode *manager_node = dst->manager->region_node;
+            unsigned fspace = manager_node->column_source->handle.id;
+            unsigned tree_id = manager_node->handle.tree_id;
+            std::vector<FieldID> fids;
+            manager_node->column_source->get_field_ids(it->second, fids);
+
+            LegionSpy::log_copy_events(it->first->manager->get_instance().id,
+                dst->manager->get_instance().id, is_region, ispace, fspace,
+                tree_id, copy_pre, copy_post, 0, fids);
           }
-          free(string_mask);
         }
 #endif
       }
