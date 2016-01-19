@@ -2363,7 +2363,19 @@ namespace LegionRuntime {
                                   copy_pre, src_fields, dst_fields);
 #ifdef LEGION_SPY
             {
-              LegionSpy::log_event_dependences(preconditions, copy_pre);
+              if (!copy_pre.exists())
+              {
+                UserEvent new_copy_pre = UserEvent::create_user_event();
+                new_copy_pre.trigger();
+                copy_pre = new_copy_pre;
+                LegionSpy::log_event_dependences(preconditions, copy_pre);
+              }
+              if (!copy_post.exists())
+              {
+                UserEvent new_copy_post = UserEvent::create_user_event();
+                new_copy_post.trigger();
+                copy_post = new_copy_post;
+              }
               std::vector<FieldID> src_fields, dst_fields;
               src_fields.push_back(src_req.instance_fields[idx]);
               dst_fields.push_back(dst_req.instance_fields[idx]);
@@ -2418,7 +2430,13 @@ namespace LegionRuntime {
       }
       Event result = Event::merge_events(result_events);
 #ifdef LEGION_SPY
-      LegionSpy::log_event_dependences(result_events, result);
+      if (!result.exists())
+      {
+        UserEvent new_result = UserEvent::create_user_event();
+        new_result.trigger();
+        result = new_result;
+        LegionSpy::log_event_dependences(result_events, result);
+      }
 #endif
 #ifdef DEBUG_PERF
       end_perf_trace(Internal::perf_trace_tolerance);
@@ -2477,10 +2495,22 @@ namespace LegionRuntime {
         if (copy_result.exists())
           result_events.insert(copy_result);
 #ifdef LEGION_SPY
-        LegionSpy::log_event_dependence(src_ref.get_ready_event(), copy_pre);
-        LegionSpy::log_event_dependence(dst_ref.get_ready_event(), copy_pre);
-        LegionSpy::log_event_dependence(precondition, copy_pre);
-        LegionSpy::log_event_dependence(dom_precondition, copy_pre);
+        if (!copy_pre.exists())
+        {
+          UserEvent new_copy_pre = UserEvent::create_user_event();
+          new_copy_pre.trigger();
+          copy_pre = new_copy_pre;
+          LegionSpy::log_event_dependence(src_ref.get_ready_event(), copy_pre);
+          LegionSpy::log_event_dependence(dst_ref.get_ready_event(), copy_pre);
+          LegionSpy::log_event_dependence(precondition, copy_pre);
+          LegionSpy::log_event_dependence(dom_precondition, copy_pre);
+        }
+        if (!copy_result.exists())
+        {
+          UserEvent new_copy_result = UserEvent::create_user_event();
+          new_copy_result.trigger();
+          copy_result = new_copy_result;
+        }
         LegionSpy::log_copy_across_events(op->get_unique_op_id(),
             copy_pre, copy_result,
             src_req, dst_req,
@@ -2491,7 +2521,13 @@ namespace LegionRuntime {
       }
       Event result = Event::merge_events(result_events);
 #ifdef LEGION_SPY
-      LegionSpy::log_event_dependences(result_events, result);
+      if (!result.exists())
+      {
+        UserEvent new_result = UserEvent::create_user_event();
+        new_result.trigger();
+        result = new_result;
+        LegionSpy::log_event_dependences(result_events, result);
+      }
 #endif
       // Note we don't need to add the copy users because
       // we already mapped these regions as part of the CopyOp.
@@ -2584,8 +2620,41 @@ namespace LegionRuntime {
                                             src_fields, dst_fields, copy_pre);
         if (copy_result.exists())
           result_events.insert(copy_result);
+#ifdef LEGION_SPY
+        if (!copy_pre.exists())
+        {
+          UserEvent new_copy_pre = UserEvent::create_user_event();
+          new_copy_pre.trigger();
+          copy_pre = new_copy_pre;
+          LegionSpy::log_event_dependence(src_ref.get_ready_event(), copy_pre);
+          LegionSpy::log_event_dependence(dst_ref.get_ready_event(), copy_pre);
+          LegionSpy::log_event_dependence(precondition, copy_pre);
+          LegionSpy::log_event_dependence(dom_precondition, copy_pre);
+        }
+        if (!copy_result.exists())
+        {
+          UserEvent new_copy_result = UserEvent::create_user_event();
+          new_copy_result.trigger();
+          copy_result = new_copy_result;
+        }
+        LegionSpy::log_copy_across_events(op->get_unique_op_id(),
+            copy_pre, copy_result,
+            src_req, dst_req,
+            src_req.instance_fields, dst_req.instance_fields,
+            src_inst->get_manager()->get_instance().id,
+            dst_inst->get_manager()->get_instance().id);
+#endif
       }
       Event result = Event::merge_events(result_events);
+#ifdef LEGION_SPY
+      if (!result.exists())
+      {
+        UserEvent new_result = UserEvent::create_user_event();
+        new_result.trigger();
+        result = new_result;
+        LegionSpy::log_event_dependences(result_events, result);
+      }
+#endif
       return result;
     }
 

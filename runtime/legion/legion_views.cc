@@ -5776,7 +5776,16 @@ namespace LegionRuntime {
         const std::set<Domain> &component_domains = 
           logical_node->get_component_domains(dom_pre);
         if (dom_pre.exists())
+        {
+#ifdef LEGION_SPY
+          Event new_reduce_pre = Event::merge_events(reduce_pre, dom_pre);
+          LegionSpy::log_event_dependence(reduce_pre, new_reduce_pre);
+          LegionSpy::log_event_dependence(dom_pre, new_reduce_pre);
+          reduce_pre = new_reduce_pre;
+#else
           reduce_pre = Event::merge_events(reduce_pre, dom_pre);
+#endif
+        }
         for (std::set<Domain>::const_iterator it = 
               component_domains.begin(); it != component_domains.end(); it++)
         {
@@ -5795,7 +5804,16 @@ namespace LegionRuntime {
         Event dom_pre;
         Domain domain = logical_node->get_domain(dom_pre);
         if (dom_pre.exists())
+        {
+#ifdef LEGION_SPY
+          Event new_reduce_pre = Event::merge_events(reduce_pre, dom_pre);
+          LegionSpy::log_event_dependence(reduce_pre, new_reduce_pre);
+          LegionSpy::log_event_dependence(dom_pre, new_reduce_pre);
+          reduce_pre = new_reduce_pre;
+#else
           reduce_pre = Event::merge_events(reduce_pre, dom_pre);
+#endif
+        }
         reduce_post = manager->issue_reduction(op, src_fields, dst_fields,
                                                domain, reduce_pre, fold,
                                                true/*precise*/);
@@ -5883,6 +5901,15 @@ namespace LegionRuntime {
         post_events.insert(post);
       }
       Event reduce_post = Event::merge_events(post_events);
+#ifdef LEGION_SPY
+      if (!reduce_post.exists())
+      {
+        UserEvent new_reduce_post = UserEvent::create_user_event();
+        new_reduce_post.trigger();
+        reduce_post = new_reduce_post;
+        LegionSpy::log_event_dependences(post_events, reduce_post);
+      }
+#endif
       // No need to add the user to the destination as that will
       // be handled by the caller using the reduce post event we return
       add_copy_user(manager->redop, reduce_post, version_info,
@@ -5890,12 +5917,6 @@ namespace LegionRuntime {
 #ifdef LEGION_SPY
       IndexSpace reduce_index_space =
               target->logical_node->as_region_node()->row_source->handle;
-      if (!reduce_post.exists())
-      {
-        UserEvent new_reduce_post = UserEvent::create_user_event();
-        new_reduce_post.trigger();
-        reduce_post = new_reduce_post;
-      }
       {
         std::vector<FieldID> fids;
         manager->region_node->column_source->get_field_ids(red_mask, fids);
@@ -5963,6 +5984,15 @@ namespace LegionRuntime {
         post_events.insert(post);
       }
       Event reduce_post = Event::merge_events(post_events);
+#ifdef LEGION_SPY
+      if (!reduce_post.exists())
+      {
+        UserEvent new_reduce_post = UserEvent::create_user_event();
+        new_reduce_post.trigger();
+        reduce_post = new_reduce_post;
+        LegionSpy::log_event_dependences(post_events, reduce_post);
+      }
+#endif
       // No need to add the user to the destination as that will
       // be handled by the caller using the reduce post event we return
       add_copy_user(manager->redop, reduce_post, version_info,
@@ -5970,12 +6000,6 @@ namespace LegionRuntime {
 #ifdef LEGION_SPY
       IndexSpace reduce_index_space =
               target->logical_node->as_region_node()->row_source->handle;
-      if (!reduce_post.exists())
-      {
-        UserEvent new_reduce_post = UserEvent::create_user_event();
-        new_reduce_post.trigger();
-        reduce_post = new_reduce_post;
-      }
       {
         std::vector<FieldID> fids;
         manager->region_node->column_source->get_field_ids(red_mask, fids);

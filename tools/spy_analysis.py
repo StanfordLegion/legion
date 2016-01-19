@@ -2470,7 +2470,6 @@ class ConnectedComponent(object):
         self.parent_tasks = dict()
         self.maps = dict()
         self.closes = set()
-        self.copies = dict()
         self.acquires = dict()
         self.releases = dict()
         self.partition_ops = dict()
@@ -2501,11 +2500,6 @@ class ConnectedComponent(object):
         assert close not in self.closes
         self.closes.add(close)
 
-    def add_copy(self, copy):
-        assert copy not in self.copies
-        self.copies[copy.uid] = copy
-        self.parent_tasks[copy.uid] = copy.ctx
-
     def add_copy_event(self, copy):
         assert copy not in self.copy_events
         self.copy_events[copy.uid] = copy
@@ -2533,8 +2527,9 @@ class ConnectedComponent(object):
         self.phase_barriers.add(phase_barrier)
 
     def num_ops(self):
-        return len(self.tasks)+len(self.maps)+len(self.closes)+len(self.copies)+\
-                len(self.acquires)+len(self.releases)+len(self.partition_ops)
+        return len(self.tasks)+len(self.maps)+len(self.closes)+\
+                len(self.copy_events)+len(self.acquires)+len(self.releases)+\
+                len(self.partition_ops)
 
     def empty(self):
         total = self.num_ops()
@@ -2545,8 +2540,6 @@ class ConnectedComponent(object):
             t.physical_unmark()
         for m in self.maps.itervalues():
             m.physical_unmark()
-        for c in self.copies.itervalues():
-            c.physical_unmark()
         for c in self.copy_events.itervalues():
             c.physical_unmark()
         for c in self.closes:
@@ -3541,7 +3534,8 @@ class State(object):
         for uid1,op1 in self.ops.iteritems():
             for uid2,op2 in self.ops.iteritems():
                 if op1 <> op2 and not (isinstance(op1, IndexTask) or isinstance(op2, IndexTask)) and\
-                        not (isinstance(op1, Deletion) or isinstance(op2, Deletion)):
+                        not (isinstance(op1, Deletion) or isinstance(op2, Deletion)) and\
+                        not (isinstance(op1, CopyOp) or isinstance(op2, CopyOp)):
                     def traverse_event(node, traverser):
                         if node in traverser.visited:
                             return False
