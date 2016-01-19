@@ -4180,7 +4180,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     TaskImpl::~TaskImpl(void)
-    //--------------------------------------------------------------------------
+    //-------------------------------------------------------------------------
     {
       task_lock.destroy_reservation();
       task_lock = Reservation::NO_RESERVATION;
@@ -4245,7 +4245,7 @@ namespace LegionRuntime {
         all_idempotent  = impl->is_idempotent();
       }
       variants[impl->vid] = impl;
-      collection->add_variant(impl->vid, Processor::LOC_PROC,
+      collection->add_variant(impl->vid, impl->get_processor_kind(false),
                               true/*single*/, true/*index*/,
                               impl->is_inner(), impl->is_leaf(), impl->vid); 
     }
@@ -4632,6 +4632,8 @@ namespace LegionRuntime {
                            const void *udata /*=NULL*/, size_t udata_size/*=0*/)
       : vid(v), owner(own), runtime(rt), global(registrar.global_registration),
         has_return_value(ret), realm_descriptor(realm), inline_descriptor(app), 
+        execution_constraints(registrar.execution_constraints),
+        layout_constraints(registrar.layout_constraints),
         user_data_size(udata_size), leaf_variant(registrar.leaf_variant), 
         inner_variant(registrar.inner_variant),
         idempotent_variant(registrar.idempotent_variant)
@@ -4644,31 +4646,11 @@ namespace LegionRuntime {
       }
       else
         user_data = NULL;
-      // Figure out which kind or processors we can use this variant on
-      // and register it against all the local processors of that kind
-      std::vector<Processor::Kind> proc_kinds;
-      execution_constraints.isa_constraint.find_proc_kinds(proc_kinds);
-      // If there were no processor kinds just register it on all of them
-      if (proc_kinds.empty())
-      {
-        // Just register it on all types to be sound
-        proc_kinds.push_back(Processor::TOC_PROC);
-        proc_kinds.push_back(Processor::LOC_PROC);
-        proc_kinds.push_back(Processor::IO_PROC);
-        // Just an application task, so don't register with utility procs
-      }
-      std::set<Event> registration_events;
+      // Perform the registration
       Realm::ProfilingRequestSet profiling_requests;
-      for (std::vector<Processor::Kind>::const_iterator it = 
-            proc_kinds.begin(); it != proc_kinds.end(); it++)
-      {
-        registration_events.insert(
-            Processor::register_task_by_kind(*it, false/*global*/,
-                                             vid, *realm_descriptor,
-                                             profiling_requests,
-                                             user_data, user_data_size));
-      }
-      ready_event = Event::merge_events(registration_events);
+      ready_event = Processor::register_task_by_kind(
+          get_processor_kind(true), false/*global*/, vid, *realm_descriptor,
+          profiling_requests, user_data, user_data_size);
       // If we have a variant name, then record it
       if (registrar.task_variant_name == NULL)
       {
@@ -4776,6 +4758,21 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    Processor::Kind VariantImpl::get_processor_kind(bool warn) const
+    //--------------------------------------------------------------------------
+    {
+      const ProcessorConstraint &constraint = 
+                                  execution_constraints.processor_constraint;
+      if (constraint.is_valid())
+        return constraint.get_kind();
+      if (warn)
+        log_run.warning("WARNING: NO PROCESSOR CONSTRAINT SPECIFIED FOR VARIANT"
+                        " %s (ID %ld) OF TASK %s (ID %d)! ASSUMING LOC_PROC!",
+                      variant_name, vid, owner->get_name(false),owner->task_id);
+      return Processor::LOC_PROC;
+    }
+
+    //--------------------------------------------------------------------------
     void VariantImpl::send_variant_response(AddressSpaceID target, Event done)
     //--------------------------------------------------------------------------
     {
@@ -4816,7 +4813,9 @@ namespace LegionRuntime {
         rez.serialize(idempotent_variant);
         size_t name_size = strlen(variant_name)+1;
         rez.serialize(variant_name, name_size);
-        // TODO: pack constraints
+        // Pack the constraints
+        execution_constraints.serialize(rez);
+        layout_constraints.serialize(rez);
       }
     }
 
@@ -4861,10 +4860,13 @@ namespace LegionRuntime {
       registrar.task_variant_name = (const char*)derez.get_current_pointer();
       size_t name_size = strlen(registrar.task_variant_name)+1;
       derez.advance_pointer(name_size);
-      // TODO unpack the constraints
+      // Unpack the constraints
+      registrar.execution_constraints.deserialize(derez);
+      registrar.layout_constraints.deserialize(derez);
       // Ask the runtime to perform the registration 
       runtime->register_variant(registrar, user_data, user_data_size,
                                 realm_desc, inline_desc, has_return,variant_id);
+
     }
 
     /////////////////////////////////////////////////////////////
@@ -4875,7 +4877,8 @@ namespace LegionRuntime {
     LayoutConstraints::LayoutConstraints(LayoutConstraintID id, Internal *rt,
                                      const LayoutConstraintRegistrar &registrar)
       : LayoutConstraintSet(registrar.layout_constraints), layout_id(id), 
-        runtime(rt), handle(registrar.handle), ready_event(Event::NO_EVENT)
+        runtime(rt), handle(registrar.handle), ready_event(Event::NO_EVENT),
+        layout_lock(Reservation::create_reservation())
     //--------------------------------------------------------------------------
     {
       if (registrar.layout_name == NULL)
@@ -4889,7 +4892,8 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     LayoutConstraints::LayoutConstraints(LayoutConstraintID id, Internal *rt)
-      : layout_id(id), runtime(rt), constraints_name(NULL)
+      : layout_id(id), runtime(rt), constraints_name(NULL),
+        layout_lock(Reservation::create_reservation())
     //--------------------------------------------------------------------------
     {
       // Make a user event for the result and send the request
@@ -4921,6 +4925,8 @@ namespace LegionRuntime {
     {
       if (constraints_name != NULL)
         free(constraints_name);
+      layout_lock.destroy_reservation();
+      layout_lock = Reservation::NO_RESERVATION;
     }
 
     //--------------------------------------------------------------------------
@@ -4973,14 +4979,21 @@ namespace LegionRuntime {
                                              UserEvent done_event)
     //--------------------------------------------------------------------------
     {
-      // Record where we have sent constraints
-      remote_instances.add(target);
+      // Hold our lock when updating our se of remote instances
+      {
+        AutoLock l_lock(layout_lock);
+        remote_instances.add(target);
+      }
       Serializer rez;
       {
         RezCheck z(rez);
         rez.serialize(layout_id);
+        rez.serialize(handle);
+        size_t name_len = strlen(constraints_name)+1;
+        rez.serialize(name_len);
+        rez.serialize(constraints_name, name_len);
         // pack the constraints
-
+        serialize(rez);   
         // pack the done events
         rez.serialize(done_event);
       }
@@ -4992,7 +5005,16 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       // Unpack the constraints
-
+      derez.deserialize(handle);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(constraints_name == NULL);
+#endif
+      size_t name_len;
+      derez.deserialize(name_len);
+      constraints_name = (char*)malloc(name_len);
+      derez.deserialize(constraints_name, name_len);
+      // unpack the constraints
+      deserialize(derez); 
       // Then trigger the event
       UserEvent done_event;
       derez.deserialize(done_event);
@@ -5025,7 +5047,7 @@ namespace LegionRuntime {
       UserEvent done_event;
       derez.deserialize(done_event);
       LayoutConstraints *constraints = runtime->find_layout_constraints(lay_id);
-      constraints->send_constraints(source, done_event);
+      constraints->send_constraints(source, done_event); 
     }
 
     //--------------------------------------------------------------------------
@@ -17223,7 +17245,7 @@ namespace LegionRuntime {
                                            HLR_TASK_ID, hlr_task, no_requests));
         registered_events.insert(
             Processor::register_task_by_kind(kinds[idx], false/*global*/,
-                      HLR_LEGION_PROFILING_ID, rt_profiling_task, no_requests)); 
+                      HLR_LEGION_PROFILING_ID, rt_profiling_task, no_requests));
         registered_events.insert(
             Processor::register_task_by_kind(kinds[idx], false/*global*/,
                      HLR_MAPPER_PROFILING_ID, map_profiling_task, no_requests));
@@ -17518,7 +17540,6 @@ namespace LegionRuntime {
       // Compute the number of processors we need to wait for
       int needed_count = 0;
       {
-        std::set<Processor> utility_procs;
         const unsigned local_space = p.address_space();
         for (std::set<Processor>::const_iterator it = all_procs.begin();
               it != all_procs.end(); it++)

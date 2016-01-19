@@ -1009,6 +1009,8 @@ namespace LegionRuntime {
                           Realm::ProfilingRequestSet &requests);
       void dispatch_inline(Processor current, Task *task);
     public:
+      Processor::Kind get_processor_kind(bool warn) const;
+    public:
       void send_variant_response(AddressSpaceID source, Event done_event);
     public:
       static AddressSpaceID get_owner_space(VariantID vid, Internal *runtime);
@@ -1091,6 +1093,7 @@ namespace LegionRuntime {
       Event ready_event;
       char *constraints_name;
     protected:
+      Reservation layout_lock;
       NodeSet remote_instances; // only valid on the owner node
     };
 

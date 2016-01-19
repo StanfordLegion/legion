@@ -1158,6 +1158,15 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     inline TaskVariantRegistrar& TaskVariantRegistrar::
+                           add_constraint(const ProcessorConstraint &constraint)
+    //--------------------------------------------------------------------------
+    {
+      execution_constraints.add_constraint(constraint);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    inline TaskVariantRegistrar& TaskVariantRegistrar::
                             add_constraint(const ResourceConstraint &constraint)
     //--------------------------------------------------------------------------
     {
@@ -1188,7 +1197,7 @@ namespace LegionRuntime {
              add_layout_constraint_set(unsigned index, LayoutConstraintID desc)
     //--------------------------------------------------------------------------
     {
-      layout_constraints.add_layout_description(index, desc);
+      layout_constraints.add_layout_constraint(index, desc);
       return *this;
     }
 
@@ -1920,26 +1929,7 @@ namespace LegionRuntime {
       registrar.set_leaf(options.leaf);
       registrar.set_inner(options.inner);
       registrar.set_idempotent(options.idempotent);
-      switch (proc_kind)
-      {
-        case Processor::LOC_PROC:
-        case Processor::IO_PROC:
-          {
-            registrar.add_constraint(
-                ISAConstraint(ISAConstraint::X86_ISA | 
-                              ISAConstraint::ARM_ISA | 
-                              ISAConstraint::POW_ISA));
-            break;
-          }
-        case Processor::TOC_PROC:
-          {
-            registrar.add_constraint(
-                ISAConstraint(ISAConstraint::CUDA_ISA));
-            break;
-          }
-        default:
-          assert(false); // Not allowed to generate tasks for other kinds 
-      }
+      registrar.add_constraint(ProcessorConstraint(proc_kind));
       CodeDescriptor *realm_desc = new CodeDescriptor(
           LegionTaskWrapper::legion_task_wrapper<T,false,TASK_PTR>);
       CodeDescriptor *inline_desc = new CodeDescriptor(
@@ -1964,26 +1954,7 @@ namespace LegionRuntime {
       registrar.set_leaf(options.leaf);
       registrar.set_inner(options.inner);
       registrar.set_idempotent(options.idempotent);
-      switch (proc_kind)
-      {
-        case Processor::LOC_PROC:
-        case Processor::IO_PROC:
-          {
-            registrar.add_constraint(
-                ISAConstraint(ISAConstraint::X86_ISA | 
-                              ISAConstraint::ARM_ISA | 
-                              ISAConstraint::POW_ISA));
-            break;
-          }
-        case Processor::TOC_PROC:
-          {
-            registrar.add_constraint(
-                ISAConstraint(ISAConstraint::CUDA_ISA));
-            break;
-          }
-        default:
-          assert(false); // Not allowed to generate tasks for other kinds 
-      }
+      registrar.add_constraint(ProcessorConstraint(proc_kind));
       CodeDescriptor *realm_desc = new CodeDescriptor(
             LegionTaskWrapper::legion_task_wrapper<false,TASK_PTR>);
       CodeDescriptor *inline_desc = new CodeDescriptor(
@@ -2009,26 +1980,7 @@ namespace LegionRuntime {
       registrar.set_leaf(options.leaf);
       registrar.set_inner(options.inner);
       registrar.set_idempotent(options.idempotent);
-      switch (proc_kind)
-      {
-        case Processor::LOC_PROC:
-        case Processor::IO_PROC:
-          {
-            registrar.add_constraint(
-                ISAConstraint(ISAConstraint::X86_ISA | 
-                              ISAConstraint::ARM_ISA | 
-                              ISAConstraint::POW_ISA));
-            break;
-          }
-        case Processor::TOC_PROC:
-          {
-            registrar.add_constraint(
-                ISAConstraint(ISAConstraint::CUDA_ISA));
-            break;
-          }
-        default:
-          assert(false); // Not allowed to generate tasks for other kinds 
-      }
+      registrar.add_constraint(ProcessorConstraint(proc_kind));
       CodeDescriptor *realm_desc = new CodeDescriptor(
             LegionTaskWrapper::legion_udt_task_wrapper<T,UDT,false,TASK_PTR>);
       CodeDescriptor *inline_desc = new CodeDescriptor(
@@ -2054,26 +2006,7 @@ namespace LegionRuntime {
       registrar.set_leaf(options.leaf);
       registrar.set_inner(options.inner);
       registrar.set_idempotent(options.idempotent);
-      switch (proc_kind)
-      {
-        case Processor::LOC_PROC:
-        case Processor::IO_PROC:
-          {
-            registrar.add_constraint(
-                ISAConstraint(ISAConstraint::X86_ISA | 
-                              ISAConstraint::ARM_ISA | 
-                              ISAConstraint::POW_ISA));
-            break;
-          }
-        case Processor::TOC_PROC:
-          {
-            registrar.add_constraint(
-                ISAConstraint(ISAConstraint::CUDA_ISA));
-            break;
-          }
-        default:
-          assert(false); // Not allowed to generate tasks for other kinds 
-      }
+      registrar.add_constraint(ProcessorConstraint(proc_kind));
       CodeDescriptor *realm_desc = new CodeDescriptor(
             LegionTaskWrapper::legion_udt_task_wrapper<UDT,false,TASK_PTR>);
       CodeDescriptor *inline_desc = new CodeDescriptor(

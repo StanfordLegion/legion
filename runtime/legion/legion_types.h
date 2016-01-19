@@ -602,6 +602,7 @@ namespace LegionRuntime {
 
     // legion_constraint.h
     class ISAConstraint;
+    class ProcessorConstraint;
     class ResourceConstraint;
     class LaunchConstraint;
     class ColocationConstraint;

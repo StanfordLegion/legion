@@ -1352,6 +1352,8 @@ namespace LegionRuntime {
     public: // Add execution constraints
       inline TaskVariantRegistrar& 
         add_constraint(const ISAConstraint &constraint);
+      inline TaskVariantRegistrar&
+        add_constraint(const ProcessorConstraint &constraint);
       inline TaskVariantRegistrar& 
         add_constraint(const ResourceConstraint &constraint);
       inline TaskVariantRegistrar&

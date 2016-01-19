@@ -13,6 +13,7 @@
  * limitations under the License.
  */
 
+#include "legion_utilities.h"
 #include "legion_constraint.h"
 
 namespace LegionRuntime {
@@ -30,28 +31,65 @@ namespace LegionRuntime {
     }
     
     //--------------------------------------------------------------------------
-    bool ISAConstraint::is_valid(void) const
+    void ISAConstraint::serialize(Serializer &rez) const
     //--------------------------------------------------------------------------
     {
-      return (isa_prop != 0);
+      rez.serialize(isa_prop);
     }
 
     //--------------------------------------------------------------------------
-    void ISAConstraint::find_proc_kinds(std::vector<Processor::Kind> &kds) const
+    void ISAConstraint::deserialize(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      if (isa_prop & (X86_ISA | ARM_ISA | POW_ISA))
-      {
-        kds.push_back(Processor::LOC_PROC);
-        kds.push_back(Processor::IO_PROC);
-      }
-      if (isa_prop & (PTX_ISA | CUDA_ISA))
-        kds.push_back(Processor::TOC_PROC);
+      derez.deserialize(isa_prop);
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Processor Constraint 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ProcessorConstraint::ProcessorConstraint(void)
+      : valid(false)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ProcessorConstraint::ProcessorConstraint(Processor::Kind k)
+      : kind(k), valid(true)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    void ProcessorConstraint::serialize(Serializer &rez) const
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize(valid);
+      if (valid)
+        rez.serialize(kind);
+    }
+    
+    //--------------------------------------------------------------------------
+    void ProcessorConstraint::deserialize(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      derez.deserialize(valid);
+      if (valid)
+        derez.deserialize(kind);
     }
 
     /////////////////////////////////////////////////////////////
     // ResourceConstraint
     /////////////////////////////////////////////////////////////
+
+
+    //--------------------------------------------------------------------------
+    ResourceConstraint::ResourceConstraint(void)
+    //--------------------------------------------------------------------------
+    {
+    }
 
     //--------------------------------------------------------------------------
     ResourceConstraint::ResourceConstraint(ResourceKind resource,
@@ -61,9 +99,34 @@ namespace LegionRuntime {
     {
     }
 
+    //--------------------------------------------------------------------------
+    void ResourceConstraint::serialize(Serializer &rez) const
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize(resource_kind);
+      rez.serialize(equality_kind);
+      rez.serialize(value);
+    }
+
+    //--------------------------------------------------------------------------
+    void ResourceConstraint::deserialize(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      derez.deserialize(resource_kind);
+      derez.deserialize(equality_kind);
+      derez.deserialize(value);
+    }
+
     /////////////////////////////////////////////////////////////
     // LaunchConstraint 
     /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    LaunchConstraint::LaunchConstraint(void)
+      : dims(0)
+    //--------------------------------------------------------------------------
+    {
+    }
 
     //--------------------------------------------------------------------------
     LaunchConstraint::LaunchConstraint(LaunchKind kind, size_t value)
@@ -85,9 +148,35 @@ namespace LegionRuntime {
         values[i] = vs[i];
     }
 
+    //--------------------------------------------------------------------------
+    void LaunchConstraint::serialize(Serializer &rez) const
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize(launch_kind);
+      rez.serialize(dims);
+      for (int i = 0; i < dims; i++)
+        rez.serialize(values[i]);
+    }
+
+    //--------------------------------------------------------------------------
+    void LaunchConstraint::deserialize(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      derez.deserialize(launch_kind);
+      derez.deserialize(dims);
+      for (int i = 0; i < dims; i++)
+        derez.deserialize(values[i]);
+    }
+
     /////////////////////////////////////////////////////////////
     // ColocationConstraint 
     /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ColocationConstraint::ColocationConstraint(void)
+    //--------------------------------------------------------------------------
+    {
+    }
 
     //--------------------------------------------------------------------------
     ColocationConstraint::ColocationConstraint(unsigned index1, unsigned index2)
@@ -104,6 +193,30 @@ namespace LegionRuntime {
     {
     }
 
+    //--------------------------------------------------------------------------
+    void ColocationConstraint::serialize(Serializer &rez) const
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize<size_t>(indexes.size());
+      for (std::set<unsigned>::const_iterator it = indexes.begin();
+            it != indexes.end(); it++)
+        rez.serialize(*it);
+    }
+
+    //--------------------------------------------------------------------------
+    void ColocationConstraint::deserialize(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      size_t num_indexes;
+      derez.deserialize(num_indexes);
+      for (unsigned idx = 0; idx < num_indexes; idx++)
+      {
+        unsigned index;
+        derez.deserialize(index);
+        indexes.insert(index);
+      }
+    }
+
     /////////////////////////////////////////////////////////////
     // ColocationConstraint 
     /////////////////////////////////////////////////////////////
@@ -114,6 +227,15 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       isa_constraint = constraint;
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    ExecutionConstraintSet& ExecutionConstraintSet::add_constraint(
+                                          const ProcessorConstraint &constraint)
+    //--------------------------------------------------------------------------
+    {
+      processor_constraint = constraint;
       return *this;
     }
 
@@ -144,6 +266,48 @@ namespace LegionRuntime {
       return *this;
     }
 
+    //--------------------------------------------------------------------------
+    void ExecutionConstraintSet::serialize(Serializer &rez) const
+    //--------------------------------------------------------------------------
+    {
+      isa_constraint.serialize(rez);
+      processor_constraint.serialize(rez);
+#define PACK_CONSTRAINTS(Type, constraints)                             \
+      rez.serialize<size_t>(constraints.size());                        \
+      for (std::vector<Type>::const_iterator it = constraints.begin();  \
+            it != constraints.end(); it++)                              \
+      {                                                                 \
+        it->serialize(rez);                                             \
+      }
+      PACK_CONSTRAINTS(ResourceConstraint, resource_constraints)
+      PACK_CONSTRAINTS(LaunchConstraint, launch_constraints)
+      PACK_CONSTRAINTS(ColocationConstraint, colocation_constraints)
+#undef PACK_CONSTRAINTS
+    }
+
+    //--------------------------------------------------------------------------
+    void ExecutionConstraintSet::deserialize(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      isa_constraint.deserialize(derez);
+      processor_constraint.deserialize(derez);
+#define UNPACK_CONSTRAINTS(Type, constraints)                       \
+      {                                                             \
+        size_t constraint_size;                                     \
+        derez.deserialize(constraint_size);                         \
+        constraints.resize(constraint_size);                        \
+        for (std::vector<Type>::iterator it = constraints.begin();  \
+              it != constraints.end(); it++)                        \
+        {                                                           \
+          it->deserialize(derez);                                   \
+        }                                                           \
+      }
+      UNPACK_CONSTRAINTS(ResourceConstraint, resource_constraints)
+      UNPACK_CONSTRAINTS(LaunchConstraint, launch_constraints)
+      UNPACK_CONSTRAINTS(ColocationConstraint, colocation_constraints)
+#undef UNPACK_CONSTRAINTS
+    }
+
     /////////////////////////////////////////////////////////////
     // Specialized Constraint
     /////////////////////////////////////////////////////////////
@@ -153,6 +317,20 @@ namespace LegionRuntime {
       : kind(k)
     //--------------------------------------------------------------------------
     {
+    }
+
+    //--------------------------------------------------------------------------
+    void SpecializedConstraint::serialize(Serializer &rez) const
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize(kind);
+    }
+
+    //--------------------------------------------------------------------------
+    void SpecializedConstraint::deserialize(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      derez.deserialize(kind);
     }
 
     /////////////////////////////////////////////////////////////
@@ -173,15 +351,64 @@ namespace LegionRuntime {
     {
     }
 
+    //--------------------------------------------------------------------------
+    void MemoryConstraint::serialize(Serializer &rez) const
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize(has_kind);
+      if (has_kind)
+        rez.serialize(kind);
+    }
+
+    //--------------------------------------------------------------------------
+    void MemoryConstraint::deserialize(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      derez.deserialize(has_kind);
+      if (has_kind)
+        derez.deserialize(kind);
+    }
+
     /////////////////////////////////////////////////////////////
     // Field Constraint 
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    FieldConstraint::FieldConstraint(const std::vector<FieldID> &order, bool cg)
-      : ordering(order), contiguous(cg)
+    FieldConstraint::FieldConstraint(void)
+      : contiguous(false)
     //--------------------------------------------------------------------------
     {
+    }
+
+    //--------------------------------------------------------------------------
+    FieldConstraint::FieldConstraint(const std::vector<FieldID> &order, bool cg)
+      : contiguous(cg), ordering(order)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    void FieldConstraint::serialize(Serializer &rez) const
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize(contiguous);
+      rez.serialize<size_t>(ordering.size());
+      for (std::vector<FieldID>::const_iterator it = ordering.begin();
+            it != ordering.end(); it++)
+        rez.serialize(*it);
+    }
+    
+    //--------------------------------------------------------------------------
+    void FieldConstraint::deserialize(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      derez.deserialize(contiguous);
+      size_t num_orders;
+      derez.deserialize(num_orders);
+      ordering.resize(num_orders);
+      for (std::vector<FieldID>::iterator it = ordering.begin();
+            it != ordering.end(); it++)
+        derez.deserialize(*it);
     }
 
     /////////////////////////////////////////////////////////////
@@ -189,11 +416,42 @@ namespace LegionRuntime {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    OrderingConstraint::OrderingConstraint(
-                           const std::vector<DimensionKind> &order, bool contig)
-      : ordering(order), contiguous(contig)
+    OrderingConstraint::OrderingConstraint(void)
+      : contiguous(false)
     //--------------------------------------------------------------------------
     {
+    }
+
+    //--------------------------------------------------------------------------
+    OrderingConstraint::OrderingConstraint(
+                           const std::vector<DimensionKind> &order, bool contig)
+      : contiguous(contig), ordering(order) 
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    void OrderingConstraint::serialize(Serializer &rez) const
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize(contiguous);
+      rez.serialize<size_t>(ordering.size());
+      for (std::vector<DimensionKind>::const_iterator it = ordering.begin();
+            it != ordering.end(); it++)
+        rez.serialize(*it);
+    }
+
+    //--------------------------------------------------------------------------
+    void OrderingConstraint::deserialize(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      derez.deserialize(contiguous);
+      size_t num_orders;
+      derez.deserialize(num_orders);
+      ordering.resize(num_orders);
+      for (std::vector<DimensionKind>::iterator it = ordering.begin();
+            it != ordering.end(); it++)
+        derez.deserialize(*it);
     }
 
     /////////////////////////////////////////////////////////////
@@ -201,15 +459,55 @@ namespace LegionRuntime {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    SplittingConstraint::SplittingConstraint(DimensionKind k, size_t v, bool ck)
-      : kind(k), value(v), chunks(ck)
+    SplittingConstraint::SplittingConstraint(void)
+      : chunks(true)
     //--------------------------------------------------------------------------
     {
+    }
+
+    //--------------------------------------------------------------------------
+    SplittingConstraint::SplittingConstraint(DimensionKind k)
+      : kind(k), chunks(true)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    SplittingConstraint::SplittingConstraint(DimensionKind k, size_t v)
+      : kind(k), value(v), chunks(false)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    void SplittingConstraint::serialize(Serializer &rez) const
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize(kind);
+      rez.serialize(chunks);
+      if (!chunks)
+        rez.serialize(value);
+    }
+
+    //--------------------------------------------------------------------------
+    void SplittingConstraint::deserialize(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      derez.deserialize(kind);
+      derez.deserialize(chunks);
+      if (!chunks)
+        derez.deserialize(value);
     }
 
     /////////////////////////////////////////////////////////////
     // Dimension Constraint 
     /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    DimensionConstraint::DimensionConstraint(void)
+    //--------------------------------------------------------------------------
+    {
+    }
 
     //--------------------------------------------------------------------------
     DimensionConstraint::DimensionConstraint(DimensionKind k, 
@@ -219,9 +517,33 @@ namespace LegionRuntime {
     {
     }
 
+    //--------------------------------------------------------------------------
+    void DimensionConstraint::serialize(Serializer &rez) const
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize(kind);
+      rez.serialize(eqk);
+      rez.serialize(value);
+    }
+
+    //--------------------------------------------------------------------------
+    void DimensionConstraint::deserialize(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      derez.deserialize(kind);
+      derez.deserialize(eqk);
+      derez.deserialize(value);
+    }
+
     /////////////////////////////////////////////////////////////
     // Alignment Constraint 
     /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    AlignmentConstraint::AlignmentConstraint(void)
+    //--------------------------------------------------------------------------
+    {
+    }
 
     //--------------------------------------------------------------------------
     AlignmentConstraint::AlignmentConstraint(FieldID f, 
@@ -231,15 +553,55 @@ namespace LegionRuntime {
     {
     }
 
+    //--------------------------------------------------------------------------
+    void AlignmentConstraint::serialize(Serializer &rez) const
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize(fid);
+      rez.serialize(eqk);
+      rez.serialize(alignment);
+    }
+
+    //--------------------------------------------------------------------------
+    void AlignmentConstraint::deserialize(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      derez.deserialize(fid);
+      derez.deserialize(eqk);
+      derez.deserialize(alignment);
+    }
+
     /////////////////////////////////////////////////////////////
     // Offset Constraint 
     /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    OffsetConstraint::OffsetConstraint(void)
+    //--------------------------------------------------------------------------
+    {
+    }
 
     //--------------------------------------------------------------------------
     OffsetConstraint::OffsetConstraint(FieldID f, size_t off)
       : fid(f), offset(off)
     //--------------------------------------------------------------------------
     {
+    }
+
+    //--------------------------------------------------------------------------
+    void OffsetConstraint::serialize(Serializer &rez) const
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize(fid);
+      rez.serialize(offset);
+    }
+
+    //--------------------------------------------------------------------------
+    void OffsetConstraint::deserialize(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      derez.deserialize(fid);
+      derez.deserialize(offset);
     }
 
     /////////////////////////////////////////////////////////////
@@ -258,6 +620,32 @@ namespace LegionRuntime {
       : is_valid(true), fid(f), ptr(p), memory(m)
     //--------------------------------------------------------------------------
     {
+    }
+
+    //--------------------------------------------------------------------------
+    void PointerConstraint::serialize(Serializer &rez) const
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize(is_valid);
+      if (is_valid)
+      {
+        rez.serialize(fid);
+        rez.serialize(ptr);
+        rez.serialize(memory);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void PointerConstraint::deserialize(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      derez.deserialize(is_valid);
+      if (is_valid)
+      {
+        derez.deserialize(fid);
+        derez.deserialize(ptr);
+        derez.deserialize(memory);
+      }
     }
 
     /////////////////////////////////////////////////////////////
@@ -343,6 +731,97 @@ namespace LegionRuntime {
     {
       pointer_constraint = constraint;
       return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void LayoutConstraintSet::serialize(Serializer &rez) const
+    //--------------------------------------------------------------------------
+    {
+      specialized_constraint.serialize(rez);
+      memory_constraint.serialize(rez);
+      pointer_constraint.serialize(rez);
+#define PACK_CONSTRAINTS(Type, constraints)                             \
+      rez.serialize<size_t>(constraints.size());                        \
+      for (std::vector<Type>::const_iterator it = constraints.begin();  \
+            it != constraints.end(); it++)                              \
+      {                                                                 \
+        it->serialize(rez);                                             \
+      }
+      PACK_CONSTRAINTS(OrderingConstraint, ordering_constraints)
+      PACK_CONSTRAINTS(SplittingConstraint, splitting_constraints)
+      PACK_CONSTRAINTS(FieldConstraint, field_constraints)
+      PACK_CONSTRAINTS(DimensionConstraint, dimension_constraints)
+      PACK_CONSTRAINTS(AlignmentConstraint, alignment_constraints)
+      PACK_CONSTRAINTS(OffsetConstraint, offset_constraints)
+#undef PACK_CONSTRAINTS
+    }
+
+    //--------------------------------------------------------------------------
+    void LayoutConstraintSet::deserialize(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      specialized_constraint.deserialize(derez);
+      memory_constraint.deserialize(derez);
+      pointer_constraint.deserialize(derez);
+#define UNPACK_CONSTRAINTS(Type, constraints)                       \
+      {                                                             \
+        size_t constraint_size;                                     \
+        derez.deserialize(constraint_size);                         \
+        constraints.resize(constraint_size);                        \
+        for (std::vector<Type>::iterator it = constraints.begin();  \
+              it != constraints.end(); it++)                        \
+        {                                                           \
+          it->deserialize(derez);                                   \
+        }                                                           \
+      }
+      UNPACK_CONSTRAINTS(OrderingConstraint, ordering_constraints)
+      UNPACK_CONSTRAINTS(SplittingConstraint, splitting_constraints)
+      UNPACK_CONSTRAINTS(FieldConstraint, field_constraints)
+      UNPACK_CONSTRAINTS(DimensionConstraint, dimension_constraints)
+      UNPACK_CONSTRAINTS(AlignmentConstraint, alignment_constraints)
+      UNPACK_CONSTRAINTS(OffsetConstraint, offset_constraints)
+#undef UNPACK_CONSTRAINTS
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Task Layout Constraint Set 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    TaskLayoutConstraintSet& TaskLayoutConstraintSet::add_layout_constraint(
+                                          unsigned idx, LayoutConstraintID desc)
+    //--------------------------------------------------------------------------
+    {
+      layouts.insert(std::pair<unsigned,LayoutConstraintID>(idx, desc));
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void TaskLayoutConstraintSet::serialize(Serializer &rez) const
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize<size_t>(layouts.size());
+      for (std::multimap<unsigned,LayoutConstraintID>::const_iterator it = 
+            layouts.begin(); it != layouts.end(); it++)
+      {
+        rez.serialize(it->first);
+        rez.serialize(it->second);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void TaskLayoutConstraintSet::deserialize(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      size_t num_layouts;
+      derez.deserialize(num_layouts);
+      for (unsigned idx = 0; idx < num_layouts; idx++)
+      {
+        std::pair<unsigned,LayoutConstraintID> pair;
+        derez.deserialize(pair.first);
+        derez.deserialize(pair.second);
+        layouts.insert(pair);
+      }
     }
 
   };
