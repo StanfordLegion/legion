@@ -1356,8 +1356,8 @@ namespace LegionRuntime {
     public:
       // Help with debug printing
       char* to_string(const FieldMask &mask) const;
-      void to_field_set(const FieldMask &mask,
-                        std::set<FieldID> &field_set) const;
+      void get_field_ids(const FieldMask &mask,
+                         std::vector<FieldID> &fields) const;
     protected:
       // Assume we are already holding the node lock
       // when calling these methods
