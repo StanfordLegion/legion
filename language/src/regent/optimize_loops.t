@@ -245,6 +245,11 @@ function optimize_index_launch_loops.stat_for_num(cx, node)
     return node
   end
 
+  if #call.conditions > 0 then
+    log_fail(call, "FIXME: handle analysis of ad-hoc conditions")
+    return node
+  end
+
   if reduce_lhs then
     local reduce_as_type = std.as_read(call.expr_type)
     if not std.reduction_op_ids[reduce_op][reduce_as_type] then
