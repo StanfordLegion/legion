@@ -5646,7 +5646,7 @@ namespace LegionRuntime {
        */
       template<typename UDT,
         void (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
-                         Context, Runtime*)>
+                         Context, Runtime*, const UDT&)>
       static VariantID preregister_task_variant(
               const TaskVariantRegistrar &registrar, 
               const UDT &user_data, const char *task_name = NULL);

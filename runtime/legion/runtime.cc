@@ -16316,7 +16316,7 @@ namespace LegionRuntime {
       LayoutConstraints *constraints = 
         legion_new<LayoutConstraints>(layout_id, this, registrar);
       AutoLock l_lock(layout_constraints_lock);
-      if (layout_constraints_table.find(layout_id) == 
+      if (layout_constraints_table.find(layout_id) != 
           layout_constraints_table.end())
       {
         log_run.error("Illegal duplicate use of layout constraint ID %ld", 
