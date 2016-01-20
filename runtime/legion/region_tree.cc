@@ -13425,7 +13425,7 @@ namespace LegionRuntime {
 #ifdef LEGION_SPY
         {
           bool is_region = dst->logical_node->is_region();
-          LowLevel::IDType ispace;
+          LegionSpy::IDType ispace;
           if (is_region)
             ispace =
               dst->logical_node->as_region_node()->row_source->handle.get_id();
