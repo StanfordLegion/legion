@@ -101,6 +101,7 @@ namespace LegionRuntime {
     };
 
     /**
+     * \class ISAConstraint
      * ISA constraints specify the kind of instruction constraints
      * a task variant requires for its execution. At a high-level this
      * will be controlling which kind of low-level runtime processor
@@ -158,6 +159,7 @@ namespace LegionRuntime {
     };
 
     /**
+     * \class ProcessorConstraint
      * Processor constraints are used to declare that a task variant
      * should only be able to executed on processors of a certain
      * kind. This is necessary for example, to distinguish I/O tasks
@@ -186,6 +188,7 @@ namespace LegionRuntime {
     };
 
     /**
+     * \class ResourceConstraint
      * Resource constraints provide a way of specifying the expected
      * constraints for a task variant on a particular architecture.
      * The target low-level processor must meet the constraint in 
@@ -228,6 +231,7 @@ namespace LegionRuntime {
     };
 
     /**
+     * \class LaunchConstraint
      * Constraints on the launch configuration for this task.
      * Right now this mainly applies to GPU tasks which can 
      * specify things like required CTA and grid shape. In
@@ -264,6 +268,7 @@ namespace LegionRuntime {
     };
 
     /**
+     * \class ColocationConstraint
      * Co-location constraints can be used to specify that two
      * region requirements for a task need to be located in the 
      * same physical instance for layout purposes.
@@ -287,6 +292,7 @@ namespace LegionRuntime {
     };
 
     /**
+     * \class ExecutionConstraintSet
      * Provide a class for tracking all the associated 
      * constraints for a given task variant.
      */
@@ -316,6 +322,7 @@ namespace LegionRuntime {
     };
 
     /**
+     * \class SpecializedConstraint
      * This is a pretty basic constraint for physical instances.
      * Normal is a standard physical instance, while specialized
      * values are for indiciating the need for a custom kind of
@@ -349,6 +356,7 @@ namespace LegionRuntime {
     };
 
     /**
+     * \class MemoryConstraint
      * A placement constraint is used to specify where in 
      * memory to create physical instances. This is just an 
      * ordering of memories in which the runtime should attempt
@@ -373,6 +381,7 @@ namespace LegionRuntime {
     };
 
     /**
+     * \class FieldConstraint
      * A field constraint controls the ordering of fields in the
      * layout. Multiple field constraints can be specified 
      * an instance layout so that partial orders on fields can
@@ -400,6 +409,7 @@ namespace LegionRuntime {
     };
 
     /**
+     * \class OrderingConstraint
      * An ordering constraint specifies an ordering on 
      * index space dimensions as well as the special 'field'
      * dimension. The earliest dimensions are assumed to
@@ -442,6 +452,7 @@ namespace LegionRuntime {
     };
 
     /**
+     * \class SplittingConstraint
      * Specify how to split a normal index space dimension into
      * an inner and outer dimension. The split can be specified
      * in one of two ways: either by saying how many chunks to
@@ -471,6 +482,7 @@ namespace LegionRuntime {
     };
 
     /**
+     * \class DimensionConstraint
      * Dimension constraints specify the minimum or maximum 
      * necessary size of a given dimension.
      */
@@ -494,6 +506,7 @@ namespace LegionRuntime {
     };
 
     /**
+     * \class AlignmentConstraint
      * Specify the alignment constraint for a field. Users can
      * set lower or upper bounds or equality for a the 
      * byte-alignment of a given field.
@@ -519,6 +532,7 @@ namespace LegionRuntime {
     };
 
     /**
+     * \class OffsetConstraint
      * Specify an offset constraint for a given field. In
      * the case of this constraint equality is implied.
      */
@@ -541,6 +555,7 @@ namespace LegionRuntime {
     };
 
     /**
+     * \class PointerConstraint
      * Specify the assumed pointer for a given field in
      * the physical instance.
      */
