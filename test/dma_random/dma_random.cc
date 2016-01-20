@@ -12,7 +12,7 @@
 #define DIM_X 100
 #define DIM_Y 100
 #define DIM_Z 10
-#define NUM_TEST 100
+#define NUM_TEST 10
 #define PATH_LEN 20
 #define NUM_FIELDS 5
 
@@ -22,7 +22,19 @@ using namespace LegionRuntime::Arrays;
 
 enum {
   TOP_LEVEL_TASK = Processor::TASK_ID_FIRST_AVAILABLE+0,
+  WORKER_TASK = Processor::TASK_ID_FIRST_AVAILABLE+1,
 };
+
+struct InputArgs {
+  int argc;
+  char **argv;
+};
+
+InputArgs& get_input_args(void)
+{
+  static InputArgs args;
+  return args;
+}
 
 void initialize_region_data(Domain domain, RegionInstance inst, std::vector<size_t> field_order)
 {
@@ -138,9 +150,78 @@ bool verify_region_data(Domain domain, RegionInstance inst, std::vector<size_t> 
   return check;
 }
 
+Processor get_next_processor(Processor cur)
+{
+  Machine machine = Machine::get_machine();
+  std::set<Processor> all_procs;
+  machine.get_all_processors(all_procs);
+  for (std::set<Processor>::const_iterator it = all_procs.begin();
+        it != all_procs.end(); it++)
+  {
+    if (*it == cur)
+    {
+      // Advance the iterator once to get the next, handle
+      // the wrap around case too
+      it++;
+      if (it == all_procs.end())
+      {
+        return *(all_procs.begin());
+      }
+      else
+      {
+        return *it;
+      }
+    }
+  }
+  // Should always find one
+  assert(false);
+  return Processor::NO_PROC;
+}
+
 void top_level_task(const void *args, size_t arglen, const void *user_data, size_t user_data_len, Processor p)
 {
   printf("top level task - DMA random tests\n");
+  int num_workers = 1;
+  // Parse the input arguments
+#define INT_ARG(argname, varname) do { \
+        if(!strcmp((argv)[i], argname)) {		\
+          varname = atoi((argv)[++i]);		\
+          continue;					\
+        } } while(0)
+
+#define BOOL_ARG(argname, varname) do { \
+        if(!strcmp((argv)[i], argname)) {		\
+          varname = true;				\
+          continue;					\
+        } } while(0)
+  {
+    InputArgs &inputs = get_input_args();
+    char **argv = inputs.argv;
+    for (int i = 1; i < inputs.argc; i++)
+    {
+      INT_ARG("-w", num_workers);
+    }
+    assert(num_workers > 0);
+  }
+#undef INT_ARG
+#undef BOOL_ARG
+
+  Processor cur_proc = p;
+  Event* events = (Event*) malloc(sizeof(Event) * num_workers);
+  for (int i = 0; i < num_workers; i++) {
+    cur_proc = get_next_processor(cur_proc);
+    events[i] = cur_proc.spawn(WORKER_TASK, NULL, 0);
+  }
+
+  for (int i = 0; i < num_workers; i++) {
+    events[i].wait();
+  }
+  printf("finish top level task......\n");
+}
+
+void worker_task(const void *args, size_t arglen, const void *user_data, size_t user_data_len, Processor p)
+{
+  printf("start worker task\n");
   std::vector<size_t> field_sizes;
   for (unsigned i = 0; i < NUM_FIELDS; i++)
     field_sizes.push_back(sizeof(int));
@@ -262,7 +343,7 @@ void top_level_task(const void *args, size_t arglen, const void *user_data, size
     }
   }
   printf("all check passed......\n");
-  printf("finish top level task......\n");
+  printf("finish worker task..\n");
   return;
 }
 
@@ -270,12 +351,20 @@ int main(int argc, char **argv)
 {
   Runtime rt;
   
-  rt.init(&argc, &argv);
+  bool ok = rt.init(&argc, &argv);
+  assert(ok);
+
   rt.register_task(TOP_LEVEL_TASK, top_level_task);
+  rt.register_task(WORKER_TASK, worker_task);
 
-  rt.run(TOP_LEVEL_TASK, Runtime::ONE_TASK_ONLY);
+  // Set the input args
+  get_input_args().argv = argv;
+  get_input_args().argc = argc;
 
-  rt.shutdown();
+  // We should never return from this call
+  rt.run(TOP_LEVEL_TASK, Runtime::ONE_TASK_ONLY, 0, 0, false/*!background*/);
+
+  //rt.shutdown();
   
   return -1;
 }
