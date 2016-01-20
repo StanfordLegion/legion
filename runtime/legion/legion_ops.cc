@@ -2204,6 +2204,10 @@ namespace LegionRuntime {
             launcher.arrive_barriers.end(); it++)
       {
         arrive_barriers.push_back(*it);
+#ifdef LEGION_SPY
+        LegionSpy::log_event_dependence(it->phase_barrier,
+            arrive_barriers.back().phase_barrier);
+#endif
       }
       map_id = launcher.map_id;
       tag = launcher.tag;
@@ -2728,6 +2732,16 @@ namespace LegionRuntime {
             preconditions.insert(e);
           }
           sync_precondition = Event::merge_events(preconditions);
+#ifdef LEGION_SPY
+          if (!sync_precondition.exists())
+          {
+            UserEvent new_pre = UserEvent::create_user_event();
+            new_pre.trigger();
+            sync_precondition = new_pre;
+          }
+          LegionSpy::log_event_dependences(preconditions,
+              sync_precondition);
+#endif
         }
         std::set<Event> applied_conditions;
         std::set<Event> copy_complete_events;
@@ -2831,6 +2845,19 @@ namespace LegionRuntime {
         // Launch the complete task if necessary 
         Event copy_complete_event = 
           Event::merge_events(copy_complete_events);
+#ifdef LEGION_SPY
+        if (!copy_complete_event.exists())
+        {
+          UserEvent new_copy_complete = UserEvent::create_user_event();
+          new_copy_complete.trigger();
+          copy_complete_event = new_copy_complete;
+        }
+        LegionSpy::log_event_dependences(copy_complete_events, 
+            copy_complete_event);
+        LegionSpy::log_event_dependence(copy_complete_event,
+            completion_event);
+#endif
+
         // Chain all the unlock and barrier arrivals off of the
         // copy complete event
         if (!arrive_barriers.empty())
@@ -2839,6 +2866,10 @@ namespace LegionRuntime {
                 arrive_barriers.begin(); it != arrive_barriers.end(); it++)
           {
             it->phase_barrier.arrive(1/*count*/, copy_complete_event);    
+#ifdef LEGION_SPY
+            LegionSpy::log_event_dependence(completion_event, 
+                it->phase_barrier);
+#endif
           }
         }
 
