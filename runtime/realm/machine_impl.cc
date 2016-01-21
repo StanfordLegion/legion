@@ -148,7 +148,7 @@ namespace Realm {
 	    Memory m = id.convert<Memory>();
 	    assert(id.index_h() < num_memories);
             Memory::Kind kind = (Memory::Kind)(*cur++);
-	    unsigned size = *cur++;
+	    size_t size = *cur++;
 	    void *regbase = (void *)(*cur++);
 	    log_annc.debug() << "adding memory " << m << " (kind = " << kind
 			     << ", size = " << size << ", regbase = " << regbase << ")";
