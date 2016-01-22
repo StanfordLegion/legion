@@ -1,4 +1,4 @@
-/* Copyright 2015 Stanford University, NVIDIA Corporation
+/* Copyright 2016 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -62,7 +62,7 @@ namespace LegionRuntime {
       // test to be performed whenever the timeout
       // reaches zero.
       int timeout;
-#if defined(LEGION_LOGGING) || defined(LEGION_SPY)
+#ifdef LEGION_SPY
       UniqueID uid;
 #endif
     public:
@@ -939,6 +939,8 @@ namespace LegionRuntime {
       bool has_child(unsigned depth) const;
       const ColorPoint& get_child(unsigned depth) const;
       unsigned get_path_length(void) const;
+    public:
+      InstanceRef translate_ref(const InstanceRef &ref) const;
     protected:
       std::vector<ColorPoint> path;
       unsigned min_depth;
@@ -1272,7 +1274,8 @@ namespace LegionRuntime {
     public:
       MappingTraverser(RegionTreePath &path, const MappableInfo &info,
                        const RegionUsage &u, const FieldMask &m,
-                       Processor target, unsigned idx, bool restricted);
+                       Processor proc, unsigned idx, 
+                       InstanceView *target = NULL/*for restricted*/);
       MappingTraverser(const MappingTraverser &rhs);
       ~MappingTraverser(void);
     public:
@@ -1286,17 +1289,15 @@ namespace LegionRuntime {
       void traverse_node(RegionTreeNode *node);
       bool map_physical_region(RegionNode *node);
       bool map_reduction_region(RegionNode *node);
-      bool map_restricted_physical(RegionNode *node);
-      bool map_restricted_reduction(RegionNode *node);
     public:
       const MappableInfo &info;
       const RegionUsage usage;
       const FieldMask user_mask;
       const Processor target_proc;
       const unsigned index;
-      const bool restricted;
     protected:
       MappingRef result;
+      LogicalView *target;
     };
 
   }; // namespace HighLevel

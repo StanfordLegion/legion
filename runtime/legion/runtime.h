@@ -1,4 +1,4 @@
-/* Copyright 2015 Stanford University, NVIDIA Corporation
+/* Copyright 2016 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -535,7 +535,6 @@ namespace LegionRuntime {
     public:
       void perform_scheduling(void);
       void launch_task_scheduler(void);
-      void notify_pending_shutdown(void);
     public:
       void activate_context(SingleTask *context);
       void deactivate_context(SingleTask *context);
@@ -580,7 +579,6 @@ namespace LegionRuntime {
       // Scheduling state
       Reservation queue_lock;
       bool task_scheduler_enabled;
-      bool pending_shutdown;
       unsigned total_active_contexts;
       struct ContextState {
       public:
@@ -795,6 +793,7 @@ namespace LegionRuntime {
       void send_notifications(void);
       void send_response(void);
       bool handle_response(AddressSpaceID sender, bool result);
+      void record_outstanding_tasks(void);
       void finalize(void);
     public:
       Internal *const runtime;
@@ -884,7 +883,220 @@ namespace LegionRuntime {
     public:
       static void handle_continuation(const void *args);
     }; 
- 
+
+    /**
+     * \class PendingVariantRegistration
+     * A small helper class for deferring the restration of task
+     * variants until the runtime is started.
+     */
+    class PendingVariantRegistration {
+    public:
+      PendingVariantRegistration(VariantID vid, bool has_return,
+                                 const TaskVariantRegistrar &registrar,
+                                 const void *user_data, size_t user_data_size,
+                                 CodeDescriptor *realm_desc, 
+                                 CodeDescriptor *inline_desc,
+                                 const char *task_name);
+      PendingVariantRegistration(const PendingVariantRegistration &rhs);
+      ~PendingVariantRegistration(void);
+    public:
+      PendingVariantRegistration& operator=(
+                                      const PendingVariantRegistration &rhs);
+    public:
+      void perform_registration(Internal *runtime);
+    private:
+      VariantID vid;
+      bool has_return;
+      TaskVariantRegistrar registrar;
+      void *user_data;
+      size_t user_data_size;
+      CodeDescriptor *realm_desc; 
+      CodeDescriptor *inline_desc;
+      char *logical_task_name; // optional semantic info to attach to the task
+    };
+
+    /**
+     * \class TaskImpl
+     * This class is used for storing all the meta-data associated 
+     * with a logical task
+     */
+    class TaskImpl {
+    public:
+      static const AllocationType alloc_type = TASK_IMPL_ALLOC;
+    public:
+      struct SemanticRequestArgs {
+        HLRTaskID hlr_id;
+        TaskImpl *proxy_this;
+        SemanticTag tag;
+        AddressSpaceID source;
+      };
+    public:
+      TaskImpl(TaskID tid, Internal *rt, const char *name = NULL);
+      TaskImpl(const TaskImpl &rhs);
+      ~TaskImpl(void);
+    public:
+      TaskImpl& operator=(const TaskImpl &rhs);
+    public:
+      inline bool returns_value(void) const { return has_return_type; }
+    public:
+      void add_variant(VariantImpl *impl);
+      VariantImpl* find_variant_impl(VariantID variant_id);
+    public:
+      // For backwards compatibility only
+      TaskVariantCollection* get_collection(void); 
+    public:
+      const char* get_name(bool needs_lock = true) const;
+      void attach_semantic_information(SemanticTag tag, AddressSpaceID source,
+                             const void *buffer, size_t size, bool is_mutable);
+      void retrieve_semantic_information(SemanticTag tag,
+                                         const void *&buffer, size_t &size);
+      void send_semantic_info(AddressSpaceID target, SemanticTag tag,
+                              const void *value, size_t size, bool is_mutable);
+      void send_semantic_request(AddressSpaceID target, SemanticTag tag);
+      void process_semantic_request(SemanticTag tag, AddressSpaceID target);
+    public:
+      inline AddressSpaceID get_owner_space(void) const
+        { return get_owner_space(task_id, runtime); }
+      static AddressSpaceID get_owner_space(TaskID task_id, Internal *runtime);
+    public:
+      static void handle_semantic_request(Internal *runtime, 
+                          Deserializer &derez, AddressSpaceID source);
+      static void handle_semantic_info(Internal *runtime,
+                          Deserializer &derez, AddressSpaceID source);
+      static void handle_variant_request(Internal *runtime,
+                          Deserializer &derez, AddressSpaceID source);
+    public:
+      const TaskID task_id;
+      Internal *const runtime;
+    private:
+      Reservation task_lock;
+      std::map<VariantID,VariantImpl*> variants;
+      std::map<SemanticTag,SemanticInfo> semantic_infos;
+      // Track whether all these variants have a return type or not
+      bool has_return_type;
+      // Track whether all these variants are idempotent or not
+      bool all_idempotent;
+    private:
+      // This is for backwards compatibility only
+      TaskVariantCollection *collection;
+    };
+
+    /**
+     * \class VariantImpl
+     * This class is used for storing all the meta-data associated
+     * with a particular variant implementation of a task
+     */
+    class VariantImpl { 
+    public:
+      static const AllocationType alloc_type = VARIANT_IMPL_ALLOC;
+    public:
+      VariantImpl(Internal *runtime, VariantID vid, TaskImpl *owner, 
+                  const TaskVariantRegistrar &registrar, bool ret_val, 
+                  CodeDescriptor *realm_desc, CodeDescriptor *inline_desc,
+                  const void *user_data = NULL, size_t user_data_size = 0);
+      VariantImpl(const VariantImpl &rhs);
+      ~VariantImpl(void);
+    public:
+      VariantImpl& operator=(const VariantImpl &rhs);
+    public:
+      inline bool is_leaf(void) const { return leaf_variant; }
+      inline bool is_inner(void) const { return inner_variant; }
+      inline bool is_idempotent(void) const { return idempotent_variant; }
+      inline bool returns_value(void) const { return has_return_value; }
+    public:
+      Event dispatch_task(Processor target, SingleTask *task, 
+                          Event precondition, int priority,
+                          Realm::ProfilingRequestSet &requests);
+      void dispatch_inline(Processor current, Task *task);
+    public:
+      Processor::Kind get_processor_kind(bool warn) const;
+    public:
+      void send_variant_response(AddressSpaceID source, Event done_event);
+    public:
+      static AddressSpaceID get_owner_space(VariantID vid, Internal *runtime);
+      static void handle_variant_response(Internal *runtime, 
+                                          Deserializer &derez);
+    public:
+      const VariantID vid;
+      TaskImpl *const owner;
+      Internal *const runtime;
+      const bool global; // globally valid variant
+      const bool has_return_value; // has a return value
+    public:
+      CodeDescriptor *const realm_descriptor;
+      CodeDescriptor *const inline_descriptor;
+    private:
+      ExecutionConstraintSet execution_constraints;
+      TaskLayoutConstraintSet   layout_constraints;
+    private:
+      void *user_data;
+      size_t user_data_size;
+      Event ready_event;
+    private: // properties
+      bool leaf_variant;
+      bool inner_variant;
+      bool idempotent_variant;
+    private:
+      char *variant_name; 
+    };
+
+    /**
+     * \class LayoutConstraints
+     * A class for tracking a long-lived set of constraints
+     */
+    class LayoutConstraints : public LayoutConstraintSet {
+    public:
+      static const AllocationType alloc_type = LAYOUT_CONSTRAINTS_ALLOC; 
+    public:
+      struct ReleaseFunctor {
+      public:
+        ReleaseFunctor(Serializer &r, AddressSpaceID skip, Internal *rt) 
+          : rez(r), to_skip(skip), runtime(rt) { }
+      public:
+        void apply(AddressSpaceID target);
+      private:
+        Serializer &rez;
+        AddressSpaceID to_skip;
+        Internal *runtime;
+      };
+    public:
+      LayoutConstraints(LayoutConstraintID layout_id, Internal *runtime, 
+                        const LayoutConstraintRegistrar &registrar);
+      LayoutConstraints(LayoutConstraintID layout_id, Internal *runtime);
+      LayoutConstraints(const LayoutConstraints &rhs);
+      ~LayoutConstraints(void);
+    public:
+      LayoutConstraints& operator=(const LayoutConstraints &rhs);
+    public:
+      inline FieldSpace get_field_space(void) const { return handle; }
+      inline Event get_ready_event(void) const { return ready_event; }
+      inline const char* get_name(void) const { return constraints_name; }
+    public:
+      void release_constraints(AddressSpaceID source);
+      void send_constraints(AddressSpaceID source, UserEvent done_event);
+      void update_constraints(Deserializer &derez);
+    public:
+      AddressSpaceID get_owner(void) const;
+      static AddressSpaceID get_owner(LayoutConstraintID layout_id,
+                                      Internal *runtime);
+    public:
+      static void process_request(Internal *runtime, Deserializer &derez,
+                                  AddressSpaceID source);
+      static void process_response(Internal *runtime, Deserializer &derez);
+      static void process_release(Internal *runtime, Deserializer &derez,
+                                  AddressSpaceID source);
+    public:
+      const LayoutConstraintID layout_id;
+      Internal *const runtime;
+    protected:
+      FieldSpace handle;
+      Event ready_event;
+      char *constraints_name;
+    protected:
+      Reservation layout_lock;
+      NodeSet remote_instances; // only valid on the owner node
+    };
+
     /**
      * \class Internal 
      * This is the actual implementation of the Legion runtime functionality
@@ -961,7 +1173,6 @@ namespace LegionRuntime {
       Event launch_mapper_task(Mapper *mapper, Processor proc, 
                                Processor::TaskFuncID tid,
                                const TaskArgument &arg, MapperID map_id);
-      void perform_one_time_logging(void);
     public:
       IndexSpace create_index_space(Context ctx, size_t max_num_elmts);
       IndexSpace create_index_space(Context ctx, Domain domain);
@@ -1366,20 +1577,24 @@ namespace LegionRuntime {
                                        ProjectionFunctor *func);
       ProjectionFunctor* find_projection_functor(ProjectionID pid);
     public:
+      void attach_semantic_information(TaskID task_id, SemanticTag,
+                       const void *buffer, size_t size, bool is_mutable);
       void attach_semantic_information(IndexSpace handle, SemanticTag tag,
-                                       const void *buffer, size_t size);
+                       const void *buffer, size_t size, bool is_mutable);
       void attach_semantic_information(IndexPartition handle, SemanticTag tag,
-                                       const void *buffer, size_t size);
+                       const void *buffer, size_t size, bool is_mutable);
       void attach_semantic_information(FieldSpace handle, SemanticTag tag,
-                                       const void *buffer, size_t size);
+                       const void *buffer, size_t size, bool is_mutable);
       void attach_semantic_information(FieldSpace handle, FieldID fid,
-                                       SemanticTag tag,
-                                       const void *buffer, size_t size);
+                                       SemanticTag tag, const void *buffer, 
+                                       size_t size, bool is_mutable);
       void attach_semantic_information(LogicalRegion handle, SemanticTag tag,
-                                       const void *buffer, size_t size);
+                       const void *buffer, size_t size, bool is_mutable);
       void attach_semantic_information(LogicalPartition handle, SemanticTag tag,
-                                       const void *buffer, size_t size);
+                       const void *buffer, size_t size, bool is_mutable);
     public:
+      void retrieve_semantic_information(TaskID task_id, SemanticTag tag,
+                                         const void *&result, size_t &size);
       void retrieve_semantic_information(IndexSpace handle, SemanticTag tag,
                                          const void *&result, size_t &size);
       void retrieve_semantic_information(IndexPartition handle, SemanticTag tag,
@@ -1406,10 +1621,20 @@ namespace LegionRuntime {
                        const std::set<FieldID> &to_free);
     public:
       const std::vector<PhysicalRegion>& begin_task(Context ctx);
+      const std::vector<PhysicalRegion>& begin_inline_task(Context ctx);
       void end_task(Context ctx, const void *result, size_t result_size,
                     bool owned);
-      const void* get_local_args(Context ctx, DomainPoint &point, 
-                                 size_t &local_size);
+      void end_inline_task(Context ctx, const void *result, size_t result_size,
+                           bool owned);
+      VariantID register_variant(const TaskVariantRegistrar &registrar,
+                                 const void *user_data, size_t user_data_size,
+                                 CodeDescriptor *realm, CodeDescriptor *indesc,
+                                 bool ret, VariantID vid = AUTO_GENERATE_ID);
+      TaskImpl* find_or_create_task_impl(TaskID task_id);
+      TaskImpl* find_task_impl(TaskID task_id);
+      VariantImpl* find_variant_impl(TaskID task_id, VariantID variant_id);
+      // For backwards compatiblity only
+      TaskVariantCollection* get_collection(TaskID task_id);
     public:
       // Memory manager functions
       MemoryManager* find_memory(Memory mem);
@@ -1500,6 +1725,8 @@ namespace LegionRuntime {
       void send_unmake_persistent(AddressSpaceID target, Serializer &rez);
       void send_mapper_message(AddressSpaceID target, Serializer &rez);
       void send_mapper_broadcast(AddressSpaceID target, Serializer &rez);
+      void send_task_impl_semantic_request(AddressSpaceID target, 
+                                           Serializer &rez);
       void send_index_space_semantic_request(AddressSpaceID target, 
                                              Serializer &rez);
       void send_index_partition_semantic_request(AddressSpaceID target,
@@ -1511,6 +1738,8 @@ namespace LegionRuntime {
                                                 Serializer &rez);
       void send_logical_partition_semantic_request(AddressSpaceID target,
                                                    Serializer &rez);
+      void send_task_impl_semantic_info(AddressSpaceID target,
+                                        Serializer &rez);
       void send_index_space_semantic_info(AddressSpaceID target, 
                                           Serializer &rez);
       void send_index_partition_semantic_info(AddressSpaceID target,
@@ -1534,7 +1763,12 @@ namespace LegionRuntime {
       void send_remote_reduction_creation_request(AddressSpaceID target,
                                                   Serializer &rez);
       void send_remote_creation_response(AddressSpaceID target,Serializer &rez);
-      void send_back_logical_state(AddressSpaceID, Serializer &rez);
+      void send_back_logical_state(AddressSpaceID target, Serializer &rez);
+      void send_variant_request(AddressSpaceID target, Serializer &rez);
+      void send_variant_response(AddressSpaceID target, Serializer &rez);
+      void send_constraint_request(AddressSpaceID target, Serializer &rez);
+      void send_constraint_response(AddressSpaceID target, Serializer &rez);
+      void send_constraint_release(AddressSpaceID target, Serializer &rez);
     public:
       // Complementary tasks for handling messages
       void handle_task(Deserializer &derez);
@@ -1614,6 +1848,8 @@ namespace LegionRuntime {
       void handle_unmake_persistent(Deserializer &derez, AddressSpaceID source);
       void handle_mapper_message(Deserializer &derez);
       void handle_mapper_broadcast(Deserializer &derez);
+      void handle_task_impl_semantic_request(Deserializer &derez,
+                                             AddressSpaceID source);
       void handle_index_space_semantic_request(Deserializer &derez,
                                                AddressSpaceID source);
       void handle_index_partition_semantic_request(Deserializer &derez,
@@ -1626,6 +1862,8 @@ namespace LegionRuntime {
                                                   AddressSpaceID source);
       void handle_logical_partition_semantic_request(Deserializer &derez,
                                                      AddressSpaceID source);
+      void handle_task_impl_semantic_info(Deserializer &derez,
+                                          AddressSpaceID source);
       void handle_index_space_semantic_info(Deserializer &derez,
                                             AddressSpaceID source);
       void handle_index_partition_semantic_info(Deserializer &derez,
@@ -1655,6 +1893,13 @@ namespace LegionRuntime {
       void handle_remote_creation_response(Deserializer &derez);
       void handle_logical_state_return(Deserializer &derez,
                                        AddressSpaceID source);
+      void handle_variant_request(Deserializer &derez, AddressSpaceID source);
+      void handle_variant_response(Deserializer &derez);
+      void handle_constraint_request(Deserializer &derez,AddressSpaceID source);
+      void handle_constraint_response(Deserializer &derez);
+      void handle_constraint_release(Deserializer &derez,AddressSpaceID source);
+      void handle_top_level_task_request(Deserializer &derez);
+      void handle_top_level_task_complete(Deserializer &derez);
       void handle_shutdown_notification(AddressSpaceID source);
       void handle_shutdown_response(Deserializer &derez, AddressSpaceID source);
     public:
@@ -1777,7 +2022,16 @@ namespace LegionRuntime {
     public:
       void increment_outstanding_top_level_tasks(void);
       void decrement_outstanding_top_level_tasks(void);
+    public:
+      void issue_runtime_shutdown_attempt(void);
+      void attempt_runtime_shutdown(void);
       void initiate_runtime_shutdown(AddressSpaceID source);
+    public:
+      bool has_outstanding_tasks(void);
+      inline void increment_total_outstanding_tasks(void)
+        { __sync_fetch_and_add(&total_outstanding_tasks,1); }
+      inline void decrement_total_outstanding_tasks(void)
+        { __sync_fetch_and_sub(&total_outstanding_tasks,1); }
     public:
       template<typename T>
       inline T* get_available(Reservation reservation,
@@ -1886,13 +2140,15 @@ namespace LegionRuntime {
       bool is_local(Processor proc) const;
       Processor find_utility_processor(Processor proc);
     public:
-      IndexSpaceID     get_unique_index_space_id(void);
-      IndexPartitionID get_unique_index_partition_id(void);
-      FieldSpaceID     get_unique_field_space_id(void);
-      IndexTreeID      get_unique_index_tree_id(void);
-      RegionTreeID     get_unique_region_tree_id(void);
-      UniqueID         get_unique_operation_id(void);
-      FieldID          get_unique_field_id(void);
+      IndexSpaceID       get_unique_index_space_id(void);
+      IndexPartitionID   get_unique_index_partition_id(void);
+      FieldSpaceID       get_unique_field_space_id(void);
+      IndexTreeID        get_unique_index_tree_id(void);
+      RegionTreeID       get_unique_region_tree_id(void);
+      UniqueID           get_unique_operation_id(void);
+      FieldID            get_unique_field_id(void);
+      VariantID          get_unique_variant_id(void);
+      LayoutConstraintID get_unique_constraint_id(void);
     public:
       // Verify that a region requirement is valid
       LegionErrorType verify_requirement(const RegionRequirement &req,
@@ -1952,6 +2208,7 @@ namespace LegionRuntime {
       Processor utility_group;
       const bool has_explicit_utility_procs;
     protected:
+      unsigned total_outstanding_tasks;
       unsigned outstanding_top_level_tasks;
       ShutdownManager *shutdown_manager;
       Reservation shutdown_lock;
@@ -1980,6 +2237,15 @@ namespace LegionRuntime {
       // For every processor map it to its address space
       const std::map<Processor,AddressSpaceID> proc_spaces;
     protected:
+      // The task table 
+      Reservation task_variant_lock;
+      std::map<TaskID,TaskImpl*> task_table;
+      std::deque<VariantImpl*> variant_table;
+    protected:
+      // Constraint sets
+      Reservation layout_constraints_lock;
+      std::map<LayoutConstraintID,LayoutConstraints*> layout_constraints_table;
+    protected:
       struct MapperInfo {
         MapperInfo(void)
           : proc(Processor::NO_PROC), map_id(0) { }
@@ -2005,6 +2271,8 @@ namespace LegionRuntime {
       unsigned unique_region_tree_id;
       unsigned unique_operation_id;
       unsigned unique_field_id; 
+      unsigned unique_variant_id;
+      unsigned unique_constraint_id;
     protected:
       std::map<ProjectionID,ProjectionFunctor*> projection_functors;
     protected:
@@ -2149,6 +2417,19 @@ namespace LegionRuntime {
       void print_outstanding_tasks(FILE *f = stdout, int cnt = -1);
 #endif
     public:
+      LayoutConstraintID register_layout(
+          const LayoutConstraintRegistrar &registrar, 
+          LayoutConstraintID id);
+      void release_layout(LayoutConstraintID layout_id, AddressSpaceID source);
+      static LayoutConstraintID preregister_layout(
+                                     const LayoutConstraintRegistrar &registrar,
+                                     LayoutConstraintID layout_id);
+      FieldSpace get_layout_constraint_field_space(LayoutConstraintID id);
+      void get_layout_constraints(LayoutConstraintID layout_id,
+                                  LayoutConstraintSet &layout_constraints);
+      const char* get_layout_constraints_name(LayoutConstraintID layout_id);
+      LayoutConstraints* find_layout_constraints(LayoutConstraintID layout_id);
+    public:
       // Static methods for start-up and callback phases
       static int start(int argc, char **argv, bool background);
       static void wait_for_shutdown(void);
@@ -2167,29 +2448,19 @@ namespace LegionRuntime {
                                     ProjectionID handle, void *func_ptr);
       static ProjectionID register_partition_projection_function(
                                     ProjectionID handle, void *func_ptr);
-      static TaskID update_collection_table(
-                      LowLevelFnptr low_level_ptr, InlineFnptr inline_ptr,
-                      TaskID uid, Processor::Kind proc_kind, 
-                      bool single_task, bool index_space_task,
-                      VariantID &vid, size_t return_size,
-                      const TaskConfigOptions &options,
-                      const char *name);
-      static TaskID update_collection_table(
-                      LowLevelFnptr low_level_ptr, InlineFnptr inline_ptr,
-                      TaskID uid, Processor::Kind proc_kind, 
-                      bool single_task, bool index_space_task,
-                      VariantID vid, size_t return_size,
-                      const TaskConfigOptions &options,
-                      const char *name, 
-                      const void *user_data, size_t user_data_size);
-      static const void* find_user_data(TaskID tid, VariantID vid);
-      static TaskVariantCollection* get_variant_collection(
-                      Processor::TaskFuncID tid);
+      static std::deque<PendingVariantRegistration*>&
+                                get_pending_variant_table(void);
+      static std::map<LayoutConstraintID,LayoutConstraintRegistrar>&
+                                get_pending_constraint_table(void);
+      static VariantID preregister_variant(
+                      const TaskVariantRegistrar &registrar,
+                      const void *user_data, size_t user_data_size,
+                      CodeDescriptor *realm_desc, CodeDescriptor *inline_desc,
+                      bool has_ret, const char *task_name);
       static PartitionProjectionFnptr 
                     find_partition_projection_function(ProjectionID pid);
       static RegionProjectionFnptr
                     find_region_projection_function(ProjectionID pid);
-      static InlineFnptr find_inline_function(Processor::TaskFuncID fid);
 #if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS)
     public:
       static const char* find_privilege_task_name(void *impl);
@@ -2201,16 +2472,9 @@ namespace LegionRuntime {
 #endif
     private:
       static int* get_startup_arrivals(void);
-      static TaskIDTable& get_task_table(bool add_runtime_tasks = true);
-      static std::map<Processor::TaskFuncID,InlineFnptr>& 
-                                            get_inline_table(void);
-      static std::map<Processor::TaskFuncID,TaskVariantCollection*>& 
-                                            get_collection_table(void);
-      static std::map<std::pair<TaskID,VariantID>,const void*>&
-                                            get_user_data_table(void);
       static RegionProjectionTable& get_region_projection_table(void);
       static PartitionProjectionTable& get_partition_projection_table(void);
-      static void register_runtime_tasks(TaskIDTable &table);
+      static Event register_runtime_tasks(RealmRuntime &realm);
       static Processor::TaskFuncID get_next_available_id(void);
       static void log_machine(Machine machine);
 #ifdef SPECIALIZED_UTIL_PROCS
@@ -2228,15 +2492,15 @@ namespace LegionRuntime {
       static unsigned initial_tasks_to_schedule;
       static unsigned superscalar_width;
       static unsigned max_message_size;
-      static unsigned max_filter_size;
       static unsigned gc_epoch_size;
-      static bool enable_imprecise_filter;
+      static bool runtime_started;
       static bool separate_runtime_instances;
       static bool record_registration;
       static bool stealing_disabled;
       static bool resilient_mode;
       static bool unsafe_launch;
       static bool dynamic_independence_tests;
+      static bool legion_spy_enabled;
       static unsigned shutdown_counter;
       static int mpi_rank;
       static unsigned mpi_rank_table[MAX_NUM_NODES];

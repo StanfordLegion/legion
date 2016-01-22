@@ -5,4 +5,5 @@ test_profiling
 ctxswitch
 proc_group
 barrier_reduce
+taskreg
 deppart

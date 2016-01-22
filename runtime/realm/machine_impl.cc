@@ -1,4 +1,4 @@
-/* Copyright 2015 Stanford University, NVIDIA Corporation
+/* Copyright 2016 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -148,7 +148,7 @@ namespace Realm {
 	    Memory m = id.convert<Memory>();
 	    assert(id.index_h() < num_memories);
             Memory::Kind kind = (Memory::Kind)(*cur++);
-	    unsigned size = *cur++;
+	    size_t size = *cur++;
 	    void *regbase = (void *)(*cur++);
 	    log_annc.debug() << "adding memory " << m << " (kind = " << kind
 			     << ", size = " << size << ", regbase = " << regbase << ")";
@@ -246,7 +246,7 @@ namespace Realm {
       for(std::vector<Machine::ProcessorMemoryAffinity>::const_iterator it = proc_mem_affinities.begin();
 	  it != proc_mem_affinities.end();
 	  it++) {
-	if((*it).p == p)
+	if((*it).p == p && (*it).m.capacity() > 0)
 	  mset.insert((*it).m);
       }
     }
@@ -259,10 +259,10 @@ namespace Realm {
       for(std::vector<Machine::MemoryMemoryAffinity>::const_iterator it = mem_mem_affinities.begin();
 	  it != mem_mem_affinities.end();
 	  it++) {
-	if((*it).m1 == m)
+	if((*it).m1 == m && (*it).m2.capacity() > 0)
 	  mset.insert((*it).m2);
 	
-	if((*it).m2 == m)
+	if((*it).m2 == m && (*it).m1.capacity() > 0)
 	  mset.insert((*it).m1);
       }
     }

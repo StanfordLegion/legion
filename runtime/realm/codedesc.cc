@@ -1,4 +1,4 @@
-/* Copyright 2015 Stanford University, NVIDIA Corporation
+/* Copyright 2016 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -143,6 +143,13 @@ namespace Realm {
   //
   // class FunctionPointerImplementation
 
+  /*static*/ Serialization::PolymorphicSerdezSubclass<CodeImplementation,
+						      FunctionPointerImplementation> FunctionPointerImplementation::serdez_subclass;
+
+  FunctionPointerImplementation::FunctionPointerImplementation(void)
+    : fnptr(0)
+  {}
+
   FunctionPointerImplementation::FunctionPointerImplementation(void (*_fnptr)())
     : fnptr(_fnptr)
   {}
@@ -161,9 +168,16 @@ namespace Realm {
   }
 
 
+#ifdef REALM_USE_DLFCN
   ////////////////////////////////////////////////////////////////////////
   //
   // class DSOReferenceImplementation
+
+  /*static*/ Serialization::PolymorphicSerdezSubclass<CodeImplementation,
+						      DSOReferenceImplementation> DSOReferenceImplementation::serdez_subclass;
+
+  DSOReferenceImplementation::DSOReferenceImplementation(void)
+  {}
 
   DSOReferenceImplementation::DSOReferenceImplementation(const std::string& _dso_name,
 							 const std::string& _symbol_name)
@@ -182,7 +196,7 @@ namespace Realm {
   {
     return true;
   }
-
+#endif
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -190,12 +204,15 @@ namespace Realm {
 
   Logger log_codetrans("codetrans");
 
+#ifdef REALM_USE_DLFCN
   FunctionPointerImplementation *cvt_dsoref_to_fnptr(const DSOReferenceImplementation *dso)
   {
     // TODO: once this moves to a "code translator" object with state, actually keep
     //  track of all the handles we open, reuse when possible, and clean up at end
 
-    void *handle = dlopen(dso->dso_name.c_str(), RTLD_NOW | RTLD_LOCAL);
+    // an empty string means we should look in the main executable
+    const char *dso_name = dso->dso_name.c_str();
+    void *handle = dlopen(*dso_name ? dso_name : 0, RTLD_NOW | RTLD_LOCAL);
     if(!handle) {
       log_codetrans.warning() << "could not open DSO '" << dso->dso_name << "': " << dlerror();
       return 0;
@@ -210,7 +227,9 @@ namespace Realm {
     return new FunctionPointerImplementation((void(*)())ptr);
   }
 
-  DSOReferenceImplementation *cvt_fnptr_to_dsoref(const FunctionPointerImplementation *fpi)
+#ifdef REALM_USE_DLADDR
+  extern "C" { int main(int argc, const char *argv[]); };
+  DSOReferenceImplementation *cvt_fnptr_to_dsoref(const FunctionPointerImplementation *fpi, bool quiet /*= false*/)
   {
     // if dladdr() gives us something with the same base pointer, assume that's portable
     Dl_info inf;
@@ -220,16 +239,34 @@ namespace Realm {
     void *ptr = (void *)(fpi->fnptr);
     ret = dladdr(ptr, &inf);
     if(ret == 0) {
-      log_codetrans.warning() << "couldn't map fnptr " << ptr << " to a dynamic symbol";
+      if(!quiet)
+	log_codetrans.warning() << "couldn't map fnptr " << ptr << " to a dynamic symbol";
       return 0;
     }
 
     if(inf.dli_saddr != ptr) {
-      log_codetrans.warning() << "pointer " << ptr << " in middle of symbol '" << inf.dli_sname << " (" << inf.dli_saddr << ")?";
+      if(!quiet)
+	log_codetrans.warning() << "pointer " << ptr << " in middle of symbol '" << inf.dli_sname << " (" << inf.dli_saddr << ")?";
       return 0;
     }
 
-    return new DSOReferenceImplementation(inf.dli_fname, inf.dli_sname);
+    // try to detect symbols that are in the base executable and change the filename to ""
+    const char *fname = inf.dli_fname;
+    {
+      static const char *local_fname = 0;
+      if(!local_fname) {
+	Dl_info inf2;
+	ret = dladdr((void *)main, &inf2);
+	assert(ret != 0);
+	local_fname = strdup(inf2.dli_fname);
+      }
+      if(!strcmp(fname, local_fname))
+	fname = "";
+    }
+
+    return new DSOReferenceImplementation(fname, inf.dli_sname);
   }
+#endif
+#endif
 
 };

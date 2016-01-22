@@ -1,4 +1,4 @@
-/* Copyright 2015 Stanford University, NVIDIA Corporation
+/* Copyright 2016 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -43,6 +43,7 @@ typedef int legion_lowlevel_custom_serdez_id_t;
 // Different Processor types
 // Keep this in sync with Processor::Kind in lowlevel.h
 typedef enum legion_lowlevel_processor_kind_t {
+  NO_KIND,
   TOC_PROC, // Throughput core
   LOC_PROC, // Latency core
   UTIL_PROC, // Utility core

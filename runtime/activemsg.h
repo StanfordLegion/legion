@@ -1,4 +1,4 @@
-/* Copyright 2015 Stanford University, NVIDIA Corporation
+/* Copyright 2016 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -60,6 +60,8 @@
       METADATA_RESPONSE_MSGID, // should really be a reply
       METADATA_INVALIDATE_MSGID,
       METADATA_INVALIDATE_ACK_MSGID,
+      REGISTER_TASK_MSGID,
+      REGISTER_TASK_COMPLETE_MSGID,
       REMOTE_MICROOP_MSGID,
       REMOTE_MICROOP_COMPLETE_MSGID,
       REMOTE_SPARSITY_CONTRIB_MSGID,

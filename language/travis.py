@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# Copyright 2015 Stanford University
+# Copyright 2016 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -64,6 +64,7 @@ if __name__ == '__main__':
     env = install_dependencies()
     env.update({
         'LG_RT_DIR': runtime_dir,
+        'LUAJIT_URL': 'http://legion.stanford.edu/~eslaught/mirror/LuaJIT-2.0.4.tar.gz',
     })
 
     test(root_dir, True, env)

@@ -1,4 +1,4 @@
-/* Copyright 2015 Stanford University, NVIDIA Corporation
+/* Copyright 2016 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -131,6 +131,9 @@ namespace LegionRuntime {
       CURRENT_STATE_ALLOC,
       PHYSICAL_STATE_ALLOC,
       VERSION_STATE_ALLOC,
+      TASK_IMPL_ALLOC,
+      VARIANT_IMPL_ALLOC,
+      LAYOUT_CONSTRAINTS_ALLOC,
       LAST_ALLOC, // must be last
     };
 

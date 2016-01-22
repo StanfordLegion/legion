@@ -1,4 +1,4 @@
-/* Copyright 2015 Stanford University, NVIDIA Corporation
+/* Copyright 2016 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,7 +16,6 @@
 
 #include "lowlevel.h"
 #include "accessor.h"
-#include "legion_logging.h"
 #include "realm/profiling.h"
 #include "realm/timers.h"
 #include "realm/custom_serdez.h"
@@ -231,7 +230,14 @@ namespace LegionRuntime {
       friend class Realm::Machine;
       friend class Realm::Runtime;
     public:
-      typedef std::map<Processor::TaskFuncID, Processor::TaskFuncPtr> TaskTable;
+      struct TaskTableEntry {
+	Processor::TaskFuncPtr func_ptr;
+	void *userdata;
+	size_t userlen;
+      };
+      typedef std::map<Processor::TaskFuncID, TaskTableEntry> TaskTable;
+      bool register_task(Processor::TaskFuncID func_id, Processor::TaskFuncPtr func_ptr,
+			 const void *userdata, size_t userlen);
     protected:
       TaskTable task_table;
       std::map<ReductionOpID, const ReductionOpUntyped *> redop_table;
@@ -1967,6 +1973,59 @@ namespace Realm {
       RuntimeImpl::get_runtime()->get_processor_impl(*this)->get_group_members(members);
     }
 
+    Logger log_taskreg("taskreg");
+  
+
+    Event Processor::register_task(TaskFuncID func_id,
+				   const CodeDescriptor& codedesc,
+				   const ProfilingRequestSet& prs,
+				   const void *user_data /*= 0*/,
+				   size_t user_data_len /*= 0*/) const
+    {
+      // some sanity checks first
+      if(codedesc.type() != TypeConv::from_cpp_type<TaskFuncPtr>()) {
+	log_taskreg.fatal() << "attempt to register a task function of improper type: " << codedesc.type();
+	assert(0);
+      }
+
+      const FunctionPointerImplementation *fpi = codedesc.find_impl<FunctionPointerImplementation>();
+      if(!fpi) {
+	log_taskreg.fatal() << "shared lowlevel cannot register a task with no function pointer";
+	assert(0);
+      }
+
+      // HACK - just fall back to global registration for now
+      RuntimeImpl::get_runtime()->register_task(func_id, (TaskFuncPtr)(fpi->fnptr),
+						user_data, user_data_len);
+
+      return Event::NO_EVENT;
+    }
+
+    /*static*/ Event Processor::register_task_by_kind(Kind target_kind, bool global,
+						      TaskFuncID func_id,
+						      const CodeDescriptor& codedesc,
+						      const ProfilingRequestSet& prs,
+						      const void *user_data /*= 0*/,
+						      size_t user_data_len /*= 0*/)
+    {
+      // some sanity checks first
+      if(codedesc.type() != TypeConv::from_cpp_type<TaskFuncPtr>()) {
+	log_taskreg.fatal() << "attempt to register a task function of improper type: " << codedesc.type();
+	assert(0);
+      }
+
+      const FunctionPointerImplementation *fpi = codedesc.find_impl<FunctionPointerImplementation>();
+      if(!fpi) {
+	log_taskreg.fatal() << "shared lowlevel cannot register a task with no function pointer";
+	assert(0);
+      }
+
+      // HACK - just fall back to global registration for now
+      RuntimeImpl::get_runtime()->register_task(func_id, (TaskFuncPtr)(fpi->fnptr),
+						user_data, user_data_len);
+
+      return Event::NO_EVENT;
+    }
 };
 
 namespace LegionRuntime {
@@ -2132,12 +2191,13 @@ namespace LegionRuntime {
 #ifdef DEBUG_LOW_LEVEL
           assert(it != task_table.end());
 #endif
-          Processor::TaskFuncPtr func = it->second;
+          Processor::TaskFuncPtr func = it->second.func_ptr;
           if (task->capture_timeline)
             task->timeline.record_start_time();
           if (task->capture_usage)
             task->usage.proc = proc;
-          func(task->args, task->arglen, NULL, 0, proc);
+          func(task->args, task->arglen,
+	       it->second.userdata, it->second.userlen, proc);
           if (task->capture_timeline)
 	  {
             task->timeline.record_end_time();
@@ -2205,7 +2265,7 @@ namespace LegionRuntime {
         task_table.find(Processor::TASK_ID_PROCESSOR_INIT);
       if (it != task_table.end())
       {	  
-        Processor::TaskFuncPtr func = it->second;
+        Processor::TaskFuncPtr func = it->second.func_ptr;
         func(NULL, 0, NULL, 0, proc);
       }
       // Wait for all the processors to be ready to go
@@ -2238,7 +2298,7 @@ namespace LegionRuntime {
         task_table.find(Processor::TASK_ID_PROCESSOR_SHUTDOWN);
       if (it != task_table.end())
       {	  
-        Processor::TaskFuncPtr func = it->second;
+        Processor::TaskFuncPtr func = it->second.func_ptr;
         func(NULL, 0, NULL, 0, proc);
       }
     }
@@ -5878,11 +5938,6 @@ namespace LegionRuntime {
 
     Event CopyOperation::register_copy(Event wait_on)
     {
-#ifdef LEGION_LOGGING
-      LegionRuntime::HighLevel::LegionLogging::log_timing_event(
-                                    Processor::get_executing_processor(),
-                                    done_event->get_event(), COPY_INIT);
-#endif
       Event result = done_event->get_event();
       if (wait_on.exists()) {
         EventImpl *event_impl = RuntimeImpl::get_runtime()->get_event_impl(wait_on);
@@ -5896,11 +5951,6 @@ namespace LegionRuntime {
     void CopyOperation::perform(void)
     {
       DetailedTimer::ScopedPush sp(TIME_COPY); 
-#ifdef LEGION_LOGGING
-      LegionRuntime::HighLevel::LegionLogging::log_timing_event(
-                                    Processor::NO_PROC,
-                                    done_event->get_event(), COPY_BEGIN);
-#endif
       // A little bit of a hack for the shared lowlevel profiling
       if (capture_usage && !srcs.empty() && !dsts.empty()) {
         usage.source = srcs[0].inst.get_location();
@@ -5948,11 +5998,6 @@ namespace LegionRuntime {
           }
         }
       }
-#ifdef LEGION_LOGGING
-      LegionRuntime::HighLevel::LegionLogging::log_timing_event(
-                                      Processor::NO_PROC,
-                                      done_event->get_event(), COPY_END);
-#endif
       // Trigger the event indicating that we are done
       done_event->trigger();
     }
@@ -6193,12 +6238,6 @@ namespace LegionRuntime {
 				 ReductionOpID redop_id /*= 0*/, bool red_fold /*= false*/)
     {
       EventImpl *done_event = NULL;
-#ifdef LEGION_LOGGING
-      done_event = RuntimeImpl::get_runtime()->get_free_event(); 
-      LegionRuntime::HighLevel::LegionLogging::log_timing_event(
-                                      Processor::get_executing_processor(),
-                                      done_event->get_event(), COPY_INIT);
-#endif
       CopyOperation *co = new CopyOperation(srcs, dsts, 
 					    domain, //get_element_mask(), get_element_mask(),
 					    redop_id, red_fold,
@@ -6214,12 +6253,6 @@ namespace LegionRuntime {
                                  ReductionOpID redop_id, bool red_fold)
     {
       EventImpl *done_event = NULL;
-#ifdef LEGION_LOGGING
-      done_event = RuntimeImpl::get_runtime()->get_free_event(); 
-      LegionRuntime::HighLevel::LegionLogging::log_timing_event(
-                                      Processor::get_executing_processor(),
-                                      done_event->get_event(), COPY_INIT);
-#endif
       CopyOperation *co = new CopyOperation(srcs, dsts, requests, 
 					    domain, redop_id, red_fold,
 					    done_event);
@@ -6650,18 +6683,7 @@ namespace Realm {
     {
       assert(impl != 0);
 
-      if (taskid == 0)
-      {
-	fprintf(stderr,"Using task_id 0 in the task table is illegal!  Task_id 0 is the shutdown task\n");
-	fflush(stderr);
-	exit(1);
-      }
-
-      if(((RuntimeImpl *)impl)->task_table.count(taskid) > 0)
-	return false;
-
-      ((RuntimeImpl *)impl)->task_table[taskid] = taskptr;
-      return true;
+      return ((RuntimeImpl *)impl)->register_task(taskid, taskptr, 0, 0);
     }
 
     bool Runtime::register_reduction(ReductionOpID redop_id, const ReductionOpUntyped *redop)
@@ -6769,6 +6791,47 @@ namespace LegionRuntime {
         PTHREAD_SAFE_CALL(pthread_mutex_init(&free_alloc_lock,NULL));
 	PTHREAD_SAFE_CALL(pthread_rwlock_init(&instance_lock,NULL));
         PTHREAD_SAFE_CALL(pthread_mutex_init(&free_inst_lock,NULL));
+    }
+
+    bool RuntimeImpl::register_task(Processor::TaskFuncID taskid, Processor::TaskFuncPtr taskptr,
+				    const void *userdata, size_t userlen)
+    {
+      if (taskid == 0)
+      {
+	fprintf(stderr,"Using task_id 0 in the task table is illegal!  Task_id 0 is the shutdown task\n");
+	fflush(stderr);
+	exit(1);
+      }
+
+      TaskTable::iterator it = task_table.find(taskid);
+      if(it != task_table.end()) {
+	// ignore re-registration of the same task
+	if(it->second.func_ptr != taskptr) {
+	  fprintf(stderr, "Attempt to change function pointer for task %d\n", taskid);
+	  assert(0);
+	  exit(1);
+	}
+	if((it->second.userlen != userlen) ||
+	   (userlen && memcmp(it->second.userdata, userdata, userlen))) {
+	  fprintf(stderr, "Attempt to change user data for task %d\n", taskid);
+	  assert(0);
+	  exit(1);
+	}
+	return true;
+      }
+
+      TaskTableEntry& tte = task_table[taskid];
+      tte.func_ptr = taskptr;
+      if(userlen) {
+	tte.userdata = malloc(userlen);
+	memcpy(tte.userdata, userdata, userlen);
+	tte.userlen = userlen;
+      } else {
+	tte.userdata = 0;
+	tte.userlen = 0;
+      }
+
+      return true;
     }
 
     bool RuntimeImpl::init(int *argc, char ***argv)

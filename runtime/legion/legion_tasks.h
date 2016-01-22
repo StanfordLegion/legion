@@ -1,4 +1,4 @@
-/* Copyright 2015 Stanford University, NVIDIA Corporation
+/* Copyright 2016 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -52,8 +52,9 @@ namespace LegionRuntime {
       virtual Acquire* as_mappable_acquire(void) const;
       virtual Release* as_mappable_release(void) const;
       virtual UniqueID get_unique_mappable_id(void) const;
+      virtual const char* get_task_name(void) const;
     public:
-      inline bool is_remote(void) const { return !runtime->is_local(orig_proc);}
+      bool is_remote(void) const;
       inline bool is_stolen(void) const { return (steal_count > 0); }
       inline bool is_locally_mapped(void) const { return map_locally; }
       inline bool is_premapped(void) const { return premapped; }
@@ -102,7 +103,13 @@ namespace LegionRuntime {
       // Returns true if the task should be deactivated
       virtual bool pack_task(Serializer &rez, Processor target) = 0;
       virtual bool unpack_task(Deserializer &derez, Processor current) = 0;
-      virtual void perform_inlining(SingleTask *ctx, InlineFnptr fn) = 0;
+      virtual void perform_inlining(SingleTask *ctx, VariantImpl *variant) = 0;
+    public:
+      virtual const std::vector<PhysicalRegion>& begin_inline_task(void);
+      virtual void end_inline_task(const void *result, 
+                                   size_t result_size, bool owned);
+    public:
+      RegionTreeContext get_parent_context(unsigned idx);
     protected:
       void pack_version_infos(Serializer &rez,
                               std::vector<VersionInfo> &infos);
@@ -184,10 +191,9 @@ namespace LegionRuntime {
       virtual void trigger_task_commit(void) = 0;
     protected:
       // Early mapped regions
-      std::map<unsigned/*idx*/,InstanceRef> early_mapped_regions;
+      std::map<unsigned/*idx*/,InstanceRef>     early_mapped_regions;
     protected:
-      std::deque<RegionTreeContext> enclosing_contexts;
-      std::vector<unsigned> parent_req_indexes;
+      std::vector<unsigned>                     parent_req_indexes;
     protected:
       std::set<LogicalRegion>                   created_regions;
       std::set<std::pair<FieldSpace,FieldID> >  created_fields;
@@ -204,6 +210,9 @@ namespace LegionRuntime {
       bool children_commit;
       bool children_complete_invoked;
       bool children_commit_invoked;
+    private:
+      mutable bool is_local;
+      mutable bool local_cached;
     protected:
       AllocManager *arg_manager;
     public:
@@ -472,7 +481,6 @@ namespace LegionRuntime {
       static void process_mapper_profiling(const void *args, size_t arglen);
     public:
       PhysicalManager* get_instance(unsigned idx);
-      void return_virtual_instance(unsigned index, const CompositeRef &ref);
     public:
       virtual void activate(void) = 0;
       virtual void deactivate(void) = 0;
@@ -486,6 +494,8 @@ namespace LegionRuntime {
       virtual bool is_stealable(void) const = 0;
       virtual bool has_restrictions(unsigned idx, LogicalRegion handle) = 0;
       virtual bool can_early_complete(UserEvent &chain_event) = 0;
+      virtual void return_virtual_instance(unsigned index, 
+                                           const CompositeRef &ref) = 0;
     public:
       virtual Event get_task_completion(void) const = 0;
       virtual TaskKind get_task_kind(void) const = 0;
@@ -496,8 +506,7 @@ namespace LegionRuntime {
       virtual void record_remote_instance(AddressSpaceID remote_inst,
                                           RemoteTask *remote_ctx) = 0;
     public:
-      // Has a base implementation but can override
-      virtual RegionTreeContext find_enclosing_context(unsigned idx);
+      RegionTreeContext find_enclosing_context(unsigned idx);
     public:
       // Override these methods from operation class
       virtual bool trigger_execution(void);
@@ -509,11 +518,13 @@ namespace LegionRuntime {
       virtual bool unpack_task(Deserializer &derez, Processor current) = 0;
       virtual void find_enclosing_local_fields(
       LegionDeque<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::tracked &infos) = 0;
-      virtual void perform_inlining(SingleTask *ctx, InlineFnptr fn) = 0;
+      virtual void perform_inlining(SingleTask *ctx, VariantImpl *variant) = 0;
     public:
       virtual void handle_future(const void *res, 
                                  size_t res_size, bool owned) = 0; 
       virtual void handle_post_mapped(Event pre = Event::NO_EVENT) = 0;
+    public:
+      virtual InstanceRef find_restricted_instance(unsigned index) = 0;
     protected:
       std::vector<RegionTreePath> mapping_paths;
       // Boolean for each region saying if it is virtual mapped
@@ -564,6 +575,9 @@ namespace LegionRuntime {
       Event dependence_precondition;
       Event profiling_done;
     protected:
+      mutable bool leaf_cached, is_leaf_result;
+      mutable bool inner_cached, is_inner_result;
+    protected:
       // Number of sub-tasks ready to map
       unsigned outstanding_subtasks;
       // Number of mapped sub-tasks that are yet to run
@@ -575,6 +589,9 @@ namespace LegionRuntime {
     protected:
       FenceOp *current_fence;
       GenerationID fence_gen;
+#ifdef LEGION_SPY
+      UniqueID current_fence_uid;
+#endif
     protected:
       // Resources that can build up over a task's lifetime
       LegionDeque<Reservation,TASK_RESERVATION_ALLOC>::tracked context_locks;
@@ -587,7 +604,7 @@ namespace LegionRuntime {
     protected:
       // Information for tracking restrictions
       LegionMap<RegionTreeID,FieldMask>::aligned restricted_trees;
-#if defined(LEGION_LOGGING) || defined(LEGION_SPY)
+#ifdef LEGION_SPY
     protected:
       Event legion_spy_start;
     public:
@@ -642,7 +659,7 @@ namespace LegionRuntime {
     public:
       virtual bool pack_task(Serializer &rez, Processor target) = 0;
       virtual bool unpack_task(Deserializer &derez, Processor current) = 0;
-      virtual void perform_inlining(SingleTask *ctx, InlineFnptr fn) = 0;
+      virtual void perform_inlining(SingleTask *ctx, VariantImpl *variant) = 0;
     public:
       virtual SliceTask* clone_as_slice_task(const Domain &d,
           Processor p, bool recurse, bool stealable,
@@ -727,6 +744,8 @@ namespace LegionRuntime {
       virtual bool is_stealable(void) const;
       virtual bool has_restrictions(unsigned idx, LogicalRegion handle);
       virtual bool can_early_complete(UserEvent &chain_event);
+      virtual void return_virtual_instance(unsigned index,
+                                           const CompositeRef &ref);
       virtual VersionInfo& get_version_info(unsigned idx);
       virtual RegionTreePath& get_privilege_path(unsigned idx);
       virtual void recapture_version_info(unsigned idx);
@@ -747,11 +766,16 @@ namespace LegionRuntime {
                                  size_t res_size, bool owned);
       virtual void handle_post_mapped(Event pre = Event::NO_EVENT);
     public:
+      virtual InstanceRef find_restricted_instance(unsigned index);
+    public:
       virtual bool pack_task(Serializer &rez, Processor target);
       virtual bool unpack_task(Deserializer &derez, Processor current);
       virtual void find_enclosing_local_fields(
           LegionDeque<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::tracked &infos);
-      virtual void perform_inlining(SingleTask *ctx, InlineFnptr fn);
+      virtual void perform_inlining(SingleTask *ctx, VariantImpl *variant);
+      virtual const std::vector<PhysicalRegion>& begin_inline_task(void);
+      virtual void end_inline_task(const void *result, 
+                                   size_t result_size, bool owned);
     protected:
       void pack_remote_complete(Serializer &rez);
       void pack_remote_commit(Serializer &rez);
@@ -826,6 +850,8 @@ namespace LegionRuntime {
       virtual bool is_stealable(void) const;
       virtual bool has_restrictions(unsigned idx, LogicalRegion handle);
       virtual bool can_early_complete(UserEvent &chain_event);
+      virtual void return_virtual_instance(unsigned index,
+                                           const CompositeRef &ref);
       virtual VersionInfo& get_version_info(unsigned idx);
       virtual void recapture_version_info(unsigned idx);
     public:
@@ -845,11 +871,13 @@ namespace LegionRuntime {
       virtual bool unpack_task(Deserializer &derez, Processor current);
       virtual void find_enclosing_local_fields(
           LegionDeque<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::tracked &infos);
-      virtual void perform_inlining(SingleTask *ctx, InlineFnptr fn);
+      virtual void perform_inlining(SingleTask *ctx, VariantImpl *variant);
     public:
       virtual void handle_future(const void *res, 
                                  size_t res_size, bool owned);
       virtual void handle_post_mapped(Event pre = Event::NO_EVENT);
+    public:
+      virtual InstanceRef find_restricted_instance(unsigned index);
     public:
       void initialize_point(SliceTask *owner, MinimalPoint *mp);
       void send_back_created_state(AddressSpaceID target, unsigned start,
@@ -892,6 +920,8 @@ namespace LegionRuntime {
       virtual bool is_stealable(void) const;
       virtual bool has_restrictions(unsigned idx, LogicalRegion handle);
       virtual bool can_early_complete(UserEvent &chain_event);
+      virtual void return_virtual_instance(unsigned index,
+                                           const CompositeRef &ref);
       virtual RemoteTask* find_outermost_context(void) = 0;
     public:
       virtual bool has_remote_state(void) const = 0;
@@ -909,11 +939,13 @@ namespace LegionRuntime {
       virtual bool unpack_task(Deserializer &derez, Processor current);
       virtual void find_enclosing_local_fields(
       LegionDeque<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::tracked &infos) = 0;
-      virtual void perform_inlining(SingleTask *ctx, InlineFnptr fn);
+      virtual void perform_inlining(SingleTask *ctx, VariantImpl *variant);
     public:
       virtual void handle_future(const void *res, 
                                  size_t res_size, bool owned);
       virtual void handle_post_mapped(Event pre = Event::NO_EVENT);
+    public:
+      virtual InstanceRef find_restricted_instance(unsigned index);
     public:
       void activate_wrapper(void);
       void deactivate_wrapper(void);
@@ -947,7 +979,6 @@ namespace LegionRuntime {
       virtual void activate(void);
       virtual void deactivate(void);
     public:
-      virtual RegionTreeContext find_enclosing_context(unsigned idx);
       virtual RemoteTask* find_outermost_context(void);
     public:
       virtual bool has_remote_state(void) const;
@@ -971,7 +1002,7 @@ namespace LegionRuntime {
     protected:
       bool is_top_level_context;
       std::map<AddressSpaceID,RemoteTask*> remote_instances;
-#if defined(LEGION_LOGGING) || defined(LEGION_SPY)
+#ifdef LEGION_SPY
     protected:
       Event remote_legion_spy_completion;
 #endif
@@ -1111,7 +1142,10 @@ namespace LegionRuntime {
     public:
       virtual bool pack_task(Serializer &rez, Processor target);
       virtual bool unpack_task(Deserializer &derez, Processor current);
-      virtual void perform_inlining(SingleTask *ctx, InlineFnptr fn);
+      virtual void perform_inlining(SingleTask *ctx, VariantImpl *variant);
+      virtual const std::vector<PhysicalRegion>& begin_inline_task(void);
+      virtual void end_inline_task(const void *result, 
+                                   size_t result_size, bool owned);
     public:
       virtual SliceTask* clone_as_slice_task(const Domain &d,
           Processor p, bool recurse, bool stealable,
@@ -1119,12 +1153,14 @@ namespace LegionRuntime {
     public:
       virtual void handle_future(const DomainPoint &point, const void *result,
                                  size_t result_size, bool owner);
+    public:
+      InstanceRef find_restricted_instance(unsigned index);
+    public:
       virtual void register_must_epoch(void);
     public:
       void enumerate_points(void);
       void record_locally_mapped_slice(SliceTask *local_slice);
     public:
-      void return_virtual_instance(unsigned index, const CompositeRef &ref);
       void return_slice_mapped(unsigned points, long long denom,
                                Event applied_condition);
       void return_slice_complete(unsigned points);
@@ -1202,13 +1238,16 @@ namespace LegionRuntime {
     public:
       virtual bool pack_task(Serializer &rez, Processor target);
       virtual bool unpack_task(Deserializer &derez, Processor current);
-      virtual void perform_inlining(SingleTask *ctx, InlineFnptr fn);
+      virtual void perform_inlining(SingleTask *ctx, VariantImpl *variant);
     public:
       virtual SliceTask* clone_as_slice_task(const Domain &d,
           Processor p, bool recurse, bool stealable,
           long long scale_denominator);
       virtual void handle_future(const DomainPoint &point, const void *result,
                                  size_t result_size, bool owner);
+    public:
+      InstanceRef find_restricted_instance(unsigned index);
+    public:
       virtual void register_must_epoch(void);
       PointTask* clone_as_point_task(const DomainPoint &p,
                                      MinimalPoint *mp);
@@ -1257,8 +1296,7 @@ namespace LegionRuntime {
     protected:
       // Temporary storage for future results
       std::map<DomainPoint,std::pair<void*,size_t> > temporary_futures;
-      // Temporary storage for virtual instance references
-      std::deque<std::pair<unsigned,CompositeRef> > temporary_virtual_refs;
+      std::deque<CompositeRef> temporary_virtual_refs;
     };
 
     /**

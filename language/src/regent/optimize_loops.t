@@ -1,4 +1,4 @@
--- Copyright 2015 Stanford University
+-- Copyright 2016 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -242,6 +242,11 @@ function optimize_index_launch_loops.stat_for_num(cx, node)
   local task = call.fn.value
   if not std.is_task(task) then
     log_fail(call, "loop optimization failed: function is not a task")
+    return node
+  end
+
+  if #call.conditions > 0 then
+    log_fail(call, "FIXME: handle analysis of ad-hoc conditions")
     return node
   end
 

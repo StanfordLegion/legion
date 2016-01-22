@@ -33,8 +33,6 @@ endif
 CONDUIT ?= udp
 ifdef GASNET_ROOT
 GASNET ?= $(GASNET_ROOT)
-else
-GASNET ?= $(LG_RT_DIR)/gasnet/release
 endif
 
 # generate libraries for Legion and Realm
@@ -139,12 +137,14 @@ endif
 # Flags for running in the general low-level runtime
 ifeq ($(strip $(SHARED_LOWLEVEL)),0)
 
-# general low-level uses CUDA by default
-USE_CUDA ?= 1
-ifeq ($(strip $(USE_CUDA)),1)
-  ifndef CUDA
+# general low-level uses CUDA if requested
+ifeq ($(strip $(CUDA)),)
+  USE_CUDA ?= 0
+  ifeq ($(strip $(USE_CUDA)),1)
     $(error CUDA variable is not defined, aborting build)
   endif
+else
+  USE_CUDA ?= 1
 endif
 
 # General CUDA variables
@@ -179,13 +179,17 @@ endif
 NVCC_FLAGS	+= -Xptxas "-v" #-abi=no"
 endif
 
-# general low-level uses GASNet by default
-USE_GASNET ?= 1
-ifeq ($(strip $(USE_GASNET)),1)
-  ifndef GASNET
+# general low-level uses GASNet if requested
+ifeq ($(strip $(GASNET)),)
+  USE_GASNET ?= 0
+  ifeq ($(strip $(USE_GASNET)),1)
     $(error GASNET variable is not defined, aborting build)
   endif
+else
+  USE_GASNET ?= 1
+endif
 
+ifeq ($(strip $(USE_GASNET)),1)
   # General GASNET variables
   INC_FLAGS	+= -I$(GASNET)/include
   ifneq ($(shell uname -s),Darwin)
@@ -282,7 +286,6 @@ ifeq ($(strip $(SHARED_LOWLEVEL)),0)
 LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/runtime_impl.cc \
 	           $(LG_RT_DIR)/lowlevel_dma.cc \
 	           $(LG_RT_DIR)/realm/module.cc \
-	           $(LG_RT_DIR)/realm/codedesc.cc \
 	           $(LG_RT_DIR)/realm/threads.cc \
 		   $(LG_RT_DIR)/realm/operation.cc \
 	           $(LG_RT_DIR)/realm/tasks.cc \
@@ -312,6 +315,7 @@ endif
 LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/logging.cc \
 	           $(LG_RT_DIR)/realm/cmdline.cc \
 		   $(LG_RT_DIR)/realm/profiling.cc \
+	           $(LG_RT_DIR)/realm/codedesc.cc \
 		   $(LG_RT_DIR)/realm/timers.cc
 
 # If you want to go back to using the shared mapper, comment out the next line
@@ -334,6 +338,7 @@ HIGH_RUNTIME_SRC += $(LG_RT_DIR)/legion/legion.cc \
 		    $(LG_RT_DIR)/legion/legion_instances.cc \
 		    $(LG_RT_DIR)/legion/legion_views.cc \
 		    $(LG_RT_DIR)/legion/legion_analysis.cc \
+		    $(LG_RT_DIR)/legion/legion_constraint.cc \
 		    $(LG_RT_DIR)/legion/region_tree.cc \
 		    $(LG_RT_DIR)/legion/runtime.cc \
 		    $(LG_RT_DIR)/legion/garbage_collection.cc

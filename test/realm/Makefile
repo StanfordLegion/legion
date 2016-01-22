@@ -1,4 +1,4 @@
-# Copyright 2015 Stanford University
+# Copyright 2016 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -51,7 +51,8 @@ override CC_FLAGS := $(filter-out -DBOUNDS_CHECKS, \
                      $(filter-out -DLEGION_SPY, \
                        $(CC_FLAGS))))
 
-TESTS := serializing test_profiling ctxswitch proc_group barrier_reduce deppart
+TESTS := serializing test_profiling ctxswitch proc_group barrier_reduce taskreg
+TESTS += deppart
 
 # can set arguments to be passed to a test when running
 TESTARGS_ctxswitch := -ll:io 1 -t 20 -i 10000

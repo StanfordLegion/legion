@@ -1,4 +1,4 @@
--- Copyright 2015 Stanford University, NVIDIA Corporation
+-- Copyright 2016 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -45,6 +45,7 @@ do
   local runtime_dir = root_dir .. "../../runtime/"
   local legion_dir = runtime_dir .. "legion/"
   local mapper_dir = runtime_dir .. "mappers/"
+  local realm_dir = runtime_dir .. "realm/"
   local pennant_cc = root_dir .. "pennant.cc"
   local pennant_so = os.tmpname() .. ".so" -- root_dir .. "pennant.so"
   local cxx = os.getenv('CXX') or 'c++'
@@ -60,14 +61,15 @@ do
 
   local cmd = (cxx .. " " .. cxx_flags .. " -I " .. runtime_dir .. " " ..
                 " -I " .. mapper_dir .. " " .. " -I " .. legion_dir .. " " ..
-                 pennant_cc .. " -o " .. pennant_so)
+                " -I " .. realm_dir .. " " .. pennant_cc .. " -o " .. pennant_so)
   if os.execute(cmd) ~= 0 then
     print("Error: failed to compile " .. pennant_cc)
     assert(false)
   end
   terralib.linklibrary(pennant_so)
   cpennant = terralib.includec("pennant.h", {"-I", root_dir, "-I", runtime_dir,
-                                             "-I", mapper_dir, "-I", legion_dir})
+                                             "-I", mapper_dir, "-I", legion_dir,
+                                             "-I", realm_dir})
 end
 
 -- Include other headers

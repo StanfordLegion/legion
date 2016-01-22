@@ -1,4 +1,4 @@
-/* Copyright 2015 Stanford University, NVIDIA Corporation
+/* Copyright 2016 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -294,7 +294,7 @@ namespace LegionRuntime {
               LegionSpy::log_mapping_dependence(
                   close_op->get_parent()->get_unique_op_id(),
                   current_uids[it->operation_idx], it->prev_idx,
-                  close_op->get_unique_op_id(), it->next_idx, it->dtype);
+                  close_op->get_unique_op_id(), 0, it->dtype);
 #endif
             }
           }

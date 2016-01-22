@@ -1,4 +1,4 @@
-/* Copyright 2015 Stanford University, NVIDIA Corporation
+/* Copyright 2016 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,7 +17,6 @@
 #include "legion.h"
 #include "runtime.h"
 #include "legion_ops.h"
-#include "legion_logging.h"
 #include "legion_profiling.h"
 #include "legion_allocation.h"
 
@@ -38,29 +37,9 @@ namespace LegionRuntime {
     Logger::Category log_prof("legion_prof");
     Logger::Category log_garbage("legion_gc");
     Logger::Category log_shutdown("shutdown");
-#ifdef LEGION_SPY
     namespace LegionSpy {
       Logger::Category log_spy("legion_spy");
     };
-#endif
-
-#ifdef LEGION_LOGGING
-    namespace LegionLogging {
-      Logger::Category log_logging("legion_logging");
-      std::list<ProcessorProfiler *> processor_profilers;
-      pthread_key_t pthread_profiler_key;
-      pthread_mutex_t profiler_mutex = PTHREAD_MUTEX_INITIALIZER;
-      std::deque<LogMsgProcessor> msgs_processor;
-      std::deque<LogMsgMemory> msgs_memory;
-      std::deque<LogMsgProcMemAffinity> msgs_proc_mem_affinity;
-      std::deque<LogMsgMemMemAffinity> msgs_mem_mem_affinity;
-      std::deque<LogMsgTaskCollection> msgs_task_collection;
-      std::deque<LogMsgTaskVariant> msgs_task_variant;
-      std::deque<LogMsgTopLevelTask> msgs_top_level_task;
-      unsigned long long init_time;
-      AddressSpaceID address_space;
-    };
-#endif
 
     const LogicalRegion LogicalRegion::NO_REGION = LogicalRegion();
     const LogicalPartition LogicalPartition::NO_PART = LogicalPartition(); 
@@ -1483,6 +1462,46 @@ namespace LegionRuntime {
     }
 
     /////////////////////////////////////////////////////////////
+    // LayoutConstraintRegistrar
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    LayoutConstraintRegistrar::LayoutConstraintRegistrar(void)
+      : handle(FieldSpace::NO_SPACE), layout_name(NULL)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    LayoutConstraintRegistrar::LayoutConstraintRegistrar(FieldSpace h,
+                                                  const char *layout/*= NULL*/)
+      : handle(h), layout_name(layout)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    /////////////////////////////////////////////////////////////
+    // TaskVariantRegistrar 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    TaskVariantRegistrar::TaskVariantRegistrar(void)
+      : task_id(0), global_registration(true), task_variant_name(NULL), 
+        leaf_variant(false), inner_variant(false), idempotent_variant(false)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    TaskVariantRegistrar::TaskVariantRegistrar(TaskID tid, bool global/*=true*/, 
+                                               const char *name/*= NULL*/)
+      : task_id(tid), global_registration(global), task_variant_name(name), 
+        leaf_variant(false), inner_variant(false), idempotent_variant(false)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    /////////////////////////////////////////////////////////////
     // MPILegionHandshake 
     /////////////////////////////////////////////////////////////
 
@@ -1995,7 +2014,7 @@ namespace LegionRuntime {
                                             Processor::Kind kind, 
                                             bool single, bool index,
                                             bool inner, bool leaf,
-                                            VariantID &vid)
+                                            VariantID vid)
     //--------------------------------------------------------------------------
     {
       if (vid == AUTO_GENERATE_ID)
@@ -3414,33 +3433,41 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::attach_semantic_information(TaskID task_id, SemanticTag tag,
+                                   const void *buffer, size_t size, bool is_mut)
+    //--------------------------------------------------------------------------
+    {
+      runtime->attach_semantic_information(task_id, tag, buffer, size, is_mut);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::attach_semantic_information(IndexSpace handle,
                                                        SemanticTag tag,
                                                        const void *buffer,
-                                                       size_t size)
+                                                       size_t size, bool is_mut)
     //--------------------------------------------------------------------------
     {
-      runtime->attach_semantic_information(handle, tag, buffer, size);
+      runtime->attach_semantic_information(handle, tag, buffer, size, is_mut);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::attach_semantic_information(IndexPartition handle,
                                                        SemanticTag tag,
                                                        const void *buffer,
-                                                       size_t size)
+                                                       size_t size, bool is_mut)
     //--------------------------------------------------------------------------
     {
-      runtime->attach_semantic_information(handle, tag, buffer, size);
+      runtime->attach_semantic_information(handle, tag, buffer, size, is_mut);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::attach_semantic_information(FieldSpace handle,
                                                        SemanticTag tag,
                                                        const void *buffer,
-                                                       size_t size)
+                                                       size_t size, bool is_mut)
     //--------------------------------------------------------------------------
     {
-      runtime->attach_semantic_information(handle, tag, buffer, size);
+      runtime->attach_semantic_information(handle, tag, buffer, size, is_mut);
     }
 
     //--------------------------------------------------------------------------
@@ -3448,81 +3475,97 @@ namespace LegionRuntime {
                                                        FieldID fid,
                                                        SemanticTag tag,
                                                        const void *buffer,
-                                                       size_t size)
+                                                       size_t size, bool is_mut)
     //--------------------------------------------------------------------------
     {
-      runtime->attach_semantic_information(handle, fid, tag, buffer, size);
+      runtime->attach_semantic_information(handle, fid, tag, buffer, 
+                                           size, is_mut);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::attach_semantic_information(LogicalRegion handle,
                                                        SemanticTag tag,
                                                        const void *buffer,
-                                                       size_t size)
+                                                       size_t size, bool is_mut)
     //--------------------------------------------------------------------------
     {
-      runtime->attach_semantic_information(handle, tag, buffer, size);
+      runtime->attach_semantic_information(handle, tag, buffer, size, is_mut);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::attach_semantic_information(LogicalPartition handle,
                                                        SemanticTag tag,
                                                        const void *buffer,
-                                                       size_t size)
+                                                       size_t size, bool is_mut)
     //--------------------------------------------------------------------------
     {
-      runtime->attach_semantic_information(handle, tag, buffer, size);
+      runtime->attach_semantic_information(handle, tag, buffer, size, is_mut);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::attach_name(IndexSpace handle, const char *name)
+    void Runtime::attach_name(TaskID task_id, const char *name, bool is_mutable)
     //--------------------------------------------------------------------------
     {
-      Runtime::attach_semantic_information(handle,
-          NAME_SEMANTIC_TAG, name, strlen(name) + 1);
+      Runtime::attach_semantic_information(task_id,
+          NAME_SEMANTIC_TAG, name, strlen(name) + 1, is_mutable);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::attach_name(IndexPartition handle, const char *name)
+    void Runtime::attach_name(IndexSpace handle, const char *name, bool is_mut)
     //--------------------------------------------------------------------------
     {
       Runtime::attach_semantic_information(handle,
-          NAME_SEMANTIC_TAG, name, strlen(name) + 1);
+          NAME_SEMANTIC_TAG, name, strlen(name) + 1, is_mut);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::attach_name(FieldSpace handle, const char *name)
+    void Runtime::attach_name(IndexPartition handle, const char *name, bool ism)
     //--------------------------------------------------------------------------
     {
       Runtime::attach_semantic_information(handle,
-          NAME_SEMANTIC_TAG, name, strlen(name) + 1);
+          NAME_SEMANTIC_TAG, name, strlen(name) + 1, ism);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::attach_name(FieldSpace handle, const char *name, bool is_mut)
+    //--------------------------------------------------------------------------
+    {
+      Runtime::attach_semantic_information(handle,
+          NAME_SEMANTIC_TAG, name, strlen(name) + 1, is_mut);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::attach_name(FieldSpace handle,
                                        FieldID fid,
-                                       const char *name)
+                                       const char *name, bool is_mutable)
     //--------------------------------------------------------------------------
     {
       Runtime::attach_semantic_information(handle, fid,
-          NAME_SEMANTIC_TAG, name, strlen(name) + 1);
+          NAME_SEMANTIC_TAG, name, strlen(name) + 1, is_mutable);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::attach_name(LogicalRegion handle, const char *name)
+    void Runtime::attach_name(LogicalRegion handle, const char *name, bool ism)
     //--------------------------------------------------------------------------
     {
       Runtime::attach_semantic_information(handle,
-          NAME_SEMANTIC_TAG, name, strlen(name) + 1);
+          NAME_SEMANTIC_TAG, name, strlen(name) + 1, ism);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::attach_name(LogicalPartition handle,
-                                       const char *name)
+    void Runtime::attach_name(LogicalPartition handle, const char *name, bool m)
     //--------------------------------------------------------------------------
     {
       Runtime::attach_semantic_information(handle,
-          NAME_SEMANTIC_TAG, name, strlen(name) + 1);
+          NAME_SEMANTIC_TAG, name, strlen(name) + 1, m);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::retrieve_semantic_information(TaskID task_id, SemanticTag tag,
+                                              const void *&result, size_t &size)
+    //--------------------------------------------------------------------------
+    {
+      runtime->retrieve_semantic_information(task_id, tag, result, size);
     }
 
     //--------------------------------------------------------------------------
@@ -3584,6 +3627,16 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       runtime->retrieve_semantic_information(part, tag, result, size);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::retrieve_name(TaskID task_id, const char *&result)
+    //--------------------------------------------------------------------------
+    {
+      const void* dummy_ptr; size_t dummy_size;
+      Runtime::retrieve_semantic_information(task_id, NAME_SEMANTIC_TAG,
+                                             dummy_ptr, dummy_size);
+      result = reinterpret_cast<const char*>(dummy_ptr);
     }
 
     //--------------------------------------------------------------------------
@@ -3693,11 +3746,26 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    const std::vector<PhysicalRegion>& Runtime::begin_inline_task(Context ctx)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->begin_inline_task(ctx);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::end_task(Context ctx, const void *result, 
                                     size_t result_size, bool owned /*= false*/)
     //--------------------------------------------------------------------------
     {
       runtime->end_task(ctx, result, result_size, owned);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::end_inline_task(Context ctx, const void *result,
+                                  size_t result_size, bool owned /*= false*/)
+    //--------------------------------------------------------------------------
+    {
+      runtime->end_inline_task(ctx, result, result_size, owned);
     }
 
     //--------------------------------------------------------------------------
@@ -3713,14 +3781,6 @@ namespace LegionRuntime {
       return result;
     }
 
-    //--------------------------------------------------------------------------
-    const void* Runtime::get_local_args(Context ctx, 
-                                         DomainPoint &point, size_t &local_size)
-    //--------------------------------------------------------------------------
-    {
-      return runtime->get_local_args(ctx, point, local_size); 
-    }
-    
     //--------------------------------------------------------------------------
     /*static*/ int Runtime::start(int argc, char **argv, 
                                            bool background)
@@ -3844,42 +3904,26 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ TaskID Runtime::update_collection_table(
-        LowLevelFnptr low_level_ptr, InlineFnptr inline_ptr, TaskID uid,
-        Processor::Kind proc_kind, bool single_task, bool index_space_task,
-        VariantID vid, size_t return_size, 
-        const TaskConfigOptions &options, const char *name)
+    VariantID Runtime::register_variant(const TaskVariantRegistrar &registrar,
+                  bool has_return, const void *user_data, size_t user_data_size,
+                  CodeDescriptor *realm, CodeDescriptor *indesc)
     //--------------------------------------------------------------------------
     {
-      return Internal::update_collection_table(low_level_ptr,inline_ptr,
-                                                    uid,proc_kind,single_task, 
-                                                    index_space_task,vid,
-                                                    return_size,options,name);
+      return runtime->register_variant(registrar, user_data, user_data_size,
+                                       realm, indesc, has_return);
     }
-
+    
     //--------------------------------------------------------------------------
-    /*static*/ TaskID Runtime::update_collection_table(
-        LowLevelFnptr low_level_ptr, InlineFnptr inline_ptr, TaskID uid,
-        Processor::Kind proc_kind, bool single_task, bool index_space_task,
-        VariantID vid, size_t return_size, 
-        const TaskConfigOptions &options, const char *name,
-        const void *user_data, size_t user_data_size)
+    /*static*/ VariantID Runtime::preregister_variant(
+                                  const TaskVariantRegistrar &registrar,
+                                  const void *user_data, size_t user_data_size,
+                                  CodeDescriptor *realm, CodeDescriptor *indesc,
+                                  bool has_return, const char *task_name)
     //--------------------------------------------------------------------------
     {
-      return Internal::update_collection_table(low_level_ptr,inline_ptr,
-                                                    uid,proc_kind,single_task, 
-                                                    index_space_task,vid,
-                                                    return_size,options,name,
-                                                    user_data, user_data_size);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ const void* Runtime::find_user_data(TaskID tid,
-                                                            VariantID vid)
-    //--------------------------------------------------------------------------
-    {
-      return Internal::find_user_data(tid, vid);
-    }
+      return Internal::preregister_variant(registrar, user_data, user_data_size,
+                                          realm, indesc, has_return, task_name);
+    } 
 
     //--------------------------------------------------------------------------
     /*static*/ void Runtime::enable_profiling(void)
@@ -3897,6 +3941,53 @@ namespace LegionRuntime {
     /*static*/ void Runtime::dump_profiling(void)
     //--------------------------------------------------------------------------
     {
+    }
+
+    //--------------------------------------------------------------------------
+    LayoutConstraintID Runtime::register_layout(
+                                     const LayoutConstraintRegistrar &registrar)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->register_layout(registrar, AUTO_GENERATE_ID);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::release_layout(LayoutConstraintID layout_id)
+    //--------------------------------------------------------------------------
+    {
+      runtime->release_layout(layout_id, runtime->address_space/*local*/);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ LayoutConstraintID Runtime::preregister_layout(
+                                     const LayoutConstraintRegistrar &registrar,
+                                     LayoutConstraintID layout_id)
+    //--------------------------------------------------------------------------
+    {
+      return Internal::preregister_layout(registrar, layout_id);
+    }
+
+    //--------------------------------------------------------------------------
+    FieldSpace Runtime::get_layout_constraint_field_space(
+                                                   LayoutConstraintID layout_id)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_layout_constraint_field_space(layout_id);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::get_layout_constraints(LayoutConstraintID layout_id,
+                                        LayoutConstraintSet &layout_constraints)   
+    //--------------------------------------------------------------------------
+    {
+      runtime->get_layout_constraints(layout_id, layout_constraints);
+    }
+
+    //--------------------------------------------------------------------------
+    const char* Runtime::get_layout_constraints_name(LayoutConstraintID id)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_layout_constraints_name(id);
     }
 
     /////////////////////////////////////////////////////////////

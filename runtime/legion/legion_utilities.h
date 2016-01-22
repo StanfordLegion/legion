@@ -1,4 +1,4 @@
-/* Copyright 2015 Stanford University, NVIDIA Corporation
+/* Copyright 2016 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -257,6 +257,32 @@ namespace LegionRuntime {
     };
 
     /////////////////////////////////////////////////////////////
+    // Semantic Info 
+    /////////////////////////////////////////////////////////////
+
+    /**
+     * \struct SemanticInfo
+     * A struct for storing semantic information for various things
+     */
+    struct SemanticInfo {
+    public:
+      SemanticInfo(void)
+        : buffer(NULL), size(0) { }  
+      SemanticInfo(void *buf, size_t s, bool is_mut = true) 
+        : buffer(buf), size(s), 
+          ready_event(UserEvent::NO_USER_EVENT), is_mutable(is_mut) { }
+      SemanticInfo(UserEvent ready)
+        : buffer(NULL), size(0), ready_event(ready), is_mutable(true) { }
+    public:
+      inline bool is_valid(void) const { return !ready_event.exists(); }
+    public:
+      void *buffer;
+      size_t size;
+      UserEvent ready_event;
+      bool is_mutable;
+    };
+
+    /////////////////////////////////////////////////////////////
     // ColorPoint 
     /////////////////////////////////////////////////////////////
     class ColorPoint {
@@ -402,6 +428,7 @@ namespace LegionRuntime {
       inline const void* get_buffer(void) const { return buffer; }
       inline size_t get_buffer_size(void) const { return total_bytes; }
       inline size_t get_used_bytes(void) const { return index; }
+      inline void* reserve_bytes(size_t size);
     private:
       inline void resize(void);
     private:
@@ -1463,6 +1490,20 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    inline void* Serializer::reserve_bytes(size_t bytes)
+    //--------------------------------------------------------------------------
+    {
+      while ((index + bytes) > total_bytes)
+        resize();
+      void *result = buffer+index;
+      index += bytes;
+#ifdef DEBUG_HIGH_LEVEL
+      context_bytes += bytes;
+#endif
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     inline void Serializer::resize(void)
     //--------------------------------------------------------------------------
     {
@@ -2332,7 +2373,7 @@ namespace LegionRuntime {
           result[idx] = bit_vector[idx+range];
         }
         // Fill in everything else with zeros
-        for (unsigned idx = (BIT_ELMTS-range); idx < (BIT_ELMTS-1); idx++)
+        for (unsigned idx = (BIT_ELMTS-range); idx < (BIT_ELMTS); idx++)
           result[idx] = 0;
       }
       else
@@ -2407,7 +2448,7 @@ namespace LegionRuntime {
           bit_vector[idx] = bit_vector[idx+range];
         }
         // Fill in everything else with zeros
-        for (unsigned idx = (BIT_ELMTS-range); idx < (BIT_ELMTS-1); idx++)
+        for (unsigned idx = (BIT_ELMTS-range); idx < (BIT_ELMTS); idx++)
           bit_vector[idx] = 0;
       }
       else
@@ -3013,7 +3054,7 @@ namespace LegionRuntime {
           result.sum_mask |= result[idx];
         }
         // Fill in everything else with zeros
-        for (unsigned idx = (BIT_ELMTS-range); idx < (BIT_ELMTS-1); idx++)
+        for (unsigned idx = (BIT_ELMTS-range); idx < (BIT_ELMTS); idx++)
           result[idx] = 0;
       }
       else
@@ -3096,7 +3137,7 @@ namespace LegionRuntime {
           sum_mask |= bit_vector[idx];
         }
         // Fill in everything else with zeros
-        for (unsigned idx = (BIT_ELMTS-range); idx < (BIT_ELMTS-1); idx++)
+        for (unsigned idx = (BIT_ELMTS-range); idx < (BIT_ELMTS); idx++)
           bit_vector[idx] = 0;
       }
       else
@@ -3662,7 +3703,7 @@ namespace LegionRuntime {
           result[idx] = bits.bit_vector[idx+range];
         }
         // Fill in everything else with zeros
-        for (unsigned idx = (BIT_ELMTS-range); idx < (BIT_ELMTS-1); idx++)
+        for (unsigned idx = (BIT_ELMTS-range); idx < (BIT_ELMTS); idx++)
           result[idx] = 0;
       }
       else
@@ -3735,7 +3776,7 @@ namespace LegionRuntime {
           bits.bit_vector[idx] = bits.bit_vector[idx+range];
         }
         // Fill in everything else with zeros
-        for (unsigned idx = (BIT_ELMTS-range); idx < (BIT_ELMTS-1); idx++)
+        for (unsigned idx = (BIT_ELMTS-range); idx < (BIT_ELMTS); idx++)
           bits.bit_vector[idx] = 0;
       }
       else
@@ -4315,7 +4356,7 @@ namespace LegionRuntime {
           result.sum_mask |= result[idx];
         }
         // Fill in everything else with zeros
-        for (unsigned idx = (BIT_ELMTS-range); idx < (BIT_ELMTS-1); idx++)
+        for (unsigned idx = (BIT_ELMTS-range); idx < (BIT_ELMTS); idx++)
           result[idx] = 0;
       }
       else
@@ -4396,7 +4437,7 @@ namespace LegionRuntime {
           sum_mask |= bits.bit_vector[idx];
         }
         // Fill in everything else with zeros
-        for (unsigned idx = (BIT_ELMTS-range); idx < (BIT_ELMTS-1); idx++)
+        for (unsigned idx = (BIT_ELMTS-range); idx < (BIT_ELMTS); idx++)
           bits.bit_vector[idx] = 0;
       }
       else
@@ -5028,7 +5069,7 @@ namespace LegionRuntime {
           result[idx] = bits.bit_vector[idx+range];
         }
         // Fill in everything else with zeros
-        for (unsigned idx = (BIT_ELMTS-range); idx < (BIT_ELMTS-1); idx++)
+        for (unsigned idx = (BIT_ELMTS-range); idx < (BIT_ELMTS); idx++)
           result[idx] = 0;
       }
       else
@@ -5101,7 +5142,7 @@ namespace LegionRuntime {
           bits.bit_vector[idx] = bits.bit_vector[idx+range];
         }
         // Fill in everything else with zeros
-        for (unsigned idx = (BIT_ELMTS-range); idx < (BIT_ELMTS-1); idx++)
+        for (unsigned idx = (BIT_ELMTS-range); idx < (BIT_ELMTS); idx++)
           bits.bit_vector[idx] = 0;
       }
       else
@@ -5778,7 +5819,7 @@ namespace LegionRuntime {
           result.sum_mask |= result[idx];
         }
         // Fill in everything else with zeros
-        for (unsigned idx = (BIT_ELMTS-range); idx < (BIT_ELMTS-1); idx++)
+        for (unsigned idx = (BIT_ELMTS-range); idx < (BIT_ELMTS); idx++)
           result[idx] = 0;
       }
       else
@@ -5859,7 +5900,7 @@ namespace LegionRuntime {
           sum_mask |= bits.bit_vector[idx];
         }
         // Fill in everything else with zeros
-        for (unsigned idx = (BIT_ELMTS-range); idx < (BIT_ELMTS-1); idx++)
+        for (unsigned idx = (BIT_ELMTS-range); idx < (BIT_ELMTS); idx++)
           bits.bit_vector[idx] = 0;
       }
       else

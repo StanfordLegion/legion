@@ -1,4 +1,4 @@
-/* Copyright 2015 Stanford University, NVIDIA Corporation
+/* Copyright 2016 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,5 +28,9 @@
 #ifdef __linux__
 #define REALM_USE_KERNEL_AIO
 #endif
+
+// dynamic loading via dlfcn and a not-completely standard dladdr extension
+#define REALM_USE_DLFCN
+#define REALM_USE_DLADDR
 
 #endif

@@ -1,4 +1,4 @@
-/* Copyright 2015 Stanford University
+/* Copyright 2016 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -2594,7 +2594,7 @@ extern "C" {
   /**
    * @return Caller takes ownership of return value.
    *
-   * @see LegionRuntime::LowLevel::Machine::get_machine()
+   * @see Realm::Machine::get_machine()
    */
   legion_machine_t
   legion_machine_create();
@@ -2602,13 +2602,13 @@ extern "C" {
   /**
    * @param handle Caller must have ownership of parameter `handle`.
    *
-   * @see LegionRuntime::LowLevel::Machine::~Machine()
+   * @see Realm::Machine::~Machine()
    */
   void
   legion_machine_destroy(legion_machine_t handle);
 
   /**
-   * @see LegionRuntime::LowLevel::Machine::get_all_processors()
+   * @see Realm::Machine::get_all_processors()
    */
   void
   legion_machine_get_all_processors(
@@ -2617,7 +2617,7 @@ extern "C" {
     unsigned processors_size);
 
   /**
-   * @see LegionRuntime::LowLevel::Machine::get_all_processors()
+   * @see Realm::Machine::get_all_processors()
    */
   unsigned
   legion_machine_get_all_processors_size(legion_machine_t machine);
@@ -2627,7 +2627,7 @@ extern "C" {
   // -----------------------------------------------------------------------
 
   /**
-   * @see LegionRuntime::LowLevel::Processor::kind()
+   * @see Realm::Processor::kind()
    */
   legion_processor_kind_t
   legion_processor_kind(legion_processor_t proc_);
@@ -2637,7 +2637,7 @@ extern "C" {
   // -----------------------------------------------------------------------
 
   /**
-   * @see LegionRuntime::LowLevel::Memory::kind()
+   * @see Realm::Memory::kind()
    */
   legion_memory_kind_t
   legion_memory_kind(legion_memory_t proc_);

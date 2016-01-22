@@ -1,4 +1,4 @@
-/* Copyright 2015 Stanford University, NVIDIA Corporation
+/* Copyright 2016 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,7 +19,6 @@
 #include "legion_tasks.h"
 #include "region_tree.h"
 #include "legion_spy.h"
-#include "legion_logging.h"
 #include "legion_profiling.h"
 #include "legion_instances.h"
 #include "legion_views.h"
@@ -161,20 +160,10 @@ namespace LegionRuntime {
                                              const std::set<Event> &term_events)
     //--------------------------------------------------------------------------
     {
-#ifdef LEGION_LOGGING
-      LegionLogging::log_timing_event(Processor::get_executing_processor(),
-                                      0 /* no unique id */,
-                                      BEGIN_GC);
-#endif     
       view->collect_users(term_events);
       // Then remove the gc reference on the object
       if (view->remove_base_gc_ref(PENDING_GC_REF))
         delete_logical_view(view);
-#ifdef LEGION_LOGGING
-      LegionLogging::log_timing_event(Processor::get_executing_processor(),
-                                      0 /* no unique id */,
-                                      END_GC);
-#endif
     }
 
     /////////////////////////////////////////////////////////////
@@ -315,8 +304,8 @@ namespace LegionRuntime {
               it != initial_user_events.end(); it++)
           filter_local_users(*it);
       }
-#if !defined(LEGION_SPY) && !defined(LEGION_LOGGING) && \
-      !defined(EVENT_GRAPH_TRACE) && defined(DEBUG_HIGH_LEVEL)
+#if !defined(LEGION_SPY) && !defined(EVENT_GRAPH_TRACE) && \
+      defined(DEBUG_HIGH_LEVEL)
       // Don't forget to remove the initial user if there was one
       // before running these checks
       assert(current_epoch_users.empty());
@@ -798,19 +787,13 @@ namespace LegionRuntime {
 #endif
       // Make the instance ref
       Event ready_event = Event::merge_events(wait_on_events);
-#if defined(LEGION_LOGGING) || defined(LEGION_SPY)
+#ifdef LEGION_SPY
       if (!ready_event.exists())
       {
         UserEvent new_ready_event = UserEvent::create_user_event();
         new_ready_event.trigger();
         ready_event = new_ready_event;
       }
-#endif
-#ifdef LEGION_LOGGING
-      LegionLogging::log_event_dependences(
-          Processor::get_executing_processor(), wait_on_events, ready_event);
-#endif
-#ifdef LEGION_SPY
       LegionSpy::log_event_dependences(wait_on_events, ready_event);
 #endif
       InstanceRef result(ready_event, this);
@@ -1335,8 +1318,7 @@ namespace LegionRuntime {
               current_epoch_users.begin(); cit != 
               current_epoch_users.end(); cit++)
         {
-#if !defined(LEGION_LOGGING) && !defined(LEGION_SPY) && \
-      !defined(EVENT_GRAPH_TRACE)
+#if !defined(LEGION_SPY) && !defined(EVENT_GRAPH_TRACE)
           // We're about to do a bunch of expensive tests, 
           // so first do something cheap to see if we can 
           // skip all the tests.
@@ -1395,8 +1377,7 @@ namespace LegionRuntime {
               previous_epoch_users.begin(); pit != 
               previous_epoch_users.end(); pit++)
         {
-#if !defined(LEGION_LOGGING) && !defined(LEGION_SPY) && \
-      !defined(EVENT_GRAPH_TRACE)
+#if !defined(LEGION_SPY) && !defined(EVENT_GRAPH_TRACE)
           // We're about to do a bunch of expensive tests, 
           // so first do something cheap to see if we can 
           // skip all the tests.
@@ -1677,8 +1658,7 @@ namespace LegionRuntime {
               current_epoch_users.begin(); cit != 
               current_epoch_users.end(); cit++)
         {
-#if !defined(LEGION_LOGGING) && !defined(LEGION_SPY) && \
-      !defined(EVENT_GRAPH_TRACE)
+#if !defined(LEGION_SPY) && !defined(EVENT_GRAPH_TRACE)
           // We're about to do a bunch of expensive tests, 
           // so first do something cheap to see if we can 
           // skip all the tests.
@@ -1734,8 +1714,7 @@ namespace LegionRuntime {
               previous_epoch_users.begin(); pit != 
               previous_epoch_users.end(); pit++)
         {
-#if !defined(LEGION_LOGGING) && !defined(LEGION_SPY) && \
-      !defined(EVENT_GRAPH_TRACE)
+#if !defined(LEGION_SPY) && !defined(EVENT_GRAPH_TRACE)
           // We're about to do a bunch of expensive tests, 
           // so first do something cheap to see if we can 
           // skip all the tests.
@@ -1995,8 +1974,7 @@ namespace LegionRuntime {
             current_epoch_users.begin(); cit !=
             current_epoch_users.end(); cit++)
       {
-#if !defined(LEGION_LOGGING) && !defined(LEGION_SPY) && \
-      !defined(EVENT_GRAPH_TRACE)
+#if !defined(LEGION_SPY) && !defined(EVENT_GRAPH_TRACE)
         if (cit->first.has_triggered())
         {
           EventUsers &current_users = cit->second;
@@ -2484,8 +2462,7 @@ namespace LegionRuntime {
     {
       // Don't do this if we are in Legion Spy since we want to see
       // all of the dependences on an instance
-#if !defined(LEGION_SPY) && !defined(LEGION_LOGGING) && \
-      !defined(EVENT_GRAPH_TRACE)
+#if !defined(LEGION_SPY) && !defined(EVENT_GRAPH_TRACE)
       std::set<Event>::iterator event_finder = 
         outstanding_gc_events.find(term_event); 
       if (event_finder != outstanding_gc_events.end())
@@ -3898,7 +3875,7 @@ namespace LegionRuntime {
           Event target_pre;
           const Domain &target = 
             it->first->logical_node->get_domain(target_pre);
-          std::vector<LowLevel::IndexSpace> already_handled;
+          std::vector<Realm::IndexSpace> already_handled;
           std::set<Event> already_preconditions;
           it->first->find_field_descriptors(term_event, usage,
                                             user_mask, fid_idx, local_proc, 
@@ -3919,11 +3896,11 @@ namespace LegionRuntime {
                                                const FieldMask &user_mask,
                                                unsigned fid_idx,
                                                Processor local_proc,
-                                               LowLevel::IndexSpace target,
+                                               Realm::IndexSpace target,
                                                Event target_precondition,
                                    std::vector<FieldDataDescriptor> &field_data,
                                    std::set<Event> &preconditions,
-                             std::vector<LowLevel::IndexSpace> &already_handled,
+                             std::vector<Realm::IndexSpace> &already_handled,
                              std::set<Event> &already_preconditions)
     //--------------------------------------------------------------------------
     {
@@ -4778,11 +4755,11 @@ namespace LegionRuntime {
                                                const FieldMask &user_mask,
                                                unsigned fid_idx,
                                                Processor local_proc,
-                                               LowLevel::IndexSpace target,
+                                               Realm::IndexSpace target,
                                                Event target_precondition,
                                    std::vector<FieldDataDescriptor> &field_data,
                                    std::set<Event> &preconditions,
-                             std::vector<LowLevel::IndexSpace> &already_handled,
+                             std::vector<Realm::IndexSpace> &already_handled,
                              std::set<Event> &already_preconditions)
     //--------------------------------------------------------------------------
     {
@@ -4792,7 +4769,7 @@ namespace LegionRuntime {
       // one local instance if it exists.
 
       // Keep track of all the index spaces we've handled below
-      std::vector<LowLevel::IndexSpace> handled_index_spaces;
+      std::vector<Realm::IndexSpace> handled_index_spaces;
       // Keep track of the preconditions for using the handled index spaces
       std::set<Event> handled_preconditions;
       unsigned done_children = 0;
@@ -4813,14 +4790,14 @@ namespace LegionRuntime {
           if (need_child_intersect)
           {
             // Compute the intersection of our target with the child
-            std::vector<LowLevel::IndexSpace::BinaryOpDescriptor> ops(1);
-            ops[0].op = LowLevel::IndexSpace::ISO_INTERSECT;
+            std::vector<Realm::IndexSpace::BinaryOpDescriptor> ops(1);
+            ops[0].op = Realm::IndexSpace::ISO_INTERSECT;
             ops[0].parent = local_domain.get_index_space();
             ops[0].left_operand = target;
             ops[0].right_operand = child_domain.get_index_space();
             Event pre = Event::merge_events(target_precondition, 
                                       child_precondition, domain_precondition);
-            Event child_ready = LowLevel::IndexSpace::compute_index_spaces(ops,
+            Event child_ready = Realm::IndexSpace::compute_index_spaces(ops,
                                                         false/*mutable*/, pre);
             done = it->first->find_field_descriptors(term_event, usage,
                                                    user_mask,fid_idx,local_proc,
@@ -4856,7 +4833,7 @@ namespace LegionRuntime {
       // If we make it here, we weren't able to cover ourselves, so make an 
       // index space for the remaining set of points we need to handle
       // First compute what we did handle
-      LowLevel::IndexSpace local_handled = LowLevel::IndexSpace::NO_SPACE;
+      Realm::IndexSpace local_handled = Realm::IndexSpace::NO_SPACE;
       Event local_precondition = Event::NO_EVENT;
       if (handled_index_spaces.size() == 1)
       {
@@ -4873,8 +4850,8 @@ namespace LegionRuntime {
           handled_preconditions.insert(parent_precondition);
         // Compute the union of all our handled index spaces
         Event handled_pre = Event::merge_events(handled_preconditions);
-        local_precondition = LowLevel::IndexSpace::reduce_index_spaces( 
-                              LowLevel::IndexSpace::ISO_UNION,
+        local_precondition = Realm::IndexSpace::reduce_index_spaces( 
+                              Realm::IndexSpace::ISO_UNION,
                               handled_index_spaces, local_handled,
                               false/*not mutable*/, 
                               parent_dom.get_index_space(), handled_pre);
@@ -4882,19 +4859,19 @@ namespace LegionRuntime {
         local_handled.destroy(term_event);
       }
       // Now we can compute the remaining part of the index space
-      LowLevel::IndexSpace remaining_space = target;
+      Realm::IndexSpace remaining_space = target;
       Event remaining_precondition = target_precondition;
       if (local_handled.exists())
       {
         // Compute the set difference
-        std::vector<LowLevel::IndexSpace::BinaryOpDescriptor> ops(1);
-        ops[0].op = LowLevel::IndexSpace::ISO_SUBTRACT;
+        std::vector<Realm::IndexSpace::BinaryOpDescriptor> ops(1);
+        ops[0].op = Realm::IndexSpace::ISO_SUBTRACT;
         ops[0].parent = local_domain.get_index_space();
         ops[0].left_operand = target;
         ops[0].right_operand = local_handled;
         Event pre = Event::merge_events(target_precondition,
                                         local_precondition,domain_precondition);
-        remaining_precondition = LowLevel::IndexSpace::compute_index_spaces(ops,
+        remaining_precondition = Realm::IndexSpace::compute_index_spaces(ops,
                                                         false/*mutable*/, pre);
         remaining_space = ops[0].result;
         // We also emit the destruction for this temporary index space
@@ -5445,20 +5422,13 @@ namespace LegionRuntime {
         std::vector<Domain::CopySrcDstField> dst_fields;
         dst->copy_to(pre_set.set_mask, dst_fields);
         Event fill_pre = Event::merge_events(pre_set.preconditions);
-#if defined(LEGION_LOGGING) || defined(LEGION_SPY)
+#ifdef LEGION_SPY
         if (!fill_pre.exists())
         {
           UserEvent new_fill_pre = UserEvent::create_user_event();
           new_fill_pre.trigger();
           fill_pre = new_fill_pre;
         }
-#endif
-#ifdef LEGION_LOGGING
-        LegionLogging::log_event_dependences(
-            Processor::get_executing_processor(), 
-            pre_set.preconditions, fill_pre);
-#endif
-#ifdef LEGION_SPY
         LegionSpy::log_event_dependences(pre_set.preconditions, fill_pre);
 #endif
         // Issue the fill commands
@@ -5492,7 +5462,7 @@ namespace LegionRuntime {
                                           value->value, value->value_size, 
                                           fill_pre);
         }
-#if defined(LEGION_LOGGING) || defined(LEGION_SPY)
+#ifdef LEGION_SPY
         if (!fill_post.exists())
         {
           UserEvent new_fill_post = UserEvent::create_user_event();
@@ -5563,20 +5533,13 @@ namespace LegionRuntime {
         std::vector<Domain::CopySrcDstField> dst_fields;
         dst->copy_to(pre_set.set_mask, dst_fields);
         Event fill_pre = Event::merge_events(pre_set.preconditions);
-#if defined(LEGION_LOGGING) || defined(LEGION_SPY)
+#ifdef LEGION_SPY
         if (!fill_pre.exists())
         {
           UserEvent new_fill_pre = UserEvent::create_user_event();
           new_fill_pre.trigger();
           fill_pre = new_fill_pre;
         }
-#endif
-#ifdef LEGION_LOGGING
-        LegionLogging::log_event_dependences(
-            Processor::get_executing_processor(), 
-            pre_set.preconditions, fill_pre);
-#endif
-#ifdef LEGION_SPY
         LegionSpy::log_event_dependences(pre_set.preconditions, fill_pre);
 #endif
         // Issue the fill commands
@@ -5610,7 +5573,7 @@ namespace LegionRuntime {
                                           value->value, value->value_size, 
                                           fill_pre);
         }
-#if defined(LEGION_LOGGING) || defined(LEGION_SPY)
+#ifdef LEGION_SPY
         if (!fill_post.exists())
         {
           UserEvent new_fill_post = UserEvent::create_user_event();
@@ -5677,11 +5640,11 @@ namespace LegionRuntime {
                                           const FieldMask &user_mask,
                                           unsigned fid_idx,
                                           Processor local_proc,
-                                          LowLevel::IndexSpace target,
+                                          Realm::IndexSpace target,
                                           Event target_precondition,
                                   std::vector<FieldDataDescriptor> &field_data,
                                           std::set<Event> &preconditions,
-                             std::vector<LowLevel::IndexSpace> &already_handled,
+                             std::vector<Realm::IndexSpace> &already_handled,
                                        std::set<Event> &already_preconditions)
     //--------------------------------------------------------------------------
     {
@@ -5749,8 +5712,8 @@ namespace LegionRuntime {
               it != initial_user_events.end(); it++)
           filter_local_users(*it);
       }
-#if !defined(LEGION_SPY) && !defined(LEGION_LOGGING) && \
-      !defined(EVENT_GRAPH_TRACE) && defined(DEBUG_HIGH_LEVEL)
+#if !defined(LEGION_SPY) && !defined(EVENT_GRAPH_TRACE) && \
+      defined(DEBUG_HIGH_LEVEL)
       assert(reduction_users.empty());
       assert(reading_users.empty());
       assert(outstanding_gc_events.empty());
@@ -5795,7 +5758,7 @@ namespace LegionRuntime {
         event_preconds.insert(it->first);
       }
       Event reduce_pre = Event::merge_events(event_preconds); 
-#if defined(LEGION_LOGGING) || defined(LEGION_SPY)
+#ifdef LEGION_SPY
       if (!reduce_pre.exists())
       {
         UserEvent new_reduce_pre = UserEvent::create_user_event();
@@ -5803,12 +5766,6 @@ namespace LegionRuntime {
         reduce_pre = new_reduce_pre;
       }
       IndexSpace reduce_index_space;
-#endif
-#ifdef LEGION_LOGGING
-      LegionLogging::log_event_dependences(
-          Processor::get_executing_processor(), event_preconds, reduce_pre);
-#endif
-#ifdef LEGION_SPY
       LegionSpy::log_event_dependences(event_preconds, reduce_pre);
 #endif
       Event reduce_post; 
@@ -5819,7 +5776,16 @@ namespace LegionRuntime {
         const std::set<Domain> &component_domains = 
           logical_node->get_component_domains(dom_pre);
         if (dom_pre.exists())
+        {
+#ifdef LEGION_SPY
+          Event new_reduce_pre = Event::merge_events(reduce_pre, dom_pre);
+          LegionSpy::log_event_dependence(reduce_pre, new_reduce_pre);
+          LegionSpy::log_event_dependence(dom_pre, new_reduce_pre);
+          reduce_pre = new_reduce_pre;
+#else
           reduce_pre = Event::merge_events(reduce_pre, dom_pre);
+#endif
+        }
         for (std::set<Domain>::const_iterator it = 
               component_domains.begin(); it != component_domains.end(); it++)
         {
@@ -5829,7 +5795,7 @@ namespace LegionRuntime {
           post_events.insert(post);
         }
         reduce_post = Event::merge_events(post_events);
-#if defined(LEGION_SPY) || defined(LEGION_LOGGING)
+#ifdef LEGION_SPY
         reduce_index_space = logical_node->as_region_node()->row_source->handle;
 #endif
       }
@@ -5838,15 +5804,24 @@ namespace LegionRuntime {
         Event dom_pre;
         Domain domain = logical_node->get_domain(dom_pre);
         if (dom_pre.exists())
+        {
+#ifdef LEGION_SPY
+          Event new_reduce_pre = Event::merge_events(reduce_pre, dom_pre);
+          LegionSpy::log_event_dependence(reduce_pre, new_reduce_pre);
+          LegionSpy::log_event_dependence(dom_pre, new_reduce_pre);
+          reduce_pre = new_reduce_pre;
+#else
           reduce_pre = Event::merge_events(reduce_pre, dom_pre);
+#endif
+        }
         reduce_post = manager->issue_reduction(op, src_fields, dst_fields,
                                                domain, reduce_pre, fold,
                                                true/*precise*/);
-#if defined(LEGION_SPY) || defined(LEGION_LOGGING)
+#ifdef LEGION_SPY
         reduce_index_space = logical_node->as_region_node()->row_source->handle;
 #endif
       }
-#if defined(LEGION_SPY) || defined(LEGION_LOGGING)
+#ifdef LEGION_SPY
       if (!reduce_post.exists())
       {
         UserEvent new_reduce_post = UserEvent::create_user_event();
@@ -5860,32 +5835,17 @@ namespace LegionRuntime {
                           reduce_mask, true/*reading*/);
       if (tracker != NULL)
         tracker->add_copy_event(reduce_post);
-#ifdef LEGION_LOGGING
-      {
-        std::set<FieldID> reduce_fields;
-        manager->region_node->column_source->to_field_set(reduce_mask,
-                                                          reduce_fields);
-        LegionLogging::log_lowlevel_copy(
-            Processor::get_executing_processor(),
-            manager->get_instance(),
-            target->get_manager()->get_instance(),
-            reduce_index_space,
-            manager->region_node->column_source->handle,
-            manager->region_node->handle.tree_id,
-            reduce_pre, reduce_post, reduce_fields, manager->redop);
-      }
-#endif
 #ifdef LEGION_SPY
       {
-        std::set<FieldID> field_set;
-        manager->region_node->column_source->to_field_set(reduce_mask,
-            field_set);
-        LegionSpy::log_copy_operation(manager->get_instance().id,
-            target->get_manager()->get_instance().id,
+        std::vector<FieldID> fids;
+        manager->region_node->column_source->get_field_ids(reduce_mask,
+            fids);
+        LegionSpy::log_copy_events(manager->get_instance().id,
+            target->get_manager()->get_instance().id, true,
             reduce_index_space.get_id(),
             manager->region_node->column_source->handle.id,
             manager->region_node->handle.tree_id, reduce_pre, reduce_post,
-            manager->redop, field_set);
+            manager->redop, fids);
       }
 #endif
     } 
@@ -5922,19 +5882,13 @@ namespace LegionRuntime {
         preconditions.insert(it->first);
       }
       Event reduce_pre = Event::merge_events(preconditions); 
-#if defined(LEGION_LOGGING) || defined(LEGION_SPY)
+#ifdef LEGION_SPY
       if (!reduce_pre.exists())
       {
         UserEvent new_reduce_pre = UserEvent::create_user_event();
         new_reduce_pre.trigger();
         reduce_pre = new_reduce_pre;
       }
-#endif
-#ifdef LEGION_LOGGING
-      LegionLogging::log_event_dependences(
-          Processor::get_executing_processor(), preconditions, reduce_pre);
-#endif
-#ifdef LEGION_SPY
       LegionSpy::log_event_dependences(preconditions, reduce_pre);
 #endif
       std::set<Event> post_events;
@@ -5947,45 +5901,31 @@ namespace LegionRuntime {
         post_events.insert(post);
       }
       Event reduce_post = Event::merge_events(post_events);
-      // No need to add the user to the destination as that will
-      // be handled by the caller using the reduce post event we return
-      add_copy_user(manager->redop, reduce_post, version_info,
-                    red_mask, true/*reading*/);
-#if defined(LEGION_SPY) || defined(LEGION_LOGGING)
-      IndexSpace reduce_index_space =
-              target->logical_node->as_region_node()->row_source->handle;
+#ifdef LEGION_SPY
       if (!reduce_post.exists())
       {
         UserEvent new_reduce_post = UserEvent::create_user_event();
         new_reduce_post.trigger();
         reduce_post = new_reduce_post;
+        LegionSpy::log_event_dependences(post_events, reduce_post);
       }
 #endif
-#ifdef LEGION_LOGGING
-      {
-        std::set<FieldID> reduce_fields;
-        manager->region_node->column_source->to_field_set(red_mask,
-                                                          reduce_fields);
-        LegionLogging::log_lowlevel_copy(
-            Processor::get_executing_processor(),
-            manager->get_instance(),
-            target->get_manager()->get_instance(),
-            reduce_index_space,
-            manager->region_node->column_source->handle,
-            manager->region_node->handle.tree_id,
-            reduce_pre, reduce_post, reduce_fields, manager->redop);
-      }
-#endif
+      // No need to add the user to the destination as that will
+      // be handled by the caller using the reduce post event we return
+      add_copy_user(manager->redop, reduce_post, version_info,
+                    red_mask, true/*reading*/);
 #ifdef LEGION_SPY
+      IndexSpace reduce_index_space =
+              target->logical_node->as_region_node()->row_source->handle;
       {
-        std::set<FieldID> field_set;
-        manager->region_node->column_source->to_field_set(red_mask, field_set);
-        LegionSpy::log_copy_operation(manager->get_instance().id,
-            target->get_manager()->get_instance().id,
+        std::vector<FieldID> fids;
+        manager->region_node->column_source->get_field_ids(red_mask, fids);
+        LegionSpy::log_copy_events(manager->get_instance().id,
+            target->get_manager()->get_instance().id, true,
             reduce_index_space.get_id(),
             manager->region_node->column_source->handle.id,
             manager->region_node->handle.tree_id, reduce_pre, reduce_post,
-            manager->redop, field_set);
+            manager->redop, fids);
       }
 #endif
       return reduce_post;
@@ -6025,19 +5965,13 @@ namespace LegionRuntime {
         preconditions.insert(it->first);
       }
       Event reduce_pre = Event::merge_events(preconditions); 
-#if defined(LEGION_LOGGING) || defined(LEGION_SPY)
+#ifdef LEGION_SPY
       if (!reduce_pre.exists())
       {
         UserEvent new_reduce_pre = UserEvent::create_user_event();
         new_reduce_pre.trigger();
         reduce_pre = new_reduce_pre;
       }
-#endif
-#ifdef LEGION_LOGGING
-      LegionLogging::log_event_dependences(
-          Processor::get_executing_processor(), preconditions, reduce_pre);
-#endif
-#ifdef LEGION_SPY
       LegionSpy::log_event_dependences(preconditions, reduce_pre);
 #endif
       std::set<Event> post_events;
@@ -6050,45 +5984,31 @@ namespace LegionRuntime {
         post_events.insert(post);
       }
       Event reduce_post = Event::merge_events(post_events);
-      // No need to add the user to the destination as that will
-      // be handled by the caller using the reduce post event we return
-      add_copy_user(manager->redop, reduce_post, version_info,
-                    red_mask, true/*reading*/);
-#if defined(LEGION_SPY) || defined(LEGION_LOGGING)
-      IndexSpace reduce_index_space =
-              target->logical_node->as_region_node()->row_source->handle;
+#ifdef LEGION_SPY
       if (!reduce_post.exists())
       {
         UserEvent new_reduce_post = UserEvent::create_user_event();
         new_reduce_post.trigger();
         reduce_post = new_reduce_post;
+        LegionSpy::log_event_dependences(post_events, reduce_post);
       }
 #endif
-#ifdef LEGION_LOGGING
-      {
-        std::set<FieldID> reduce_fields;
-        manager->region_node->column_source->to_field_set(red_mask,
-                                                          reduce_fields);
-        LegionLogging::log_lowlevel_copy(
-            Processor::get_executing_processor(),
-            manager->get_instance(),
-            target->get_manager()->get_instance(),
-            reduce_index_space,
-            manager->region_node->column_source->handle,
-            manager->region_node->handle.tree_id,
-            reduce_pre, reduce_post, reduce_fields, manager->redop);
-      }
-#endif
+      // No need to add the user to the destination as that will
+      // be handled by the caller using the reduce post event we return
+      add_copy_user(manager->redop, reduce_post, version_info,
+                    red_mask, true/*reading*/);
 #ifdef LEGION_SPY
+      IndexSpace reduce_index_space =
+              target->logical_node->as_region_node()->row_source->handle;
       {
-        std::set<FieldID> field_set;
-        manager->region_node->column_source->to_field_set(red_mask, field_set);
-        LegionSpy::log_copy_operation(manager->get_instance().id,
-            target->get_manager()->get_instance().id,
+        std::vector<FieldID> fids;
+        manager->region_node->column_source->get_field_ids(red_mask, fids);
+        LegionSpy::log_copy_events(manager->get_instance().id,
+            target->get_manager()->get_instance().id, true,
             reduce_index_space.get_id(),
             manager->region_node->column_source->handle.id,
             manager->region_node->handle.tree_id, reduce_pre, reduce_post,
-            manager->redop, field_set);
+            manager->redop, fids);
       }
 #endif
       return reduce_post;
@@ -6398,19 +6318,13 @@ namespace LegionRuntime {
         defer_collect_user(term_event);
       // Return our result
       Event result = Event::merge_events(wait_on);
-#if defined(LEGION_LOGGING) || defined(LEGION_SPY)
+#ifdef LEGION_SPY
       if (!result.exists())
       {
         UserEvent new_result = UserEvent::create_user_event();
         new_result.trigger();
         result = new_result;
       }
-#endif
-#ifdef LEGION_LOGGING
-      LegionLogging::log_event_dependences(
-          Processor::get_executing_processor(), wait_on, result);
-#endif
-#ifdef LEGION_SPY
       LegionSpy::log_event_dependences(wait_on, result);
 #endif
       return InstanceRef(result, this);
@@ -6622,8 +6536,7 @@ namespace LegionRuntime {
     {
       // Do not do this if we are in LegionSpy so we can see 
       // all of the dependences
-#if !defined(LEGION_SPY) && !defined(LEGION_LOGGING) && \
-      !defined(EVENT_GRAPH_TRACE)
+#if !defined(LEGION_SPY) && !defined(EVENT_GRAPH_TRACE)
       AutoLock v_lock(view_lock);
       for (std::set<Event>::const_iterator it = term_events.begin();
             it != term_events.end(); it++)
