@@ -21,7 +21,116 @@
 
 #include "runtime_impl.h"
 
+#include "dynamic_templates.h"
+
+#include <typeinfo>
+
 namespace Realm {
+
+  typedef DynamicTemplates::IntList<1, 3> DIMCOUNTS;
+  typedef DynamicTemplates::TypeList<int, long long>::TL DIMTYPES;
+  typedef DynamicTemplates::TypeList<int, bool>::TL FLDTYPES;
+  typedef DynamicTemplates::ListProduct2<DIMTYPES, FLDTYPES> DFT;
+
+  struct DT : public DynamicTemplates::ListProduct2<DIMCOUNTS, DIMTYPES> {
+    typedef DynamicTemplates::ListProduct2<DIMCOUNTS, DIMTYPES> SUPER;
+    template <int N, typename T>
+    static TagType encode_tag(void) {
+      return DynamicTemplates::ListProduct2<DIMCOUNTS, DIMTYPES>::template encode_tag<DynamicTemplates::Int<N>, T>();
+    }
+
+    template <typename TARGET>
+    struct ConvertToInt {
+      template <typename T1, typename T2, typename A1>
+      static void demux(A1 arg1) { TARGET::template demux<T1::N, T2>(arg1); }
+
+      template <typename T1, typename T2, typename A1, typename A2>
+      static void demux(A1 arg1, A2 arg2) { TARGET::template demux<T1::N, T2>(arg1, arg2); }
+
+      template <typename T1, typename T2, typename A1, typename A2, typename A3>
+      static void demux(A1 arg1, A2 arg2, A3 arg3) { TARGET::template demux<T1::N, T2>(arg1, arg2, arg3); }
+    };
+
+    template <typename TARGET, typename A1>
+    static void demux(TagType tag, A1 arg1) { SUPER::template demux<ConvertToInt<TARGET>, A1>(tag, arg1); }
+
+    template <typename TARGET, typename A1, typename A2>
+    static void demux(TagType tag, A1 arg1, A2 arg2) { SUPER::template demux<ConvertToInt<TARGET>, A1>(tag, arg1, arg2); }
+
+    template <typename TARGET, typename A1, typename A2, typename A3>
+    static void demux(TagType tag, A1 arg1, A2 arg2, A3 arg3) { SUPER::template demux<ConvertToInt<TARGET>, A1>(tag, arg1, arg2, arg3); }
+  };
+
+  class BBB {
+  public:
+    template <int N, typename T>
+    static void demux(int x)
+    {
+      std::cout << "BBB::demux<" << N << "," << typeid(T).name() << ">(" << x << ")" << std::endl;
+    }
+
+    template <int N, typename T>
+    static void demux(int x, int y)
+    {
+      std::cout << "BBB::demux<" << N << "," << typeid(T).name() << ">(" << x << y << ")" << std::endl;
+    }
+
+    template <int N, typename T>
+    static void demux(int x, int y, int z)
+    {
+      std::cout << "BBB::demux<" << N << "," << typeid(T).name() << ">(" << x << y << z << ")" << std::endl;
+    }
+  };
+
+  class AAA {
+  public:
+    template <typename T1, typename T2>
+    static void demux(int x)
+    {
+      std::cout << "AAA::demux<" << typeid(T1).name() << "," << typeid(T2).name() << ">(" << x << ")" << std::endl;
+    }
+
+    template <typename T1, typename T2>
+    static void bar(int x)
+    {
+      std::cout << "AAA::bar<" << typeid(T1).name() << "," << typeid(T2).name() << ">(" << x << ")" << std::endl;
+      int tag = DFT::encode_tag<T1, T2>();
+      DFT::demux<AAA>(tag, tag * 100 + x);
+    }
+  };
+
+  class TestMe {
+  public:
+    TestMe(void)
+    {
+      std::cout << "int? " << DIMTYPES::TypePresent<int>::value << std::endl;
+      std::cout << "long long? " << DIMTYPES::TypePresent<long long>::value << std::endl;
+      std::cout << "std::ostream? " << DIMTYPES::TypePresent<std::ostream>::value << std::endl;
+
+      //std::cout << "int: " << DIMTYPES::TypeToIndex<int>::INDEX << std::endl;
+      std::cout << "long long: " << DIMTYPES::TypeToIndex<long long>::INDEX << std::endl;
+      //std::cout << "char: " << DIMTYPES::TypeToIndex<char>::INDEX << std::endl;
+      
+      std::cout << "0: " << typeid(DIMTYPES::IndexToType<0>::TYPE).name() << std::endl;
+      std::cout << "1: " << typeid(DIMTYPES::IndexToType<1>::TYPE).name() << std::endl;
+
+      //std::cout << "x: " << DFT::encode_tag<long long, int>() << std::endl;
+      //DFT::demux<AAA>(DFT::encode_tag<long long, int>(), 1);
+      AAA::bar<long long, int>(4);
+      AAA::bar<long long, bool>(4);
+      AAA::bar<int, int>(4);
+      AAA::bar<int, bool>(4);
+
+      std::cout << "y: " << DT::encode_tag<3, int>() << std::endl;
+      DT::demux<BBB>(DT::encode_tag<3, int>(), 12);
+      DT::demux<BBB>(DT::encode_tag<3, int>(), 12, 3);
+      DT::demux<BBB>(DT::encode_tag<3, int>(), 12, 4, 5);
+      exit(0);
+    }
+  };
+
+  TestMe testme;
+
 
   Logger log_part("part");
   Logger log_uop_timing("uop_timing");
