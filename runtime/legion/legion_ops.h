@@ -23,11 +23,11 @@
 #include "legion_allocation.h"
 #include "legion_analysis.h"
 
-namespace LegionRuntime {
-  namespace HighLevel {
+namespace Legion {
+  namespace Internal {
 
     // Special typedef for predicates
-    typedef Predicate::Impl PredicateOp; 
+    typedef PredicateImpl PredicateOp; 
 
     /**
      * \class Operation
@@ -133,7 +133,7 @@ namespace LegionRuntime {
           { mapping_dependences.insert(dependence); }
         inline void add_resolution_dependence(Event dependence)
           { resolution_dependences.insert(dependence); }
-        void issue_stage_triggers(Operation *op, Internal *runtime, 
+        void issue_stage_triggers(Operation *op, Runtime *runtime, 
                                   MustEpochOp *must_epoch);
       private:
         std::set<Event> mapping_dependences;
@@ -143,12 +143,12 @@ namespace LegionRuntime {
       public:
         inline void add_commit_dependence(Event dependence)
           { commit_dependences.insert(dependence); }
-        bool issue_commit_trigger(Operation *op, Internal *runtime);
+        bool issue_commit_trigger(Operation *op, Runtime *runtime);
       private:
         std::set<Event> commit_dependences;
       };
     public:
-      Operation(Internal *rt);
+      Operation(Runtime *rt);
       virtual ~Operation(void);
     public:
       static const char* get_string_rep(OpKind kind);
@@ -352,7 +352,7 @@ namespace LegionRuntime {
       void notify_regions_verified(const std::set<unsigned> &regions,
                                    GenerationID gen);
     public:
-      Internal *const runtime;
+      Runtime *const runtime;
     protected:
       Reservation op_lock;
       GenerationID gen;
@@ -443,15 +443,15 @@ namespace LegionRuntime {
     };
 
     /**
-     * \class Predicate::Impl 
+     * \class Predicate 
      * A predicate operation is an abstract class that
      * contains a method that allows other operations to
      * sample their values and see if they are resolved
      * or whether they are speculated values.
      */
-    class Predicate::Impl : public Operation {
+    class PredicateImpl : public Operation {
     public:
-      Impl(Internal *rt);
+      PredicateImpl(Runtime *rt);
     public:
       void activate_predicate(void);
       void deactivate_predicate(void);
@@ -491,13 +491,13 @@ namespace LegionRuntime {
         RESOLVE_FALSE_STATE,
       };
     public:
-      SpeculativeOp(Internal *rt);
+      SpeculativeOp(Runtime *rt);
     public:
       void activate_speculative(void);
       void deactivate_speculative(void);
     public:
-      void initialize_speculation(SingleTask *ctx, bool track, 
-                                  unsigned regions, const Predicate &p);
+      void initialize_speculation(SingleTask *ctx, bool track, unsigned regions,
+                                  const Predicate &p);
       void register_predicate_dependence(void);
       bool is_predicated(void) const;
       // Wait until the predicate is valid and then return
@@ -546,7 +546,7 @@ namespace LegionRuntime {
     public:
       static const AllocationType alloc_type = MAP_OP_ALLOC;
     public:
-      MapOp(Internal *rt);
+      MapOp(Runtime *rt);
       MapOp(const MapOp &rhs);
       virtual ~MapOp(void);
     public:
@@ -608,7 +608,7 @@ namespace LegionRuntime {
     public:
       static const AllocationType alloc_type = COPY_OP_ALLOC;
     public:
-      CopyOp(Internal *rt);
+      CopyOp(Runtime *rt);
       CopyOp(const CopyOp &rhs);
       virtual ~CopyOp(void);
     public:
@@ -678,7 +678,7 @@ namespace LegionRuntime {
     public:
       static const AllocationType alloc_type = FENCE_OP_ALLOC;
     public:
-      FenceOp(Internal *rt);
+      FenceOp(Runtime *rt);
       FenceOp(const FenceOp &rhs);
       virtual ~FenceOp(void);
     public:
@@ -710,7 +710,7 @@ namespace LegionRuntime {
     public:
       static const AllocationType alloc_type = FRAME_OP_ALLOC;
     public:
-      FrameOp(Internal *rt);
+      FrameOp(Runtime *rt);
       FrameOp(const FrameOp &rhs);
       virtual ~FrameOp(void);
     public:
@@ -751,7 +751,7 @@ namespace LegionRuntime {
         LOGICAL_PARTITION_DELETION,
       };
     public:
-      DeletionOp(Internal *rt);
+      DeletionOp(Runtime *rt);
       DeletionOp(const DeletionOp &rhs);
       virtual ~DeletionOp(void);
     public:
@@ -800,7 +800,7 @@ namespace LegionRuntime {
     public:
       static const AllocationType alloc_type = CLOSE_OP_ALLOC;
     public:
-      CloseOp(Internal *rt);
+      CloseOp(Runtime *rt);
       CloseOp(const CloseOp &rhs);
       virtual ~CloseOp(void);
     public:
@@ -837,7 +837,7 @@ namespace LegionRuntime {
      */
     class TraceCloseOp : public CloseOp {
     public:
-      TraceCloseOp(Internal *runtime);
+      TraceCloseOp(Runtime *runtime);
       virtual ~TraceCloseOp(void);
     public:
       virtual void activate(void) = 0;
@@ -890,7 +890,7 @@ namespace LegionRuntime {
      */
     class InterCloseOp : public TraceCloseOp {
     public:
-      InterCloseOp(Internal *runtime);
+      InterCloseOp(Runtime *runtime);
       InterCloseOp(const InterCloseOp &rhs);
       virtual ~InterCloseOp(void);
     public:
@@ -928,7 +928,7 @@ namespace LegionRuntime {
      */
     class ReadCloseOp : public TraceCloseOp {
     public:
-      ReadCloseOp(Internal *runtime);
+      ReadCloseOp(Runtime *runtime);
       ReadCloseOp(const ReadCloseOp &rhs);
       virtual ~ReadCloseOp(void);
     public:
@@ -958,7 +958,7 @@ namespace LegionRuntime {
      */
     class PostCloseOp : public CloseOp {
     public:
-      PostCloseOp(Internal *runtime);
+      PostCloseOp(Runtime *runtime);
       PostCloseOp(const PostCloseOp &rhs);
       virtual ~PostCloseOp(void);
     public:
@@ -989,7 +989,7 @@ namespace LegionRuntime {
      */
     class VirtualCloseOp : public CloseOp {
     public:
-      VirtualCloseOp(Internal *runtime);
+      VirtualCloseOp(Runtime *runtime);
       VirtualCloseOp(const VirtualCloseOp &rhs);
       virtual ~VirtualCloseOp(void);
     public:
@@ -1019,7 +1019,7 @@ namespace LegionRuntime {
     public:
       static const AllocationType alloc_type = ACQUIRE_OP_ALLOC;
     public:
-      AcquireOp(Internal *rt);
+      AcquireOp(Runtime *rt);
       AcquireOp(const AcquireOp &rhs);
       virtual ~AcquireOp(void);
     public:
@@ -1074,7 +1074,7 @@ namespace LegionRuntime {
     public:
       static const AllocationType alloc_type = RELEASE_OP_ALLOC;
     public:
-      ReleaseOp(Internal *rt);
+      ReleaseOp(Runtime *rt);
       ReleaseOp(const ReleaseOp &rhs);
       virtual ~ReleaseOp(void);
     public:
@@ -1130,7 +1130,7 @@ namespace LegionRuntime {
     public:
       static const AllocationType alloc_type = DYNAMIC_COLLECTIVE_OP_ALLOC;
     public:
-      DynamicCollectiveOp(Internal *rt);
+      DynamicCollectiveOp(Runtime *rt);
       DynamicCollectiveOp(const DynamicCollectiveOp &rhs);
       virtual ~DynamicCollectiveOp(void);
     public:
@@ -1155,7 +1155,7 @@ namespace LegionRuntime {
      * \class FuturePredOp
      * A class for making predicates out of futures.
      */
-    class FuturePredOp : public Predicate::Impl {
+    class FuturePredOp : public PredicateOp {
     public:
       static const AllocationType alloc_type = FUTURE_PRED_OP_ALLOC;
     public:
@@ -1164,7 +1164,7 @@ namespace LegionRuntime {
         FuturePredOp *future_pred_op;
       };
     public:
-      FuturePredOp(Internal *rt);
+      FuturePredOp(Runtime *rt);
       FuturePredOp(const FuturePredOp &rhs);
       virtual ~FuturePredOp(void);
     public:
@@ -1188,11 +1188,11 @@ namespace LegionRuntime {
      * \class NotPredOp
      * A class for negating other predicates
      */
-    class NotPredOp : public Predicate::Impl, PredicateWaiter {
+    class NotPredOp : public PredicateOp, PredicateWaiter {
     public:
       static const AllocationType alloc_type = NOT_PRED_OP_ALLOC;
     public:
-      NotPredOp(Internal *rt);
+      NotPredOp(Runtime *rt);
       NotPredOp(const NotPredOp &rhs);
       virtual ~NotPredOp(void);
     public:
@@ -1216,11 +1216,11 @@ namespace LegionRuntime {
      * \class AndPredOp
      * A class for and-ing other predicates
      */
-    class AndPredOp : public Predicate::Impl, PredicateWaiter {
+    class AndPredOp : public PredicateOp, PredicateWaiter {
     public:
       static const AllocationType alloc_type = AND_PRED_OP_ALLOC;
     public:
-      AndPredOp(Internal *rt);
+      AndPredOp(Runtime *rt);
       AndPredOp(const AndPredOp &rhs);
       virtual ~AndPredOp(void);
     public:
@@ -1251,11 +1251,11 @@ namespace LegionRuntime {
      * \class OrPredOp
      * A class for or-ing other predicates
      */
-    class OrPredOp : public Predicate::Impl, PredicateWaiter {
+    class OrPredOp : public PredicateOp, PredicateWaiter {
     public:
       static const AllocationType alloc_type = OR_PRED_OP_ALLOC;
     public:
-      OrPredOp(Internal *rt);
+      OrPredOp(Runtime *rt);
       OrPredOp(const OrPredOp &rhs);
       virtual ~OrPredOp(void);
     public:
@@ -1311,17 +1311,18 @@ namespace LegionRuntime {
         DependenceType dtype;
       };
     public:
-      MustEpochOp(Internal *rt);
+      MustEpochOp(Runtime *rt);
       MustEpochOp(const MustEpochOp &rhs);
       virtual ~MustEpochOp(void);
     public:
       MustEpochOp& operator=(const MustEpochOp &rhs);
     public:
       FutureMap initialize(SingleTask *ctx,
-                           const MustEpochLauncher &launcher,
-                           bool check_privileges);
+                                   const MustEpochLauncher &launcher,
+                                   bool check_privileges);
       void set_task_options(ProcessorManager *manager);
-      void find_conflicted_regions(std::vector<PhysicalRegion> &unmapped); 
+      void find_conflicted_regions(
+          std::vector<PhysicalRegion> &unmapped); 
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -1478,7 +1479,7 @@ namespace LegionRuntime {
     public:
       MustEpochDistributor& operator=(const MustEpochDistributor &rhs);
     public:
-      void distribute_tasks(Internal *runtime,
+      void distribute_tasks(Runtime *runtime,
                             const std::vector<IndividualTask*> &indiv_tasks,
                             const std::set<SliceTask*> &slice_tasks);
     public:
@@ -1635,7 +1636,7 @@ namespace LegionRuntime {
         std::vector<IndexSpace> handles;
       };
     public:
-      PendingPartitionOp(Internal *rt);
+      PendingPartitionOp(Runtime *rt);
       PendingPartitionOp(const PendingPartitionOp &rhs);
       virtual ~PendingPartitionOp(void);
     public:
@@ -1706,7 +1707,7 @@ namespace LegionRuntime {
         BY_PREIMAGE,
       };
     public:
-      DependentPartitionOp(Internal *rt);
+      DependentPartitionOp(Runtime *rt);
       DependentPartitionOp(const DependentPartitionOp &rhs);
       virtual ~DependentPartitionOp(void);
     public:
@@ -1764,7 +1765,7 @@ namespace LegionRuntime {
     public:
       static const AllocationType alloc_type = FILL_OP_ALLOC;
     public:
-      FillOp(Internal *rt);
+      FillOp(Runtime *rt);
       FillOp(const FillOp &rhs);
       virtual ~FillOp(void);
     public:
@@ -1775,7 +1776,7 @@ namespace LegionRuntime {
                       const void *ptr, size_t size,
                       const Predicate &pred, bool check_privileges);
       void initialize(SingleTask *ctx, LogicalRegion handle,
-                      LogicalRegion parent, FieldID fid, const Future &f,
+                      LogicalRegion parent, FieldID fid,const Future &f,
                       const Predicate &pred, bool check_privileges);
       void initialize(SingleTask *ctx, LogicalRegion handle,
                       LogicalRegion parent, 
@@ -1832,17 +1833,19 @@ namespace LegionRuntime {
         IN_MEMORY_DATA
       };
     public:
-      AttachOp(Internal *rt);
+      AttachOp(Runtime *rt);
       AttachOp(const AttachOp &rhs);
       virtual ~AttachOp(void);
     public:
       AttachOp& operator=(const AttachOp &rhs);
     public:
-      PhysicalRegion initialize_hdf5(SingleTask *ctx, const char *file_name,
+      PhysicalRegion initialize_hdf5(
+                                 SingleTask *ctx, const char *file_name,
                                  LogicalRegion handle, LogicalRegion parent,
                                  const std::map<FieldID,const char*> &field_map,
                                  LegionFileMode mode, bool check_privileges);
-      PhysicalRegion initialize_file(SingleTask *ctx, const char *file_name,
+      PhysicalRegion initialize_file(
+                                     SingleTask *ctx, const char *file_name,
                                      LogicalRegion handle, LogicalRegion parent,
                                      const std::vector<FieldID> &field_vec,
                                      LegionFileMode mode, bool check_privileges);
@@ -1887,7 +1890,7 @@ namespace LegionRuntime {
     public:
       static const AllocationType alloc_type = DETACH_OP_ALLOC;
     public:
-      DetachOp(Internal *rt);
+      DetachOp(Runtime *rt);
       DetachOp(const DetachOp &rhs);
       virtual ~DetachOp(void);
     public:
@@ -1929,7 +1932,7 @@ namespace LegionRuntime {
         NANOSECOND_MEASUREMENT,
       };
     public:
-      TimingOp(Internal *rt);
+      TimingOp(Runtime *rt);
       TimingOp(const TimingOp &rhs);
       virtual ~TimingOp(void);
     public:
@@ -1954,7 +1957,7 @@ namespace LegionRuntime {
       Future result;
     };
 
-  }; //namespace HighLevel
-}; // namespace LegionRuntime
+  }; //namespace Internal 
+}; // namespace Legion 
 
 #endif // __LEGION_OPERATIONS_H__

@@ -31,8 +31,8 @@
 #include <cstring>
 #include <algorithm>
 
-namespace LegionRuntime {
-  namespace HighLevel {
+namespace Legion {
+
     class TaskResult {
     public:
       TaskResult(void) : value(NULL), value_size(0) {}
@@ -96,10 +96,10 @@ namespace LegionRuntime {
     class CObjectWrapper {
     public:
 
-      typedef Accessor::AccessorType::Generic Generic;
-      typedef Accessor::AccessorType::SOA<0> SOA;
-      typedef Accessor::RegionAccessor<Generic> AccessorGeneric;
-      typedef Accessor::RegionAccessor<SOA, char> AccessorArray;
+      typedef LegionRuntime::Accessor::AccessorType::Generic Generic;
+      typedef LegionRuntime::Accessor::AccessorType::SOA<0> SOA;
+      typedef LegionRuntime::Accessor::RegionAccessor<Generic> AccessorGeneric;
+      typedef LegionRuntime::Accessor::RegionAccessor<SOA, char> AccessorArray;
 
 #define NEW_OPAQUE_WRAPPER(T_, T)                                       \
       static T_ wrap(T t) {                                             \
@@ -145,8 +145,8 @@ namespace LegionRuntime {
       NEW_OPAQUE_WRAPPER(legion_machine_t, Machine *);
       NEW_OPAQUE_WRAPPER(legion_mapper_t, Mapper *);
       NEW_OPAQUE_WRAPPER(legion_machine_query_interface_t,
-                         MappingUtilities::MachineQueryInterface*);
-      NEW_OPAQUE_WRAPPER(legion_default_mapper_t, DefaultMapper*);
+                         Mapping::Utilities::MachineQueryInterface*);
+      NEW_OPAQUE_WRAPPER(legion_default_mapper_t, Mapping::DefaultMapper*);
 #undef NEW_OPAQUE_WRAPPER
 
       static legion_ptr_t
@@ -400,17 +400,17 @@ namespace LegionRuntime {
       }
 
       static const legion_byte_offset_t
-      wrap(const Accessor::ByteOffset offset)
+      wrap(const LegionRuntime::Accessor::ByteOffset offset)
       {
         legion_byte_offset_t offset_;
         offset_.offset = offset.offset;
         return offset_;
       }
 
-      static const Accessor::ByteOffset
+      static const LegionRuntime::Accessor::ByteOffset
       unwrap(const legion_byte_offset_t offset_)
       {
-        const Accessor::ByteOffset offset(offset_.offset);
+        const LegionRuntime::Accessor::ByteOffset offset(offset_.offset);
         return offset;
       }
 
@@ -527,7 +527,6 @@ namespace LegionRuntime {
         return domain_split;
       }
     };
-  }
 }
 
 #endif // __LEGION_C_UTIL_H__

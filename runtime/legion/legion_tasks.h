@@ -24,8 +24,8 @@
 #include "legion_utilities.h"
 #include "legion_allocation.h"
 
-namespace LegionRuntime {
-  namespace HighLevel {
+namespace Legion {
+  namespace Internal {
 
     /**
      * \class TaskOp
@@ -42,7 +42,7 @@ namespace LegionRuntime {
         SLICE_TASK_KIND,
       };
     public:
-      TaskOp(Internal *rt);
+      TaskOp(Runtime *rt);
       virtual ~TaskOp(void);
     public:
       virtual MappableKind get_mappable_kind(void) const;
@@ -70,7 +70,7 @@ namespace LegionRuntime {
                                 const Predicate &p, 
                                 Processor::TaskFuncID tid);
       void check_empty_field_requirements(void);
-      size_t check_future_size(Future::Impl *impl);
+      size_t check_future_size(FutureImpl *impl);
     public:
       virtual void activate(void) = 0;
       virtual void deactivate(void) = 0;
@@ -217,7 +217,7 @@ namespace LegionRuntime {
       AllocManager *arg_manager;
     public:
       // Static methods
-      static void process_unpack_task(Internal *rt,
+      static void process_unpack_task(Runtime *rt,
                                       Deserializer &derez);
     public:
       static void pack_index_space_requirement(
@@ -312,7 +312,7 @@ namespace LegionRuntime {
         UserEvent profiling_done;
       };
     public:
-      SingleTask(Internal *rt);
+      SingleTask(Runtime *rt);
       virtual ~SingleTask(void);
     protected:
       void activate_single(void);
@@ -425,7 +425,7 @@ namespace LegionRuntime {
       void find_conflicting_regions(DependentPartitionOp *partition,
                                     std::vector<PhysicalRegion> &conflicting);
       void find_conflicting_internal(const RegionRequirement &req,
-                                     std::vector<PhysicalRegion> &conflicting);
+                                    std::vector<PhysicalRegion> &conflicting);
       void find_conflicting_regions(FillOp *fill,
                                     std::vector<PhysicalRegion> &conflicting);
       bool check_region_dependence(RegionTreeID tid, IndexSpace space,
@@ -619,7 +619,7 @@ namespace LegionRuntime {
      */
     class MultiTask : public TaskOp {
     public:
-      MultiTask(Internal *rt);
+      MultiTask(Runtime *rt);
       virtual ~MultiTask(void);
     protected:
       void activate_multi(void);
@@ -706,7 +706,7 @@ namespace LegionRuntime {
     public:
       static const AllocationType alloc_type = INDIVIDUAL_TASK_ALLOC;
     public:
-      IndividualTask(Internal *rt);
+      IndividualTask(Runtime *rt);
       IndividualTask(const IndividualTask &rhs);
       virtual ~IndividualTask(void);
     public:
@@ -831,7 +831,7 @@ namespace LegionRuntime {
     public:
       static const AllocationType alloc_type = POINT_TASK_ALLOC;
     public:
-      PointTask(Internal *rt);
+      PointTask(Runtime *rt);
       PointTask(const PointTask &rhs);
       virtual ~PointTask(void);
     public:
@@ -904,7 +904,7 @@ namespace LegionRuntime {
      */
     class WrapperTask : public SingleTask {
     public:
-      WrapperTask(Internal *rt);
+      WrapperTask(Runtime *rt);
       virtual ~WrapperTask(void);
     public:
       virtual void activate(void) = 0;
@@ -966,7 +966,7 @@ namespace LegionRuntime {
     public:
       static const AllocationType alloc_type = REMOTE_TASK_ALLOC;
     public:
-      RemoteTask(Internal *rt);
+      RemoteTask(Runtime *rt);
       RemoteTask(const RemoteTask &rhs);
       virtual ~RemoteTask(void);
     public:
@@ -1017,7 +1017,7 @@ namespace LegionRuntime {
     public:
       static const AllocationType alloc_type = INLINE_TASK_ALLOC;
     public:
-      InlineTask(Internal *rt);
+      InlineTask(Runtime *rt);
       InlineTask(const InlineTask &rhs);
       virtual ~InlineTask(void);
     public:
@@ -1071,7 +1071,7 @@ namespace LegionRuntime {
     public:
       static const AllocationType alloc_type = INDEX_TASK_ALLOC;
     public:
-      IndexTask(Internal *rt);
+      IndexTask(Runtime *rt);
       IndexTask(const IndexTask &rhs);
       virtual ~IndexTask(void);
     public:
@@ -1212,7 +1212,7 @@ namespace LegionRuntime {
     public:
       static const AllocationType alloc_type = SLICE_TASK_ALLOC;
     public:
-      SliceTask(Internal *rt);
+      SliceTask(Runtime *rt);
       SliceTask(const SliceTask &rhs);
       virtual ~SliceTask(void);
     public:
@@ -1272,7 +1272,7 @@ namespace LegionRuntime {
       void pack_remote_complete(Serializer &rez);
       void pack_remote_commit(Serializer &rez);
     public:
-      static void handle_slice_return(Internal *rt, Deserializer &derez);
+      static void handle_slice_return(Runtime *rt, Deserializer &derez);
     protected:
       friend class IndexTask;
       bool reclaim; // used for reclaiming intermediate slices
@@ -1357,7 +1357,7 @@ namespace LegionRuntime {
       bool own_arg;
     };
 
-  }; // namespace HighLevel
-}; // namespace LegionRuntime
+  }; // namespace Internal 
+}; // namespace Legion
 
 #endif // __LEGION_TASKS_H__

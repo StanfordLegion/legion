@@ -20,8 +20,8 @@
 #include <cassert>
 #include <cstdlib>
 
-namespace LegionRuntime {
-  namespace HighLevel {
+namespace Legion {
+  namespace Internal {
 
     /**
      * \class IntervalTreeNode
@@ -544,8 +544,8 @@ namespace LegionRuntime {
       return root->dominates(left, right);
     }
 
-  };
-};
+  }; // namespace Internal
+}; // namespace Legion
 
 #endif // __LEGION_INTERVAL_TREE_H__
 

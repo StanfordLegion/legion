@@ -24,8 +24,8 @@
 #include <cstdio>
 #include <cassert>
 
-namespace LegionRuntime {
-  namespace HighLevel {
+namespace Legion {
+  namespace Internal {
 
     template<typename T>
     class Segment {
@@ -2414,8 +2414,8 @@ namespace LegionRuntime {
       }
       return false;
     } 
-  };
-};
+  }; // namespace Internal
+}; // namespace Legion
 
 #endif // __LEGION_RECTANGLE_SET_H__
 

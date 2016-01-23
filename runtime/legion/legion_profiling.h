@@ -26,8 +26,8 @@
 #include <deque>
 #include <algorithm>
 
-namespace LegionRuntime {
-  namespace HighLevel {
+namespace Legion {
+  namespace Internal {
 
     class LegionProfMarker {
       public:
@@ -239,8 +239,8 @@ namespace LegionRuntime {
     private:
       LegionProfInstance **const instances;
     };
-  };
-};
+  }; // namespace Internal
+}; // namespace Legion
 
 #endif // __LEGION_PROFILING_H__
 

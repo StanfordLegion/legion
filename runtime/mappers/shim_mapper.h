@@ -24,8 +24,8 @@
 #include <cassert>
 #include <algorithm>
 
-namespace LegionRuntime {
-  namespace HighLevel {
+namespace Legion {
+  namespace Mapping {
 
     /**
      * \class ShimMapper

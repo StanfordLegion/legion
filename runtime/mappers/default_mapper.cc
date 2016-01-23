@@ -33,12 +33,12 @@
 // This is the default implementation of the mapper interface for 
 // the general low level runtime
 
-namespace LegionRuntime {
-  namespace HighLevel {
+namespace Legion {
+  namespace Mapping {
 
-    using namespace MappingUtilities;
+    using namespace Utilities;
 
-    Logger::Category log_mapper("default_mapper");
+    LegionRuntime::Logger::Category log_mapper("default_mapper");
 
     enum MapperMeesageType
     {
@@ -77,7 +77,7 @@ namespace LegionRuntime {
         stealing_enabled(STATIC_STEALING_ENABLED),
         max_schedule_count(STATIC_MAX_SCHEDULE_COUNT),
         max_failed_mappings(STATIC_MAX_FAILED_MAPPINGS),
-        machine_interface(MappingUtilities::MachineQueryInterface(m))
+        machine_interface(Utilities::MachineQueryInterface(m))
     //--------------------------------------------------------------------------
     {
       log_mapper.spew("Initializing the default mapper for "
@@ -121,7 +121,8 @@ namespace LegionRuntime {
     DefaultMapper::DefaultMapper(const DefaultMapper &rhs)
       : Mapper(NULL), local_proc(Processor::NO_PROC),
         local_kind(Processor::LOC_PROC), machine(rhs.machine),
-        machine_interface(MappingUtilities::MachineQueryInterface(Machine::get_machine()))
+        machine_interface(Utilities::MachineQueryInterface(
+                                                        Machine::get_machine()))
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -962,13 +963,14 @@ namespace LegionRuntime {
 					 unsigned splitting_factor, 
                                      std::vector<Mapper::DomainSplit> &slices)
     {
-      Arrays::Rect<DIM> r = domain.get_rect<DIM>();
+      LegionRuntime::Arrays::Rect<DIM> r = domain.get_rect<DIM>();
 
       std::vector<Processor>::const_iterator target_it = targets.begin();
-      for(Arrays::GenericPointInRectIterator<DIM> pir(r); pir; pir++) 
+      for(LegionRuntime::Arrays::GenericPointInRectIterator<DIM> 
+            pir(r); pir; pir++) 
       {
         // rect containing a single point
-	Arrays::Rect<DIM> subrect(pir.p, pir.p); 
+        LegionRuntime::Arrays::Rect<DIM> subrect(pir.p, pir.p); 
 	Mapper::DomainSplit ds(Domain::from_rect<DIM>(subrect), *target_it++, 
                                false /* recurse */, false /* stealable */);
 	slices.push_back(ds);
@@ -1073,7 +1075,7 @@ namespace LegionRuntime {
       {
         // Only works for one dimensional rectangles right now
         assert(domain.get_dim() == 1);
-        Arrays::Rect<1> rect = domain.get_rect<1>();
+        LegionRuntime::Arrays::Rect<1> rect = domain.get_rect<1>();
         unsigned num_elmts = rect.volume();
         unsigned num_chunks = targets.size()*splitting_factor;
         if (num_chunks > num_elmts)
@@ -1087,10 +1089,10 @@ namespace LegionRuntime {
         for (unsigned idx = 0; idx < num_chunks; idx++)
         {
           unsigned elmts = (idx < number_small) ? lower_bound : upper_bound;
-          Arrays::Point<1> lo(index);  
-          Arrays::Point<1> hi(index+elmts-1);
+          LegionRuntime::Arrays::Point<1> lo(index);  
+          LegionRuntime::Arrays::Point<1> hi(index+elmts-1);
           index += elmts;
-          Arrays::Rect<1> chunk(rect.lo+lo,rect.lo+hi);
+          LegionRuntime::Arrays::Rect<1> chunk(rect.lo+lo,rect.lo+hi);
           unsigned proc_idx = idx % targets.size();
           slices.push_back(DomainSplit(
                 Domain::from_rect<1>(chunk), targets[proc_idx], false, false));
@@ -1098,5 +1100,6 @@ namespace LegionRuntime {
       }
     }
 
-  };
-};
+  }; // namespace Mapping
+}; // namespace Legion
+

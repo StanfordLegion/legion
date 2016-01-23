@@ -22,9 +22,9 @@
 #include <cstdlib>
 #include <cassert>
 
-namespace LegionRuntime {
-  namespace HighLevel {
-    namespace MappingUtilities {
+namespace Legion {
+  namespace Mapping {
+    namespace Utilities {
 
       /**
        * A class containing methods for pulling out
@@ -288,9 +288,9 @@ namespace LegionRuntime {
         OptionMap profiling_options;
       };
 
-    };
-  };
-};
+    }; // namespace Utilities
+  }; // namespace Mapping
+}; // namespace Legion
 
 #endif // __MAPPING_UTILITIES__
 

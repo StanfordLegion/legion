@@ -32,8 +32,8 @@
 // own references to the owner node.
 // #define USE_REMOTE_REFERENCES
 
-namespace LegionRuntime {
-  namespace HighLevel {
+namespace Legion {
+  namespace Internal {
 
     enum ReferenceSource {
       FUTURE_HANDLE_REF,
@@ -79,7 +79,7 @@ namespace LegionRuntime {
       "Remote Creation Reference",                  \
     }
 
-    extern Logger::Category log_garbage;
+    extern LegionRuntime::Logger::Category log_garbage;
 
     /**
      * \class Collectable
@@ -149,7 +149,7 @@ namespace LegionRuntime {
         unsigned count;
       };
     public:
-      DistributedCollectable(Internal *rt, DistributedID did,
+      DistributedCollectable(Runtime *rt, DistributedID did,
                              AddressSpaceID owner_space,
                              AddressSpaceID local_space,
                              bool register_with_runtime = true);
@@ -225,19 +225,19 @@ namespace LegionRuntime {
                                  AddressSpaceID target, bool flush);
 #endif
     public:
-      static void handle_did_remote_registration(Internal *runtime,
+      static void handle_did_remote_registration(Runtime *runtime,
                                                  Deserializer &derez,
                                                  AddressSpaceID source);
-      static void handle_did_remote_valid_update(Internal *runtime,
+      static void handle_did_remote_valid_update(Runtime *runtime,
                                                  Deserializer &derez);
-      static void handle_did_remote_gc_update(Internal *runtime,
+      static void handle_did_remote_gc_update(Runtime *runtime,
                                               Deserializer &derez);
-      static void handle_did_remote_resource_update(Internal *runtime,
+      static void handle_did_remote_resource_update(Runtime *runtime,
                                                     Deserializer &derez);
     public:
-      static void handle_did_add_create(Internal *runtime, 
+      static void handle_did_add_create(Runtime *runtime, 
                                         Deserializer &derez);
-      static void handle_did_remove_create(Internal *runtime, 
+      static void handle_did_remove_create(Runtime *runtime, 
                                            Deserializer &derez);
     protected:
       bool update_state(bool &need_activate, bool &need_validate,
@@ -245,7 +245,7 @@ namespace LegionRuntime {
                         bool &do_deletion);
       bool can_delete(void);
     public:
-      Internal *const runtime;
+      Runtime *const runtime;
       const DistributedID did;
       const AddressSpaceID owner_space;
       const AddressSpaceID local_space;
@@ -497,8 +497,8 @@ namespace LegionRuntime {
       return remove_resource_reference(cnt);
     }
 
-  }; // namespace HighLevel 
-}; // namespace LegionRuntime
+  }; // namespace Internal 
+}; // namespace Legion 
 
 #endif // __LEGION_GARBAGE_COLLECTION__
 

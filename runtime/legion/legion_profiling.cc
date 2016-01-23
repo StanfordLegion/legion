@@ -20,10 +20,10 @@
 #include <cstring>
 #include <cstdlib>
 
-namespace LegionRuntime {
-  namespace HighLevel {
+namespace Legion {
+  namespace Internal {
 
-    extern Logger::Category log_prof;
+    extern LegionRuntime::Logger::Category log_prof;
 
     //--------------------------------------------------------------------------
     LegionProfMarker::LegionProfMarker(const char* _name)
@@ -786,5 +786,6 @@ namespace LegionRuntime {
     }
 #endif
 
-  };
-};
+  }; // namespace Internal
+}; // namespace Legion
+

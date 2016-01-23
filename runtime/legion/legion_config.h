@@ -152,7 +152,7 @@
 #endif
 
 // The following enums are all re-exported by
-// LegionRuntime::HighLevel. These versions are here to facilitate the
+// namespace Legion. These versions are here to facilitate the
 // C API. If you are writing C++ code, use the namespaced versions.
 
 typedef enum legion_error_t {
@@ -360,7 +360,7 @@ typedef enum legion_partition_kind_t {
 typedef enum legion_dependence_type_t {
   NO_DEPENDENCE = 0,
   TRUE_DEPENDENCE = 1,
-  ANTI_DEPENDENCE = 2, // Write-After-Read or Write-After-Write with Write-Only privilege
+  ANTI_DEPENDENCE = 2, // WAR or WAW with Write-Only privilege
   ATOMIC_DEPENDENCE = 3,
   SIMULTANEOUS_DEPENDENCE = 4,
   PROMOTED_DEPENDENCE = 5,

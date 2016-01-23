@@ -19,8 +19,8 @@
 
 #include "legion_types.h"
 
-namespace LegionRuntime {
-  namespace HighLevel {
+namespace Legion {
+  namespace Internal {
 
     /**
      * \class FieldTree
@@ -982,8 +982,8 @@ namespace LegionRuntime {
       }
     }
     
-  };
-};
+  }; // namespace Internal
+}; // namespace Legion
 
 #endif // __LEGION_FIELD_TREE_H__
 

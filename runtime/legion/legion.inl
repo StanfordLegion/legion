@@ -18,8 +18,7 @@
 // Useful for IDEs 
 #include "legion.h"
 
-namespace LegionRuntime {
-  namespace HighLevel {
+namespace Legion {
 
     /**
      * \struct SerdezRedopFns
@@ -1405,14 +1404,15 @@ namespace LegionRuntime {
         IndexSpace parent, const T& mapping, int part_color /*= AUTO_GENERATE*/)
     //--------------------------------------------------------------------------
     {
-      Arrays::Rect<T::IDIM> parent_rect = 
+      LegionRuntime::Arrays::Rect<T::IDIM> parent_rect = 
         get_index_space_domain(ctx, parent).get_rect<T::IDIM>();
-      Arrays::Rect<T::ODIM> color_space = mapping.image_convex(parent_rect);
+      LegionRuntime::Arrays::Rect<T::ODIM> color_space = 
+        mapping.image_convex(parent_rect);
       DomainPointColoring c;
       for (typename T::PointInOutputRectIterator pir(color_space); 
           pir; pir++) 
       {
-        Arrays::Rect<T::IDIM> preimage = mapping.preimage(pir.p);
+        LegionRuntime::Arrays::Rect<T::IDIM> preimage = mapping.preimage(pir.p);
 #ifdef DEBUG_HIGH_LEVEL
         assert(mapping.preimage_is_dense(pir.p));
 #endif
@@ -1436,8 +1436,10 @@ namespace LegionRuntime {
           {
             if (current_colors.find(it2->first) != current_colors.end())
               continue;
-            Arrays::Rect<T::IDIM> rect1 = it1->second.get_rect<T::IDIM>();
-            Arrays::Rect<T::IDIM> rect2 = it2->second.get_rect<T::IDIM>();
+            LegionRuntime::Arrays::Rect<T::IDIM> rect1 = 
+              it1->second.get_rect<T::IDIM>();
+            LegionRuntime::Arrays::Rect<T::IDIM> rect2 = 
+              it2->second.get_rect<T::IDIM>();
             if (rect1.overlaps(rect2))
             {
               switch (it1->first.dim)
@@ -1480,7 +1482,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     template<unsigned DIM>
     IndexSpace Runtime::get_index_subspace(Context ctx, 
-                              IndexPartition p, Arrays::Point<DIM> color_point)
+                IndexPartition p, LegionRuntime::Arrays::Point<DIM> color_point)
     //--------------------------------------------------------------------------
     {
       DomainPoint dom_point = DomainPoint::from_point<DIM>(color_point);
@@ -1593,7 +1595,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     template<unsigned DIM>
     IndexSpace Mapper::get_index_subspace(IndexPartition p,
-                                          Arrays::Point<DIM> &color_point) const
+                           LegionRuntime::Arrays::Point<DIM> &color_point) const
     //--------------------------------------------------------------------------
     {
       DomainPoint dom_point = DomainPoint::from_point<DIM>(color_point);
@@ -2131,5 +2133,136 @@ namespace LegionRuntime {
       return left = static_cast<AllocateMode>(l);
     }
 
+}; // namespace Legion
+
+// This is for backwards compatibility with the old namespace scheme
+namespace LegionRuntime {
+  namespace HighLevel {
+    typedef Legion::IndexSpace IndexSpace;
+    typedef Legion::IndexPartition IndexPartition;
+    typedef Legion::FieldSpace FieldSpace;
+    typedef Legion::LogicalRegion LogicalRegion;
+    typedef Legion::LogicalPartition LogicalPartition;
+    typedef Legion::IndexAllocator IndexAllocator;
+    typedef Legion::FieldAllocator FieldAllocator;
+    typedef Legion::TaskArgument TaskArgument;
+    typedef Legion::ArgumentMap ArgumentMap;
+    typedef Legion::Predicate Predicate;
+    typedef Legion::Lock Lock;
+    typedef Legion::LockRequest LockRequest;
+    typedef Legion::Grant Grant;
+    typedef Legion::PhaseBarrier PhaseBarrier;
+    typedef Legion::DynamicCollective DynamicCollective;
+    typedef Legion::RegionRequirement RegionRequirement;
+    typedef Legion::IndexSpaceRequirement IndexSpaceRequirement;
+    typedef Legion::FieldSpaceRequirement FieldSpaceRequirement;
+    typedef Legion::Future Future;
+    typedef Legion::FutureMap FutureMap;
+    typedef Legion::TaskLauncher TaskLauncher;
+    typedef Legion::IndexLauncher IndexLauncher;
+    typedef Legion::InlineLauncher InlineLauncher;
+    typedef Legion::CopyLauncher CopyLauncher;
+    typedef Legion::PhysicalRegion PhysicalRegion;
+    typedef Legion::IndexIterator IndexIterator;
+    typedef Legion::AcquireLauncher AcquireLauncher;
+    typedef Legion::ReleaseLauncher ReleaseLauncher;
+    typedef Legion::MustEpochLauncher MustEpochLauncher;
+    typedef Legion::MPILegionHandshake MPILegionHandshake;
+    typedef Legion::Mappable Mappable;
+    typedef Legion::Task Task;
+    typedef Legion::Copy Copy;
+    typedef Legion::Inline Inline;
+    typedef Legion::Acquire Acquire;
+    typedef Legion::Release Release;
+    typedef Legion::TaskVariantCollection TaskVariantCollection;
+    typedef Legion::Mapper Mapper;
+    typedef Legion::InputArgs InputArgs;
+    typedef Legion::TaskConfigOptions TaskConfigOptions;
+    typedef Legion::ProjectionFunctor ProjectionFunctor;
+    typedef Legion::Runtime Runtime;
+    typedef Legion::Runtime HighLevelRuntime; // for backwards compatibility
+    typedef Legion::ColoringSerializer ColoringSerializer;
+    typedef Legion::DomainColoringSerializer DomainColoringSerializer;
+    typedef Legion::Serializer Serializer;
+    typedef Legion::Deserializer Deserializer;
+    typedef Realm::Runtime RealmRuntime;
+    typedef Realm::Machine Machine;
+    typedef Realm::Domain Domain;
+    typedef Realm::DomainPoint DomainPoint;
+    typedef Realm::IndexSpaceAllocator IndexSpaceAllocator;
+    typedef Realm::RegionInstance PhysicalInstance;
+    typedef Realm::Memory Memory;
+    typedef Realm::Processor Processor;
+    typedef Realm::CodeDescriptor CodeDescriptor;
+    typedef Realm::Event Event;
+    typedef Realm::Event MapperEvent;
+    typedef Realm::UserEvent UserEvent;
+    typedef Realm::Reservation Reservation;
+    typedef Realm::Barrier Barrier;
+    typedef ::legion_reduction_op_id_t ReductionOpID;
+    typedef Realm::ReductionOpUntyped ReductionOp;
+    typedef ::legion_custom_serdez_id_t CustomSerdezID;
+    typedef Realm::CustomSerdezUntyped SerdezOp;
+    typedef Realm::Machine::ProcessorMemoryAffinity ProcessorMemoryAffinity;
+    typedef Realm::Machine::MemoryMemoryAffinity MemoryMemoryAffinity;
+    typedef Realm::ElementMask::Enumerator Enumerator;
+    typedef Realm::IndexSpace::FieldDataDescriptor FieldDataDescriptor;
+    typedef std::map<CustomSerdezID, 
+                     const Realm::CustomSerdezUntyped *> SerdezOpTable;
+    typedef std::map<Realm::ReductionOpID, 
+            const Realm::ReductionOpUntyped *> ReductionOpTable;
+    typedef void (*SerdezInitFnptr)(const ReductionOp*, void *&, size_t&);
+    typedef void (*SerdezFoldFnptr)(const ReductionOp*, void *&, size_t&,
+                                    const void*, bool);
+    typedef std::map<Realm::ReductionOpID, 
+                     Legion::SerdezRedopFns> SerdezRedopTable;
+    typedef ::legion_address_space_t AddressSpace;
+    typedef ::legion_task_priority_t TaskPriority;
+    typedef ::legion_color_t Color;
+    typedef ::legion_field_id_t FieldID;
+    typedef ::legion_trace_id_t TraceID;
+    typedef ::legion_mapper_id_t MapperID;
+    typedef ::legion_context_id_t ContextID;
+    typedef ::legion_instance_id_t InstanceID;
+    typedef ::legion_index_space_id_t IndexSpaceID;
+    typedef ::legion_index_partition_id_t IndexPartitionID;
+    typedef ::legion_index_tree_id_t IndexTreeID;
+    typedef ::legion_field_space_id_t FieldSpaceID;
+    typedef ::legion_generation_id_t GenerationID;
+    typedef ::legion_type_handle TypeHandle;
+    typedef ::legion_projection_id_t ProjectionID;
+    typedef ::legion_region_tree_id_t RegionTreeID;
+    typedef ::legion_distributed_id_t DistributedID;
+    typedef ::legion_address_space_id_t AddressSpaceID;
+    typedef ::legion_tunable_id_t TunableID;
+    typedef ::legion_mapping_tag_id_t MappingTagID;
+    typedef ::legion_semantic_tag_t SemanticTag;
+    typedef ::legion_variant_id_t VariantID;
+    typedef ::legion_unique_id_t UniqueID;
+    typedef ::legion_version_id_t VersionID;
+    typedef ::legion_task_id_t TaskID;
+    typedef ::legion_layout_constraint_id_t LayoutConstraintID;
+    typedef std::map<Color,Legion::ColoredPoints<ptr_t> > Coloring;
+    typedef std::map<Color,Domain> DomainColoring;
+    typedef std::map<Color,std::set<Domain> > MultiDomainColoring;
+    typedef std::map<DomainPoint,Legion::ColoredPoints<ptr_t> > PointColoring;
+    typedef std::map<DomainPoint,Domain> DomainPointColoring;
+    typedef std::map<DomainPoint,std::set<Domain> > MultiDomainPointColoring;
+    typedef void (*RegistrationCallbackFnptr)(Machine machine, 
+        Runtime *rt, const std::set<Processor> &local_procs);
+    typedef LogicalRegion (*RegionProjectionFnptr)(LogicalRegion parent, 
+        const DomainPoint&, Runtime *rt);
+    typedef LogicalRegion (*PartitionProjectionFnptr)(LogicalPartition parent, 
+        const DomainPoint&, Runtime *rt);
+    typedef bool (*PredicateFnptr)(const void*, size_t, 
+        const std::vector<Future> futures);
+    typedef std::map<ProjectionID,RegionProjectionFnptr> 
+      RegionProjectionTable;
+    typedef std::map<ProjectionID,PartitionProjectionFnptr> 
+      PartitionProjectionTable;
+    typedef void (*RealmFnptr)(const void*,size_t,
+                               const void*,size_t,Processor);
+    typedef Legion::Internal::SingleTask* Context;
   };
 };
+

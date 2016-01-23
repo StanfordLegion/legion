@@ -32,13 +32,7 @@
  * \namespace LegionRuntime
  * Namespace for all Legion runtime objects
  */
-namespace LegionRuntime {
-  /**
-   * \namespace HighLevel
-   * Namespace specifically devoted to objects of the Legion high-level
-   * runtime system (see LowLevel namespace for low-level objects). 
-   */
-  namespace HighLevel {
+namespace Legion {
 
     //==========================================================================
     //                       Data Description Classes
@@ -485,10 +479,9 @@ namespace LegionRuntime {
       inline bool remove_point(const PT point[DIM]);
     private:
       FRIEND_ALL_RUNTIME_CLASSES
-      class Impl;
-      Impl *impl;
+      Internal::ArgumentMapImpl *impl;
     private:
-      ArgumentMap(Impl *i);
+      explicit ArgumentMap(Internal::ArgumentMapImpl *i);
     };
 
     //==========================================================================
@@ -514,13 +507,11 @@ namespace LegionRuntime {
       Predicate(const Predicate &p);
       explicit Predicate(bool value);
       ~Predicate(void);
-    public:
-      class Impl;
     protected:
       FRIEND_ALL_RUNTIME_CLASSES
-      Impl *impl;
+      Internal::PredicateImpl *impl;
       // Only the runtime should be allowed to make these
-      Predicate(Impl *impl);
+      explicit Predicate(Internal::PredicateImpl *impl);
     public:
       Predicate& operator=(const Predicate &p);
       inline bool operator==(const Predicate &p) const;
@@ -613,12 +604,10 @@ namespace LegionRuntime {
       Grant(void);
       Grant(const Grant &g);
       ~Grant(void);
-    public:
-      class Impl;
     protected:
       // Only the runtime is allowed to make non-empty grants
       FRIEND_ALL_RUNTIME_CLASSES
-      Grant(Impl *impl);
+      explicit Grant(Internal::GrantImpl *impl);
     public:
       bool operator==(const Grant &g) const
         { return impl == g.impl; }
@@ -626,7 +615,7 @@ namespace LegionRuntime {
         { return impl < g.impl; }
       Grant& operator=(const Grant &g);
     protected:
-      Impl *impl;
+      Internal::GrantImpl *impl;
     };
 
     /**
@@ -820,7 +809,7 @@ namespace LegionRuntime {
       inline RegionRequirement& add_flags(RegionFlags new_flags);
     public:
 #ifdef PRIVILEGE_CHECKS
-      AccessorPrivilege get_accessor_privilege(void) const;
+      unsigned get_accessor_privilege(void) const;
 #endif
       bool has_field_privilege(FieldID fid) const;
       void copy_without_mapping_info(const RegionRequirement &rhs);
@@ -949,14 +938,12 @@ namespace LegionRuntime {
       Future(void);
       Future(const Future &f);
       ~Future(void);
-    public:
-      class Impl;
     private:
-      Impl *impl;
+      Internal::FutureImpl *impl;
     protected:
       // Only the runtime should be allowed to make these
       FRIEND_ALL_RUNTIME_CLASSES
-      Future(Impl *impl);
+      explicit Future(Internal::FutureImpl *impl);
     public:
       bool operator==(const Future &f) const
         { return impl == f.impl; }
@@ -1037,12 +1024,11 @@ namespace LegionRuntime {
       FutureMap(const FutureMap &map);
       ~FutureMap(void);
     private:
-      class Impl;
-      Impl *impl;
+      Internal::FutureMapImpl *impl;
     protected:
       // Only the runtime should be allowed to make these
       FRIEND_ALL_RUNTIME_CLASSES
-      FutureMap(Impl *impl);
+      explicit FutureMap(Internal::FutureMapImpl *impl);
     public:
       bool operator==(const FutureMap &f) const
         { return impl == f.impl; }
@@ -1398,11 +1384,10 @@ namespace LegionRuntime {
       PhysicalRegion(const PhysicalRegion &rhs);
       ~PhysicalRegion(void);
     private:
-      class Impl;
-      Impl *impl;
+      Internal::PhysicalRegionImpl *impl;
     protected:
       FRIEND_ALL_RUNTIME_CLASSES
-      PhysicalRegion(Impl *impl);
+      explicit PhysicalRegion(Internal::PhysicalRegionImpl *impl);
     public:
       PhysicalRegion& operator=(const PhysicalRegion &rhs);
       inline bool operator==(const PhysicalRegion &reg) const
@@ -1434,13 +1419,15 @@ namespace LegionRuntime {
       /**
        * Return a generic accessor for the entire physical region.
        */
-      Accessor::RegionAccessor<Accessor::AccessorType::Generic> 
-        get_accessor(void) const;
+      LegionRuntime::Accessor::RegionAccessor<
+        LegionRuntime::Accessor::AccessorType::Generic> 
+          get_accessor(void) const;
       /**
        * Return a field accessor for a specific field within the region.
        */
-      Accessor::RegionAccessor<Accessor::AccessorType::Generic> 
-        get_field_accessor(FieldID field) const; 
+      LegionRuntime::Accessor::RegionAccessor<
+        LegionRuntime::Accessor::AccessorType::Generic> 
+          get_field_accessor(FieldID field) const; 
       /**
        * Return the memories where the underlying physical instances locate.
        */
@@ -1607,14 +1594,12 @@ namespace LegionRuntime {
       MPILegionHandshake(void);
       MPILegionHandshake(const MPILegionHandshake &rhs);
       ~MPILegionHandshake(void);
-    public:
-      class Impl;
     private:
-      Impl *impl;
+      Internal::MPILegionHandshakeImpl *impl;
     protected:
       // Only the runtime should be able to make these
       FRIEND_ALL_RUNTIME_CLASSES
-      MPILegionHandshake(Impl *impl);
+      explicit MPILegionHandshake(Internal::MPILegionHandshakeImpl *impl);
     public:
       bool operator==(const MPILegionHandshake &h) const
         { return impl == h.impl; }
@@ -2809,7 +2794,7 @@ namespace LegionRuntime {
 
       template<unsigned DIM>
       IndexSpace get_index_subspace(IndexPartition p, 
-                                    Arrays::Point<DIM> &color_point) const;
+                          LegionRuntime::Arrays::Point<DIM> &color_point) const;
 
       Color get_index_space_color(IndexSpace handle) const;
 
@@ -3031,9 +3016,9 @@ namespace LegionRuntime {
     protected:
       // The Runtime bootstraps itself and should
       // never need to be explicitly created.
-      friend class Internal;
+      friend class Internal::Runtime;
       friend class Future;
-      Runtime(Internal *rt);
+      Runtime(Internal::Runtime *rt);
     public:
       //------------------------------------------------------------------------
       // Index Space Operations
@@ -3202,8 +3187,9 @@ namespace LegionRuntime {
        * @return handle for the next index partition
        */
       IndexPartition create_index_partition(Context ctx, IndexSpace parent,
-       Accessor::RegionAccessor<Accessor::AccessorType::Generic> field_accessor,
-                                            int part_color = -1);
+       LegionRuntime::Accessor::RegionAccessor<
+        LegionRuntime::Accessor::AccessorType::Generic> field_accessor,
+                                                        int part_color = -1);
 
       /**
        * Destroy an index partition
@@ -3769,7 +3755,7 @@ namespace LegionRuntime {
        */
       template <unsigned DIM>
       IndexSpace get_index_subspace(Context ctx, IndexPartition p, 
-                                    Arrays::Point<DIM> color_point);
+                                LegionRuntime::Arrays::Point<DIM> color_point);
 
       /**
        * Return the color for the corresponding index space in
@@ -5794,7 +5780,7 @@ namespace LegionRuntime {
       static SerdezRedopTable& get_serdez_redop_table(void);
     private:
       friend class Mapper;
-      Internal *runtime;
+      Internal::Runtime *runtime;
     };
 
     //==========================================================================
@@ -5839,7 +5825,6 @@ namespace LegionRuntime {
       DomainColoring coloring;
     };
 
-  }; // namespace HighLevel
 }; // namespace LegionRuntime
 
 #include "legion.inl"

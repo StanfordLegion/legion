@@ -24,7 +24,6 @@
 #include "legion_types.h"
 #include "legion.h"
 #include "legion_profiling.h"
-#include "legion_allocation.h"
 
 // Apple can go screw itself
 #ifndef __MACH__
@@ -47,8 +46,7 @@
 #define MASK_FMT "%16.16lx"
 #endif
 
-namespace LegionRuntime {
-  namespace HighLevel {
+namespace Legion {
 
 // Useful macros
 #define IS_NO_ACCESS(req) (((req).privilege & READ_WRITE) == NO_ACCESS)
@@ -214,34 +212,21 @@ namespace LegionRuntime {
     public:
       AutoLock(Reservation r, unsigned mode = 0, bool exclusive = true, 
                Event wait_on = Event::NO_EVENT)
-        : is_low(true), low_lock(r)
+        : low_lock(r)
       {
         Event lock_event = r.acquire(mode,exclusive,wait_on);
         if (lock_event.exists())
           lock_event.wait();
       }
-      AutoLock(ImmovableLock l)
-        : is_low(false), immov_lock(l)
-      {
-        l.lock();
-      }
     public:
       AutoLock(const AutoLock &rhs)
-        : is_low(false)
       {
         // should never be called
         assert(false);
       }
       ~AutoLock(void)
       {
-        if (is_low)
-        {
-          low_lock.release();
-        }
-        else
-        {
-          immov_lock.unlock();
-        }
+        low_lock.release();
       }
     public:
       AutoLock& operator=(const AutoLock &rhs)
@@ -251,9 +236,7 @@ namespace LegionRuntime {
         return *this;
       }
     private:
-      const bool is_low;
       Reservation low_lock;
-      ImmovableLock immov_lock;
     };
 
     /////////////////////////////////////////////////////////////
@@ -1149,8 +1132,6 @@ namespace LegionRuntime {
     public:
       struct DenseSet {
       public:
-        static const AllocationType alloc_type = DENSE_INDEX_ALLOC;
-      public:
         DT set;
       };
       struct UnionFunctor {
@@ -1283,7 +1264,7 @@ namespace LegionRuntime {
         {
           if (elems[i] != 0)
           {
-            legion_delete(elems[i]);
+            delete elems[i];
           }
         }
       }
@@ -6042,7 +6023,7 @@ namespace LegionRuntime {
       }
       else
       {
-        mask.dense = legion_new<BITMASK>(init);
+        mask.dense = new BITMASK(init);
         tag = COMPOUND_DENSE;
       }
     }
@@ -6068,7 +6049,7 @@ namespace LegionRuntime {
           }
         case COMPOUND_DENSE:
           {
-            mask.dense = legion_new<BITMASK>(rhs.mask.dense);
+            mask.dense = new BITMASK(rhs.mask.dense);
             break;
           }
         default:
@@ -6090,7 +6071,7 @@ namespace LegionRuntime {
           }
         case COMPOUND_DENSE:
           {
-            legion_delete(mask.dense);
+            delete mask.dense;
             break;
           }
       }
@@ -6125,7 +6106,7 @@ namespace LegionRuntime {
           {
             if ((mask.sparse->size()+1) > MAX_SPARSE_SIZE) 
             {
-              BITMASK *next = legion_new<BITMASK>();
+              BITMASK *next = new BITMASK();
               for (std::set<unsigned>::const_iterator it = 
                     mask.sparse->begin(); it != mask.sparse->end(); it++)
               {
@@ -6175,7 +6156,7 @@ namespace LegionRuntime {
             mask.dense->unset_bit(bit);
             if (!(*mask.dense))
             {
-              legion_delete(mask.dense);
+              delete mask.dense;
               tag = COMPOUND_NONE;
             }
             break;
@@ -6273,7 +6254,7 @@ namespace LegionRuntime {
           }
         case COMPOUND_DENSE:
           {
-            legion_delete(mask.dense);
+            delete mask.dense;
             break;
           }
       }
@@ -6407,7 +6388,7 @@ namespace LegionRuntime {
             }
           case COMPOUND_DENSE:
             {
-              mask.dense = legion_new<BITMASK>(rhs.mask.dense);
+              mask.dense = new BITMASK(rhs.mask.dense);
               break;
             }
         }
@@ -6449,20 +6430,20 @@ namespace LegionRuntime {
         case COMPOUND_NONE:
           {
             result.tag = COMPOUND_DENSE;
-            result.mask.dense = legion_new<BITMASK>(FIELD_ALL_ONES);
+            result.mask.dense = new BITMASK(FIELD_ALL_ONES);
             break;
           }
         case COMPOUND_SINGLE:
           {
             result.tag = COMPOUND_DENSE;
-            result.mask.dense = legion_new<BITMASK>(FIELD_ALL_ONES);
+            result.mask.dense = new BITMASK(FIELD_ALL_ONES);
             result.mask.dense->unset_bit(mask.index);
             break;
           }
         case COMPOUND_SPARSE:
           {
             result.tag = COMPOUND_DENSE;
-            result.mask.dense = legion_new<BITMASK>(FIELD_ALL_ONES);
+            result.mask.dense = new BITMASK(FIELD_ALL_ONES);
             for (std::set<unsigned>::const_iterator it = 
                   mask.sparse->begin(); it != mask.sparse->end(); it++)
             {
@@ -6473,7 +6454,7 @@ namespace LegionRuntime {
         case COMPOUND_DENSE:
           {
             result.tag = COMPOUND_DENSE;
-            result.mask.dense = legion_new<BITMASK>(~(*mask.dense));
+            result.mask.dense = new BITMASK(~(*mask.dense));
             break;
           }
       }
@@ -6492,7 +6473,7 @@ namespace LegionRuntime {
         if (tag == COMPOUND_DENSE)
         {
           result.tag = COMPOUND_DENSE;
-          result.mask.dense = legion_new<BITMASK>(*mask.dense);
+          result.mask.dense = new BITMASK(*mask.dense);
           if (rhs.tag == COMPOUND_SPARSE)
           {
             for (std::set<unsigned>::const_iterator it = 
@@ -6507,7 +6488,7 @@ namespace LegionRuntime {
         else if (rhs.tag == COMPOUND_DENSE)
         {
           result.tag = COMPOUND_DENSE;
-          result.mask.dense = legion_new<BITMASK>(*rhs.mask.dense);
+          result.mask.dense = new BITMASK(*rhs.mask.dense);
           if (tag == COMPOUND_SPARSE)
           {
             for (std::set<unsigned>::const_iterator it = 
@@ -6573,7 +6554,7 @@ namespace LegionRuntime {
                     rhs.mask.sparse->size()) > MAX_SPARSE_SIZE)
               {
                 result.tag = COMPOUND_DENSE;
-                result.mask.dense = legion_new<BITMASK>();
+                result.mask.dense = new BITMASK();
                 for (std::set<unsigned>::const_iterator it = 
                       mask.sparse->begin(); it != mask.sparse->end(); it++)
                 {
@@ -6601,7 +6582,7 @@ namespace LegionRuntime {
             {
               result.tag = COMPOUND_DENSE;
               result.mask.dense = 
-                legion_new<BITMASK>(*mask.dense | *rhs.mask.dense);
+                new BITMASK(*mask.dense | *rhs.mask.dense);
               break;
             }
         }
@@ -6751,7 +6732,7 @@ namespace LegionRuntime {
         {
           result.tag = COMPOUND_DENSE;
           result.mask.dense = 
-            legion_new<BITMASK>(*mask.dense & *rhs.mask.dense);
+            new BITMASK(*mask.dense & *rhs.mask.dense);
         }
       }
       return result;
@@ -6812,7 +6793,7 @@ namespace LegionRuntime {
       {
         result.tag = COMPOUND_DENSE;
         result.mask.dense = 
-          legion_new<BITMASK>((*mask.dense) ^ (*rhs.mask.dense));
+          new BITMASK((*mask.dense) ^ (*rhs.mask.dense));
       }
       return result;
     }
@@ -6848,14 +6829,14 @@ namespace LegionRuntime {
         {
           unsigned index_copy = mask.index;
           tag = COMPOUND_DENSE;
-          mask.dense = legion_new<BITMASK>(*rhs.mask.dense);
+          mask.dense = new BITMASK(*rhs.mask.dense);
           mask.dense->set_bit(index_copy);
         }
         else if (tag == COMPOUND_SPARSE)
         {
           std::set<unsigned> *copy_sparse = mask.sparse;
           tag = COMPOUND_DENSE;
-          mask.dense = legion_new<BITMASK>(*rhs.mask.dense);
+          mask.dense = new BITMASK(*rhs.mask.dense);
           for (std::set<unsigned>::const_iterator it = 
                 copy_sparse->begin(); it != copy_sparse->end(); it++)
           {
@@ -6912,7 +6893,7 @@ namespace LegionRuntime {
         if (tag == COMPOUND_SPARSE)
           delete mask.sparse;
         else if (tag == COMPOUND_DENSE)
-          legion_delete(mask.dense);
+          delete mask.dense;
         tag = COMPOUND_NONE;
       }
       else if (tag == COMPOUND_SINGLE)
@@ -6939,13 +6920,13 @@ namespace LegionRuntime {
           // tag is compound dense
           if (mask.dense->is_set(rhs.mask.index))
           {
-            legion_delete(mask.dense);
+            delete mask.dense;
             mask.index = rhs.mask.index;
             tag = COMPOUND_SINGLE;
           }
           else
           {
-            legion_delete(mask.dense);
+            delete mask.dense;
             tag = COMPOUND_NONE;
           }
         }
@@ -6988,13 +6969,13 @@ namespace LegionRuntime {
             mask.dense->unset_bit(*it);
           if (!(*mask.dense))
           {
-            legion_delete(mask.dense);
+            delete mask.dense;
             tag = COMPOUND_NONE;
           }
           else if (BITMASK::pop_count(*mask.dense) == 1)
           {
             unsigned index = mask.dense->find_first_set();
-            legion_delete(mask.dense);
+            delete mask.dense;
             mask.index = index;
             tag = COMPOUND_SINGLE;
           }
@@ -7037,13 +7018,13 @@ namespace LegionRuntime {
           (*mask.dense) &= (*rhs.mask.dense);
           if (!(*mask.dense))
           {
-            legion_delete(mask.dense);
+            delete mask.dense;
             tag = COMPOUND_NONE;
           }
           else if (BITMASK::pop_count(*mask.dense) == 1)
           {
             unsigned index = mask.dense->find_first_set();
-            legion_delete(mask.dense);
+            delete mask.dense;
             mask.index = index;
             tag = COMPOUND_SINGLE;
           }
@@ -7105,7 +7086,7 @@ namespace LegionRuntime {
         else
         {
           // rhs tag is compound dense
-          BITMASK *next = legion_new<BITMASK>(rhs.mask.dense);
+          BITMASK *next = new BITMASK(rhs.mask.dense);
           if (!next->is_set(mask.index))
           {
             mask.dense = next;
@@ -7117,7 +7098,7 @@ namespace LegionRuntime {
             if (BITMASK::pop_count(*next) == 1)
             {
               mask.index = next->find_first_set();
-              legion_delete(next);
+              delete next;
               tag = COMPOUND_SINGLE;
             }
             else
@@ -7187,7 +7168,7 @@ namespace LegionRuntime {
         else
         {
           // rhs is dense
-          BITMASK *next = legion_new<BITMASK>(rhs.mask.dense);
+          BITMASK *next = new BITMASK(rhs.mask.dense);
           for (std::set<unsigned>::const_iterator it = mask.sparse->begin();
                 it != mask.sparse->end(); it++)
           {
@@ -7199,13 +7180,13 @@ namespace LegionRuntime {
           delete mask.sparse;
           if (!(*next))
           {
-            legion_delete(next);
+            delete next;
             tag = COMPOUND_NONE;
           }
           else if (BITMASK::pop_count(*next) == 1)
           {
             mask.index = next->find_first_set();
-            legion_delete(next);
+            delete next;
             tag = COMPOUND_SINGLE;
           }
           else
@@ -7228,13 +7209,13 @@ namespace LegionRuntime {
         }
         if (!(*mask.dense))
         {
-          legion_delete(mask.dense);    
+          delete mask.dense;    
           tag = COMPOUND_NONE;
         }
         else if (BITMASK::pop_count(*mask.dense) == 1)
         {
           unsigned index = mask.dense->find_first_set();
-          legion_delete(mask.dense);
+          delete mask.dense;
           mask.index = index;
           tag = COMPOUND_SINGLE;
         }
@@ -7332,7 +7313,7 @@ namespace LegionRuntime {
       }
       else if (tag == COMPOUND_DENSE)
       {
-        result.mask.dense = legion_new<BITMASK>((*mask.dense) << shift);
+        result.mask.dense = new BITMASK((*mask.dense) << shift);
         result.tag = COMPOUND_DENSE; 
       }
       return result;
@@ -7378,7 +7359,7 @@ namespace LegionRuntime {
       }
       else if (tag == COMPOUND_DENSE)
       {
-        result.mask.dense = legion_new<BITMASK>((*mask.dense) >> shift);
+        result.mask.dense = new BITMASK((*mask.dense) >> shift);
         result.tag = COMPOUND_DENSE;
       }
       return result;
@@ -7561,7 +7542,7 @@ namespace LegionRuntime {
           }
         case COMPOUND_DENSE:
           {
-            mask.dense = legion_new<BITMASK>();
+            mask.dense = new BITMASK();
             mask.dense->deserialize(derez);
             break;
           }
@@ -7892,7 +7873,7 @@ namespace LegionRuntime {
       }
       else
       {
-        set_ptr.dense = legion_new<DenseSet>();
+        set_ptr.dense = new DenseSet();
         set_ptr.dense->set = rhs.set_ptr.dense->set;
       }
     }
@@ -7908,7 +7889,7 @@ namespace LegionRuntime {
       if (sparse)
         delete set_ptr.sparse;
       else
-        legion_delete(set_ptr.dense);
+        delete set_ptr.dense;
     }
     
     //-------------------------------------------------------------------------
@@ -7921,7 +7902,7 @@ namespace LegionRuntime {
       {
         if (!sparse)
         {
-          legion_delete(set_ptr.dense);
+          delete set_ptr.dense;
           set_ptr.sparse = new std::set<IT>();
         }
         else
@@ -7933,7 +7914,7 @@ namespace LegionRuntime {
         if (sparse)
         {
           delete set_ptr.sparse;
-          set_ptr.dense = legion_new<DenseSet>();
+          set_ptr.dense = new DenseSet();
         }
         else
           set_ptr.dense->set.clear();
@@ -7966,7 +7947,7 @@ namespace LegionRuntime {
         if (sizeof(DT) < (set_ptr.sparse->size() * 
                           (sizeof(IT) + STL_SET_NODE_SIZE)))
         {
-          DenseSet *dense_set = legion_new<DenseSet>();
+          DenseSet *dense_set = new DenseSet();
           for (typename std::set<IT>::const_iterator it = 
                 set_ptr.sparse->begin(); it != set_ptr.sparse->end(); it++)
           {
@@ -8010,7 +7991,7 @@ namespace LegionRuntime {
               }
             }
             // Delete the dense set
-            legion_delete(set_ptr.dense);
+            delete set_ptr.dense;
             set_ptr.sparse = sparse_set;
             sparse = true;
           }
@@ -8127,7 +8108,7 @@ namespace LegionRuntime {
         // If it doesn't match then replace the old one
         if (!sparse)
         {
-          legion_delete(set_ptr.dense);
+          delete set_ptr.dense;
           set_ptr.sparse = new std::set<IT>();
         }
         else
@@ -8147,7 +8128,7 @@ namespace LegionRuntime {
         if (sparse)
         {
           delete set_ptr.sparse;
-          set_ptr.dense = legion_new<DenseSet>();
+          set_ptr.dense = new DenseSet();
         }
         else
           set_ptr.dense->set.clear();
@@ -8303,7 +8284,7 @@ namespace LegionRuntime {
       // always switch back to set on a clear
       if (!sparse)
       {
-	legion_delete(set_ptr.dense);
+	delete set_ptr.dense;
 	set_ptr.sparse = new std::set<IT>();
 	sparse = true;
       } else
@@ -8459,7 +8440,7 @@ namespace LegionRuntime {
         AutoLock l(leaf->lock);
         // Now that we have the lock, check to see if we lost the race
         if (leaf->elems[offset] == 0)
-          leaf->elems[offset] = legion_new<ET>();
+          leaf->elems[offset] = new ET();
         result = leaf->elems[offset];
       }
 #ifdef DEBUG_HIGH_LEVEL
@@ -8485,7 +8466,7 @@ namespace LegionRuntime {
         AutoLock l(leaf->lock);
         // Now that we have the lock, check to see if we lost the race
         if (leaf->elems[offset] == 0)
-          leaf->elems[offset] = legion_new<ET>(arg);
+          leaf->elems[offset] = new ET(arg);
         result = leaf->elems[offset];
       }
 #ifdef DEBUG_HIGH_LEVEL
@@ -8512,7 +8493,7 @@ namespace LegionRuntime {
         AutoLock l(leaf->lock);
         // Now that we have the lock, check to see if we lost the race
         if (leaf->elems[offset] == 0)
-          leaf->elems[offset] = legion_new<ET>(arg1, arg2);
+          leaf->elems[offset] = new ET(arg1, arg2);
         result = leaf->elems[offset];
       }
 #ifdef DEBUG_HIGH_LEVEL
@@ -8613,7 +8594,6 @@ namespace LegionRuntime {
       return n;
     }
 
-  }; // namespace HighLevel
-}; // namespace LegionRuntime
+}; // namespace Legion 
 
 #endif // __LEGION_UTILITIES_H__

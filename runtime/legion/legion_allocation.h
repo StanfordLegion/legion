@@ -32,8 +32,8 @@
 #endif
 #include "legion_types.h" // StaticAssert
 
-namespace LegionRuntime {
-  namespace HighLevel {
+namespace Legion {
+  namespace Internal {
 
     enum AllocationType {
       ARGUMENT_MAP_ALLOC,
@@ -201,9 +201,9 @@ namespace LegionRuntime {
       static void trace_allocation(AllocationType a, size_t size, int elems=1);
       static void trace_free(AllocationType a, size_t size, int elems=1);
       static Internal* find_runtime(void);
-      static void trace_allocation(Internal *&rt, AllocationType a, 
+      static void trace_allocation(Runtime *&rt, AllocationType a, 
                                    size_t size, int elems=1);
-      static void trace_free(Internal *&rt, AllocationType a, 
+      static void trace_free(Runtime *&rt, AllocationType a, 
                              size_t size, int elems=1);
     };
 
@@ -265,7 +265,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
 #ifdef TRACE_ALLOCATION
-      Internal *rt = LegionAllocation::find_runtime(); 
+      Runtime *rt = LegionAllocation::find_runtime(); 
       LegionAllocation::trace_free(rt, a, old_size);
       LegionAllocation::trace_allocation(rt, a, new_size);
 #endif
@@ -632,7 +632,7 @@ namespace LegionRuntime {
                                            { return !operator==(a); }
     public:
 #ifdef TRACE_ALLOCATION
-      Internal *runtime;
+      Runtime *runtime;
 #endif
     };
 
@@ -680,7 +680,7 @@ namespace LegionRuntime {
       typedef std::map<T1, T2, COMPARATOR, LegionAllocator<
                    std::pair<const T1, T2>, A, true/*aligned*/> > track_aligned;
     };
-  };
-};
+  }; // namespace Internal
+}; // namespace Legion
 
 #endif // __LEGION_ALLOCATION__

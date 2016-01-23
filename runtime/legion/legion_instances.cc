@@ -23,8 +23,8 @@
 #include "legion_instances.h"
 #include "legion_views.h"
 
-namespace LegionRuntime {
-  namespace HighLevel {
+namespace Legion {
+  namespace Internal {
 
     LEGION_EXTERN_LOGGER_DECLARATIONS
 
@@ -604,8 +604,9 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    Accessor::RegionAccessor<Accessor::AccessorType::Generic>
-      InstanceManager::get_accessor(void) const
+    LegionRuntime::Accessor::RegionAccessor<
+      LegionRuntime::Accessor::AccessorType::Generic>
+        InstanceManager::get_accessor(void) const
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -615,8 +616,9 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    Accessor::RegionAccessor<Accessor::AccessorType::Generic>
-      InstanceManager::get_field_accessor(FieldID fid) const
+    LegionRuntime::Accessor::RegionAccessor<
+      LegionRuntime::Accessor::AccessorType::Generic>
+        InstanceManager::get_field_accessor(FieldID fid) const
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -624,8 +626,9 @@ namespace LegionRuntime {
       assert(layout != NULL);
 #endif
       const Domain::CopySrcDstField &info = layout->find_field_info(fid);
-      Accessor::RegionAccessor<Accessor::AccessorType::Generic> temp = 
-        instance.get_accessor();
+      LegionRuntime::Accessor::RegionAccessor<
+        LegionRuntime::Accessor::AccessorType::Generic> temp = 
+                                                    instance.get_accessor();
       return temp.get_untyped_field_accessor(info.offset, info.size);
     }
 
@@ -802,7 +805,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void InstanceManager::handle_send_manager(Internal *runtime, 
+    /*static*/ void InstanceManager::handle_send_manager(Runtime *runtime, 
                                      AddressSpaceID source, Deserializer &derez)
     //--------------------------------------------------------------------------
     {
@@ -987,7 +990,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void ReductionManager::handle_send_manager(Internal *runtime, 
+    /*static*/ void ReductionManager::handle_send_manager(Runtime *runtime, 
                                      AddressSpaceID source, Deserializer &derez)
     //--------------------------------------------------------------------------
     {
@@ -1012,7 +1015,7 @@ namespace LegionRuntime {
       derez.deserialize(use_event);
 
       RegionNode *target_node = runtime->forest->get_node(handle);
-      const ReductionOp *op = Internal::get_reduction_op(redop);
+      const ReductionOp *op = Runtime::get_reduction_op(redop);
       if (foldable)
       {
         FoldReductionManager *manager = 
@@ -1120,8 +1123,9 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    Accessor::RegionAccessor<Accessor::AccessorType::Generic>
-      ListReductionManager::get_accessor(void) const
+    LegionRuntime::Accessor::RegionAccessor<
+      LegionRuntime::Accessor::AccessorType::Generic>
+        ListReductionManager::get_accessor(void) const
     //--------------------------------------------------------------------------
     {
       // TODO: Implement this 
@@ -1130,8 +1134,9 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    Accessor::RegionAccessor<Accessor::AccessorType::Generic>
-      ListReductionManager::get_field_accessor(FieldID fid) const
+    LegionRuntime::Accessor::RegionAccessor<
+      LegionRuntime::Accessor::AccessorType::Generic>
+        ListReductionManager::get_field_accessor(FieldID fid) const
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -1298,16 +1303,18 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    Accessor::RegionAccessor<Accessor::AccessorType::Generic>
-      FoldReductionManager::get_accessor(void) const
+    LegionRuntime::Accessor::RegionAccessor<
+      LegionRuntime::Accessor::AccessorType::Generic>
+        FoldReductionManager::get_accessor(void) const
     //--------------------------------------------------------------------------
     {
       return instance.get_accessor();
     }
 
     //--------------------------------------------------------------------------
-    Accessor::RegionAccessor<Accessor::AccessorType::Generic>
-      FoldReductionManager::get_field_accessor(FieldID fid) const
+    LegionRuntime::Accessor::RegionAccessor<
+      LegionRuntime::Accessor::AccessorType::Generic>
+        FoldReductionManager::get_field_accessor(FieldID fid) const
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -1403,5 +1410,6 @@ namespace LegionRuntime {
       return use_event;
     }
 
-  }; // namespace HighLevel
-}; // namespace LegionRuntime
+  }; // namespace Internal 
+}; // namespace Legion
+

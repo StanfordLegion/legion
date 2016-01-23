@@ -24,8 +24,8 @@
 #include <cassert>
 #include <algorithm>
 
-namespace LegionRuntime {
-  namespace HighLevel {
+namespace Legion {
+  namespace Mapping {
 
     /**
      * \class DefaultMapper
@@ -134,13 +134,13 @@ namespace LegionRuntime {
       unsigned max_failed_mappings;
       std::map<UniqueID,unsigned> failed_mappings;
       // Utilities for use within the default mapper 
-      MappingUtilities::MachineQueryInterface machine_interface;
-      MappingUtilities::MappingMemoizer memoizer;
-      MappingUtilities::MappingProfiler profiler;
+      Utilities::MachineQueryInterface machine_interface;
+      Utilities::MappingMemoizer memoizer;
+      Utilities::MappingProfiler profiler;
     };
 
-  };
-};
+  }; // namespace Mapping
+}; // namespace Legion
 
 #endif // __DEFAULT_MAPPER_H__
 

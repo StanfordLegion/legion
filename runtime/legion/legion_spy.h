@@ -28,13 +28,13 @@
  * To see where these statements get consumed, look in spy_parser.py
  */
 
-namespace LegionRuntime {
-  namespace HighLevel {
+namespace Legion {
+  namespace Internal {
     namespace LegionSpy {
 
       typedef ::legion_lowlevel_id_t IDType;
 
-      extern Logger::Category log_spy;
+      extern LegionRuntime::Logger::Category log_spy;
 
       // Logger calls for the machine architecture
       static inline void log_utility_processor(IDType unique_id)
@@ -592,7 +592,7 @@ namespace LegionRuntime {
       }
 #endif
 
-    };
+    }; // namespace LegionSpy
 
     class TreeStateLogger {
     public:
@@ -608,7 +608,7 @@ namespace LegionRuntime {
       void finish_block(void);
       unsigned get_depth(void) const { return depth; }
     public:
-      static void capture_state(Internal *rt, const RegionRequirement *req, 
+      static void capture_state(Runtime *rt, const RegionRequirement *req, 
                                 unsigned idx, const char *task_name, 
                                 long long uid, RegionTreeNode *node, 
                                 ContextID ctx, bool before, 
@@ -626,8 +626,8 @@ namespace LegionRuntime {
       unsigned depth;
       Reservation logger_lock;
     };
-  };
-};
+  }; // namespace Internal
+}; // namespace Legion
 
 #endif // __LEGION_SPY_H__
 

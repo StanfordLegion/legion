@@ -22,8 +22,7 @@
 
 #include "legion_types.h"
 
-namespace LegionRuntime {
-  namespace HighLevel {
+namespace Legion {
 
     // These are the constraint kinds for describing execution 
     enum ExecutionConstraintKind {
@@ -640,8 +639,7 @@ namespace LegionRuntime {
       std::multimap<unsigned,LayoutConstraintID> layouts;
     };
 
-  }; // namesapce HighLevel
-}; // namespace LegionRuntime
+}; // namespace Legion
 
 #endif // __LEGION_CONSTRAINT_H__
 

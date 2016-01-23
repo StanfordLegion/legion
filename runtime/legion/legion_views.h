@@ -21,8 +21,8 @@
 #include "legion_allocation.h"
 #include "garbage_collection.h"
 
-namespace LegionRuntime {
-  namespace HighLevel {
+namespace Legion {
+  namespace Internal {
 
     /**
      * \class LogicalView 
@@ -178,7 +178,7 @@ namespace LegionRuntime {
       template<bool MAKE>
       struct PersistenceFunctor {
       public:
-        PersistenceFunctor(AddressSpaceID s, Internal *rt, 
+        PersistenceFunctor(AddressSpaceID s, Runtime *rt, 
                            SingleTask *p, LogicalRegion h,
                            LogicalRegion u,
                            DistributedID id, unsigned pidx, 
@@ -189,7 +189,7 @@ namespace LegionRuntime {
         void apply(AddressSpaceID target);
       protected:
         AddressSpaceID source;
-        Internal *runtime;
+        Runtime *runtime;
         SingleTask *parent;
         LogicalRegion handle;
         LogicalRegion upper;
@@ -370,13 +370,13 @@ namespace LegionRuntime {
       static void handle_send_back_atomic(RegionTreeForest *ctx,
                                           Deserializer &derez);
     public:
-      static void handle_send_materialized_view(Internal *runtime,
+      static void handle_send_materialized_view(Runtime *runtime,
                               Deserializer &derez, AddressSpaceID source);
-      static void handle_send_update(Internal *runtime, Deserializer &derez,
+      static void handle_send_update(Runtime *runtime, Deserializer &derez,
                                      AddressSpaceID source);
-      static void handle_make_persistent(Internal *runtime, Deserializer &derez,
+      static void handle_make_persistent(Runtime *runtime, Deserializer &derez,
                                          AddressSpaceID source);
-      static void handle_unmake_persistent(Internal *runtime, 
+      static void handle_unmake_persistent(Runtime *runtime, 
                                    Deserializer &derez, AddressSpaceID source);
     public:
       InstanceManager *const manager;
@@ -527,9 +527,9 @@ namespace LegionRuntime {
                              Event term_event, const FieldMask &user_mask);
       void filter_local_users(Event term_event);
     public:
-      static void handle_send_reduction_view(Internal *runtime,
+      static void handle_send_reduction_view(Runtime *runtime,
                               Deserializer &derez, AddressSpaceID source);
-      static void handle_send_update(Internal *runtime,
+      static void handle_send_update(Runtime *runtime,
                               Deserializer &derez, AddressSpaceID source);
     public:
       ReductionOpID get_redop(void) const;
@@ -680,7 +680,7 @@ namespace LegionRuntime {
       void process_deferred_view_update(Deserializer &derez, 
                                         AddressSpaceID source);
     public:
-      static void handle_deferred_update(Internal *rt, Deserializer &derez,
+      static void handle_deferred_update(Runtime *rt, Deserializer &derez,
                                          AddressSpaceID source);
     protected:
       // Track the set of reduction views which need to be applied here
@@ -781,7 +781,7 @@ namespace LegionRuntime {
                                                 Event precondition,
                                          std::set<Event> &postconditions);
     public:
-      static void handle_send_composite_view(Internal *runtime, 
+      static void handle_send_composite_view(Runtime *runtime, 
                               Deserializer &derez, AddressSpaceID source);
     public:
       CompositeView *const parent;
@@ -1017,7 +1017,7 @@ namespace LegionRuntime {
                              std::vector<Realm::IndexSpace> &already_handled,
                                        std::set<Event> &already_preconditions);
     public:
-      static void handle_send_fill_view(Internal *runtime, Deserializer &derez,
+      static void handle_send_fill_view(Runtime *runtime, Deserializer &derez,
                                         AddressSpaceID source);
     public:
       FillView *const parent;
@@ -1027,7 +1027,7 @@ namespace LegionRuntime {
       std::map<ColorPoint,FillView*> children;
     };
 
-  }; // namespace HighLevel
-}; // namespace LegionRuntime
+  }; // namespace Internal 
+}; // namespace Legion 
 
 #endif // __LEGION_VIEWS_H__

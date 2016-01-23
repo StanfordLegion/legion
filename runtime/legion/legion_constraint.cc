@@ -16,8 +16,7 @@
 #include "legion_utilities.h"
 #include "legion_constraint.h"
 
-namespace LegionRuntime {
-  namespace HighLevel {
+namespace Legion {
 
     /////////////////////////////////////////////////////////////
     // ISAConstraint 
@@ -824,8 +823,7 @@ namespace LegionRuntime {
       }
     }
 
-  };
-};
+}; // namespace Legion
 
 // EOF
 

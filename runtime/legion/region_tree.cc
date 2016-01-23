@@ -27,8 +27,8 @@
 #include "interval_tree.h"
 #include "rectangle_set.h"
 
-namespace LegionRuntime {
-  namespace HighLevel {
+namespace Legion {
+  namespace Internal {
 
     LEGION_EXTERN_LOGGER_DECLARATIONS
 
@@ -37,7 +37,7 @@ namespace LegionRuntime {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    RegionTreeForest::RegionTreeForest(Internal *rt)
+    RegionTreeForest::RegionTreeForest(Runtime *rt)
       : runtime(rt)
     //--------------------------------------------------------------------------
     {
@@ -133,7 +133,7 @@ namespace LegionRuntime {
       IndexSpaceNode *parent_node = get_node(parent);
       if (!part_color.is_valid())
         part_color = ColorPoint(DomainPoint::from_point<1>(
-                              Arrays::Point<1>(parent_node->generate_color())));
+              LegionRuntime::Arrays::Point<1>(parent_node->generate_color())));
       IndexPartNode *new_part;
       UserEvent disjointness_event = UserEvent::NO_USER_EVENT;
       if (part_kind == COMPUTE_KIND)
@@ -146,7 +146,7 @@ namespace LegionRuntime {
         new_part = create_node(pid, parent_node, part_color, color_space, 
                                (part_kind == DISJOINT_KIND), mode);
 
-      if (Internal::legion_spy_enabled)
+      if (Runtime::legion_spy_enabled)
       {
         bool disjoint = (part_kind == DISJOINT_KIND);
         LegionSpy::log_index_partition(parent.id, pid.id, disjoint,
@@ -172,7 +172,7 @@ namespace LegionRuntime {
         create_node(handle, it->second, new_part, ColorPoint(it->first),
                     parent_node->kind, mode);
 
-        if (Internal::legion_spy_enabled)
+        if (Runtime::legion_spy_enabled)
           LegionSpy::log_index_subspace(pid.id, handle.id, it->first);
       } 
       if (part_kind == COMPUTE_KIND)
@@ -201,7 +201,7 @@ namespace LegionRuntime {
       IndexSpaceNode *parent_node = get_node(parent);
       if (!part_color.is_valid())
         part_color = ColorPoint(DomainPoint::from_point<1>(
-                              Arrays::Point<1>(parent_node->generate_color())));
+              LegionRuntime::Arrays::Point<1>(parent_node->generate_color())));
       IndexPartNode *new_part;
       UserEvent disjointness_event = UserEvent::NO_USER_EVENT;
       if (part_kind == COMPUTE_KIND)
@@ -214,7 +214,7 @@ namespace LegionRuntime {
         new_part = create_node(pid, parent_node, part_color, color_space, 
                                             (part_kind == DISJOINT_KIND), mode);
 
-      if (Internal::legion_spy_enabled)
+      if (Runtime::legion_spy_enabled)
       {
         bool disjoint = (part_kind == DISJOINT_KIND);
         LegionSpy::log_index_partition(parent.id, pid.id, disjoint,
@@ -244,7 +244,7 @@ namespace LegionRuntime {
                                             parent_node->kind, mode);
         child->update_component_domains(comp_it->second);
 
-        if (Internal::legion_spy_enabled)
+        if (Runtime::legion_spy_enabled)
           LegionSpy::log_index_subspace(pid.id, handle.id, it->first);
       }
       if (part_kind == COMPUTE_KIND)
@@ -466,7 +466,7 @@ namespace LegionRuntime {
       IndexSpaceNode *parent_node = get_node(parent);
       if (!partition_color.is_valid())
         partition_color = ColorPoint(DomainPoint::from_point<1>(
-                              Arrays::Point<1>(parent_node->generate_color())));
+              LegionRuntime::Arrays::Point<1>(parent_node->generate_color())));
       UserEvent disjointness_event = UserEvent::NO_USER_EVENT;
       IndexPartNode *partition_node;
       if (part_kind == COMPUTE_KIND)
@@ -481,7 +481,7 @@ namespace LegionRuntime {
                                      color_space, (part_kind == DISJOINT_KIND),
                                      allocable ? MUTABLE : NO_MEMORY);
 
-      if (Internal::legion_spy_enabled)
+      if (Runtime::legion_spy_enabled)
       {
         bool disjoint = (part_kind == DISJOINT_KIND);
         LegionSpy::log_index_partition(parent.id, pid.id, disjoint,
@@ -513,7 +513,7 @@ namespace LegionRuntime {
           create_node(is, handle_ready, domain_ready,
                       partition_node, child_color, parent_node->kind, 
                       allocable ? MUTABLE : NO_MEMORY);
-        if (Internal::legion_spy_enabled)
+        if (Runtime::legion_spy_enabled)
           LegionSpy::log_index_subspace(pid.id, is.id, itr.p);
       }
       // If we need to compute the disjointness, only do that
@@ -559,7 +559,7 @@ namespace LegionRuntime {
         ColorPoint partition_color = part_color;
         if (!partition_color.is_valid())
           partition_color = ColorPoint(DomainPoint::from_point<1>(
-                              Arrays::Point<1>(child_node->generate_color())));
+              LegionRuntime::Arrays::Point<1>(child_node->generate_color())));
         IndexPartition pid(runtime->get_unique_index_partition_id(),
                            handle1.get_tree_id());
         create_pending_partition(pid, child_node->handle,
@@ -1459,7 +1459,7 @@ namespace LegionRuntime {
                                      FieldMask(FIELD_ALL_ONES), user_mask);
 #endif
 #ifdef DEBUG_PERF
-      end_perf_trace(Internal::perf_trace_tolerance);
+      end_perf_trace(Runtime::perf_trace_tolerance);
 #endif
     }
 
@@ -1508,7 +1508,7 @@ namespace LegionRuntime {
                                      FieldMask(FIELD_ALL_ONES), user_mask);
 #endif
 #ifdef DEBUG_PERF
-      end_perf_trace(Internal::perf_trace_tolerance);
+      end_perf_trace(Runtime::perf_trace_tolerance);
 #endif
     }
 
@@ -1761,7 +1761,7 @@ namespace LegionRuntime {
       }
 #endif
 #ifdef DEBUG_PERF
-      end_perf_trace(Internal::perf_trace_tolerance);
+      end_perf_trace(Runtime::perf_trace_tolerance);
 #endif
       return result;
     }
@@ -1812,7 +1812,7 @@ namespace LegionRuntime {
 #endif
       bool result = traverser.traverse(start_node);
 #ifdef DEBUG_PERF
-      end_perf_trace(Internal::perf_trace_tolerance);
+      end_perf_trace(Runtime::perf_trace_tolerance);
 #endif
       if (result)
         return traverser.get_instance_ref();
@@ -1860,7 +1860,7 @@ namespace LegionRuntime {
       target_node->remap_region(ctx.get_id(), view, user_mask, 
                                 version_info, needed_mask);
 #ifdef DEBUG_PERF
-      end_perf_trace(Internal::perf_trace_tolerance);
+      end_perf_trace(Runtime::perf_trace_tolerance);
 #endif
       return MappingRef(view, needed_mask);
     }
@@ -1916,7 +1916,7 @@ namespace LegionRuntime {
                                      FieldMask(FIELD_ALL_ONES), user_mask);
 #endif
 #ifdef DEBUG_PERF
-      end_perf_trace(Internal::perf_trace_tolerance);
+      end_perf_trace(Runtime::perf_trace_tolerance);
 #endif
       if (result)
         return traverser.get_instance_ref();
@@ -2018,7 +2018,7 @@ namespace LegionRuntime {
                                      FieldMask(FIELD_ALL_ONES), user_mask);
 #endif
 #ifdef DEBUG_PERF
-      end_perf_trace(Internal::perf_trace_tolerance);
+      end_perf_trace(Runtime::perf_trace_tolerance);
 #endif
       return result;
     }
@@ -2222,7 +2222,7 @@ namespace LegionRuntime {
                                      FieldMask(FIELD_ALL_ONES), closing_mask);
 #endif
 #ifdef DEBUG_PERF
-      end_perf_trace(Internal::perf_trace_tolerance);
+      end_perf_trace(Runtime::perf_trace_tolerance);
 #endif
       return result;
     }
@@ -2439,7 +2439,7 @@ namespace LegionRuntime {
       }
 #endif
 #ifdef DEBUG_PERF
-      end_perf_trace(Internal::perf_trace_tolerance);
+      end_perf_trace(Runtime::perf_trace_tolerance);
 #endif
       return result;
     }
@@ -2532,7 +2532,7 @@ namespace LegionRuntime {
       // Note we don't need to add the copy users because
       // we already mapped these regions as part of the CopyOp.
 #ifdef DEBUG_PERF
-      end_perf_trace(Internal::perf_trace_tolerance);
+      end_perf_trace(Runtime::perf_trace_tolerance);
 #endif
       // No need to add copy users since we added them when we
       // mapped this copy operation
@@ -4012,7 +4012,7 @@ namespace LegionRuntime {
     {
       get_node(handle)->attach_semantic_information(tag, source, buffer, 
                                                     size, is_mutable);
-      if (Internal::legion_spy_enabled && (NAME_SEMANTIC_TAG == tag))
+      if (Runtime::legion_spy_enabled && (NAME_SEMANTIC_TAG == tag))
         LegionSpy::log_index_space_name(handle.id,
             reinterpret_cast<const char*>(buffer));
     }
@@ -4028,7 +4028,7 @@ namespace LegionRuntime {
     {
       get_node(handle)->attach_semantic_information(tag, source, buffer, 
                                                     size, is_mutable);
-      if (Internal::legion_spy_enabled && (NAME_SEMANTIC_TAG == tag))
+      if (Runtime::legion_spy_enabled && (NAME_SEMANTIC_TAG == tag))
         LegionSpy::log_index_partition_name(handle.id,
             reinterpret_cast<const char*>(buffer));
     }
@@ -4044,7 +4044,7 @@ namespace LegionRuntime {
     {
       get_node(handle)->attach_semantic_information(tag, source, buffer, 
                                                     size, is_mutable);
-      if (Internal::legion_spy_enabled && (NAME_SEMANTIC_TAG == tag))
+      if (Runtime::legion_spy_enabled && (NAME_SEMANTIC_TAG == tag))
         LegionSpy::log_field_space_name(handle.id,
             reinterpret_cast<const char*>(buffer));
     }
@@ -4061,7 +4061,7 @@ namespace LegionRuntime {
     {
       get_node(handle)->attach_semantic_information(fid, tag, src, buf, 
                                                     size, is_mutable);
-      if (Internal::legion_spy_enabled && (NAME_SEMANTIC_TAG == tag))
+      if (Runtime::legion_spy_enabled && (NAME_SEMANTIC_TAG == tag))
         LegionSpy::log_field_name(handle.id, fid,
             reinterpret_cast<const char*>(buf));
     }
@@ -4077,7 +4077,7 @@ namespace LegionRuntime {
     {
       get_node(handle)->attach_semantic_information(tag, source, buffer, 
                                                     size, is_mutable);
-      if (Internal::legion_spy_enabled && (NAME_SEMANTIC_TAG == tag))
+      if (Runtime::legion_spy_enabled && (NAME_SEMANTIC_TAG == tag))
         LegionSpy::log_logical_region_name(handle.index_space.id,
             handle.field_space.id, handle.tree_id,
             reinterpret_cast<const char*>(buffer));
@@ -4094,7 +4094,7 @@ namespace LegionRuntime {
     {
       get_node(handle)->attach_semantic_information(tag, source, buffer, 
                                                     size, is_mutable);
-      if (Internal::legion_spy_enabled && (NAME_SEMANTIC_TAG == tag))
+      if (Runtime::legion_spy_enabled && (NAME_SEMANTIC_TAG == tag))
         LegionSpy::log_logical_partition_name(handle.index_partition.id,
             handle.field_space.id, handle.tree_id,
             reinterpret_cast<const char*>(buffer));
@@ -5382,7 +5382,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     /*static*/ AddressSpaceID IndexSpaceNode::get_owner_space(IndexSpace handle,
-                                                              Internal *rt)
+                                                              Runtime *rt)
     //--------------------------------------------------------------------------
     {
       return (handle.id % rt->runtime_stride);
@@ -5782,7 +5782,7 @@ namespace LegionRuntime {
             ready = finder->second;
           else
           {
-            if (Internal::dynamic_independence_tests)
+            if (Runtime::dynamic_independence_tests)
               issue_dynamic_test = true;
             else
             {
@@ -6710,7 +6710,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     /*static*/ AddressSpaceID IndexPartNode::get_owner_space(
-                                         IndexPartition part, Internal *runtime)
+                                          IndexPartition part, Runtime *runtime)
     //--------------------------------------------------------------------------
     {
       return (part.id % runtime->runtime_stride);
@@ -7028,7 +7028,7 @@ namespace LegionRuntime {
             ready_event = finder->second;
           else
           {
-            if (Internal::dynamic_independence_tests)
+            if (Runtime::dynamic_independence_tests)
               issue_dynamic_test = true;
             else
             {
@@ -7977,7 +7977,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     /*static*/ AddressSpaceID FieldSpaceNode::get_owner_space(FieldSpace handle,
-                                                              Internal *rt)
+                                                              Runtime *rt)
     //--------------------------------------------------------------------------
     {
       return (handle.id % rt->runtime_stride);
@@ -8871,7 +8871,7 @@ namespace LegionRuntime {
       }
 #ifdef DEBUG_HIGH_LEVEL
       // Have a little bit of code for logging bit masks when requested
-      if (Internal::bit_mask_logging)
+      if (Runtime::bit_mask_logging)
       {
         char *bit_string = result.to_string();
         fprintf(stderr,"%s\n",bit_string);
@@ -9216,7 +9216,7 @@ namespace LegionRuntime {
       }
       ReductionManager *result = NULL;
       // Find the reduction operation for this instance
-      const ReductionOp *reduction_op = Internal::get_reduction_op(redop);
+      const ReductionOp *reduction_op = Runtime::get_reduction_op(redop);
 #ifdef DEBUG_HIGH_LEVEL
       std::map<FieldID,FieldInfo>::const_iterator finder =
 #endif
@@ -9908,7 +9908,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     /*static*/ AddressSpaceID RegionTreeNode::get_owner_space(RegionTreeID tid,
-                                                              Internal *runtime)
+                                                              Runtime *runtime)
     //--------------------------------------------------------------------------
     {
       return (tid % runtime->runtime_stride);
@@ -14641,7 +14641,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     /*static*/ AddressSpaceID RegionNode::get_owner_space(LogicalRegion handle,
-                                                          Internal *runtime)
+                                                          Runtime *runtime)
     //--------------------------------------------------------------------------
     {
       return (handle.tree_id % runtime->runtime_stride);
@@ -16190,7 +16190,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     /*static*/ AddressSpaceID PartitionNode::get_owner_space(
-                                     LogicalPartition handle, Internal *runtime)
+                                     LogicalPartition handle, Runtime *runtime)
     //--------------------------------------------------------------------------
     {
       return (handle.tree_id % runtime->runtime_stride);
@@ -17146,8 +17146,8 @@ namespace LegionRuntime {
     }
 #endif
 
-  }; // namespace HighLevel
-}; // namespace LegionRuntime
+  }; // namespace Internal 
+}; // namespace Legion
 
 // EOF
 

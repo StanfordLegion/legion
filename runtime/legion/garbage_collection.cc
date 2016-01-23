@@ -21,16 +21,15 @@
 #include "region_tree.h"
 #include "garbage_collection.h"
 
-namespace LegionRuntime {
-  namespace HighLevel {
-
+namespace Legion {
+  namespace Internal {
 
     /////////////////////////////////////////////////////////////
     // DistributedCollectable 
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    DistributedCollectable::DistributedCollectable(Internal *rt,
+    DistributedCollectable::DistributedCollectable(Runtime *rt,
                                                    DistributedID id,
                                                    AddressSpaceID own_space,
                                                    AddressSpaceID loc_space,
@@ -593,7 +592,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     /*static*/ void DistributedCollectable::handle_did_remote_registration(
-                  Internal *runtime, Deserializer &derez, AddressSpaceID source)
+                  Runtime *runtime, Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
@@ -608,7 +607,7 @@ namespace LegionRuntime {
     
     //--------------------------------------------------------------------------
     /*static*/ void DistributedCollectable::handle_did_remote_valid_update(
-                                         Internal *runtime, Deserializer &derez)
+                                         Runtime *runtime, Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
@@ -626,7 +625,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     /*static*/ void DistributedCollectable::handle_did_remote_gc_update(
-                                         Internal *runtime, Deserializer &derez)
+                                         Runtime *runtime, Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
@@ -644,7 +643,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     /*static*/ void DistributedCollectable::handle_did_remote_resource_update(
-                                         Internal *runtime, Deserializer &derez)
+                                         Runtime *runtime, Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
@@ -663,7 +662,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     /*static*/ void DistributedCollectable::handle_did_add_create(
-                                         Internal *runtime, Deserializer &derez)
+                                         Runtime *runtime, Deserializer &derez)
     //--------------------------------------------------------------------------
     {
 #ifdef USE_REMOTE_REFERENCES
@@ -687,7 +686,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     /*static*/ void DistributedCollectable::handle_did_remove_create(
-                                         Internal *runtime, Deserializer &derez)
+                                         Runtime *runtime, Deserializer &derez)
     //--------------------------------------------------------------------------
     {
 #ifdef USE_REMOTE_REFERENCES
@@ -1023,8 +1022,8 @@ namespace LegionRuntime {
       return result;
     }
 
-  }; // namespace HighLevel
-}; // namespace LegionRuntime
+  }; // namespace Internal 
+}; // namespace Legion
 
 // EOF
 

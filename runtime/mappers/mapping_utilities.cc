@@ -19,9 +19,9 @@
 #include <algorithm>
 #include <limits>
 
-namespace LegionRuntime {
-  namespace HighLevel {
-    namespace MappingUtilities {
+namespace Legion {
+  namespace Mapping {
+    namespace Utilities {
 
       /**************************
        * Machine Query Interface
@@ -1060,9 +1060,9 @@ namespace LegionRuntime {
       //------------------------------------------------------------------------
       {
       }
-    };
-  };
-};
+    }; // namespace Utilities
+  }; // namespace Mapping
+}; // namespace Legion
 
 // EOF
 

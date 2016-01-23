@@ -24,8 +24,8 @@
 #include "legion_views.h"
 #include "legion_analysis.h"
 
-namespace LegionRuntime {
-  namespace HighLevel {
+namespace Legion {
+  namespace Internal {
 
     LEGION_EXTERN_LOGGER_DECLARATIONS
 
@@ -2659,7 +2659,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     /*static*/ void MaterializedView::handle_send_materialized_view(
-                  Internal *runtime, Deserializer &derez, AddressSpaceID source)
+                  Runtime *runtime, Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez); 
@@ -2702,7 +2702,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void MaterializedView::handle_send_update(Internal *runtime,
+    /*static*/ void MaterializedView::handle_send_update(Runtime *runtime,
                                      Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -2735,7 +2735,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void MaterializedView::handle_make_persistent(Internal *runtime,
+    /*static*/ void MaterializedView::handle_make_persistent(Runtime *runtime,
                                      Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -2772,7 +2772,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     /*static*/ void MaterializedView::handle_unmake_persistent(
-                  Internal *runtime, Deserializer &derez, AddressSpaceID source)
+                   Runtime *runtime, Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
@@ -3264,7 +3264,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void DeferredView::handle_deferred_update(Internal *runtime,
+    /*static*/ void DeferredView::handle_deferred_update(Runtime *runtime,
                                      Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -3562,7 +3562,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void CompositeView::handle_send_composite_view(Internal *runtime,
+    /*static*/ void CompositeView::handle_send_composite_view(Runtime *runtime,
                                      Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -5265,7 +5265,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void FillView::handle_send_fill_view(Internal *runtime,
+    /*static*/ void FillView::handle_send_fill_view(Runtime *runtime,
                                      Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -6766,7 +6766,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void ReductionView::handle_send_reduction_view(Internal *runtime,
+    /*static*/ void ReductionView::handle_send_reduction_view(Runtime *runtime,
                                      Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -6804,7 +6804,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void ReductionView::handle_send_update(Internal *runtime,
+    /*static*/ void ReductionView::handle_send_update(Runtime *runtime,
                                      Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -6823,5 +6823,6 @@ namespace LegionRuntime {
       red_view->process_update(derez, source);
     }
 
-  }; // namespace HighLevel
-}; // namespace LegionRuntime
+  }; // namespace Internal 
+}; // namespace Legion
+

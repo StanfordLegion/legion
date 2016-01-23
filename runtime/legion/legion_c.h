@@ -99,7 +99,7 @@ extern "C" {
 #undef NEW_BLOCKIFY_TYPE
 
   /**
-   * @see LegionRuntime::HighLevel::Domain
+   * @see Legion::Domain
    */
   typedef struct legion_domain_t {
     legion_lowlevel_id_t is_id;
@@ -108,7 +108,7 @@ extern "C" {
   } legion_domain_t;
 
   /**
-   * @see LegionRuntime::HighLevel::DomainPoint
+   * @see Legion::DomainPoint
    */
   typedef struct legion_domain_point_t {
     int dim;
@@ -116,7 +116,7 @@ extern "C" {
   } legion_domain_point_t;
 
   /**
-   * @see LegionRuntime::HighLevel::IndexSpace
+   * @see Legion::IndexSpace
    */
   typedef struct legion_index_space_t {
     legion_index_space_id_t id;
@@ -124,7 +124,7 @@ extern "C" {
   } legion_index_space_t;
 
   /**
-   * @see LegionRuntime::HighLevel::IndexPartition
+   * @see Legion::IndexPartition
    */
   typedef struct legion_index_partition_t {
     legion_index_partition_id_t id;
@@ -132,7 +132,7 @@ extern "C" {
   } legion_index_partition_t;
 
   /**
-   * @see LegionRuntime::HighLevel::IndexAllocator
+   * @see Legion::IndexAllocator
    */
   typedef struct legion_index_allocator_t {
     legion_index_space_t index_space;
@@ -140,14 +140,14 @@ extern "C" {
   } legion_index_allocator_t;
 
   /**
-   * @see LegionRuntime::HighLevel::FieldSpace
+   * @see Legion::FieldSpace
    */
   typedef struct legion_field_space_t {
     legion_field_space_id_t id;
   } legion_field_space_t;
 
   /**
-   * @see LegionRuntime::HighLevel::FieldAllocator
+   * @see Legion::FieldAllocator
    */
   typedef struct legion_field_allocator_t {
     legion_field_space_t field_space;
@@ -156,7 +156,7 @@ extern "C" {
   } legion_field_allocator_t;
 
   /**
-   * @see LegionRuntime::HighLevel::LogicalRegion
+   * @see Legion::LogicalRegion
    */
   typedef struct legion_logical_region_t {
     legion_region_tree_id_t tree_id;
@@ -165,7 +165,7 @@ extern "C" {
   } legion_logical_region_t;
 
   /**
-   * @see LegionRuntime::HighLevel::LogicalPartition
+   * @see Legion::LogicalPartition
    */
   typedef struct legion_logical_partition_t {
     legion_region_tree_id_t tree_id;
@@ -174,7 +174,7 @@ extern "C" {
   } legion_logical_partition_t;
 
   /**
-   * @see LegionRuntime::HighLevel::TaskArgument
+   * @see Legion::TaskArgument
    */
   typedef struct legion_task_argument_t {
     void *args;
@@ -182,7 +182,7 @@ extern "C" {
   } legion_task_argument_t;
 
   /**
-   * @see LegionRuntime::HighLevel::TaskResult
+   * @see Legion::TaskResult
    */
   typedef struct legion_task_result_t {
     void *value;
@@ -197,7 +197,7 @@ extern "C" {
   } legion_byte_offset_t;
 
   /**
-   * @see LegionRuntime::HighLevel::InputArgs
+   * @see Legion::InputArgs
    */
   typedef struct legion_input_args_t {
     char **argv;
@@ -205,7 +205,7 @@ extern "C" {
   } legion_input_args_t;
 
   /**
-   * @see LegionRuntime::HighLevel::TaskConfigOptions
+   * @see Legion::TaskConfigOptions
    */
   typedef struct legion_task_config_options_t {
     bool leaf /* = false */;
@@ -214,21 +214,21 @@ extern "C" {
   }  legion_task_config_options_t;
 
   /**
-   * @see LegionRuntime::HighLevel::Processor
+   * @see Legion::Processor
    */
   typedef struct legion_processor_t {
     legion_lowlevel_id_t id;
   } legion_processor_t;
 
   /**
-   * @see LegionRuntime::HighLevel::Memory
+   * @see Legion::Memory
    */
   typedef struct legion_memory_t {
     legion_lowlevel_id_t id;
   } legion_memory_t;
 
   /**
-   * @see LegionRuntime::HighLevel::Mapper::DomainSplit
+   * @see Legion::Mapper::DomainSplit
    */
   typedef struct legion_domain_split_t {
     legion_domain_t domain;
@@ -343,7 +343,7 @@ extern "C" {
   }
 
   /**
-   * @see LegionRuntime::HighLevel::Runtime::safe_cast(
+   * @see Legion::Runtime::safe_cast(
    *        Context, ptr_t, LogicalRegion)
    */
   legion_ptr_t
@@ -357,50 +357,50 @@ extern "C" {
   // -----------------------------------------------------------------------
 
   /**
-   * @see LegionRuntime::HighLevel::Domain::from_rect()
+   * @see Legion::Domain::from_rect()
    */
   legion_domain_t
   legion_domain_from_rect_1d(legion_rect_1d_t r);
 
   /**
-   * @see LegionRuntime::HighLevel::Domain::from_rect()
+   * @see Legion::Domain::from_rect()
    */
   legion_domain_t
   legion_domain_from_rect_2d(legion_rect_2d_t r);
 
   /**
-   * @see LegionRuntime::HighLevel::Domain::from_rect()
+   * @see Legion::Domain::from_rect()
    */
   legion_domain_t
   legion_domain_from_rect_3d(legion_rect_3d_t r);
 
   /**
-   * @see LegionRuntime::HighLevel::Domain::get_rect()
+   * @see Legion::Domain::get_rect()
    */
   legion_rect_1d_t
   legion_domain_get_rect_1d(legion_domain_t d);
 
   /**
-   * @see LegionRuntime::HighLevel::Domain::get_rect()
+   * @see Legion::Domain::get_rect()
    */
   legion_rect_2d_t
   legion_domain_get_rect_2d(legion_domain_t d);
 
   /**
-   * @see LegionRuntime::HighLevel::Domain::get_rect()
+   * @see Legion::Domain::get_rect()
    */
   legion_rect_3d_t
   legion_domain_get_rect_3d(legion_domain_t d);
 
   /**
-   * @see LegionRuntime::HighLevel::Domain::get_volume()
+   * @see Legion::Domain::get_volume()
    */
   size_t
   legion_domain_get_volume(legion_domain_t d);
 
   /**
-   * @see LegionRuntime::HighLevel::Domain::Domain(
-   *        LegionRuntime::HighLevel::IndexSpace)
+   * @see Legion::Domain::Domain(
+   *        Legion::IndexSpace)
    */
   legion_domain_t
   legion_domain_from_index_space(legion_index_space_t is);
@@ -410,25 +410,25 @@ extern "C" {
   // -----------------------------------------------------------------------
 
   /**
-   * @see LegionRuntime::HighLevel::DomainPoint::from_point()
+   * @see Legion::DomainPoint::from_point()
    */
   legion_domain_point_t
   legion_domain_point_from_point_1d(legion_point_1d_t p);
 
   /**
-   * @see LegionRuntime::HighLevel::DomainPoint::from_point()
+   * @see Legion::DomainPoint::from_point()
    */
   legion_domain_point_t
   legion_domain_point_from_point_2d(legion_point_2d_t p);
 
   /**
-   * @see LegionRuntime::HighLevel::DomainPoint::from_point()
+   * @see Legion::DomainPoint::from_point()
    */
   legion_domain_point_t
   legion_domain_point_from_point_3d(legion_point_3d_t p);
 
   /**
-   * @see LegionRuntime::HighLevel::Runtime::safe_cast(
+   * @see Legion::Runtime::safe_cast(
    *        Context, DomainPoint, LogicalRegion)
    */
   legion_domain_point_t
@@ -444,7 +444,7 @@ extern "C" {
   /**
    * @return Caller takes ownership of return value.
    *
-   * @see LegionRuntime::HighLevel::Coloring
+   * @see Legion::Coloring
    */
   legion_coloring_t
   legion_coloring_create(void);
@@ -452,20 +452,20 @@ extern "C" {
   /**
    * @param handle Caller must have ownership of parameter `handle`.
    *
-   * @see LegionRuntime::HighLevel::Coloring
+   * @see Legion::Coloring
    */
   void
   legion_coloring_destroy(legion_coloring_t handle);
 
   /**
-   * @see LegionRuntime::HighLevel::Coloring
+   * @see Legion::Coloring
    */
   void
   legion_coloring_ensure_color(legion_coloring_t handle,
                                legion_color_t color);
 
   /**
-   * @see LegionRuntime::HighLevel::Coloring
+   * @see Legion::Coloring
    */
   void
   legion_coloring_add_point(legion_coloring_t handle,
@@ -473,7 +473,7 @@ extern "C" {
                             legion_ptr_t point);
 
   /**
-   * @see LegionRuntime::HighLevel::Coloring
+   * @see Legion::Coloring
    */
   void
   legion_coloring_delete_point(legion_coloring_t handle,
@@ -481,7 +481,7 @@ extern "C" {
                                legion_ptr_t point);
 
   /**
-   * @see LegionRuntime::HighLevel::Coloring
+   * @see Legion::Coloring
    */
   bool
   legion_coloring_has_point(legion_coloring_t handle,
@@ -489,7 +489,7 @@ extern "C" {
                             legion_ptr_t point);
 
   /**
-   * @see LegionRuntime::HighLevel::Coloring
+   * @see Legion::Coloring
    */
   void
   legion_coloring_add_range(legion_coloring_t handle,
@@ -504,7 +504,7 @@ extern "C" {
   /**
    * @return Caller takes ownership of return value.
    *
-   * @see LegionRuntime::HighLevel::DomainColoring
+   * @see Legion::DomainColoring
    */
   legion_domain_coloring_t
   legion_domain_coloring_create(void);
@@ -512,13 +512,13 @@ extern "C" {
   /**
    * @param handle Caller must have ownership of parameter `handle`.
    *
-   * @see LegionRuntime::HighLevel::DomainColoring
+   * @see Legion::DomainColoring
    */
   void
   legion_domain_coloring_destroy(legion_domain_coloring_t handle);
 
   /**
-   * @see LegionRuntime::HighLevel::DomainColoring
+   * @see Legion::DomainColoring
    */
   void
   legion_domain_coloring_color_domain(legion_domain_coloring_t handle,
@@ -526,7 +526,7 @@ extern "C" {
                                       legion_domain_t domain);
 
   /**
-   * @see LegionRuntime::HighLevel::DomainColoring
+   * @see Legion::DomainColoring
    */
   legion_domain_t
   legion_domain_coloring_get_color_space(legion_domain_coloring_t handle);
@@ -538,7 +538,7 @@ extern "C" {
   /**
    * @return Caller takes ownership of return value.
    *
-   * @see LegionRuntime::HighLevel::Runtime::create_index_space(Context, size_t)
+   * @see Legion::Runtime::create_index_space(Context, size_t)
    */
   legion_index_space_t
   legion_index_space_create(legion_runtime_t runtime,
@@ -548,7 +548,7 @@ extern "C" {
   /**
    * @return Caller takes ownership of return value.
    *
-   * @see LegionRuntime::HighLevel::Runtime::create_index_space(Context, Domain)
+   * @see Legion::Runtime::create_index_space(Context, Domain)
    */
   legion_index_space_t
   legion_index_space_create_domain(legion_runtime_t runtime,
@@ -558,7 +558,7 @@ extern "C" {
   /**
    * @param handle Caller must have ownership of parameter `handle`.
    *
-   * @see LegionRuntime::HighLevel::Runtime::get_index_space_domain()
+   * @see Legion::Runtime::get_index_space_domain()
    */
   legion_domain_t
   legion_index_space_get_domain(legion_runtime_t runtime,
@@ -568,7 +568,7 @@ extern "C" {
   /**
    * @param handle Caller must have ownership of parameter `handle`.
    *
-   * @see LegionRuntime::HighLevel::Runtime::destroy_index_space()
+   * @see Legion::Runtime::destroy_index_space()
    */
   void
   legion_index_space_destroy(legion_runtime_t runtime,
@@ -576,7 +576,7 @@ extern "C" {
                              legion_index_space_t handle);
 
   /**
-   * @see LegionRuntime::HighLevel::Runtime::attach_name()
+   * @see Legion::Runtime::attach_name()
    */
   void
   legion_index_space_attach_name(legion_runtime_t runtime,
@@ -584,7 +584,7 @@ extern "C" {
                                  const char *name);
 
   /**
-   * @see LegionRuntime::HighLevel::Runtime::retrieve_name()
+   * @see Legion::Runtime::retrieve_name()
    */
   void
   legion_index_space_retrieve_name(legion_runtime_t runtime,
@@ -598,7 +598,7 @@ extern "C" {
   /**
    * @return Caller takes ownership of return value.
    *
-   * @see LegionRuntime::HighLevel::Runtime::create_index_partition(
+   * @see Legion::Runtime::create_index_partition(
    *        Context, IndexSpace, Coloring, bool, int)
    */
   legion_index_partition_t
@@ -613,7 +613,7 @@ extern "C" {
   /**
    * @return Caller takes ownership of return value.
    *
-   * @see LegionRuntime::HighLevel::Runtime::create_index_partition(
+   * @see Legion::Runtime::create_index_partition(
    *        Context, IndexSpace, Domain, DomainColoring, bool, int)
    */
   legion_index_partition_t
@@ -630,7 +630,7 @@ extern "C" {
   /**
    * @return Caller takes ownership of return value.
    *
-   * @see LegionRuntime::HighLevel::Runtime::create_index_partition<T>(
+   * @see Legion::Runtime::create_index_partition<T>(
    *        Context, IndexSpace, const T&, int)
    */
   legion_index_partition_t
@@ -644,7 +644,7 @@ extern "C" {
   /**
    * @return Caller takes ownership of return value.
    *
-   * @see LegionRuntime::HighLevel::Runtime::create_index_partition<T>(
+   * @see Legion::Runtime::create_index_partition<T>(
    *        Context, IndexSpace, const T&, int)
    */
   legion_index_partition_t
@@ -658,7 +658,7 @@ extern "C" {
   /**
    * @return Caller takes ownership of return value.
    *
-   * @see LegionRuntime::HighLevel::Runtime::create_index_partition<T>(
+   * @see Legion::Runtime::create_index_partition<T>(
    *        Context, IndexSpace, const T&, int)
    */
   legion_index_partition_t
@@ -672,7 +672,7 @@ extern "C" {
   /**
    * @return Caller takes ownership of return value.
    *
-   * @see LegionRuntime::HighLevel::Runtime::create_equal_partition()
+   * @see Legion::Runtime::create_equal_partition()
    */
   legion_index_partition_t
   legion_index_partition_create_equal(legion_runtime_t runtime,
@@ -686,7 +686,7 @@ extern "C" {
   /**
    * @return Caller takes ownership of return value.
    *
-   * @see LegionRuntime::HighLevel::Runtime::create_partition_by_union()
+   * @see Legion::Runtime::create_partition_by_union()
    */
   legion_index_partition_t
   legion_index_partition_create_by_union(
@@ -702,7 +702,7 @@ extern "C" {
   /**
    * @return Caller takes ownership of return value.
    *
-   * @see LegionRuntime::HighLevel::Runtime::create_partition_by_intersection()
+   * @see Legion::Runtime::create_partition_by_intersection()
    */
   legion_index_partition_t
   legion_index_partition_create_by_intersection(
@@ -718,7 +718,7 @@ extern "C" {
   /**
    * @return Caller takes ownership of return value.
    *
-   * @see LegionRuntime::HighLevel::Runtime::create_partition_by_difference()
+   * @see Legion::Runtime::create_partition_by_difference()
    */
   legion_index_partition_t
   legion_index_partition_create_by_difference(
@@ -734,7 +734,7 @@ extern "C" {
   /**
    * @return Caller takes ownership of return value.
    *
-   * @see LegionRuntime::HighLevel::Runtime::create_partition_by_field()
+   * @see Legion::Runtime::create_partition_by_field()
    */
   legion_index_partition_t
   legion_index_partition_create_by_field(legion_runtime_t runtime,
@@ -749,7 +749,7 @@ extern "C" {
   /**
    * @return Caller takes ownership of return value.
    *
-   * @see LegionRuntime::HighLevel::Runtime::create_partition_by_image()
+   * @see Legion::Runtime::create_partition_by_image()
    */
   legion_index_partition_t
   legion_index_partition_create_by_image(
@@ -767,7 +767,7 @@ extern "C" {
   /**
    * @return Caller takes ownership of return value.
    *
-   * @see LegionRuntime::HighLevel::Runtime::create_partition_by_preimage()
+   * @see Legion::Runtime::create_partition_by_preimage()
    */
   legion_index_partition_t
   legion_index_partition_create_by_preimage(
@@ -783,7 +783,7 @@ extern "C" {
     bool allocable /* = false */);
 
   /**
-   * @see LegionRuntime::HighLevel::Runtime::get_index_subspace()
+   * @see Legion::Runtime::get_index_subspace()
    */
   legion_index_space_t
   legion_index_partition_get_index_subspace(legion_runtime_t runtime,
@@ -792,7 +792,7 @@ extern "C" {
                                             legion_color_t color);
 
   /**
-   * @see LegionRuntime::HighLevel::Runtime::get_index_partition_color_space()
+   * @see Legion::Runtime::get_index_partition_color_space()
    */
   legion_domain_t
   legion_index_partition_get_color_space(legion_runtime_t runtime,
@@ -800,7 +800,7 @@ extern "C" {
                                          legion_index_partition_t handle);
 
   /**
-   * @see LegionRuntime::HighLevel::Runtime::get_parent_index_space()
+   * @see Legion::Runtime::get_parent_index_space()
    */
   legion_index_space_t
   legion_index_partition_get_parent_index_space(legion_runtime_t runtime,
@@ -810,7 +810,7 @@ extern "C" {
   /**
    * @param handle Caller must have ownership of parameter `handle`.
    *
-   * @see LegionRuntime::HighLevel::Runtime::destroy_index_space()
+   * @see Legion::Runtime::destroy_index_space()
    */
   void
   legion_index_partition_destroy(legion_runtime_t runtime,
@@ -818,7 +818,7 @@ extern "C" {
                                  legion_index_partition_t handle);
 
   /**
-   * @see LegionRuntime::HighLevel::Runtime::attach_name()
+   * @see Legion::Runtime::attach_name()
    */
   void
   legion_index_partition_attach_name(legion_runtime_t runtime,
@@ -826,7 +826,7 @@ extern "C" {
                                      const char *name);
 
   /**
-   * @see LegionRuntime::HighLevel::Runtime::retrieve_name()
+   * @see Legion::Runtime::retrieve_name()
    */
   void
   legion_index_partition_retrieve_name(legion_runtime_t runtime,
@@ -840,7 +840,7 @@ extern "C" {
   /**
    * @return Caller takes ownership of return value.
    *
-   * @see LegionRuntime::HighLevel::Runtime::create_field_space()
+   * @see Legion::Runtime::create_field_space()
    */
   legion_field_space_t
   legion_field_space_create(legion_runtime_t runtime,
@@ -849,7 +849,7 @@ extern "C" {
   /**
    * @param handle Caller must have ownership of parameter `handle`.
    *
-   * @see LegionRuntime::HighLevel::Runtime::destroy_field_space()
+   * @see Legion::Runtime::destroy_field_space()
    */
   void
   legion_field_space_destroy(legion_runtime_t runtime,
@@ -857,7 +857,7 @@ extern "C" {
                              legion_field_space_t handle);
 
   /**
-   * @see LegionRuntime::HighLevel::Runtime::attach_name()
+   * @see Legion::Runtime::attach_name()
    */
   void
   legion_field_space_attach_name(legion_runtime_t runtime,
@@ -865,7 +865,7 @@ extern "C" {
                                  const char *name);
 
   /**
-   * @see LegionRuntime::HighLevel::Runtime::retrieve_name()
+   * @see Legion::Runtime::retrieve_name()
    */
   void
   legion_field_space_retrieve_name(legion_runtime_t runtime,
@@ -873,7 +873,7 @@ extern "C" {
                                    const char **result);
 
   /**
-   * @see LegionRuntime::HighLevel::Runtime::retrieve_name()
+   * @see Legion::Runtime::retrieve_name()
    */
   void
   legion_field_id_attach_name(legion_runtime_t runtime,
@@ -882,7 +882,7 @@ extern "C" {
                               const char *name);
 
   /**
-   * @see LegionRuntime::HighLevel::Runtime::attach_name()
+   * @see Legion::Runtime::attach_name()
    */
   void
   legion_field_id_retrieve_name(legion_runtime_t runtime,
@@ -897,7 +897,7 @@ extern "C" {
   /**
    * @return Caller takes ownership of return value.
    *
-   * @see LegionRuntime::HighLevel::Runtime::create_logical_region()
+   * @see Legion::Runtime::create_logical_region()
    */
   legion_logical_region_t
   legion_logical_region_create(legion_runtime_t runtime,
@@ -908,7 +908,7 @@ extern "C" {
   /**
    * @param handle Caller must have ownership of parameter `handle`.
    *
-   * @see LegionRuntime::HighLevel::Runtime::destroy_logical_region()
+   * @see Legion::Runtime::destroy_logical_region()
    */
   void
   legion_logical_region_destroy(legion_runtime_t runtime,
@@ -916,7 +916,7 @@ extern "C" {
                                 legion_logical_region_t handle);
 
   /**
-   * @see LegionRuntime::HighLevel::Runtime::get_logical_region_color()
+   * @see Legion::Runtime::get_logical_region_color()
    */
   legion_color_t
   legion_logical_region_get_color(legion_runtime_t runtime,
@@ -924,7 +924,7 @@ extern "C" {
                                   legion_logical_region_t handle);
 
   /**
-   * @see LegionRuntime::HighLevel::Runtime::has_parent_logical_partition()
+   * @see Legion::Runtime::has_parent_logical_partition()
    */
   bool
   legion_logical_region_has_parent_logical_partition(
@@ -933,7 +933,7 @@ extern "C" {
     legion_logical_region_t handle);
 
   /**
-   * @see LegionRuntime::HighLevel::Runtime::get_parent_logical_partition()
+   * @see Legion::Runtime::get_parent_logical_partition()
    */
   legion_logical_partition_t
   legion_logical_region_get_parent_logical_partition(
@@ -942,7 +942,7 @@ extern "C" {
     legion_logical_region_t handle);
 
   /**
-   * @see LegionRuntime::HighLevel::Runtime::attach_name()
+   * @see Legion::Runtime::attach_name()
    */
   void
   legion_logical_region_attach_name(legion_runtime_t runtime,
@@ -950,7 +950,7 @@ extern "C" {
                                     const char *name);
 
   /**
-   * @see LegionRuntime::HighLevel::Runtime::retrieve_name()
+   * @see Legion::Runtime::retrieve_name()
    */
   void
   legion_logical_region_retrieve_name(legion_runtime_t runtime,
@@ -964,7 +964,7 @@ extern "C" {
   /**
    * @return Caller takes ownership of return value.
    *
-   * @see LegionRuntime::HighLevel::Runtime::get_logical_partition()
+   * @see Legion::Runtime::get_logical_partition()
    */
   legion_logical_partition_t
   legion_logical_partition_create(legion_runtime_t runtime,
@@ -975,7 +975,7 @@ extern "C" {
   /**
    * @return Caller takes ownership of return value.
    *
-   * @see LegionRuntime::HighLevel::Runtime::get_logical_partition_by_tree()
+   * @see Legion::Runtime::get_logical_partition_by_tree()
    */
   legion_logical_partition_t
   legion_logical_partition_create_by_tree(legion_runtime_t runtime,
@@ -987,7 +987,7 @@ extern "C" {
   /**
    * @param handle Caller must have ownership of parameter `handle`.
    *
-   * @see LegionRuntime::HighLevel::Runtime::destroy_logical_partition()
+   * @see Legion::Runtime::destroy_logical_partition()
    */
   void
   legion_logical_partition_destroy(legion_runtime_t runtime,
@@ -997,7 +997,7 @@ extern "C" {
   /**
    * @return Caller does **NOT** take ownership of return value.
    *
-   * @see LegionRuntime::HighLevel::Runtime::get_logical_subregion()
+   * @see Legion::Runtime::get_logical_subregion()
    */
   legion_logical_region_t
   legion_logical_partition_get_logical_subregion(
@@ -1009,7 +1009,7 @@ extern "C" {
   /**
    * @return Caller does **NOT** take ownership of return value.
    *
-   * @see LegionRuntime::HighLevel::Runtime::get_logical_subregion_by_color()
+   * @see Legion::Runtime::get_logical_subregion_by_color()
    */
   legion_logical_region_t
   legion_logical_partition_get_logical_subregion_by_color(
@@ -1019,7 +1019,7 @@ extern "C" {
     legion_color_t c);
 
   /**
-   * @see LegionRuntime::HighLevel::Runtime::get_parent_logical_region()
+   * @see Legion::Runtime::get_parent_logical_region()
    */
   legion_logical_region_t
   legion_logical_partition_get_parent_logical_region(
@@ -1028,7 +1028,7 @@ extern "C" {
     legion_logical_partition_t handle);
 
   /**
-   * @see LegionRuntime::HighLevel::Runtime::attach_name()
+   * @see Legion::Runtime::attach_name()
    */
   void
   legion_logical_partition_attach_name(legion_runtime_t runtime,
@@ -1036,7 +1036,7 @@ extern "C" {
                                        const char *name);
 
   /**
-   * @see LegionRuntime::HighLevel::Runtime::retrieve_name()
+   * @see Legion::Runtime::retrieve_name()
    */
   void
   legion_logical_partition_retrieve_name(legion_runtime_t runtime,
@@ -1048,25 +1048,25 @@ extern "C" {
   // -----------------------------------------------------------------------
 
   /**
-   * @see LegionRuntime::HighLevel::RegionRequirement::region
+   * @see Legion::RegionRequirement::region
    */
   legion_logical_region_t
   legion_region_requirement_get_region(legion_region_requirement_t handle);
 
   /**
-   * @see LegionRuntime::HighLevel::RegionRequirement::parent
+   * @see Legion::RegionRequirement::parent
    */
   legion_logical_region_t
   legion_region_requirement_get_parent(legion_region_requirement_t handle);
 
   /**
-   * @see LegionRuntime::HighLevel::RegionRequirement::partition
+   * @see Legion::RegionRequirement::partition
    */
   legion_logical_partition_t
   legion_region_requirement_get_partition(legion_region_requirement_t handle);
 
   /**
-   * @see LegionRuntime::HighLevel::RegionRequirement::privilege_fields
+   * @see Legion::RegionRequirement::privilege_fields
    */
   unsigned
   legion_region_requirement_get_privilege_fields_size(
@@ -1081,7 +1081,7 @@ extern "C" {
    *         The return might be truncated if the buffer size is
    *         smaller than the number of privilege fields.
    *
-   * @see LegionRuntime::HighLevel::RegionRequirement::privilege_fields
+   * @see Legion::RegionRequirement::privilege_fields
    */
   void
   legion_region_requirement_get_privilege_fields(
@@ -1094,7 +1094,7 @@ extern "C" {
    *         note that this function takes O(n) time due to the underlying
    *         data structure does not provide an indexing operation.
    *
-   * @see LegionRuntime::HighLevel::RegionRequirement::privilege_fields
+   * @see Legion::RegionRequirement::privilege_fields
    */
   legion_field_id_t
   legion_region_requirement_get_privilege_field(
@@ -1102,7 +1102,7 @@ extern "C" {
       unsigned idx);
 
   /**
-   * @see LegionRuntime::HighLevel::RegionRequirement::instance_fields
+   * @see Legion::RegionRequirement::instance_fields
    */
   unsigned
   legion_region_requirement_get_instance_fields_size(
@@ -1117,7 +1117,7 @@ extern "C" {
    *         The return might be truncated if the buffer size is
    *         smaller than the number of instance fields.
    *
-   * @see LegionRuntime::HighLevel::RegionRequirement::instance_fields
+   * @see Legion::RegionRequirement::instance_fields
    */
   void
   legion_region_requirement_get_instance_fields(
@@ -1128,7 +1128,7 @@ extern "C" {
   /**
    * @return returns the i-th instance field in the region requirement.
    *
-   * @see LegionRuntime::HighLevel::RegionRequirement::instance_fields
+   * @see Legion::RegionRequirement::instance_fields
    */
   legion_field_id_t
   legion_region_requirement_get_instance_field(
@@ -1136,49 +1136,49 @@ extern "C" {
       unsigned idx);
 
   /**
-   * @see LegionRuntime::HighLevel::RegionRequirement::privilege
+   * @see Legion::RegionRequirement::privilege
    */
   legion_privilege_mode_t
   legion_region_requirement_get_privilege(legion_region_requirement_t handle);
 
   /**
-   * @see LegionRuntime::HighLevel::RegionRequirement::prop
+   * @see Legion::RegionRequirement::prop
    */
   legion_coherence_property_t
   legion_region_requirement_get_prop(legion_region_requirement_t handle);
 
   /**
-   * @see LegionRuntime::HighLevel::RegionRequirement::redop
+   * @see Legion::RegionRequirement::redop
    */
   legion_reduction_op_id_t
   legion_region_requirement_get_redop(legion_region_requirement_t handle);
 
   /**
-   * @see LegionRuntime::HighLevel::RegionRequirement::tag
+   * @see Legion::RegionRequirement::tag
    */
   legion_mapping_tag_id_t
   legion_region_requirement_get_tag(legion_region_requirement_t handle);
 
   /**
-   * @see LegionRuntime::HighLevel::RegionRequirement::handle_type
+   * @see Legion::RegionRequirement::handle_type
    */
   legion_handle_type_t
   legion_region_requirement_get_handle_type(legion_region_requirement_t handle);
 
   /**
-   * @see LegionRuntime::HighLevel::RegionRequirement::projection
+   * @see Legion::RegionRequirement::projection
    */
   legion_projection_id_t
   legion_region_requirement_get_projection(legion_region_requirement_t handle);
 
   /**
-   * @see LegionRuntime::HighLevel::RegionRequirement::virtual_map
+   * @see Legion::RegionRequirement::virtual_map
    */
   bool
   legion_region_requirement_get_virtual_map(legion_region_requirement_t handle);
 
   /**
-   * @see LegionRuntime::HighLevel::RegionRequirement::virtual_map
+   * @see Legion::RegionRequirement::virtual_map
    */
   void
   legion_region_requirement_set_virtual_map(
@@ -1186,13 +1186,13 @@ extern "C" {
     bool value);
 
   /**
-   * @see LegionRuntime::HighLevel::RegionRequirement::early_map
+   * @see Legion::RegionRequirement::early_map
    */
   bool
   legion_region_requirement_get_early_map(legion_region_requirement_t handle);
 
   /**
-   * @see LegionRuntime::HighLevel::RegionRequirement::early_map
+   * @see Legion::RegionRequirement::early_map
    */
   void
   legion_region_requirement_set_early_map(
@@ -1200,14 +1200,14 @@ extern "C" {
     bool value);
 
   /**
-   * @see LegionRuntime::HighLevel::RegionRequirement::enable_WAR_optimization
+   * @see Legion::RegionRequirement::enable_WAR_optimization
    */
   bool
   legion_region_requirement_get_enable_WAR_optimization(
     legion_region_requirement_t handle);
 
   /**
-   * @see LegionRuntime::HighLevel::RegionRequirement::enable_WAR_optimization
+   * @see Legion::RegionRequirement::enable_WAR_optimization
    */
   void
   legion_region_requirement_set_enable_WAR_optimization(
@@ -1215,14 +1215,14 @@ extern "C" {
     bool value);
 
   /**
-   * @see LegionRuntime::HighLevel::RegionRequirement::reduction_list
+   * @see Legion::RegionRequirement::reduction_list
    */
   bool
   legion_region_requirement_get_reduction_list(
     legion_region_requirement_t handle);
 
   /**
-   * @see LegionRuntime::HighLevel::RegionRequirement::reduction_list
+   * @see Legion::RegionRequirement::reduction_list
    */
   void
   legion_region_requirement_set_reduction_list(
@@ -1230,14 +1230,14 @@ extern "C" {
     bool value);
 
   /**
-   * @see LegionRuntime::HighLevel::RegionRequirement::make_persistent
+   * @see Legion::RegionRequirement::make_persistent
    */
   unsigned
   legion_region_requirement_get_make_persistent(
     legion_region_requirement_t handle);
 
   /**
-   * @see LegionRuntime::HighLevel::RegionRequirement::make_persistent
+   * @see Legion::RegionRequirement::make_persistent
    */
   void
   legion_region_requirement_set_make_persistent(
@@ -1245,14 +1245,14 @@ extern "C" {
     unsigned value);
 
   /**
-   * @see LegionRuntime::HighLevel::RegionRequirement::blocking_factor
+   * @see Legion::RegionRequirement::blocking_factor
    */
   unsigned
   legion_region_requirement_get_blocking_factor(
     legion_region_requirement_t handle);
 
   /**
-   * @see LegionRuntime::HighLevel::RegionRequirement::blocking_factor
+   * @see Legion::RegionRequirement::blocking_factor
    */
   void
   legion_region_requirement_set_blocking_factor(
@@ -1260,14 +1260,14 @@ extern "C" {
     unsigned value);
 
   /**
-   * @see LegionRuntime::HighLevel::RegionRequirement::max_blocking_factor
+   * @see Legion::RegionRequirement::max_blocking_factor
    */
   unsigned
   legion_region_requirement_get_max_blocking_factor(
     legion_region_requirement_t handle);
 
   /**
-   * @see LegionRuntime::HighLevel::RegionRequirement::target_ranking
+   * @see Legion::RegionRequirement::target_ranking
    */
   void
   legion_region_requirement_add_target_ranking(
@@ -1281,7 +1281,7 @@ extern "C" {
   /**
    * @return Caller takes ownership of return value.
    *
-   * @see LegionRuntime::HighLevel::Runtime::create_index_allocator()
+   * @see Legion::Runtime::create_index_allocator()
    */
   legion_index_allocator_t
   legion_index_allocator_create(legion_runtime_t runtime,
@@ -1291,20 +1291,20 @@ extern "C" {
   /**
    * @param handle Caller must have ownership of parameter `handle`.
    *
-   * @see LegionRuntime::HighLevel::IndexAllocator::~IndexAllocator()
+   * @see Legion::IndexAllocator::~IndexAllocator()
    */
   void
   legion_index_allocator_destroy(legion_index_allocator_t handle);
 
   /**
-   * @see LegionRuntime::HighLevel::IndexAllocator::alloc()
+   * @see Legion::IndexAllocator::alloc()
    */
   legion_ptr_t
   legion_index_allocator_alloc(legion_index_allocator_t allocator,
                                unsigned num_elements /* = 1 */);
 
   /**
-   * @see LegionRuntime::HighLevel::IndexAllocator::free()
+   * @see Legion::IndexAllocator::free()
    */
   void
   legion_index_allocator_free(legion_index_allocator_t allocator,
@@ -1314,7 +1314,7 @@ extern "C" {
   /**
    * @return Caller takes ownership of return value.
    *
-   * @see LegionRuntime::HighLevel::Runtime::create_field_allocator()
+   * @see Legion::Runtime::create_field_allocator()
    */
   legion_field_allocator_t
   legion_field_allocator_create(legion_runtime_t runtime,
@@ -1324,13 +1324,13 @@ extern "C" {
   /**
    * @param handle Caller must have ownership of parameter `handle`.
    *
-   * @see LegionRuntime::HighLevel::FieldAllocator::~FieldAllocator()
+   * @see Legion::FieldAllocator::~FieldAllocator()
    */
   void
   legion_field_allocator_destroy(legion_field_allocator_t handle);
 
   /**
-   * @see LegionRuntime::HighLevel::FieldAllocator::allocate_field()
+   * @see Legion::FieldAllocator::allocate_field()
    */
   legion_field_id_t
   legion_field_allocator_allocate_field(
@@ -1339,14 +1339,14 @@ extern "C" {
     legion_field_id_t desired_fieldid /* = AUTO_GENERATE_ID */);
 
   /**
-   * @see LegionRuntime::HighLevel::FieldAllocator::free_field()
+   * @see Legion::FieldAllocator::free_field()
    */
   void
   legion_field_allocator_free_field(legion_field_allocator_t allocator,
                                     legion_field_id_t fid);
 
   /**
-   * @see LegionRuntime::HighLevel::FieldAllocator::allocate_local_field()
+   * @see Legion::FieldAllocator::allocate_local_field()
    */
   legion_field_id_t
   legion_field_allocator_allocate_local_field(
@@ -1357,13 +1357,13 @@ extern "C" {
   /**
    * @return Caller takes ownership of return value.
    *
-   * @see LegionRuntime::HighLevel::ArgumentMap::ArgumentMap()
+   * @see Legion::ArgumentMap::ArgumentMap()
    */
   legion_argument_map_t
   legion_argument_map_create();
 
   /**
-   * @see LegionRuntime::HighLevel::ArgumentMap::set_point()
+   * @see Legion::ArgumentMap::set_point()
    */
   void
   legion_argument_map_set_point(legion_argument_map_t map,
@@ -1374,7 +1374,7 @@ extern "C" {
   /**
    * @param handle Caller must have ownership of parameter `handle`.
    *
-   * @see LegionRuntime::HighLevel::ArgumentMap::~ArgumentMap()
+   * @see Legion::ArgumentMap::~ArgumentMap()
    */
   void
   legion_argument_map_destroy(legion_argument_map_t handle);
@@ -1386,7 +1386,7 @@ extern "C" {
   /**
    * @param handle Caller must have ownership of parameter `handle`.
    *
-   * @see LegionRuntime::HighLevel::Predicate::~Predicate()
+   * @see Legion::Predicate::~Predicate()
    */
   void
   legion_predicate_destroy(legion_predicate_t handle);
@@ -1394,7 +1394,7 @@ extern "C" {
   /**
    * @return Caller does **NOT** take ownership of return value.
    *
-   * @see LegionRuntime::HighLevel::Predicate::TRUE_PRED
+   * @see Legion::Predicate::TRUE_PRED
    */
   const legion_predicate_t
   legion_predicate_true(void);
@@ -1402,7 +1402,7 @@ extern "C" {
   /**
    * @return Caller does **NOT** take ownership of return value.
    *
-   * @see LegionRuntime::HighLevel::Predicate::FALSE_PRED
+   * @see Legion::Predicate::FALSE_PRED
    */
   const legion_predicate_t
   legion_predicate_false(void);
@@ -1414,7 +1414,7 @@ extern "C" {
   /**
    * @return Caller takes ownership of return value.
    *
-   * @see LegionRuntime::HighLevel::HighLevelRuntime::create_phase_barrier()
+   * @see Legion::HighLevelRuntime::create_phase_barrier()
    */
   legion_phase_barrier_t
   legion_phase_barrier_create(legion_runtime_t runtime,
@@ -1424,7 +1424,7 @@ extern "C" {
   /**
    * @param handle Caller must have ownership of parameter `handle`.
    *
-   * @see LegionRuntime::HighLevel::PhaseBarrier::~PhaseBarrier()
+   * @see Legion::PhaseBarrier::~PhaseBarrier()
    */
   void
   legion_phase_barrier_destroy(legion_phase_barrier_t handle);
@@ -1432,7 +1432,7 @@ extern "C" {
   /**
    * @return Caller takes ownership of return value.
    *
-   * @see LegionRuntime::HighLevel::HighLevelRuntime::advance_phase_barrier()
+   * @see Legion::HighLevelRuntime::advance_phase_barrier()
    */
   legion_phase_barrier_t
   legion_phase_barrier_advance(legion_runtime_t runtime,
@@ -1448,7 +1448,7 @@ extern "C" {
    *
    * @return Caller takes ownership of return value.
    *
-   * @see LegionRuntime::HighLevel::Future::from_value()
+   * @see Legion::Future::from_value()
    */
   legion_future_t
   legion_future_from_buffer(legion_runtime_t runtime,
@@ -1458,7 +1458,7 @@ extern "C" {
   /**
    * @return Caller takes ownership of return value.
    *
-   * @see LegionRuntime::HighLevel::Future::from_value()
+   * @see Legion::Future::from_value()
    */
   legion_future_t
   legion_future_from_uint32(legion_runtime_t runtime,
@@ -1467,7 +1467,7 @@ extern "C" {
   /**
    * @return Caller takes ownership of return value.
    *
-   * @see LegionRuntime::HighLevel::Future::from_value()
+   * @see Legion::Future::from_value()
    */
   legion_future_t
   legion_future_from_uint64(legion_runtime_t runtime,
@@ -1476,13 +1476,13 @@ extern "C" {
   /**
    * @param handle Caller must have ownership of parameter `handle`.
    *
-   * @see LegionRuntime::HighLevel::Future::~Future()
+   * @see Legion::Future::~Future()
    */
   void
   legion_future_destroy(legion_future_t handle);
 
   /**
-   * @see LegionRuntime::HighLevel::Future::get_void_result()
+   * @see Legion::Future::get_void_result()
    */
   void
   legion_future_get_void_result(legion_future_t handle);
@@ -1490,32 +1490,32 @@ extern "C" {
   /**
    * @return Caller takes ownership of return value.
    *
-   * @see LegionRuntime::HighLevel::Future::get_result()
+   * @see Legion::Future::get_result()
    */
   legion_task_result_t
   legion_future_get_result(legion_future_t handle);
 
   /**
-   * @see LegionRuntime::HighLevel::Future::get_result()
+   * @see Legion::Future::get_result()
    */
   uint32_t
   legion_future_get_result_uint32(legion_future_t handle);
 
   /**
-   * @see LegionRuntime::HighLevel::Future::get_result()
+   * @see Legion::Future::get_result()
    */
   uint64_t
   legion_future_get_result_uint64(legion_future_t handle);
 
   /**
-   * @see LegionRuntime::HighLevel::Future::is_empty()
+   * @see Legion::Future::is_empty()
    */
   bool
   legion_future_is_empty(legion_future_t handle,
                          bool block /* = false */);
 
   /**
-   * @see LegionRuntime::HighLevel::Future::get_untyped_pointer()
+   * @see Legion::Future::get_untyped_pointer()
    */
   const void *
   legion_future_get_untyped_pointer(legion_future_t handle);
@@ -1523,7 +1523,7 @@ extern "C" {
   /**
    * @return Caller takes ownership of return value.
    *
-   * @see LegionRuntime::HighLevel::Runtime::execute_task()
+   * @see Legion::Runtime::execute_task()
    */
   legion_task_result_t
   legion_task_result_create(const void *handle, size_t size);
@@ -1531,7 +1531,7 @@ extern "C" {
   /**
    * @param handle Caller must have ownership of parameter `handle`.
    *
-   * @see LegionRuntime::HighLevel::Runtime::execute_task()
+   * @see Legion::Runtime::execute_task()
    */
   void
   legion_task_result_destroy(legion_task_result_t handle);
@@ -1543,13 +1543,13 @@ extern "C" {
   /**
    * @param handle Caller must have ownership of parameter `handle`.
    *
-   * @see LegionRuntime::HighLevel::FutureMap::~FutureMap()
+   * @see Legion::FutureMap::~FutureMap()
    */
   void
   legion_future_map_destroy(legion_future_map_t handle);
 
   /**
-   * @see LegionRuntime::HighLevel::FutureMap::wait_all_results()
+   * @see Legion::FutureMap::wait_all_results()
    */
   void
   legion_future_map_wait_all_results(legion_future_map_t handle);
@@ -1557,7 +1557,7 @@ extern "C" {
   /**
    * @return Caller takes ownership of return value.
    *
-   * @see LegionRuntime::HighLevel::Future::get_future()
+   * @see Legion::Future::get_future()
    */
   legion_future_t
   legion_future_map_get_future(legion_future_map_t handle,
@@ -1566,7 +1566,7 @@ extern "C" {
   /**
    * @return Caller takes ownership of return value.
    *
-   * @see LegionRuntime::HighLevel::Future::get_result()
+   * @see Legion::Future::get_result()
    */
   legion_task_result_t
   legion_future_map_get_result(legion_future_map_t handle,
@@ -1579,7 +1579,7 @@ extern "C" {
   /**
    * @return Caller takes ownership of return value.
    *
-   * @see LegionRuntime::HighLevel::TaskLauncher::TaskLauncher()
+   * @see Legion::TaskLauncher::TaskLauncher()
    */
   legion_task_launcher_t
   legion_task_launcher_create(
@@ -1592,7 +1592,7 @@ extern "C" {
   /**
    * @param handle Caller must have ownership of parameter `handle`.
    *
-   * @see LegionRuntime::HighLevel::TaskLauncher::~TaskLauncher()
+   * @see Legion::TaskLauncher::~TaskLauncher()
    */
   void
   legion_task_launcher_destroy(legion_task_launcher_t handle);
@@ -1600,7 +1600,7 @@ extern "C" {
   /**
    * @return Caller takes ownership of return value.
    *
-   * @see LegionRuntime::HighLevel::Runtime::execute_task()
+   * @see Legion::Runtime::execute_task()
    */
   legion_future_t
   legion_task_launcher_execute(legion_runtime_t runtime,
@@ -1608,7 +1608,7 @@ extern "C" {
                                legion_task_launcher_t launcher);
 
   /**
-   * @see LegionRuntime::HighLevel::TaskLauncher::add_region_requirement()
+   * @see Legion::TaskLauncher::add_region_requirement()
    */
   unsigned
   legion_task_launcher_add_region_requirement_logical_region(
@@ -1621,7 +1621,7 @@ extern "C" {
     bool verified /* = false*/);
 
   /**
-   * @see LegionRuntime::HighLevel::TaskLauncher::add_region_requirement()
+   * @see Legion::TaskLauncher::add_region_requirement()
    */
   unsigned
   legion_task_launcher_add_region_requirement_logical_region_reduction(
@@ -1634,7 +1634,7 @@ extern "C" {
     bool verified /* = false*/);
 
   /**
-   * @see LegionRuntime::HighLevel::TaskLauncher::add_field()
+   * @see Legion::TaskLauncher::add_field()
    */
   void
   legion_task_launcher_add_field(legion_task_launcher_t launcher,
@@ -1643,7 +1643,7 @@ extern "C" {
                                  bool inst /* = true */);
 
   /**
-   * @see LegionRuntime::HighLevel::TaskLauncher::add_index_requirement()
+   * @see Legion::TaskLauncher::add_index_requirement()
    */
   unsigned
   legion_task_launcher_add_index_requirement(
@@ -1654,21 +1654,21 @@ extern "C" {
     bool verified /* = false*/);
 
   /**
-   * @see LegionRuntime::HighLevel::TaskLauncher::add_future()
+   * @see Legion::TaskLauncher::add_future()
    */
   void
   legion_task_launcher_add_future(legion_task_launcher_t launcher,
                                   legion_future_t future);
 
   /**
-   * @see LegionRuntime::HighLevel::TaskLauncher::add_wait_barrier()
+   * @see Legion::TaskLauncher::add_wait_barrier()
    */
   void
   legion_task_launcher_add_wait_barrier(legion_task_launcher_t launcher,
                                         legion_phase_barrier_t bar);
 
   /**
-   * @see LegionRuntime::HighLevel::TaskLauncher::add_arrival_barrier()
+   * @see Legion::TaskLauncher::add_arrival_barrier()
    */
   void
   legion_task_launcher_add_arrival_barrier(legion_task_launcher_t launcher,
@@ -1677,7 +1677,7 @@ extern "C" {
   /**
    * @return Caller takes ownership of return value.
    *
-   * @see LegionRuntime::HighLevel::IndexLauncher::IndexLauncher()
+   * @see Legion::IndexLauncher::IndexLauncher()
    */
   legion_index_launcher_t
   legion_index_launcher_create(
@@ -1693,7 +1693,7 @@ extern "C" {
   /**
    * @param handle Caller must have ownership of parameter `handle`.
    *
-   * @see LegionRuntime::HighLevel::IndexLauncher::~IndexLauncher()
+   * @see Legion::IndexLauncher::~IndexLauncher()
    */
   void
   legion_index_launcher_destroy(legion_index_launcher_t handle);
@@ -1701,7 +1701,7 @@ extern "C" {
   /**
    * @return Caller takes ownership of return value.
    *
-   * @see LegionRuntime::HighLevel::Runtime::execute_index_space(Context, const IndexLauncher &)
+   * @see Legion::Runtime::execute_index_space(Context, const IndexLauncher &)
    */
   legion_future_map_t
   legion_index_launcher_execute(legion_runtime_t runtime,
@@ -1711,7 +1711,7 @@ extern "C" {
   /**
    * @return Caller takes ownership of return value.
    *
-   * @see LegionRuntime::HighLevel::Runtime::execute_index_space(Context, const IndexLauncher &, ReductionOpID)
+   * @see Legion::Runtime::execute_index_space(Context, const IndexLauncher &, ReductionOpID)
    */
   legion_future_t
   legion_index_launcher_execute_reduction(legion_runtime_t runtime,
@@ -1720,7 +1720,7 @@ extern "C" {
                                           legion_reduction_op_id_t redop);
 
   /**
-   * @see LegionRuntime::HighLevel::IndexLauncher::add_region_requirement()
+   * @see Legion::IndexLauncher::add_region_requirement()
    */
   unsigned
   legion_index_launcher_add_region_requirement_logical_region(
@@ -1734,7 +1734,7 @@ extern "C" {
     bool verified /* = false*/);
 
   /**
-   * @see LegionRuntime::HighLevel::IndexLauncher::add_region_requirement()
+   * @see Legion::IndexLauncher::add_region_requirement()
    */
   unsigned
   legion_index_launcher_add_region_requirement_logical_partition(
@@ -1748,7 +1748,7 @@ extern "C" {
     bool verified /* = false*/);
 
   /**
-   * @see LegionRuntime::HighLevel::IndexLauncher::add_region_requirement()
+   * @see Legion::IndexLauncher::add_region_requirement()
    */
   unsigned
   legion_index_launcher_add_region_requirement_logical_region_reduction(
@@ -1762,7 +1762,7 @@ extern "C" {
     bool verified /* = false*/);
 
   /**
-   * @see LegionRuntime::HighLevel::IndexLauncher::add_region_requirement()
+   * @see Legion::IndexLauncher::add_region_requirement()
    */
   unsigned
   legion_index_launcher_add_region_requirement_logical_partition_reduction(
@@ -1776,7 +1776,7 @@ extern "C" {
     bool verified /* = false*/);
 
   /**
-   * @see LegionRuntime::HighLevel::IndexLaunchxer::add_field()
+   * @see Legion::IndexLaunchxer::add_field()
    */
   void
   legion_index_launcher_add_field(legion_index_launcher_t launcher,
@@ -1785,7 +1785,7 @@ extern "C" {
                                  bool inst /* = true */);
 
   /**
-   * @see LegionRuntime::HighLevel::IndexLauncher::add_index_requirement()
+   * @see Legion::IndexLauncher::add_index_requirement()
    */
   unsigned
   legion_index_launcher_add_index_requirement(
@@ -1796,21 +1796,21 @@ extern "C" {
     bool verified /* = false*/);
 
   /**
-   * @see LegionRuntime::HighLevel::IndexLauncher::add_future()
+   * @see Legion::IndexLauncher::add_future()
    */
   void
   legion_index_launcher_add_future(legion_index_launcher_t launcher,
                                    legion_future_t future);
 
   /**
-   * @see LegionRuntime::HighLevel::IndexLauncher::add_wait_barrier()
+   * @see Legion::IndexLauncher::add_wait_barrier()
    */
   void
   legion_index_launcher_add_wait_barrier(legion_index_launcher_t launcher,
                                          legion_phase_barrier_t bar);
 
   /**
-   * @see LegionRuntime::HighLevel::IndexLauncher::add_arrival_barrier()
+   * @see Legion::IndexLauncher::add_arrival_barrier()
    */
   void
   legion_index_launcher_add_arrival_barrier(legion_index_launcher_t launcher,
@@ -1823,7 +1823,7 @@ extern "C" {
   /**
    * @return Caller takes ownership of return value.
    *
-   * @see LegionRuntime::HighLevel::InlineLauncher::InlineLauncher()
+   * @see Legion::InlineLauncher::InlineLauncher()
    */
   legion_inline_launcher_t
   legion_inline_launcher_create_logical_region(
@@ -1839,7 +1839,7 @@ extern "C" {
   /**
    * @param handle Caller must have ownership of parameter `handle`.
    *
-   * @see LegionRuntime::HighLevel::InlineLauncher::~InlineLauncher()
+   * @see Legion::InlineLauncher::~InlineLauncher()
    */
   void
   legion_inline_launcher_destroy(legion_inline_launcher_t handle);
@@ -1847,7 +1847,7 @@ extern "C" {
   /**
    * @return Caller takes ownership of return value.
    *
-   * @see LegionRuntime::HighLevel::Runtime::map_region()
+   * @see Legion::Runtime::map_region()
    */
   legion_physical_region_t
   legion_inline_launcher_execute(legion_runtime_t runtime,
@@ -1855,7 +1855,7 @@ extern "C" {
                                  legion_inline_launcher_t launcher);
 
   /**
-   * @see LegionRuntime::HighLevel::InlineLauncher::add_field()
+   * @see Legion::InlineLauncher::add_field()
    */
   void
   legion_inline_launcher_add_field(legion_inline_launcher_t launcher,
@@ -1863,7 +1863,7 @@ extern "C" {
                                    bool inst /* = true */);
 
   /**
-   * @see LegionRuntime::HighLevel::Runtime::remap_region()
+   * @see Legion::Runtime::remap_region()
    */
   void
   legion_runtime_remap_region(legion_runtime_t runtime,
@@ -1871,7 +1871,7 @@ extern "C" {
                               legion_physical_region_t region);
 
   /**
-   * @see LegionRuntime::HighLevel::Runtime::unmap_region()
+   * @see Legion::Runtime::unmap_region()
    */
   void
   legion_runtime_unmap_region(legion_runtime_t runtime,
@@ -1879,14 +1879,14 @@ extern "C" {
                               legion_physical_region_t region);
 
   /**
-   * @see LegionRuntime::HighLevel::Runtime::unmap_all_regions()
+   * @see Legion::Runtime::unmap_all_regions()
    */
   void
   legion_runtime_unmap_all_regions(legion_runtime_t runtime,
                                    legion_context_t ctx);
 
   /**
-   * @see LegionRuntime::HighLevel::Runtime::fill_field()
+   * @see Legion::Runtime::fill_field()
    */
   void
   legion_runtime_fill_field(
@@ -1900,7 +1900,7 @@ extern "C" {
     legion_predicate_t pred /* = legion_predicate_true() */);
 
   /**
-   * @see LegionRuntime::HighLevel::Runtime::fill_field()
+   * @see Legion::Runtime::fill_field()
    */
   void
   legion_runtime_fill_field_future(
@@ -1919,7 +1919,7 @@ extern "C" {
   /**
    * @return Caller takes ownership of return value.
    *
-   * @see LegionRuntime::HighLevel::CopyLauncher::CopyLauncher()
+   * @see Legion::CopyLauncher::CopyLauncher()
    */
   legion_copy_launcher_t
   legion_copy_launcher_create(
@@ -1930,7 +1930,7 @@ extern "C" {
   /**
    * @param handle Caller must have ownership of parameter `handle`.
    *
-   * @see LegionRuntime::HighLevel::CopyLauncher::~CopyLauncher()
+   * @see Legion::CopyLauncher::~CopyLauncher()
    */
   void
   legion_copy_launcher_destroy(legion_copy_launcher_t handle);
@@ -1938,7 +1938,7 @@ extern "C" {
   /**
    * @return Caller takes ownership of return value.
    *
-   * @see LegionRuntime::HighLevel::Runtime::issue_copy_operation()
+   * @see Legion::Runtime::issue_copy_operation()
    */
   void
   legion_copy_launcher_execute(legion_runtime_t runtime,
@@ -1946,7 +1946,7 @@ extern "C" {
                                legion_copy_launcher_t launcher);
 
   /**
-   * @see LegionRuntime::HighLevel::CopyLauncher::add_copy_requirements()
+   * @see Legion::CopyLauncher::add_copy_requirements()
    */
   unsigned
   legion_copy_launcher_add_src_region_requirement_logical_region(
@@ -1959,7 +1959,7 @@ extern "C" {
     bool verified /* = false*/);
 
   /**
-   * @see LegionRuntime::HighLevel::CopyLauncher::add_copy_requirements()
+   * @see Legion::CopyLauncher::add_copy_requirements()
    */
   unsigned
   legion_copy_launcher_add_dst_region_requirement_logical_region(
@@ -1972,7 +1972,7 @@ extern "C" {
     bool verified /* = false*/);
 
   /**
-   * @see LegionRuntime::HighLevel::CopyLauncher::add_region_requirement()
+   * @see Legion::CopyLauncher::add_region_requirement()
    */
   unsigned
   legion_copy_launcher_add_dst_region_requirement_logical_region_reduction(
@@ -1985,7 +1985,7 @@ extern "C" {
     bool verified /* = false*/);
 
   /**
-   * @see LegionRuntime::HighLevel::CopyLauncher::add_field()
+   * @see Legion::CopyLauncher::add_field()
    */
   void
   legion_copy_launcher_add_src_field(legion_copy_launcher_t launcher,
@@ -1994,7 +1994,7 @@ extern "C" {
                                      bool inst /* = true */);
 
   /**
-   * @see LegionRuntime::HighLevel::CopyLauncher::add_field()
+   * @see Legion::CopyLauncher::add_field()
    */
   void
   legion_copy_launcher_add_dst_field(legion_copy_launcher_t launcher,
@@ -2003,14 +2003,14 @@ extern "C" {
                                      bool inst /* = true */);
 
   /**
-   * @see LegionRuntime::HighLevel::CopyLauncher::add_wait_barrier()
+   * @see Legion::CopyLauncher::add_wait_barrier()
    */
   void
   legion_copy_launcher_add_wait_barrier(legion_copy_launcher_t launcher,
                                         legion_phase_barrier_t bar);
 
   /**
-   * @see LegionRuntime::HighLevel::CopyLauncher::add_arrival_barrier()
+   * @see Legion::CopyLauncher::add_arrival_barrier()
    */
   void
   legion_copy_launcher_add_arrival_barrier(legion_copy_launcher_t launcher,
@@ -2023,7 +2023,7 @@ extern "C" {
   /**
    * @return Caller takes ownership of return value.
    *
-   * @see LegionRuntime::HighLevel::MustEpochLauncher::MustEpochLauncher()
+   * @see Legion::MustEpochLauncher::MustEpochLauncher()
    */
   legion_must_epoch_launcher_t
   legion_must_epoch_launcher_create(
@@ -2033,7 +2033,7 @@ extern "C" {
   /**
    * @param handle Caller must have ownership of parameter `handle`.
    *
-   * @see LegionRuntime::HighLevel::MustEpochLauncher::~MustEpochLauncher()
+   * @see Legion::MustEpochLauncher::~MustEpochLauncher()
    */
   void
   legion_must_epoch_launcher_destroy(legion_must_epoch_launcher_t handle);
@@ -2041,7 +2041,7 @@ extern "C" {
   /**
    * @return Caller takes ownership of return value.
    *
-   * @see LegionRuntime::HighLevel::HighLevelRuntime::execute_must_epoch()
+   * @see Legion::HighLevelRuntime::execute_must_epoch()
    */
   legion_future_map_t
   legion_must_epoch_launcher_execute(legion_runtime_t runtime,
@@ -2051,7 +2051,7 @@ extern "C" {
   /**
    * @param handle Caller must have ownership of parameter `handle`.
    *
-   * @see LegionRuntime::HighLevel::Must_EpochLauncher::add_single_task()
+   * @see Legion::Must_EpochLauncher::add_single_task()
    */
   void
   legion_must_epoch_launcher_add_single_task(
@@ -2062,7 +2062,7 @@ extern "C" {
   /**
    * @param handle Caller must have ownership of parameter `handle`.
    *
-   * @see LegionRuntime::HighLevel::Must_EpochLauncher::add_index_task()
+   * @see Legion::Must_EpochLauncher::add_index_task()
    */
   void
   legion_must_epoch_launcher_add_index_task(
@@ -2074,14 +2074,14 @@ extern "C" {
   // -----------------------------------------------------------------------
 
   /**
-   * @see LegionRuntime::HighLevel::Runtime::issue_mapping_fence()
+   * @see Legion::Runtime::issue_mapping_fence()
    */
   void
   legion_runtime_issue_mapping_fence(legion_runtime_t runtime,
                                      legion_context_t ctx);
 
   /**
-   * @see LegionRuntime::HighLevel::Runtime::issue_execution_fence()
+   * @see Legion::Runtime::issue_execution_fence()
    */
   void
   legion_runtime_issue_execution_fence(legion_runtime_t runtime,
@@ -2092,7 +2092,7 @@ extern "C" {
   // -----------------------------------------------------------------------
 
   /**
-   * @see LegionRuntime::HighLevel::Runtime::begin_trace()
+   * @see Legion::Runtime::begin_trace()
    */
   void
   legion_runtime_begin_trace(legion_runtime_t runtime,
@@ -2100,7 +2100,7 @@ extern "C" {
                              legion_trace_id_t tid);
 
   /**
-   * @see LegionRuntime::HighLevel::Runtime::end_trace()
+   * @see Legion::Runtime::end_trace()
    */
   void
   legion_runtime_end_trace(legion_runtime_t runtime,
@@ -2112,7 +2112,7 @@ extern "C" {
   // -----------------------------------------------------------------------
 
   /**
-   * @see LegionRuntime::HighLevel::Runtime::get_executing_processor()
+   * @see Legion::Runtime::get_executing_processor()
    */
   legion_processor_t
   legion_runtime_get_executing_processor(legion_runtime_t runtime,
@@ -2125,31 +2125,31 @@ extern "C" {
   /**
    * @param handle Caller must have ownership of parameter `handle`.
    *
-   * @see LegionRuntime::HighLevel::PhysicalRegion::~PhysicalRegion()
+   * @see Legion::PhysicalRegion::~PhysicalRegion()
    */
   void
   legion_physical_region_destroy(legion_physical_region_t handle);
 
   /**
-   * @see LegionRuntime::HighLevel::PhysicalRegion::is_mapped()
+   * @see Legion::PhysicalRegion::is_mapped()
    */
   bool
   legion_physical_region_is_mapped(legion_physical_region_t handle);
 
   /**
-   * @see LegionRuntime::HighLevel::PhysicalRegion::wait_until_valid()
+   * @see Legion::PhysicalRegion::wait_until_valid()
    */
   void
   legion_physical_region_wait_until_valid(legion_physical_region_t handle);
 
   /**
-   * @see LegionRuntime::HighLevel::PhysicalRegion::is_valid()
+   * @see Legion::PhysicalRegion::is_valid()
    */
   bool
   legion_physical_region_is_valid(legion_physical_region_t handle);
 
   /**
-   * @see LegionRuntime::HighLevel::PhysicalRegion::get_logical_region()
+   * @see Legion::PhysicalRegion::get_logical_region()
    */
   legion_logical_region_t
   legion_physical_region_get_logical_region(legion_physical_region_t handle);
@@ -2159,7 +2159,7 @@ extern "C" {
    *
    * @return Caller takes ownership of return value.
    *
-   * @see LegionRuntime::HighLevel::PhysicalRegion::get_accessor()
+   * @see Legion::PhysicalRegion::get_accessor()
    */
   legion_accessor_generic_t
   legion_physical_region_get_accessor_generic(legion_physical_region_t handle);
@@ -2167,7 +2167,7 @@ extern "C" {
   /**
    * @return Caller takes ownership of return value.
    *
-   * @see LegionRuntime::HighLevel::PhysicalRegion::get_field_accessor()
+   * @see Legion::PhysicalRegion::get_field_accessor()
    */
   legion_accessor_generic_t
   legion_physical_region_get_field_accessor_generic(
@@ -2179,7 +2179,7 @@ extern "C" {
    *
    * @return Caller takes ownership of return value.
    *
-   * @see LegionRuntime::HighLevel::PhysicalRegion::get_field_accessor()
+   * @see Legion::PhysicalRegion::get_field_accessor()
    */
   legion_accessor_array_t
   legion_physical_region_get_accessor_array(
@@ -2188,7 +2188,7 @@ extern "C" {
   /**
    * @return Caller takes ownership of return value.
    *
-   * @see LegionRuntime::HighLevel::PhysicalRegion::get_field_accessor()
+   * @see Legion::PhysicalRegion::get_field_accessor()
    */
   legion_accessor_array_t
   legion_physical_region_get_field_accessor_array(
@@ -2316,7 +2316,7 @@ extern "C" {
   /**
    * @return Caller takes ownership of return value.
    *
-   * @see LegionRuntime::HighLevel::IndexIterator::IndexIterator()
+   * @see Legion::IndexIterator::IndexIterator()
    */
   legion_index_iterator_t
   legion_index_iterator_create(legion_runtime_t runtime,
@@ -2326,25 +2326,25 @@ extern "C" {
   /**
    * @param handle Caller must have ownership of parameter `handle`.
    *
-   * @see LegionRuntime::HighLevel::IndexIterator::~IndexIterator()
+   * @see Legion::IndexIterator::~IndexIterator()
    */
   void
   legion_index_iterator_destroy(legion_index_iterator_t handle);
 
   /**
-   * @see LegionRuntime::HighLevel::IndexIterator::has_next()
+   * @see Legion::IndexIterator::has_next()
    */
   bool
   legion_index_iterator_has_next(legion_index_iterator_t handle);
 
   /**
-   * @see LegionRuntime::HighLevel::IndexIterator::next()
+   * @see Legion::IndexIterator::next()
    */
   legion_ptr_t
   legion_index_iterator_next(legion_index_iterator_t handle);
 
   /**
-   * @see LegionRuntime::HighLevel::IndexIterator::next_span()
+   * @see Legion::IndexIterator::next_span()
    */
   legion_ptr_t
   legion_index_iterator_next_span(legion_index_iterator_t handle,
@@ -2356,49 +2356,49 @@ extern "C" {
   // -----------------------------------------------------------------------
 
   /**
-   * @see LegionRuntime::HighLevel::Task::args
+   * @see Legion::Task::args
    */
   void *
   legion_task_get_args(legion_task_t task);
 
   /**
-   * @see LegionRuntime::HighLevel::Task::arglen
+   * @see Legion::Task::arglen
    */
   size_t
   legion_task_get_arglen(legion_task_t task);
 
   /**
-   * @see LegionRuntime::HighLevel::Task::index_domain
+   * @see Legion::Task::index_domain
    */
   legion_domain_t
   legion_task_get_index_domain(legion_task_t task);
 
   /**
-   * @see LegionRuntime::HighLevel::Task::index_point
+   * @see Legion::Task::index_point
    */
   legion_domain_point_t
   legion_task_get_index_point(legion_task_t task);
 
   /**
-   * @see LegionRuntime::HighLevel::Task::is_index_space
+   * @see Legion::Task::is_index_space
    */
   bool
   legion_task_get_is_index_space(legion_task_t task);
 
   /**
-   * @see LegionRuntime::HighLevel::Task::local_args
+   * @see Legion::Task::local_args
    */
   void *
   legion_task_get_local_args(legion_task_t task);
 
   /**
-   * @see LegionRuntime::HighLevel::Task::local_arglen
+   * @see Legion::Task::local_arglen
    */
   size_t
   legion_task_get_local_arglen(legion_task_t task);
 
   /**
-   * @see LegionRuntime::HighLevel::Task::regions
+   * @see Legion::Task::regions
    */
   unsigned
   legion_task_get_regions_size(legion_task_t task);
@@ -2406,49 +2406,49 @@ extern "C" {
   /**
    * @return Caller does **NOT** take ownership of return value.
    *
-   * @see LegionRuntime::HighLevel::Task::regions
+   * @see Legion::Task::regions
    */
   legion_region_requirement_t
   legion_task_get_region(legion_task_t task, unsigned idx);
 
   /**
-   * @see LegionRuntime::HighLevel::Task::futures
+   * @see Legion::Task::futures
    */
   unsigned
   legion_task_get_futures_size(legion_task_t task);
 
   /**
-   * @see LegionRuntime::HighLevel::Task::futures
+   * @see Legion::Task::futures
    */
   legion_future_t
   legion_task_get_future(legion_task_t task, unsigned idx);
 
   /**
-   * @see LegionRuntime::HighLevel::Task::task_id
+   * @see Legion::Task::task_id
    */
   legion_task_id_t
   legion_task_get_task_id(legion_task_t task);
 
   /**
-   * @see LegionRuntime::HighLevel::Task::target_proc
+   * @see Legion::Task::target_proc
    */
   legion_processor_t
   legion_task_get_target_proc(legion_task_t task);
 
   /**
-   * @see LegionRuntime::HighLevel::Task::variants::name
+   * @see Legion::Task::variants::name
    */
   const char *
   legion_task_get_name(legion_task_t task);
 
   /**
-   * @see LegionRuntime::HighLevel::Task::target_proc
+   * @see Legion::Task::target_proc
    */
   void
   legion_task_set_target_proc(legion_task_t task, legion_processor_t proc);
 
   /**
-   * @see LegionRuntime::HighLevel::Task::additional_procs
+   * @see Legion::Task::additional_procs
    */
   void
   legion_task_add_additional_proc(legion_task_t task, legion_processor_t proc);
@@ -2461,7 +2461,7 @@ extern "C" {
   /**
    * @return Caller does **NOT** take ownership of return value.
    *
-   * @see LegionRuntime::HighLevel::Inline::requirement
+   * @see Legion::Inline::requirement
    */
   legion_region_requirement_t
   legion_inline_get_requirement(legion_inline_t inline_operation);
@@ -2471,7 +2471,7 @@ extern "C" {
   // -----------------------------------------------------------------------
 
   /**
-   * @see LegionRuntime::HighLevel::Runtime::start()
+   * @see Legion::Runtime::start()
    */
   int
   legion_runtime_start(int argc,
@@ -2479,32 +2479,32 @@ extern "C" {
                        bool background /* = false */);
 
   /**
-   * @see LegionRuntime::HighLevel::Runtime::wait_for_shutdown()
+   * @see Legion::Runtime::wait_for_shutdown()
    */
   void
   legion_runtime_wait_for_shutdown(void);
 
   /**
-   * @see LegionRuntime::HighLevel::Runtime::set_top_level_task_id()
+   * @see Legion::Runtime::set_top_level_task_id()
    */
   void
   legion_runtime_set_top_level_task_id(legion_task_id_t top_id);
 
   /**
-   * @see LegionRuntime::HighLevel::Runtime::get_input_args()
+   * @see Legion::Runtime::get_input_args()
    */
   const legion_input_args_t
   legion_runtime_get_input_args(void);
 
   /**
-   * @see LegionRuntime::HighLevel::Runtime::set_registration_callback()
+   * @see Legion::Runtime::set_registration_callback()
    */
   void
   legion_runtime_set_registration_callback(
     legion_registration_callback_pointer_t callback);
 
   /**
-   * @see LegionRuntime::HighLevel::Runtime::replace_default_mapper()
+   * @see Legion::Runtime::replace_default_mapper()
    */
   void
   legion_runtime_replace_default_mapper(
@@ -2513,7 +2513,7 @@ extern "C" {
     legion_processor_t proc);
 
   /**
-   * @see LegionRuntime::HighLevel::Runtime::register_legion_task()
+   * @see Legion::Runtime::register_legion_task()
    */
   legion_task_id_t
   legion_runtime_register_task_void(
@@ -2527,7 +2527,7 @@ extern "C" {
     legion_task_pointer_void_t task_pointer);
 
   /**
-   * @see LegionRuntime::HighLevel::Runtime::register_legion_task()
+   * @see Legion::Runtime::register_legion_task()
    */
   legion_task_id_t
   legion_runtime_register_task(
@@ -2541,7 +2541,7 @@ extern "C" {
     legion_task_pointer_t task_pointer);
 
   /**
-   * @see LegionRuntime::HighLevel::Runtime::register_legion_task()
+   * @see Legion::Runtime::register_legion_task()
    */
   legion_task_id_t
   legion_runtime_register_task_uint32(
@@ -2555,7 +2555,7 @@ extern "C" {
     legion_task_pointer_uint32_t task_pointer);
 
   /**
-   * @see LegionRuntime::HighLevel::Runtime::register_legion_task()
+   * @see Legion::Runtime::register_legion_task()
    */
   legion_task_id_t
   legion_runtime_register_task_uint64(
@@ -2569,7 +2569,7 @@ extern "C" {
     legion_task_pointer_uint64_t task_pointer);
 
   /**
-   * @see LegionRuntime::HighLevel::Runtime::register_projection_functor()
+   * @see Legion::Runtime::register_projection_functor()
    */
   void
   legion_runtime_register_projection_functor(
@@ -2649,7 +2649,7 @@ extern "C" {
   /**
    * @return Caller takes ownership of return value.
    *
-   * @see LegionRuntime::HighLevel::MappingUtilities::MachineQueryInterface()
+   * @see Legion::MappingUtilities::MachineQueryInterface()
    */
   legion_machine_query_interface_t
   legion_machine_query_interface_create(legion_machine_t machine);
@@ -2657,14 +2657,14 @@ extern "C" {
   /**
    * @param handle Caller must have ownership of parameter `handle`.
    *
-   * @see LegionRuntime::HighLevel::MappingUtilities::~MachineQueryInterface()
+   * @see Legion::MappingUtilities::~MachineQueryInterface()
    */
   void
   legion_machine_query_interface_destroy(
     legion_machine_query_interface_t handle);
 
   /**
-   * @see LegionRuntime::HighLevel::MappingUtilities
+   * @see Legion::MappingUtilities
    *                   ::MachineQueryInterface::find_memory_kind()
    */
   legion_memory_t
@@ -2678,7 +2678,7 @@ extern "C" {
   // -----------------------------------------------------------------------
 
   /**
-   * @see LegionRuntime::HighLevel::DefaultMapper::map_task()
+   * @see Legion::DefaultMapper::map_task()
    */
   bool
   legion_default_mapper_map_task(
@@ -2686,7 +2686,7 @@ extern "C" {
     legion_task_t task);
 
   /**
-   * @see LegionRuntime::HighLevel::DefaultMapper::map_inline()
+   * @see Legion::DefaultMapper::map_inline()
    */
   bool
   legion_default_mapper_map_inline(

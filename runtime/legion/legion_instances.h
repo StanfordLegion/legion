@@ -21,8 +21,8 @@
 #include "legion_allocation.h"
 #include "garbage_collection.h"
 
-namespace LegionRuntime {
-  namespace HighLevel {
+namespace Legion {
+  namespace Internal {
 
     /**
      * \class LayoutDescription
@@ -125,10 +125,12 @@ namespace LegionRuntime {
                       PhysicalInstance inst, bool register_now);
       virtual ~PhysicalManager(void);
     public:
-      virtual Accessor::RegionAccessor<Accessor::AccessorType::Generic>
-        get_accessor(void) const = 0;
-      virtual Accessor::RegionAccessor<Accessor::AccessorType::Generic>
-        get_field_accessor(FieldID fid) const = 0;
+      virtual LegionRuntime::Accessor::RegionAccessor<
+        LegionRuntime::Accessor::AccessorType::Generic>
+          get_accessor(void) const = 0;
+      virtual LegionRuntime::Accessor::RegionAccessor<
+        LegionRuntime::Accessor::AccessorType::Generic>
+          get_field_accessor(FieldID fid) const = 0;
       virtual bool is_reduction_manager(void) const = 0;
       virtual InstanceManager* as_instance_manager(void) const = 0;
       virtual ReductionManager* as_reduction_manager(void) const = 0;
@@ -178,10 +180,12 @@ namespace LegionRuntime {
     public:
       InstanceManager& operator=(const InstanceManager &rhs);
     public:
-      virtual Accessor::RegionAccessor<Accessor::AccessorType::Generic>
-        get_accessor(void) const;
-      virtual Accessor::RegionAccessor<Accessor::AccessorType::Generic>
-        get_field_accessor(FieldID fid) const;
+      virtual LegionRuntime::Accessor::RegionAccessor<
+        LegionRuntime::Accessor::AccessorType::Generic>
+          get_accessor(void) const;
+      virtual LegionRuntime::Accessor::RegionAccessor<
+        LegionRuntime::Accessor::AccessorType::Generic>
+          get_field_accessor(FieldID fid) const;
       virtual bool is_reduction_manager(void) const;
       virtual InstanceManager* as_instance_manager(void) const;
       virtual ReductionManager* as_reduction_manager(void) const;
@@ -203,7 +207,7 @@ namespace LegionRuntime {
       void set_descriptor(FieldDataDescriptor &desc, unsigned fid_idx) const;
     public:
       virtual DistributedID send_manager(AddressSpaceID target); 
-      static void handle_send_manager(Internal *runtime, 
+      static void handle_send_manager(Runtime *runtime, 
                                       AddressSpaceID source,
                                       Deserializer &derez);
     public:
@@ -240,10 +244,12 @@ namespace LegionRuntime {
                        const ReductionOp *op, bool register_now);
       virtual ~ReductionManager(void);
     public:
-      virtual Accessor::RegionAccessor<Accessor::AccessorType::Generic>
-        get_accessor(void) const = 0;
-      virtual Accessor::RegionAccessor<Accessor::AccessorType::Generic>
-        get_field_accessor(FieldID fid) const = 0;
+      virtual LegionRuntime::Accessor::RegionAccessor<
+        LegionRuntime::Accessor::AccessorType::Generic>
+          get_accessor(void) const = 0;
+      virtual LegionRuntime::Accessor::RegionAccessor<
+        LegionRuntime::Accessor::AccessorType::Generic>
+          get_field_accessor(FieldID fid) const = 0;
       virtual bool is_reduction_manager(void) const;
       virtual InstanceManager* as_instance_manager(void) const;
       virtual ReductionManager* as_reduction_manager(void) const;
@@ -268,7 +274,7 @@ namespace LegionRuntime {
     public:
       virtual DistributedID send_manager(AddressSpaceID target); 
     public:
-      static void handle_send_manager(Internal *runtime,
+      static void handle_send_manager(Runtime *runtime,
                                       AddressSpaceID source,
                                       Deserializer &derez);
     public:
@@ -297,10 +303,12 @@ namespace LegionRuntime {
     public:
       ListReductionManager& operator=(const ListReductionManager &rhs);
     public:
-      virtual Accessor::RegionAccessor<Accessor::AccessorType::Generic>
-        get_accessor(void) const;
-      virtual Accessor::RegionAccessor<Accessor::AccessorType::Generic>
-        get_field_accessor(FieldID fid) const;
+      virtual LegionRuntime::Accessor::RegionAccessor<
+        LegionRuntime::Accessor::AccessorType::Generic>
+          get_accessor(void) const;
+      virtual LegionRuntime::Accessor::RegionAccessor<
+        LegionRuntime::Accessor::AccessorType::Generic>
+          get_field_accessor(FieldID fid) const;
       virtual size_t get_instance_size(void) const;
     public:
       virtual bool is_foldable(void) const;
@@ -341,10 +349,12 @@ namespace LegionRuntime {
     public:
       FoldReductionManager& operator=(const FoldReductionManager &rhs);
     public:
-      virtual Accessor::RegionAccessor<Accessor::AccessorType::Generic>
-        get_accessor(void) const;
-      virtual Accessor::RegionAccessor<Accessor::AccessorType::Generic>
-        get_field_accessor(FieldID fid) const;
+      virtual LegionRuntime::Accessor::RegionAccessor<
+        LegionRuntime::Accessor::AccessorType::Generic>
+          get_accessor(void) const;
+      virtual LegionRuntime::Accessor::RegionAccessor<
+        LegionRuntime::Accessor::AccessorType::Generic>
+          get_field_accessor(FieldID fid) const;
       virtual size_t get_instance_size(void) const;
     public:
       virtual bool is_foldable(void) const;
@@ -365,7 +375,7 @@ namespace LegionRuntime {
       const Event use_event;
     };
 
-  }; // namespace HighLevel
-}; // namespace LegionRuntime
+  }; // namespace Internal 
+}; // namespace Legion
 
 #endif // __LEGION_INSTANCES_H__

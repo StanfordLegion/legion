@@ -40,7 +40,7 @@
 
 namespace BindingLib { class Utility; } // BindingLib namespace
 
-namespace LegionRuntime {
+namespace Legion {
   /**
    * \struct LegionStaticAssert
    * Help with static assertions.
@@ -64,19 +64,121 @@ namespace LegionRuntime {
   public:
     static const bool value = false;
   };
-  
-  namespace HighLevel {
 
-    typedef ::legion_error_t LegionErrorType;
-    typedef ::legion_privilege_mode_t PrivilegeMode;
-    typedef ::legion_allocate_mode_t AllocateMode;
-    typedef ::legion_coherence_property_t CoherenceProperty;
-    typedef ::legion_region_flags_t RegionFlags;
-    typedef ::legion_handle_type_t HandleType;
-    typedef ::legion_partition_kind_t PartitionKind;
-    typedef ::legion_dependence_type_t DependenceType;
-    typedef ::legion_index_space_kind_t IndexSpaceKind;
-    typedef ::legion_file_mode_t LegionFileMode;
+  typedef ::legion_error_t LegionErrorType;
+  typedef ::legion_privilege_mode_t PrivilegeMode;
+  typedef ::legion_allocate_mode_t AllocateMode;
+  typedef ::legion_coherence_property_t CoherenceProperty;
+  typedef ::legion_region_flags_t RegionFlags;
+  typedef ::legion_handle_type_t HandleType;
+  typedef ::legion_partition_kind_t PartitionKind;
+  typedef ::legion_dependence_type_t DependenceType;
+  typedef ::legion_index_space_kind_t IndexSpaceKind;
+  typedef ::legion_file_mode_t LegionFileMode;
+
+  // Forward declarations for user level objects
+  // legion.h
+  class FieldSpace;
+  class LogicalRegion;
+  class LogicalPartition;
+  class IndexAllocator;
+  class FieldAllocator;
+  class TaskArgument;
+  class ArgumentMap;
+  class Lock;
+  struct LockRequest;
+  class Grant;
+  class PhaseBarrier;
+  struct RegionRequirement;
+  struct IndexSpaceRequirement;
+  struct FieldSpaceRequirement;
+  struct TaskLauncher;
+  struct IndexLauncher;
+  struct InlineLauncher;
+  struct CopyLauncher;
+  struct AcquireLauncher;
+  struct ReleaseLauncher;
+  struct LayoutConstraintRegistrar;
+  struct TaskVariantRegistrar;
+  class Future;
+  class FutureMap;
+  class Predicate;
+  class PhysicalRegion;
+  class IndexIterator;
+  class Mappable;
+  class Task;
+  class Copy;
+  class Inline;
+  class Acquire;
+  class Release;
+  class TaskVariantCollection;
+  class Mapper; 
+  template<typename T> struct ColoredPoints; 
+  struct InputArgs;
+  class ProjectionFunctor;
+  class Runtime;
+  // For backwards compatibility
+  typedef Runtime HighLevelRuntime;
+  // Helper for saving instantiated template functions
+  struct SerdezRedopFns;
+
+  // Forward declarations for compiler level objects
+  // legion.h
+  class ColoringSerializer;
+  class DomainColoringSerializer;
+
+  // Forward declarations for wrapper tasks
+  // legion.h
+  class LegionTaskWrapper;
+  class LegionSerialization;
+
+  // Forward declarations for C wrapper objects
+  // legion_c_util.h
+  class CObjectWrapper;
+
+  // legion_utilities.h
+  struct RegionUsage;
+  class AutoLock;
+  class ColorPoint;
+  class Serializer;
+  class Deserializer;
+  template<typename T> class Fraction;
+  template<typename T, unsigned int MAX, 
+           unsigned SHIFT, unsigned MASK> class BitMask;
+  template<typename T, unsigned int MAX,
+           unsigned SHIFT, unsigned MASK> class TLBitMask;
+#ifdef __SSE2__
+  template<unsigned int MAX> class SSEBitMask;
+  template<unsigned int MAX> class SSETLBitMask;
+#endif
+#ifdef __AVX__
+  template<unsigned int MAX> class AVXBitMask;
+  template<unsigned int MAX> class AVXTLBitMask;
+#endif
+  template<typename T, unsigned LOG2MAX> class BitPermutation;
+  template<typename IT, typename DT, bool BIDIR = false> class IntegerSet;
+
+  // legion_constraint.h
+  class ISAConstraint;
+  class ProcessorConstraint;
+  class ResourceConstraint;
+  class LaunchConstraint;
+  class ColocationConstraint;
+  class ExecutionConstraintSet;
+
+  class SpecializedConstraint;
+  class MemoryConstraint;
+  class FieldConstraint;
+  class OrderingConstraint;
+  class SplittingConstraint;
+  class DimensionConstraint;
+  class AlignmentConstraint;
+  class OffsetConstraint;
+  class PointerConstraint;
+  class LayoutConstraintSet;
+  class TaskLayoutConstraintSet;
+  
+  namespace Internal {
 
     enum OpenState {
       NOT_OPEN            = 0,
@@ -414,77 +516,24 @@ namespace LegionRuntime {
       TASK_SEMANTIC,
     };
 
-    // Forward declarations for user level objects
-    // legion.h
-    class FieldSpace;
-    class LogicalRegion;
-    class LogicalPartition;
-    class IndexAllocator;
-    class FieldAllocator;
-    class TaskArgument;
-    class ArgumentMap;
-    class Lock;
-    struct LockRequest;
-    class Grant;
-    class PhaseBarrier;
-    struct RegionRequirement;
-    struct IndexSpaceRequirement;
-    struct FieldSpaceRequirement;
-    struct TaskLauncher;
-    struct IndexLauncher;
-    struct InlineLauncher;
-    struct CopyLauncher;
-    struct AcquireLauncher;
-    struct ReleaseLauncher;
-    struct LayoutConstraintRegistrar;
-    struct TaskVariantRegistrar;
-    class Future;
-    class FutureMap;
-    class Predicate;
-    class PhysicalRegion;
-    class IndexIterator;
-    class Mappable;
-    class Task;
-    class Copy;
-    class Inline;
-    class Acquire;
-    class Release;
-    class TaskVariantCollection;
-    class Mapper; 
-    template<typename T> struct ColoredPoints; 
-    struct InputArgs;
-    class ProjectionFunctor;
-    class Runtime;
-    // For backwards compatibility
-    typedef Runtime HighLevelRuntime;
-    // Helper for saving instantiated template functions
-    struct SerdezRedopFns;
-
-    // Forward declarations for compiler level objects
-    // legion.h
-    class ColoringSerializer;
-    class DomainColoringSerializer;
-
-    // Forward declarations for wrapper tasks
-    // legion.h
-    class LegionTaskWrapper;
-    class LegionSerialization;
-
-    // Forward declarations for C wrapper objects
-    // legion_c_util.h
-    class CObjectWrapper;
-
     // Forward declarations for runtime level objects
     // runtime.h
     class Collectable;
+    class ArgumentMapImpl;
     class ArgumentMapStore;
+    class FutureImpl;
+    class FutureMapImpl;
+    class PhysicalRegionImpl;
+    class GrantImpl;
+    class PredicateImpl;
+    class MPILegionHandshakeImpl;
     class ProcessorManager;
     class MessageManager;
     class GarbageCollectionEpoch;
     class TaskImpl;
     class VariantImpl;
     class LayoutConstraints;
-    class Internal;
+    class Runtime;
 
     // legion_ops.h
     class Operation;
@@ -584,8 +633,6 @@ namespace LegionRuntime {
     class RegionAnalyzer;
     class RegionMapper;
 
-    struct RegionUsage;
-
     struct EscapedUser;
     struct EscapedCopy;
     struct GenericUser;
@@ -598,49 +645,7 @@ namespace LegionRuntime {
     class ReductionCloser;
     class TreeCloseImpl;
     class TreeClose;
-    struct CloseInfo;
-
-    // legion_constraint.h
-    class ISAConstraint;
-    class ProcessorConstraint;
-    class ResourceConstraint;
-    class LaunchConstraint;
-    class ColocationConstraint;
-    class ExecutionConstraintSet;
-
-    class SpecializedConstraint;
-    class MemoryConstraint;
-    class FieldConstraint;
-    class OrderingConstraint;
-    class SplittingConstraint;
-    class DimensionConstraint;
-    class AlignmentConstraint;
-    class OffsetConstraint;
-    class PointerConstraint;
-    class LayoutConstraintSet;
-    class TaskLayoutConstraintSet;
-
-    // legion_utilities.h
-    struct RegionUsage;
-    class AutoLock;
-    class ColorPoint;
-    class Serializer;
-    class Deserializer;
-    template<typename T> class Fraction;
-    template<typename T, unsigned int MAX, 
-             unsigned SHIFT, unsigned MASK> class BitMask;
-    template<typename T, unsigned int MAX,
-             unsigned SHIFT, unsigned MASK> class TLBitMask;
-#ifdef __SSE2__
-    template<unsigned int MAX> class SSEBitMask;
-    template<unsigned int MAX> class SSETLBitMask;
-#endif
-#ifdef __AVX__
-    template<unsigned int MAX> class AVXBitMask;
-    template<unsigned int MAX> class AVXTLBitMask;
-#endif
-    template<typename T, unsigned LOG2MAX> class BitPermutation;
-    template<typename IT, typename DT, bool BIDIR = false> class IntegerSet;
+    struct CloseInfo; 
 
     // legion_spy.h
     class TreeStateLogger;
@@ -649,82 +654,234 @@ namespace LegionRuntime {
     class LegionProfiler;
     class LegionProfInstance;
 
-    typedef Realm::Runtime RealmRuntime;
-    typedef Realm::Machine Machine;
-    typedef Realm::Domain Domain;
-    typedef Realm::DomainPoint DomainPoint;
-    typedef Realm::IndexSpaceAllocator IndexSpaceAllocator;
-    typedef Realm::RegionInstance PhysicalInstance;
-    typedef Realm::Memory Memory;
-    typedef Realm::Processor Processor;
-    typedef Realm::CodeDescriptor CodeDescriptor;
-    typedef Realm::Event Event;
-    typedef Realm::Event MapperEvent;
-    typedef Realm::UserEvent UserEvent;
-    typedef Realm::Reservation Reservation;
-    typedef Realm::Barrier Barrier;
-    typedef ::legion_reduction_op_id_t ReductionOpID;
-    typedef Realm::ReductionOpUntyped ReductionOp;
-    typedef ::legion_custom_serdez_id_t CustomSerdezID;
-    typedef Realm::CustomSerdezUntyped SerdezOp;
-    typedef Realm::Machine::ProcessorMemoryAffinity ProcessorMemoryAffinity;
-    typedef Realm::Machine::MemoryMemoryAffinity MemoryMemoryAffinity;
-    typedef Realm::ElementMask::Enumerator Enumerator;
-    typedef Realm::IndexSpace::FieldDataDescriptor FieldDataDescriptor;
-    typedef std::map<CustomSerdezID, const Realm::CustomSerdezUntyped *> SerdezOpTable;
-    typedef std::map<Realm::ReductionOpID, 
-            const Realm::ReductionOpUntyped *> ReductionOpTable;
-    typedef void (*SerdezInitFnptr)(const ReductionOp*, void *&, size_t&);
-    typedef void (*SerdezFoldFnptr)(const ReductionOp*, void *&, size_t&,
-                                    const void*, bool);
-    typedef std::map<Realm::ReductionOpID, SerdezRedopFns> SerdezRedopTable;
-    typedef ::legion_address_space_t AddressSpace;
-    typedef ::legion_task_priority_t TaskPriority;
-    typedef ::legion_color_t Color;
-    typedef ::legion_field_id_t FieldID;
-    typedef ::legion_trace_id_t TraceID;
-    typedef ::legion_mapper_id_t MapperID;
-    typedef ::legion_context_id_t ContextID;
-    typedef ::legion_instance_id_t InstanceID;
-    typedef ::legion_index_space_id_t IndexSpaceID;
-    typedef ::legion_index_partition_id_t IndexPartitionID;
-    typedef ::legion_index_tree_id_t IndexTreeID;
-    typedef ::legion_field_space_id_t FieldSpaceID;
-    typedef ::legion_generation_id_t GenerationID;
-    typedef ::legion_type_handle TypeHandle;
-    typedef ::legion_projection_id_t ProjectionID;
-    typedef ::legion_region_tree_id_t RegionTreeID;
-    typedef ::legion_distributed_id_t DistributedID;
-    typedef ::legion_address_space_id_t AddressSpaceID;
-    typedef ::legion_tunable_id_t TunableID;
-    typedef ::legion_mapping_tag_id_t MappingTagID;
-    typedef ::legion_semantic_tag_t SemanticTag;
-    typedef ::legion_variant_id_t VariantID;
-    typedef ::legion_unique_id_t UniqueID;
-    typedef ::legion_version_id_t VersionID;
-    typedef ::legion_task_id_t TaskID;
-    typedef ::legion_layout_constraint_id_t LayoutConstraintID;
-    typedef SingleTask* Context;
-    typedef std::map<Color,ColoredPoints<ptr_t> > Coloring;
-    typedef std::map<Color,Domain> DomainColoring;
-    typedef std::map<Color,std::set<Domain> > MultiDomainColoring;
-    typedef std::map<DomainPoint,ColoredPoints<ptr_t> > PointColoring;
-    typedef std::map<DomainPoint,Domain> DomainPointColoring;
-    typedef std::map<DomainPoint,std::set<Domain> > MultiDomainPointColoring;
-    typedef void (*RegistrationCallbackFnptr)(Machine machine, 
-        Runtime *rt, const std::set<Processor> &local_procs);
-    typedef LogicalRegion (*RegionProjectionFnptr)(LogicalRegion parent, 
-        const DomainPoint&, Runtime *rt);
-    typedef LogicalRegion (*PartitionProjectionFnptr)(LogicalPartition parent, 
-        const DomainPoint&, Runtime *rt);
-    typedef bool (*PredicateFnptr)(const void*, size_t, 
-        const std::vector<Future> futures);
-    typedef std::map<ProjectionID,RegionProjectionFnptr> 
-      RegionProjectionTable;
-    typedef std::map<ProjectionID,PartitionProjectionFnptr> 
-      PartitionProjectionTable;
-    typedef void (*RealmFnptr)(const void*,size_t,
-			       const void*,size_t,Processor);
+#define FRIEND_ALL_RUNTIME_CLASSES                          \
+    friend class Legion::Runtime;                           \
+    friend class Internal::Runtime;                         \
+    friend class Internal::PhysicalRegionImpl;              \
+    friend class Internal::TaskImpl;                        \
+    friend class Internal::ProcessorManager;                \
+    friend class Internal::Operation;                       \
+    friend class Internal::SpeculativeOp;                   \
+    friend class Internal::MapOp;                           \
+    friend class Internal::CopyOp;                          \
+    friend class Internal::FenceOp;                         \
+    friend class Internal::DynamicCollectiveOp;             \
+    friend class Internal::FuturePredOp;                    \
+    friend class Internal::DeletionOp;                      \
+    friend class Internal::CloseOp;                         \
+    friend class Internal::TraceCloseOp;                    \
+    friend class Internal::InterCloseOp;                    \
+    friend class Internal::ReadCloseOp;                     \
+    friend class Internal::PostCloseOp;                     \
+    friend class Internal::VirtualCloseOp;                  \
+    friend class Internal::AcquireOp;                       \
+    friend class Internal::ReleaseOp;                       \
+    friend class Internal::NotPredOp;                       \
+    friend class Internal::AndPredOp;                       \
+    friend class Internal::OrPredOp;                        \
+    friend class Internal::MustEpochOp;                     \
+    friend class Internal::PendingPartitionOp;              \
+    friend class Internal::DependentPartitionOp;            \
+    friend class Internal::FillOp;                          \
+    friend class Internal::AttachOp;                        \
+    friend class Internal::DetachOp;                        \
+    friend class Internal::TimingOp;                        \
+    friend class Internal::TaskOp;                          \
+    friend class Internal::SingleTask;                      \
+    friend class Internal::MultiTask;                       \
+    friend class Internal::IndividualTask;                  \
+    friend class Internal::PointTask;                       \
+    friend class Internal::IndexTask;                       \
+    friend class Internal::SliceTask;                       \
+    friend class Internal::RegionTreeForest;                \
+    friend class Internal::IndexSpaceNode;                  \
+    friend class Internal::IndexPartNode;                   \
+    friend class Internal::FieldSpaceNode;                  \
+    friend class Internal::RegionTreeNode;                  \
+    friend class Internal::RegionNode;                      \
+    friend class Internal::PartitionNode;                   \
+    friend class Internal::LogicalView;                     \
+    friend class Internal::InstanceView;                    \
+    friend class Internal::DeferredView;                    \
+    friend class Internal::ReductionView;                   \
+    friend class Internal::MaterializedView;                \
+    friend class Internal::CompositeView;                   \
+    friend class Internal::CompositeNode;                   \
+    friend class Internal::FillView;                        \
+    friend class Internal::LayoutDescription;               \
+    friend class Internal::PhysicalManager;                 \
+    friend class Internal::InstanceManager;                 \
+    friend class Internal::ReductionManager;                \
+    friend class Internal::ListReductionManager;            \
+    friend class Internal::FoldReductionManager;            \
+    friend class Internal::TreeStateLogger;                 \
+    friend class BindingLib::Utility;                       \
+    friend class CObjectWrapper;                  
+
+#define LEGION_EXTERN_LOGGER_DECLARATIONS                        \
+    extern LegionRuntime::Logger::Category log_run;              \
+    extern LegionRuntime::Logger::Category log_task;             \
+    extern LegionRuntime::Logger::Category log_index;            \
+    extern LegionRuntime::Logger::Category log_field;            \
+    extern LegionRuntime::Logger::Category log_region;           \
+    extern LegionRuntime::Logger::Category log_inst;             \
+    extern LegionRuntime::Logger::Category log_leak;             \
+    extern LegionRuntime::Logger::Category log_variant;          \
+    extern LegionRuntime::Logger::Category log_allocation;       \
+    extern LegionRuntime::Logger::Category log_prof;             \
+    extern LegionRuntime::Logger::Category log_garbage;          \
+    extern LegionRuntime::Logger::Category log_spy;              \
+    extern LegionRuntime::Logger::Category log_shutdown;
+
+    // Timing events
+    enum {
+#ifdef PRECISE_HIGH_LEVEL_TIMING
+      TIME_HIGH_LEVEL_CREATE_REGION = 100,
+      TIME_HIGH_LEVEL_DESTROY_REGION = 101,
+      TIME_HIGH_LEVEL_SMASH_REGION = 102
+      TIME_HIGH_LEVEL_JOIN_REGION = 103
+      TIME_HIGH_LEVEL_CREATE_PARTITION = 104,
+      TIME_HIGH_LEVEL_DESTROY_PARTITION = 105,
+      TIME_HIGH_LEVEL_ENQUEUE_TASKS = 106,
+      TIME_HIGH_LEVEL_STEAL_REQUEST = 107,
+      TIME_HIGH_LEVEL_CHILDREN_MAPPED = 108,
+      TIME_HIGH_LEVEL_FINISH_TASK = 109,
+      TIME_HIGH_LEVEL_NOTIFY_START = 110,
+      TIME_HIGH_LEVEL_NOTIFY_MAPPED = 111,
+      TIME_HIGH_LEVEL_NOTIFY_FINISH = 112,
+      TIME_HIGH_LEVEL_EXECUTE_TASK = 113,
+      TIME_HIGH_LEVEL_SCHEDULER = 114,
+      TIME_HIGH_LEVEL_ISSUE_STEAL = 115,
+      TIME_HIGH_LEVEL_GET_SUBREGION = 116,
+      TIME_HIGH_LEVEL_INLINE_MAP = 117,
+      TIME_HIGH_LEVEL_CREATE_INDEX_SPACE = 118,
+      TIME_HIGH_LEVEL_DESTROY_INDEX_SPACE = 119,
+      TIME_HIGH_LEVEL_CREATE_INDEX_PARTITION = 120,
+      TIME_HIGH_LEVEL_DESTROY_INDEX_PARTITION = 121,
+      TIME_HIGH_LEVEL_GET_INDEX_PARTITION = 122,
+      TIME_HIGH_LEVEL_GET_INDEX_SUBSPACE = 123,
+      TIME_HIGH_LEVEL_CREATE_FIELD_SPACE = 124,
+      TIME_HIGH_LEVEL_DESTROY_FIELD_SPACE = 125,
+      TIME_HIGH_LEVEL_GET_LOGICAL_PARTITION = 126,
+      TIME_HIGH_LEVEL_GET_LOGICAL_SUBREGION = 127,
+      TIME_HIGH_LEVEL_ALLOCATE_FIELD = 128,
+      TIME_HIGH_LEVEL_FREE_FIELD = 129,
+#else
+      TIME_HIGH_LEVEL_CREATE_REGION = TIME_HIGH_LEVEL, 
+      TIME_HIGH_LEVEL_DESTROY_REGION = TIME_HIGH_LEVEL, 
+      TIME_HIGH_LEVEL_SMASH_REGION = TIME_HIGH_LEVEL, 
+      TIME_HIGH_LEVEL_JOIN_REGION = TIME_HIGH_LEVEL, 
+      TIME_HIGH_LEVEL_CREATE_PARTITION = TIME_HIGH_LEVEL, 
+      TIME_HIGH_LEVEL_DESTROY_PARTITION = TIME_HIGH_LEVEL, 
+      TIME_HIGH_LEVEL_ENQUEUE_TASKS = TIME_HIGH_LEVEL, 
+      TIME_HIGH_LEVEL_STEAL_REQUEST = TIME_HIGH_LEVEL, 
+      TIME_HIGH_LEVEL_CHILDREN_MAPPED = TIME_HIGH_LEVEL, 
+      TIME_HIGH_LEVEL_FINISH_TASK = TIME_HIGH_LEVEL, 
+      TIME_HIGH_LEVEL_NOTIFY_START = TIME_HIGH_LEVEL, 
+      TIME_HIGH_LEVEL_NOTIFY_MAPPED = TIME_HIGH_LEVEL, 
+      TIME_HIGH_LEVEL_NOTIFY_FINISH = TIME_HIGH_LEVEL, 
+      TIME_HIGH_LEVEL_EXECUTE_TASK = TIME_HIGH_LEVEL, 
+      TIME_HIGH_LEVEL_SCHEDULER = TIME_HIGH_LEVEL,
+      TIME_HIGH_LEVEL_ISSUE_STEAL = TIME_HIGH_LEVEL, 
+      TIME_HIGH_LEVEL_GET_SUBREGION = TIME_HIGH_LEVEL, 
+      TIME_HIGH_LEVEL_INLINE_MAP = TIME_HIGH_LEVEL, 
+      TIME_HIGH_LEVEL_CREATE_INDEX_SPACE = TIME_HIGH_LEVEL, 
+      TIME_HIGH_LEVEL_DESTROY_INDEX_SPACE = TIME_HIGH_LEVEL, 
+      TIME_HIGH_LEVEL_CREATE_INDEX_PARTITION = TIME_HIGH_LEVEL, 
+      TIME_HIGH_LEVEL_DESTROY_INDEX_PARTITION = TIME_HIGH_LEVEL, 
+      TIME_HIGH_LEVEL_GET_INDEX_PARTITION = TIME_HIGH_LEVEL, 
+      TIME_HIGH_LEVEL_GET_INDEX_SUBSPACE = TIME_HIGH_LEVEL, 
+      TIME_HIGH_LEVEL_CREATE_FIELD_SPACE = TIME_HIGH_LEVEL, 
+      TIME_HIGH_LEVEL_DESTROY_FIELD_SPACE = TIME_HIGH_LEVEL, 
+      TIME_HIGH_LEVEL_GET_LOGICAL_PARTITION = TIME_HIGH_LEVEL, 
+      TIME_HIGH_LEVEL_GET_LOGICAL_SUBREGION = TIME_HIGH_LEVEL, 
+      TIME_HIGH_LEVEL_ALLOCATE_FIELD = TIME_HIGH_LEVEL, 
+      TIME_HIGH_LEVEL_FREE_FIELD = TIME_HIGH_LEVEL, 
+#endif
+    };
+  }; // Internal namespace
+
+  // Typedefs that are needed everywhere
+  typedef Realm::Runtime RealmRuntime;
+  typedef Realm::Machine Machine;
+  typedef Realm::Domain Domain;
+  typedef Realm::DomainPoint DomainPoint;
+  typedef Realm::IndexSpaceAllocator IndexSpaceAllocator;
+  typedef Realm::RegionInstance PhysicalInstance;
+  typedef Realm::Memory Memory;
+  typedef Realm::Processor Processor;
+  typedef Realm::CodeDescriptor CodeDescriptor;
+  typedef Realm::Event Event;
+  typedef Realm::Event MapperEvent;
+  typedef Realm::UserEvent UserEvent;
+  typedef Realm::Reservation Reservation;
+  typedef Realm::Barrier Barrier;
+  typedef ::legion_reduction_op_id_t ReductionOpID;
+  typedef Realm::ReductionOpUntyped ReductionOp;
+  typedef ::legion_custom_serdez_id_t CustomSerdezID;
+  typedef Realm::CustomSerdezUntyped SerdezOp;
+  typedef Realm::Machine::ProcessorMemoryAffinity ProcessorMemoryAffinity;
+  typedef Realm::Machine::MemoryMemoryAffinity MemoryMemoryAffinity;
+  typedef Realm::ElementMask::Enumerator Enumerator;
+  typedef Realm::IndexSpace::FieldDataDescriptor FieldDataDescriptor;
+  typedef std::map<CustomSerdezID, 
+                   const Realm::CustomSerdezUntyped *> SerdezOpTable;
+  typedef std::map<Realm::ReductionOpID, 
+          const Realm::ReductionOpUntyped *> ReductionOpTable;
+  typedef void (*SerdezInitFnptr)(const ReductionOp*, void *&, size_t&);
+  typedef void (*SerdezFoldFnptr)(const ReductionOp*, void *&, size_t&,
+                                  const void*, bool);
+  typedef std::map<Realm::ReductionOpID, SerdezRedopFns> SerdezRedopTable;
+  typedef ::legion_address_space_t AddressSpace;
+  typedef ::legion_task_priority_t TaskPriority;
+  typedef ::legion_color_t Color;
+  typedef ::legion_field_id_t FieldID;
+  typedef ::legion_trace_id_t TraceID;
+  typedef ::legion_mapper_id_t MapperID;
+  typedef ::legion_context_id_t ContextID;
+  typedef ::legion_instance_id_t InstanceID;
+  typedef ::legion_index_space_id_t IndexSpaceID;
+  typedef ::legion_index_partition_id_t IndexPartitionID;
+  typedef ::legion_index_tree_id_t IndexTreeID;
+  typedef ::legion_field_space_id_t FieldSpaceID;
+  typedef ::legion_generation_id_t GenerationID;
+  typedef ::legion_type_handle TypeHandle;
+  typedef ::legion_projection_id_t ProjectionID;
+  typedef ::legion_region_tree_id_t RegionTreeID;
+  typedef ::legion_distributed_id_t DistributedID;
+  typedef ::legion_address_space_id_t AddressSpaceID;
+  typedef ::legion_tunable_id_t TunableID;
+  typedef ::legion_mapping_tag_id_t MappingTagID;
+  typedef ::legion_semantic_tag_t SemanticTag;
+  typedef ::legion_variant_id_t VariantID;
+  typedef ::legion_unique_id_t UniqueID;
+  typedef ::legion_version_id_t VersionID;
+  typedef ::legion_task_id_t TaskID;
+  typedef ::legion_layout_constraint_id_t LayoutConstraintID;
+  typedef std::map<Color,ColoredPoints<ptr_t> > Coloring;
+  typedef std::map<Color,Domain> DomainColoring;
+  typedef std::map<Color,std::set<Domain> > MultiDomainColoring;
+  typedef std::map<DomainPoint,ColoredPoints<ptr_t> > PointColoring;
+  typedef std::map<DomainPoint,Domain> DomainPointColoring;
+  typedef std::map<DomainPoint,std::set<Domain> > MultiDomainPointColoring;
+  typedef void (*RegistrationCallbackFnptr)(Machine machine, 
+      Runtime *rt, const std::set<Processor> &local_procs);
+  typedef LogicalRegion (*RegionProjectionFnptr)(LogicalRegion parent, 
+      const DomainPoint&, Runtime *rt);
+  typedef LogicalRegion (*PartitionProjectionFnptr)(LogicalPartition parent, 
+      const DomainPoint&, Runtime *rt);
+  typedef bool (*PredicateFnptr)(const void*, size_t, 
+      const std::vector<Future> futures);
+  typedef std::map<ProjectionID,RegionProjectionFnptr> 
+    RegionProjectionTable;
+  typedef std::map<ProjectionID,PartitionProjectionFnptr> 
+    PartitionProjectionTable;
+  typedef void (*RealmFnptr)(const void*,size_t,
+                             const void*,size_t,Processor);
+  // The most magical of typedefs
+  typedef Internal::SingleTask* Context;
+
+  namespace Internal {
     // A little bit of logic here to figure out the 
     // kind of bit mask to use for FieldMask
 
@@ -840,158 +997,7 @@ namespace LegionRuntime {
 
 #undef PROC_SHIFT
 #undef PROC_MASK
-
-#define FRIEND_ALL_RUNTIME_CLASSES                \
-    friend class Runtime;                         \
-    friend class Internal;                        \
-    friend class TaskImpl;                        \
-    friend class FuturePredicate;                 \
-    friend class NotPredicate;                    \
-    friend class AndPredicate;                    \
-    friend class OrPredicate;                     \
-    friend class ProcessorManager;                \
-    friend class Operation;                       \
-    friend class SpeculativeOp;                   \
-    friend class MapOp;                           \
-    friend class CopyOp;                          \
-    friend class FenceOp;                         \
-    friend class FutureOp;                        \
-    friend class DynamicCollectiveOp;             \
-    friend class FuturePredOp;                    \
-    friend class DeletionOp;                      \
-    friend class CloseOp;                         \
-    friend class TraceCloseOp;                    \
-    friend class InterCloseOp;                    \
-    friend class ReadCloseOp;                     \
-    friend class PostCloseOp;                     \
-    friend class VirtualCloseOp;                  \
-    friend class AcquireOp;                       \
-    friend class ReleaseOp;                       \
-    friend class NotPredOp;                       \
-    friend class AndPredOp;                       \
-    friend class OrPredOp;                        \
-    friend class MustEpochOp;                     \
-    friend class PendingPartitionOp;              \
-    friend class DependentPartitionOp;            \
-    friend class FillOp;                          \
-    friend class AttachOp;                        \
-    friend class DetachOp;                        \
-    friend class TimingOp;                        \
-    friend class TaskOp;                          \
-    friend class SingleTask;                      \
-    friend class MultiTask;                       \
-    friend class IndividualTask;                  \
-    friend class PointTask;                       \
-    friend class IndexTask;                       \
-    friend class SliceTask;                       \
-    friend class RegionTreeForest;                \
-    friend class IndexSpaceNode;                  \
-    friend class IndexPartNode;                   \
-    friend class FieldSpaceNode;                  \
-    friend class RegionTreeNode;                  \
-    friend class RegionNode;                      \
-    friend class PartitionNode;                   \
-    friend class LogicalView;                     \
-    friend class InstanceView;                    \
-    friend class DeferredView;                    \
-    friend class ReductionView;                   \
-    friend class MaterializedView;                \
-    friend class CompositeView;                   \
-    friend class CompositeNode;                   \
-    friend class FillView;                        \
-    friend class LayoutDescription;               \
-    friend class PhysicalManager;                 \
-    friend class InstanceManager;                 \
-    friend class ReductionManager;                \
-    friend class ListReductionManager;            \
-    friend class FoldReductionManager;            \
-    friend class TreeStateLogger;                 \
-    friend class BindingLib::Utility;             \
-    friend class CObjectWrapper;                  
-
-#define LEGION_EXTERN_LOGGER_DECLARATIONS         \
-    extern Logger::Category log_run;              \
-    extern Logger::Category log_task;             \
-    extern Logger::Category log_index;            \
-    extern Logger::Category log_field;            \
-    extern Logger::Category log_region;           \
-    extern Logger::Category log_inst;             \
-    extern Logger::Category log_leak;             \
-    extern Logger::Category log_variant;          \
-    extern Logger::Category log_allocation;       \
-    extern Logger::Category log_prof;             \
-    extern Logger::Category log_garbage;          \
-    extern Logger::Category log_spy;              \
-    extern Logger::Category log_shutdown;
-
-    // Timing events
-    enum {
-#ifdef PRECISE_HIGH_LEVEL_TIMING
-      TIME_HIGH_LEVEL_CREATE_REGION = 100,
-      TIME_HIGH_LEVEL_DESTROY_REGION = 101,
-      TIME_HIGH_LEVEL_SMASH_REGION = 102
-      TIME_HIGH_LEVEL_JOIN_REGION = 103
-      TIME_HIGH_LEVEL_CREATE_PARTITION = 104,
-      TIME_HIGH_LEVEL_DESTROY_PARTITION = 105,
-      TIME_HIGH_LEVEL_ENQUEUE_TASKS = 106,
-      TIME_HIGH_LEVEL_STEAL_REQUEST = 107,
-      TIME_HIGH_LEVEL_CHILDREN_MAPPED = 108,
-      TIME_HIGH_LEVEL_FINISH_TASK = 109,
-      TIME_HIGH_LEVEL_NOTIFY_START = 110,
-      TIME_HIGH_LEVEL_NOTIFY_MAPPED = 111,
-      TIME_HIGH_LEVEL_NOTIFY_FINISH = 112,
-      TIME_HIGH_LEVEL_EXECUTE_TASK = 113,
-      TIME_HIGH_LEVEL_SCHEDULER = 114,
-      TIME_HIGH_LEVEL_ISSUE_STEAL = 115,
-      TIME_HIGH_LEVEL_GET_SUBREGION = 116,
-      TIME_HIGH_LEVEL_INLINE_MAP = 117,
-      TIME_HIGH_LEVEL_CREATE_INDEX_SPACE = 118,
-      TIME_HIGH_LEVEL_DESTROY_INDEX_SPACE = 119,
-      TIME_HIGH_LEVEL_CREATE_INDEX_PARTITION = 120,
-      TIME_HIGH_LEVEL_DESTROY_INDEX_PARTITION = 121,
-      TIME_HIGH_LEVEL_GET_INDEX_PARTITION = 122,
-      TIME_HIGH_LEVEL_GET_INDEX_SUBSPACE = 123,
-      TIME_HIGH_LEVEL_CREATE_FIELD_SPACE = 124,
-      TIME_HIGH_LEVEL_DESTROY_FIELD_SPACE = 125,
-      TIME_HIGH_LEVEL_GET_LOGICAL_PARTITION = 126,
-      TIME_HIGH_LEVEL_GET_LOGICAL_SUBREGION = 127,
-      TIME_HIGH_LEVEL_ALLOCATE_FIELD = 128,
-      TIME_HIGH_LEVEL_FREE_FIELD = 129,
-#else
-      TIME_HIGH_LEVEL_CREATE_REGION = TIME_HIGH_LEVEL, 
-      TIME_HIGH_LEVEL_DESTROY_REGION = TIME_HIGH_LEVEL, 
-      TIME_HIGH_LEVEL_SMASH_REGION = TIME_HIGH_LEVEL, 
-      TIME_HIGH_LEVEL_JOIN_REGION = TIME_HIGH_LEVEL, 
-      TIME_HIGH_LEVEL_CREATE_PARTITION = TIME_HIGH_LEVEL, 
-      TIME_HIGH_LEVEL_DESTROY_PARTITION = TIME_HIGH_LEVEL, 
-      TIME_HIGH_LEVEL_ENQUEUE_TASKS = TIME_HIGH_LEVEL, 
-      TIME_HIGH_LEVEL_STEAL_REQUEST = TIME_HIGH_LEVEL, 
-      TIME_HIGH_LEVEL_CHILDREN_MAPPED = TIME_HIGH_LEVEL, 
-      TIME_HIGH_LEVEL_FINISH_TASK = TIME_HIGH_LEVEL, 
-      TIME_HIGH_LEVEL_NOTIFY_START = TIME_HIGH_LEVEL, 
-      TIME_HIGH_LEVEL_NOTIFY_MAPPED = TIME_HIGH_LEVEL, 
-      TIME_HIGH_LEVEL_NOTIFY_FINISH = TIME_HIGH_LEVEL, 
-      TIME_HIGH_LEVEL_EXECUTE_TASK = TIME_HIGH_LEVEL, 
-      TIME_HIGH_LEVEL_SCHEDULER = TIME_HIGH_LEVEL,
-      TIME_HIGH_LEVEL_ISSUE_STEAL = TIME_HIGH_LEVEL, 
-      TIME_HIGH_LEVEL_GET_SUBREGION = TIME_HIGH_LEVEL, 
-      TIME_HIGH_LEVEL_INLINE_MAP = TIME_HIGH_LEVEL, 
-      TIME_HIGH_LEVEL_CREATE_INDEX_SPACE = TIME_HIGH_LEVEL, 
-      TIME_HIGH_LEVEL_DESTROY_INDEX_SPACE = TIME_HIGH_LEVEL, 
-      TIME_HIGH_LEVEL_CREATE_INDEX_PARTITION = TIME_HIGH_LEVEL, 
-      TIME_HIGH_LEVEL_DESTROY_INDEX_PARTITION = TIME_HIGH_LEVEL, 
-      TIME_HIGH_LEVEL_GET_INDEX_PARTITION = TIME_HIGH_LEVEL, 
-      TIME_HIGH_LEVEL_GET_INDEX_SUBSPACE = TIME_HIGH_LEVEL, 
-      TIME_HIGH_LEVEL_CREATE_FIELD_SPACE = TIME_HIGH_LEVEL, 
-      TIME_HIGH_LEVEL_DESTROY_FIELD_SPACE = TIME_HIGH_LEVEL, 
-      TIME_HIGH_LEVEL_GET_LOGICAL_PARTITION = TIME_HIGH_LEVEL, 
-      TIME_HIGH_LEVEL_GET_LOGICAL_SUBREGION = TIME_HIGH_LEVEL, 
-      TIME_HIGH_LEVEL_ALLOCATE_FIELD = TIME_HIGH_LEVEL, 
-      TIME_HIGH_LEVEL_FREE_FIELD = TIME_HIGH_LEVEL, 
-#endif
-    };
-
-  }; // HighLevel namespace
-}; // LegionRuntime namespace
+  }; // namespace Internal
+}; // Legion namespace
 
 #endif // __LEGION_TYPES_H__

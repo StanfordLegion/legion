@@ -23,12 +23,12 @@
 // This is the implementation of the shim mapper which provides
 // backwards compatibility with the old version of the mapper interface
 
-namespace LegionRuntime {
-  namespace HighLevel {
+namespace Legion {
+  namespace Mapping {
 
-    using namespace MappingUtilities;
+    using namespace Utilities;
 
-    Logger::Category log_shim("shim_mapper");
+    LegionRuntime::Logger::Category log_shim("shim_mapper");
 
     //--------------------------------------------------------------------------
     ShimMapper::ShimMapper(Machine m, HighLevelRuntime *rt, Processor local)

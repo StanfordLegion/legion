@@ -20,8 +20,8 @@
 #include "legion_trace.h"
 #include "legion_tasks.h"
 
-namespace LegionRuntime {
-  namespace HighLevel {
+namespace Legion {
+  namespace Internal {
 
     LEGION_EXTERN_LOGGER_DECLARATIONS
 
@@ -501,7 +501,7 @@ namespace LegionRuntime {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    TraceCaptureOp::TraceCaptureOp(Internal *rt)
+    TraceCaptureOp::TraceCaptureOp(Runtime *rt)
       : Operation(rt)
     //--------------------------------------------------------------------------
     {
@@ -589,7 +589,7 @@ namespace LegionRuntime {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    TraceCompleteOp::TraceCompleteOp(Internal *rt)
+    TraceCompleteOp::TraceCompleteOp(Runtime *rt)
       : FenceOp(rt)
     //--------------------------------------------------------------------------
     {
@@ -676,6 +676,6 @@ namespace LegionRuntime {
       end_dependence_analysis();
     }
     
-  }; // namespace HighLevel
-}; // namespace LegionRuntime
+  }; // namespace Internal 
+}; // namespace Legion
 

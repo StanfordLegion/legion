@@ -23,8 +23,8 @@
 #include "legion_allocation.h"
 #include "garbage_collection.h"
 
-namespace LegionRuntime {
-  namespace HighLevel { 
+namespace Legion {
+  namespace Internal { 
 
     // Special helper for when we need a dummy context
 #define DUMMY_CONTEXT       0
@@ -59,7 +59,7 @@ namespace LegionRuntime {
     };
 
     /**
-     * \class ArgumentMap::Impl
+     * \class ArgumentMapImpl
      * An argument map implementation that provides
      * the backing store for an argument map handle.
      * Argument maps maintain pairs of domain points
@@ -70,18 +70,19 @@ namespace LegionRuntime {
      * a single backing store to de-duplicate domain
      * points and values.
      */
-    class ArgumentMap::Impl : public Collectable {
+    class ArgumentMapImpl : public Collectable {
     public:
       static const AllocationType alloc_type = ARGUMENT_MAP_ALLOC;
     public:
       FRIEND_ALL_RUNTIME_CLASSES
-      Impl(void);
-      Impl(ArgumentMapStore *st);
-      Impl(ArgumentMapStore *st, const std::map<DomainPoint,TaskArgument> &);
-      Impl(const Impl &impl);
-      ~Impl(void);
+      ArgumentMapImpl(void);
+      ArgumentMapImpl(ArgumentMapStore *st);
+      ArgumentMapImpl(ArgumentMapStore *st, 
+                  const std::map<DomainPoint,TaskArgument> &);
+      ArgumentMapImpl(const ArgumentMapImpl &impl);
+      ~ArgumentMapImpl(void);
     public:
-      Impl& operator=(const Impl &rhs);
+      ArgumentMapImpl& operator=(const ArgumentMapImpl &rhs);
     public:
       bool has_point(const DomainPoint &point);
       void set_point(const DomainPoint &point, const TaskArgument &arg,
@@ -92,11 +93,11 @@ namespace LegionRuntime {
       void pack_arguments(Serializer &rez, const Domain &domain);
       void unpack_arguments(Deserializer &derez);
     protected:
-      Impl* freeze(void);
-      Impl* clone(void);
+      ArgumentMapImpl* freeze(void);
+      ArgumentMapImpl* clone(void);
     private:
       std::map<DomainPoint,TaskArgument> arguments;
-      Impl *next;
+      ArgumentMapImpl *next;
       ArgumentMapStore *const store;
       bool frozen;
     };
@@ -125,7 +126,7 @@ namespace LegionRuntime {
     };
 
     /**
-     * \class Future::Impl
+     * \class FutureImpl
      * The base implementation of a future object.  The runtime
      * manages future implementation objects and knows how to
      * copy them from one node to another.  Future implementations
@@ -133,25 +134,25 @@ namespace LegionRuntime {
      * remotely.  We use the distributed collectable scheme
      * to manage garbage collection of distributed futures
      */
-    class Future::Impl : public DistributedCollectable {
+    class FutureImpl : public DistributedCollectable {
     public:
       static const AllocationType alloc_type = FUTURE_ALLOC;
     public:
       struct ContributeCollectiveArgs {
       public:
         HLRTaskID hlr_id;
-        Future::Impl *impl;
+        FutureImpl *impl;
         Barrier barrier;
         unsigned count;
       };
     public:
-      Impl(Internal *rt, bool register_future, DistributedID did, 
-           AddressSpaceID owner_space, AddressSpaceID local_space,
-           Operation *op = NULL);
-      Impl(const Future::Impl &rhs);
-      virtual ~Impl(void);
+      FutureImpl(Runtime *rt, bool register_future, DistributedID did, 
+                 AddressSpaceID owner_space, AddressSpaceID local_space,
+                 Operation *op = NULL);
+      FutureImpl(const FutureImpl &rhs);
+      virtual ~FutureImpl(void);
     public:
-      Impl& operator=(const Future::Impl &rhs);
+      FutureImpl& operator=(const FutureImpl &rhs);
     public:
       void get_void_result(void);
       void* get_untyped_result(void);
@@ -184,10 +185,10 @@ namespace LegionRuntime {
       void send_future(AddressSpaceID sid);
       void register_waiter(AddressSpaceID sid);
     public:
-      static void handle_future_send(Deserializer &derez, Internal *rt, 
+      static void handle_future_send(Deserializer &derez, Runtime *rt, 
                                      AddressSpaceID source);
-      static void handle_future_result(Deserializer &derez, Internal *rt);
-      static void handle_future_subscription(Deserializer &derez, Internal *rt);
+      static void handle_future_result(Deserializer &derez, Runtime *rt);
+      static void handle_future_subscription(Deserializer &derez, Runtime *rt);
     public:
       void contribute_to_collective(Barrier barrier, unsigned count);
       static void handle_contribute_to_collective(const void *args);
@@ -210,24 +211,24 @@ namespace LegionRuntime {
     };
 
     /**
-     * \class FutureMap::Impl
+     * \class FutureMapImpl
      * The base implementation of a future map object.  Note
      * that while future objects can move from one node to
      * another, future maps will never leave the node on
      * which they are created.  The futures contained within
      * a future map are permitted to migrate.
      */
-    class FutureMap::Impl : public Collectable {
+    class FutureMapImpl : public Collectable {
     public:
       static const AllocationType alloc_type = FUTURE_MAP_ALLOC;
     public:
-      Impl(SingleTask *ctx, TaskOp *task, Internal *rt);
-      Impl(SingleTask *ctx, Event completion_event, Internal *rt);
-      Impl(SingleTask *ctx, Internal *rt); // empty map
-      Impl(const FutureMap::Impl &rhs);
-      ~Impl(void);
+      FutureMapImpl(SingleTask *ctx, TaskOp *task, Runtime *rt);
+      FutureMapImpl(SingleTask *ctx, Event completion_event, Runtime *rt);
+      FutureMapImpl(SingleTask *ctx, Runtime *rt); // empty map
+      FutureMapImpl(const FutureMapImpl &rhs);
+      ~FutureMapImpl(void);
     public:
-      Impl& operator=(const FutureMap::Impl &rhs);
+      FutureMapImpl& operator=(const FutureMapImpl &rhs);
     public:
       Future get_future(const DomainPoint &point);
       void get_void_result(const DomainPoint &point);
@@ -244,7 +245,7 @@ namespace LegionRuntime {
       TaskOp *const task;
       const GenerationID task_gen;
       const bool valid;
-      Internal *const runtime;
+      Runtime *const runtime;
     private:
       Event ready_event;
       std::map<DomainPoint,Future> futures;
@@ -259,7 +260,7 @@ namespace LegionRuntime {
     };
 
     /**
-     * \class PhysicalRegion::Impl
+     * \class PhysicalRegionImpl
      * The base implementation of a physical region object.
      * Physical region objects are not allowed to move from the
      * node in which they are created.  Like other objects
@@ -271,26 +272,28 @@ namespace LegionRuntime {
      * will only be manipulated by a single task which is 
      * guaranteed to only be running on one processor.
      */
-    class PhysicalRegion::Impl : public Collectable {
+    class PhysicalRegionImpl : public Collectable {
     public:
       static const AllocationType alloc_type = PHYSICAL_REGION_ALLOC;
     public:
-      Impl(const RegionRequirement &req, Event ready_event,
-           bool mapped, SingleTask *ctx, MapperID mid,
-           MappingTagID tag, bool leaf, Internal *rt);
-      Impl(const PhysicalRegion::Impl &rhs);
-      ~Impl(void);
+      PhysicalRegionImpl(const RegionRequirement &req, Event ready_event,
+                         bool mapped, SingleTask *ctx, MapperID mid,
+                         MappingTagID tag, bool leaf, Runtime *rt);
+      PhysicalRegionImpl(const PhysicalRegionImpl &rhs);
+      ~PhysicalRegionImpl(void);
     public:
-      Impl& operator=(const PhysicalRegion::Impl &rhs);
+      PhysicalRegionImpl& operator=(const PhysicalRegionImpl &rhs);
     public:
       void wait_until_valid(void);
       bool is_valid(void) const;
       bool is_mapped(void) const;
       LogicalRegion get_logical_region(void) const;
-      Accessor::RegionAccessor<Accessor::AccessorType::Generic> 
-        get_accessor(void);
-      Accessor::RegionAccessor<Accessor::AccessorType::Generic> 
-        get_field_accessor(FieldID field);
+      LegionRuntime::Accessor::RegionAccessor<
+        LegionRuntime::Accessor::AccessorType::Generic>
+          get_accessor(void);
+      LegionRuntime::Accessor::RegionAccessor<
+        LegionRuntime::Accessor::AccessorType::Generic> 
+          get_field_accessor(FieldID field);
     public:
       void unmap_region(void);
       void remap_region(Event new_ready_event);
@@ -312,7 +315,7 @@ namespace LegionRuntime {
       bool contains_point(const DomainPoint &dp) const;
 #endif
     public:
-      Internal *const runtime;
+      Runtime *const runtime;
       SingleTask *const context;
       const MapperID map_id;
       const MappingTagID tag;
@@ -336,7 +339,7 @@ namespace LegionRuntime {
     };
 
     /**
-     * \class Grant::Impl
+     * \class GrantImpl
      * This is the base implementation of a grant object.
      * The grant implementation remembers the locks that
      * must be acquired and gives out an precondition event
@@ -347,7 +350,7 @@ namespace LegionRuntime {
      * locks.  Grants continues accepting registrations
      * until the runtime marks that it is no longer active.
      */
-    class Grant::Impl : public Collectable {
+    class GrantImpl : public Collectable {
     public:
       static const AllocationType alloc_type = GRANT_ALLOC;
     public:
@@ -364,12 +367,12 @@ namespace LegionRuntime {
         bool exclusive;
       };
     public:
-      Impl(void);
-      Impl(const std::vector<ReservationRequest> &requests);
-      Impl(const Grant::Impl &rhs);
-      ~Impl(void);
+      GrantImpl(void);
+      GrantImpl(const std::vector<ReservationRequest> &requests);
+      GrantImpl(const GrantImpl &rhs);
+      ~GrantImpl(void);
     public:
-      Impl& operator=(const Grant::Impl &rhs);
+      GrantImpl& operator=(const GrantImpl &rhs);
     public:
       void register_operation(Event completion_event);
       Event acquire_grant(void);
@@ -385,7 +388,7 @@ namespace LegionRuntime {
       Reservation grant_lock;
     };
 
-    class MPILegionHandshake::Impl : public Collectable {
+    class MPILegionHandshakeImpl : public Collectable {
     public:
       static const AllocationType alloc_type = MPI_HANDSHAKE_ALLOC;
     public:
@@ -394,11 +397,12 @@ namespace LegionRuntime {
         IN_LEGION,
       };
     public:
-      Impl(bool in_mpi, int mpi_participants, int legion_participants);
-      Impl(const Impl &rhs);
-      ~Impl(void);
+      MPILegionHandshakeImpl(bool in_mpi, int mpi_participants, 
+                             int legion_participants);
+      MPILegionHandshakeImpl(const MPILegionHandshakeImpl &rhs);
+      ~MPILegionHandshakeImpl(void);
     public:
-      Impl& operator=(const Impl &rhs);
+      MPILegionHandshakeImpl& operator=(const MPILegionHandshakeImpl &rhs);
     public:
       void mpi_handoff_to_legion(void);
       void mpi_wait_on_legion(void);
@@ -458,7 +462,7 @@ namespace LegionRuntime {
       };
     public:
       ProcessorManager(Processor proc, Processor::Kind proc_kind,
-                       Internal *rt,
+                       Runtime *rt,
                        unsigned width, unsigned default_mappers,  
                        bool no_steal, unsigned max_steals);
       ProcessorManager(const ProcessorManager &rhs);
@@ -561,7 +565,7 @@ namespace LegionRuntime {
       void decrement_active_contexts(void);
     public:
       // Immutable state
-      Internal *const runtime;
+      Runtime *const runtime;
       const Processor local_proc;
       const Processor::Kind proc_kind;
       // Effective super-scalar width of the runtime
@@ -625,7 +629,7 @@ namespace LegionRuntime {
      */
     class MemoryManager {
     public:
-      MemoryManager(Memory mem, Internal *rt);
+      MemoryManager(Memory mem, Runtime *rt);
       MemoryManager(const MemoryManager &rhs);
       ~MemoryManager(void);
     public:
@@ -647,7 +651,7 @@ namespace LegionRuntime {
       // The remaining capacity in this memory
       size_t remaining_capacity;
       // The runtime we are associate with
-      Internal *const runtime;
+      Runtime *const runtime;
       // Reservation for controlling access to the data
       // structures in this memory manager
       Reservation manager_lock;
@@ -684,12 +688,12 @@ namespace LegionRuntime {
       VirtualChannel& operator=(const VirtualChannel &rhs);
     public:
       void package_message(Serializer &rez, MessageKind k, bool flush,
-                           Internal *runtime, Processor target);
+                           Runtime *runtime, Processor target);
       void process_message(const void *args, size_t arglen, 
-                        Internal *runtime, AddressSpaceID remote_address_space);
+                        Runtime *runtime, AddressSpaceID remote_address_space);
     private:
-      void send_message(bool complete, Internal *runtime, Processor target);
-      void handle_messages(unsigned num_messages, Internal *runtime, 
+      void send_message(bool complete, Runtime *runtime, Processor target);
+      void handle_messages(unsigned num_messages, Runtime *runtime, 
                            AddressSpaceID remote_address_space,
                            const char *args, size_t arglen);
       void buffer_messages(unsigned num_messages,
@@ -738,7 +742,7 @@ namespace LegionRuntime {
     class MessageManager { 
     public:
       MessageManager(AddressSpaceID remote, 
-                     Internal *rt, size_t max,
+                     Runtime *rt, size_t max,
                      const std::set<Processor> &procs);
       MessageManager(const MessageManager &rhs);
       ~MessageManager(void);
@@ -756,7 +760,7 @@ namespace LegionRuntime {
     public:
       const AddressSpaceID remote_address_space;
     private:
-      Internal *const runtime;
+      Runtime *const runtime;
       // State for sending messages
       Processor target;
       VirtualChannel *const channels; 
@@ -781,7 +785,7 @@ namespace LegionRuntime {
         bool result;
       };
     public:
-      ShutdownManager(Internal *rt, AddressSpaceID source, MessageManager *man);
+      ShutdownManager(Runtime *rt, AddressSpaceID source, MessageManager *man);
       ShutdownManager(const ShutdownManager &rhs);
       ~ShutdownManager(void);
     public:
@@ -796,7 +800,7 @@ namespace LegionRuntime {
       void record_outstanding_tasks(void);
       void finalize(void);
     public:
-      Internal *const runtime;
+      Runtime *const runtime;
       const AddressSpaceID source; 
       MessageManager *const source_manager;
     protected:
@@ -819,7 +823,7 @@ namespace LegionRuntime {
         LogicalView *view;
       };
     public:
-      GarbageCollectionEpoch(Internal *runtime);
+      GarbageCollectionEpoch(Runtime *runtime);
       GarbageCollectionEpoch(const GarbageCollectionEpoch &rhs);
       ~GarbageCollectionEpoch(void);
     public:
@@ -829,7 +833,7 @@ namespace LegionRuntime {
       Event launch(int priority);
       bool handle_collection(const GarbageCollectionArgs *args);
     private:
-      Internal *const runtime;
+      Runtime *const runtime;
       int remaining;
       std::map<LogicalView*,std::set<Event> > collections;
     };
@@ -877,7 +881,7 @@ namespace LegionRuntime {
         LegionContinuation *continuation;
       };
     public:
-      Event defer(Internal *runtime, Event precondition = Event::NO_EVENT);
+      Event defer(Runtime *runtime, Event precondition = Event::NO_EVENT);
     public:
       virtual void execute(void) = 0;
     public:
@@ -903,7 +907,7 @@ namespace LegionRuntime {
       PendingVariantRegistration& operator=(
                                       const PendingVariantRegistration &rhs);
     public:
-      void perform_registration(Internal *runtime);
+      void perform_registration(Runtime *runtime);
     private:
       VariantID vid;
       bool has_return;
@@ -931,7 +935,7 @@ namespace LegionRuntime {
         AddressSpaceID source;
       };
     public:
-      TaskImpl(TaskID tid, Internal *rt, const char *name = NULL);
+      TaskImpl(TaskID tid, Runtime *rt, const char *name = NULL);
       TaskImpl(const TaskImpl &rhs);
       ~TaskImpl(void);
     public:
@@ -957,17 +961,17 @@ namespace LegionRuntime {
     public:
       inline AddressSpaceID get_owner_space(void) const
         { return get_owner_space(task_id, runtime); }
-      static AddressSpaceID get_owner_space(TaskID task_id, Internal *runtime);
+      static AddressSpaceID get_owner_space(TaskID task_id, Runtime *runtime);
     public:
-      static void handle_semantic_request(Internal *runtime, 
+      static void handle_semantic_request(Runtime *runtime, 
                           Deserializer &derez, AddressSpaceID source);
-      static void handle_semantic_info(Internal *runtime,
+      static void handle_semantic_info(Runtime *runtime,
                           Deserializer &derez, AddressSpaceID source);
-      static void handle_variant_request(Internal *runtime,
+      static void handle_variant_request(Runtime *runtime,
                           Deserializer &derez, AddressSpaceID source);
     public:
       const TaskID task_id;
-      Internal *const runtime;
+      Runtime *const runtime;
     private:
       Reservation task_lock;
       std::map<VariantID,VariantImpl*> variants;
@@ -990,7 +994,7 @@ namespace LegionRuntime {
     public:
       static const AllocationType alloc_type = VARIANT_IMPL_ALLOC;
     public:
-      VariantImpl(Internal *runtime, VariantID vid, TaskImpl *owner, 
+      VariantImpl(Runtime *runtime, VariantID vid, TaskImpl *owner, 
                   const TaskVariantRegistrar &registrar, bool ret_val, 
                   CodeDescriptor *realm_desc, CodeDescriptor *inline_desc,
                   const void *user_data = NULL, size_t user_data_size = 0);
@@ -1013,13 +1017,13 @@ namespace LegionRuntime {
     public:
       void send_variant_response(AddressSpaceID source, Event done_event);
     public:
-      static AddressSpaceID get_owner_space(VariantID vid, Internal *runtime);
-      static void handle_variant_response(Internal *runtime, 
+      static AddressSpaceID get_owner_space(VariantID vid, Runtime *runtime);
+      static void handle_variant_response(Runtime *runtime, 
                                           Deserializer &derez);
     public:
       const VariantID vid;
       TaskImpl *const owner;
-      Internal *const runtime;
+      Runtime *const runtime;
       const bool global; // globally valid variant
       const bool has_return_value; // has a return value
     public:
@@ -1050,19 +1054,19 @@ namespace LegionRuntime {
     public:
       struct ReleaseFunctor {
       public:
-        ReleaseFunctor(Serializer &r, AddressSpaceID skip, Internal *rt) 
+        ReleaseFunctor(Serializer &r, AddressSpaceID skip, Runtime *rt) 
           : rez(r), to_skip(skip), runtime(rt) { }
       public:
         void apply(AddressSpaceID target);
       private:
         Serializer &rez;
         AddressSpaceID to_skip;
-        Internal *runtime;
+        Runtime *runtime;
       };
     public:
-      LayoutConstraints(LayoutConstraintID layout_id, Internal *runtime, 
+      LayoutConstraints(LayoutConstraintID layout_id, Runtime *runtime, 
                         const LayoutConstraintRegistrar &registrar);
-      LayoutConstraints(LayoutConstraintID layout_id, Internal *runtime);
+      LayoutConstraints(LayoutConstraintID layout_id, Runtime *runtime);
       LayoutConstraints(const LayoutConstraints &rhs);
       ~LayoutConstraints(void);
     public:
@@ -1078,16 +1082,16 @@ namespace LegionRuntime {
     public:
       AddressSpaceID get_owner(void) const;
       static AddressSpaceID get_owner(LayoutConstraintID layout_id,
-                                      Internal *runtime);
+                                      Runtime *runtime);
     public:
-      static void process_request(Internal *runtime, Deserializer &derez,
+      static void process_request(Runtime *runtime, Deserializer &derez,
                                   AddressSpaceID source);
-      static void process_response(Internal *runtime, Deserializer &derez);
-      static void process_release(Internal *runtime, Deserializer &derez,
+      static void process_response(Runtime *runtime, Deserializer &derez);
+      static void process_release(Runtime *runtime, Deserializer &derez,
                                   AddressSpaceID source);
     public:
       const LayoutConstraintID layout_id;
-      Internal *const runtime;
+      Runtime *const runtime;
     protected:
       FieldSpace handle;
       Event ready_event;
@@ -1098,7 +1102,7 @@ namespace LegionRuntime {
     };
 
     /**
-     * \class Internal 
+     * \class Runtime 
      * This is the actual implementation of the Legion runtime functionality
      * that implements the underlying interface for the Runtime 
      * objects.  Most of the calls in the Runtime class translate
@@ -1106,7 +1110,7 @@ namespace LegionRuntime {
      * an extra function call overhead to every runtime call because C++
      * is terrible and doesn't have mix-in classes.
      */
-    class Internal {
+    class Runtime {
     public:
       struct DeferredRecycleArgs {
       public:
@@ -1115,14 +1119,14 @@ namespace LegionRuntime {
       };
       struct DeferredFutureSetArgs {
         HLRTaskID hlr_id;
-        Future::Impl *target;
-        Future::Impl *result;
+        FutureImpl *target;
+        FutureImpl *result;
         TaskOp *task_op;
       };
       struct DeferredFutureMapSetArgs {
         HLRTaskID hlr_id;
-        FutureMap::Impl *future_map;
-        Future::Impl *result;
+        FutureMapImpl *future_map;
+        FutureImpl *result;
         Domain domain;
         TaskOp *task_op;
       };
@@ -1134,12 +1138,12 @@ namespace LegionRuntime {
       struct CollectiveFutureArgs {
         HLRTaskID hlr_id;
         ReductionOpID redop;
-        Future::Impl *future;
+        FutureImpl *future;
         Barrier barrier;
       };
       struct MapperTaskArgs {
         HLRTaskID hlr_id;
-        Future::Impl *future;
+        FutureImpl *future;
         MapperID map_id;
         Processor proc;
         Event event;
@@ -1157,16 +1161,16 @@ namespace LegionRuntime {
         ProcessorMask       processor_mask;
       };
     public:
-      Internal(Machine m, AddressSpaceID space_id,
-               const std::set<Processor> &local_procs,
-               const std::set<Processor> &local_util_procs,
-               const std::set<AddressSpaceID> &address_spaces,
-               const std::map<Processor,AddressSpaceID> &proc_spaces,
-               Processor cleanup, Processor gc, Processor message);
-      Internal(const Internal &rhs);
-      ~Internal(void);
+      Runtime(Machine m, AddressSpaceID space_id,
+              const std::set<Processor> &local_procs,
+              const std::set<Processor> &local_util_procs,
+              const std::set<AddressSpaceID> &address_spaces,
+              const std::map<Processor,AddressSpaceID> &proc_spaces,
+              Processor cleanup, Processor gc, Processor message);
+      Runtime(const Runtime &rhs);
+      ~Runtime(void);
     public:
-      Internal& operator=(const Internal&rhs);
+      Runtime& operator=(const Runtime &rhs);
     public:
       void construct_mpi_rank_tables(Processor proc, int rank);
       void launch_top_level_task(Processor proc);
@@ -1210,8 +1214,9 @@ namespace LegionRuntime {
                                             bool disjoint, 
                                             int part_color);
       IndexPartition create_index_partition(Context ctx, IndexSpace parent,
-      Accessor::RegionAccessor<Accessor::AccessorType::Generic> field_accessor,
-                                            int part_color);
+      LegionRuntime::Accessor::RegionAccessor<
+        LegionRuntime::Accessor::AccessorType::Generic> field_accessor,
+                                                        int part_color);
       void destroy_index_partition(Context ctx, IndexPartition handle);
       // Called from deletion op
       void finalize_index_partition_destroy(IndexPartition handle);
@@ -1435,9 +1440,10 @@ namespace LegionRuntime {
       ArgumentMap create_argument_map(Context ctx);
     public:
       Future execute_task(Context ctx, const TaskLauncher &launcher);
-      FutureMap execute_index_space(Context ctx, const IndexLauncher &launcher);
-      Future execute_index_space(Context ctx, const IndexLauncher &launcher,
-                                 ReductionOpID redop);
+      FutureMap execute_index_space(Context ctx, 
+                                            const IndexLauncher &launcher);
+      Future execute_index_space(Context ctx, 
+                        const IndexLauncher &launcher, ReductionOpID redop);
       Future execute_task(Context ctx, 
                           Processor::TaskFuncID task_id,
                           const std::vector<IndexSpaceRequirement> &indexes,
@@ -1474,8 +1480,10 @@ namespace LegionRuntime {
                           MapperID id = 0, 
                           MappingTagID tag = 0);
     public:
-      PhysicalRegion map_region(Context ctx, const InlineLauncher &launcher);
-      PhysicalRegion map_region(Context ctx, const RegionRequirement &req, 
+      PhysicalRegion map_region(Context ctx, 
+                                const InlineLauncher &launcher);
+      PhysicalRegion map_region(Context ctx, 
+                                const RegionRequirement &req, 
                                 MapperID id = 0, MappingTagID tag = 0);
       PhysicalRegion map_region(Context ctx, unsigned idx, 
                                 MapperID id = 0, MappingTagID tag = 0);
@@ -1514,10 +1522,10 @@ namespace LegionRuntime {
       void issue_copy_operation(Context ctx, const CopyLauncher &launcher);
     public:
       Predicate create_predicate(Context ctx, const Future &f);
-      Predicate predicate_not(Context ctx, const Predicate &p); 
+      Predicate predicate_not(Context ctx, const Predicate &p);
       Predicate predicate_and(Context ctx, const Predicate &p1, 
-                                           const Predicate &p2); 
-      Predicate predicate_or(Context ctx, const Predicate &p1, 
+                                           const Predicate &p2);
+      Predicate predicate_or(Context ctx, const Predicate &p1,
                                           const Predicate &p2);  
     public:
       Lock create_lock(Context ctx);
@@ -2010,11 +2018,11 @@ namespace LegionRuntime {
       DistributedCollectable* weak_find_distributed_collectable(
                                                            DistributedID did);
     public:
-      void register_future(DistributedID did, Future::Impl *impl);
+      void register_future(DistributedID did, FutureImpl *impl);
       void unregister_future(DistributedID did);
       bool has_future(DistributedID did);
-      Future::Impl* find_future(DistributedID did);
-      Future::Impl* find_or_create_future(DistributedID did,
+      FutureImpl* find_future(DistributedID did);
+      FutureImpl* find_or_create_future(DistributedID did,
                                           AddressSpaceID owner_space);
     public:
       void defer_collect_user(LogicalView *view, Event term_event);
@@ -2198,7 +2206,7 @@ namespace LegionRuntime {
       void process_message_task(const void *args, size_t arglen);
     public:
       // The Runtime wrapper for this class
-      Runtime *const high_level;
+      Legion::Runtime *const external;
       // The machine object for this runtime
       const Machine machine;
       const AddressSpaceID address_space; 
@@ -2305,7 +2313,7 @@ namespace LegionRuntime {
     protected:
       // Keep track of futures
       Reservation future_lock;
-      LegionMap<DistributedID,Future::Impl*,
+      LegionMap<DistributedID,FutureImpl*,
                 RUNTIME_FUTURE_ALLOC>::tracked local_futures;
     protected:
       // The runtime keeps track of remote contexts so they
@@ -2440,7 +2448,7 @@ namespace LegionRuntime {
       static const SerdezRedopFns* get_serdez_redop_fns(ReductionOpID redop_id);
       static void set_registration_callback(RegistrationCallbackFnptr callback);
       static InputArgs& get_input_args(void);
-      static Internal* get_runtime(Processor p);
+      static Runtime* get_runtime(Processor p);
       static ReductionOpTable& get_reduction_table(void);
       static SerdezOpTable& get_serdez_table(void);
       static SerdezRedopTable& get_serdez_redop_table(void);
@@ -2484,7 +2492,7 @@ namespace LegionRuntime {
 #endif
     public:
       // Static member variables
-      static Internal *runtime_map[(MAX_NUM_PROCS+1/*+1 for NO_PROC*/)];
+      static Runtime *runtime_map[(MAX_NUM_PROCS+1/*+1 for NO_PROC*/)];
       static volatile RegistrationCallbackFnptr registration_callback;
       static Processor::TaskFuncID legion_main_id;
       static int initial_task_window_size;
@@ -2530,10 +2538,10 @@ namespace LegionRuntime {
      * \class GetAvailableContinuation
      * Continuation class for obtaining resources from the runtime
      */
-    template<typename T, T (Internal::*FUNC_PTR)(bool,bool)>
+    template<typename T, T (Runtime::*FUNC_PTR)(bool,bool)>
     class GetAvailableContinuation : public LegionContinuation {
     public:
-      GetAvailableContinuation(Internal *rt, Reservation r)
+      GetAvailableContinuation(Runtime *rt, Reservation r)
         : runtime(rt), reservation(r) { }
     public:
       inline T get_result(void)
@@ -2563,7 +2571,7 @@ namespace LegionRuntime {
         reservation.release();
       }
     protected:
-      Internal *const runtime;
+      Runtime *const runtime;
       Reservation reservation;
       T result;
     };
@@ -2576,7 +2584,7 @@ namespace LegionRuntime {
     public:
       RegisterDistributedContinuation(DistributedID id,
                                       DistributedCollectable *d,
-                                      Internal *rt)
+                                      Runtime *rt)
         : did(id), dc(d), runtime(rt) { }
     public:
       virtual void execute(void)
@@ -2586,7 +2594,7 @@ namespace LegionRuntime {
     protected:
       const DistributedID did;
       DistributedCollectable *const dc;
-      Internal *const runtime;
+      Runtime *const runtime;
     };
 
     /**
@@ -2863,7 +2871,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     template<typename T>
-    inline T* Internal::get_available(Reservation reservation, 
+    inline T* Runtime::get_available(Reservation reservation, 
                                       std::deque<T*> &queue, bool has_lock)
     //--------------------------------------------------------------------------
     {
@@ -2895,8 +2903,8 @@ namespace LegionRuntime {
       return result;
     }
 
-  }; // namespace HighLevel
-}; // namespace LegionRuntime
+  }; // namespace Internal 
+}; // namespace Legion 
 
 #endif // __RUNTIME_H__
 

@@ -28,9 +28,9 @@
 #endif
 #endif
 
-using namespace LegionRuntime;
-using namespace LegionRuntime::HighLevel;
-using namespace LegionRuntime::HighLevel::MappingUtilities;
+using namespace Legion;
+using namespace Legion::Mapping;
+using namespace Legion::Mapping::Utilities;
 typedef CObjectWrapper::Generic Generic;
 typedef CObjectWrapper::SOA SOA;
 typedef CObjectWrapper::AccessorGeneric AccessorGeneric;
@@ -1085,7 +1085,7 @@ PartitionByFieldShim::task(const Task *task,
   PointColoring coloring;
   assert(args.color_space.get_dim() == 1);
 
-  Accessor::RegionAccessor<SOA, Color> accessor =
+  LegionRuntime::Accessor::RegionAccessor<SOA, Color> accessor =
     regions[0].get_field_accessor(args.fid).typeify<Color>().convert<SOA>();
   for (IndexIterator it(runtime, ctx, regions[0].get_logical_region());
        it.has_next();) {
@@ -1217,7 +1217,7 @@ PartitionByImageShim::task(const Task *task,
   Args &args = *(Args *)task->args;
 
   PointColoring coloring;
-  Accessor::RegionAccessor<SOA, ptr_t> accessor =
+  LegionRuntime::Accessor::RegionAccessor<SOA, ptr_t> accessor =
     regions[0].get_field_accessor(args.fid).typeify<ptr_t>().convert<SOA>();
   for(Domain::DomainPointIterator c(args.color_space); c; c++) {
     LogicalRegion r =
@@ -1357,7 +1357,7 @@ PartitionByPreimageShim::task(const Task *task,
   Args &args = *(Args *)task->args;
 
   PointColoring coloring;
-  Accessor::RegionAccessor<SOA, ptr_t> accessor =
+  LegionRuntime::Accessor::RegionAccessor<SOA, ptr_t> accessor =
     regions[0].get_field_accessor(args.fid).typeify<ptr_t>().convert<SOA>();
   for(Domain::DomainPointIterator c(args.color_space); c; c++) {
     IndexSpace target = runtime->get_index_subspace(ctx, args.projection, c.p);
@@ -3292,7 +3292,7 @@ legion_accessor_generic_raw_span_ptr(legion_accessor_generic_t handle_,
   AccessorGeneric *handle = CObjectWrapper::unwrap(handle_);
   ptr_t ptr = CObjectWrapper::unwrap(ptr_);
 
-  Accessor::ByteOffset stride;
+  LegionRuntime::Accessor::ByteOffset stride;
   void *data = handle->raw_span_ptr(ptr, req_count, *act_count, stride);
   *stride_ = CObjectWrapper::wrap(stride);
   return data;
@@ -3308,7 +3308,7 @@ legion_accessor_generic_raw_rect_ptr_1d(legion_accessor_generic_t handle_,
   Rect<1> rect = CObjectWrapper::unwrap(rect_);
 
   Rect<1> subrect;
-  Accessor::ByteOffset offsets[1];
+  LegionRuntime::Accessor::ByteOffset offsets[1];
   void *data = handle->raw_rect_ptr<1>(rect, subrect, &offsets[0]);
   *subrect_ = CObjectWrapper::wrap(subrect);
   offsets_[0] = CObjectWrapper::wrap(offsets[0]);
@@ -3325,7 +3325,7 @@ legion_accessor_generic_raw_rect_ptr_2d(legion_accessor_generic_t handle_,
   Rect<2> rect = CObjectWrapper::unwrap(rect_);
 
   Rect<2> subrect;
-  Accessor::ByteOffset offsets[2];
+  LegionRuntime::Accessor::ByteOffset offsets[2];
   void *data = handle->raw_rect_ptr<2>(rect, subrect, &offsets[0]);
   *subrect_ = CObjectWrapper::wrap(subrect);
   offsets_[0] = CObjectWrapper::wrap(offsets[0]);
@@ -3343,7 +3343,7 @@ legion_accessor_generic_raw_rect_ptr_3d(legion_accessor_generic_t handle_,
   Rect<3> rect = CObjectWrapper::unwrap(rect_);
 
   Rect<3> subrect;
-  Accessor::ByteOffset offsets[3];
+  LegionRuntime::Accessor::ByteOffset offsets[3];
   void *data = handle->raw_rect_ptr<3>(rect, subrect, &offsets[0]);
   *subrect_ = CObjectWrapper::wrap(subrect);
   offsets_[0] = CObjectWrapper::wrap(offsets[0]);

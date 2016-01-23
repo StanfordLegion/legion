@@ -21,8 +21,8 @@
 #include "legion_allocation.h"
 #include "garbage_collection.h"
 
-namespace LegionRuntime {
-  namespace HighLevel {
+namespace Legion {
+  namespace Internal {
 
     /**
      * \struct GenericUser
@@ -799,7 +799,7 @@ namespace LegionRuntime {
         UserEvent to_trigger;
       };
     public:
-      VersionState(VersionID vid, Internal *rt, DistributedID did,
+      VersionState(VersionID vid, Runtime *rt, DistributedID did,
                    AddressSpaceID owner_space, AddressSpaceID local_space, 
                    CurrentState *manager); 
       VersionState(const VersionState &rhs);
@@ -858,7 +858,7 @@ namespace LegionRuntime {
       void send_version_state(AddressSpaceID target, VersionRequestKind kind,
                            const FieldMask &request_mask, UserEvent to_trigger);
       void send_version_state_request(AddressSpaceID target, AddressSpaceID src,
-                            UserEvent to_trigger, const FieldMask &request_mask, 
+                            UserEvent to_trigger, const FieldMask &request_mask,
                             VersionRequestKind request_kind);
       void launch_send_version_state(AddressSpaceID target,
                                      UserEvent to_trigger, 
@@ -877,13 +877,13 @@ namespace LegionRuntime {
       void handle_version_state_response(AddressSpaceID source,
             UserEvent to_trigger, VersionRequestKind kind, Deserializer &derez);
     public:
-      static void process_version_state_path_only(Internal *rt,
+      static void process_version_state_path_only(Runtime *rt,
                               Deserializer &derez, AddressSpaceID source);
-      static void process_version_state_initialization(Internal *rt,
+      static void process_version_state_initialization(Runtime *rt,
                               Deserializer &derez, AddressSpaceID source);
-      static void process_version_state_request(Internal *rt, 
+      static void process_version_state_request(Runtime *rt, 
                                                 Deserializer &derez);
-      static void process_version_state_response(Internal *rt,
+      static void process_version_state_response(Runtime *rt,
                               Deserializer &derez, AddressSpaceID source);
     public:
       const VersionID version_number;
@@ -1209,13 +1209,15 @@ namespace LegionRuntime {
       void update_atomic_locks(std::map<Reservation,bool> &atomic_locks,
                                bool exclusive);
       Memory get_memory(void) const;
-      Accessor::RegionAccessor<Accessor::AccessorType::Generic>
-        get_accessor(void) const;
-      Accessor::RegionAccessor<Accessor::AccessorType::Generic>
-        get_field_accessor(FieldID fid) const;
+      LegionRuntime::Accessor::RegionAccessor<
+          LegionRuntime::Accessor::AccessorType::Generic>
+            get_accessor(void) const;
+      LegionRuntime::Accessor::RegionAccessor<
+        LegionRuntime::Accessor::AccessorType::Generic>
+          get_field_accessor(FieldID fid) const;
     public:
       void pack_reference(Serializer &rez, AddressSpaceID target);
-      void unpack_reference(Internal *rt, Deserializer &derez);
+      void unpack_reference(Runtime *rt, Deserializer &derez);
     private:
       Event ready_event;
       InstanceView *view; // only valid on creation node
@@ -1237,7 +1239,7 @@ namespace LegionRuntime {
       CompositeView* get_view(void) const { return view; }
     public:
       void pack_reference(Serializer &rez, AddressSpaceID target);
-      void unpack_reference(Internal *rt, Deserializer &derez);
+      void unpack_reference(Runtime *rt, Deserializer &derez);
     private:
       CompositeView *view;
       bool local;
@@ -1300,7 +1302,7 @@ namespace LegionRuntime {
       LogicalView *target;
     };
 
-  }; // namespace HighLevel
-}; // namespace LegionRuntime
+  }; // namespace Internal 
+}; // namespace Legion
 
 #endif // __LEGION_ANALYSIS_H__
