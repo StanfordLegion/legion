@@ -126,7 +126,6 @@ namespace LegionRuntime {
       NEW_OPAQUE_WRAPPER(legion_index_space_allocator_t, IndexSpaceAllocator *);
       NEW_OPAQUE_WRAPPER(legion_argument_map_t, ArgumentMap *);
       NEW_OPAQUE_WRAPPER(legion_predicate_t, Predicate *);
-      NEW_OPAQUE_WRAPPER(legion_phase_barrier_t, PhaseBarrier *);
       NEW_OPAQUE_WRAPPER(legion_future_t, Future *);
       NEW_OPAQUE_WRAPPER(legion_future_map_t, FutureMap *);
       NEW_OPAQUE_WRAPPER(legion_task_launcher_t, TaskLauncher *);
@@ -525,6 +524,20 @@ namespace LegionRuntime {
             domain_split_.recurse,
             domain_split_.stealable);
         return domain_split;
+      }
+
+      static legion_phase_barrier_t
+      wrap(PhaseBarrier barrier) {
+        legion_phase_barrier_t barrier_;
+        *(PhaseBarrier*)barrier_.object = barrier;
+        return barrier_;
+      }
+
+      static PhaseBarrier
+      unwrap(legion_phase_barrier_t barrier_) {
+        PhaseBarrier barrier;
+        barrier = *(PhaseBarrier*)barrier_.object;
+        return barrier;
       }
     };
   }

@@ -51,7 +51,6 @@ extern "C" {
   NEW_OPAQUE_TYPE(legion_index_space_allocator_t);
   NEW_OPAQUE_TYPE(legion_argument_map_t);
   NEW_OPAQUE_TYPE(legion_predicate_t);
-  NEW_OPAQUE_TYPE(legion_phase_barrier_t);
   NEW_OPAQUE_TYPE(legion_future_t);
   NEW_OPAQUE_TYPE(legion_future_map_t);
   NEW_OPAQUE_TYPE(legion_task_launcher_t);
@@ -236,6 +235,13 @@ extern "C" {
     bool recurse;
     bool stealable;
   } legion_domain_split_t;
+
+  /**
+   * @see LegionRuntime::HighLevel::PhaseBarrier
+   */
+  typedef struct legion_phase_barrier_t {
+    char object[16];
+  } legion_phase_barrier_t;
 
   /**
    * Interface for a Legion C registration callback.
@@ -1412,8 +1418,6 @@ extern "C" {
   // -----------------------------------------------------------------------
 
   /**
-   * @return Caller takes ownership of return value.
-   *
    * @see LegionRuntime::HighLevel::HighLevelRuntime::create_phase_barrier()
    */
   legion_phase_barrier_t
@@ -1422,16 +1426,14 @@ extern "C" {
                               unsigned arrivals);
 
   /**
-   * @param handle Caller must have ownership of parameter `handle`.
-   *
-   * @see LegionRuntime::HighLevel::PhaseBarrier::~PhaseBarrier()
+   * @see LegionRuntime::HighLevel::PhaseBarrier::destroy_phase_barrier()
    */
   void
-  legion_phase_barrier_destroy(legion_phase_barrier_t handle);
+  legion_phase_barrier_destroy(legion_runtime_t runtime,
+                               legion_context_t ctx,
+                               legion_phase_barrier_t handle);
 
   /**
-   * @return Caller takes ownership of return value.
-   *
    * @see LegionRuntime::HighLevel::HighLevelRuntime::advance_phase_barrier()
    */
   legion_phase_barrier_t

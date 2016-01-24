@@ -2218,17 +2218,21 @@ legion_phase_barrier_create(legion_runtime_t runtime_,
   HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_);
 
-  PhaseBarrier *result =
-    new PhaseBarrier(runtime->create_phase_barrier(ctx, arrivals));
+  assert(sizeof(PhaseBarrier) == sizeof(legion_phase_barrier_t));
+  PhaseBarrier result = runtime->create_phase_barrier(ctx, arrivals);
   return CObjectWrapper::wrap(result);
 }
 
 void
-legion_phase_barrier_destroy(legion_phase_barrier_t handle_)
+legion_phase_barrier_destroy(legion_runtime_t runtime_,
+                             legion_context_t ctx_,
+                             legion_phase_barrier_t handle_)
 {
-  PhaseBarrier *handle = CObjectWrapper::unwrap(handle_);
+  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_);
+  PhaseBarrier handle = CObjectWrapper::unwrap(handle_);
 
-  delete handle;
+  runtime->destroy_phase_barrier(ctx, handle);
 }
 
 legion_phase_barrier_t
@@ -2238,10 +2242,9 @@ legion_phase_barrier_advance(legion_runtime_t runtime_,
 {
   HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_);
-  PhaseBarrier *handle = CObjectWrapper::unwrap(handle_);
+  PhaseBarrier handle = CObjectWrapper::unwrap(handle_);
 
-  PhaseBarrier *result =
-    new PhaseBarrier(runtime->advance_phase_barrier(ctx, *handle));
+  PhaseBarrier result = runtime->advance_phase_barrier(ctx, handle);
   return CObjectWrapper::wrap(result);
 }
 
@@ -2531,9 +2534,9 @@ legion_task_launcher_add_wait_barrier(legion_task_launcher_t launcher_,
                                       legion_phase_barrier_t bar_)
 {
   TaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
-  PhaseBarrier *bar = CObjectWrapper::unwrap(bar_);
+  PhaseBarrier bar = CObjectWrapper::unwrap(bar_);
 
-  launcher->add_wait_barrier(*bar);
+  launcher->add_wait_barrier(bar);
 }
 
 void
@@ -2541,9 +2544,9 @@ legion_task_launcher_add_arrival_barrier(legion_task_launcher_t launcher_,
                                          legion_phase_barrier_t bar_)
 {
   TaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
-  PhaseBarrier *bar = CObjectWrapper::unwrap(bar_);
+  PhaseBarrier bar = CObjectWrapper::unwrap(bar_);
 
-  launcher->add_arrival_barrier(*bar);
+  launcher->add_arrival_barrier(bar);
 }
 
 legion_index_launcher_t
@@ -2740,9 +2743,9 @@ legion_index_launcher_add_wait_barrier(legion_index_launcher_t launcher_,
                                       legion_phase_barrier_t bar_)
 {
   IndexLauncher *launcher = CObjectWrapper::unwrap(launcher_);
-  PhaseBarrier *bar = CObjectWrapper::unwrap(bar_);
+  PhaseBarrier bar = CObjectWrapper::unwrap(bar_);
 
-  launcher->add_wait_barrier(*bar);
+  launcher->add_wait_barrier(bar);
 }
 
 void
@@ -2750,9 +2753,9 @@ legion_index_launcher_add_arrival_barrier(legion_index_launcher_t launcher_,
                                          legion_phase_barrier_t bar_)
 {
   IndexLauncher *launcher = CObjectWrapper::unwrap(launcher_);
-  PhaseBarrier *bar = CObjectWrapper::unwrap(bar_);
+  PhaseBarrier bar = CObjectWrapper::unwrap(bar_);
 
-  launcher->add_arrival_barrier(*bar);
+  launcher->add_arrival_barrier(bar);
 }
 
 // -----------------------------------------------------------------------
@@ -3008,9 +3011,9 @@ legion_copy_launcher_add_wait_barrier(legion_copy_launcher_t launcher_,
                                       legion_phase_barrier_t bar_)
 {
   CopyLauncher *launcher = CObjectWrapper::unwrap(launcher_);
-  PhaseBarrier *bar = CObjectWrapper::unwrap(bar_);
+  PhaseBarrier bar = CObjectWrapper::unwrap(bar_);
 
-  launcher->add_wait_barrier(*bar);
+  launcher->add_wait_barrier(bar);
 }
 
 void
@@ -3018,9 +3021,9 @@ legion_copy_launcher_add_arrival_barrier(legion_copy_launcher_t launcher_,
                                          legion_phase_barrier_t bar_)
 {
   CopyLauncher *launcher = CObjectWrapper::unwrap(launcher_);
-  PhaseBarrier *bar = CObjectWrapper::unwrap(bar_);
+  PhaseBarrier bar = CObjectWrapper::unwrap(bar_);
 
-  launcher->add_arrival_barrier(*bar);
+  launcher->add_arrival_barrier(bar);
 }
 
 // -----------------------------------------------------------------------
