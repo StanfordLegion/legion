@@ -292,6 +292,126 @@ namespace Realm {
 
     };
 
+    template <typename L1, typename L2, typename L3>
+    struct ListProduct3 {
+      typedef int TagType;
+
+      template <typename T1, typename T2, typename T3>
+      static TagType encode_tag(void);
+
+      template <typename TARGET, typename T1, typename T2>
+      struct DemuxHelper3 {
+	template <typename T3, typename A1>
+	static void demux(A1 arg1);
+
+	template <typename T3, typename A1, typename A2>
+	static void demux(A1 arg1, A2 arg2);
+
+	template <typename T3, typename A1, typename A2, typename A3>
+	static void demux(A1 arg1, A2 arg2, A3 arg3);
+      };
+
+      template <typename TARGET, typename T1>
+      struct DemuxHelper2 {
+	template <typename T2, typename A1>
+	static void demux(TagType tag, A1 arg1);
+
+	template <typename T2, typename A1, typename A2>
+	static void demux(TagType tag, A1 arg1, A2 arg2);
+
+	template <typename T2, typename A1, typename A2, typename A3>
+	static void demux(TagType tag, A1 arg1, A2 arg2, A3 arg3);
+      };
+
+      template <typename TARGET>
+      struct DemuxHelper1 {
+	template <typename T1, typename A1>
+	static void demux(TagType tag, A1 arg1);
+
+	template <typename T1, typename A1, typename A2>
+	static void demux(TagType tag, A1 arg1, A2 arg2);
+
+	template <typename T1, typename A1, typename A2, typename A3>
+	static void demux(TagType tag, A1 arg1, A2 arg2, A3 arg3);
+      };
+
+      template <typename TARGET, typename A1>
+      static void demux(TagType tag, A1 arg1);
+
+      template <typename TARGET, typename A1, typename A2>
+      static void demux(TagType tag, A1 arg1, A2 arg2);
+
+      template <typename TARGET, typename A1, typename A2, typename A3>
+      static void demux(TagType tag, A1 arg1, A2 arg2, A3 arg3);
+
+    };
+
+    template <typename L1, typename L2, typename L3, typename L4>
+    struct ListProduct4 {
+      typedef int TagType;
+
+      template <typename T1, typename T2, typename T3, typename T4>
+      static TagType encode_tag(void);
+
+      template <typename TARGET, typename T1, typename T2, typename T3>
+      struct DemuxHelper4 {
+	template <typename T4, typename A1>
+	static void demux(A1 arg1);
+
+	template <typename T4, typename A1, typename A2>
+	static void demux(A1 arg1, A2 arg2);
+
+	template <typename T4, typename A1, typename A2, typename A3>
+	static void demux(A1 arg1, A2 arg2, A3 arg3);
+      };
+
+      template <typename TARGET, typename T1, typename T2>
+      struct DemuxHelper3 {
+	template <typename T3, typename A1>
+	static void demux(TagType tag, A1 arg1);
+
+	template <typename T3, typename A1, typename A2>
+	static void demux(TagType tag, A1 arg1, A2 arg2);
+
+	template <typename T3, typename A1, typename A2, typename A3>
+	static void demux(TagType tag, A1 arg1, A2 arg2, A3 arg3);
+      };
+
+      template <typename TARGET, typename T1>
+      struct DemuxHelper2 {
+	template <typename T2, typename A1>
+	static void demux(TagType tag, A1 arg1);
+
+	template <typename T2, typename A1, typename A2>
+	static void demux(TagType tag, A1 arg1, A2 arg2);
+
+	template <typename T2, typename A1, typename A2, typename A3>
+	static void demux(TagType tag, A1 arg1, A2 arg2, A3 arg3);
+      };
+
+      template <typename TARGET>
+      struct DemuxHelper1 {
+	template <typename T1, typename A1>
+	static void demux(TagType tag, A1 arg1);
+
+	template <typename T1, typename A1, typename A2>
+	static void demux(TagType tag, A1 arg1, A2 arg2);
+
+	template <typename T1, typename A1, typename A2, typename A3>
+	static void demux(TagType tag, A1 arg1, A2 arg2, A3 arg3);
+      };
+
+      template <typename TARGET, typename A1>
+      static void demux(TagType tag, A1 arg1);
+
+      template <typename TARGET, typename A1, typename A2>
+      static void demux(TagType tag, A1 arg1, A2 arg2);
+
+      template <typename TARGET, typename A1, typename A2, typename A3>
+      static void demux(TagType tag, A1 arg1, A2 arg2, A3 arg3);
+
+    };
+
   }; // namespace DynamicTemplates
 
 }; // namespace Realm

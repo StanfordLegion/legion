@@ -333,6 +333,267 @@ namespace Realm {
       L1::template demux<DemuxHelper1<TARGET>, TagType, A1, A2, A3>(tag1, tag, arg1, arg2, arg3);
     }
 
+
+    ////////////////////////////////////////////////////////////////////////
+    //
+    // class ListProduct3<L1,L2,L3>
+
+    template <typename L1, typename L2, typename L3>
+    template <typename T1, typename T2, typename T3>
+    inline /*static*/ typename ListProduct3<L1,L2,L3>::TagType ListProduct3<L1,L2,L3>::encode_tag(void)
+    {
+      return ((L1::template TypeToIndex<T1>::INDEX << 16) +
+	      (L2::template TypeToIndex<T2>::INDEX << 8) +
+	      (L3::template TypeToIndex<T3>::INDEX));
+    }
+
+    template <typename L1, typename L2, typename L3>
+    template <typename TARGET, typename T1, typename T2>
+    template <typename T3, typename A1>
+    inline /*static*/ void ListProduct3<L1,L2,L3>::DemuxHelper3<TARGET,T1,T2>::demux(A1 arg1)
+    {
+      TARGET::template demux<T1, T2, T3>(arg1);
+    }
+
+    template <typename L1, typename L2, typename L3>
+    template <typename TARGET, typename T1, typename T2>
+    template <typename T3, typename A1, typename A2>
+    inline /*static*/ void ListProduct3<L1,L2,L3>::DemuxHelper3<TARGET,T1,T2>::demux(A1 arg1, A2 arg2)
+    {
+      TARGET::template demux<T1, T2, T3>(arg1, arg2);
+    }
+
+    template <typename L1, typename L2, typename L3>
+    template <typename TARGET, typename T1, typename T2>
+    template <typename T3, typename A1, typename A2, typename A3>
+    inline /*static*/ void ListProduct3<L1,L2,L3>::DemuxHelper3<TARGET,T1,T2>::demux(A1 arg1, A2 arg2, A3 arg3)
+    {
+      TARGET::template demux<T1, T2, T3>(arg1, arg2, arg3);
+    }
+
+    template <typename L1, typename L2, typename L3>
+    template <typename TARGET, typename T1>
+    template <typename T2, typename A1>
+    inline /*static*/ void ListProduct3<L1,L2,L3>::DemuxHelper2<TARGET,T1>::demux(TagType tag, A1 arg1)
+    {
+      TagType tag3 = (tag >> 0) & 0xff;
+      L3::template demux<DemuxHelper3<TARGET, T1, T2>, A1>(tag3, arg1);
+    }
+
+    template <typename L1, typename L2, typename L3>
+    template <typename TARGET, typename T1>
+    template <typename T2, typename A1, typename A2>
+    inline /*static*/ void ListProduct3<L1,L2,L3>::DemuxHelper2<TARGET,T1>::demux(TagType tag, A1 arg1, A2 arg2)
+    {
+      TagType tag3 = (tag >> 0) & 0xff;
+      L3::template demux<DemuxHelper3<TARGET, T1, T2>, A1, A2>(tag3, arg1, arg2);
+    }
+
+    template <typename L1, typename L2, typename L3>
+    template <typename TARGET, typename T1>
+    template <typename T2, typename A1, typename A2, typename A3>
+    inline /*static*/ void ListProduct3<L1,L2,L3>::DemuxHelper2<TARGET,T1>::demux(TagType tag, A1 arg1, A2 arg2, A3 arg3)
+    {
+      TagType tag3 = (tag >> 0) & 0xff;
+      L3::template demux<DemuxHelper3<TARGET, T1, T2>, A1, A2, A3>(tag3, arg1, arg2, arg3);
+    }
+
+    template <typename L1, typename L2, typename L3>
+    template <typename TARGET>
+    template <typename T1, typename A1>
+    inline /*static*/ void ListProduct3<L1,L2,L3>::DemuxHelper1<TARGET>::demux(TagType tag, A1 arg1)
+    {
+      TagType tag2 = (tag >> 8) & 0xff;
+      L2::template demux<DemuxHelper2<TARGET, T1>, TagType, A1>(tag2, tag, arg1);
+    }
+
+    template <typename L1, typename L2, typename L3>
+    template <typename TARGET>
+    template <typename T1, typename A1, typename A2>
+    inline /*static*/ void ListProduct3<L1,L2,L3>::DemuxHelper1<TARGET>::demux(TagType tag, A1 arg1, A2 arg2)
+    {
+      TagType tag2 = (tag >> 8) & 0xff;
+      L2::template demux<DemuxHelper2<TARGET, T1>, TagType, A1, A2>(tag2, tag, arg1, arg2);
+    }
+
+    template <typename L1, typename L2, typename L3>
+    template <typename TARGET>
+    template <typename T1, typename A1, typename A2, typename A3>
+    inline /*static*/ void ListProduct3<L1,L2,L3>::DemuxHelper1<TARGET>::demux(TagType tag, A1 arg1, A2 arg2, A3 arg3)
+    {
+      TagType tag2 = (tag >> 8) & 0xff;
+      L2::template demux<DemuxHelper2<TARGET, T1>, TagType, A1, A2, A3>(tag2, tag, arg1, arg2, arg3);
+    }
+
+    template <typename L1, typename L2, typename L3>
+    template <typename TARGET, typename A1>
+    inline /*static*/ void ListProduct3<L1,L2,L3>::demux(TagType tag, A1 arg1)
+    {
+      TagType tag1 = (tag >> 16) & 0xff;
+      L1::template demux<DemuxHelper1<TARGET>, TagType, A1>(tag1, tag, arg1);
+    }
+
+    template <typename L1, typename L2, typename L3>
+    template <typename TARGET, typename A1, typename A2>
+    inline /*static*/ void ListProduct3<L1,L2,L3>::demux(TagType tag, A1 arg1, A2 arg2)
+    {
+      TagType tag1 = (tag >> 16) & 0xff;
+      L1::template demux<DemuxHelper1<TARGET>, TagType, A1, A2>(tag1, tag, arg1, arg2);
+    }
+
+    template <typename L1, typename L2, typename L3>
+    template <typename TARGET, typename A1, typename A2, typename A3>
+    inline /*static*/ void ListProduct3<L1,L2,L3>::demux(TagType tag, A1 arg1, A2 arg2, A3 arg3)
+    {
+      TagType tag1 = (tag >> 16) & 0xff;
+      L1::template demux<DemuxHelper1<TARGET>, TagType, A1, A2, A3>(tag1, tag, arg1, arg2, arg3);
+    }
+
+
+    ////////////////////////////////////////////////////////////////////////
+    //
+    // class ListProduct4<L1,L2,L3,L4>
+
+    template <typename L1, typename L2, typename L3, typename L4>
+    template <typename T1, typename T2, typename T3, typename T4>
+    inline /*static*/ typename ListProduct4<L1,L2,L3,L4>::TagType ListProduct4<L1,L2,L3,L4>::encode_tag(void)
+    {
+      return ((L1::template TypeToIndex<T1>::INDEX << 24) +
+	      (L2::template TypeToIndex<T2>::INDEX << 16) +
+	      (L3::template TypeToIndex<T3>::INDEX << 8) +
+	      (L4::template TypeToIndex<T4>::INDEX));
+    }
+
+    template <typename L1, typename L2, typename L3, typename L4>
+    template <typename TARGET, typename T1, typename T2, typename T3>
+    template <typename T4, typename A1>
+    inline /*static*/ void ListProduct4<L1,L2,L3,L4>::DemuxHelper4<TARGET,T1,T2,T3>::demux(A1 arg1)
+    {
+      TARGET::template demux<T1, T2, T3, T4>(arg1);
+    }
+
+    template <typename L1, typename L2, typename L3, typename L4>
+    template <typename TARGET, typename T1, typename T2, typename T3>
+    template <typename T4, typename A1, typename A2>
+    inline /*static*/ void ListProduct4<L1,L2,L3,L4>::DemuxHelper4<TARGET,T1,T2,T3>::demux(A1 arg1, A2 arg2)
+    {
+      TARGET::template demux<T1, T2, T3, T4>(arg1, arg2);
+    }
+
+    template <typename L1, typename L2, typename L3, typename L4>
+    template <typename TARGET, typename T1, typename T2, typename T3>
+    template <typename T4, typename A1, typename A2, typename A3>
+    inline /*static*/ void ListProduct4<L1,L2,L3,L4>::DemuxHelper4<TARGET,T1,T2,T3>::demux(A1 arg1, A2 arg2, A3 arg3)
+    {
+      TARGET::template demux<T1, T2, T3, T4>(arg1, arg2, arg3);
+    }
+
+    template <typename L1, typename L2, typename L3, typename L4>
+    template <typename TARGET, typename T1, typename T2>
+    template <typename T3, typename A1>
+    inline /*static*/ void ListProduct4<L1,L2,L3,L4>::DemuxHelper3<TARGET,T1,T2>::demux(TagType tag, A1 arg1)
+    {
+      TagType tag4 = (tag >> 0) & 0xff;
+      L4::template demux<DemuxHelper4<TARGET, T1, T2, T3>, A1>(tag4, arg1);
+    }
+
+    template <typename L1, typename L2, typename L3, typename L4>
+    template <typename TARGET, typename T1, typename T2>
+    template <typename T3, typename A1, typename A2>
+    inline /*static*/ void ListProduct4<L1,L2,L3,L4>::DemuxHelper3<TARGET,T1,T2>::demux(TagType tag, A1 arg1, A2 arg2)
+    {
+      TagType tag4 = (tag >> 0) & 0xff;
+      L4::template demux<DemuxHelper4<TARGET, T1, T2, T3>, A1, A2>(tag4, arg1, arg2);
+    }
+
+    template <typename L1, typename L2, typename L3, typename L4>
+    template <typename TARGET, typename T1, typename T2>
+    template <typename T3, typename A1, typename A2, typename A3>
+    inline /*static*/ void ListProduct4<L1,L2,L3,L4>::DemuxHelper3<TARGET,T1,T2>::demux(TagType tag, A1 arg1, A2 arg2, A3 arg3)
+    {
+      TagType tag4 = (tag >> 0) & 0xff;
+      L4::template demux<DemuxHelper4<TARGET, T1, T2, T3>, A1, A2, A3>(tag4, arg1, arg2, arg3);
+    }
+
+    template <typename L1, typename L2, typename L3, typename L4>
+    template <typename TARGET, typename T1>
+    template <typename T2, typename A1>
+    inline /*static*/ void ListProduct4<L1,L2,L3,L4>::DemuxHelper2<TARGET,T1>::demux(TagType tag, A1 arg1)
+    {
+      TagType tag3 = (tag >> 8) & 0xff;
+      L3::template demux<DemuxHelper3<TARGET, T1, T2>, TagType, A1>(tag3, tag, arg1);
+    }
+
+    template <typename L1, typename L2, typename L3, typename L4>
+    template <typename TARGET, typename T1>
+    template <typename T2, typename A1, typename A2>
+    inline /*static*/ void ListProduct4<L1,L2,L3,L4>::DemuxHelper2<TARGET,T1>::demux(TagType tag, A1 arg1, A2 arg2)
+    {
+      TagType tag3 = (tag >> 8) & 0xff;
+      L3::template demux<DemuxHelper3<TARGET, T1, T2>, TagType, A1, A2>(tag3, tag, arg1, arg2);
+    }
+
+    template <typename L1, typename L2, typename L3, typename L4>
+    template <typename TARGET, typename T1>
+    template <typename T2, typename A1, typename A2, typename A3>
+    inline /*static*/ void ListProduct4<L1,L2,L3,L4>::DemuxHelper2<TARGET,T1>::demux(TagType tag, A1 arg1, A2 arg2, A3 arg3)
+    {
+      TagType tag3 = (tag >> 8) & 0xff;
+      L3::template demux<DemuxHelper3<TARGET, T1, T2>, TagType, A1, A2, A3>(tag3, tag, arg1, arg2, arg3);
+    }
+
+    template <typename L1, typename L2, typename L3, typename L4>
+    template <typename TARGET>
+    template <typename T1, typename A1>
+    inline /*static*/ void ListProduct4<L1,L2,L3,L4>::DemuxHelper1<TARGET>::demux(TagType tag, A1 arg1)
+    {
+      TagType tag2 = (tag >> 16) & 0xff;
+      L2::template demux<DemuxHelper2<TARGET, T1>, TagType, A1>(tag2, tag, arg1);
+    }
+
+    template <typename L1, typename L2, typename L3, typename L4>
+    template <typename TARGET>
+    template <typename T1, typename A1, typename A2>
+    inline /*static*/ void ListProduct4<L1,L2,L3,L4>::DemuxHelper1<TARGET>::demux(TagType tag, A1 arg1, A2 arg2)
+    {
+      TagType tag2 = (tag >> 16) & 0xff;
+      L2::template demux<DemuxHelper2<TARGET, T1>, TagType, A1, A2>(tag2, tag, arg1, arg2);
+    }
+
+    template <typename L1, typename L2, typename L3, typename L4>
+    template <typename TARGET>
+    template <typename T1, typename A1, typename A2, typename A3>
+    inline /*static*/ void ListProduct4<L1,L2,L3,L4>::DemuxHelper1<TARGET>::demux(TagType tag, A1 arg1, A2 arg2, A3 arg3)
+    {
+      TagType tag2 = (tag >> 16) & 0xff;
+      L2::template demux<DemuxHelper2<TARGET, T1>, TagType, A1, A2, A3>(tag2, tag, arg1, arg2, arg3);
+    }
+
+    template <typename L1, typename L2, typename L3, typename L4>
+    template <typename TARGET, typename A1>
+    inline /*static*/ void ListProduct4<L1,L2,L3,L4>::demux(TagType tag, A1 arg1)
+    {
+      TagType tag1 = (tag >> 24) & 0xff;
+      L1::template demux<DemuxHelper1<TARGET>, TagType, A1>(tag1, tag, arg1);
+    }
+
+    template <typename L1, typename L2, typename L3, typename L4>
+    template <typename TARGET, typename A1, typename A2>
+    inline /*static*/ void ListProduct4<L1,L2,L3,L4>::demux(TagType tag, A1 arg1, A2 arg2)
+    {
+      TagType tag1 = (tag >> 24) & 0xff;
+      L1::template demux<DemuxHelper1<TARGET>, TagType, A1, A2>(tag1, tag, arg1, arg2);
+    }
+
+    template <typename L1, typename L2, typename L3, typename L4>
+    template <typename TARGET, typename A1, typename A2, typename A3>
+    inline /*static*/ void ListProduct4<L1,L2,L3,L4>::demux(TagType tag, A1 arg1, A2 arg2, A3 arg3)
+    {
+      TagType tag1 = (tag >> 24) & 0xff;
+      L1::template demux<DemuxHelper1<TARGET>, TagType, A1, A2, A3>(tag1, tag, arg1, arg2, arg3);
+    }
+
+
   }; // namespace DynamicTemplates
 
 }; // namespace Realm
