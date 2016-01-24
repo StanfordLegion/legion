@@ -1643,6 +1643,14 @@ extern "C" {
                                  bool inst /* = true */);
 
   /**
+   * @see LegionRuntime::HighLevel::RegionRequirement::add_flags()
+   */
+  void
+  legion_task_launcher_add_flags(legion_task_launcher_t launcher,
+                                 unsigned idx,
+                                 enum legion_region_flags_t flags);
+
+  /**
    * @see LegionRuntime::HighLevel::TaskLauncher::add_index_requirement()
    */
   unsigned
@@ -1783,6 +1791,14 @@ extern "C" {
                                  unsigned idx,
                                  legion_field_id_t fid,
                                  bool inst /* = true */);
+
+  /**
+   * @see LegionRuntime::HighLevel::RegionRequirement::add_flags()
+   */
+  void
+  legion_index_launcher_add_flags(legion_index_launcher_t launcher,
+                                  unsigned idx,
+                                  enum legion_region_flags_t flags);
 
   /**
    * @see LegionRuntime::HighLevel::IndexLauncher::add_index_requirement()

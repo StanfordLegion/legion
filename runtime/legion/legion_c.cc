@@ -2488,6 +2488,16 @@ legion_task_launcher_add_field(legion_task_launcher_t launcher_,
   launcher->add_field(idx, fid, inst);
 }
 
+void
+legion_task_launcher_add_flags(legion_task_launcher_t launcher_,
+                               unsigned idx,
+                               enum legion_region_flags_t flags)
+{
+  TaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+
+  launcher->region_requirements[idx].add_flags(flags);
+}
+
 unsigned
 legion_task_launcher_add_index_requirement(
   legion_task_launcher_t launcher_,
@@ -2685,6 +2695,16 @@ legion_index_launcher_add_field(legion_index_launcher_t launcher_,
   IndexLauncher *launcher = CObjectWrapper::unwrap(launcher_);
 
   launcher->add_field(idx, fid, inst);
+}
+
+void
+legion_index_launcher_add_flags(legion_index_launcher_t launcher_,
+                                unsigned idx,
+                                enum legion_region_flags_t flags)
+{
+  IndexLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+
+  launcher->region_requirements[idx].add_flags(flags);
 }
 
 unsigned
