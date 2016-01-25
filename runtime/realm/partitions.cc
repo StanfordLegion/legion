@@ -21,16 +21,55 @@
 
 #include "runtime_impl.h"
 
-#include "dynamic_templates.h"
-
 #include <typeinfo>
 
 namespace Realm {
 
-  typedef DynamicTemplates::IntList<1, 3> DIMCOUNTS;
-  typedef DynamicTemplates::TypeList<int, long long>::TL DIMTYPES;
-  typedef DynamicTemplates::TypeList<int, bool>::TL FLDTYPES;
+  struct NT_TemplateHelper : public DynamicTemplates::ListProduct2<DIMCOUNTS, DIMTYPES> {
+    typedef DynamicTemplates::ListProduct2<DIMCOUNTS, DIMTYPES> SUPER;
+    template <int N, typename T>
+    static DynamicTemplates::TagType encode_tag(void) {
+      return SUPER::template encode_tag<DynamicTemplates::Int<N>, T>();
+    }
+  };
+
+  struct NTF_TemplateHelper : public DynamicTemplates::ListProduct3<DIMCOUNTS, DIMTYPES, FLDTYPES> {
+    typedef DynamicTemplates::ListProduct3<DIMCOUNTS, DIMTYPES, FLDTYPES> SUPER;
+    template <int N, typename T, typename FT>
+    static DynamicTemplates::TagType encode_tag(void) {
+      return SUPER::template encode_tag<DynamicTemplates::Int<N>, T, FT>();
+    }
+  };
+
+  struct NTNT_TemplateHelper : public DynamicTemplates::ListProduct4<DIMCOUNTS, DIMTYPES, DIMCOUNTS, DIMTYPES> {
+    typedef DynamicTemplates::ListProduct4<DIMCOUNTS, DIMTYPES, DIMCOUNTS, DIMTYPES>  SUPER;
+    template <int N, typename T, int N2, typename T2>
+    static DynamicTemplates::TagType encode_tag(void) {
+      return SUPER::template encode_tag<DynamicTemplates::Int<N>, T,
+ 	                                DynamicTemplates::Int<N2>, T2>();
+    }
+  };
+
+#if 0
   typedef DynamicTemplates::ListProduct2<DIMTYPES, FLDTYPES> DFT;
+  typedef DynamicTemplates::ListProduct3<DIMTYPES, FLDTYPES, DIMTYPES> QQQ;
+  typedef DynamicTemplates::ListProduct4<DIMTYPES, FLDTYPES, DIMTYPES, FLDTYPES> QQQ3;
+
+  struct QQQ2 {
+    template <typename T1, typename T2, typename T3>
+    static void demux(int x, int y, const char *z)
+    {
+      std::cout << "QQQ2::demux<" << typeid(T1).name() << "," << typeid(T2).name() << "," << typeid(T3).name() << ">(" << x << ")" << std::endl;
+    }
+  };
+
+  struct QQQ4 {
+    template <typename T1, typename T2, typename T3, typename T4>
+    static void demux(int x, int y, const char *z)
+    {
+      std::cout << "QQQ4::demux<" << typeid(T1).name() << "," << typeid(T2).name() << "," << typeid(T3).name() << "," << typeid(T4).name() << ">(" << x << ")" << std::endl;
+    }
+  };
 
   struct DT : public DynamicTemplates::ListProduct2<DIMCOUNTS, DIMTYPES> {
     typedef DynamicTemplates::ListProduct2<DIMCOUNTS, DIMTYPES> SUPER;
@@ -125,12 +164,19 @@ namespace Realm {
       DT::demux<BBB>(DT::encode_tag<3, int>(), 12);
       DT::demux<BBB>(DT::encode_tag<3, int>(), 12, 3);
       DT::demux<BBB>(DT::encode_tag<3, int>(), 12, 4, 5);
+
+      int t = QQQ::encode_tag<long long, bool, int>();
+      QQQ::demux<QQQ2>(t, 111, 11, "aaa");
+
+      int t2 = QQQ3::encode_tag<int, bool, long long, bool>();
+      std::cout << "t2 = " << std::hex << t2 << std::dec << std::endl;
+      QQQ3::demux<QQQ4>(t2, 211, 11, "bbb");
       exit(0);
     }
   };
 
   TestMe testme;
-
+#endif
 
   Logger log_part("part");
   Logger log_uop_timing("uop_timing");
@@ -1781,6 +1827,12 @@ namespace Realm {
   // class ByFieldMicroOp<N,T,FT>
 
   template <int N, typename T, typename FT>
+  inline /*static*/ DynamicTemplates::TagType ByFieldMicroOp<N,T,FT>::type_tag(void)
+  {
+    return NTF_TemplateHelper::encode_tag<N,T,FT>();
+  }
+
+  template <int N, typename T, typename FT>
   ByFieldMicroOp<N,T,FT>::ByFieldMicroOp(ZIndexSpace<N,T> _parent_space,
 					 ZIndexSpace<N,T> _inst_space,
 					 RegionInstance _inst,
@@ -2053,6 +2105,12 @@ namespace Realm {
   // class ImageMicroOp<N,T,N2,T2>
 
   template <int N, typename T, int N2, typename T2>
+  inline /*static*/ DynamicTemplates::TagType ImageMicroOp<N,T,N2,T2>::type_tag(void)
+  {
+    return NTNT_TemplateHelper::encode_tag<N,T,N2,T2>();
+  }
+
+  template <int N, typename T, int N2, typename T2>
   ImageMicroOp<N,T,N2,T2>::ImageMicroOp(ZIndexSpace<N,T> _parent_space,
 					ZIndexSpace<N2,T2> _inst_space,
 					RegionInstance _inst,
@@ -2291,6 +2349,12 @@ namespace Realm {
   // class PreimageMicroOp<N,T,N2,T2>
 
   template <int N, typename T, int N2, typename T2>
+  inline /*static*/ DynamicTemplates::TagType PreimageMicroOp<N,T,N2,T2>::type_tag(void)
+  {
+    return NTNT_TemplateHelper::encode_tag<N,T,N2,T2>();
+  }
+
+  template <int N, typename T, int N2, typename T2>
   PreimageMicroOp<N,T,N2,T2>::PreimageMicroOp(ZIndexSpace<N,T> _parent_space,
 					 ZIndexSpace<N,T> _inst_space,
 					 RegionInstance _inst,
@@ -2447,6 +2511,12 @@ namespace Realm {
   ////////////////////////////////////////////////////////////////////////
   //
   // class UnionMicroOp<N,T>
+
+  template <int N, typename T>
+  inline /*static*/ DynamicTemplates::TagType UnionMicroOp<N,T>::type_tag(void)
+  {
+    return NT_TemplateHelper::encode_tag<N,T>();
+  }
 
   template <int N, typename T>
   UnionMicroOp<N,T>::UnionMicroOp(const std::vector<ZIndexSpace<N,T> >& _inputs)
@@ -2819,6 +2889,12 @@ namespace Realm {
   // class IntersectionMicroOp<N,T>
 
   template <int N, typename T>
+  inline /*static*/ DynamicTemplates::TagType IntersectionMicroOp<N,T>::type_tag(void)
+  {
+    return NT_TemplateHelper::encode_tag<N,T>();
+  }
+
+  template <int N, typename T>
   IntersectionMicroOp<N,T>::IntersectionMicroOp(const std::vector<ZIndexSpace<N,T> >& _inputs)
     : inputs(_inputs)
   {
@@ -2981,6 +3057,12 @@ namespace Realm {
   ////////////////////////////////////////////////////////////////////////
   //
   // class DifferenceMicroOp<N,T>
+
+  template <int N, typename T>
+  inline /*static*/ DynamicTemplates::TagType DifferenceMicroOp<N,T>::type_tag(void)
+  {
+    return NT_TemplateHelper::encode_tag<N,T>();
+  }
 
   template <int N, typename T>
   DifferenceMicroOp<N,T>::DifferenceMicroOp(ZIndexSpace<N,T> _lhs,
@@ -3221,78 +3303,121 @@ namespace Realm {
   ////////////////////////////////////////////////////////////////////////
   //
   // class RemoteMicroOpMessage
-  
-  template <int N, typename T>
-  /*static*/ void RemoteMicroOpMessage::decode_request(RequestArgs args,
-						       const void *data, size_t datalen)
+
+  template <typename NT, typename T, typename FT>
+  inline /*static*/ void RemoteMicroOpMessage::ByFieldDecoder::demux(const RequestArgs *args,
+								     const void *data,
+								     size_t datalen)
   {
     Serialization::FixedBufferDeserializer fbd(data, datalen);
+    ByFieldMicroOp<NT::N,T,FT> *uop = new ByFieldMicroOp<NT::N,T,FT>(args->sender,
+								     args->async_microop,
+								     fbd);
+    uop->dispatch(args->operation, false /*not ok to run in this thread*/);
+  }
 
-    switch(args.opcode) {
-    case PartitioningMicroOp::UOPCODE_BY_FIELD:
-      {
-	ByFieldMicroOp<N,T,int> *uop = new ByFieldMicroOp<N,T,int>(args.sender,
-								 args.async_microop,
-								 fbd);
-	uop->dispatch(args.operation, false /*not ok to run in this thread*/);
-	break;
-      }
-    case PartitioningMicroOp::UOPCODE_IMAGE:
-      {
-	ImageMicroOp<N,T,N,T> *uop = new ImageMicroOp<N,T,N,T>(args.sender,
-							       args.async_microop,
-							       fbd);
-	uop->dispatch(args.operation, false /*not ok to run in this thread*/);
-	break;
-      }
-    case PartitioningMicroOp::UOPCODE_PREIMAGE:
-      {
-	PreimageMicroOp<N,T,N,T> *uop = new PreimageMicroOp<N,T,N,T>(args.sender,
-								     args.async_microop,
+  template <typename NT, typename T, typename N2T, typename T2>
+  inline /*static*/ void RemoteMicroOpMessage::ImageDecoder::demux(const RequestArgs *args,
+								   const void *data,
+								   size_t datalen)
+  {
+    Serialization::FixedBufferDeserializer fbd(data, datalen);
+    ImageMicroOp<NT::N,T,N2T::N,T2> *uop = new ImageMicroOp<NT::N,T,N2T::N,T2>(args->sender,
+									       args->async_microop,
+									       fbd);
+    uop->dispatch(args->operation, false /*not ok to run in this thread*/);
+  }
+
+  template <typename NT, typename T, typename N2T, typename T2>
+  inline /*static*/ void RemoteMicroOpMessage::PreimageDecoder::demux(const RequestArgs *args,
+								      const void *data,
+								      size_t datalen)
+  {
+    Serialization::FixedBufferDeserializer fbd(data, datalen);
+    PreimageMicroOp<NT::N,T,N2T::N,T2> *uop = new PreimageMicroOp<NT::N,T,N2T::N,T2>(args->sender,
+										     args->async_microop,
+										     fbd);
+    uop->dispatch(args->operation, false /*not ok to run in this thread*/);
+  }
+
+  template <typename NT, typename T>
+  inline /*static*/ void RemoteMicroOpMessage::UnionDecoder::demux(const RequestArgs *args,
+								   const void *data,
+								   size_t datalen)
+  {
+    Serialization::FixedBufferDeserializer fbd(data, datalen);
+    UnionMicroOp<NT::N,T> *uop = new UnionMicroOp<NT::N,T>(args->sender,
+							   args->async_microop,
+							   fbd);
+    uop->dispatch(args->operation, false /*not ok to run in this thread*/);
+  }
+
+  template <typename NT, typename T>
+  inline /*static*/ void RemoteMicroOpMessage::IntersectionDecoder::demux(const RequestArgs *args,
+								   const void *data,
+								   size_t datalen)
+  {
+    Serialization::FixedBufferDeserializer fbd(data, datalen);
+    IntersectionMicroOp<NT::N,T> *uop = new IntersectionMicroOp<NT::N,T>(args->sender,
+									 args->async_microop,
+									 fbd);
+    uop->dispatch(args->operation, false /*not ok to run in this thread*/);
+  }
+
+  template <typename NT, typename T>
+  inline /*static*/ void RemoteMicroOpMessage::DifferenceDecoder::demux(const RequestArgs *args,
+								   const void *data,
+								   size_t datalen)
+  {
+    Serialization::FixedBufferDeserializer fbd(data, datalen);
+    DifferenceMicroOp<NT::N,T> *uop = new DifferenceMicroOp<NT::N,T>(args->sender,
+								     args->async_microop,
 								     fbd);
-	uop->dispatch(args.operation, false /*not ok to run in this thread*/);
-	break;
-      }
-    case PartitioningMicroOp::UOPCODE_UNION:
-      {
-	UnionMicroOp<N,T> *uop = new UnionMicroOp<N,T>(args.sender,
-						       args.async_microop,
-						       fbd);
-	uop->dispatch(args.operation, false /*not ok to run in this thread*/);
-	break;
-      }
-    case PartitioningMicroOp::UOPCODE_INTERSECTION:
-      {
-	IntersectionMicroOp<N,T> *uop = new IntersectionMicroOp<N,T>(args.sender,
-								     args.async_microop,
-								     fbd);
-	uop->dispatch(args.operation, false /*not ok to run in this thread*/);
-	break;
-      }
-    case PartitioningMicroOp::UOPCODE_DIFFERENCE:
-      {
-	DifferenceMicroOp<N,T> *uop = new DifferenceMicroOp<N,T>(args.sender,
-								 args.async_microop,
-								 fbd);
-	uop->dispatch(args.operation, false /*not ok to run in this thread*/);
-	break;
-      }
-    default:
-      assert(0);
-    }
+    uop->dispatch(args->operation, false /*not ok to run in this thread*/);
   }
 
   /*static*/ void RemoteMicroOpMessage::handle_request(RequestArgs args,
 						       const void *data, size_t datalen)
   {
-    log_part.info() << "received remote micro op message: dim=" << args.dim
-		    << " idxtype=" << args.idxtype << " opcode=" << args.opcode;
+    log_part.info() << "received remote micro op message: tag=" 
+		    << std::hex << args.type_tag << std::dec
+		    << " opcode=" << args.opcode;
 
-    if((args.dim == 1) && (args.idxtype == (int)sizeof(int))) {
-      decode_request<1,int>(args, data, datalen);
-      return;
+    // switch on the opcode first, since they use different numbers of template arguments
+    switch(args.opcode) {
+    case PartitioningMicroOp::UOPCODE_BY_FIELD:
+      {
+	NTF_TemplateHelper::demux<ByFieldDecoder>(args.type_tag, &args, data, datalen);
+	break;
+      }
+    case PartitioningMicroOp::UOPCODE_IMAGE:
+      {
+	NTNT_TemplateHelper::demux<ImageDecoder>(args.type_tag, &args, data, datalen);
+	break;
+      }
+    case PartitioningMicroOp::UOPCODE_PREIMAGE:
+      {
+	NTNT_TemplateHelper::demux<PreimageDecoder>(args.type_tag, &args, data, datalen);
+	break;
+      }
+    case PartitioningMicroOp::UOPCODE_UNION:
+      {
+	NT_TemplateHelper::demux<UnionDecoder>(args.type_tag, &args, data, datalen);
+	break;
+      }
+    case PartitioningMicroOp::UOPCODE_INTERSECTION:
+      {
+	NT_TemplateHelper::demux<IntersectionDecoder>(args.type_tag, &args, data, datalen);
+	break;
+      }
+    case PartitioningMicroOp::UOPCODE_DIFFERENCE:
+      {
+	NT_TemplateHelper::demux<DifferenceDecoder>(args.type_tag, &args, data, datalen);
+	break;
+      }
+    default:
+      assert(0);
     }
-    assert(0);
   }
   
   template <typename T>
@@ -3303,8 +3428,7 @@ namespace Realm {
     RequestArgs args;
 
     args.sender = gasnet_mynode();
-    args.dim = T::DIM;
-    args.idxtype = sizeof(typename T::IDXTYPE);
+    args.type_tag = T::type_tag();
     args.opcode = T::OPCODE;
     args.operation = operation;
     args.async_microop = microop.async_microop;

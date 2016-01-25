@@ -28,13 +28,19 @@
 #include "pri_queue.h"
 #include "nodeset.h"
 #include "interval_tree.h"
-
-// NOTE: all these interfaces are templated, which means partitions.cc is going
-//  to have to somehow know which ones to instantiate - we'll try to have a 
-//  Makefile-based way to control this, but right now it's hardcoded at the
-//  bottom of partitions.cc, so go there if you get link errors
+#include "dynamic_templates.h"
 
 namespace Realm {
+
+  // NOTE: all these interfaces are templated, which means partitions.cc is going
+  //  to have to somehow know which ones to instantiate - this is controlled by the
+  //  following type lists, using a bunch of helper stuff from dynamic_templates.h
+
+  typedef DynamicTemplates::IntList<1, 1> DIMCOUNTS;
+  typedef DynamicTemplates::TypeList<int>::TL DIMTYPES;
+  //typedef DynamicTemplates::IntList<1, 3> DIMCOUNTS;
+  //typedef DynamicTemplates::TypeList<int, long long>::TL DIMTYPES;
+  typedef DynamicTemplates::TypeList<int, bool>::TL FLDTYPES;
 
   class PartitioningMicroOp;
   class PartitioningOperation;
@@ -272,6 +278,8 @@ namespace Realm {
 
     static const Opcode OPCODE = UOPCODE_BY_FIELD;
 
+    static DynamicTemplates::TagType type_tag(void);
+
     ByFieldMicroOp(ZIndexSpace<N,T> _parent_space, ZIndexSpace<N,T> _inst_space,
 		   RegionInstance _inst, size_t _field_offset);
     virtual ~ByFieldMicroOp(void);
@@ -335,6 +343,8 @@ namespace Realm {
 
     static const Opcode OPCODE = UOPCODE_IMAGE;
 
+    static DynamicTemplates::TagType type_tag(void);
+
     ImageMicroOp(ZIndexSpace<N,T> _parent_space, ZIndexSpace<N2,T2> _inst_space,
 		   RegionInstance _inst, size_t _field_offset);
     virtual ~ImageMicroOp(void);
@@ -385,6 +395,8 @@ namespace Realm {
 
     static const Opcode OPCODE = UOPCODE_PREIMAGE;
 
+    static DynamicTemplates::TagType type_tag(void);
+
     PreimageMicroOp(ZIndexSpace<N,T> _parent_space, ZIndexSpace<N,T> _inst_space,
 		   RegionInstance _inst, size_t _field_offset);
     virtual ~PreimageMicroOp(void);
@@ -422,6 +434,8 @@ namespace Realm {
 
     static const Opcode OPCODE = UOPCODE_UNION;
 
+    static DynamicTemplates::TagType type_tag(void);
+
     UnionMicroOp(const std::vector<ZIndexSpace<N,T> >& _inputs);
     UnionMicroOp(ZIndexSpace<N,T> _lhs, ZIndexSpace<N,T> _rhs);
     virtual ~UnionMicroOp(void);
@@ -456,6 +470,8 @@ namespace Realm {
 
     static const Opcode OPCODE = UOPCODE_INTERSECTION;
 
+    static DynamicTemplates::TagType type_tag(void);
+
     IntersectionMicroOp(const std::vector<ZIndexSpace<N,T> >& _inputs);
     IntersectionMicroOp(ZIndexSpace<N,T> _lhs, ZIndexSpace<N,T> _rhs);
     virtual ~IntersectionMicroOp(void);
@@ -489,6 +505,8 @@ namespace Realm {
     typedef T IDXTYPE;
 
     static const Opcode OPCODE = UOPCODE_DIFFERENCE;
+
+    static DynamicTemplates::TagType type_tag(void);
 
     DifferenceMicroOp(ZIndexSpace<N,T> _lhs, ZIndexSpace<N,T> _rhs);
     virtual ~DifferenceMicroOp(void);
@@ -721,15 +739,38 @@ namespace Realm {
   struct RemoteMicroOpMessage {
     struct RequestArgs : public BaseMedium {
       gasnet_node_t sender;
-      int dim;
-      int idxtype;
+      DynamicTemplates::TagType type_tag;
       PartitioningMicroOp::Opcode opcode;
       PartitioningOperation *operation;
       AsyncMicroOp *async_microop;
     };
 
-    template <int N, typename T>
-    static void decode_request(RequestArgs args, const void *data, size_t datalen);
+    // each different type of microop needs a different demux helper because they
+    //  use differing numbers of template arguments
+    struct ByFieldDecoder {
+      template <typename NT, typename T, typename FT>
+      static void demux(const RequestArgs *args, const void *data, size_t datalen);
+    };
+    struct ImageDecoder {
+      template <typename NT, typename T, typename N2T, typename T2>
+      static void demux(const RequestArgs *args, const void *data, size_t datalen);
+    };
+    struct PreimageDecoder {
+      template <typename NT, typename T, typename N2T, typename T2>
+      static void demux(const RequestArgs *args, const void *data, size_t datalen);
+    };
+    struct UnionDecoder {
+      template <typename NT, typename T>
+      static void demux(const RequestArgs *args, const void *data, size_t datalen);
+    };
+    struct IntersectionDecoder {
+      template <typename NT, typename T>
+      static void demux(const RequestArgs *args, const void *data, size_t datalen);
+    };
+    struct DifferenceDecoder {
+      template <typename NT, typename T>
+      static void demux(const RequestArgs *args, const void *data, size_t datalen);
+    };
 
     static void handle_request(RequestArgs args, const void *data, size_t datalen);
 

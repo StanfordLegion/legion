@@ -253,7 +253,7 @@ namespace Realm {
 
     template <typename L1, typename L2>
     template <typename T1, typename T2>
-    inline /*static*/ typename ListProduct2<L1,L2>::TagType ListProduct2<L1,L2>::encode_tag(void)
+    inline /*static*/ TagType ListProduct2<L1,L2>::encode_tag(void)
     {
       return (L1::template TypeToIndex<T1>::INDEX << 8) + (L2::template TypeToIndex<T2>::INDEX);
     }
@@ -340,7 +340,7 @@ namespace Realm {
 
     template <typename L1, typename L2, typename L3>
     template <typename T1, typename T2, typename T3>
-    inline /*static*/ typename ListProduct3<L1,L2,L3>::TagType ListProduct3<L1,L2,L3>::encode_tag(void)
+    inline /*static*/ TagType ListProduct3<L1,L2,L3>::encode_tag(void)
     {
       return ((L1::template TypeToIndex<T1>::INDEX << 16) +
 	      (L2::template TypeToIndex<T2>::INDEX << 8) +
@@ -456,7 +456,7 @@ namespace Realm {
 
     template <typename L1, typename L2, typename L3, typename L4>
     template <typename T1, typename T2, typename T3, typename T4>
-    inline /*static*/ typename ListProduct4<L1,L2,L3,L4>::TagType ListProduct4<L1,L2,L3,L4>::encode_tag(void)
+    inline /*static*/ TagType ListProduct4<L1,L2,L3,L4>::encode_tag(void)
     {
       return ((L1::template TypeToIndex<T1>::INDEX << 24) +
 	      (L2::template TypeToIndex<T2>::INDEX << 16) +

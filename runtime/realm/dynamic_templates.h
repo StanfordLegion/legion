@@ -250,10 +250,10 @@ namespace Realm {
     // each helper class has several overloaded versions of the demux method to
     // support different argument lists on the TARGET
 
+    typedef unsigned TagType;
+
     template <typename L1, typename L2>
     struct ListProduct2 {
-      typedef int TagType;
-
       template <typename T1, typename T2>
       static TagType encode_tag(void);
 
@@ -294,8 +294,6 @@ namespace Realm {
 
     template <typename L1, typename L2, typename L3>
     struct ListProduct3 {
-      typedef int TagType;
-
       template <typename T1, typename T2, typename T3>
       static TagType encode_tag(void);
 
@@ -348,8 +346,6 @@ namespace Realm {
 
     template <typename L1, typename L2, typename L3, typename L4>
     struct ListProduct4 {
-      typedef int TagType;
-
       template <typename T1, typename T2, typename T3, typename T4>
       static TagType encode_tag(void);
 
