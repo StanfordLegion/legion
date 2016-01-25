@@ -36,9 +36,8 @@ namespace Realm {
   //  to have to somehow know which ones to instantiate - this is controlled by the
   //  following type lists, using a bunch of helper stuff from dynamic_templates.h
 
-  typedef DynamicTemplates::IntList<1, 1> DIMCOUNTS;
+  typedef DynamicTemplates::IntList<1, 3> DIMCOUNTS;
   typedef DynamicTemplates::TypeList<int>::TL DIMTYPES;
-  //typedef DynamicTemplates::IntList<1, 3> DIMCOUNTS;
   //typedef DynamicTemplates::TypeList<int, long long>::TL DIMTYPES;
   typedef DynamicTemplates::TypeList<int, bool>::TL FLDTYPES;
 
@@ -92,8 +91,10 @@ namespace Realm {
 
     void add_rect(const ZRect<N,T>& r);
 
+    const std::vector<ZRect<N,T> >& convert_to_vector(void);
+
     std::vector<ZRect<N,T> > as_vector;
-    std::multimap<T, ZRect<N,T> > as_mmap;
+    //std::multimap<T, ZRect<N,T> > as_mmap;
   };
 
   template <typename T>
@@ -108,7 +109,7 @@ namespace Realm {
 
     void add_rect(const ZRect<1,T>& r);
 
-    void convert_to_vector(void);
+    const std::vector<ZRect<1,T> >& convert_to_vector(void);
     void convert_to_map(void);
 
     bool is_vector;
@@ -137,7 +138,7 @@ namespace Realm {
     void set_contributor_count(int count);
 
     void contribute_nothing(void);
-    void contribute_dense_rect_list(const DenseRectangleList<N,T>& rects);
+    void contribute_dense_rect_list(const std::vector<ZRect<N,T> >& rects);
     void contribute_raw_rects(const ZRect<N,T>* rects, size_t count, bool last);
 
     // adds a microop as a waiter for valid sparsity map data - returns true
@@ -612,7 +613,7 @@ namespace Realm {
 
     virtual void set_overlap_tester(void *tester);
 
-    void provide_sparse_image(int index, const ZRect<N,T> *rects, size_t count);
+    void provide_sparse_image(int index, const ZRect<N2,T2> *rects, size_t count);
 
   protected:
     ZIndexSpace<N,T> parent;

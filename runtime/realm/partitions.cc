@@ -800,6 +800,33 @@ namespace Realm {
   //
   // class HybridRectangleList<N,T>
 
+  template <int N, typename T>
+  HybridRectangleList<N,T>::HybridRectangleList(void)
+  {}
+
+  template <int N, typename T>
+  inline void HybridRectangleList<N,T>::add_point(const ZPoint<N,T>& p)
+  {
+    as_vector.push_back(ZRect<N,T>(p, p));
+  }
+
+  template <int N, typename T>
+  inline void HybridRectangleList<N,T>::add_rect(const ZRect<N,T>& r)
+  {
+    as_vector.push_back(r);
+  }
+
+  template <int N, typename T>
+  inline const std::vector<ZRect<N,T> >& HybridRectangleList<N,T>::convert_to_vector(void)
+  {
+    return as_vector;
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class HybridRectangleList<1,T>
+
   template <typename T>
   HybridRectangleList<1,T>::HybridRectangleList(void)
     : is_vector(true)
@@ -885,22 +912,24 @@ namespace Realm {
   }
 
   template <typename T>
-  void HybridRectangleList<1,T>::convert_to_vector(void)
+  const std::vector<ZRect<1,T> >& HybridRectangleList<1,T>::convert_to_vector(void)
   {
-    if(is_vector) return;
-    assert(this->rects.empty());
-    for(typename std::map<T, T>::iterator it = as_map.begin();
-	it != as_map.end();
-	it++) {
-      ZRect<1,T> r;
-      r.lo.x = it->first;
-      r.hi.x = it->second;
-      this->rects.push_back(r);
+    if(!is_vector) {
+      assert(this->rects.empty());
+      for(typename std::map<T, T>::iterator it = as_map.begin();
+	  it != as_map.end();
+	  it++) {
+	ZRect<1,T> r;
+	r.lo.x = it->first;
+	r.hi.x = it->second;
+	this->rects.push_back(r);
+      }
+      for(size_t i = 1; i < this->rects.size(); i++)
+	assert(this->rects[i-1].hi.x < (this->rects[i].lo.x - 1));
+      as_map.clear();
+      is_vector = true;
     }
-    for(size_t i = 1; i < this->rects.size(); i++)
-      assert(this->rects[i-1].hi.x < (this->rects[i].lo.x - 1));
-    as_map.clear();
-    is_vector = true;
+    return this->rects;
   }
 
 
@@ -1099,7 +1128,7 @@ namespace Realm {
   }
 
   template <int N, typename T>
-  void SparsityMapImpl<N,T>::contribute_dense_rect_list(const DenseRectangleList<N,T>& rects)
+  void SparsityMapImpl<N,T>::contribute_dense_rect_list(const std::vector<ZRect<N,T> >& rects)
   {
     gasnet_node_t owner = ID(me).node();
 
@@ -1107,9 +1136,9 @@ namespace Realm {
       // send the data to the owner to collect
       int seq_id = fragment_assembler.get_sequence_id();
       const size_t max_to_send = cfg_max_bytes_per_packet / sizeof(ZRect<N,T>);
-      const ZRect<N,T> *rdata = &rects.rects[0];
+      const ZRect<N,T> *rdata = &rects[0];
       int seq_count = 0;
-      size_t remaining = rects.rects.size();
+      size_t remaining = rects.size();
       // send partial messages first
       while(remaining > max_to_send) {
 	RemoteSparsityContribMessage::send_request<N,T>(owner, me, seq_id, 0,
@@ -1125,7 +1154,7 @@ namespace Realm {
       return;
     }
 
-    contribute_raw_rects(&rects.rects[0], rects.rects.size(), true);
+    contribute_raw_rects(&rects[0], rects.size(), true);
   }
 
   template <int N, typename T>
@@ -1964,7 +1993,7 @@ namespace Realm {
       SparsityMapImpl<N,T> *impl = SparsityMapImpl<N,T>::lookup(it->second);
       typename std::map<FT, DenseRectangleList<N,T> *>::const_iterator it2 = rect_map.find(it->first);
       if(it2 != rect_map.end()) {
-	impl->contribute_dense_rect_list(*(it2->second));
+	impl->contribute_dense_rect_list(it2->second->rects);
 	delete it2->second;
       } else
 	impl->contribute_nothing();
@@ -2235,8 +2264,7 @@ namespace Realm {
 	SparsityMapImpl<N,T> *impl = SparsityMapImpl<N,T>::lookup(sparsity_outputs[i]);
 	typename std::map<int, HybridRectangleList<N,T> *>::const_iterator it2 = rect_map.find(i);
 	if(it2 != rect_map.end()) {
-	  it2->second->convert_to_vector();
-	  impl->contribute_dense_rect_list(*(it2->second));
+	  impl->contribute_dense_rect_list(it2->second->convert_to_vector());
 	  delete it2->second;
 	} else
 	  impl->contribute_nothing();
@@ -2283,7 +2311,7 @@ namespace Realm {
       if(!sources[i].dense()) {
 	// it's safe to add the count after the registration only because we initialized
 	//  the count to 2 instead of 1
-	bool registered = SparsityMapImpl<N,T>::lookup(sources[i].sparsity)->add_waiter(this, true /*precise*/);
+	bool registered = SparsityMapImpl<N2,T2>::lookup(sources[i].sparsity)->add_waiter(this, true /*precise*/);
 	if(registered)
 	  __sync_fetch_and_add(&wait_count, 1);
       }
@@ -2428,7 +2456,7 @@ namespace Realm {
       SparsityMapImpl<N,T> *impl = SparsityMapImpl<N,T>::lookup(sparsity_outputs[i]);
       typename std::map<int, DenseRectangleList<N,T> *>::const_iterator it2 = rect_map.find(i);
       if(it2 != rect_map.end()) {
-	impl->contribute_dense_rect_list(*(it2->second));
+	impl->contribute_dense_rect_list(it2->second->rects);
 	delete it2->second;
       } else {
 	impl->contribute_nothing();
@@ -2464,7 +2492,7 @@ namespace Realm {
       if(!targets[i].dense()) {
 	// it's safe to add the count after the registration only because we initialized
 	//  the count to 2 instead of 1
-	bool registered = SparsityMapImpl<N,T>::lookup(targets[i].sparsity)->add_waiter(this, true /*precise*/);
+	bool registered = SparsityMapImpl<N2,T2>::lookup(targets[i].sparsity)->add_waiter(this, true /*precise*/);
 	if(registered)
 	  __sync_fetch_and_add(&wait_count, 1);
       }
@@ -2643,12 +2671,168 @@ namespace Realm {
     std::cout << "]]\n";
   }
 
+  template <int N, typename T, typename BM>
+  bool try_fast_1d_union(BM& bitmask, const std::vector<ZIndexSpace<N,T> >& spaces)
+  {
+    return false;  // general case doesn't work
+  }
+
+  template <typename T, typename BM>
+  bool try_fast_1d_union(BM& bitmask, const std::vector<ZIndexSpace<1,T> >& inputs)
+  {
+    static const int N = 1;
+    // stuff
+      // even more special case where inputs.size() == 2
+      if(inputs.size() == 2) {
+	ZIndexSpaceIterator<N,T> it_lhs(inputs[0]);
+	ZIndexSpaceIterator<N,T> it_rhs(inputs[1]);
+       
+	while(it_lhs.valid && it_rhs.valid) {
+	  // if either side comes completely before the other, emit it and continue
+	  if(it_lhs.rect.hi.x < (it_rhs.rect.lo.x - 1)) {
+	    bitmask.add_rect(it_lhs.rect);
+	    it_lhs.step();
+	    continue;
+	  }
+
+	  if(it_rhs.rect.hi.x < (it_lhs.rect.lo.x - 1)) {
+	    bitmask.add_rect(it_rhs.rect);
+	    it_rhs.step();
+	    continue;
+	  }
+
+	  // new rectangle will be at least the union of these two
+	  ZRect<N,T> u = it_lhs.rect.union_bbox(it_rhs.rect);
+	  it_lhs.step();
+	  it_rhs.step();
+	  // try to consume even more
+	  while(true) {
+	    if(it_lhs.valid && (it_lhs.rect.lo.x <= (u.hi.x + 1))) {
+	      u.hi.x = std::max(u.hi.x, it_lhs.rect.hi.x);
+	      it_lhs.step();
+	      continue;
+	    }
+	    if(it_rhs.valid && (it_rhs.rect.lo.x <= (u.hi.x + 1))) {
+	      u.hi.x = std::max(u.hi.x, it_rhs.rect.hi.x);
+	      it_rhs.step();
+	      continue;
+	    }
+	    // if both fail, we're done
+	    break;
+	  }
+	  bitmask.add_rect(u);
+	}
+
+	// leftover rects from one side or the other just get added
+	while(it_lhs.valid) {
+	  bitmask.add_rect(it_lhs.rect);
+	  it_lhs.step();
+	}
+	while(it_rhs.valid) {
+	  bitmask.add_rect(it_rhs.rect);
+	  it_rhs.step();
+	}
+      } else {
+	// N-way merge
+	NWayMerge<N,T> nwm(inputs);
+	//nwm.print();
+	while(nwm.size() > 1) {
+	  //nwm.print();
+
+	  // consume rectangles off the first one until there's overlap with the next guy
+	  T lo1 = nwm[1].lo.x;
+	  if(nwm[0].hi.x < (lo1 - 1)) {
+	    while(nwm[0].hi.x < (lo1 - 1)) {
+	      bitmask.add_rect(nwm[0]);
+	      if(!nwm.step(0)) break;
+	    }
+	    nwm.update(0);
+	    continue;
+	  }
+
+	  // at least a little overlap, so start accumulating a value
+	  ZRect<N,T> u = nwm[0];
+	  nwm.step(0); nwm.update(0);
+	  while((nwm.size() > 0) && (nwm[0].lo.x <= (u.hi.x + 1))) {
+	    u.hi.x = std::max(u.hi.x, nwm[0].hi.x);
+	    nwm.step(0);
+	    nwm.update(0);
+	  }
+	  bitmask.add_rect(u);
+	}
+
+	// any stragglers?
+	if(nwm.size() > 0)
+	  do {
+	    bitmask.add_rect(nwm[0]);
+	  } while(nwm.step(0));
+#if 0
+	std::vector<ZIndexSpaceIterator<N,T> > its(inputs.size());
+	std::vector<int> order(inputs.size());
+	size_t n = 0;
+	for(size_t i = 0; i < inputs.size(); i++) {
+	  its[i].reset(inputs[i]);
+	  if(its[i].valid) {
+	    order[n] = i;
+	    T lo = its[i].rect.lo.x;
+	    for(size_t j = n; j > 0; j--)
+	      if(its[order[j-1]].rect.lo.x > lo)
+		std::swap(order[j-1], order[j]);
+	      else
+		break;
+	    n++;
+	  }
+	}
+	std::cout << "[[";
+	for(size_t i = 0; i < n; i++) std::cout << " " << i << "=" << order[i] << "=" << its[order[i]].rect;
+	std::cout << "]]\n";
+	while(n > 1) {
+	  std::cout << "[[";
+	  for(size_t i = 0; i < n; i++) std::cout << " " << i << "=" << order[i] << "=" << its[order[i]].rect;
+	  std::cout << "]]\n";
+	  // consume rectangles off the first one until there's overlap with the next guy
+	  if(its[order[0]].rect.hi.x < (its[order[1]].rect.lo.x - 1)) {
+	    while(its[order[0]].rect.hi.x < (its[order[1]].rect.lo.x - 1)) {
+	      bitmask.add_rect(its[order[0]].rect);
+	      if(!its[order[0]].step()) break;
+	    }
+	    if(its[order[0]].valid) {
+	      for(size_t j = 0; j < n - 1; j++)
+		if(its[order[j]].rect.lo.x > its[order[j+1]].rect.lo.x)
+		  std::swap(order[j], order[j+1]);
+		else
+		  break;
+	    } else {
+	      order.erase(order.begin());
+	      n--;
+	    }
+	    continue;
+	  }
+
+	  // at least some overlap, switch to consuming and appending to next guy
+	  ZRect<N,T> 
+	  break;
+	}
+
+	// whichever one is left can just emit all its remaining rectangles
+	while(its[order[0]].valid) {
+	  bitmask.add_rect(its[order[0]].rect);
+	  its[order[0]].step();
+	}
+#endif
+      }
+    return true;
+  }
+
   template <int N, typename T>
   template <typename BM>
   void UnionMicroOp<N,T>::populate_bitmask(BM& bitmask)
   {
     // special case: in 1-D, we can count on the iterators being ordered and just do an O(N)
     //  merge-union of the two streams
+    if(try_fast_1d_union<N,T>(bitmask, inputs))
+      return;
+#if 0
     if(N == 1) {
       // even more special case where inputs.size() == 2
       if(inputs.size() == 2) {
@@ -2791,6 +2975,7 @@ namespace Realm {
       }
       return;
     }
+#endif
 
     // iterate over all the inputs, adding dense (sub)rectangles first
     for(typename std::vector<ZIndexSpace<N,T> >::const_iterator it = inputs.begin();
@@ -2829,7 +3014,7 @@ namespace Realm {
     populate_bitmask(drl);
     if(sparsity_output.exists()) {
       SparsityMapImpl<N,T> *impl = SparsityMapImpl<N,T>::lookup(sparsity_output);
-      impl->contribute_dense_rect_list(drl);
+      impl->contribute_dense_rect_list(drl.rects);
     }
   }
 
@@ -2999,7 +3184,7 @@ namespace Realm {
     populate_bitmask(drl);
     if(sparsity_output.exists()) {
       SparsityMapImpl<N,T> *impl = SparsityMapImpl<N,T>::lookup(sparsity_output);
-      impl->contribute_dense_rect_list(drl);
+      impl->contribute_dense_rect_list(drl.rects);
     }
   }
 
@@ -3239,7 +3424,7 @@ namespace Realm {
     populate_bitmask(drl);
     if(sparsity_output.exists()) {
       SparsityMapImpl<N,T> *impl = SparsityMapImpl<N,T>::lookup(sparsity_output);
-      impl->contribute_dense_rect_list(drl);
+      impl->contribute_dense_rect_list(drl.rects);
     }
   }
 
@@ -3989,7 +4174,7 @@ namespace Realm {
   }
 
   template <int N, typename T, int N2, typename T2>
-  void PreimageOperation<N,T,N2,T2>::provide_sparse_image(int index, const ZRect<N,T> *rects, size_t count)
+  void PreimageOperation<N,T,N2,T2>::provide_sparse_image(int index, const ZRect<N2,T2> *rects, size_t count)
   {
     // atomically check the overlap tester's readiness and queue us if not
     bool tester_ready = false;

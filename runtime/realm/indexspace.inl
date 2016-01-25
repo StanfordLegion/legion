@@ -1096,7 +1096,8 @@ namespace Realm {
     // base offset is currently done in get_strided_access_parameters, since we're piggybacking on the
     //  old-style linearizers for now
     //base -= element_stride * alis.offset;
-    strides = element_stride * alis.strides;
+    for(int i = 0; i < N; i++)
+      strides[i] = element_stride * alis.strides[i];
 #ifdef REALM_ACCESSOR_DEBUG
     dbg_inst = inst;
     dbg_bounds = alis.dbg_bounds;
