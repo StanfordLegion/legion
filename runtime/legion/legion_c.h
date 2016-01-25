@@ -240,7 +240,11 @@ extern "C" {
    * @see LegionRuntime::HighLevel::PhaseBarrier
    */
   typedef struct legion_phase_barrier_t {
-    char object[16];
+    // From Realm::Event
+    legion_lowlevel_id_t id;
+    legion_lowlevel_event_gen_t gen;
+    // From Realm::Barrier
+    legion_lowlevel_barrier_timestamp_t timestamp;
   } legion_phase_barrier_t;
 
   /**
@@ -1418,6 +1422,8 @@ extern "C" {
   // -----------------------------------------------------------------------
 
   /**
+   * @return Caller takes ownership of return value.
+   *
    * @see LegionRuntime::HighLevel::HighLevelRuntime::create_phase_barrier()
    */
   legion_phase_barrier_t
@@ -1426,6 +1432,8 @@ extern "C" {
                               unsigned arrivals);
 
   /**
+   * @param handle Caller must have ownership of parameter `handle`.
+   *
    * @see LegionRuntime::HighLevel::PhaseBarrier::destroy_phase_barrier()
    */
   void
@@ -1434,6 +1442,8 @@ extern "C" {
                                legion_phase_barrier_t handle);
 
   /**
+   * @return Caller does **NOT** take ownership of return value.
+   *
    * @see LegionRuntime::HighLevel::HighLevelRuntime::advance_phase_barrier()
    */
   legion_phase_barrier_t

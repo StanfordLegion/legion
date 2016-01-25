@@ -529,14 +529,18 @@ namespace LegionRuntime {
       static legion_phase_barrier_t
       wrap(PhaseBarrier barrier) {
         legion_phase_barrier_t barrier_;
-        *(PhaseBarrier*)barrier_.object = barrier;
+        barrier_.id = barrier.get_barrier().id;
+        barrier_.gen = barrier.get_barrier().gen;
+        barrier_.timestamp = barrier.get_barrier().timestamp;
         return barrier_;
       }
 
       static PhaseBarrier
       unwrap(legion_phase_barrier_t barrier_) {
         PhaseBarrier barrier;
-        barrier = *(PhaseBarrier*)barrier_.object;
+        barrier.phase_barrier.id = barrier_.id;
+        barrier.phase_barrier.gen = barrier_.gen;
+        barrier.phase_barrier.timestamp = barrier_.timestamp;
         return barrier;
       }
     };
