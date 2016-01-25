@@ -922,7 +922,7 @@ namespace Realm {
   // class SparsityMapImplWrapper
 
   SparsityMapImplWrapper::SparsityMapImplWrapper(void)
-    : me((ID::IDType)-1), owner(-1), dim(0), idxtype(0), map_impl(0)
+    : me((ID::IDType)-1), owner(-1), type_tag(0), map_impl(0)
   {}
 
   void SparsityMapImplWrapper::init(ID _me, unsigned _init_owner)
@@ -934,12 +934,14 @@ namespace Realm {
   template <int N, typename T>
   /*static*/ SparsityMapImpl<N,T> *SparsityMapImplWrapper::get_or_create(SparsityMap<N,T> me)
   {
-    // set the size if it's zero and check if it's not
-    int olddim = __sync_val_compare_and_swap(&dim, 0, N);
-    assert((olddim == 0) || (olddim == N));
-    int oldtype = __sync_val_compare_and_swap(&idxtype, 0, (int)sizeof(T));
-    assert((oldtype == 0) || (oldtype == (int)sizeof(T)));
-    // now see if the pointer is valid
+    DynamicTemplates::TagType new_tag = NT_TemplateHelper::encode_tag<N,T>();
+    assert(new_tag != 0);
+
+    // try set the tag for this entry - if it's 0, we may be the first to get here
+    DynamicTemplates::TagType old_tag = __sync_val_compare_and_swap(&type_tag, 0, new_tag);
+    assert((old_tag == 0) || (old_tag == new_tag));  // better not mismatch...
+
+    // now see if the pointer is valid - the validity of the old_tag is no guarantee
     void *impl = map_impl;
     if(impl)
       return static_cast<SparsityMapImpl<N,T> *>(impl);
@@ -2162,13 +2164,13 @@ namespace Realm {
     //std::cout << "a_data = " << a_data << "\n";
 
     // double iteration - use the instance's space first, since it's probably smaller
-    for(ZIndexSpaceIterator<N,T> it(inst_space); it.valid; it.step()) {
+    for(ZIndexSpaceIterator<N2,T2> it(inst_space); it.valid; it.step()) {
       for(size_t i = 0; i < sources.size(); i++) {
-	for(ZIndexSpaceIterator<N,T> it2(sources[i], it.rect); it2.valid; it2.step()) {
+	for(ZIndexSpaceIterator<N2,T2> it2(sources[i], it.rect); it2.valid; it2.step()) {
 	  BM **bmpp = 0;
 
 	  // iterate over each point in the source and see if it points into the parent space	  
-	  for(ZPointInRectIterator<N,T> pir(it2.rect); pir.valid; pir.step()) {
+	  for(ZPointInRectIterator<N2,T2> pir(it2.rect); pir.valid; pir.step()) {
 	    ZPoint<N,T> ptr = a_data.read(pir.p);
 
 	    if(parent_space.contains(ptr)) {
@@ -2198,9 +2200,9 @@ namespace Realm {
     //std::cout << "a_data = " << a_data << "\n";
 
     // simple image operation - project ever 
-    for(ZIndexSpaceIterator<N,T> it(inst_space); it.valid; it.step()) {
+    for(ZIndexSpaceIterator<N2,T2> it(inst_space); it.valid; it.step()) {
       // iterate over each point in the source and mark what it touches
-      for(ZPointInRectIterator<N,T> pir(it.rect); pir.valid; pir.step()) {
+      for(ZPointInRectIterator<N2,T2> pir(it.rect); pir.valid; pir.step()) {
 	ZPoint<N,T> ptr = a_data.read(pir.p);
 
 	bitmask.add_point(ptr);
@@ -2247,11 +2249,11 @@ namespace Realm {
       populate_approx_bitmask(approx_rects);
 
       if(requestor == gasnet_mynode()) {
-	PreimageOperation<N,T,N2,T2> *op = reinterpret_cast<PreimageOperation<N,T,N2,T2> *>(approx_output_op);
+	PreimageOperation<N2,T2,N,T> *op = reinterpret_cast<PreimageOperation<N2,T2,N,T> *>(approx_output_op);
 	op->provide_sparse_image(approx_output_index, &approx_rects.rects[0], approx_rects.rects.size());
       } else {
-	ApproxImageResponseMessage::send_request(requestor, approx_output_op, approx_output_index,
-						 &approx_rects.rects[0], approx_rects.rects.size());
+	ApproxImageResponseMessage::send_request<N2,T2,N,T>(requestor, approx_output_op, approx_output_index,
+							    &approx_rects.rects[0], approx_rects.rects.size());
       }
     }
   }
@@ -3469,32 +3471,28 @@ namespace Realm {
   //
   // class RemoteSparsityContribMessage
 
-  template <int N, typename T>
-  /*static*/ void RemoteSparsityContribMessage::decode_request(RequestArgs args,
-							       const void *data, size_t datalen)
+  template <typename NT, typename T>
+  inline /*static*/ void RemoteSparsityContribMessage::DecodeHelper::demux(const RequestArgs *args,
+									   const void *data, size_t datalen)
   {
-    SparsityMap<N,T> sparsity;
-    sparsity.id = args.sparsity_id;
+    SparsityMap<NT::N,T> sparsity;
+    sparsity.id = args->sparsity_id;
 
     log_part.info() << "received remote contribution: sparsity=" << sparsity << " len=" << datalen;
-    size_t count = datalen / sizeof(ZRect<N,T>);
-    assert((datalen % sizeof(ZRect<N,T>)) == 0);
-    bool last_fragment = fragment_assembler.add_fragment(args.sender,
-							 args.sequence_id,
-							 args.sequence_count);
-    SparsityMapImpl<N,T>::lookup(sparsity)->contribute_raw_rects((const ZRect<N,T> *)data,
-								 count,
-								 last_fragment);
+    size_t count = datalen / sizeof(ZRect<NT::N,T>);
+    assert((datalen % sizeof(ZRect<NT::N,T>)) == 0);
+    bool last_fragment = fragment_assembler.add_fragment(args->sender,
+							 args->sequence_id,
+							 args->sequence_count);
+    SparsityMapImpl<NT::N,T>::lookup(sparsity)->contribute_raw_rects((const ZRect<NT::N,T> *)data,
+								     count,
+								     last_fragment);
   }
 
   /*static*/ void RemoteSparsityContribMessage::handle_request(RequestArgs args,
 							       const void *data, size_t datalen)
   {
-    if((args.dim == 1) && (args.idxtype == (int)sizeof(int))) {
-      decode_request<1,int>(args, data, datalen);
-      return;
-    }
-    assert(0);
+    NT_TemplateHelper::demux<DecodeHelper>(args.type_tag, &args, data, datalen);
   }
 
   template <int N, typename T>
@@ -3508,8 +3506,7 @@ namespace Realm {
     RequestArgs args;
 
     args.sender = gasnet_mynode();
-    args.dim = N;
-    args.idxtype = sizeof(T);
+    args.type_tag = NT_TemplateHelper::encode_tag<N,T>();
     args.sparsity_id = sparsity.id;
     args.sequence_id = sequence_id;
     args.sequence_count = sequence_count;
@@ -3523,23 +3520,19 @@ namespace Realm {
   //
   // class RemoteSparsityRequestMessage
 
-  template <int N, typename T>
-  /*static*/ void RemoteSparsityRequestMessage::decode_request(RequestArgs args)
+  template <typename NT, typename T>
+  inline /*static*/ void RemoteSparsityRequestMessage::DecodeHelper::demux(const RequestArgs *args)
   {
-    SparsityMap<N,T> sparsity;
-    sparsity.id = args.sparsity_id;
+    SparsityMap<NT::N,T> sparsity;
+    sparsity.id = args->sparsity_id;
 
-    log_part.info() << "received sparsity request: sparsity=" << sparsity << " precise=" << args.send_precise << " approx=" << args.send_approx;
-    SparsityMapImpl<N,T>::lookup(sparsity)->remote_data_request(args.sender, args.send_precise, args.send_approx);
+    log_part.info() << "received sparsity request: sparsity=" << sparsity << " precise=" << args->send_precise << " approx=" << args->send_approx;
+    SparsityMapImpl<NT::N,T>::lookup(sparsity)->remote_data_request(args->sender, args->send_precise, args->send_approx);
   }
 
   /*static*/ void RemoteSparsityRequestMessage::handle_request(RequestArgs args)
   {
-    if((args.dim == 1) && (args.idxtype == (int)sizeof(int))) {
-      decode_request<1,int>(args);
-      return;
-    }
-    assert(0);
+    NT_TemplateHelper::demux<DecodeHelper>(args.type_tag, &args);
   }
 
   template <int N, typename T>
@@ -3551,8 +3544,7 @@ namespace Realm {
     RequestArgs args;
 
     args.sender = gasnet_mynode();
-    args.dim = N;
-    args.idxtype = sizeof(T);
+    args.type_tag = NT_TemplateHelper::encode_tag<N,T>();
     args.sparsity_id = sparsity.id;
     args.send_precise = send_precise;
     args.send_approx = send_approx;
@@ -3565,42 +3557,37 @@ namespace Realm {
   //
   // class ApproxImageResponseMessage
   
-  template <int N, typename T>
-  /*static*/ void ApproxImageResponseMessage::decode_request(RequestArgs args,
-						       const void *data, size_t datalen)
+  template <typename NT, typename T, typename N2T, typename T2>
+  inline /*static*/ void ApproxImageResponseMessage::DecodeHelper::demux(const RequestArgs *args,
+									 const void *data, size_t datalen)
   {
-    PreimageOperation<N,T,N,T> *op = reinterpret_cast<PreimageOperation<N,T,N,T> *>(args.approx_output_op);
-    op->provide_sparse_image(args.approx_output_index,
-			     static_cast<const ZRect<N,T> *>(data),
-			     datalen / sizeof(ZRect<N,T>));
+    PreimageOperation<NT::N,T,N2T::N,T2> *op = reinterpret_cast<PreimageOperation<NT::N,T,N2T::N,T2> *>(args->approx_output_op);
+    op->provide_sparse_image(args->approx_output_index,
+			     static_cast<const ZRect<N2T::N,T2> *>(data),
+			     datalen / sizeof(ZRect<N2T::N,T2>));
   }
 
   /*static*/ void ApproxImageResponseMessage::handle_request(RequestArgs args,
 							     const void *data, size_t datalen)
   {
-    log_part.info() << "received approx image response: dim=" << args.dim
-		    << " idxtype=" << args.idxtype << " op=" << args.approx_output_op;
+    log_part.info() << "received approx image response: tag=" << std::hex << args.type_tag << std::dec
+		    << " op=" << args.approx_output_op;
 
-    if((args.dim == 1) && (args.idxtype == (int)sizeof(int))) {
-      decode_request<1,int>(args, data, datalen);
-      return;
-    }
-    assert(0);
+    NTNT_TemplateHelper::demux<DecodeHelper>(args.type_tag, &args, data, datalen);
   }
   
-  template <int N, typename T>
+  template <int N, typename T, int N2, typename T2>
   /*static*/ void ApproxImageResponseMessage::send_request(gasnet_node_t target, 
 							   intptr_t output_op, int output_index,
-							   const ZRect<N,T> *rects, size_t count)
+							   const ZRect<N2,T2> *rects, size_t count)
   {
     RequestArgs args;
 
-    args.dim = N;
-    args.idxtype = sizeof(T);
+    args.type_tag = NTNT_TemplateHelper::encode_tag<N,T,N2,T2>();
     args.approx_output_op = output_op;
     args.approx_output_index = output_index;
 
-    Message::request(target, args, rects, count * sizeof(ZRect<N,T>), PAYLOAD_COPY);
+    Message::request(target, args, rects, count * sizeof(ZRect<N2,T2>), PAYLOAD_COPY);
   }
 
 
@@ -3608,23 +3595,19 @@ namespace Realm {
   //
   // class SetContribCountMessage
 
-  template <int N, typename T>
-  /*static*/ void SetContribCountMessage::decode_request(RequestArgs args)
+  template <typename NT, typename T>
+  inline /*static*/ void SetContribCountMessage::DecodeHelper::demux(const RequestArgs *args)
   {
-    SparsityMap<N,T> sparsity;
-    sparsity.id = args.sparsity_id;
+    SparsityMap<NT::N,T> sparsity;
+    sparsity.id = args->sparsity_id;
 
-    log_part.info() << "received contributor count: sparsity=" << sparsity << " count=" << args.count;
-    SparsityMapImpl<N,T>::lookup(sparsity)->set_contributor_count(args.count);
+    log_part.info() << "received contributor count: sparsity=" << sparsity << " count=" << args->count;
+    SparsityMapImpl<NT::N,T>::lookup(sparsity)->set_contributor_count(args->count);
   }
 
   /*static*/ void SetContribCountMessage::handle_request(RequestArgs args)
   {
-    if((args.dim == 1) && (args.idxtype == (int)sizeof(int))) {
-      decode_request<1,int>(args);
-      return;
-    }
-    assert(0);
+    NT_TemplateHelper::demux<DecodeHelper>(args.type_tag, &args);
   }
 
   template <int N, typename T>
@@ -3634,8 +3617,7 @@ namespace Realm {
   {
     RequestArgs args;
 
-    args.dim = N;
-    args.idxtype = sizeof(T);
+    args.type_tag = NT_TemplateHelper::encode_tag<N,T>();
     args.sparsity_id = sparsity.id;
     args.count = count;
 
@@ -3877,7 +3859,7 @@ namespace Realm {
 
       overlap_tester->test_overlap(sources[i], overlaps_by_source, true /*approx*/);
 
-      log_part.info() << overlaps_by_source.size() << " overlaps for source " << i << "\n";
+      log_part.info() << overlaps_by_source.size() << " overlaps for source " << i;
 
       SparsityMapImpl<N,T>::lookup(images[i])->set_contributor_count(overlaps_by_source.size());
 
@@ -3981,7 +3963,7 @@ namespace Realm {
 	uop->add_input_space(targets[i]);
 
 	// in parallel, we will request the approximate images of the parent in each field
-	ImageMicroOp<N,T,N2,T2> *img = new ImageMicroOp<N,T,N2,T2>(parent,
+	ImageMicroOp<N2,T2,N,T> *img = new ImageMicroOp<N2,T2,N,T>(parent,
 								   field_data[i].index_space,
 								   field_data[i].inst,
 								   field_data[i].field_offset);

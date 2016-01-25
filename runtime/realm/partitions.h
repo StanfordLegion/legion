@@ -175,8 +175,7 @@ namespace Realm {
     ID me;
     unsigned owner;
     SparsityMapImplWrapper *next_free;
-    int dim;
-    int idxtype; // captured via sizeof(T) right now
+    DynamicTemplates::TagType type_tag;
     void *map_impl;  // actual implementation
 
     template <int N, typename T>
@@ -800,15 +799,16 @@ namespace Realm {
   struct RemoteSparsityContribMessage {
     struct RequestArgs : public BaseMedium {
       gasnet_node_t sender;
-      int dim;
-      int idxtype;
+      DynamicTemplates::TagType type_tag;
       ID::IDType sparsity_id;
       int sequence_id;
       int sequence_count;
     };
 
-    template <int N, typename T>
-    static void decode_request(RequestArgs args, const void *data, size_t datalen);
+    struct DecodeHelper {
+      template <typename NT, typename T>
+      static void demux(const RequestArgs *args, const void *data, size_t datalen);
+    };
 
     static void handle_request(RequestArgs args, const void *data, size_t datalen);
 
@@ -825,15 +825,16 @@ namespace Realm {
   struct RemoteSparsityRequestMessage {
     struct RequestArgs {
       gasnet_node_t sender;
-      int dim;
-      int idxtype;
+      DynamicTemplates::TagType type_tag;
       ID::IDType sparsity_id;
       bool send_precise;
       bool send_approx;
     };
 
-    template <int N, typename T>
-    static void decode_request(RequestArgs args);
+    struct DecodeHelper {
+      template <typename NT, typename T>
+      static void demux(const RequestArgs *args);
+    };
 
     static void handle_request(RequestArgs args);
 
@@ -848,14 +849,15 @@ namespace Realm {
 
   struct ApproxImageResponseMessage {
     struct RequestArgs : public BaseMedium {
-      int dim;
-      int idxtype;
+      DynamicTemplates::TagType type_tag;
       intptr_t approx_output_op;
       int approx_output_index;
     };
 
-    template <int N, typename T>
-    static void decode_request(RequestArgs args, const void *data, size_t datalen);
+    struct DecodeHelper {
+      template <typename NT, typename T, typename N2T, typename T2>
+      static void demux(const RequestArgs *args, const void *data, size_t datalen);
+    };
 
     static void handle_request(RequestArgs args, const void *data, size_t datalen);
 
@@ -863,21 +865,22 @@ namespace Realm {
                                        RequestArgs,
                                        handle_request> Message;
 
-    template <int N, typename T>
+    template <int N, typename T, int N2, typename T2>
     static void send_request(gasnet_node_t target, intptr_t output_op, int output_index,
-			     const ZRect<N,T> *rects, size_t count);
+			     const ZRect<N2,T2> *rects, size_t count);
   };
     
   struct SetContribCountMessage {
     struct RequestArgs {
-      int dim;
-      int idxtype;
+      DynamicTemplates::TagType type_tag;
       ID::IDType sparsity_id;
       int count;
     };
 
-    template <int N, typename T>
-    static void decode_request(RequestArgs args);
+    struct DecodeHelper {
+      template <typename NT, typename T>
+      static void demux(const RequestArgs *args);
+    };
 
     static void handle_request(RequestArgs args);
 
