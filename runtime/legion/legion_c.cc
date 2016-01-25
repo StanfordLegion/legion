@@ -2218,7 +2218,6 @@ legion_phase_barrier_create(legion_runtime_t runtime_,
   HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_);
 
-  assert(sizeof(PhaseBarrier) == sizeof(legion_phase_barrier_t));
   PhaseBarrier result = runtime->create_phase_barrier(ctx, arrivals);
   return CObjectWrapper::wrap(result);
 }
