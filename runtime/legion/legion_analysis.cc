@@ -4300,12 +4300,12 @@ namespace LegionRuntime {
       for (std::deque<std::pair<InstanceView*,bool> >::const_iterator it =
             created_instances.begin(); it != created_instances.end(); it++)
       {
-        if (!it->second)
-        {
-          if (it->first->remove_base_valid_ref(INITIAL_CREATION_REF))
-            LogicalView::delete_logical_view(it->first);
-        }
-        else
+        // Remove our reference on the view
+        if (it->first->remove_base_valid_ref(INITIAL_CREATION_REF))
+          LogicalView::delete_logical_view(it->first);
+        // If it was remote, we also have a reference to remove on 
+        // the instance manager from when it was created remotely
+        if (it->second)
         {
           PhysicalManager *manager = it->first->get_manager();
           manager->send_remote_valid_update(manager->owner_space,
@@ -4332,10 +4332,8 @@ namespace LegionRuntime {
     void PhysicalState::record_created_instance(InstanceView *view, bool remote)
     //--------------------------------------------------------------------------
     {
-      // If this is remote, it already had its valid reference added
-      // by the remote node so no need to do anything here
-      if (!remote)
-        view->add_base_valid_ref(INITIAL_CREATION_REF); 
+      // Always record an initial creation reference on this view
+      view->add_base_valid_ref(INITIAL_CREATION_REF); 
       created_instances.push_back(std::pair<InstanceView*,bool>(view,remote));
     }
 
