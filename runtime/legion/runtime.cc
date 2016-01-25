@@ -14158,9 +14158,9 @@ namespace LegionRuntime {
                                            Processor target)
     //--------------------------------------------------------------------------
     {
-      // If this is not a task directly related to shutdown, 
-      // then increment the number of outstanding tasks
-      if (tid < HLR_SHUTDOWN_ATTEMPT_TASK_ID)
+      // If this is not a task directly related to shutdown or is a message, 
+      // to a remote node then increment the number of outstanding tasks
+      if (tid < HLR_MESSAGE_ID)
         increment_total_outstanding_tasks();
       if (!target.exists())
       {
@@ -18018,7 +18018,7 @@ namespace LegionRuntime {
         default:
           assert(false); // should never get here
       }
-      if (tid < HLR_SHUTDOWN_ATTEMPT_TASK_ID)
+      if (tid < HLR_MESSAGE_ID)
         Internal::get_runtime(p)->decrement_total_outstanding_tasks();
     }
 

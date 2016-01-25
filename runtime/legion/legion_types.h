@@ -104,7 +104,6 @@ namespace LegionRuntime {
     // Enumeration of high-level runtime tasks
     enum HLRTaskID {
       HLR_SCHEDULER_ID,
-      HLR_MESSAGE_ID,
       HLR_POST_END_ID,
       HLR_DEFERRED_MAPPING_TRIGGER_ID,
       HLR_DEFERRED_RESOLUTION_TRIGGER_ID,
@@ -149,7 +148,8 @@ namespace LegionRuntime {
       HLR_FIELD_SEMANTIC_INFO_REQ_TASK_ID,
       HLR_REGION_SEMANTIC_INFO_REQ_TASK_ID,
       HLR_PARTITION_SEMANTIC_INFO_REQ_TASK_ID,
-      HLR_SHUTDOWN_ATTEMPT_TASK_ID, // These three must be before last
+      HLR_MESSAGE_ID, // These four must be last (see issue_runtime_meta_task)
+      HLR_SHUTDOWN_ATTEMPT_TASK_ID,
       HLR_SHUTDOWN_NOTIFICATION_TASK_ID,
       HLR_SHUTDOWN_RESPONSE_TASK_ID,
       HLR_LAST_TASK_ID, // This one should always be last
@@ -160,7 +160,6 @@ namespace LegionRuntime {
 #define HLR_TASK_DESCRIPTIONS(name)                               \
       const char *name[HLR_LAST_TASK_ID] = {                      \
         "Scheduler",                                              \
-        "Remote Message",                                         \
         "Post-Task Execution",                                    \
         "Deferred Mapping Trigger",                               \
         "Deferred Resolution Trigger",                            \
@@ -205,6 +204,7 @@ namespace LegionRuntime {
         "Field Semantic Request",                                 \
         "Region Semantic Request",                                \
         "Partition Semantic Request",                             \
+        "Remote Message",                                         \
         "Shutdown Attempt",                                       \
         "Shutdown Notification",                                  \
         "Shutdown Response",                                      \
