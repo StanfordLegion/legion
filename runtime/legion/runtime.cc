@@ -3948,7 +3948,8 @@ namespace LegionRuntime {
       {
 #ifdef DEBUG_SHUTDOWN_HANG
         HLR_TASK_DESCRIPTIONS(task_descs);
-        for (unsigned idx = 0; idx < runtime->outstanding_counts.size(); idx++)
+        // Only need to see tasks less than this 
+        for (unsigned idx = 0; idx < HLR_MESSAGE_ID; idx++)
         {
           if (runtime->outstanding_counts[idx] == 0)
             continue;
@@ -14600,21 +14601,20 @@ namespace LegionRuntime {
         gc_done.wait();
       ShutdownManager *local_manager = 
         new ShutdownManager(this, source, message_managers[source]);
-      // First check to see if we have any outstanding tasks
-      // which means we are definitely not done
-      if (!has_outstanding_tasks())
+      // IMPORTANT: always send messages to remote nodes
+      // so that they can begin their shutdown process which
+      // may be a pre-requisite for some of our oustanding
+      // tasks being able to run.
+      for (unsigned idx = 0; idx < MAX_NUM_NODES; idx++)
       {
-        // If we don't have any outstanding tasks then we
-        // need to figure out which managers we have
-        for (unsigned idx = 0; idx < MAX_NUM_NODES; idx++)
-        {
-          if (idx == source)
-            continue;
-          if (message_managers[idx] != NULL)
-            local_manager->add_manager(idx, message_managers[idx]);
-        }
+        if (idx == source)
+          continue;
+        if (message_managers[idx] != NULL)
+          local_manager->add_manager(idx, message_managers[idx]);
       }
-      else
+
+      // Record if we have any outstanding tasks
+      if (has_outstanding_tasks())
         local_manager->record_outstanding_tasks();
 
       // Check to see if we have any remote nodes
