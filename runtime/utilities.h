@@ -102,6 +102,36 @@ namespace LegionRuntime {
     pthread_mutex_t *mutex;
   };
 
+  // For backwards compatibility only
+  class AutoLock {
+  public:
+    AutoLock(ImmovableLock &lock)
+      : low_lock(lock)
+    {
+      low_lock.lock();
+    }
+  public:
+    AutoLock(const AutoLock &rhs)
+      : low_lock(rhs.low_lock)
+    {
+      // should never be called
+      assert(false);
+    }
+    ~AutoLock(void)
+    {
+      low_lock.unlock();
+    }
+  public:
+    AutoLock& operator=(const AutoLock &rhs)
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+  private:
+    ImmovableLock &low_lock;
+  };
+
   /**
    * A timer class for doing detailed timing analysis of applications
    * Implementation is specific to low level runtimes
