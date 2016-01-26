@@ -134,11 +134,13 @@ namespace Legion {
 
   // Forward declarations for C wrapper objects
   // legion_c_util.h
+  class TaskResult;
   class CObjectWrapper;
 
   // legion_utilities.h
   struct RegionUsage;
   class AutoLock;
+  class ImmovableAutoLock;
   class ColorPoint;
   class Serializer;
   class Deserializer;

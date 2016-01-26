@@ -2185,6 +2185,9 @@ namespace LegionRuntime {
     typedef Legion::DomainColoringSerializer DomainColoringSerializer;
     typedef Legion::Serializer Serializer;
     typedef Legion::Deserializer Deserializer;
+    typedef Legion::TaskResult TaskResult;
+    typedef Legion::CObjectWrapper CObjectWrapper;
+    typedef Legion::ImmovableAutoLock AutoLock;
     typedef Realm::Runtime RealmRuntime;
     typedef Realm::Machine Machine;
     typedef Realm::Domain Domain;
@@ -2262,7 +2265,7 @@ namespace LegionRuntime {
       PartitionProjectionTable;
     typedef void (*RealmFnptr)(const void*,size_t,
                                const void*,size_t,Processor);
-    typedef Legion::Internal::SingleTask* Context;
+    typedef Legion::Internal::SingleTask* Context; 
   };
 };
 
