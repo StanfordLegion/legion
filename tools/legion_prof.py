@@ -43,10 +43,10 @@ message_info_pat = re.compile(prefix + r'Prof Message Info (?P<mid>[0-9]+) (?P<p
 
 # Make sure this is up to date with lowlevel.h
 processor_kinds = {
-    0 : 'GPU',
-    1 : 'CPU',
-    2 : 'Utility',
-    3 : 'I/O',
+    1 : 'GPU',
+    2 : 'CPU',
+    3 : 'Utility',
+    4 : 'I/O',
 }
 
 # Make sure this is up to date with lowlevel.h

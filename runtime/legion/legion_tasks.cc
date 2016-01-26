@@ -6714,7 +6714,6 @@ namespace Legion {
             // Only need to send back the pointer to the task instance
             rez.serialize(orig_task);
             rez.serialize(applied_condition);
-            rez.serialize<size_t>(0);
             runtime->send_individual_remote_mapped(orig_proc, rez);
           }
           // Mark that we have completed mapping

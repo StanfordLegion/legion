@@ -3973,6 +3973,17 @@ namespace Legion {
       }
       else
       {
+#ifdef DEBUG_SHUTDOWN_HANG
+        HLR_TASK_DESCRIPTIONS(task_descs);
+        // Only need to see tasks less than this 
+        for (unsigned idx = 0; idx < HLR_MESSAGE_ID; idx++)
+        {
+          if (runtime->outstanding_counts[idx] == 0)
+            continue;
+          log_shutdown.info("Meta-Task %s: %d outstanding",
+                task_descs[idx], runtime->outstanding_counts[idx]);
+        }
+#endif
         // We failed, so try again
         log_shutdown.info("FAILED SHUTDOWN!  Trying again...");
         runtime->issue_runtime_shutdown_attempt();
@@ -5294,6 +5305,9 @@ namespace Legion {
           log_garbage.info("GC Source Kind %d %s", idx, reference_names[idx]);
         }
       }
+#endif
+#ifdef DEBUG_SHUTDOWN_HANG
+      outstanding_counts.resize(HLR_LAST_TASK_ID, 0);
 #endif
       // Check to see which operations we buffered before the 
       // runtime started that we now need to do
@@ -14187,10 +14201,13 @@ namespace Legion {
                                            Processor target)
     //--------------------------------------------------------------------------
     {
-      // If this is not a task directly related to shutdown, 
-      // then increment the number of outstanding tasks
-      if (tid < HLR_SHUTDOWN_ATTEMPT_TASK_ID)
+      // If this is not a task directly related to shutdown or is a message, 
+      // to a remote node then increment the number of outstanding tasks
+      if (tid < HLR_MESSAGE_ID)
         increment_total_outstanding_tasks();
+#ifdef DEBUG_SHUTDOWN_HANG
+      __sync_fetch_and_add(&outstanding_counts[tid],1);
+#endif
       if (!target.exists())
       {
         // If we don't have a processor to explicitly target, figure
@@ -14613,21 +14630,20 @@ namespace Legion {
         gc_done.wait();
       ShutdownManager *local_manager = 
         new ShutdownManager(this, source, message_managers[source]);
-      // First check to see if we have any outstanding tasks
-      // which means we are definitely not done
-      if (!has_outstanding_tasks())
+      // IMPORTANT: always send messages to remote nodes
+      // so that they can begin their shutdown process which
+      // may be a pre-requisite for some of our oustanding
+      // tasks being able to run.
+      for (unsigned idx = 0; idx < MAX_NUM_NODES; idx++)
       {
-        // If we don't have any outstanding tasks then we
-        // need to figure out which managers we have
-        for (unsigned idx = 0; idx < MAX_NUM_NODES; idx++)
-        {
-          if (idx == source)
-            continue;
-          if (message_managers[idx] != NULL)
-            local_manager->add_manager(idx, message_managers[idx]);
-        }
+        if (idx == source)
+          continue;
+        if (message_managers[idx] != NULL)
+          local_manager->add_manager(idx, message_managers[idx]);
       }
-      else
+
+      // Record if we have any outstanding tasks
+      if (has_outstanding_tasks())
         local_manager->record_outstanding_tasks();
 
       // Check to see if we have any remote nodes
@@ -18049,6 +18065,10 @@ namespace Legion {
       }
       if (tid < HLR_SHUTDOWN_ATTEMPT_TASK_ID)
         Runtime::get_runtime(p)->decrement_total_outstanding_tasks();
+#ifdef DEBUG_SHUTDOWN_HANG
+      Runtime *runtime = Runtime::get_runtime(p);
+      __sync_fetch_and_add(&runtime->outstanding_counts[tid],-1);
+#endif
     }
 
     //--------------------------------------------------------------------------

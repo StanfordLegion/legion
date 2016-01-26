@@ -2220,6 +2220,10 @@ namespace Legion {
       unsigned outstanding_top_level_tasks;
       ShutdownManager *shutdown_manager;
       Reservation shutdown_lock;
+#ifdef DEBUG_SHUTDOWN_HANG
+    public:
+      std::vector<int> outstanding_counts;
+#endif
 #ifdef SPECIALIZED_UTIL_PROCS
     public:
       const Processor cleanup_proc;

@@ -30,7 +30,7 @@ namespace Realm {
     class Event {
     public:
       typedef ::legion_lowlevel_id_t id_t;
-      typedef unsigned gen_t;
+      typedef ::legion_lowlevel_event_gen_t gen_t;
 
       id_t id;
       gen_t gen;
@@ -94,7 +94,7 @@ namespace Realm {
     //  occurs
     class Barrier : public Event {
     public:
-      typedef unsigned long long timestamp_t; // used to avoid race conditions with arrival adjustments
+      typedef ::legion_lowlevel_barrier_timestamp_t timestamp_t; // used to avoid race conditions with arrival adjustments
 
       timestamp_t timestamp;
 

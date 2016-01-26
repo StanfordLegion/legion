@@ -2032,11 +2032,17 @@ local function expr_call_setup_region_arg(
     add_field = c.legion_index_launcher_add_field
   end
 
+  local add_flags = c.legion_task_launcher_add_flags
+  if index then
+    add_flags = c.legion_index_launcher_add_flags
+  end
+
   for i, privilege in ipairs(privileges) do
     local field_paths = privilege_field_paths[i]
     local field_types = privilege_field_types[i]
     local privilege_mode = privilege_modes[i]
     local coherence_mode = coherence_modes[i]
+    local flag = std.flag_mode(flags[i])
 
     local reduction_op
     if std.is_reduction_op(privilege) then
@@ -2091,6 +2097,7 @@ local function expr_call_setup_region_arg(
                  [launcher], [requirement], [field_id], true)
              end
            end)]
+        [add_flags]([launcher], [requirement], [flag])
       end)
   end
 end
@@ -2109,7 +2116,7 @@ end
 local function setup_list_of_regions_add_region(
     cx, param_type, container_type, value_type, value,
     region, parent, field_paths, add_requirement, get_requirement,
-    add_field, has_field, requirement_args, launcher)
+    add_field, has_field, add_flags, requirement_args, flag, launcher)
   return quote
     var [region] = [raise_privilege_depth(cx, `([value].impl), param_type)]
     var [parent] = [raise_privilege_depth(cx, `([value].impl), container_type)]
@@ -2117,6 +2124,7 @@ local function setup_list_of_regions_add_region(
     if requirement == [uint32](-1) then
       requirement = [add_requirement]([requirement_args])
     end
+    [add_flags]([launcher], requirement, [flag])
     [field_paths:map(
        function(field_path)
          local field_id = cx:list_of_regions(container_type):field_id(field_path)
@@ -2132,7 +2140,7 @@ end
 local function setup_list_of_regions_add_list(
     cx, param_type, container_type, value_type, value,
     region, parent, field_paths, add_requirement, get_requirement,
-    add_field, has_field, requirement_args, launcher)
+    add_field, has_field, add_flags, requirement_args, flag, launcher)
   local element = terralib.newsymbol()
   if std.is_list(value_type.element_type) then
     return quote
@@ -2141,7 +2149,7 @@ local function setup_list_of_regions_add_list(
         [setup_list_of_regions_add_list(
            cx, param_type, container_type, value_type.element_type, element,
            region, parent, field_paths, add_requirement, get_requirement,
-           add_field, has_field, requirement_args, launcher)]
+           add_field, has_field, add_flags, requirement_args, flag, launcher)]
       end
     end
   else
@@ -2151,7 +2159,7 @@ local function setup_list_of_regions_add_list(
         [setup_list_of_regions_add_region(
            cx, param_type, container_type, value_type.element_type, element,
            region, parent, field_paths, add_requirement, get_requirement,
-           add_field, has_field, requirement_args, launcher)]
+           add_field, has_field, add_flags, requirement_args, flag, launcher)]
       end
     end
   end
@@ -2175,11 +2183,17 @@ local function expr_call_setup_list_of_regions_arg(
     assert(false)
   end
 
+  local add_flags = c.legion_task_launcher_add_flags
+  if index then
+    add_flags = c.legion_index_launcher_add_flags
+  end
+
   for i, privilege in ipairs(privileges) do
     local field_paths = privilege_field_paths[i]
     local field_types = privilege_field_types[i]
     local privilege_mode = privilege_modes[i]
     local coherence_mode = coherence_modes[i]
+    local flag = std.flag_mode(flags[i])
 
     local reduction_op
     if std.is_reduction_op(privilege) then
@@ -2237,7 +2251,7 @@ local function expr_call_setup_list_of_regions_arg(
       setup_list_of_regions_add_list(
         cx, param_type, arg_type, arg_type, list,
         region, parent, field_paths, add_requirement, get_requirement,
-        add_field, has_field, requirement_args, launcher))
+        add_field, has_field, add_flags, requirement_args, flag, launcher))
   end
 end
 
@@ -2257,6 +2271,7 @@ local function expr_call_setup_partition_arg(
     local field_types = privilege_field_types[i]
     local privilege_mode = privilege_modes[i]
     local coherence_mode = coherence_modes[i]
+    local flag = std.flag_mode(flags[i])
 
     local reduction_op
     if std.is_reduction_op(privilege) then
@@ -2301,6 +2316,7 @@ local function expr_call_setup_partition_arg(
                  [launcher], [requirement], [field_id], true)
              end
            end)]
+      c.legion_index_launcher_add_flags([launcher], [requirement], [flag])
       end)
   end
 end
