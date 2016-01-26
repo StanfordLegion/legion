@@ -5267,6 +5267,9 @@ namespace LegionRuntime {
         }
       }
 #endif
+#ifdef DEBUG_SHUTDOWN_HANG
+      outstanding_counts.resize(HLR_LAST_TASK_ID, 0);
+#endif
       // Check to see which operations we buffered before the 
       // runtime started that we now need to do
       std::deque<PendingVariantRegistration*> &pending_variants = 
@@ -14162,6 +14165,9 @@ namespace LegionRuntime {
       // to a remote node then increment the number of outstanding tasks
       if (tid < HLR_MESSAGE_ID)
         increment_total_outstanding_tasks();
+#ifdef DEBUG_SHUTDOWN_HANG
+      __sync_fetch_and_add(&outstanding_counts[tid],1);
+#endif
       if (!target.exists())
       {
         // If we don't have a processor to explicitly target, figure
@@ -18020,6 +18026,9 @@ namespace LegionRuntime {
       }
       if (tid < HLR_MESSAGE_ID)
         Internal::get_runtime(p)->decrement_total_outstanding_tasks();
+#ifdef DEBUG_SHUTDOWN_HANG
+      __sync_fetch_and_add(&outstanding_counts[tid],-1);
+#endif
     }
 
     //--------------------------------------------------------------------------
