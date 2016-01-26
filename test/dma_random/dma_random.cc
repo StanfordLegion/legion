@@ -9,10 +9,10 @@
 #include "lowlevel_impl.h"
 #include "channel.h"
 
-#define DIM_X 100
-#define DIM_Y 100
+#define DIM_X 128
+#define DIM_Y 128
 #define DIM_Z 10
-#define NUM_TEST 10
+#define NUM_TEST 100
 #define PATH_LEN 20
 #define NUM_FIELDS 5
 
@@ -227,7 +227,7 @@ void worker_task(const void *args, size_t arglen, const void *user_data, size_t 
     field_sizes.push_back(sizeof(int));
   for (unsigned i = 0; i < NUM_TEST; i++) {
     printf("Test case #%u:\n", i);
-    int dim = (i + 1) % 3 + 1;
+    int dim = 3;
     Domain domain;
     switch (dim) {
       case 0:
@@ -286,8 +286,9 @@ void worker_task(const void *args, size_t arglen, const void *user_data, size_t 
         it++;
         mem_idx--;
       }
-      block_size_vec[j] = rand() % domain.get_volume() + 1;
-      printf("node = %d, kind = %d\n", ID(*it).node(), it->kind());
+      //block_size_vec[j] = rand() % domain.get_volume() + 1;
+      block_size_vec[j] = domain.get_volume();
+      //printf("node = %d, kind = %d\n", ID(*it).node(), it->kind());
       inst_vec[j] = domain.create_instance(*it, field_sizes, block_size_vec[j]);
       assert(ID(inst_vec[j]).type() == ID::ID_INSTANCE);
       // random field order of this region instance
@@ -318,6 +319,7 @@ void worker_task(const void *args, size_t arglen, const void *user_data, size_t 
           src_fields.push_back(src_field);
           dst_fields.push_back(dst_field);
         }
+        double starttime = Realm::Clock::current_time_in_microseconds();
         Event copyEvent = domain.copy(src_fields, dst_fields, Event::NO_EVENT);
         printf("[%d]	inst[%u] {%d (%d) -> %d (%d)}: ", gasnet_mynode(), j,
                get_runtime()->get_instance_impl(inst_vec[j-1])->memory.kind(),
@@ -325,8 +327,11 @@ void worker_task(const void *args, size_t arglen, const void *user_data, size_t 
                get_runtime()->get_instance_impl(inst_vec[j])->memory.kind(),
                ID(get_runtime()->get_instance_impl(inst_vec[j])->memory).node());
         copyEvent.wait();
+        double stoptime = Realm::Clock::current_time_in_microseconds();
+        double totalsize = domain.get_volume();
+        printf("time = %.2lfus, tp = %.2lfMB/s\n", stoptime - starttime, totalsize * sizeof(int) * NUM_FIELDS / (stoptime - starttime));
         //if (verify_region_data(domain, inst_vec[j], field_order[j]))
-          printf("check passed...\n ");
+          //printf("check passed...\n ");
         //else
           //printf("check failed...\n");
       }

@@ -220,6 +220,7 @@ namespace LegionRuntime{
     public:
       GPUCompletionEvent(void) {triggered = false;}
       void request_completed(void) {triggered = true;}
+      void reset(void) {triggered = false;}
       bool has_triggered(void) {return triggered;}
     private:
       bool triggered;
@@ -1451,7 +1452,7 @@ namespace LegionRuntime{
       {
         gasnet_node_t execution_node = xd_guid >> (NODE_BITS + INDEX_BITS);
         if (execution_node == gasnet_mynode()) {
-          pthread_rwlock_rdlock(&guid_lock);
+          pthread_rwlock_wrlock(&guid_lock);
           std::map<XferDesID, XferDesWithUpdates>::iterator it = guid_to_xd.find(xd_guid);
           if (it != guid_to_xd.end()) {
             if (it->second.xd != NULL) {
@@ -1482,6 +1483,7 @@ namespace LegionRuntime{
           if (it == guid_to_xd.end()) {
             // This means this update goes slower than future updates, which marks
             // completion of xfer des (ID = xd_guid). In this case, it is safe to return
+            pthread_rwlock_unlock(&guid_lock);
             return;
           }
           assert(it != guid_to_xd.end());

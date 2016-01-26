@@ -960,26 +960,32 @@ namespace LegionRuntime {
             switch (kind) {
               case XferDes::XFER_GPU_TO_FB:
               {
+                printf("[GPUtoFBXferDes] src_start = %ld, dst_start = %ld, nbytes = %lu\n", src_start, dst_start, req_size);
                 GPUtoFBRequest* gpu_to_fb_req = (GPUtoFBRequest*) requests[idx];
                 gpu_to_fb_req->src = src_buf_base + src_start;
                 gpu_to_fb_req->dst_offset = dst_buf.alloc_offset + dst_start;
                 gpu_to_fb_req->nbytes = req_size;
+                gpu_to_fb_req->event.reset();
                 break;
               }
               case XferDes::XFER_GPU_FROM_FB:
               {
+                printf("[GPUfromFBXferDes] src_start = %ld, dst_start = %ld, nbytes = %lu\n", src_start, dst_start, req_size);
                 GPUfromFBRequest* gpu_from_fb_req = (GPUfromFBRequest*) requests[idx];
                 gpu_from_fb_req->src_offset = src_buf.alloc_offset + src_start;
                 gpu_from_fb_req->dst = dst_buf_base + dst_start;
                 gpu_from_fb_req->nbytes = req_size;
+                gpu_from_fb_req->event.reset();
                 break;
               }
               case XferDes::XFER_GPU_IN_FB:
               {
+                printf("[GPUinFBXferDes] src_start = %ld, dst_start = %ld, nbytes = %lu\n", src_start, dst_start, req_size);
                 GPUinFBRequest* gpu_in_fb_req = (GPUinFBRequest*) requests[idx];
                 gpu_in_fb_req->src_offset = src_buf.alloc_offset + src_start;
                 gpu_in_fb_req->dst_offset = dst_buf.alloc_offset + dst_start;
                 gpu_in_fb_req->nbytes = req_size;
+                gpu_in_fb_req->event.reset();
                 break;
               }
               case XferDes::XFER_GPU_PEER_FB:
@@ -989,6 +995,7 @@ namespace LegionRuntime {
                 gpu_peer_fb_req->dst_offset = dst_buf.alloc_offset + dst_start;
                 gpu_peer_fb_req->nbytes = req_size;
                 gpu_peer_fb_req->dst_gpu = dst_gpu;
+                gpu_peer_fb_req->event.reset();
                 break;
               }
               default:
@@ -1058,6 +1065,7 @@ namespace LegionRuntime {
           default:
             assert(0);
         }
+        printf("[GPU_Request_Done] dst_offset = %ld, nbytes = %lu\n", offset, size);
         simple_update_bytes_write(offset, size);
         available_reqs.push(req);
       }
@@ -1591,6 +1599,8 @@ namespace LegionRuntime {
             GPUtoFBRequest** gpu_to_fb_reqs = (GPUtoFBRequest**) requests;
             for (int i = 0; i < nr; i++) {
               //gpu_to_fb_reqs[i]->complete_event = GenEventImpl::create_genevent()->current_event();
+              // Should be deleted!!!
+              gpu_to_fb_reqs[i]->event.request_completed();
               src_gpu->copy_to_fb(gpu_to_fb_reqs[i]->dst_offset,
                                   gpu_to_fb_reqs[i]->src,
                                   gpu_to_fb_reqs[i]->nbytes,
@@ -1694,7 +1704,7 @@ namespace LegionRuntime {
             break;
           case XferDes::XFER_GPU_PEER_FB:
             while (!pending_copies.empty()) {
-              GPUinFBRequest* gpu_peer_fb_req = (GPUinFBRequest*)pending_copies.front();
+              GPUpeerFBRequest* gpu_peer_fb_req = (GPUpeerFBRequest*)pending_copies.front();
               if (gpu_peer_fb_req->event.has_triggered()) {
                 gpu_peer_fb_req->xd->notify_request_read_done(gpu_peer_fb_req);
                 gpu_peer_fb_req->xd->notify_request_write_done(gpu_peer_fb_req);
@@ -1916,6 +1926,7 @@ namespace LegionRuntime {
               // We flush all changes into destination before mark this XferDes as completed
               xd->flush();
               xd->mark_completed();
+              log_new_dma.info("Finish XferDes : id(%lx)", xd->guid);
               /*bool need_to_delete_dma_request = xd->mark_completed();
               if (need_to_delete_dma_request) {
                 DmaRequest* dma_request = xd->dma_request;
