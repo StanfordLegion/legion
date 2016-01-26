@@ -3946,6 +3946,16 @@ namespace LegionRuntime {
       }
       else
       {
+#ifdef DEBUG_SHUTDOWN_HANG
+        HLR_TASK_DESCRIPTIONS(task_descs);
+        for (unsigned idx = 0; idx < runtime->outstanding_counts.size(); idx++)
+        {
+          if (runtime->outstanding_counts[idx] == 0)
+            continue;
+          log_shutdown.info("Meta-Task %s: %d outstanding",
+                task_descs[idx], runtime->outstanding_counts[idx]);
+        }
+#endif
         // We failed, so try again
         log_shutdown.info("FAILED SHUTDOWN!  Trying again...");
         runtime->issue_runtime_shutdown_attempt();
@@ -18027,7 +18037,8 @@ namespace LegionRuntime {
       if (tid < HLR_MESSAGE_ID)
         Internal::get_runtime(p)->decrement_total_outstanding_tasks();
 #ifdef DEBUG_SHUTDOWN_HANG
-      __sync_fetch_and_add(&outstanding_counts[tid],-1);
+      Internal *runtime = Internal::get_runtime(p);
+      __sync_fetch_and_add(&runtime->outstanding_counts[tid],-1);
 #endif
     }
 

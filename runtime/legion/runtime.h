@@ -2213,6 +2213,7 @@ namespace LegionRuntime {
       ShutdownManager *shutdown_manager;
       Reservation shutdown_lock;
 #ifdef DEBUG_SHUTDOWN_HANG
+    public:
       std::vector<int> outstanding_counts;
 #endif
 #ifdef SPECIALIZED_UTIL_PROCS
