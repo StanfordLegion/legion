@@ -142,6 +142,13 @@ namespace Legion {
   }; // namespace Mapping
 }; // namespace Legion
 
+// For backwards compatibility
+namespace LegionRuntime {
+  namespace HighLevel {
+    typedef Legion::Mapping::DefaultMapper DefaultMapper;
+  };
+};
+
 #endif // __DEFAULT_MAPPER_H__
 
 // EOF

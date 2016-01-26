@@ -137,6 +137,13 @@ namespace Legion {
   };
 };
 
+// For backwards compatibility
+namespace LegionRuntime {
+  namespace HighLevel {
+    typedef Legion::Mapping::ShimMapper ShimMapper;
+  };
+};
+
 #endif // __SHIM_MAPPER_H__
 
 // EOF
