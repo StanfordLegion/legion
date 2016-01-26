@@ -19,6 +19,7 @@ local root_dir = arg[0]:match(".*/") or "./"
 local runtime_dir = root_dir .. "../../runtime/"
 local legion_dir = runtime_dir .. "legion/"
 local mapper_dir = runtime_dir .. "mappers/"
+local realm_dir = runtime_dir .. "realm/"
 local helpers_cc = root_dir .. "manual_capi_task_result_reduce.cc"
 local helpers_so = os.tmpname() .. ".so"
 local cxx = os.getenv('CXX') or 'c++'
@@ -34,7 +35,7 @@ end
 
 local cmd = (cxx .. " " .. cxx_flags .. " -I " .. runtime_dir .. " " ..
                " -I " .. mapper_dir .. " " .. " -I " .. legion_dir .. " " ..
-               helpers_cc .. " -o " .. helpers_so)
+               " -I " .. realm_dir .. " " .. helpers_cc .. " -o " .. helpers_so)
 if os.execute(cmd) ~= 0 then
   print("Error: failed to compile " .. helpers_cc)
   assert(false)

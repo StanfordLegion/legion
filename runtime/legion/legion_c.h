@@ -51,7 +51,6 @@ extern "C" {
   NEW_OPAQUE_TYPE(legion_index_space_allocator_t);
   NEW_OPAQUE_TYPE(legion_argument_map_t);
   NEW_OPAQUE_TYPE(legion_predicate_t);
-  NEW_OPAQUE_TYPE(legion_phase_barrier_t);
   NEW_OPAQUE_TYPE(legion_future_t);
   NEW_OPAQUE_TYPE(legion_future_map_t);
   NEW_OPAQUE_TYPE(legion_task_launcher_t);
@@ -236,6 +235,17 @@ extern "C" {
     bool recurse;
     bool stealable;
   } legion_domain_split_t;
+
+  /**
+   * @see LegionRuntime::HighLevel::PhaseBarrier
+   */
+  typedef struct legion_phase_barrier_t {
+    // From Realm::Event
+    legion_lowlevel_id_t id;
+    legion_lowlevel_event_gen_t gen;
+    // From Realm::Barrier
+    legion_lowlevel_barrier_timestamp_t timestamp;
+  } legion_phase_barrier_t;
 
   /**
    * Interface for a Legion C registration callback.
@@ -1424,13 +1434,15 @@ extern "C" {
   /**
    * @param handle Caller must have ownership of parameter `handle`.
    *
-   * @see LegionRuntime::HighLevel::PhaseBarrier::~PhaseBarrier()
+   * @see LegionRuntime::HighLevel::PhaseBarrier::destroy_phase_barrier()
    */
   void
-  legion_phase_barrier_destroy(legion_phase_barrier_t handle);
+  legion_phase_barrier_destroy(legion_runtime_t runtime,
+                               legion_context_t ctx,
+                               legion_phase_barrier_t handle);
 
   /**
-   * @return Caller takes ownership of return value.
+   * @return Caller does **NOT** take ownership of return value.
    *
    * @see LegionRuntime::HighLevel::HighLevelRuntime::advance_phase_barrier()
    */
@@ -1643,6 +1655,14 @@ extern "C" {
                                  bool inst /* = true */);
 
   /**
+   * @see LegionRuntime::HighLevel::RegionRequirement::add_flags()
+   */
+  void
+  legion_task_launcher_add_flags(legion_task_launcher_t launcher,
+                                 unsigned idx,
+                                 enum legion_region_flags_t flags);
+
+  /**
    * @see LegionRuntime::HighLevel::TaskLauncher::add_index_requirement()
    */
   unsigned
@@ -1783,6 +1803,14 @@ extern "C" {
                                  unsigned idx,
                                  legion_field_id_t fid,
                                  bool inst /* = true */);
+
+  /**
+   * @see LegionRuntime::HighLevel::RegionRequirement::add_flags()
+   */
+  void
+  legion_index_launcher_add_flags(legion_index_launcher_t launcher,
+                                  unsigned idx,
+                                  enum legion_region_flags_t flags);
 
   /**
    * @see LegionRuntime::HighLevel::IndexLauncher::add_index_requirement()
@@ -2594,7 +2622,7 @@ extern "C" {
   /**
    * @return Caller takes ownership of return value.
    *
-   * @see LegionRuntime::LowLevel::Machine::get_machine()
+   * @see Realm::Machine::get_machine()
    */
   legion_machine_t
   legion_machine_create();
@@ -2602,13 +2630,13 @@ extern "C" {
   /**
    * @param handle Caller must have ownership of parameter `handle`.
    *
-   * @see LegionRuntime::LowLevel::Machine::~Machine()
+   * @see Realm::Machine::~Machine()
    */
   void
   legion_machine_destroy(legion_machine_t handle);
 
   /**
-   * @see LegionRuntime::LowLevel::Machine::get_all_processors()
+   * @see Realm::Machine::get_all_processors()
    */
   void
   legion_machine_get_all_processors(
@@ -2617,7 +2645,7 @@ extern "C" {
     unsigned processors_size);
 
   /**
-   * @see LegionRuntime::LowLevel::Machine::get_all_processors()
+   * @see Realm::Machine::get_all_processors()
    */
   unsigned
   legion_machine_get_all_processors_size(legion_machine_t machine);
@@ -2627,7 +2655,7 @@ extern "C" {
   // -----------------------------------------------------------------------
 
   /**
-   * @see LegionRuntime::LowLevel::Processor::kind()
+   * @see Realm::Processor::kind()
    */
   legion_processor_kind_t
   legion_processor_kind(legion_processor_t proc_);
@@ -2637,7 +2665,7 @@ extern "C" {
   // -----------------------------------------------------------------------
 
   /**
-   * @see LegionRuntime::LowLevel::Memory::kind()
+   * @see Realm::Memory::kind()
    */
   legion_memory_kind_t
   legion_memory_kind(legion_memory_t proc_);

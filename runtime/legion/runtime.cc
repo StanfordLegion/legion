@@ -51,7 +51,7 @@ namespace LegionRuntime {
         // Have to bounce this off the Runtime because C++ is stupid 
         HighLevel::Internal::check_bounds(impl, ptr);
       }
-      void check_bounds(void *impl, const LowLevel::DomainPoint &dp)
+      void check_bounds(void *impl, const Realm::DomainPoint &dp)
       {
         // Have to bounce this off the Runtime because C++ is stupid
         HighLevel::Internal::check_bounds(impl, dp);
@@ -3423,6 +3423,12 @@ namespace LegionRuntime {
               runtime->handle_mapper_broadcast(derez);
               break;
             }
+          case SEND_TASK_IMPL_SEMANTIC_REQ:
+            {
+              runtime->handle_task_impl_semantic_request(derez, 
+                                                        remote_address_space);
+              break;
+            }
           case SEND_INDEX_SPACE_SEMANTIC_REQ:
             {
               runtime->handle_index_space_semantic_request(derez,
@@ -3457,6 +3463,12 @@ namespace LegionRuntime {
             {
               runtime->handle_logical_partition_semantic_request(derez,
                                                           remote_address_space);
+              break;
+            }
+          case SEND_TASK_IMPL_SEMANTIC_INFO:
+            {
+              runtime->handle_task_impl_semantic_info(derez,
+                                                      remote_address_space);
               break;
             }
           case SEND_INDEX_SPACE_SEMANTIC_INFO:
@@ -3548,6 +3560,31 @@ namespace LegionRuntime {
           case SEND_BACK_LOGICAL_STATE:
             {
               runtime->handle_logical_state_return(derez, remote_address_space);
+              break;
+            }
+          case SEND_VARIANT_REQUEST:
+            {
+              runtime->handle_variant_request(derez, remote_address_space);
+              break;
+            }
+          case SEND_VARIANT_RESPONSE:
+            {
+              runtime->handle_variant_response(derez);
+              break;
+            }
+          case SEND_CONSTRAINT_REQUEST:
+            {
+              runtime->handle_constraint_request(derez, remote_address_space);
+              break;
+            }
+          case SEND_CONSTRAINT_RESPONSE:
+            {
+              runtime->handle_constraint_response(derez);
+              break;
+            }
+          case SEND_CONSTRAINT_RELEASE:
+            {
+              runtime->handle_constraint_release(derez, remote_address_space);
               break;
             }
           case SEND_SHUTDOWN_NOTIFICATION:
@@ -3909,6 +3946,17 @@ namespace LegionRuntime {
       }
       else
       {
+#ifdef DEBUG_SHUTDOWN_HANG
+        HLR_TASK_DESCRIPTIONS(task_descs);
+        // Only need to see tasks less than this 
+        for (unsigned idx = 0; idx < HLR_MESSAGE_ID; idx++)
+        {
+          if (runtime->outstanding_counts[idx] == 0)
+            continue;
+          log_shutdown.info("Meta-Task %s: %d outstanding",
+                task_descs[idx], runtime->outstanding_counts[idx]);
+        }
+#endif
         // We failed, so try again
         log_shutdown.info("FAILED SHUTDOWN!  Trying again...");
         runtime->issue_runtime_shutdown_attempt();
@@ -4013,7 +4061,1029 @@ namespace LegionRuntime {
       // See if we are done
       return (__sync_add_and_fetch(&remaining, -1) == 0);
     }
-    
+
+    /////////////////////////////////////////////////////////////
+    // Pending Registrations 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    PendingVariantRegistration::PendingVariantRegistration(VariantID v,
+                                  bool has_ret, const TaskVariantRegistrar &reg,
+                                  const void *udata, size_t udata_size,
+                                  CodeDescriptor *realm, CodeDescriptor *app,
+                                  const char *task_name)
+      : vid(v), has_return(has_ret), registrar(reg), 
+        realm_desc(realm), inline_desc(app), logical_task_name(NULL)
+    //--------------------------------------------------------------------------
+    {
+      // If we're doing a pending registration, this is a static
+      // registration so we don't have to register it globally
+      registrar.global_registration = false;
+      // Make sure we own the task variant name
+      if (reg.task_variant_name != NULL)
+        registrar.task_variant_name = strdup(reg.task_variant_name);
+      // We need to own the user data too
+      if (udata != NULL)
+      {
+        user_data_size = udata_size;
+        user_data = malloc(user_data_size);
+        memcpy(user_data,udata,user_data_size);
+      }
+      else
+      {
+        user_data_size = 0;
+        user_data = NULL;
+      }
+      if (task_name != NULL)
+        logical_task_name = strdup(task_name);
+    }
+
+    //--------------------------------------------------------------------------
+    PendingVariantRegistration::PendingVariantRegistration(
+                                          const PendingVariantRegistration &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    PendingVariantRegistration::~PendingVariantRegistration(void)
+    //--------------------------------------------------------------------------
+    {
+      if (registrar.task_variant_name != NULL)
+        free(const_cast<char*>(registrar.task_variant_name));
+      if (user_data != NULL)
+        free(user_data);
+      if (logical_task_name != NULL)
+        free(logical_task_name);
+    }
+
+    //--------------------------------------------------------------------------
+    PendingVariantRegistration& PendingVariantRegistration::operator=(
+                                          const PendingVariantRegistration &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void PendingVariantRegistration::perform_registration(Internal *runtime)
+    //--------------------------------------------------------------------------
+    {
+      runtime->register_variant(registrar, user_data, user_data_size,
+                                realm_desc, inline_desc, has_return, vid);
+      // If we have a logical task name, attach the name info
+      if (logical_task_name != NULL)
+        runtime->attach_semantic_information(registrar.task_id, 
+                          NAME_SEMANTIC_TAG, logical_task_name, 
+                          strlen(logical_task_name)+1, false/*mutable*/);
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Task Impl 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    TaskImpl::TaskImpl(TaskID tid, Internal *rt, const char *name/*=NULL*/)
+      : task_id(tid), runtime(rt), task_lock(Reservation::create_reservation()), 
+        has_return_type(false), all_idempotent(false)
+    //--------------------------------------------------------------------------
+    {
+      // Always fill in semantic info 0 with a name for the task
+      if (name == NULL)
+      {
+        const size_t name_size = 64 * sizeof(char);
+        char *noname = (char*)legion_malloc(SEMANTIC_INFO_ALLOC, name_size);
+        snprintf(noname,name_size,"unnamed_task_%d", task_id);
+        semantic_infos[NAME_SEMANTIC_TAG] = 
+          SemanticInfo(noname, name_size, true/*mutable*/);
+      }
+      else
+      {
+        const size_t name_size = strlen(name) + 1; // for \0
+        char *name_copy = (char*)legion_malloc(SEMANTIC_INFO_ALLOC, name_size);
+        memcpy(name_copy, name, name_size);
+        semantic_infos[NAME_SEMANTIC_TAG] = 
+          SemanticInfo(name_copy, name_size, false/*mutable*/);
+      }
+      // Register this task with the profiler if necessary
+      if (runtime->profiler != NULL)
+      {
+        const SemanticInfo &info = semantic_infos[NAME_SEMANTIC_TAG]; 
+        const char *name = (const char*)info.buffer;
+        runtime->profiler->register_task_kind(task_id, name);
+      }
+      collection = new TaskVariantCollection(task_id, get_name(), 
+                                             false/*idempotent*/, 0);
+    }
+
+    //--------------------------------------------------------------------------
+    TaskImpl::TaskImpl(const TaskImpl &rhs)
+      : task_id(rhs.task_id), runtime(rhs.runtime)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    TaskImpl::~TaskImpl(void)
+    //-------------------------------------------------------------------------
+    {
+      task_lock.destroy_reservation();
+      task_lock = Reservation::NO_RESERVATION;
+      for (std::map<SemanticTag,SemanticInfo>::const_iterator it = 
+            semantic_infos.begin(); it != semantic_infos.end(); it++)
+      {
+        legion_free(SEMANTIC_INFO_ALLOC, it->second.buffer,
+                    it->second.size);
+      }
+      semantic_infos.clear();
+      delete collection;
+    }
+
+    //--------------------------------------------------------------------------
+    TaskImpl& TaskImpl::operator=(const TaskImpl &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void TaskImpl::add_variant(VariantImpl *impl)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(impl->owner == this);
+#endif
+      AutoLock t_lock(task_lock);
+      if (!variants.empty())
+      {
+        // Make sure that all the variants agree whether there is 
+        // a return type or not
+        if (has_return_type != impl->returns_value())
+        {
+          log_run.error("Variants of task %s (ID %d) disagree on whether "
+                        "there is a return type or not. All variants "
+                        "of a task must agree on whether there is a "
+                        "return type.", get_name(false/*need lock*/),
+                        task_id);
+#ifdef DEBUG_HIGH_LEVEL
+          assert(false);
+#endif
+          exit(ERROR_RETURN_SIZE_MISMATCH);
+        }
+        if (all_idempotent != impl->is_idempotent())
+        {
+          log_run.error("Variants of task %s (ID %d) have different idempotent "
+                        "options.  All variants of the same task must "
+                        "all be either idempotent or non-idempotent.",
+                        get_name(false/*need lock*/), task_id);
+#ifdef DEBUG_HIGH_LEVEL
+          assert(false);
+#endif
+          exit(ERROR_IDEMPOTENT_MISMATCH);
+        }
+      }
+      else
+      {
+        has_return_type = impl->returns_value();
+        all_idempotent  = impl->is_idempotent();
+      }
+      variants[impl->vid] = impl;
+      collection->add_variant(impl->vid, impl->get_processor_kind(false),
+                              true/*single*/, true/*index*/,
+                              impl->is_inner(), impl->is_leaf(), impl->vid); 
+    }
+
+    //--------------------------------------------------------------------------
+    VariantImpl* TaskImpl::find_variant_impl(VariantID variant_id)
+    //--------------------------------------------------------------------------
+    {
+      // See if we already have the variant
+      {
+        AutoLock t_lock(task_lock,1,false/*exclusive*/);
+        std::map<VariantID,VariantImpl*>::const_iterator finder = 
+          variants.find(variant_id);
+        if (finder != variants.end())
+          return finder->second;
+      }
+      // If we don't have it, see if we can go get it
+      AddressSpaceID owner_space = 
+        VariantImpl::get_owner_space(variant_id, runtime); 
+      if (owner_space == runtime->address_space)
+      {
+        log_run.error("Unable to find variant %ld of task %s!",
+                      variant_id, get_name(false));
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_UNREGISTERED_VARIANT);
+      }
+      // Send a request to the owner node for the variant
+      UserEvent wait_on = UserEvent::create_user_event(); 
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(task_id);
+        rez.serialize(variant_id);
+        rez.serialize(wait_on);
+        runtime->send_variant_request(owner_space, rez);
+      }
+      // Wait for the results
+      wait_on.wait();
+      // Now we can re-take the lock and find our variant
+      AutoLock t_lock(task_lock,1,false/*exclusive*/);
+      std::map<VariantID,VariantImpl*>::const_iterator finder = 
+        variants.find(variant_id);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(finder != variants.end());
+#endif
+      return finder->second;
+    }
+
+    //--------------------------------------------------------------------------
+    TaskVariantCollection* TaskImpl::get_collection(void)
+    //--------------------------------------------------------------------------
+    {
+      return collection;
+    }
+
+    //--------------------------------------------------------------------------
+    const char* TaskImpl::get_name(bool needs_lock /*= true*/) const
+    //--------------------------------------------------------------------------
+    {
+      if (needs_lock)
+      {
+        AutoLock t_lock(task_lock,1,false/*exclusive*/);
+        std::map<SemanticTag,SemanticInfo>::const_iterator finder = 
+          semantic_infos.find(NAME_SEMANTIC_TAG);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(finder != semantic_infos.end());
+#endif
+        return reinterpret_cast<const char*>(finder->second.buffer);
+      }
+      else
+      {
+        std::map<SemanticTag,SemanticInfo>::const_iterator finder = 
+          semantic_infos.find(NAME_SEMANTIC_TAG);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(finder != semantic_infos.end());
+#endif
+        return reinterpret_cast<const char*>(finder->second.buffer);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void TaskImpl::attach_semantic_information(SemanticTag tag,
+                                               AddressSpaceID source,
+                                               const void *buffer, size_t size,
+                                               bool is_mutable)
+    //--------------------------------------------------------------------------
+    {
+      if ((tag == NAME_SEMANTIC_TAG) && (runtime->profiler != NULL))
+        runtime->profiler->register_task_kind(task_id, (const char*)buffer);
+
+      void *local = legion_malloc(SEMANTIC_INFO_ALLOC, size);
+      memcpy(local, buffer, size);
+      if (tag == NAME_SEMANTIC_TAG)
+        collection->name = (const char*)local;
+      bool added = true;
+      UserEvent to_trigger = UserEvent::NO_USER_EVENT;
+      {
+        AutoLock t_lock(task_lock);
+        std::map<SemanticTag,SemanticInfo>::iterator finder = 
+          semantic_infos.find(tag);
+        if (finder != semantic_infos.end())
+        {
+          // Check to see if it is valid
+          if (finder->second.is_valid())
+          {
+            // See if it is mutable or not
+            if (!finder->second.is_mutable)
+            {
+              // Note mutable so check to make sure that the bits are the same
+              if (size != finder->second.size)
+              {
+                log_run.error("ERROR: Inconsistent Semantic Tag value "
+                              "for tag %ld with different sizes of %ld"
+                              " and %ld for task impl", 
+                              tag, size, finder->second.size);
+#ifdef DEBUG_HIGH_LEVEL
+                assert(false);
+#endif
+                exit(ERROR_INCONSISTENT_SEMANTIC_TAG);
+              }
+              // Otherwise do a bitwise comparison
+              {
+                const char *orig = (const char*)finder->second.buffer;
+                const char *next = (const char*)buffer;
+                for (unsigned idx = 0; idx < size; idx++)
+                {
+                  char diff = orig[idx] ^ next[idx];
+                  if (diff)
+                  {
+                    log_run.error("ERROR: Inconsistent Semantic Tag value "
+                                  "for tag %ld with different values at"
+                                  "byte %d for task impl, %x != %x",
+                                  tag, idx, orig[idx], next[idx]);
+#ifdef DEBUG_HIGH_LEVEL
+                    assert(false);
+#endif
+                    exit(ERROR_INCONSISTENT_SEMANTIC_TAG);
+                  }
+                }
+              }
+              added = false;
+            }
+            else
+            {
+              // It is mutable so just overwrite it
+              legion_free(SEMANTIC_INFO_ALLOC, 
+                          finder->second.buffer, finder->second.size);
+              finder->second.buffer = local;
+              finder->second.size = size;
+              finder->second.ready_event = UserEvent::NO_USER_EVENT;
+              finder->second.is_mutable = is_mutable;
+            }
+          }
+          else
+          {
+            finder->second.buffer = local;
+            finder->second.size = size;
+            to_trigger = finder->second.ready_event;
+            finder->second.ready_event = UserEvent::NO_USER_EVENT;
+            finder->second.is_mutable = is_mutable;
+          }
+        }
+        else
+          semantic_infos[tag] = SemanticInfo(local, size, is_mutable);
+      }
+      if (to_trigger.exists())
+        to_trigger.trigger();
+      if (added)
+      {
+        AddressSpaceID owner_space = get_owner_space();
+        // if we are not the owner and the message didn't come
+        // from the owner, then send it
+        if ((owner_space != runtime->address_space) && (source != owner_space))
+          send_semantic_info(owner_space, tag, buffer, size, is_mutable);
+      }
+      else
+        legion_free(SEMANTIC_INFO_ALLOC, local, size);
+    }
+
+    //--------------------------------------------------------------------------
+    void TaskImpl::retrieve_semantic_information(SemanticTag tag,
+                                              const void *&result, size_t &size)
+    //--------------------------------------------------------------------------
+    {
+      Event wait_on = Event::NO_EVENT;
+      {
+        AutoLock t_lock(task_lock);
+        std::map<SemanticTag,SemanticInfo>::const_iterator finder = 
+          semantic_infos.find(tag);
+        if (finder != semantic_infos.end())
+        {
+          // Already have the data so we are done
+          if (finder->second.is_valid())
+          {
+            result = finder->second.buffer;
+            size = finder->second.size;
+            return;
+          }
+          else
+            wait_on = finder->second.ready_event;
+        }
+        else
+        {
+          // Otherwise we make an event to wait on
+          UserEvent ready_event = UserEvent::create_user_event();
+          wait_on = ready_event;
+          semantic_infos[tag] = SemanticInfo(ready_event);
+        }
+      }
+      // If we are not the owner, send a request otherwise we are
+      // the owner and the information will get sent here
+      AddressSpaceID owner_space = get_owner_space();
+      if (owner_space != runtime->address_space)
+        send_semantic_request(owner_space, tag); 
+      wait_on.wait();
+      // When we wake up, we should be able to find everything
+      AutoLock t_lock(task_lock,1,false/*exclusive*/);
+      std::map<SemanticTag,SemanticInfo>::const_iterator finder = 
+        semantic_infos.find(tag);
+      if (finder == semantic_infos.end())
+      {
+        log_run.error("ERROR: invalid semantic tag %ld for "
+                            "task implementation", tag);   
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_INVALID_SEMANTIC_TAG);
+      }
+      result = finder->second.buffer;
+      size = finder->second.size;
+    }
+
+    //--------------------------------------------------------------------------
+    void TaskImpl::send_semantic_info(AddressSpaceID target, SemanticTag tag,
+                               const void *buffer, size_t size, bool is_mutable)
+    //--------------------------------------------------------------------------
+    {
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(task_id);
+        rez.serialize(tag);
+        rez.serialize(size);
+        rez.serialize(buffer, size);
+        rez.serialize(is_mutable);
+      }
+      runtime->send_task_impl_semantic_info(target, rez);
+    }
+
+    //--------------------------------------------------------------------------
+    void TaskImpl::send_semantic_request(AddressSpaceID target, SemanticTag tag)
+    //--------------------------------------------------------------------------
+    {
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(task_id);
+        rez.serialize(tag);
+      }
+      runtime->send_task_impl_semantic_request(target, rez);
+    }
+
+    //--------------------------------------------------------------------------
+    void TaskImpl::process_semantic_request(SemanticTag tag, 
+                                            AddressSpaceID target)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(get_owner_space() == runtime->address_space);
+#endif
+      Event precondition = Event::NO_EVENT;
+      void *result = NULL;
+      size_t size = 0;
+      bool is_mutable = false;
+      {
+        AutoLock t_lock(task_lock);
+        // See if we already have the data
+        std::map<SemanticTag,SemanticInfo>::iterator finder = 
+          semantic_infos.find(tag);
+        if (finder != semantic_infos.end())
+        {
+          if (finder->second.is_valid())
+          {
+            result = finder->second.buffer;
+            size = finder->second.size;
+            is_mutable = finder->second.is_mutable;
+          }
+          else
+            precondition = finder->second.ready_event;
+        }
+        else
+        {
+          // Don't have it yet, make a condition and hope that one comes
+          UserEvent ready_event = UserEvent::create_user_event();
+          precondition = ready_event;
+          semantic_infos[tag] = SemanticInfo(ready_event);
+        }
+      }
+      if (result == NULL)
+      {
+        // Defer this until the semantic condition is ready
+        SemanticRequestArgs args;
+        args.hlr_id = HLR_TASK_IMPL_SEMANTIC_INFO_REQ_TASK_ID;
+        args.proxy_this = this;
+        args.tag = tag;
+        args.source = target;
+        runtime->issue_runtime_meta_task(&args, sizeof(args),
+                      HLR_TASK_IMPL_SEMANTIC_INFO_REQ_TASK_ID,
+                      NULL/*op*/, precondition);
+      }
+      else
+        send_semantic_info(target, tag, result, size, is_mutable);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void TaskImpl::handle_semantic_request(Internal *runtime,
+                                     Deserializer &derez, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      TaskID task_id;
+      derez.deserialize(task_id);
+      SemanticTag tag;
+      derez.deserialize(tag);
+      TaskImpl *impl = runtime->find_or_create_task_impl(task_id);
+      impl->process_semantic_request(tag, source);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void TaskImpl::handle_semantic_info(Internal *runtime,
+                                     Deserializer &derez, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      TaskID task_id;
+      derez.deserialize(task_id);
+      SemanticTag tag;
+      derez.deserialize(tag);
+      size_t size;
+      derez.deserialize(size);
+      const void *buffer = derez.get_current_pointer();
+      derez.advance_pointer(size);
+      bool is_mutable;
+      derez.deserialize(is_mutable);
+      TaskImpl *impl = runtime->find_or_create_task_impl(task_id);
+      impl->attach_semantic_information(tag, source, buffer, size, is_mutable);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ AddressSpaceID TaskImpl::get_owner_space(TaskID task_id,
+                                                        Internal *runtime)
+    //--------------------------------------------------------------------------
+    {
+      return (task_id % runtime->runtime_stride);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void TaskImpl::handle_variant_request(Internal *runtime,
+                                     Deserializer &derez, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez); 
+      TaskID task_id;
+      derez.deserialize(task_id);
+      VariantID variant_id;
+      derez.deserialize(variant_id);
+      UserEvent done_event;
+      derez.deserialize(done_event);
+      TaskImpl *task_impl = runtime->find_task_impl(task_id);
+      VariantImpl *var_impl = task_impl->find_variant_impl(variant_id);
+      var_impl->send_variant_response(source, done_event);
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Variant Impl 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    VariantImpl::VariantImpl(Internal *rt, VariantID v, TaskImpl *own, 
+                           const TaskVariantRegistrar &registrar, bool ret,
+                           CodeDescriptor *realm, CodeDescriptor *app,
+                           const void *udata /*=NULL*/, size_t udata_size/*=0*/)
+      : vid(v), owner(own), runtime(rt), global(registrar.global_registration),
+        has_return_value(ret), realm_descriptor(realm), inline_descriptor(app), 
+        execution_constraints(registrar.execution_constraints),
+        layout_constraints(registrar.layout_constraints),
+        user_data_size(udata_size), leaf_variant(registrar.leaf_variant), 
+        inner_variant(registrar.inner_variant),
+        idempotent_variant(registrar.idempotent_variant)
+    //--------------------------------------------------------------------------
+    { 
+      if (udata != NULL)
+      {
+        user_data = malloc(user_data_size);
+        memcpy(user_data, udata, user_data_size);
+      }
+      else
+        user_data = NULL;
+      // Perform the registration
+      Realm::ProfilingRequestSet profiling_requests;
+      ready_event = Processor::register_task_by_kind(
+          get_processor_kind(true), false/*global*/, vid, *realm_descriptor,
+          profiling_requests, user_data, user_data_size);
+      // If we have a variant name, then record it
+      if (registrar.task_variant_name == NULL)
+      {
+        variant_name = (char*)malloc(64*sizeof(char));
+        snprintf(variant_name,64,"unnamed_variant_%ld", vid);
+      }
+      else
+        variant_name = strdup(registrar.task_variant_name);
+      // register this with the runtime profiler if we have to
+      if (runtime->profiler != NULL)
+        runtime->profiler->register_task_variant(vid, variant_name);
+      // Check that global registration has portable implementations
+      if (global && (!realm_descriptor->has_portable_implementations() ||
+                     !inline_descriptor->has_portable_implementations()))
+      {
+        log_run.error("Variant %s requested global registration without "
+                      "a portable implementation.", variant_name);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_ILLEGAL_GLOBAL_VARIANT_REGISTRATION);
+      }
+      if (leaf_variant && inner_variant)
+      {
+        log_run.error("Task variant %s (ID %ld) of task %s (ID %d) is not "
+                      "permitted to be both inner and leaf tasks "
+                      "simultaneously.", variant_name, vid,
+                      owner->get_name(), owner->task_id);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_INNER_LEAF_MISMATCH);
+      }
+      if (Internal::record_registration)
+        log_run.print("Task variant %s of task %s (ID %d) has Realm ID %ld",
+                      variant_name, owner->get_name(), owner->task_id, vid);
+    }
+
+    //--------------------------------------------------------------------------
+    VariantImpl::VariantImpl(const VariantImpl &rhs) 
+      : vid(rhs.vid), owner(rhs.owner), runtime(rhs.runtime), 
+        global(rhs.global), has_return_value(rhs.has_return_value),
+        realm_descriptor(rhs.realm_descriptor), 
+        inline_descriptor(rhs.inline_descriptor)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    VariantImpl::~VariantImpl(void)
+    //--------------------------------------------------------------------------
+    {
+      delete realm_descriptor;
+      delete inline_descriptor;
+      if (user_data != NULL)
+        free(user_data);
+      if (variant_name != NULL)
+        free(variant_name);
+    }
+
+    //--------------------------------------------------------------------------
+    VariantImpl& VariantImpl::operator=(const VariantImpl &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    Event VariantImpl::dispatch_task(Processor target, SingleTask *task, 
+                                     Event precondition, int priority, 
+                                     Realm::ProfilingRequestSet &requests)
+    //--------------------------------------------------------------------------
+    {
+      // Add any profiling requests
+      if (runtime->profiler != NULL)
+        runtime->profiler->add_task_request(requests, vid, task);
+      // Increment the number of outstanding tasks
+      runtime->increment_total_outstanding_tasks();
+      // If our ready event hasn't triggered, include it in the precondition
+      if (!ready_event.has_triggered())
+        return target.spawn(vid, &task, sizeof(task), requests,
+                  Event::merge_events(precondition, ready_event), priority);
+      return target.spawn(vid, &task, sizeof(task), requests, 
+                          precondition, priority);
+    }
+
+    //--------------------------------------------------------------------------
+    void VariantImpl::dispatch_inline(Processor current, Task *task)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(inline_descriptor != NULL);
+#endif
+      const Realm::FunctionPointerImplementation *fp_impl = 
+        inline_descriptor->find_impl<Realm::FunctionPointerImplementation>();
+#ifdef DEBUG_HIGH_LEVEL
+      assert(fp_impl != NULL);
+#endif
+      RealmFnptr inline_ptr = fp_impl->get_impl<RealmFnptr>();
+      (*inline_ptr)(&task, sizeof(task), user_data, user_data_size, current);
+    }
+
+    //--------------------------------------------------------------------------
+    Processor::Kind VariantImpl::get_processor_kind(bool warn) const
+    //--------------------------------------------------------------------------
+    {
+      const ProcessorConstraint &constraint = 
+                                  execution_constraints.processor_constraint;
+      if (constraint.is_valid())
+        return constraint.get_kind();
+      if (warn)
+        log_run.warning("WARNING: NO PROCESSOR CONSTRAINT SPECIFIED FOR VARIANT"
+                        " %s (ID %ld) OF TASK %s (ID %d)! ASSUMING LOC_PROC!",
+                      variant_name, vid, owner->get_name(false),owner->task_id);
+      return Processor::LOC_PROC;
+    }
+
+    //--------------------------------------------------------------------------
+    void VariantImpl::send_variant_response(AddressSpaceID target, Event done)
+    //--------------------------------------------------------------------------
+    {
+      if (!global)
+      {
+        log_run.error("Illegal remote use of variant %s of task %s "
+                      "which was not globally registered.",
+                      variant_name, owner->get_name());
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_ILLEGAL_USE_OF_NON_GLOBAL_VARIANT);
+      }
+      // Package up this variant and send it over to the target 
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(owner->task_id);
+        rez.serialize(vid);
+        rez.serialize(has_return_value);
+        // pack the code descriptors 
+        Realm::Serialization::ByteCountSerializer counter;
+        realm_descriptor->serialize(counter, true/*portable*/);
+        inline_descriptor->serialize(counter, true/*portable*/);
+        const size_t impl_size = counter.bytes_used();
+        rez.serialize(impl_size);
+        {
+          Realm::Serialization::FixedBufferSerializer 
+            serializer(rez.reserve_bytes(impl_size), impl_size);
+          realm_descriptor->serialize(serializer, true/*portable*/);
+          inline_descriptor->serialize(serializer, true/*portable*/);
+        }
+        rez.serialize(user_data_size);
+        if (user_data_size > 0)
+          rez.serialize(user_data, user_data_size);
+        rez.serialize(leaf_variant);
+        rez.serialize(inner_variant);
+        rez.serialize(idempotent_variant);
+        size_t name_size = strlen(variant_name)+1;
+        rez.serialize(variant_name, name_size);
+        // Pack the constraints
+        execution_constraints.serialize(rez);
+        layout_constraints.serialize(rez);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ AddressSpaceID VariantImpl::get_owner_space(VariantID vid,
+                                                           Internal *runtime)
+    //--------------------------------------------------------------------------
+    {
+      return (vid % runtime->address_space);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void VariantImpl::handle_variant_response(Internal *runtime,
+                                                         Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      TaskID task_id;
+      derez.deserialize(task_id);
+      TaskVariantRegistrar registrar(task_id);
+      VariantID variant_id;
+      derez.deserialize(variant_id);
+      bool has_return;
+      derez.deserialize(has_return);
+      size_t impl_size;
+      derez.deserialize(impl_size);
+      Realm::Serialization::FixedBufferDeserializer
+        deserializer(derez.get_current_pointer(), impl_size);
+      derez.advance_pointer(impl_size);
+      CodeDescriptor *realm_desc = new CodeDescriptor();
+      realm_desc->deserialize(deserializer);
+      CodeDescriptor *inline_desc = new CodeDescriptor();
+      inline_desc->deserialize(deserializer);
+      size_t user_data_size;
+      derez.deserialize(user_data_size);
+      const void *user_data = derez.get_current_pointer();
+      derez.advance_pointer(user_data_size);
+      derez.deserialize(registrar.leaf_variant);
+      derez.deserialize(registrar.inner_variant);
+      derez.deserialize(registrar.idempotent_variant);
+      // The last thing will be the name
+      registrar.task_variant_name = (const char*)derez.get_current_pointer();
+      size_t name_size = strlen(registrar.task_variant_name)+1;
+      derez.advance_pointer(name_size);
+      // Unpack the constraints
+      registrar.execution_constraints.deserialize(derez);
+      registrar.layout_constraints.deserialize(derez);
+      // Ask the runtime to perform the registration 
+      runtime->register_variant(registrar, user_data, user_data_size,
+                                realm_desc, inline_desc, has_return,variant_id);
+
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Layout Constraints 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    LayoutConstraints::LayoutConstraints(LayoutConstraintID id, Internal *rt,
+                                     const LayoutConstraintRegistrar &registrar)
+      : LayoutConstraintSet(registrar.layout_constraints), layout_id(id), 
+        runtime(rt), handle(registrar.handle), ready_event(Event::NO_EVENT),
+        layout_lock(Reservation::create_reservation())
+    //--------------------------------------------------------------------------
+    {
+      if (registrar.layout_name == NULL)
+      {
+        constraints_name = (char*)malloc(64*sizeof(char));
+        snprintf(constraints_name,64,"layout constraints %ld", layout_id);
+      }
+      else
+        constraints_name = strdup(registrar.layout_name);
+    }
+
+    //--------------------------------------------------------------------------
+    LayoutConstraints::LayoutConstraints(LayoutConstraintID id, Internal *rt)
+      : layout_id(id), runtime(rt), constraints_name(NULL),
+        layout_lock(Reservation::create_reservation())
+    //--------------------------------------------------------------------------
+    {
+      // Make a user event for the result and send the request
+      UserEvent done_event = UserEvent::create_user_event();
+      // Save the done event as the ready event
+      ready_event = done_event;
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(layout_id);
+        rez.serialize(done_event);
+      }
+      AddressSpaceID target = get_owner();
+      runtime->send_constraint_request(target, rez);
+    }
+
+    //--------------------------------------------------------------------------
+    LayoutConstraints::LayoutConstraints(const LayoutConstraints &rhs)
+      : layout_id(rhs.layout_id), runtime(rhs.runtime)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    LayoutConstraints::~LayoutConstraints(void)
+    //--------------------------------------------------------------------------
+    {
+      if (constraints_name != NULL)
+        free(constraints_name);
+      layout_lock.destroy_reservation();
+      layout_lock = Reservation::NO_RESERVATION;
+    }
+
+    //--------------------------------------------------------------------------
+    LayoutConstraints& LayoutConstraints::operator=(const LayoutConstraints &rh)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void LayoutConstraints::ReleaseFunctor::apply(AddressSpaceID target)
+    //--------------------------------------------------------------------------
+    {
+      if (target != to_skip)
+        runtime->send_constraint_release(target, rez);
+    }
+
+    //--------------------------------------------------------------------------
+    void LayoutConstraints::release_constraints(AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      const AddressSpaceID owner = get_owner();
+      // See if this is the owner node or not 
+      if (owner == runtime->address_space)
+      {
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(layout_id);
+        }
+        ReleaseFunctor functor(rez, source, runtime);
+        remote_instances.map(functor);
+      }
+      else if (source != owner)
+      {
+        // Send notification to the owner to do the release
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(layout_id);
+        }
+        runtime->send_constraint_release(owner, rez);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void LayoutConstraints::send_constraints(AddressSpaceID target,
+                                             UserEvent done_event)
+    //--------------------------------------------------------------------------
+    {
+      // Hold our lock when updating our se of remote instances
+      {
+        AutoLock l_lock(layout_lock);
+        remote_instances.add(target);
+      }
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(layout_id);
+        rez.serialize(handle);
+        size_t name_len = strlen(constraints_name)+1;
+        rez.serialize(name_len);
+        rez.serialize(constraints_name, name_len);
+        // pack the constraints
+        serialize(rez);   
+        // pack the done events
+        rez.serialize(done_event);
+      }
+      runtime->send_constraint_response(target, rez);
+    }
+
+    //--------------------------------------------------------------------------
+    void LayoutConstraints::update_constraints(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      // Unpack the constraints
+      derez.deserialize(handle);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(constraints_name == NULL);
+#endif
+      size_t name_len;
+      derez.deserialize(name_len);
+      constraints_name = (char*)malloc(name_len);
+      derez.deserialize(constraints_name, name_len);
+      // unpack the constraints
+      deserialize(derez); 
+      // Then trigger the event
+      UserEvent done_event;
+      derez.deserialize(done_event);
+      done_event.trigger();
+    }
+
+    //--------------------------------------------------------------------------
+    AddressSpaceID LayoutConstraints::get_owner(void) const
+    //--------------------------------------------------------------------------
+    {
+      return get_owner(layout_id, runtime);
+    }
+
+    //--------------------------------------------------------------------------
+    AddressSpaceID LayoutConstraints::get_owner(LayoutConstraintID layout_id,
+                                                Internal *runtime)
+    //--------------------------------------------------------------------------
+    {
+      return (layout_id % runtime->runtime_stride);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void LayoutConstraints::process_request(Internal *runtime,
+                                     Deserializer &derez, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      LayoutConstraintID lay_id;
+      derez.deserialize(lay_id);
+      UserEvent done_event;
+      derez.deserialize(done_event);
+      LayoutConstraints *constraints = runtime->find_layout_constraints(lay_id);
+      constraints->send_constraints(source, done_event); 
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void LayoutConstraints::process_response(Internal *runtime,
+                                                        Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      LayoutConstraintID lay_id;
+      derez.deserialize(lay_id);
+      LayoutConstraints *constraints = runtime->find_layout_constraints(lay_id);
+      constraints->update_constraints(derez);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void LayoutConstraints::process_release(Internal *runtime,
+                                     Deserializer &derez, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      LayoutConstraintID lay_id;
+      derez.deserialize(lay_id);
+      runtime->release_layout(lay_id, source);
+    }
+
     /////////////////////////////////////////////////////////////
     // Legion Runtime 
     /////////////////////////////////////////////////////////////
@@ -4039,6 +5109,8 @@ namespace LegionRuntime {
         memory_manager_lock(Reservation::create_reservation()),
         message_manager_lock(Reservation::create_reservation()),
         proc_spaces(processor_spaces),
+        task_variant_lock(Reservation::create_reservation()),
+        layout_constraints_lock(Reservation::create_reservation()),
         mapper_info_lock(Reservation::create_reservation()),
         unique_index_space_id((unique == 0) ? runtime_stride : unique),
         unique_index_partition_id((unique == 0) ? runtime_stride : unique), 
@@ -4047,6 +5119,8 @@ namespace LegionRuntime {
         unique_region_tree_id((unique == 0) ? runtime_stride : unique),
         unique_operation_id((unique == 0) ? runtime_stride : unique),
         unique_field_id((unique == 0) ? runtime_stride : unique),
+        unique_variant_id((unique == 0) ? runtime_stride : unique),
+        unique_constraint_id((unique == 0) ? runtime_stride : unique),
         available_lock(Reservation::create_reservation()), total_contexts(0),
         group_lock(Reservation::create_reservation()),
         distributed_id_lock(Reservation::create_reservation()),
@@ -4194,25 +5268,6 @@ namespace LegionRuntime {
         HLR_MESSAGE_DESCRIPTIONS(hlr_message_descriptions);
         profiler->record_message_kinds(hlr_message_descriptions,LAST_SEND_KIND);
 #endif
-        // We also have to register any statically registered task
-        // variants here since the profiler didn't exist before
-        const std::map<Processor::TaskFuncID,TaskVariantCollection*> 
-          &collections = Internal::get_collection_table();
-        for (std::map<Processor::TaskFuncID,TaskVariantCollection*>::
-              const_iterator cit = collections.begin(); cit != 
-              collections.end(); cit++) 
-        {
-          const std::map<VariantID,TaskVariantCollection::Variant> 
-            &variants = cit->second->variants;  
-          profiler->register_task_kind(cit->first, cit->second->name);
-          for (std::map<VariantID,TaskVariantCollection::Variant>::
-                const_iterator it = variants.begin(); it != 
-                variants.end(); it++)
-          {
-            profiler->register_task_variant(cit->second->name,
-                                            it->second);
-          }
-        }
       }
 #ifdef LEGION_GC
       {
@@ -4223,6 +5278,50 @@ namespace LegionRuntime {
         }
       }
 #endif
+#ifdef DEBUG_SHUTDOWN_HANG
+      outstanding_counts.resize(HLR_LAST_TASK_ID, 0);
+#endif
+      // Check to see which operations we buffered before the 
+      // runtime started that we now need to do
+      std::deque<PendingVariantRegistration*> &pending_variants = 
+        get_pending_variant_table();
+      const size_t num_static_variants = 
+        TASK_ID_AVAILABLE + pending_variants.size();
+      if (!pending_variants.empty())
+      {
+        for (std::deque<PendingVariantRegistration*>::const_iterator it =
+              pending_variants.begin(); it != pending_variants.end(); it++)
+        {
+          (*it)->perform_registration(this);
+          delete *it;
+        }
+        pending_variants.clear();
+      }
+      // All the runtime instances registered the static variants
+      // starting at 1 and counting by 1, so just increment our
+      // unique_variant_id until it is greater than the
+      // number of static variants, no need to use atomics
+      // here since we are still initializing the runtime
+      while (unique_variant_id <= num_static_variants)
+        unique_variant_id += runtime_stride;
+      // Register any pending constraint sets
+      std::map<LayoutConstraintID,LayoutConstraintRegistrar> 
+        &pending_constraints = get_pending_constraint_table();
+      if (!pending_constraints.empty())
+      {
+        // Update the next available constraint
+        while (pending_constraints.find(unique_constraint_id) !=
+                pending_constraints.end())
+          unique_constraint_id += runtime_stride;
+        // Now do the registrations
+        for (std::map<LayoutConstraintID,LayoutConstraintRegistrar>::
+              const_iterator it = pending_constraints.begin(); 
+              it != pending_constraints.end(); it++)
+        {
+          register_layout(it->second, it->first);
+        }
+        pending_constraints.clear();
+      } 
 
       // Before launching the top level task, see if the user requested
       // a callback to be performed before starting the application
@@ -4576,6 +5675,28 @@ namespace LegionRuntime {
       available_timing_ops.clear();
       timing_op_lock.destroy_reservation();
       timing_op_lock = Reservation::NO_RESERVATION;
+      for (std::map<TaskID,TaskImpl*>::const_iterator it = 
+            task_table.begin(); it != task_table.end(); it++)
+      {
+        legion_delete(it->second);
+      }
+      task_table.clear();
+      for (std::deque<VariantImpl*>::const_iterator it = 
+            variant_table.begin(); it != variant_table.end(); it++)
+      {
+        legion_delete(*it);
+      }
+      variant_table.clear();
+      task_variant_lock.destroy_reservation();
+      task_variant_lock = Reservation::NO_RESERVATION;
+      for (std::map<LayoutConstraintID,LayoutConstraints*>::const_iterator
+            it = layout_constraints_table.begin(); it != 
+            layout_constraints_table.end(); it++)
+      {
+        legion_delete(it->second);
+      }
+      layout_constraints_lock.destroy_reservation();
+      layout_constraints_lock = Reservation::NO_RESERVATION;
 
       delete forest;
 
@@ -4769,8 +5890,8 @@ namespace LegionRuntime {
       if (legion_spy_enabled)
         LegionSpy::log_top_index_space(handle.id);
 
-      LowLevel::IndexSpace space = 
-                      LowLevel::IndexSpace::create_index_space(max_num_elmts);
+      Realm::IndexSpace space = 
+                      Realm::IndexSpace::create_index_space(max_num_elmts);
       forest->create_index_space(handle, Domain(space), 
                                  UNSTRUCTURED_KIND, MUTABLE);
       ctx->register_index_space_creation(handle);
@@ -5005,7 +6126,7 @@ namespace LegionRuntime {
       for (std::map<DomainPoint,ColoredPoints<ptr_t> >::const_iterator it = 
             coloring.begin(); it != coloring.end(); it++)
       {
-        LowLevel::ElementMask child_mask(num_elmts);
+        Realm::ElementMask child_mask(num_elmts);
         const ColoredPoints<ptr_t> &pcoloring = it->second;
         for (std::set<ptr_t>::const_iterator pit = pcoloring.points.begin();
               pit != pcoloring.points.end(); pit++)
@@ -5017,8 +6138,8 @@ namespace LegionRuntime {
         {
           child_mask.enable(pit->first.value, pit->second - pit->first + 1);
         }
-        LowLevel::IndexSpace child_space = 
-          LowLevel::IndexSpace::create_index_space(
+        Realm::IndexSpace child_space = 
+          Realm::IndexSpace::create_index_space(
                           parent_dom.get_index_space(), child_mask, allocable);
         new_index_spaces[it->first] = Domain(child_space);
       }
@@ -5092,7 +6213,7 @@ namespace LegionRuntime {
         parent_dom.get_index_space().get_valid_mask().get_first_element();
       for (GenericPointInRectIterator<1> pir(color_range); pir; pir++)
       {
-        LowLevel::ElementMask child_mask(num_elmts, first_element);
+        Realm::ElementMask child_mask(num_elmts, first_element);
         Color c = pir.p;
         std::map<Color,ColoredPoints<ptr_t> >::const_iterator finder = 
           coloring.find(c);
@@ -5113,12 +6234,12 @@ namespace LegionRuntime {
         }
         // Now make the index space and save the information
 #ifdef ASSUME_UNALLOCABLE
-        LowLevel::IndexSpace child_space = 
-          LowLevel::IndexSpace::create_index_space(
+        Realm::IndexSpace child_space = 
+          Realm::IndexSpace::create_index_space(
               parent_dom.get_index_space(), child_mask, false/*allocable*/);
 #else
-        LowLevel::IndexSpace child_space = 
-          LowLevel::IndexSpace::create_index_space(
+        Realm::IndexSpace child_space = 
+          Realm::IndexSpace::create_index_space(
                           parent_dom.get_index_space(), child_mask);
 #endif
         new_index_spaces[DomainPoint::from_point<1>(
@@ -5431,7 +6552,7 @@ namespace LegionRuntime {
       Accessor::RegionAccessor<Accessor::AccessorType::Generic,int> 
         fa_coloring = field_accessor.typeify<int>();
       {
-        std::map<Color,LowLevel::ElementMask> child_masks;
+        std::map<Color,Realm::ElementMask> child_masks;
         Domain parent_dom = forest->get_index_space_domain(parent);
         size_t parent_elmts = 
           parent_dom.get_index_space().get_valid_mask().get_num_elmts();
@@ -5443,12 +6564,12 @@ namespace LegionRuntime {
           if (c >= 0)
           {
             Color color = (Color)c; 
-            std::map<Color,LowLevel::ElementMask>::iterator finder = 
+            std::map<Color,Realm::ElementMask>::iterator finder = 
               child_masks.find(color);
             // Haven't made an index space for this color yet
             if (finder == child_masks.end())
             {
-              child_masks[color] = LowLevel::ElementMask(parent_elmts);
+              child_masks[color] = Realm::ElementMask(parent_elmts);
               finder = child_masks.find(color);
             }
 #ifdef DEBUG_HIGH_LEVEL
@@ -5468,31 +6589,31 @@ namespace LegionRuntime {
         for (GenericPointInRectIterator<1> pir(color_range); pir; pir++)
         {
           Color c = pir.p;
-          std::map<Color,LowLevel::ElementMask>::const_iterator finder = 
+          std::map<Color,Realm::ElementMask>::const_iterator finder = 
             child_masks.find(c);
-          LowLevel::IndexSpace child_space;
+          Realm::IndexSpace child_space;
           if (finder != child_masks.end())
           {
 #ifdef ASSUME_UNALLOCABLE
             child_space = 
-              LowLevel::IndexSpace::create_index_space(
+              Realm::IndexSpace::create_index_space(
                 parent_dom.get_index_space(), finder->second, false);
 #else
             child_space = 
-              LowLevel::IndexSpace::create_index_space(
+              Realm::IndexSpace::create_index_space(
                     parent_dom.get_index_space(), finder->second);
 #endif
           }
           else
           {
-            LowLevel::ElementMask empty_mask;
+            Realm::ElementMask empty_mask;
 #ifdef ASSUME_UNALLOCABLE
             child_space = 
-              LowLevel::IndexSpace::create_index_space(
+              Realm::IndexSpace::create_index_space(
                     parent_dom.get_index_space(), empty_mask, false);
 #else
             child_space = 
-              LowLevel::IndexSpace::create_index_space(
+              Realm::IndexSpace::create_index_space(
                     parent_dom.get_index_space(), empty_mask);
 #endif
           }
@@ -5574,13 +6695,13 @@ namespace LegionRuntime {
           if (current_colors.find(it2->first) != current_colors.end())
             continue;
           // Otherwise perform the check
-          const LowLevel::ElementMask &em1 = 
+          const Realm::ElementMask &em1 = 
             it1->second.get_index_space().get_valid_mask();
-          const LowLevel::ElementMask &em2 = 
+          const Realm::ElementMask &em2 = 
             it2->second.get_index_space().get_valid_mask();
-          LowLevel::ElementMask::OverlapResult result = 
+          Realm::ElementMask::OverlapResult result = 
             em1.overlaps_with(em2, 1/*effort level*/);
-          if (result == LowLevel::ElementMask::OVERLAP_YES)
+          if (result == Realm::ElementMask::OVERLAP_YES)
           {
             log_run.error("ERROR: colors %d and %d of partition %d "
                             "are not disjoint when they were claimed to be!",
@@ -5588,7 +6709,7 @@ namespace LegionRuntime {
             assert(false);
             exit(ERROR_DISJOINTNESS_TEST_FAILURE);
           }
-          else if (result == LowLevel::ElementMask::OVERLAP_MAYBE)
+          else if (result == Realm::ElementMask::OVERLAP_MAYBE)
           {
             log_run.warning("WARNING: colors %d and %d of partition "
                         "%d may not be disjoint when they were claimed to be!"
@@ -5978,7 +7099,7 @@ namespace LegionRuntime {
         partition_color = ColorPoint(color);
       Domain color_space;
       forest->compute_pending_color_space(parent, handle1, handle2, color_space,
-                                          LowLevel::IndexSpace::ISO_UNION);
+                                          Realm::IndexSpace::ISO_UNION);
       PendingPartitionOp *part_op = get_available_pending_partition_op(true);
       part_op->initialize_union_partition(ctx, pid, handle1, handle2);
       Event handle_ready = part_op->get_handle_ready();
@@ -6055,7 +7176,7 @@ namespace LegionRuntime {
         partition_color = ColorPoint(color);
       Domain color_space;
       forest->compute_pending_color_space(parent, handle1, handle2, color_space,
-                                          LowLevel::IndexSpace::ISO_INTERSECT);
+                                          Realm::IndexSpace::ISO_INTERSECT);
       PendingPartitionOp *part_op = get_available_pending_partition_op(true);
       part_op->initialize_intersection_partition(ctx, pid, handle1, handle2);
       Event handle_ready = part_op->get_handle_ready();
@@ -6132,7 +7253,7 @@ namespace LegionRuntime {
         partition_color = ColorPoint(color);
       Domain color_space;
       forest->compute_pending_color_space(parent, handle1, handle2, color_space,
-                                          LowLevel::IndexSpace::ISO_SUBTRACT);
+                                          Realm::IndexSpace::ISO_SUBTRACT);
       PendingPartitionOp *part_op = get_available_pending_partition_op(true);
       part_op->initialize_difference_partition(ctx, pid, handle1, handle2);
       Event handle_ready = part_op->get_handle_ready();
@@ -7755,20 +8876,19 @@ namespace LegionRuntime {
         {
           // We need to check to make sure that the task actually
           // does expect to have a void return type
-          TaskVariantCollection *variants = 
-            get_variant_collection(launcher.task_id);
-          if (variants->return_size > 0)
+          TaskImpl *impl = find_or_create_task_impl(launcher.task_id);
+          if (impl->returns_value())
           {
             log_run.error("Predicated task launch for task %s "
-                                "in parent task %s (UID %lld) has non-void "
-                                "return type but no default value for its "
-                                "future if the task predicate evaluates to "
-                                "false.  Please set either the "
-                                "'predicate_false_result' or "
-                                "'predicate_false_future' fields of the "
-                                "TaskLauncher struct.",
-                                variants->name, ctx->variants->name,
-                                ctx->get_unique_task_id());
+                          "in parent task %s (UID %lld) has non-void "
+                          "return type but no default value for its "
+                          "future if the task predicate evaluates to "
+                          "false.  Please set either the "
+                          "'predicate_false_result' or "
+                          "'predicate_false_future' fields of the "
+                          "TaskLauncher struct.",
+                          impl->get_name(), ctx->get_task_name(),
+                          ctx->get_unique_task_id());
 #ifdef DEBUG_HIGH_LEVEL
             assert(false);
 #endif
@@ -7878,20 +8998,19 @@ namespace LegionRuntime {
         {
           // Check to make sure the task actually does expect to
           // have a void return type
-          TaskVariantCollection *variants = 
-            get_variant_collection(launcher.task_id);
-          if (variants->return_size > 0)
+          TaskImpl *impl = find_or_create_task_impl(launcher.task_id);
+          if (impl->returns_value())
           {
             log_run.error("Predicated index task launch for task %s "
-                                "in parent task %s (UID %lld) has non-void "
-                                "return type but no default value for its "
-                                "future if the task predicate evaluates to "
-                                "false.  Please set either the "
-                                "'predicate_false_result' or "
-                                "'predicate_false_future' fields of the "
-                                "IndexLauncher struct.",
-                                variants->name, ctx->variants->name,
-                                ctx->get_unique_task_id());
+                          "in parent task %s (UID %lld) has non-void "
+                          "return type but no default value for its "
+                          "future if the task predicate evaluates to "
+                          "false.  Please set either the "
+                          "'predicate_false_result' or "
+                          "'predicate_false_future' fields of the "
+                          "IndexLauncher struct.",
+                          impl->get_name(), ctx->get_task_name(),
+                          ctx->get_unique_task_id());
 #ifdef DEBUG_HIGH_LEVEL
             assert(false);
 #endif
@@ -7976,9 +9095,8 @@ namespace LegionRuntime {
         {
           // We need to check to make sure that the task actually
           // does expect to have a void return type
-          TaskVariantCollection *variants = 
-            get_variant_collection(launcher.task_id);
-          if (variants->return_size > 0)
+          TaskImpl *impl = find_or_create_task_impl(launcher.task_id);
+          if (impl->returns_value())
           {
             log_run.error("Predicated index task launch for task %s "
                                 "in parent task %s (UID %lld) has non-void "
@@ -7988,7 +9106,7 @@ namespace LegionRuntime {
                                 "'predicate_false_result' or "
                                 "'predicate_false_future' fields of the "
                                 "IndexLauncher struct.",
-                                variants->name, ctx->variants->name,
+                                impl->get_name(), ctx->get_task_name(),
                                 ctx->get_unique_task_id());
 #ifdef DEBUG_HIGH_LEVEL
             assert(false);
@@ -10177,63 +11295,88 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void Internal::attach_semantic_information(TaskID task_id, SemanticTag tag,
+                               const void *buffer, size_t size, bool is_mutable)
+    //--------------------------------------------------------------------------
+    {
+      TaskImpl *impl = find_or_create_task_impl(task_id);
+      impl->attach_semantic_information(tag, address_space, 
+                                        buffer, size, is_mutable);
+    }
+
+    //--------------------------------------------------------------------------
     void Internal::attach_semantic_information(IndexSpace handle, 
                                               SemanticTag tag,
-                                              const void *buffer, size_t size)
+                                              const void *buffer, size_t size,
+                                              bool is_mutable)
     //--------------------------------------------------------------------------
     {
       forest->attach_semantic_information(handle, tag, address_space, 
-                                          buffer, size);
+                                          buffer, size, is_mutable);
     }
 
     //--------------------------------------------------------------------------
     void Internal::attach_semantic_information(IndexPartition handle, 
                                               SemanticTag tag,
-                                              const void *buffer, size_t size)
+                                              const void *buffer, size_t size,
+                                              bool is_mutable)
     //--------------------------------------------------------------------------
     {
       forest->attach_semantic_information(handle, tag, address_space, 
-                                          buffer, size);
+                                          buffer, size, is_mutable);
     }
 
     //--------------------------------------------------------------------------
     void Internal::attach_semantic_information(FieldSpace handle, 
                                               SemanticTag tag,
-                                              const void *buffer, size_t size)
+                                              const void *buffer, size_t size,
+                                              bool is_mutable)
     //--------------------------------------------------------------------------
     {
       forest->attach_semantic_information(handle, tag, address_space, 
-                                          buffer, size);
+                                          buffer, size, is_mutable);
     }
 
     //--------------------------------------------------------------------------
     void Internal::attach_semantic_information(FieldSpace handle, FieldID fid,
                                               SemanticTag tag,
-                                              const void *buffer, size_t size)
+                                              const void *buffer, size_t size,
+                                              bool is_mutable)
     //--------------------------------------------------------------------------
     {
-      forest->attach_semantic_information(handle, fid, tag, 
-                                          address_space, buffer, size);
+      forest->attach_semantic_information(handle, fid, tag, address_space, 
+                                          buffer, size, is_mutable);
     }
 
     //--------------------------------------------------------------------------
     void Internal::attach_semantic_information(LogicalRegion handle, 
                                               SemanticTag tag,
-                                              const void *buffer, size_t size)
+                                              const void *buffer, size_t size,
+                                              bool is_mutable)
     //--------------------------------------------------------------------------
     {
       forest->attach_semantic_information(handle, tag, address_space, 
-                                          buffer, size);
+                                          buffer, size, is_mutable);
     }
 
     //--------------------------------------------------------------------------
     void Internal::attach_semantic_information(LogicalPartition handle, 
                                               SemanticTag tag,
-                                              const void *buffer, size_t size)
+                                              const void *buffer, size_t size,
+                                              bool is_mutable)
     //--------------------------------------------------------------------------
     {
       forest->attach_semantic_information(handle, tag, address_space, 
-                                          buffer, size);
+                                          buffer, size, is_mutable);
+    }
+
+    //--------------------------------------------------------------------------
+    void Internal::retrieve_semantic_information(TaskID task_id,SemanticTag tag,
+                                              const void *&result, size_t &size)
+    //--------------------------------------------------------------------------
+    {
+      TaskImpl *impl = find_or_create_task_impl(task_id);
+      impl->retrieve_semantic_information(tag, result, size);
     }
 
     //--------------------------------------------------------------------------
@@ -10459,6 +11602,16 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    const std::vector<PhysicalRegion>& Internal::begin_inline_task(
+                                                                SingleTask *ctx)
+    //--------------------------------------------------------------------------
+    {
+      // It's possible we lied about this being a single task :)
+      TaskOp *task = ctx;
+      return task->begin_inline_task();
+    }
+
+    //--------------------------------------------------------------------------
     void Internal::end_task(SingleTask *ctx, const void *result, 
                                  size_t result_size, bool owned)
     //--------------------------------------------------------------------------
@@ -10468,13 +11621,83 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    const void* Internal::get_local_args(SingleTask *ctx, 
-                                        DomainPoint &point, size_t &local_size)
+    void Internal::end_inline_task(SingleTask *ctx, const void *result,
+                                   size_t result_size, bool owned)
     //--------------------------------------------------------------------------
     {
-      point = ctx->index_point;
-      local_size = ctx->local_arglen;
-      return ctx->local_args;
+      // It's possible we lied about this being a single task :)
+      TaskOp *task = ctx;
+      task->end_inline_task(result, result_size, owned);
+    }
+
+    //--------------------------------------------------------------------------
+    VariantID Internal::register_variant(const TaskVariantRegistrar &registrar,
+                                  const void *user_data, size_t user_data_size,
+                                  CodeDescriptor *realm, CodeDescriptor *indesc,
+                                  bool ret,VariantID vid /*= AUTO_GENERATE_ID*/)
+    //--------------------------------------------------------------------------
+    {
+      // See if we need to make a new variant ID
+      if (vid == AUTO_GENERATE_ID) // Make a variant ID to use
+        vid = get_unique_variant_id();
+      // First find the task implementation
+      TaskImpl *task_impl = find_or_create_task_impl(registrar.task_id);
+      // Make our variant and add it to the set of variants
+      VariantImpl *impl = legion_new<VariantImpl>(this, vid, task_impl, 
+                                                  registrar, ret, realm, indesc,
+                                                  user_data, user_data_size);
+      // Add this variant to the owner
+      task_impl->add_variant(impl);
+      AutoLock tv_lock(task_variant_lock);
+      variant_table.push_back(impl);
+      return vid;
+    }
+
+    //--------------------------------------------------------------------------
+    TaskImpl* Internal::find_or_create_task_impl(TaskID task_id)
+    //--------------------------------------------------------------------------
+    {
+      {
+        AutoLock tv_lock(task_variant_lock,1,false/*exclusive*/);
+        std::map<TaskID,TaskImpl*>::const_iterator finder = 
+          task_table.find(task_id);
+        if (finder != task_table.end())
+          return finder->second;
+      }
+      TaskImpl *result = legion_new<TaskImpl>(task_id, this);
+      AutoLock tv_lock(task_variant_lock);
+      task_table[task_id] = result;
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    TaskImpl* Internal::find_task_impl(TaskID task_id)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock tv_lock(task_variant_lock,1,false/*exclusive*/);
+      std::map<TaskID,TaskImpl*>::const_iterator finder = 
+        task_table.find(task_id);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(finder != task_table.end());
+#endif
+      return finder->second;
+    }
+
+    //--------------------------------------------------------------------------
+    VariantImpl* Internal::find_variant_impl(TaskID task_id, 
+                                             VariantID variant_id)
+    //--------------------------------------------------------------------------
+    {
+      TaskImpl *owner = find_or_create_task_impl(task_id);
+      return owner->find_variant_impl(variant_id);
+    }
+
+    //--------------------------------------------------------------------------
+    TaskVariantCollection* Internal::get_collection(TaskID task_id)
+    //--------------------------------------------------------------------------
+    {
+      TaskImpl *impl = find_task_impl(task_id);
+      return impl->get_collection();
     }
 
     //--------------------------------------------------------------------------
@@ -11307,6 +12530,15 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void Internal::send_task_impl_semantic_request(AddressSpaceID target,
+                                                   Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_TASK_IMPL_SEMANTIC_REQ,
+                                  SEMANTIC_INFO_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Internal::send_index_space_semantic_request(AddressSpaceID target,
                                                     Serializer &rez)
     //--------------------------------------------------------------------------
@@ -11361,6 +12593,15 @@ namespace LegionRuntime {
       find_messenger(target)->send_message(rez,
             SEND_LOGICAL_PARTITION_SEMANTIC_REQ, SEMANTIC_INFO_VIRTUAL_CHANNEL,
                                                                  true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Internal::send_task_impl_semantic_info(AddressSpaceID target,
+                                                Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_TASK_IMPL_SEMANTIC_INFO,
+                                  SEMANTIC_INFO_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -11508,6 +12749,49 @@ namespace LegionRuntime {
     {
       find_messenger(target)->send_message(rez, SEND_BACK_LOGICAL_STATE,
                                        DEFAULT_VIRTUAL_CHANNEL, false/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Internal::send_variant_request(AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_VARIANT_REQUEST,
+                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Internal::send_variant_response(AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_VARIANT_RESPONSE,
+                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Internal::send_constraint_request(AddressSpaceID target, 
+                                           Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_CONSTRAINT_REQUEST,
+                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Internal::send_constraint_response(AddressSpaceID target, 
+                                            Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_CONSTRAINT_RESPONSE,
+                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Internal::send_constraint_release(AddressSpaceID target,
+                                           Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_CONSTRAINT_RELEASE,
+                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -12003,6 +13287,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void Internal::handle_task_impl_semantic_request(Deserializer &derez,
+                                                     AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      TaskImpl::handle_semantic_request(this, derez, source);
+    }
+
+    //--------------------------------------------------------------------------
     void Internal::handle_index_space_semantic_request(Deserializer &derez,
                                                       AddressSpaceID source)
     //--------------------------------------------------------------------------
@@ -12048,6 +13340,14 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       PartitionNode::handle_semantic_request(forest, derez, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Internal::handle_task_impl_semantic_info(Deserializer &derez,
+                                                  AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      TaskImpl::handle_semantic_info(this, derez, source);
     }
 
     //--------------------------------------------------------------------------
@@ -12183,6 +13483,44 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       RegionTreeNode::handle_logical_state_return(forest, derez, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Internal::handle_variant_request(Deserializer &derez, 
+                                          AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      TaskImpl::handle_variant_request(this, derez, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Internal::handle_variant_response(Deserializer &derez) 
+    //--------------------------------------------------------------------------
+    {
+      VariantImpl::handle_variant_response(this, derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Internal::handle_constraint_request(Deserializer &derez,
+                                             AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      LayoutConstraints::process_request(this, derez, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Internal::handle_constraint_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      LayoutConstraints::process_response(this, derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Internal::handle_constraint_release(Deserializer &derez,
+                                             AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      LayoutConstraints::process_release(this, derez, source);
     }
 
     //--------------------------------------------------------------------------
@@ -12834,10 +14172,13 @@ namespace LegionRuntime {
                                            Processor target)
     //--------------------------------------------------------------------------
     {
-      // If this is not a task directly related to shutdown, 
-      // then increment the number of outstanding tasks
-      if (tid < HLR_SHUTDOWN_ATTEMPT_TASK_ID)
+      // If this is not a task directly related to shutdown or is a message, 
+      // to a remote node then increment the number of outstanding tasks
+      if (tid < HLR_MESSAGE_ID)
         increment_total_outstanding_tasks();
+#ifdef DEBUG_SHUTDOWN_HANG
+      __sync_fetch_and_add(&outstanding_counts[tid],1);
+#endif
       if (!target.exists())
       {
         // If we don't have a processor to explicitly target, figure
@@ -13260,21 +14601,20 @@ namespace LegionRuntime {
         gc_done.wait();
       ShutdownManager *local_manager = 
         new ShutdownManager(this, source, message_managers[source]);
-      // First check to see if we have any outstanding tasks
-      // which means we are definitely not done
-      if (!has_outstanding_tasks())
+      // IMPORTANT: always send messages to remote nodes
+      // so that they can begin their shutdown process which
+      // may be a pre-requisite for some of our oustanding
+      // tasks being able to run.
+      for (unsigned idx = 0; idx < MAX_NUM_NODES; idx++)
       {
-        // If we don't have any outstanding tasks then we
-        // need to figure out which managers we have
-        for (unsigned idx = 0; idx < MAX_NUM_NODES; idx++)
-        {
-          if (idx == source)
-            continue;
-          if (message_managers[idx] != NULL)
-            local_manager->add_manager(idx, message_managers[idx]);
-        }
+        if (idx == source)
+          continue;
+        if (message_managers[idx] != NULL)
+          local_manager->add_manager(idx, message_managers[idx]);
       }
-      else
+
+      // Record if we have any outstanding tasks
+      if (has_outstanding_tasks())
         local_manager->record_outstanding_tasks();
 
       // Check to see if we have any remote nodes
@@ -14396,6 +15736,32 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    VariantID Internal::get_unique_variant_id(void)
+    //--------------------------------------------------------------------------
+    {
+      VariantID result = __sync_fetch_and_add(&unique_variant_id,
+                                              runtime_stride);
+#ifdef DEBUG_HIGH_LEVEL
+      // check for overflow
+      assert(result <= unique_variant_id);
+#endif
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    LayoutConstraintID Internal::get_unique_constraint_id(void)
+    //--------------------------------------------------------------------------
+    {
+      LayoutConstraintID result = __sync_fetch_and_add(&unique_constraint_id,
+                                                       runtime_stride);
+#ifdef DEBUG_HIGH_LEVEL
+      // check for overflow
+      assert(result <= unique_constraint_id);
+#endif
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     LegionErrorType Internal::verify_requirement(
                                const RegionRequirement &req, FieldID &bad_field)
     //--------------------------------------------------------------------------
@@ -14741,6 +16107,12 @@ namespace LegionRuntime {
           return "Physical State";
         case VERSION_STATE_ALLOC:
           return "Version State";
+        case TASK_IMPL_ALLOC:
+          return "Task Implementation";
+        case VARIANT_IMPL_ALLOC:
+          return "Variant Implementation";
+        case LAYOUT_CONSTRAINTS_ALLOC:
+          return "Layout Constraints";
         default:
           assert(false); // should never get here
       }
@@ -14948,6 +16320,176 @@ namespace LegionRuntime {
     }
 #endif
 
+    //--------------------------------------------------------------------------
+    LayoutConstraintID Internal::register_layout(
+                                     const LayoutConstraintRegistrar &registrar,
+                                     LayoutConstraintID layout_id)
+    //--------------------------------------------------------------------------
+    {
+      if (layout_id == AUTO_GENERATE_ID)
+        layout_id = get_unique_constraint_id();
+      // Now make our entry and then return the result
+      LayoutConstraints *constraints = 
+        legion_new<LayoutConstraints>(layout_id, this, registrar);
+      AutoLock l_lock(layout_constraints_lock);
+      if (layout_constraints_table.find(layout_id) != 
+          layout_constraints_table.end())
+      {
+        log_run.error("Illegal duplicate use of layout constraint ID %ld", 
+                      layout_id);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_DUPLICATE_CONSTRAINT_ID);
+      }
+      layout_constraints_table[layout_id] = constraints;
+      return layout_id;
+    }
+
+    //--------------------------------------------------------------------------
+    void Internal::release_layout(LayoutConstraintID layout_id,
+                                  AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      LayoutConstraints *constraints = find_layout_constraints(layout_id);
+      constraints->release_constraints(source);
+      {
+        AutoLock l_lock(layout_constraints_lock);
+        std::map<LayoutConstraintID,LayoutConstraints*>::iterator
+          finder = layout_constraints_table.find(layout_id);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(finder != layout_constraints_table.end());
+#endif
+        layout_constraints_table.erase(finder);
+      }
+      legion_delete(constraints);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ LayoutConstraintID Internal::preregister_layout(
+                                     const LayoutConstraintRegistrar &registrar,
+                                     LayoutConstraintID layout_id)
+    //--------------------------------------------------------------------------
+    { 
+      if (runtime_started)
+      {
+        log_run.error("Illegal call to 'preregister_layout' after "
+                      "the runtime has started!");
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_STATIC_CALL_POST_RUNTIME_START);
+      }
+      std::map<LayoutConstraintID,LayoutConstraintRegistrar> 
+        &pending_constraints = get_pending_constraint_table();
+      // See if we have to generate an ID
+      if (layout_id == AUTO_GENERATE_ID)
+      {
+        // Find the first available layout ID
+        layout_id = 1;
+        for (std::map<LayoutConstraintID,LayoutConstraintRegistrar>::
+              const_iterator it = pending_constraints.begin(); 
+              it != pending_constraints.end(); it++)
+        {
+          if (layout_id != it->first)
+          {
+            // We've found a free one, so we can use it
+            break;
+          }
+          else
+            layout_id++;
+        }
+      }
+      else
+      {
+        if (layout_id == 0)
+        {
+          log_run.error("Illegal use of reserved constraint ID 0");
+#ifdef DEBUG_HIGH_LEVEL
+          assert(false);
+#endif
+          exit(ERROR_RESERVED_CONSTRAINT_ID);
+        }
+        // Check to make sure it is not already used
+        std::map<LayoutConstraintID,LayoutConstraintRegistrar>::const_iterator
+          finder = pending_constraints.find(layout_id);
+        if (finder != pending_constraints.end())
+        {
+          log_run.error("Duplicate use of constraint ID %ld", layout_id);
+#ifdef DEBUG_HIGH_LEVEL
+          assert(false);
+#endif
+          exit(ERROR_DUPLICATE_CONSTRAINT_ID);
+        }
+      }
+      pending_constraints[layout_id] = registrar;
+      return layout_id;
+    }
+
+    //--------------------------------------------------------------------------
+    FieldSpace Internal::get_layout_constraint_field_space(
+                                                   LayoutConstraintID layout_id)
+    //--------------------------------------------------------------------------
+    {
+      LayoutConstraints *constraints = find_layout_constraints(layout_id);
+      return constraints->get_field_space();
+    }
+
+    //--------------------------------------------------------------------------
+    void Internal::get_layout_constraints(LayoutConstraintID layout_id,
+                                        LayoutConstraintSet &layout_constraints)
+    //--------------------------------------------------------------------------
+    {
+      LayoutConstraints *constraints = find_layout_constraints(layout_id);
+      layout_constraints = *constraints;
+    }
+
+    //--------------------------------------------------------------------------
+    const char* Internal::get_layout_constraints_name(
+                                                   LayoutConstraintID layout_id)
+    //--------------------------------------------------------------------------
+    {
+      LayoutConstraints *constraints = find_layout_constraints(layout_id);
+      return constraints->get_name();
+    }
+
+    //--------------------------------------------------------------------------
+    LayoutConstraints* Internal::find_layout_constraints(
+                                                   LayoutConstraintID layout_id)
+    //--------------------------------------------------------------------------
+    {
+      // See if we can find it first
+      Event wait_on = Event::NO_EVENT;
+      {
+        AutoLock l_lock(layout_constraints_lock);
+        std::map<LayoutConstraintID,LayoutConstraints*>::const_iterator
+          finder = layout_constraints_table.find(layout_id);
+        if (finder != layout_constraints_table.end())
+        {
+          wait_on = finder->second->get_ready_event();
+          if (wait_on.has_triggered())
+            return finder->second;
+        }
+        else // make a place holder which will request the actual constraints
+        {
+          LayoutConstraints *constraints = 
+            legion_new<LayoutConstraints>(layout_id, this);
+          layout_constraints_table[layout_id] = constraints; 
+          wait_on = constraints->get_ready_event();
+        }
+      }
+      // If we didn't find it send a remote request for the constraints
+      wait_on.wait();
+      // When we wake up, the result should be there
+      AutoLock l_lock(layout_constraints_lock);
+      std::map<LayoutConstraintID,LayoutConstraints*>::const_iterator
+          finder = layout_constraints_table.find(layout_id);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(finder != layout_constraints_table.end());
+#endif
+      return finder->second;
+    }
+
     /*static*/ Internal *Internal::runtime_map[(MAX_NUM_PROCS+1)];
     /*static*/ volatile RegistrationCallbackFnptr Internal::
                                               registration_callback = NULL;
@@ -14962,11 +16504,9 @@ namespace LegionRuntime {
                                       DEFAULT_SUPERSCALAR_WIDTH;
     /*static*/ unsigned Internal::max_message_size = 
                                       DEFAULT_MAX_MESSAGE_SIZE;
-    /*static*/ unsigned Internal::max_filter_size = 
-                                      DEFAULT_MAX_FILTER_SIZE;
     /*static*/ unsigned Internal::gc_epoch_size = 
                                       DEFAULT_GC_EPOCH_SIZE;
-    /*static*/ bool Internal::enable_imprecise_filter = false;
+    /*static*/ bool Internal::runtime_started = false;
     /*static*/ bool Internal::separate_runtime_instances = false;
     /*static*/ bool Internal::record_registration = false;
     /*sattic*/ bool Internal::stealing_disabled = false;
@@ -15032,27 +16572,20 @@ namespace LegionRuntime {
       LEGION_STATIC_ASSERT(DEFAULT_MIN_TASKS_TO_SCHEDULE > 0);
       LEGION_STATIC_ASSERT(DEFAULT_SUPERSCALAR_WIDTH > 0);
       LEGION_STATIC_ASSERT(DEFAULT_MAX_MESSAGE_SIZE > 0);
+      // Once we've made this call, the Legion runtime is started
+      runtime_started = true;
       // Need to pass argc and argv to low-level runtime before we can record 
       // their values as they might be changed by GASNet or MPI or whatever.
       // Note that the logger isn't initialized until after this call returns 
       // which means any logging that occurs before this has undefined behavior.
       RealmRuntime realm;
-
 #ifndef NDEBUG
       bool ok = 
 #endif
         realm.init(&argc, &argv);
       assert(ok);
-
-      // register tasks and reduction ops with Realm 
-      {
-	const TaskIDTable& task_table =
-	  get_task_table(true/*add runtime tasks*/);
-	for(TaskIDTable::const_iterator it = task_table.begin();
-	    it != task_table.end();
-	    it++)
-	  realm.register_task(it->first, it->second);
       
+      {
 	const ReductionOpTable& red_table = get_reduction_table();
 	for(ReductionOpTable::const_iterator it = red_table.begin();
 	    it != red_table.end();
@@ -15100,7 +16633,6 @@ namespace LegionRuntime {
         initial_tasks_to_schedule = DEFAULT_MIN_TASKS_TO_SCHEDULE;
         superscalar_width = DEFAULT_SUPERSCALAR_WIDTH;
         max_message_size = DEFAULT_MAX_MESSAGE_SIZE;
-        max_filter_size = DEFAULT_MAX_FILTER_SIZE;
         gc_epoch_size = DEFAULT_GC_EPOCH_SIZE;
 #ifdef INORDER_EXECUTION
         program_order_execution = true;
@@ -15117,7 +16649,6 @@ namespace LegionRuntime {
 #endif
         for (int i = 1; i < argc; i++)
         {
-          BOOL_ARG("-hl:imprecise",enable_imprecise_filter);
           BOOL_ARG("-hl:separate",separate_runtime_instances);
           BOOL_ARG("-hl:registration",record_registration);
           BOOL_ARG("-hl:nosteal",stealing_disabled);
@@ -15132,7 +16663,6 @@ namespace LegionRuntime {
           INT_ARG("-hl:sched", initial_tasks_to_schedule);
           INT_ARG("-hl:width", superscalar_width);
           INT_ARG("-hl:message",max_message_size);
-          INT_ARG("-hl:filter", max_filter_size);
           INT_ARG("-hl:epoch", gc_epoch_size);
           if (!strcmp(argv[i],"-hl:no_dyn"))
             dynamic_independence_tests = false;
@@ -15299,31 +16829,11 @@ namespace LegionRuntime {
 #ifdef HANG_TRACE
       signal(SIGTERM, catch_hang); 
 #endif
-      if (Internal::record_registration)
-      {
-        log_run.print("High-level runtime initialization task "
-                            "has low-level ID %d", INIT_FUNC_ID);
-        log_run.print("High-level runtime shutdown task has "
-                            "low-level ID %d", SHUTDOWN_FUNC_ID);
-        log_run.print("Internal meta-task has low-level ID %d", 
-                            HLR_TASK_ID);
-        std::map<Processor::TaskFuncID,TaskVariantCollection*>& 
-          variant_table = Internal::get_collection_table(); 
-        for (std::map<Processor::TaskFuncID,TaskVariantCollection*>::
-              const_iterator vit = variant_table.begin(); vit !=
-              variant_table.end(); vit++)
-        {
-          TaskVariantCollection *collection = vit->second;
-          for (std::map<VariantID,TaskVariantCollection::Variant>::
-                const_iterator it = collection->variants.begin(); it != 
-                collection->variants.end(); it++)
-          {
-            log_run.print("Task variant %s (ID %ld) is mapped to "
-                                "low-level task ID %d", collection->name, 
-                                it->first, it->second.low_id);
-          }
-        }
-      } 
+      // For the moment, we only need to register our runtime tasks
+      // We'll register everything else once the Legion runtime starts
+      Event tasks_registered = register_runtime_tasks(realm);
+      // Wait for our tasks to be registered
+      tasks_registered.external_wait();
       // Kick off the low-level machine
       realm.run(0, RealmRuntime::ONE_TASK_ONLY, 0, 0, background);
       // We should only make it here if the machine thread is backgrounded
@@ -15557,194 +17067,50 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ TaskID Internal::update_collection_table(
-                          LowLevelFnptr low_level_ptr,
-                          InlineFnptr inline_ptr,
-                          TaskID uid, Processor::Kind proc_kind, 
-                          bool single_task, bool index_space_task,
-                          VariantID &vid, size_t return_size,
-                          const TaskConfigOptions &options,
-                          const char *name)
+    /*static*/ std::deque<PendingVariantRegistration*>& 
+                                       Internal::get_pending_variant_table(void)
     //--------------------------------------------------------------------------
     {
-      std::map<Processor::TaskFuncID,TaskVariantCollection*>& table = 
-                                        Internal::get_collection_table();
-      // See if the user wants us to find a new ID
-      if (uid == AUTO_GENERATE_ID)
-      {
-#ifdef DEBUG_HIGH_LEVEL
-#ifndef NDEBUG
-        bool found = false; 
-#endif
-#endif
-        for (unsigned idx = 0; idx < uid; idx++)
-        {
-          if (table.find(idx) == table.end())
-          {
-            uid = idx;
-#ifdef DEBUG_HIGH_LEVEL
-#ifndef NDEBUG
-            found = true;
-#endif
-#endif
-            break;
-          }
-        }
-#ifdef DEBUG_HIGH_LEVEL
-        assert(found); // If not we ran out of task ID's 2^32 tasks!
-#endif
-      }
-      // First update the low-level task table
-      Processor::TaskFuncID low_id = Internal::get_next_available_id();
-      // Add it to the low level table
-      Internal::get_task_table(false)[low_id] = low_level_ptr;
-      Internal::get_inline_table()[low_id] = inline_ptr;
-      // Now see if an entry already exists in the attribute 
-      // table for this uid
-      if (table.find(uid) == table.end())
-      {
-        if (options.leaf && options.inner)
-        {
-          log_run.error("Task variant %s (ID %d) is not permitted to "
-                              "be both inner and leaf tasks simultaneously.",
-                              name, uid);
-#ifdef DEBUG_HIGH_LEVEL
-          assert(false);
-#endif
-          exit(ERROR_INNER_LEAF_MISMATCH);
-        }
-        TaskVariantCollection *collec = 
-          new TaskVariantCollection(uid, name, 
-                options.idempotent, return_size);
-#ifdef DEBUG_HIGH_LEVEL
-        assert(collec != NULL);
-#endif
-        table[uid] = collec;
-        collec->add_variant(low_id, proc_kind, 
-                            single_task, index_space_task, 
-#ifdef LEGION_SPY
-                            false, // no inner optimizations for analysis
-#else
-                            false, // disabling this for now
-                            // See github issue #102
-                            //options.inner, 
-#endif
-                            options.leaf, 
-                            vid);
-      }
-      else
-      {
-        if (table[uid]->idempotent != options.idempotent)
-        {
-          log_run.error("Tasks of variant %s have different idempotent "
-                              "options.  All tasks of the same variant must "
-                              "all be either idempotent or non-idempotent.",
-                              table[uid]->name);
-#ifdef DEBUG_HIGH_LEVEL
-          assert(false);
-#endif
-          exit(ERROR_IDEMPOTENT_MISMATCH);
-        }
-        if (table[uid]->return_size != return_size)
-        {
-          log_run.error("Tasks of variant %s have different return "
-                              "type sizes of %ld and %ld.  All variants "
-                              "must have the same return type size.",
-                              table[uid]->name, table[uid]->return_size,
-                              return_size);
-#ifdef DEBUG_HIGH_LEVEL
-          assert(false);
-#endif
-          exit(ERROR_RETURN_SIZE_MISMATCH);
-        }
-        if ((name != NULL) && 
-            (strcmp(table[uid]->name,name) != 0))
-        {
-          log_run.warning("WARNING: name mismatch between variants of "
-                                "task %d.  Differing names: %s %s",
-                                uid, table[uid]->name, name);
-        }
-        if ((vid != AUTO_GENERATE_ID) && table[uid]->has_variant(vid))
-        {
-          log_run.warning("WARNING: Task variant collection for task %s "
-                                "(ID %d) already has variant %d.  It will be "
-                                "overwritten.", table[uid]->name, uid, 
-                                unsigned(vid)/*dumb compiler warnings*/);
-        }
-        // Update the variants for the attribute
-        table[uid]->add_variant(low_id, proc_kind, 
-                                single_task, index_space_task, 
-#ifdef LEGION_SPY
-                                false, // no inner optimizations for analysis
-#else
-                                false, // disabling this for now
-                                // See github issue #102
-                                //options.inner,
-#endif
-                                options.leaf, 
-                                vid);
-      }
-      return uid;
+      static std::deque<PendingVariantRegistration*> pending_variant_table;
+      return pending_variant_table;
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ TaskID Internal::update_collection_table(
-                          LowLevelFnptr low_level_ptr,
-                          InlineFnptr inline_ptr,
-                          TaskID tid, Processor::Kind proc_kind, 
-                          bool single_task, bool index_space_task,
-                          VariantID vid, size_t return_size,
-                          const TaskConfigOptions &options,
-                          const char *name,
-                          const void *user_data, size_t user_data_size)
+    /*static*/ std::map<LayoutConstraintID,LayoutConstraintRegistrar>&
+                                    Internal::get_pending_constraint_table(void)
     //--------------------------------------------------------------------------
     {
-      TaskID result = update_collection_table(low_level_ptr, inline_ptr,
-                                              tid, proc_kind, 
-                                              single_task, index_space_task,
-                                              vid, return_size, options, name);
-      std::pair<TaskID,VariantID> key(tid,vid);
-      void *buffer = malloc(user_data_size);
-      memcpy(buffer, user_data, user_data_size);
-      get_user_data_table()[key] = buffer;
-      return result;
+      static std::map<LayoutConstraintID,LayoutConstraintRegistrar>
+                                                    pending_constraint_table;
+      return pending_constraint_table;
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ const void* Internal::find_user_data(TaskID tid, VariantID vid)
+    /*static*/ VariantID Internal::preregister_variant(
+                          const TaskVariantRegistrar &registrar,
+                          const void *user_data, size_t user_data_size,
+                          CodeDescriptor *realm, CodeDescriptor *inline_desc,
+                          bool has_ret, const char *task_name)
     //--------------------------------------------------------------------------
     {
-      std::pair<TaskID,VariantID> key(tid,vid);
-      const std::map<std::pair<TaskID,VariantID>,const void*> 
-        &user_data_table = get_user_data_table();
-      std::map<std::pair<TaskID,VariantID>,const void*>::const_iterator
-        finder = user_data_table.find(key);
-#ifdef DEBUG_HIGH_LEVEL
-      assert(finder != user_data_table.end());
-#endif
-      return finder->second;
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ TaskVariantCollection* Internal::get_variant_collection(
-                                                      Processor::TaskFuncID tid)
-    //--------------------------------------------------------------------------
-    {
-      std::map<Processor::TaskFuncID,TaskVariantCollection*> &task_table = 
-        Internal::get_collection_table();
-      std::map<Processor::TaskFuncID,TaskVariantCollection*>::const_iterator
-        finder = task_table.find(tid);
-      if (finder == task_table.end())
+      // Report an error if the runtime has already started
+      if (runtime_started)
       {
-        log_run.error("Unable to find entry for Task ID %d in "
-                            "the task collection table.  Did you forget "
-                            "to register a task?", tid);
+        log_run.error("Illegal call to 'preregister_task_variant' after "
+                      "the runtime has been started!");
 #ifdef DEBUG_HIGH_LEVEL
         assert(false);
 #endif
-        exit(ERROR_INVALID_TASK_ID);
+        exit(ERROR_STATIC_CALL_POST_RUNTIME_START);
       }
-      return finder->second;
+      std::deque<PendingVariantRegistration*> &pending_table = 
+        get_pending_variant_table();
+      // Offset by the runtime tasks
+      VariantID vid = TASK_ID_AVAILABLE + pending_table.size();
+      pending_table.push_back(new PendingVariantRegistration(vid, has_ret,
+                              registrar, user_data, user_data_size, 
+                              realm, inline_desc, task_name));
+      return vid;
     }
 
     //--------------------------------------------------------------------------
@@ -15781,27 +17147,6 @@ namespace LegionRuntime {
         assert(false);
 #endif
         exit(ERROR_INVALID_PROJECTION_ID);
-      }
-      return finder->second;
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ InlineFnptr Internal::find_inline_function(
-                                                    Processor::TaskFuncID fid)
-    //--------------------------------------------------------------------------
-    {
-      const std::map<Processor::TaskFuncID,InlineFnptr> &table = 
-                                                            get_inline_table();
-      std::map<Processor::TaskFuncID,InlineFnptr>::const_iterator finder = 
-                                                        table.find(fid);
-      if (finder == table.end())
-      {
-        log_run.error("Unable to find inline function with with "
-                            "inline function ID %d", fid);
-#ifdef DEBUG_HIGH_LEVEL
-        assert(false);
-#endif
-        exit(ERROR_INVALID_INLINE_ID);
       }
       return finder->second;
     }
@@ -15871,45 +17216,6 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ TaskIDTable& Internal::get_task_table(
-                                              bool add_runtime_tasks /*= true*/)
-    //--------------------------------------------------------------------------
-    {
-      static TaskIDTable table;
-      if (add_runtime_tasks)
-        Internal::register_runtime_tasks(table); 
-      return table;
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ std::map<Processor::TaskFuncID,InlineFnptr>& 
-                                          Internal::get_inline_table(void)
-    //--------------------------------------------------------------------------
-    {
-      static std::map<Processor::TaskFuncID,InlineFnptr> table;
-      return table;
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ std::map<Processor::TaskFuncID,TaskVariantCollection*>& 
-                                      Internal::get_collection_table(void)
-    //--------------------------------------------------------------------------
-    {
-      static std::map<Processor::TaskFuncID,TaskVariantCollection*> 
-                                                            collection_table;
-      return collection_table;
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ std::map<std::pair<TaskID,VariantID>,const void*>&
-                                      Internal::get_user_data_table(void)
-    //--------------------------------------------------------------------------
-    {
-      static std::map<std::pair<TaskID,VariantID>,const void*> user_data_table;
-      return user_data_table;
-    }
-
-    //--------------------------------------------------------------------------
     /*static*/ RegionProjectionTable& Internal::
                                               get_region_projection_table(void)
     //--------------------------------------------------------------------------
@@ -15928,27 +17234,52 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void Internal::register_runtime_tasks(TaskIDTable &table)
+    /*static*/ Event Internal::register_runtime_tasks(RealmRuntime &realm)
     //--------------------------------------------------------------------------
     {
-      // Check to make sure that nobody has registered any tasks here
-      for (unsigned idx = 0; idx < TASK_ID_AVAILABLE; idx++)
+      // Make the code descriptors for our tasks
+      CodeDescriptor init_task(Internal::initialize_runtime);
+      CodeDescriptor shutdown_task(Internal::shutdown_runtime);
+      CodeDescriptor hlr_task(Internal::high_level_runtime_task);
+      CodeDescriptor rt_profiling_task(Internal::profiling_runtime_task);
+      CodeDescriptor map_profiling_task(Internal::profiling_mapper_task);
+      Realm::ProfilingRequestSet no_requests;
+      // We'll just register these on all the processor kinds
+      std::set<Event> registered_events;
+      Processor::Kind kinds[4] = { Processor::TOC_PROC, Processor::LOC_PROC,
+                                   Processor::UTIL_PROC, Processor::IO_PROC };
+      for (unsigned idx = 0; idx < 4; idx++)
       {
-        if (table.find(idx) != table.end())
-        {
-          log_run.error("Task ID %d is reserved for high-level runtime "
-                              "tasks",idx);
-#ifdef DEBUG_HIGH_LEVEL
-          assert(false);
-#endif
-          exit(ERROR_RESERVED_TASK_ID);
-        }
+        registered_events.insert(
+            Processor::register_task_by_kind(kinds[idx], false/*global*/,
+                                         INIT_FUNC_ID, init_task, no_requests));
+        registered_events.insert(
+            Processor::register_task_by_kind(kinds[idx], false/*global*/,
+                                 SHUTDOWN_FUNC_ID, shutdown_task, no_requests));
+        registered_events.insert(
+            Processor::register_task_by_kind(kinds[idx], false/*global*/,
+                                           HLR_TASK_ID, hlr_task, no_requests));
+        registered_events.insert(
+            Processor::register_task_by_kind(kinds[idx], false/*global*/,
+                      HLR_LEGION_PROFILING_ID, rt_profiling_task, no_requests));
+        registered_events.insert(
+            Processor::register_task_by_kind(kinds[idx], false/*global*/,
+                     HLR_MAPPER_PROFILING_ID, map_profiling_task, no_requests));
       }
-      table[INIT_FUNC_ID]            = Internal::initialize_runtime;
-      table[SHUTDOWN_FUNC_ID]        = Internal::shutdown_runtime;
-      table[HLR_TASK_ID]             = Internal::high_level_runtime_task;
-      table[HLR_LEGION_PROFILING_ID] = Internal::profiling_runtime_task;
-      table[HLR_MAPPER_PROFILING_ID] = Internal::profiling_mapper_task;
+      if (record_registration)
+      {
+        log_run.print("Legion runtime initialization task "
+                            "has Realm ID %d", INIT_FUNC_ID);
+        log_run.print("Legion runtime shutdown task has "
+                            "Realm ID %d", SHUTDOWN_FUNC_ID);
+        log_run.print("Legion runtime meta-task has Realm ID %d", 
+                      HLR_TASK_ID);
+        log_run.print("Legion runtime profiling task Realm ID %d",
+                      HLR_LEGION_PROFILING_ID);
+        log_run.print("Legion mapper profiling task has Realm ID %d",
+                      HLR_MAPPER_PROFILING_ID);
+      }
+      return Event::merge_events(registered_events);
     }
 
     //--------------------------------------------------------------------------
@@ -16225,7 +17556,6 @@ namespace LegionRuntime {
       // Compute the number of processors we need to wait for
       int needed_count = 0;
       {
-        std::set<Processor> utility_procs;
         const unsigned local_space = p.address_space();
         for (std::set<Processor>::const_iterator it = all_procs.begin();
               it != all_procs.end(); it++)
@@ -16619,6 +17949,14 @@ namespace LegionRuntime {
             LegionContinuation::handle_continuation(args);
             break;
           }
+        case HLR_TASK_IMPL_SEMANTIC_INFO_REQ_TASK_ID:
+          {
+            TaskImpl::SemanticRequestArgs *req_args = 
+              (TaskImpl::SemanticRequestArgs*)args;
+            req_args->proxy_this->process_semantic_request(
+                          req_args->tag, req_args->source);
+            break;
+          }
         case HLR_INDEX_SPACE_SEMANTIC_INFO_REQ_TASK_ID:
           {
             IndexSpaceNode::SemanticRequestArgs *req_args = 
@@ -16696,8 +18034,12 @@ namespace LegionRuntime {
         default:
           assert(false); // should never get here
       }
-      if (tid < HLR_SHUTDOWN_ATTEMPT_TASK_ID)
+      if (tid < HLR_MESSAGE_ID)
         Internal::get_runtime(p)->decrement_total_outstanding_tasks();
+#ifdef DEBUG_SHUTDOWN_HANG
+      Internal *runtime = Internal::get_runtime(p);
+      __sync_fetch_and_add(&runtime->outstanding_counts[tid],-1);
+#endif
     }
 
     //--------------------------------------------------------------------------

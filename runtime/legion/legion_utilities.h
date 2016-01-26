@@ -257,6 +257,32 @@ namespace LegionRuntime {
     };
 
     /////////////////////////////////////////////////////////////
+    // Semantic Info 
+    /////////////////////////////////////////////////////////////
+
+    /**
+     * \struct SemanticInfo
+     * A struct for storing semantic information for various things
+     */
+    struct SemanticInfo {
+    public:
+      SemanticInfo(void)
+        : buffer(NULL), size(0) { }  
+      SemanticInfo(void *buf, size_t s, bool is_mut = true) 
+        : buffer(buf), size(s), 
+          ready_event(UserEvent::NO_USER_EVENT), is_mutable(is_mut) { }
+      SemanticInfo(UserEvent ready)
+        : buffer(NULL), size(0), ready_event(ready), is_mutable(true) { }
+    public:
+      inline bool is_valid(void) const { return !ready_event.exists(); }
+    public:
+      void *buffer;
+      size_t size;
+      UserEvent ready_event;
+      bool is_mutable;
+    };
+
+    /////////////////////////////////////////////////////////////
     // ColorPoint 
     /////////////////////////////////////////////////////////////
     class ColorPoint {
@@ -402,6 +428,7 @@ namespace LegionRuntime {
       inline const void* get_buffer(void) const { return buffer; }
       inline size_t get_buffer_size(void) const { return total_bytes; }
       inline size_t get_used_bytes(void) const { return index; }
+      inline void* reserve_bytes(size_t size);
     private:
       inline void resize(void);
     private:
@@ -1460,6 +1487,20 @@ namespace LegionRuntime {
       index += sizeof(size_t);
       context_bytes = 0;
 #endif
+    }
+
+    //--------------------------------------------------------------------------
+    inline void* Serializer::reserve_bytes(size_t bytes)
+    //--------------------------------------------------------------------------
+    {
+      while ((index + bytes) > total_bytes)
+        resize();
+      void *result = buffer+index;
+      index += bytes;
+#ifdef DEBUG_HIGH_LEVEL
+      context_bytes += bytes;
+#endif
+      return result;
     }
 
     //--------------------------------------------------------------------------

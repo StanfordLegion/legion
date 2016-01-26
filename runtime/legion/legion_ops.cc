@@ -2206,7 +2206,7 @@ namespace LegionRuntime {
         arrive_barriers.push_back(*it);
 #ifdef LEGION_SPY
         LegionSpy::log_event_dependence(it->phase_barrier,
-                                arrive_barriers.back().phase_barrier);
+            arrive_barriers.back().phase_barrier);
 #endif
       }
       map_id = launcher.map_id;
@@ -2366,7 +2366,7 @@ namespace LegionRuntime {
                                              req.privilege,
                                              req.prop, req.redop);
           LegionSpy::log_requirement_fields(unique_op_id, idx, 
-                                            req.privilege_fields);
+                                            req.instance_fields);
         }
         for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
         {
@@ -2381,7 +2381,7 @@ namespace LegionRuntime {
                                              req.prop, req.redop);
           LegionSpy::log_requirement_fields(unique_op_id, 
                                             src_requirements.size()+idx, 
-                                            req.privilege_fields);
+                                            req.instance_fields);
         }
       }
     }
@@ -2739,16 +2739,10 @@ namespace LegionRuntime {
             new_pre.trigger();
             sync_precondition = new_pre;
           }
-#endif
-#ifdef LEGION_SPY
           LegionSpy::log_event_dependences(preconditions,
-                                           sync_precondition);
+              sync_precondition);
 #endif
         }
-#ifdef LEGION_SPY
-        std::set<Event> start_events;
-        start_events.insert(sync_precondition);
-#endif
         std::set<Event> applied_conditions;
         std::set<Event> copy_complete_events;
         for (unsigned idx = 0; idx < src_requirements.size(); idx++)
@@ -2775,11 +2769,6 @@ namespace LegionRuntime {
             dst_requirements[idx].mapping_failed = false;
             dst_requirements[idx].selected_memory = dst_ref.get_memory();
           }
-#ifdef LEGION_SPY
-          start_events.insert(dst_ref.get_ready_event());
-          LegionSpy::log_op_user(unique_op_id, src_requirements.size()+idx,
-              dst_ref.get_manager()->get_instance().id);
-#endif
           if (!src_mapping_refs[idx].has_ref())
           {
             // In this case, there is no source instance so we need
@@ -2851,11 +2840,6 @@ namespace LegionRuntime {
                                           src_requirements[idx],
                                           dst_requirements[idx],
                                           src_ref, dst_ref, sync_precondition));
-#ifdef LEGION_SPY
-            start_events.insert(src_ref.get_ready_event());
-            LegionSpy::log_op_user(unique_op_id, idx,
-                src_ref.get_manager()->get_instance().id);
-#endif
           }
         }
         // Launch the complete task if necessary 
@@ -2868,27 +2852,12 @@ namespace LegionRuntime {
           new_copy_complete.trigger();
           copy_complete_event = new_copy_complete;
         }
-#endif
-#ifdef LEGION_SPY
-        Event start_event = Event::merge_events(start_events);
-        if (!start_event.exists())
-        {
-          UserEvent new_start_event = UserEvent::create_user_event();
-          new_start_event.trigger();
-          start_event = new_start_event;
-        }
-        LegionSpy::log_event_dependences(start_events, start_event);
-        LegionSpy::log_op_events(unique_op_id, start_event,
-                                 completion_event);
         LegionSpy::log_event_dependences(copy_complete_events, 
-                                         copy_complete_event);
+            copy_complete_event);
         LegionSpy::log_event_dependence(copy_complete_event,
-                                        completion_event);
-        {
-          Processor proc = Processor::get_executing_processor();
-          LegionSpy::log_op_proc_user(unique_op_id, proc.id);
-        }
+            completion_event);
 #endif
+
         // Chain all the unlock and barrier arrivals off of the
         // copy complete event
         if (!arrive_barriers.empty())
@@ -2899,7 +2868,7 @@ namespace LegionRuntime {
             it->phase_barrier.arrive(1/*count*/, copy_complete_event);    
 #ifdef LEGION_SPY
             LegionSpy::log_event_dependence(completion_event, 
-                                            it->phase_barrier);
+                it->phase_barrier);
 #endif
           }
         }
@@ -2913,10 +2882,6 @@ namespace LegionRuntime {
         if (notify)
           runtime->invoke_mapper_notify_result(local_proc, this);
 
-#ifdef LEGION_SPY
-        LegionSpy::log_event_dependence(copy_complete_event,
-                                        completion_event);
-#endif
         // Handle the case for marking when the copy completes
         completion_event.trigger(copy_complete_event);
         need_completion_trigger = false;

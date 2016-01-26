@@ -371,6 +371,9 @@ namespace Realm {
 
     virtual bool is_portable(void) const;
 
+    template<typename T>
+    inline T get_impl(void) const { return reinterpret_cast<T>(fnptr); }
+
     template <typename S>
     bool serialize(S& serializer) const;
 

@@ -464,7 +464,7 @@ namespace LegionRuntime {
     {
       if (d.get_dim() == 0)
       {
-        const LowLevel::ElementMask &mask = 
+        const Realm::ElementMask &mask = 
           d.get_index_space().get_valid_mask();
         return mask.get_num_elmts();
       }
@@ -1146,7 +1146,7 @@ namespace LegionRuntime {
       size_t result = op->sizeof_rhs;
       if (ptr_space.get_dim() == 0)
       {
-        const LowLevel::ElementMask &mask = 
+        const Realm::ElementMask &mask = 
           ptr_space.get_index_space().get_valid_mask();
         result *= mask.get_num_elmts();
       }
@@ -1323,7 +1323,7 @@ namespace LegionRuntime {
       const Domain &d = region_node->row_source->get_domain_blocking();
       if (d.get_dim() == 0)
       {
-        const LowLevel::ElementMask &mask = 
+        const Realm::ElementMask &mask = 
           d.get_index_space().get_valid_mask();
         result *= mask.get_num_elmts();
       }

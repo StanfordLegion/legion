@@ -16,7 +16,7 @@
 #ifndef __LEGION_PROFILING_H__
 #define __LEGION_PROFILING_H__
 
-#include "lowlevel.h"
+#include "realm.h"
 #include "utilities.h"
 #include "legion_types.h"
 #include "legion_utilities.h"
@@ -45,12 +45,12 @@ namespace LegionRuntime {
     public:
       struct TaskKind {
       public:
-        Processor::TaskFuncID task_id;
+        TaskID task_id;
         const char *task_name;
       };
       struct TaskVariant {
       public:
-        Processor::TaskFuncID func_id;
+        VariantID func_id;
         const char *variant_name;
       };
       struct OperationInstance {
@@ -61,12 +61,12 @@ namespace LegionRuntime {
       struct MultiTask {
       public:
         UniqueID op_id;
-        Processor::TaskFuncID task_id;
+        TaskID task_id;
       };
       struct TaskInfo {
       public:
         UniqueID task_id;
-        Processor::TaskFuncID func_id;
+        TaskID func_id;
         Processor proc;
         unsigned long long create, ready, start, stop;
       };
@@ -113,11 +113,11 @@ namespace LegionRuntime {
     public:
       LegionProfInstance& operator=(const LegionProfInstance &rhs);
     public:
-      void register_task_kind(Processor::TaskFuncID kind, const char *name);
-      void register_task_variant(const char *variant_name,
-                                 const TaskVariantCollection::Variant &variant);
+      void register_task_kind(TaskID task_id, const char *name);
+      void register_task_variant(VariantID variant_id, 
+                                 const char *variant_name);
       void register_operation(Operation *op);
-      void register_multi_task(Operation *op, Processor::TaskFuncID kind);
+      void register_multi_task(Operation *op, TaskID kind);
     public:
       void process_task(size_t id, UniqueID op_id, 
                   Realm::ProfilingMeasurements::OperationTimeline *timeline,
@@ -193,16 +193,14 @@ namespace LegionRuntime {
     public:
       // Dynamically created things must be registered at runtime
       // Tasks
-      void register_task_kind(Processor::TaskFuncID task_id,
-                              const char *task_name);
-      void register_task_variant(const char *variant_name,
-                                 const TaskVariantCollection::Variant &variant);
+      void register_task_kind(TaskID task_id, const char *task_name);
+      void register_task_variant(VariantID var_id, const char *variant_name);
       // Operations
       void register_operation(Operation *op);
-      void register_multi_task(Operation *op, Processor::TaskFuncID task_id);
+      void register_multi_task(Operation *op, TaskID task_id);
     public:
       void add_task_request(Realm::ProfilingRequestSet &requests, 
-                            Processor::TaskFuncID tid, SingleTask *task);
+                            TaskID tid, SingleTask *task);
       void add_meta_request(Realm::ProfilingRequestSet &requests,
                             HLRTaskID tid, Operation *op);
       void add_copy_request(Realm::ProfilingRequestSet &requests, 
@@ -214,7 +212,7 @@ namespace LegionRuntime {
     public:
       // Alternate versions of the one above with op ids
       void add_task_request(Realm::ProfilingRequestSet &requests, 
-                            Processor::TaskFuncID tid, UniqueID uid);
+                            TaskID tid, UniqueID uid);
       void add_meta_request(Realm::ProfilingRequestSet &requests,
                             HLRTaskID tid, UniqueID uid);
       void add_copy_request(Realm::ProfilingRequestSet &requests, 

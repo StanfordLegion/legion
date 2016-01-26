@@ -88,10 +88,6 @@
 #ifndef DEFAULT_MAX_MESSAGE_SIZE
 #define DEFAULT_MAX_MESSAGE_SIZE        16384
 #endif
-// Maximum number of tasks in logical region node before consolidation
-#ifndef DEFAULT_MAX_FILTER_SIZE
-#define DEFAULT_MAX_FILTER_SIZE         0
-#endif
 // Timeout before checking for whether a logical user
 // should be pruned from the logical region tree data strucutre
 // Making the value less than or equal to zero will
@@ -300,6 +296,12 @@ typedef enum legion_error_t {
   ERROR_TRACE_VIOLATION = 137,
   ERROR_INVALID_TARGET_PROC = 138,
   ERROR_INCOMPLETE_TRACE = 139,
+  ERROR_STATIC_CALL_POST_RUNTIME_START = 140,
+  ERROR_ILLEGAL_GLOBAL_VARIANT_REGISTRATION = 141,
+  ERROR_ILLEGAL_USE_OF_NON_GLOBAL_VARIANT = 142,
+  ERROR_RESERVED_CONSTRAINT_ID = 143,
+  ERROR_DUPLICATE_CONSTRAINT_ID = 144,
+  ERROR_INVALID_CONSTRAINT_ID = 145,
 }  legion_error_t;
 
 // enum and namepsaces don't really get along well
@@ -404,6 +406,7 @@ typedef unsigned long legion_semantic_tag_t;
 typedef unsigned long long legion_unique_id_t;
 typedef unsigned long long legion_version_id_t;
 typedef legion_lowlevel_task_func_id_t legion_task_id_t;
+typedef unsigned long legion_layout_constraint_id_t;
 
 
 #endif // __LEGION_CONFIG_H__

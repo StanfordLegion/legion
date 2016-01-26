@@ -3875,7 +3875,7 @@ namespace LegionRuntime {
           Event target_pre;
           const Domain &target = 
             it->first->logical_node->get_domain(target_pre);
-          std::vector<LowLevel::IndexSpace> already_handled;
+          std::vector<Realm::IndexSpace> already_handled;
           std::set<Event> already_preconditions;
           it->first->find_field_descriptors(term_event, usage,
                                             user_mask, fid_idx, local_proc, 
@@ -3896,11 +3896,11 @@ namespace LegionRuntime {
                                                const FieldMask &user_mask,
                                                unsigned fid_idx,
                                                Processor local_proc,
-                                               LowLevel::IndexSpace target,
+                                               Realm::IndexSpace target,
                                                Event target_precondition,
                                    std::vector<FieldDataDescriptor> &field_data,
                                    std::set<Event> &preconditions,
-                             std::vector<LowLevel::IndexSpace> &already_handled,
+                             std::vector<Realm::IndexSpace> &already_handled,
                              std::set<Event> &already_preconditions)
     //--------------------------------------------------------------------------
     {
@@ -4755,11 +4755,11 @@ namespace LegionRuntime {
                                                const FieldMask &user_mask,
                                                unsigned fid_idx,
                                                Processor local_proc,
-                                               LowLevel::IndexSpace target,
+                                               Realm::IndexSpace target,
                                                Event target_precondition,
                                    std::vector<FieldDataDescriptor> &field_data,
                                    std::set<Event> &preconditions,
-                             std::vector<LowLevel::IndexSpace> &already_handled,
+                             std::vector<Realm::IndexSpace> &already_handled,
                              std::set<Event> &already_preconditions)
     //--------------------------------------------------------------------------
     {
@@ -4769,7 +4769,7 @@ namespace LegionRuntime {
       // one local instance if it exists.
 
       // Keep track of all the index spaces we've handled below
-      std::vector<LowLevel::IndexSpace> handled_index_spaces;
+      std::vector<Realm::IndexSpace> handled_index_spaces;
       // Keep track of the preconditions for using the handled index spaces
       std::set<Event> handled_preconditions;
       unsigned done_children = 0;
@@ -4790,14 +4790,14 @@ namespace LegionRuntime {
           if (need_child_intersect)
           {
             // Compute the intersection of our target with the child
-            std::vector<LowLevel::IndexSpace::BinaryOpDescriptor> ops(1);
-            ops[0].op = LowLevel::IndexSpace::ISO_INTERSECT;
+            std::vector<Realm::IndexSpace::BinaryOpDescriptor> ops(1);
+            ops[0].op = Realm::IndexSpace::ISO_INTERSECT;
             ops[0].parent = local_domain.get_index_space();
             ops[0].left_operand = target;
             ops[0].right_operand = child_domain.get_index_space();
             Event pre = Event::merge_events(target_precondition, 
                                       child_precondition, domain_precondition);
-            Event child_ready = LowLevel::IndexSpace::compute_index_spaces(ops,
+            Event child_ready = Realm::IndexSpace::compute_index_spaces(ops,
                                                         false/*mutable*/, pre);
             done = it->first->find_field_descriptors(term_event, usage,
                                                    user_mask,fid_idx,local_proc,
@@ -4833,7 +4833,7 @@ namespace LegionRuntime {
       // If we make it here, we weren't able to cover ourselves, so make an 
       // index space for the remaining set of points we need to handle
       // First compute what we did handle
-      LowLevel::IndexSpace local_handled = LowLevel::IndexSpace::NO_SPACE;
+      Realm::IndexSpace local_handled = Realm::IndexSpace::NO_SPACE;
       Event local_precondition = Event::NO_EVENT;
       if (handled_index_spaces.size() == 1)
       {
@@ -4850,8 +4850,8 @@ namespace LegionRuntime {
           handled_preconditions.insert(parent_precondition);
         // Compute the union of all our handled index spaces
         Event handled_pre = Event::merge_events(handled_preconditions);
-        local_precondition = LowLevel::IndexSpace::reduce_index_spaces( 
-                              LowLevel::IndexSpace::ISO_UNION,
+        local_precondition = Realm::IndexSpace::reduce_index_spaces( 
+                              Realm::IndexSpace::ISO_UNION,
                               handled_index_spaces, local_handled,
                               false/*not mutable*/, 
                               parent_dom.get_index_space(), handled_pre);
@@ -4859,19 +4859,19 @@ namespace LegionRuntime {
         local_handled.destroy(term_event);
       }
       // Now we can compute the remaining part of the index space
-      LowLevel::IndexSpace remaining_space = target;
+      Realm::IndexSpace remaining_space = target;
       Event remaining_precondition = target_precondition;
       if (local_handled.exists())
       {
         // Compute the set difference
-        std::vector<LowLevel::IndexSpace::BinaryOpDescriptor> ops(1);
-        ops[0].op = LowLevel::IndexSpace::ISO_SUBTRACT;
+        std::vector<Realm::IndexSpace::BinaryOpDescriptor> ops(1);
+        ops[0].op = Realm::IndexSpace::ISO_SUBTRACT;
         ops[0].parent = local_domain.get_index_space();
         ops[0].left_operand = target;
         ops[0].right_operand = local_handled;
         Event pre = Event::merge_events(target_precondition,
                                         local_precondition,domain_precondition);
-        remaining_precondition = LowLevel::IndexSpace::compute_index_spaces(ops,
+        remaining_precondition = Realm::IndexSpace::compute_index_spaces(ops,
                                                         false/*mutable*/, pre);
         remaining_space = ops[0].result;
         // We also emit the destruction for this temporary index space
@@ -5640,11 +5640,11 @@ namespace LegionRuntime {
                                           const FieldMask &user_mask,
                                           unsigned fid_idx,
                                           Processor local_proc,
-                                          LowLevel::IndexSpace target,
+                                          Realm::IndexSpace target,
                                           Event target_precondition,
                                   std::vector<FieldDataDescriptor> &field_data,
                                           std::set<Event> &preconditions,
-                             std::vector<LowLevel::IndexSpace> &already_handled,
+                             std::vector<Realm::IndexSpace> &already_handled,
                                        std::set<Event> &already_preconditions)
     //--------------------------------------------------------------------------
     {
@@ -5776,7 +5776,16 @@ namespace LegionRuntime {
         const std::set<Domain> &component_domains = 
           logical_node->get_component_domains(dom_pre);
         if (dom_pre.exists())
+        {
+#ifdef LEGION_SPY
+          Event new_reduce_pre = Event::merge_events(reduce_pre, dom_pre);
+          LegionSpy::log_event_dependence(reduce_pre, new_reduce_pre);
+          LegionSpy::log_event_dependence(dom_pre, new_reduce_pre);
+          reduce_pre = new_reduce_pre;
+#else
           reduce_pre = Event::merge_events(reduce_pre, dom_pre);
+#endif
+        }
         for (std::set<Domain>::const_iterator it = 
               component_domains.begin(); it != component_domains.end(); it++)
         {
@@ -5795,7 +5804,16 @@ namespace LegionRuntime {
         Event dom_pre;
         Domain domain = logical_node->get_domain(dom_pre);
         if (dom_pre.exists())
+        {
+#ifdef LEGION_SPY
+          Event new_reduce_pre = Event::merge_events(reduce_pre, dom_pre);
+          LegionSpy::log_event_dependence(reduce_pre, new_reduce_pre);
+          LegionSpy::log_event_dependence(dom_pre, new_reduce_pre);
+          reduce_pre = new_reduce_pre;
+#else
           reduce_pre = Event::merge_events(reduce_pre, dom_pre);
+#endif
+        }
         reduce_post = manager->issue_reduction(op, src_fields, dst_fields,
                                                domain, reduce_pre, fold,
                                                true/*precise*/);
@@ -5819,15 +5837,15 @@ namespace LegionRuntime {
         tracker->add_copy_event(reduce_post);
 #ifdef LEGION_SPY
       {
-        std::set<FieldID> field_set;
-        manager->region_node->column_source->to_field_set(reduce_mask,
-            field_set);
-        LegionSpy::log_copy_operation(manager->get_instance().id,
-            target->get_manager()->get_instance().id,
+        std::vector<FieldID> fids;
+        manager->region_node->column_source->get_field_ids(reduce_mask,
+            fids);
+        LegionSpy::log_copy_events(manager->get_instance().id,
+            target->get_manager()->get_instance().id, true,
             reduce_index_space.get_id(),
             manager->region_node->column_source->handle.id,
             manager->region_node->handle.tree_id, reduce_pre, reduce_post,
-            manager->redop, field_set);
+            manager->redop, fids);
       }
 #endif
     } 
@@ -5883,6 +5901,15 @@ namespace LegionRuntime {
         post_events.insert(post);
       }
       Event reduce_post = Event::merge_events(post_events);
+#ifdef LEGION_SPY
+      if (!reduce_post.exists())
+      {
+        UserEvent new_reduce_post = UserEvent::create_user_event();
+        new_reduce_post.trigger();
+        reduce_post = new_reduce_post;
+        LegionSpy::log_event_dependences(post_events, reduce_post);
+      }
+#endif
       // No need to add the user to the destination as that will
       // be handled by the caller using the reduce post event we return
       add_copy_user(manager->redop, reduce_post, version_info,
@@ -5890,21 +5917,15 @@ namespace LegionRuntime {
 #ifdef LEGION_SPY
       IndexSpace reduce_index_space =
               target->logical_node->as_region_node()->row_source->handle;
-      if (!reduce_post.exists())
       {
-        UserEvent new_reduce_post = UserEvent::create_user_event();
-        new_reduce_post.trigger();
-        reduce_post = new_reduce_post;
-      }
-      {
-        std::set<FieldID> field_set;
-        manager->region_node->column_source->to_field_set(red_mask, field_set);
-        LegionSpy::log_copy_operation(manager->get_instance().id,
-            target->get_manager()->get_instance().id,
+        std::vector<FieldID> fids;
+        manager->region_node->column_source->get_field_ids(red_mask, fids);
+        LegionSpy::log_copy_events(manager->get_instance().id,
+            target->get_manager()->get_instance().id, true,
             reduce_index_space.get_id(),
             manager->region_node->column_source->handle.id,
             manager->region_node->handle.tree_id, reduce_pre, reduce_post,
-            manager->redop, field_set);
+            manager->redop, fids);
       }
 #endif
       return reduce_post;
@@ -5963,6 +5984,15 @@ namespace LegionRuntime {
         post_events.insert(post);
       }
       Event reduce_post = Event::merge_events(post_events);
+#ifdef LEGION_SPY
+      if (!reduce_post.exists())
+      {
+        UserEvent new_reduce_post = UserEvent::create_user_event();
+        new_reduce_post.trigger();
+        reduce_post = new_reduce_post;
+        LegionSpy::log_event_dependences(post_events, reduce_post);
+      }
+#endif
       // No need to add the user to the destination as that will
       // be handled by the caller using the reduce post event we return
       add_copy_user(manager->redop, reduce_post, version_info,
@@ -5970,21 +6000,15 @@ namespace LegionRuntime {
 #ifdef LEGION_SPY
       IndexSpace reduce_index_space =
               target->logical_node->as_region_node()->row_source->handle;
-      if (!reduce_post.exists())
       {
-        UserEvent new_reduce_post = UserEvent::create_user_event();
-        new_reduce_post.trigger();
-        reduce_post = new_reduce_post;
-      }
-      {
-        std::set<FieldID> field_set;
-        manager->region_node->column_source->to_field_set(red_mask, field_set);
-        LegionSpy::log_copy_operation(manager->get_instance().id,
-            target->get_manager()->get_instance().id,
+        std::vector<FieldID> fids;
+        manager->region_node->column_source->get_field_ids(red_mask, fids);
+        LegionSpy::log_copy_events(manager->get_instance().id,
+            target->get_manager()->get_instance().id, true,
             reduce_index_space.get_id(),
             manager->region_node->column_source->handle.id,
             manager->region_node->handle.tree_id, reduce_pre, reduce_post,
-            manager->redop, field_set);
+            manager->redop, fids);
       }
 #endif
       return reduce_post;

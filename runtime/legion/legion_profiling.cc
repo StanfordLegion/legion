@@ -84,7 +84,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void LegionProfInstance::register_task_kind(Processor::TaskFuncID task_id,
+    void LegionProfInstance::register_task_kind(TaskID task_id,
                                                 const char *name)
     //--------------------------------------------------------------------------
     {
@@ -95,13 +95,13 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void LegionProfInstance::register_task_variant(const char *variant_name,
-                                  const TaskVariantCollection::Variant &variant)
+    void LegionProfInstance::register_task_variant(VariantID variant_id,
+                                                   const char *variant_name)
     //--------------------------------------------------------------------------
     {
       task_variants.push_back(TaskVariant()); 
       TaskVariant &var = task_variants.back();
-      var.func_id = variant.low_id;
+      var.func_id = variant_id;
       var.variant_name = strdup(variant_name);
     }
 
@@ -116,8 +116,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void LegionProfInstance::register_multi_task(Operation *op, 
-                                                 Processor::TaskFuncID task_id)
+    void LegionProfInstance::register_multi_task(Operation *op, TaskID task_id)
     //--------------------------------------------------------------------------
     {
       multi_tasks.push_back(MultiTask());
@@ -255,7 +254,7 @@ namespace LegionRuntime {
       for (std::deque<TaskVariant>::const_iterator it = task_variants.begin();
             it != task_variants.end(); it++)
       {
-        log_prof.info("Prof Task Variant %u %s", it->func_id, it->variant_name);
+        log_prof.info("Prof Task Variant %lu %s", it->func_id,it->variant_name);
         free(const_cast<char*>(it->variant_name));
       }
       for (std::deque<OperationInstance>::const_iterator it = 
@@ -397,7 +396,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void LegionProfiler::register_task_kind(Processor::TaskFuncID task_id,
+    void LegionProfiler::register_task_kind(TaskID task_id,
                                             const char *task_name)
     //--------------------------------------------------------------------------
     {
@@ -412,8 +411,8 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void LegionProfiler::register_task_variant(const char *variant_name,
-                                  const TaskVariantCollection::Variant &variant)
+    void LegionProfiler::register_task_variant(VariantID variant_id, 
+                                               const char *variant_name)
     //--------------------------------------------------------------------------
     {
       Processor current = Processor::get_executing_processor();
@@ -423,7 +422,7 @@ namespace LegionRuntime {
 #endif
       if (instances[local_id] == NULL)
         instances[local_id] = new LegionProfInstance(this);
-      instances[local_id]->register_task_variant(variant_name, variant);
+      instances[local_id]->register_task_variant(variant_id, variant_name);
     }
 
     //--------------------------------------------------------------------------
@@ -441,8 +440,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void LegionProfiler::register_multi_task(Operation *op, 
-                                             Processor::TaskFuncID task_id)
+    void LegionProfiler::register_multi_task(Operation *op, TaskID task_id)
     //--------------------------------------------------------------------------
     {
       Processor current = Processor::get_executing_processor();
@@ -457,7 +455,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void LegionProfiler::add_task_request(Realm::ProfilingRequestSet &requests,
-                                    Processor::TaskFuncID tid, SingleTask *task)
+                                          TaskID tid, SingleTask *task)
     //--------------------------------------------------------------------------
     {
       ProfilingInfo info(LEGION_PROF_TASK); 
@@ -542,7 +540,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void LegionProfiler::add_task_request(Realm::ProfilingRequestSet &requests,
-                                        Processor::TaskFuncID tid, UniqueID uid)
+                                          TaskID tid, UniqueID uid)
     //--------------------------------------------------------------------------
     {
       ProfilingInfo info(LEGION_PROF_TASK); 
