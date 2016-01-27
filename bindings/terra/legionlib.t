@@ -15,6 +15,7 @@
 local ffi = require("ffi")
 local std = terralib.includec("stdlib.h")
 local cstr = terralib.includec("string.h")
+local cstdio = terralib.includec("stdio.h")
 
 legion = {}
 legion.__index = legion
@@ -1638,14 +1639,14 @@ function legion:start(args)
   for i, arg in pairs(args) do
     if i >= 0 then
       argv_setup:insert(quote
-        [argv][ [i] ] = [arg]
+        [argv][ [i-1] ] = [arg]
       end)
     end
   end
 
   local terra main()
     [argv_setup]
-    var res = legion_c.legion_runtime_start(argc, argv, false)
+    var res = legion_c.legion_runtime_start(argc, argv, true)
     legion_c.legion_runtime_wait_for_shutdown()
   end
   main()
