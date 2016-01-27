@@ -1639,7 +1639,7 @@ function legion:start(args)
   for i, arg in pairs(args) do
     if i >= 0 then
       argv_setup:insert(quote
-        [argv][ [i] ] = [arg]
+        [argv][ [i-1] ] = [arg]
       end)
     end
   end
