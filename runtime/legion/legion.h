@@ -5825,7 +5825,7 @@ namespace Legion {
       DomainColoring coloring;
     };
 
-}; // namespace LegionRuntime
+}; // namespace Legion
 
 #include "legion.inl"
 
