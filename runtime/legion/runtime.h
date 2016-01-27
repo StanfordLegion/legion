@@ -2474,6 +2474,7 @@ namespace LegionRuntime {
       static volatile RegistrationCallbackFnptr registration_callback;
       static Processor::TaskFuncID legion_main_id;
       static Event runtime_startup_event;
+      static volatile bool runtime_startup_event_ready;
       static int initial_task_window_size;
       static unsigned initial_task_window_hysteresis;
       static unsigned initial_tasks_to_schedule;
@@ -2481,6 +2482,7 @@ namespace LegionRuntime {
       static unsigned max_message_size;
       static unsigned gc_epoch_size;
       static bool runtime_started;
+      static bool runtime_backgrounded;
       static bool separate_runtime_instances;
       static bool record_registration;
       static bool stealing_disabled;

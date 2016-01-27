@@ -5711,55 +5711,51 @@ namespace LegionRuntime {
     void Internal::construct_mpi_rank_tables(Processor proc, int rank)
     //--------------------------------------------------------------------------
     {
-      // Only do this on the first processor
-      if (proc == *(local_procs.begin()))
+      // Initialize our mpi rank event
+      Internal::mpi_rank_event = UserEvent::create_user_event();
+      // Now broadcast our address space and rank to all the other nodes
+      MPIRankArgs args;
+      args.hlr_id = HLR_MPI_RANK_ID;
+      args.mpi_rank = rank;
+      args.source_space = address_space;
+      std::set<AddressSpace> sent_targets;
+      std::set<Processor> all_procs;
+      machine.get_all_processors(all_procs);
+      for (std::set<Processor>::const_iterator it = all_procs.begin();
+            it != all_procs.end(); it++)
       {
-        // Initialize our mpi rank event
-        Internal::mpi_rank_event = UserEvent::create_user_event();
-        // Now broadcast our address space and rank to all the other nodes
-        MPIRankArgs args;
-        args.hlr_id = HLR_MPI_RANK_ID;
-        args.mpi_rank = rank;
-        args.source_space = address_space;
-        std::set<AddressSpace> sent_targets;
-        std::set<Processor> all_procs;
-	machine.get_all_processors(all_procs);
-        for (std::set<Processor>::const_iterator it = all_procs.begin();
-              it != all_procs.end(); it++)
-        {
-          AddressSpace target_space = it->address_space();
-          if (target_space == address_space)
-            continue;
-          if (sent_targets.find(target_space) != sent_targets.end())
-            continue;
-          Processor::Kind kind = it->kind();
-          if (kind != Processor::LOC_PROC)
-            continue;
-          issue_runtime_meta_task(&args, sizeof(args), 
-                                  HLR_MPI_RANK_ID, NULL,
-                                  Event::NO_EVENT, 0/*priority*/, *it);
-          sent_targets.insert(target_space);
-        }
-        // Now set our own value, update the count, and see if we're done
-        Internal::mpi_rank_table[rank] = address_space;
-        unsigned count = 
-          __sync_add_and_fetch(&Internal::remaining_mpi_notifications, 1);
-        const size_t total_ranks = machine.get_address_space_count();
-        if (count == total_ranks)
-          Internal::mpi_rank_event.trigger();
-        // Wait on the event
-        mpi_rank_event.wait();
-        // Once we've triggered, then we can build the maps
-        for (unsigned local_rank = 0; local_rank < count; local_rank++)
-        {
-          AddressSpace local_space = Internal::mpi_rank_table[local_rank];
+        AddressSpace target_space = it->address_space();
+        if (target_space == address_space)
+          continue;
+        if (sent_targets.find(target_space) != sent_targets.end())
+          continue;
+        Processor::Kind kind = it->kind();
+        if (kind != Processor::LOC_PROC)
+          continue;
+        issue_runtime_meta_task(&args, sizeof(args), 
+                                HLR_MPI_RANK_ID, NULL,
+                                Event::NO_EVENT, 0/*priority*/, *it);
+        sent_targets.insert(target_space);
+      }
+      // Now set our own value, update the count, and see if we're done
+      Internal::mpi_rank_table[rank] = address_space;
+      unsigned count = 
+        __sync_add_and_fetch(&Internal::remaining_mpi_notifications, 1);
+      const size_t total_ranks = machine.get_address_space_count();
+      if (count == total_ranks)
+        Internal::mpi_rank_event.trigger();
+      // Wait on the event
+      mpi_rank_event.wait();
+      // Once we've triggered, then we can build the maps
+      for (unsigned local_rank = 0; local_rank < count; local_rank++)
+      {
+        AddressSpace local_space = Internal::mpi_rank_table[local_rank];
 #ifdef DEBUG_HIGH_LEVEL
-          assert(reverse_mpi_mapping.find(local_space) == 
-                 reverse_mpi_mapping.end());
+        assert(reverse_mpi_mapping.find(local_space) == 
+               reverse_mpi_mapping.end());
 #endif
-          forward_mpi_mapping[local_rank] = local_space;
-          reverse_mpi_mapping[local_space] = local_rank;
-        }
+        forward_mpi_mapping[local_rank] = local_space;
+        reverse_mpi_mapping[local_space] = local_rank;
       }
     }
 
@@ -16506,6 +16502,7 @@ namespace LegionRuntime {
                                               registration_callback = NULL;
     /*static*/ Processor::TaskFuncID Internal::legion_main_id = 0;
     /*static*/ Event Internal::runtime_startup_event = Event::NO_EVENT;
+    /*static*/ volatile bool Internal::runtime_startup_event_ready = false;
     /*static*/ int Internal::initial_task_window_size = 
                                       DEFAULT_MAX_TASK_WINDOW;
     /*static*/ unsigned Internal::initial_task_window_hysteresis =
@@ -16519,6 +16516,7 @@ namespace LegionRuntime {
     /*static*/ unsigned Internal::gc_epoch_size = 
                                       DEFAULT_GC_EPOCH_SIZE;
     /*static*/ bool Internal::runtime_started = false;
+    /*static*/ bool Internal::runtime_backgrounded = true;
     /*static*/ bool Internal::separate_runtime_instances = false;
     /*static*/ bool Internal::record_registration = false;
     /*sattic*/ bool Internal::stealing_disabled = false;
@@ -16885,6 +16883,9 @@ namespace LegionRuntime {
           exit(ERROR_MAXIMUM_PROCS_EXCEEDED);
         }
       }
+      // To avoid a race condition, we first have to mark that we 
+      // haven't recorded the runtime start-up event
+      runtime_startup_event_ready = false;
       // Now perform a collective spawn to initialize the runtime everywhere
       // Save the precondition in case we are the node that needs to start
       // the top-level task.
@@ -16894,17 +16895,33 @@ namespace LegionRuntime {
       runtime_startup_event = realm.collective_spawn_by_kind(
           Processor::NO_KIND, INIT_TASK_ID, NULL, 0, 
           !separate_runtime_instances, tasks_registered);
+      // Now mark that we've recorded the start-up event
+      runtime_startup_event_ready = true;
       // If we are supposed to background this thread, then we wait
       // for the runtime to shutdown, otherwise we can now return
       if (!background)
+      {
+        // Record that we didn't background the runtime
+        runtime_backgrounded = false;
+        // Now wait for realm to be shutdown
         realm.wait_for_shutdown();
-      return 0;  
+      }
+      return 0;
     }
 
     //--------------------------------------------------------------------------
     /*static*/ void Internal::wait_for_shutdown(void)
     //--------------------------------------------------------------------------
     {
+      if (!runtime_backgrounded)
+      {
+        log_run.error("Illegal call to wait_for_shutdown when runtime was "
+                      "not launched in background mode!");
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_ILLEGAL_WAIT_FOR_SHUTDOWN);
+      }
       RealmRuntime::get_runtime().wait_for_shutdown();
     }
 
@@ -17474,6 +17491,14 @@ namespace LegionRuntime {
       if (local_space_id == 0)
       {
         HLRTaskID hlr_id = HLR_LAUNCH_TOP_LEVEL_ID;
+        // To avoid a race condition on reading the runtime_startup_event,
+        // do some spin-waiting until we know that the runtime startup
+        // event is ready for us to read
+#ifdef __SSE2__
+        while (!runtime_startup_event_ready) { _mm_pause(); } 
+#else
+        while (!runtime_startup_event_ready) { }
+#endif
         local_rt->issue_runtime_meta_task(&hlr_id, sizeof(hlr_id),
                                           hlr_id, NULL, runtime_startup_event);
       }
