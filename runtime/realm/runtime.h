@@ -59,6 +59,15 @@ namespace Realm {
 	return register_custom_serdez(serdez_id, CustomSerdezUntyped::create_custom_serdez<SERDEZ>());
       }
 
+      Event collective_spawn(Processor target_proc, Processor::TaskFuncID task_id, 
+			     const void *args, size_t arglen,
+			     Event wait_on = Event::NO_EVENT, int priority = 0);
+
+      Event collective_spawn_by_kind(Processor::Kind target_kind, Processor::TaskFuncID task_id, 
+				     const void *args, size_t arglen,
+				     bool one_per_node = false,
+				     Event wait_on = Event::NO_EVENT, int priority = 0);
+
       // there are three potentially interesting ways to start the initial
       // tasks:
       enum RunStyle {
@@ -71,7 +80,7 @@ namespace Realm {
 	       const void *args = 0, size_t arglen = 0, bool background = false);
 
       // requests a shutdown of the runtime
-      void shutdown(void);
+      void shutdown(Event wait_on = Event::NO_EVENT);
 
       void wait_for_shutdown(void);
     };

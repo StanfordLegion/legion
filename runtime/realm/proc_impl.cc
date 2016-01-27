@@ -736,7 +736,10 @@ namespace Realm {
 					 const ByteArrayRef& user_data)
   {
     // first, make sure we haven't seen this task id before
-    assert(task_table.count(func_id) == 0);
+    if(task_table.count(func_id) > 0) {
+      log_taskreg.fatal() << "duplicate task registration: proc=" << me << " func=" << func_id;
+      assert(0);
+    }
 
     // next, get see if we have a function pointer to register
     Processor::TaskFuncPtr fnptr;

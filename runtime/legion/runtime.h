@@ -1165,15 +1165,14 @@ namespace Legion {
               const std::set<Processor> &local_procs,
               const std::set<Processor> &local_util_procs,
               const std::set<AddressSpaceID> &address_spaces,
-              const std::map<Processor,AddressSpaceID> &proc_spaces,
-              Processor cleanup, Processor gc, Processor message);
+              const std::map<Processor,AddressSpaceID> &proc_spaces);
       Runtime(const Runtime &rhs);
       ~Runtime(void);
     public:
       Runtime& operator=(const Runtime &rhs);
     public:
       void construct_mpi_rank_tables(Processor proc, int rank);
-      void launch_top_level_task(Processor proc);
+      void launch_top_level_task(void);
       Event launch_mapper_task(Mapper *mapper, Processor proc, 
                                Processor::TaskFuncID tid,
                                const TaskArgument &arg, MapperID map_id);
@@ -1915,12 +1914,6 @@ namespace Legion {
       inline unsigned get_context_count(void) { return total_contexts; }
       inline unsigned get_start_color(void) const { return address_space; }
       inline unsigned get_color_modulus(void) const { return runtime_stride; }
-#ifdef SPECIALIZED_UTIL_PROCS
-    public:
-      Processor get_cleanup_proc(Processor p) const;
-      Processor get_gc_proc(Processor p) const;
-      Processor get_message_proc(Processor p) const;
-#endif
 #ifdef HANG_TRACE
     public:
       void dump_processor_states(FILE *target);
@@ -2034,6 +2027,7 @@ namespace Legion {
       void issue_runtime_shutdown_attempt(void);
       void attempt_runtime_shutdown(void);
       void initiate_runtime_shutdown(AddressSpaceID source);
+      void finalize_runtime_shutdown(void);
     public:
       bool has_outstanding_tasks(void);
       inline void increment_total_outstanding_tasks(void)
@@ -2223,12 +2217,6 @@ namespace Legion {
 #ifdef DEBUG_SHUTDOWN_HANG
     public:
       std::vector<int> outstanding_counts;
-#endif
-#ifdef SPECIALIZED_UTIL_PROCS
-    public:
-      const Processor cleanup_proc;
-      const Processor gc_proc;
-      const Processor message_proc;
 #endif
     protected:
       // Internal runtime state 
@@ -2483,22 +2471,18 @@ namespace Legion {
       static void check_bounds(void *impl, const DomainPoint &dp);
 #endif
     private:
-      static int* get_startup_arrivals(void);
       static RegionProjectionTable& get_region_projection_table(void);
       static PartitionProjectionTable& get_partition_projection_table(void);
       static Event register_runtime_tasks(RealmRuntime &realm);
       static Processor::TaskFuncID get_next_available_id(void);
       static void log_machine(Machine machine);
-#ifdef SPECIALIZED_UTIL_PROCS
-      static void get_utility_processor_mapping(
-          const std::set<Processor> &util_procs, Processor &cleanup_proc,
-          Processor &gc_proc, Processor &message_proc);
-#endif
     public:
       // Static member variables
       static Runtime *runtime_map[(MAX_NUM_PROCS+1/*+1 for NO_PROC*/)];
       static volatile RegistrationCallbackFnptr registration_callback;
       static Processor::TaskFuncID legion_main_id;
+      static Event runtime_startup_event;
+      static volatile bool runtime_startup_event_ready;
       static int initial_task_window_size;
       static unsigned initial_task_window_hysteresis;
       static unsigned initial_tasks_to_schedule;
@@ -2506,6 +2490,7 @@ namespace Legion {
       static unsigned max_message_size;
       static unsigned gc_epoch_size;
       static bool runtime_started;
+      static bool runtime_backgrounded;
       static bool separate_runtime_instances;
       static bool record_registration;
       static bool stealing_disabled;
@@ -2513,7 +2498,6 @@ namespace Legion {
       static bool unsafe_launch;
       static bool dynamic_independence_tests;
       static bool legion_spy_enabled;
-      static unsigned shutdown_counter;
       static int mpi_rank;
       static unsigned mpi_rank_table[MAX_NUM_NODES];
       static unsigned remaining_mpi_notifications;

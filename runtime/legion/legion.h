@@ -5323,8 +5323,8 @@ namespace Legion {
 
       /**
        * Blocking call to wait for the runtime to shutdown when
-       * running in background mode.  Otherwise this call should
-       * never be used.
+       * running in background mode.  Otherwise it is illegal to 
+       * invoke this method.
        */
       static void wait_for_shutdown(void);
       

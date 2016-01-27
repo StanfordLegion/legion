@@ -3968,8 +3968,8 @@ namespace Legion {
       }
       else if (result)
       {
-        // We succeeded so shutdown Realm
-        RealmRuntime::get_runtime().shutdown();
+        // We succeeded so shutdown the runtime
+        runtime->finalize_runtime_shutdown();
       }
       else
       {
@@ -5120,8 +5120,7 @@ namespace Legion {
                      const std::set<Processor> &locals,
                      const std::set<Processor> &local_utilities,
                      const std::set<AddressSpaceID> &address_spaces,
-                     const std::map<Processor,AddressSpaceID> &processor_spaces,
-                     Processor cleanup, Processor gc, Processor message)
+                     const std::map<Processor,AddressSpaceID> &processor_spaces)
       : external(new Legion::Runtime(this)),machine(m),address_space(unique),
         runtime_stride(address_spaces.size()), profiler(NULL),
         forest(new RegionTreeForest(this)), 
@@ -5129,9 +5128,6 @@ namespace Legion {
         total_outstanding_tasks(0), outstanding_top_level_tasks(0), 
         shutdown_manager(NULL),
         shutdown_lock(Reservation::create_reservation()),
-#ifdef SPECIALIZED_UTIL_PROCS
-        cleanup_proc(cleanup), gc_proc(gc), message_proc(message),
-#endif
         local_procs(locals), local_utils(local_utilities),
         memory_manager_lock(Reservation::create_reservation()),
         message_manager_lock(Reservation::create_reservation()),
@@ -5363,10 +5359,6 @@ namespace Legion {
         runtime_stride(0), profiler(NULL), forest(NULL),
         has_explicit_utility_procs(false),
         local_procs(rhs.local_procs), proc_spaces(rhs.proc_spaces)
-#ifdef SPECIALIZE_UTIL_PROCS
-        , cleanup_proc(Processor::NO_PROC), gc_proc(Processor::NO_PROC),
-        message_proc(Processor::NO_PROC)
-#endif
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -5746,100 +5738,108 @@ namespace Legion {
     void Runtime::construct_mpi_rank_tables(Processor proc, int rank)
     //--------------------------------------------------------------------------
     {
-      // Only do this on the first processor
-      if (proc == *(local_procs.begin()))
+      // Initialize our mpi rank event
+      Runtime::mpi_rank_event = UserEvent::create_user_event();
+      // Now broadcast our address space and rank to all the other nodes
+      MPIRankArgs args;
+      args.hlr_id = HLR_MPI_RANK_ID;
+      args.mpi_rank = rank;
+      args.source_space = address_space;
+      std::set<AddressSpace> sent_targets;
+      std::set<Processor> all_procs;
+      machine.get_all_processors(all_procs);
+      for (std::set<Processor>::const_iterator it = all_procs.begin();
+            it != all_procs.end(); it++)
       {
-        // Initialize our mpi rank event
-        Runtime::mpi_rank_event = UserEvent::create_user_event();
-        // Now broadcast our address space and rank to all the other nodes
-        MPIRankArgs args;
-        args.hlr_id = HLR_MPI_RANK_ID;
-        args.mpi_rank = rank;
-        args.source_space = address_space;
-        std::set<AddressSpace> sent_targets;
-        std::set<Processor> all_procs;
-	machine.get_all_processors(all_procs);
-        for (std::set<Processor>::const_iterator it = all_procs.begin();
-              it != all_procs.end(); it++)
-        {
-          AddressSpace target_space = it->address_space();
-          if (target_space == address_space)
-            continue;
-          if (sent_targets.find(target_space) != sent_targets.end())
-            continue;
-          Processor::Kind kind = it->kind();
-          if (kind != Processor::LOC_PROC)
-            continue;
-          issue_runtime_meta_task(&args, sizeof(args), 
-                                  HLR_MPI_RANK_ID, NULL,
-                                  Event::NO_EVENT, 0/*priority*/, *it);
-          sent_targets.insert(target_space);
-        }
-        // Now set our own value, update the count, and see if we're done
-        Runtime::mpi_rank_table[rank] = address_space;
-        unsigned count = 
-          __sync_add_and_fetch(&Runtime::remaining_mpi_notifications, 1);
-        const size_t total_ranks = machine.get_address_space_count();
-        if (count == total_ranks)
-          Runtime::mpi_rank_event.trigger();
-        // Wait on the event
-        mpi_rank_event.wait();
-        // Once we've triggered, then we can build the maps
-        for (unsigned local_rank = 0; local_rank < count; local_rank++)
-        {
-          AddressSpace local_space = Runtime::mpi_rank_table[local_rank];
+        AddressSpace target_space = it->address_space();
+        if (target_space == address_space)
+          continue;
+        if (sent_targets.find(target_space) != sent_targets.end())
+          continue;
+        Processor::Kind kind = it->kind();
+        if (kind != Processor::LOC_PROC)
+          continue;
+        issue_runtime_meta_task(&args, sizeof(args), 
+                                HLR_MPI_RANK_ID, NULL,
+                                Event::NO_EVENT, 0/*priority*/, *it);
+        sent_targets.insert(target_space);
+      }
+      // Now set our own value, update the count, and see if we're done
+      Runtime::mpi_rank_table[rank] = address_space;
+      unsigned count = 
+        __sync_add_and_fetch(&Runtime::remaining_mpi_notifications, 1);
+      const size_t total_ranks = machine.get_address_space_count();
+      if (count == total_ranks)
+        Runtime::mpi_rank_event.trigger();
+      // Wait on the event
+      mpi_rank_event.wait();
+      // Once we've triggered, then we can build the maps
+      for (unsigned local_rank = 0; local_rank < count; local_rank++)
+      {
+        AddressSpace local_space = Runtime::mpi_rank_table[local_rank];
 #ifdef DEBUG_HIGH_LEVEL
-          assert(reverse_mpi_mapping.find(local_space) == 
-                 reverse_mpi_mapping.end());
+        assert(reverse_mpi_mapping.find(local_space) == 
+               reverse_mpi_mapping.end());
 #endif
-          forward_mpi_mapping[local_rank] = local_space;
-          reverse_mpi_mapping[local_space] = local_rank;
-        }
+        forward_mpi_mapping[local_rank] = local_space;
+        reverse_mpi_mapping[local_space] = local_rank;
       }
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::launch_top_level_task(Processor proc)
+    void Runtime::launch_top_level_task(void)
     //--------------------------------------------------------------------------
     {
-      // Check to see if we should launch the top-level task
-      // If we're the first address space and the first of
-      // the local processors
-      if ((address_space == 0) && (proc == *(local_procs.begin())))
+      // Find the first CPU processor on which to launch the 
+      // top-level task. If we're doing separate instances we can
+      // just use our current processor
+      Processor target = Processor::NO_PROC;
+      if (!separate_runtime_instances)
       {
-        // Get an individual task to be the top-level task
-        IndividualTask *top_task = get_available_individual_task(false);
-        // Get a remote task to serve as the top of the top-level task
-        RemoteTask *top_context = get_available_remote_task(false);
-        top_context->initialize_remote(0, NULL, true/*top*/);
-        // Set the executing processor
-        top_context->set_executing_processor(proc);
-        TaskLauncher launcher(Runtime::legion_main_id, TaskArgument());
-        // Mark that this task is the top-level task
-        top_task->set_top_level();
-        top_task->initialize_task(top_context, launcher, 
-                                  false/*check priv*/, false/*track parent*/);
-        // Set up the input arguments
-        top_task->arglen = sizeof(InputArgs);
-        top_task->args = malloc(top_task->arglen);
-        top_task->depth = 0;
-        memcpy(top_task->args,&Runtime::get_input_args(),top_task->arglen);
-#ifdef DEBUG_HIGH_LEVEL
-        assert(proc_managers.find(proc) != proc_managers.end());
-#endif
-        proc_managers[proc]->invoke_mapper_set_task_options(top_task);
-        invoke_mapper_configure_context(proc, top_task);
-        if (legion_spy_enabled)
+        std::set<Processor> local_cpus;
+        machine.get_local_processors_by_kind(local_cpus, Processor::LOC_PROC);
+        if (local_cpus.empty())
         {
-          Runtime::log_machine(machine);
-          LegionSpy::log_top_level_task(Runtime::legion_main_id,
-                                        top_task->get_unique_task_id(),
-                                        top_task->variants->name);
+          log_run.error("Machine model contains no CPU processors!");
+          assert(false);
+          exit(ERROR_NO_PROCESSORS); 
         }
-        increment_outstanding_top_level_tasks();
-        // Put the task in the ready queue
-        add_to_ready_queue(proc, top_task, false/*prev failure*/);
+        target = *(local_cpus.begin());
       }
+      else
+        target = *(local_procs.begin()); 
+      // Get an individual task to be the top-level task
+      IndividualTask *top_task = get_available_individual_task(false);
+      // Get a remote task to serve as the top of the top-level task
+      RemoteTask *top_context = get_available_remote_task(false);
+      top_context->initialize_remote(0, NULL, true/*top*/);
+      // Set the executing processor
+      top_context->set_executing_processor(target);
+      TaskLauncher launcher(Runtime::legion_main_id, TaskArgument());
+      // Mark that this task is the top-level task
+      top_task->set_top_level();
+      top_task->initialize_task(top_context, launcher, 
+                                false/*check priv*/, false/*track parent*/);
+      // Set up the input arguments
+      top_task->arglen = sizeof(InputArgs);
+      top_task->args = malloc(top_task->arglen);
+      top_task->depth = 0;
+      memcpy(top_task->args,&Runtime::get_input_args(),top_task->arglen);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(proc_managers.find(target) != proc_managers.end());
+#endif
+      proc_managers[target]->invoke_mapper_set_task_options(top_task);
+      invoke_mapper_configure_context(target, top_task);
+      if (legion_spy_enabled)
+      {
+        Runtime::log_machine(machine);
+        LegionSpy::log_top_level_task(Runtime::legion_main_id,
+                                      top_task->get_unique_task_id(),
+                                      top_task->variants->name);
+      }
+      increment_outstanding_top_level_tasks();
+      // Put the task in the ready queue
+      add_to_ready_queue(target, top_task, false/*prev failure*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13601,35 +13601,6 @@ namespace Legion {
       }
     }
 
-#ifdef SPECIALIZED_UTIL_PROCS
-    //--------------------------------------------------------------------------
-    Processor Runtime::get_cleanup_proc(Processor p) const
-    //--------------------------------------------------------------------------
-    {
-      if (cleanup_proc.exists())
-        return cleanup_proc;
-      return p;
-    }
-
-    //--------------------------------------------------------------------------
-    Processor Runtime::get_gc_proc(Processor p) const
-    //--------------------------------------------------------------------------
-    {
-      if (gc_proc.exists())
-        return gc_proc;
-      return p;
-    }
-
-    //--------------------------------------------------------------------------
-    Processor Runtime::get_message_proc(Processor p) const
-    //--------------------------------------------------------------------------
-    {
-      if (message_proc.exists())
-        return message_proc;
-      return p;
-    }
-#endif
-
 #ifdef HANG_TRACE
     //--------------------------------------------------------------------------
     void Runtime::dump_processor_states(FILE *target)
@@ -14212,14 +14183,7 @@ namespace Legion {
       {
         // If we don't have a processor to explicitly target, figure
         // out which of our utility processors to use
-#ifdef SPECIALIZED_UTIL_PROCS
-        if (tid == HLR_DEFERRED_COLLECT_ID)
-          target = gc_proc;
-        else
-          target = cleanup_proc;
-#else
         target = utility_group;
-#endif
       }
 #ifdef DEBUG_HIGH_LEVEL
       assert(target.exists());
@@ -14676,6 +14640,49 @@ namespace Legion {
         local_manager->finalize();
         delete local_manager;
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::finalize_runtime_shutdown(void)
+    //--------------------------------------------------------------------------
+    {
+      std::set<Event> shutdown_events;
+      // Launch tasks to shutdown all the runtime instances
+      std::set<Processor> all_procs;
+      machine.get_all_processors(all_procs);
+      Realm::ProfilingRequestSet empty_requests;
+      if (Runtime::separate_runtime_instances)
+      {
+        // If we are doing separate runtime instances, run it once on every
+        // processor since we have separate runtimes for every processor
+        for (std::set<Processor>::const_iterator it = all_procs.begin();
+              it != all_procs.end(); it++)
+        {
+          shutdown_events.insert(
+              it->spawn(SHUTDOWN_TASK_ID, NULL, 0, empty_requests));
+                                  
+        }
+      }
+      else
+      {
+        // In the normal case we just have to run this once on every node
+        std::set<AddressSpace> shutdown_spaces;
+        for (std::set<Processor>::const_iterator it = all_procs.begin();
+              it != all_procs.end(); it++)
+        {
+          AddressSpace space = it->address_space();
+          if (shutdown_spaces.find(space) == shutdown_spaces.end())
+          {
+            shutdown_events.insert(
+                it->spawn(SHUTDOWN_TASK_ID, NULL, 0, empty_requests));
+            shutdown_spaces.insert(space);
+          }
+        }
+      }
+      // Then tell Realm to shutdown when they are all done
+      Event shutdown_precondition = Event::merge_events(shutdown_events);
+      RealmRuntime realm = RealmRuntime::get_runtime();
+      realm.shutdown(shutdown_precondition);
     }
 
     //--------------------------------------------------------------------------
@@ -16523,6 +16530,8 @@ namespace Legion {
     /*static*/ volatile RegistrationCallbackFnptr Runtime::
                                               registration_callback = NULL;
     /*static*/ Processor::TaskFuncID Runtime::legion_main_id = 0;
+    /*static*/ Event Runtime::runtime_startup_event = Event::NO_EVENT;
+    /*static*/ volatile bool Runtime::runtime_startup_event_ready = false;
     /*static*/ int Runtime::initial_task_window_size = 
                                       DEFAULT_MAX_TASK_WINDOW;
     /*static*/ unsigned Runtime::initial_task_window_hysteresis =
@@ -16536,6 +16545,7 @@ namespace Legion {
     /*static*/ unsigned Runtime::gc_epoch_size = 
                                       DEFAULT_GC_EPOCH_SIZE;
     /*static*/ bool Runtime::runtime_started = false;
+    /*static*/ bool Runtime::runtime_backgrounded = true;
     /*static*/ bool Runtime::separate_runtime_instances = false;
     /*static*/ bool Runtime::record_registration = false;
     /*sattic*/ bool Runtime::stealing_disabled = false;
@@ -16543,7 +16553,6 @@ namespace Legion {
     /*static*/ bool Runtime::unsafe_launch = false;
     /*static*/ bool Runtime::dynamic_independence_tests = true;
     /*static*/ bool Runtime::legion_spy_enabled = false;
-    /*static*/ unsigned Runtime::shutdown_counter = 0;
     /*static*/ int Runtime::mpi_rank = -1;
     /*static*/ unsigned Runtime::mpi_rank_table[MAX_NUM_NODES];
     /*static*/ unsigned Runtime::remaining_mpi_notifications = 0;
@@ -16861,22 +16870,87 @@ namespace Legion {
       // For the moment, we only need to register our runtime tasks
       // We'll register everything else once the Legion runtime starts
       Event tasks_registered = register_runtime_tasks(realm);
-      // Wait for our tasks to be registered
-      tasks_registered.external_wait();
-      // Kick off the low-level machine
-      realm.run(0, RealmRuntime::ONE_TASK_ONLY, 0, 0, background);
-      // We should only make it here if the machine thread is backgrounded
-      assert(background);
-      if (background)
-        return 0;
-      else
-        return -1;
+      // Do some error checking in case we are running with separate instances
+      Machine machine = Machine::get_machine();
+      if (separate_runtime_instances)
+      {
+#ifdef TRACE_ALLOCATION
+        log_run.error("Memory tracing not supported with "
+                      "separate runtime instances.");
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_TRACING_ALLOCATION_WITH_SEPARATE);
+#endif
+        // Check for utility processors
+        std::set<Processor> util_procs;
+        machine.get_local_processors_by_kind(util_procs, Processor::UTIL_PROC);
+        if (!util_procs.empty())
+        {
+          log_run.error("Separate runtime instances are not "
+                        "supported when running with explicit "
+                        "utility processors");
+#ifdef DEBUG_HIGH_LEVEL
+          assert(false);
+#endif
+          exit(ERROR_SEPARATE_UTILITY_PROCS);
+        }
+      }
+      // Check for exceeding the local number of processors
+      {
+        std::set<Processor> local_procs;
+        machine.get_local_processors(local_procs);
+        if (local_procs.size() > MAX_NUM_PROCS)
+        {
+          log_run.error("Maximum number of local processors %ld exceeds "
+                        "compile time maximum of %d.  Change the value "
+                        "in legion_config.h and recompile.",
+                        local_procs.size(), MAX_NUM_PROCS);
+#ifdef DEBUG_HIGH_LEVEL
+          assert(false);
+#endif
+          exit(ERROR_MAXIMUM_PROCS_EXCEEDED);
+        }
+      }
+      // To avoid a race condition, we first have to mark that we 
+      // haven't recorded the runtime start-up event
+      runtime_startup_event_ready = false;
+      // Now perform a collective spawn to initialize the runtime everywhere
+      // Save the precondition in case we are the node that needs to start
+      // the top-level task.
+      // If we're doing separate runtime instances we need to launch an
+      // init task on every processor on all nodes, otherwise we just
+      // need to launch one task on a processor on every node
+      runtime_startup_event = realm.collective_spawn_by_kind(
+          Processor::NO_KIND, INIT_TASK_ID, NULL, 0, 
+          !separate_runtime_instances, tasks_registered);
+      // Now mark that we've recorded the start-up event
+      runtime_startup_event_ready = true;
+      // If we are supposed to background this thread, then we wait
+      // for the runtime to shutdown, otherwise we can now return
+      if (!background)
+      {
+        // Record that we didn't background the runtime
+        runtime_backgrounded = false;
+        // Now wait for realm to be shutdown
+        realm.wait_for_shutdown();
+      }
+      return 0;
     }
 
     //--------------------------------------------------------------------------
     /*static*/ void Runtime::wait_for_shutdown(void)
     //--------------------------------------------------------------------------
     {
+      if (!runtime_backgrounded)
+      {
+        log_run.error("Illegal call to wait_for_shutdown when runtime was "
+                      "not launched in background mode!");
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_ILLEGAL_WAIT_FOR_SHUTDOWN);
+      }
       RealmRuntime::get_runtime().wait_for_shutdown();
     }
 
@@ -17237,14 +17311,6 @@ namespace Legion {
 #endif
 
     //--------------------------------------------------------------------------
-    /*static*/ int* Runtime::get_startup_arrivals(void)
-    //--------------------------------------------------------------------------
-    {
-      static int startup_arrivals = 0;
-      return &startup_arrivals;
-    }
-
-    //--------------------------------------------------------------------------
     /*static*/ RegionProjectionTable& Runtime::
                                               get_region_projection_table(void)
     //--------------------------------------------------------------------------
@@ -17281,10 +17347,10 @@ namespace Legion {
       {
         registered_events.insert(
             Processor::register_task_by_kind(kinds[idx], false/*global*/,
-                                         INIT_FUNC_ID, init_task, no_requests));
+                                         INIT_TASK_ID, init_task, no_requests));
         registered_events.insert(
             Processor::register_task_by_kind(kinds[idx], false/*global*/,
-                                 SHUTDOWN_FUNC_ID, shutdown_task, no_requests));
+                                 SHUTDOWN_TASK_ID, shutdown_task, no_requests));
         registered_events.insert(
             Processor::register_task_by_kind(kinds[idx], false/*global*/,
                                            HLR_TASK_ID, hlr_task, no_requests));
@@ -17298,9 +17364,9 @@ namespace Legion {
       if (record_registration)
       {
         log_run.print("Legion runtime initialization task "
-                            "has Realm ID %d", INIT_FUNC_ID);
+                            "has Realm ID %d", INIT_TASK_ID);
         log_run.print("Legion runtime shutdown task has "
-                            "Realm ID %d", SHUTDOWN_FUNC_ID);
+                            "Realm ID %d", SHUTDOWN_TASK_ID);
         log_run.print("Legion runtime meta-task has Realm ID %d", 
                       HLR_TASK_ID);
         log_run.print("Legion runtime profiling task Realm ID %d",
@@ -17371,69 +17437,6 @@ namespace Legion {
       }
     }
 
-#ifdef SPECIALIZED_UTIL_PROCS
-    //--------------------------------------------------------------------------
-    /*static*/ void Runtime::get_utility_processor_mapping(
-                const std::set<Processor> &util_procs, Processor &cleanup_proc,
-                Processor &gc_proc, Processor &message_proc)
-    //--------------------------------------------------------------------------
-    {
-      if (util_procs.empty())
-      {
-        cleanup_proc = Processor::NO_PROC;
-        gc_proc = Processor::NO_PROC;
-        message_proc = Processor::NO_PROC;
-        return;
-      }
-      std::set<Processor>::const_iterator set_it = util_procs.begin();
-      // If we only have one utility processor then it does everything
-      // otherwise we skip the first one since it does all the work
-      // for actually being the utility processor for the cores
-      if (util_procs.size() == 1)
-      {
-        cleanup_proc = *set_it;
-        gc_proc = *set_it;
-        message_proc = *set_it;
-        return;
-      }
-      else
-        set_it++;
-      // Put the processors in a vector
-      std::vector<Processor> remaining(set_it,util_procs.end());
-#ifdef DEBUG_HIGH_LEVEL
-      assert(!remaining.empty());
-#endif
-      switch (remaining.size())
-      {
-        case 1:
-          {
-            // Have the GC processor share with the actual utility
-            // processor since they touch the same data structures
-            gc_proc = *(util_procs.begin());
-            // Use the other utility processor for the other responsibilites
-            cleanup_proc = remaining[0];
-            message_proc = remaining[0];
-            break;
-          }
-        case 2:
-          {
-            gc_proc = remaining[0];
-            cleanup_proc = remaining[1];
-            message_proc = remaining[1];
-            break;
-          }
-        default:
-          {
-            // Three or more
-            gc_proc = remaining[0];
-            cleanup_proc = remaining[1];
-            message_proc = remaining[2];
-            break;
-          }
-      }
-    }
-#endif
-
     //--------------------------------------------------------------------------
     /*static*/ void Runtime::initialize_runtime(
                                           const void *args, size_t arglen, 
@@ -17441,8 +17444,8 @@ namespace Legion {
                                           Processor p)
     //--------------------------------------------------------------------------
     {
-      // Always enable the idle task for any processor 
-      // that is not a utility processor
+      // We now know that this task will only get called once for each runtime 
+      // instance that is supposed to be created which wasn't always true
       Machine machine = Machine::get_machine();
       std::set<Processor> all_procs;
       machine.get_all_processors(all_procs);
@@ -17453,168 +17456,80 @@ namespace Legion {
 	assert(false);
 	exit(ERROR_NO_PROCESSORS);
       }
-      Processor::Kind proc_kind = p.kind();
-      // Make separate runtime instances if they are requested,
-      // otherwise only make a runtime instances for each of the
-      // separate nodes in the machine.  To do this we exploit a
-      // little bit of knowledge about the naming scheme for low-level
-      // processor objects that works on both the shared and general
-      // low-level runtimes.
-#ifdef DEBUG_HIGH_LEVEL
-      assert(p.local_id() < (MAX_NUM_PROCS+1));
-#endif 
-      // Figure out if we are the first processor on this node in 
-      // the list of all processors. We can skip this computation 
-      // if we are doing separate runtime instances.
-      bool first_local_proc = false;
-      if (!separate_runtime_instances)
+      // Compute the data structures necessary for
+      // constructing a runtime instance
+      std::set<Processor> local_procs;
+      std::set<Processor> local_util_procs;
+      std::set<AddressSpaceID> address_spaces;
+      std::map<Processor,AddressSpaceID> proc_spaces;
+      AddressSpaceID local_space_id = 0;
+      if (separate_runtime_instances)
       {
-        AddressSpaceID local_addr_space = p.address_space();
+        // If we are doing separate runtime instances then each
+        // processor effectively gets its own address space
+        local_procs.insert(p);
+        AddressSpaceID sid = 0;
+        for (std::set<Processor>::const_iterator it = all_procs.begin();
+              it != all_procs.end(); it++,sid++)
+        {
+          if (p == (*it))
+            local_space_id = sid;
+          address_spaces.insert(sid); 
+          proc_spaces[*it] = sid;
+        }
+      }
+      else // The normal path
+      {
+        local_space_id = p.address_space();
         for (std::set<Processor>::const_iterator it = all_procs.begin();
               it != all_procs.end(); it++)
         {
-          // See if this is the same address space as us
-          if (it->address_space() == local_addr_space)
+          AddressSpaceID sid = it->address_space();
+          address_spaces.insert(sid);
+          proc_spaces[*it] = sid;
+          if (sid == local_space_id)
           {
-            if ((*it) == p)
-              first_local_proc = true;
-            break;
+            if (it->kind() == Processor::UTIL_PROC)
+              local_util_procs.insert(*it);
+            else
+              local_procs.insert(*it);
           }
         }
       }
-      if (separate_runtime_instances || first_local_proc)
+      // Set up the runtime mask for this instance
+      Runtime *local_rt = new Runtime(machine, local_space_id, 
+                                      local_procs, local_util_procs,
+                                      address_spaces, proc_spaces);
+      // Now set up the runtime on all of the local processors
+      // and their utility processors
+      for (std::set<Processor>::const_iterator it = local_procs.begin();
+            it != local_procs.end(); it++)
       {
-        // Compute these three data structures necessary for
-        // constructing a runtime instance
-        std::set<Processor> local_procs;
-        std::set<Processor> local_util_procs;
-        std::set<AddressSpaceID> address_spaces;
-        std::map<Processor,AddressSpaceID> proc_spaces;
-        AddressSpaceID local_space_id = 0;
-        if (separate_runtime_instances)
-        {
-#ifdef TRACE_ALLOCATION
-          log_run.error("Memory tracing not supported with "
-                              "separate runtime instances.");
-#ifdef DEBUG_HIGH_LEVEL
-          assert(false);
-#endif
-          exit(ERROR_TRACING_ALLOCATION_WITH_SEPARATE);
-#endif
-          // If we are doing separate runtime instances then each
-          // processor effectively gets its own address space
-          local_procs.insert(p);
-          AddressSpaceID sid = 0;
-          for (std::set<Processor>::const_iterator it = all_procs.begin();
-                it != all_procs.end(); it++,sid++)
-          {
-            Processor::Kind k = it->kind();
-            if (k == Processor::UTIL_PROC)
-            {
-              log_run.error("Separate runtime instances are not "
-                                  "supported when running with explicit "
-                                  "utility processors");
-#ifdef DEBUG_HIGH_LEVEL
-              assert(false);
-#endif
-              exit(ERROR_SEPARATE_UTILITY_PROCS);
-            }
-            if (p == (*it))
-              local_space_id = sid;
-            address_spaces.insert(sid); 
-            proc_spaces[*it] = sid;
-          }
-        }
-        else
-        {
-          local_space_id = p.address_space();
-          for (std::set<Processor>::const_iterator it = all_procs.begin();
-                it != all_procs.end(); it++)
-          {
-            AddressSpaceID sid = it->address_space();
-            address_spaces.insert(sid);
-            proc_spaces[*it] = sid;
-            if (sid == local_space_id)
-            {
-              if (it->kind() == Processor::UTIL_PROC)
-                local_util_procs.insert(*it);
-              else
-                local_procs.insert(*it);
-            }
-          }
-        }
-        if (local_procs.size() > MAX_NUM_PROCS)
-        {
-          log_run.error("Maximum number of local processors %ld exceeds "
-                              "compile time maximum of %d.  Change the value "
-                              "in legion_config.h and recompile.",
-                              local_procs.size(), MAX_NUM_PROCS);
-#ifdef DEBUG_HIGH_LEVEL
-          assert(false);
-#endif
-          exit(ERROR_MAXIMUM_PROCS_EXCEEDED);
-        }
-        Processor cleanup_proc = Processor::NO_PROC;
-        Processor gc_proc = Processor::NO_PROC;
-        Processor message_proc = Processor::NO_PROC;
-#ifdef SPECIALIZED_UTIL_PROCS
-        Runtime::get_utility_processor_mapping(local_util_procs,
-                                               cleanup_proc, gc_proc,
-                                               message_proc);
-#endif
-        // Set up the runtime mask for this instance
-        Runtime *local_rt = new Runtime(machine, local_space_id, 
-                                        local_procs, local_util_procs,
-                                        address_spaces, proc_spaces,
-                                        cleanup_proc, gc_proc, message_proc);
-        // Now set up the runtime on all of the local processors
-        // and their utility processors
-        for (std::set<Processor>::const_iterator it = local_procs.begin();
-              it != local_procs.end(); it++)
-        {
-          runtime_map[it->local_id()] = local_rt;
-        }
-        for (std::set<Processor>::const_iterator it = local_util_procs.begin();
-              it != local_util_procs.end(); it++)
-        {
-          runtime_map[it->local_id()] = local_rt;
-        }
+        runtime_map[it->local_id()] = local_rt;
       }
-      // Arrive at the barrier
-      __sync_fetch_and_add(Runtime::get_startup_arrivals(), 1);
-      // Compute the number of processors we need to wait for
-      int needed_count = 0;
+      for (std::set<Processor>::const_iterator it = local_util_procs.begin();
+            it != local_util_procs.end(); it++)
       {
-        const unsigned local_space = p.address_space();
-        for (std::set<Processor>::const_iterator it = all_procs.begin();
-              it != all_procs.end(); it++)
-        {
-          if (local_space != it->address_space())
-            continue;
-          needed_count++;
-        }
+        runtime_map[it->local_id()] = local_rt;
       }
-      // Yes there is a race condition here on writes, but
-      // everyone is going to be writing the same value
-      // so it doesn't matter.
-      Runtime::shutdown_counter = needed_count;
-      // Have a spinning barrier here to wait for all processors
-      // to finish initializing before continuing
-#ifndef VALGRIND
-      while (__sync_fetch_and_add(Runtime::get_startup_arrivals(), 0) 
-              != needed_count) { }
-#endif
-      // Call in the runtime to see if we should launch the top-level task
-      if (proc_kind != Processor::UTIL_PROC)
+      // If we have an MPI rank, build the maps first
+      if (Runtime::mpi_rank >= 0)
+        local_rt->construct_mpi_rank_tables(p, Runtime::mpi_rank);
+      // See if we are supposed to launch the top-level task
+      // If so do it contingent upon the runtime being started everywhere
+      if (local_space_id == 0)
       {
-        Runtime *local_rt = Runtime::get_runtime(p);
-#ifdef DEBUG_HIGH_LEVEL
-        assert(local_rt != NULL);
+        HLRTaskID hlr_id = HLR_LAUNCH_TOP_LEVEL_ID;
+        // To avoid a race condition on reading the runtime_startup_event,
+        // do some spin-waiting until we know that the runtime startup
+        // event is ready for us to read
+#ifdef __SSE2__
+        while (!runtime_startup_event_ready) { _mm_pause(); } 
+#else
+        while (!runtime_startup_event_ready) { }
 #endif
-        // If we have an MPI rank, build the maps first
-        if (Runtime::mpi_rank >= 0)
-          local_rt->construct_mpi_rank_tables(p, Runtime::mpi_rank);
-        local_rt->launch_top_level_task(p);
+        local_rt->issue_runtime_meta_task(&hlr_id, sizeof(hlr_id),
+                                          hlr_id, NULL, runtime_startup_event);
       }
     }
 
@@ -17623,15 +17538,8 @@ namespace Legion {
                               const void *userdata, size_t userlen, Processor p)
     //--------------------------------------------------------------------------
     {
-      if (separate_runtime_instances)
-        delete get_runtime(p);
-      else
-      {
-        unsigned result = __sync_sub_and_fetch(&Runtime::shutdown_counter, 1);
-        // Only delete the runtime if we're the last one to use it
-        if (result == 0)
-          delete get_runtime(p);
-      }
+      // All we need to is delete our runtime instance
+      delete get_runtime(p);
     }
 
     //--------------------------------------------------------------------------
@@ -17666,6 +17574,11 @@ namespace Legion {
               (const SingleTask::PostEndArgs*)args;
             post_end_args->proxy_this->post_end_task(post_end_args->result, 
                                 post_end_args->result_size, true/*owned*/);
+            break;
+          }
+        case HLR_LAUNCH_TOP_LEVEL_ID:
+          {
+            Runtime::get_runtime(p)->launch_top_level_task();
             break;
           }
         case HLR_DEFERRED_MAPPING_TRIGGER_ID:
