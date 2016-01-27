@@ -775,10 +775,12 @@ namespace LegionRuntime{
       {
         // clear available_reqs
         while (!available_reqs.empty()) {
+          Request* req = available_reqs.front();
+          delete req;
           available_reqs.pop();
         }
         delete li;
-        free(requests);
+        //free(requests);
         // trigger complete event
         //if (complete_event.exists()) {
           //get_runtime()->get_genevent_impl(complete_event)->trigger(complete_event.gen, gasnet_mynode());
@@ -796,7 +798,7 @@ namespace LegionRuntime{
       void flush();
 
     private:
-      Request* requests;
+      //Request* requests;
       //std::map<int64_t, uint64_t> segments_read, segments_write;
       Layouts::GenericLayoutIterator<DIM>* li;
       int offset_idx;
