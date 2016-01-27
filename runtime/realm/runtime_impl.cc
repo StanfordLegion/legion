@@ -497,19 +497,18 @@ namespace Realm {
       //  spawners (e.g. the ssh spawner for gasnetrun_ibv) start with bogus args and
       //  fetch the real ones from somewhere during gasnet_init()
 
-      //GASNetNode::my_node = new GASNetNode(argc, argv, this);
+#ifdef USE_GASNET
       // SJT: WAR for issue on Titan with duplicate cookies on Gemini
       //  communication domains
       char *orig_pmi_gni_cookie = getenv("PMI_GNI_COOKIE");
       if(orig_pmi_gni_cookie) {
-        char *new_pmi_gni_cookie = (char *)malloc(256);
-        sprintf(new_pmi_gni_cookie, "PMI_GNI_COOKIE=%d", 1+atoi(orig_pmi_gni_cookie));
-        //printf("changing PMI cookie to: '%s'\n", new_pmi_gni_cookie);
-        putenv(new_pmi_gni_cookie);  // libc now owns the memory
+	char new_pmi_gni_cookie[32];
+	snprintf(new_pmi_gni_cookie, 32, "%d", 1+atoi(orig_pmi_gni_cookie));
+	setenv("PMI_GNI_COOKIE", new_pmi_gni_cookie, 1 /*overwrite*/);
       }
       // SJT: another GASNET workaround - if we don't have GASNET_IB_SPAWNER set, assume it was MPI
       if(!getenv("GASNET_IB_SPAWNER"))
-	putenv(strdup("GASNET_IB_SPAWNER=mpi"));
+	setenv("GASNET_IB_SPAWNER", "mpi", 0 /*no overwrite*/);
 
       // and one more... disable GASNet's probing of pinnable memory - it's
       //  painfully slow on most systems (the gemini conduit doesn't probe
@@ -530,14 +529,15 @@ namespace Realm {
 	const char *e = getenv("GASNET_PHYSMEM_NOPROBE");
 	if(!e || (atoi(e) > 0)) {
 	  if(!e)
-	    putenv(strdup("GASNET_PHYSMEM_NOPROBE=1"));
+	    setenv("GASNET_PHYSMEM_NOPROBE", "1", 0 /*no overwrite*/);
 	  if(!getenv("GASNET_PHYSMEM_MAX")) {
 	    // just because it's fun to read things like this 20 years later:
 	    // "nobody will ever build a system with more than 1 TB of RAM..."
-	    putenv(strdup("GASNET_PHYSMEM_MAX=1T"));
+	    setenv("GASNET_PHYSMEM_MAX", "1T", 0 /*no overwrite*/);
 	  }
 	}
       }
+#endif
 
 #ifdef DEBUG_REALM_STARTUP
       { // we don't have rank IDs yet, so everybody gets to spew
