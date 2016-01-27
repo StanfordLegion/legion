@@ -50,7 +50,7 @@ GASNET_FLAGS ?=
 INC_FLAGS += -I$(TERRA_DIR)/release/include/terra -I$(TERRA_DIR)/include/terra
 LD_FLAGS +=
 
-CC_FLAGS += -fPIC
+CC_FLAGS += -fPIC -DASSUME_UNALLOCABLE
 ifeq ($(shell uname), Darwin)
 	LD_FLAGS += -dynamiclib -single_module -undefined dynamic_lookup -fPIC
 else
