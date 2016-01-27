@@ -88,8 +88,8 @@ namespace LegionRuntime {
 
     // Runtime task numbering 
     enum {
-      INIT_FUNC_ID            = Realm::Processor::TASK_ID_PROCESSOR_INIT,
-      SHUTDOWN_FUNC_ID        = Realm::Processor::TASK_ID_PROCESSOR_SHUTDOWN,
+      INIT_TASK_ID            = Realm::Processor::TASK_ID_PROCESSOR_INIT,
+      SHUTDOWN_TASK_ID        = Realm::Processor::TASK_ID_PROCESSOR_SHUTDOWN,
       HLR_TASK_ID             = Realm::Processor::TASK_ID_FIRST_AVAILABLE,
       HLR_LEGION_PROFILING_ID = Realm::Processor::TASK_ID_FIRST_AVAILABLE+1,
       HLR_MAPPER_PROFILING_ID = Realm::Processor::TASK_ID_FIRST_AVAILABLE+2,
@@ -105,6 +105,7 @@ namespace LegionRuntime {
     enum HLRTaskID {
       HLR_SCHEDULER_ID,
       HLR_POST_END_ID,
+      HLR_LAUNCH_TOP_LEVEL_ID,
       HLR_DEFERRED_MAPPING_TRIGGER_ID,
       HLR_DEFERRED_RESOLUTION_TRIGGER_ID,
       HLR_DEFERRED_EXECUTION_TRIGGER_ID,
@@ -161,6 +162,7 @@ namespace LegionRuntime {
       const char *name[HLR_LAST_TASK_ID] = {                      \
         "Scheduler",                                              \
         "Post-Task Execution",                                    \
+        "Launch Top Level Task",                                  \
         "Deferred Mapping Trigger",                               \
         "Deferred Resolution Trigger",                            \
         "Deferred Execution Trigger",                             \
