@@ -28,6 +28,7 @@
 
 #include "lowlevel_config.h"
 #include "arrays.h"
+#include "layouts.h"
 #include "custom_serdez.h"
 
 namespace Realm {
