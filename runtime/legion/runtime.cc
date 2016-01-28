@@ -4139,7 +4139,8 @@ namespace LegionRuntime {
       if (logical_task_name != NULL)
         runtime->attach_semantic_information(registrar.task_id, 
                           NAME_SEMANTIC_TAG, logical_task_name, 
-                          strlen(logical_task_name)+1, false/*mutable*/);
+                          strlen(logical_task_name)+1, 
+                          false/*mutable*/, false/*send to owner*/);
     }
 
     /////////////////////////////////////////////////////////////
@@ -4148,7 +4149,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     TaskImpl::TaskImpl(TaskID tid, Internal *rt, const char *name/*=NULL*/)
-      : task_id(tid), runtime(rt), task_lock(Reservation::create_reservation()), 
+      : task_id(tid), runtime(rt), task_lock(Reservation::create_reservation()),
         has_return_type(false), all_idempotent(false)
     //--------------------------------------------------------------------------
     {
@@ -4343,7 +4344,7 @@ namespace LegionRuntime {
     void TaskImpl::attach_semantic_information(SemanticTag tag,
                                                AddressSpaceID source,
                                                const void *buffer, size_t size,
-                                               bool is_mutable)
+                                            bool is_mutable, bool send_to_owner)
     //--------------------------------------------------------------------------
     {
       if ((tag == NAME_SEMANTIC_TAG) && (runtime->profiler != NULL))
@@ -4426,7 +4427,7 @@ namespace LegionRuntime {
       }
       if (to_trigger.exists())
         to_trigger.trigger();
-      if (added)
+      if (added && send_to_owner)
       {
         AddressSpaceID owner_space = get_owner_space();
         // if we are not the owner and the message didn't come
@@ -4604,7 +4605,8 @@ namespace LegionRuntime {
       bool is_mutable;
       derez.deserialize(is_mutable);
       TaskImpl *impl = runtime->find_or_create_task_impl(task_id);
-      impl->attach_semantic_information(tag, source, buffer, size, is_mutable);
+      impl->attach_semantic_information(tag, source, buffer, size, 
+                                        is_mutable, false/*send to owner*/);
     }
 
     //--------------------------------------------------------------------------
@@ -11278,12 +11280,12 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void Internal::attach_semantic_information(TaskID task_id, SemanticTag tag,
-                               const void *buffer, size_t size, bool is_mutable)
+           const void *buffer, size_t size, bool is_mutable, bool send_to_owner)
     //--------------------------------------------------------------------------
     {
       TaskImpl *impl = find_or_create_task_impl(task_id);
-      impl->attach_semantic_information(tag, address_space, 
-                                        buffer, size, is_mutable);
+      impl->attach_semantic_information(tag, address_space, buffer, size, 
+                                        is_mutable, send_to_owner);
     }
 
     //--------------------------------------------------------------------------
@@ -16898,7 +16900,7 @@ namespace LegionRuntime {
       // need to launch one task on a CPU processor on every node
       Event runtime_startup_event = realm.collective_spawn_by_kind(
           (separate_runtime_instances ? Processor::NO_KIND : 
-           Processor::UTIL_PROC), INIT_TASK_ID, NULL, 0,
+           Processor::LOC_PROC), INIT_TASK_ID, NULL, 0,
           !separate_runtime_instances, tasks_registered);
       // See if we are supposed to start the top-level task
       if (top_level_proc.exists())
