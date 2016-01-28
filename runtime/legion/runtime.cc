@@ -4427,13 +4427,17 @@ namespace LegionRuntime {
       }
       if (to_trigger.exists())
         to_trigger.trigger();
-      if (added && send_to_owner)
+      if (added)
       {
-        AddressSpaceID owner_space = get_owner_space();
-        // if we are not the owner and the message didn't come
-        // from the owner, then send it
-        if ((owner_space != runtime->address_space) && (source != owner_space))
-          send_semantic_info(owner_space, tag, buffer, size, is_mutable);
+        if (send_to_owner)
+        {
+          AddressSpaceID owner_space = get_owner_space();
+          // if we are not the owner and the message didn't come
+          // from the owner, then send it
+          if ((owner_space != runtime->address_space) && 
+              (source != owner_space))
+            send_semantic_info(owner_space, tag, buffer, size, is_mutable);
+        }
       }
       else
         legion_free(SEMANTIC_INFO_ALLOC, local, size);
