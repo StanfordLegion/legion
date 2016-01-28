@@ -5787,27 +5787,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::launch_top_level_task(void)
+    void Runtime::launch_top_level_task(Processor target)
     //--------------------------------------------------------------------------
     {
-      // Find the first CPU processor on which to launch the 
-      // top-level task. If we're doing separate instances we can
-      // just use our current processor
-      Processor target = Processor::NO_PROC;
-      if (!separate_runtime_instances)
-      {
-        std::set<Processor> local_cpus;
-        machine.get_local_processors_by_kind(local_cpus, Processor::LOC_PROC);
-        if (local_cpus.empty())
-        {
-          log_run.error("Machine model contains no CPU processors!");
-          assert(false);
-          exit(ERROR_NO_PROCESSORS); 
-        }
-        target = *(local_cpus.begin());
-      }
-      else
-        target = *(local_procs.begin()); 
       // Get an individual task to be the top-level task
       IndividualTask *top_task = get_available_individual_task(false);
       // Get a remote task to serve as the top of the top-level task
@@ -16530,8 +16512,6 @@ namespace Legion {
     /*static*/ volatile RegistrationCallbackFnptr Runtime::
                                               registration_callback = NULL;
     /*static*/ Processor::TaskFuncID Runtime::legion_main_id = 0;
-    /*static*/ Event Runtime::runtime_startup_event = Event::NO_EVENT;
-    /*static*/ volatile bool Runtime::runtime_startup_event_ready = false;
     /*static*/ int Runtime::initial_task_window_size = 
                                       DEFAULT_MAX_TASK_WINDOW;
     /*static*/ unsigned Runtime::initial_task_window_hysteresis =
@@ -16545,7 +16525,7 @@ namespace Legion {
     /*static*/ unsigned Runtime::gc_epoch_size = 
                                       DEFAULT_GC_EPOCH_SIZE;
     /*static*/ bool Runtime::runtime_started = false;
-    /*static*/ bool Runtime::runtime_backgrounded = true;
+    /*static*/ bool Runtime::runtime_backgrounded = false;
     /*static*/ bool Runtime::separate_runtime_instances = false;
     /*static*/ bool Runtime::record_registration = false;
     /*sattic*/ bool Runtime::stealing_disabled = false;
@@ -16897,6 +16877,8 @@ namespace Legion {
         }
       }
       // Check for exceeding the local number of processors
+      // and also see if we are supposed to launch the top-level task
+      Processor top_level_proc = Processor::NO_PROC;
       {
         std::set<Processor> local_procs;
         machine.get_local_processors(local_procs);
@@ -16911,30 +16893,55 @@ namespace Legion {
 #endif
           exit(ERROR_MAXIMUM_PROCS_EXCEEDED);
         }
+        AddressSpace local_space = local_procs.begin()->address_space();
+        // If we are node 0 then we have to launch the top-level task
+        if (local_space == 0)
+        {
+          // Find the first CPU processor
+          for (std::set<Processor>::const_iterator it = local_procs.begin();
+                it != local_procs.end(); it++)
+          {
+            Processor::Kind kind = it->kind(); 
+            if (kind == Processor::LOC_PROC)
+            {
+              top_level_proc = *it;
+              break;
+            }
+          }
+          // If we didn't find one that is very bad
+          if (!top_level_proc.exists())
+          {
+            log_run.error("Machine model contains no CPU processors!");
+#ifdef DEBUG_HIGH_LEVEL
+            assert(false);
+#endif
+            exit(ERROR_NO_PROCESSORS);
+          }
+        }
       }
-      // To avoid a race condition, we first have to mark that we 
-      // haven't recorded the runtime start-up event
-      runtime_startup_event_ready = false;
       // Now perform a collective spawn to initialize the runtime everywhere
       // Save the precondition in case we are the node that needs to start
       // the top-level task.
       // If we're doing separate runtime instances we need to launch an
       // init task on every processor on all nodes, otherwise we just
-      // need to launch one task on a processor on every node
-      runtime_startup_event = realm.collective_spawn_by_kind(
-          Processor::NO_KIND, INIT_TASK_ID, NULL, 0, 
+      // need to launch one task on a CPU processor on every node
+      Event runtime_startup_event = realm.collective_spawn_by_kind(
+          (separate_runtime_instances ? Processor::NO_KIND : 
+           Processor::LOC_PROC), INIT_TASK_ID, NULL, 0,
           !separate_runtime_instances, tasks_registered);
-      // Now mark that we've recorded the start-up event
-      runtime_startup_event_ready = true;
+      // See if we are supposed to start the top-level task
+      if (top_level_proc.exists())
+      {
+        Realm::ProfilingRequestSet empty_requests;
+        top_level_proc.spawn(HLR_LAUNCH_TOP_LEVEL_ID, NULL, 0,
+                             empty_requests, runtime_startup_event);
+      }
       // If we are supposed to background this thread, then we wait
       // for the runtime to shutdown, otherwise we can now return
-      if (!background)
-      {
-        // Record that we didn't background the runtime
-        runtime_backgrounded = false;
-        // Now wait for realm to be shutdown
+      if (background) // Record that the runtime was backgrounded
+        runtime_backgrounded = true;
+      else // Otherwise wait for realm to be shutdown
         realm.wait_for_shutdown();
-      }
       return 0;
     }
 
@@ -17338,6 +17345,7 @@ namespace Legion {
       CodeDescriptor hlr_task(Runtime::high_level_runtime_task);
       CodeDescriptor rt_profiling_task(Runtime::profiling_runtime_task);
       CodeDescriptor map_profiling_task(Runtime::profiling_mapper_task);
+      CodeDescriptor launch_top_level_task(Runtime::launch_top_level);
       Realm::ProfilingRequestSet no_requests;
       // We'll just register these on all the processor kinds
       std::set<Event> registered_events;
@@ -17360,6 +17368,9 @@ namespace Legion {
         registered_events.insert(
             Processor::register_task_by_kind(kinds[idx], false/*global*/,
                      HLR_MAPPER_PROFILING_ID, map_profiling_task, no_requests));
+        registered_events.insert(
+            Processor::register_task_by_kind(kinds[idx], false/*global*/,
+                  HLR_LAUNCH_TOP_LEVEL_ID, launch_top_level_task, no_requests));
       }
       if (record_registration)
       {
@@ -17373,6 +17384,8 @@ namespace Legion {
                       HLR_LEGION_PROFILING_ID);
         log_run.print("Legion mapper profiling task has Realm ID %d",
                       HLR_MAPPER_PROFILING_ID);
+        log_run.print("Legion launch top-level task has Realm ID %d",
+                      HLR_LAUNCH_TOP_LEVEL_ID);
       }
       return Event::merge_events(registered_events);
     }
@@ -17512,25 +17525,9 @@ namespace Legion {
       {
         runtime_map[it->local_id()] = local_rt;
       }
-      // If we have an MPI rank, build the maps first
+      // If we have an MPI rank, then build the maps
       if (Runtime::mpi_rank >= 0)
         local_rt->construct_mpi_rank_tables(p, Runtime::mpi_rank);
-      // See if we are supposed to launch the top-level task
-      // If so do it contingent upon the runtime being started everywhere
-      if (local_space_id == 0)
-      {
-        HLRTaskID hlr_id = HLR_LAUNCH_TOP_LEVEL_ID;
-        // To avoid a race condition on reading the runtime_startup_event,
-        // do some spin-waiting until we know that the runtime startup
-        // event is ready for us to read
-#ifdef __SSE2__
-        while (!runtime_startup_event_ready) { _mm_pause(); } 
-#else
-        while (!runtime_startup_event_ready) { }
-#endif
-        local_rt->issue_runtime_meta_task(&hlr_id, sizeof(hlr_id),
-                                          hlr_id, NULL, runtime_startup_event);
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -17574,11 +17571,6 @@ namespace Legion {
               (const SingleTask::PostEndArgs*)args;
             post_end_args->proxy_this->post_end_task(post_end_args->result, 
                                 post_end_args->result_size, true/*owned*/);
-            break;
-          }
-        case HLR_LAUNCH_TOP_LEVEL_ID:
-          {
-            Runtime::get_runtime(p)->launch_top_level_task();
             break;
           }
         case HLR_DEFERRED_MAPPING_TRIGGER_ID:
@@ -18003,6 +17995,17 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       SingleTask::process_mapper_profiling(args, arglen);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void Runtime::launch_top_level(
+                                   const void *args, size_t arglen, 
+				   const void *userdata, size_t userlen,
+				   Processor p)
+    //--------------------------------------------------------------------------
+    {
+      Runtime *rt = Runtime::get_runtime(p);
+      rt->launch_top_level_task(p);
     }
 
     //--------------------------------------------------------------------------

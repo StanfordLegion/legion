@@ -1172,7 +1172,7 @@ namespace Legion {
       Runtime& operator=(const Runtime &rhs);
     public:
       void construct_mpi_rank_tables(Processor proc, int rank);
-      void launch_top_level_task(void);
+      void launch_top_level_task(Processor target);
       Event launch_mapper_task(Mapper *mapper, Processor proc, 
                                Processor::TaskFuncID tid,
                                const TaskArgument &arg, MapperID map_id);
@@ -2192,6 +2192,10 @@ namespace Legion {
                           const void *args, size_t arglen, 
 			  const void *userdata, size_t userlen,
 			  Processor p);
+      static void launch_top_level(
+                          const void *args, size_t arglen, 
+			  const void *userdata, size_t userlen,
+			  Processor p);
     protected:
       // Internal runtime methods invoked by the above static methods
       // after the find the right runtime instance to call
@@ -2481,8 +2485,6 @@ namespace Legion {
       static Runtime *runtime_map[(MAX_NUM_PROCS+1/*+1 for NO_PROC*/)];
       static volatile RegistrationCallbackFnptr registration_callback;
       static Processor::TaskFuncID legion_main_id;
-      static Event runtime_startup_event;
-      static volatile bool runtime_startup_event_ready;
       static int initial_task_window_size;
       static unsigned initial_task_window_hysteresis;
       static unsigned initial_tasks_to_schedule;

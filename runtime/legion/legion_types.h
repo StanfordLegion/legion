@@ -197,7 +197,8 @@ namespace Legion {
       HLR_TASK_ID             = Realm::Processor::TASK_ID_FIRST_AVAILABLE,
       HLR_LEGION_PROFILING_ID = Realm::Processor::TASK_ID_FIRST_AVAILABLE+1,
       HLR_MAPPER_PROFILING_ID = Realm::Processor::TASK_ID_FIRST_AVAILABLE+2,
-      TASK_ID_AVAILABLE       = Realm::Processor::TASK_ID_FIRST_AVAILABLE+3,
+      HLR_LAUNCH_TOP_LEVEL_ID = Realm::Processor::TASK_ID_FIRST_AVAILABLE+3,
+      TASK_ID_AVAILABLE       = Realm::Processor::TASK_ID_FIRST_AVAILABLE+4,
     };
 
     // redop IDs - none used in HLR right now, but 0 isn't allowed
@@ -209,7 +210,6 @@ namespace Legion {
     enum HLRTaskID {
       HLR_SCHEDULER_ID,
       HLR_POST_END_ID,
-      HLR_LAUNCH_TOP_LEVEL_ID,
       HLR_DEFERRED_MAPPING_TRIGGER_ID,
       HLR_DEFERRED_RESOLUTION_TRIGGER_ID,
       HLR_DEFERRED_EXECUTION_TRIGGER_ID,
@@ -266,7 +266,6 @@ namespace Legion {
       const char *name[HLR_LAST_TASK_ID] = {                      \
         "Scheduler",                                              \
         "Post-Task Execution",                                    \
-        "Launch Top Level Task",                                  \
         "Deferred Mapping Trigger",                               \
         "Deferred Resolution Trigger",                            \
         "Deferred Execution Trigger",                             \
