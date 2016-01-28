@@ -951,7 +951,7 @@ namespace Legion {
     public:
       const char* get_name(bool needs_lock = true) const;
       void attach_semantic_information(SemanticTag tag, AddressSpaceID source,
-                             const void *buffer, size_t size, bool is_mutable);
+         const void *buffer, size_t size, bool is_mutable, bool send_to_owner);
       void retrieve_semantic_information(SemanticTag tag,
                                          const void *&buffer, size_t &size);
       void send_semantic_info(AddressSpaceID target, SemanticTag tag,
@@ -1585,7 +1585,8 @@ namespace Legion {
       ProjectionFunctor* find_projection_functor(ProjectionID pid);
     public:
       void attach_semantic_information(TaskID task_id, SemanticTag,
-                       const void *buffer, size_t size, bool is_mutable);
+                                   const void *buffer, size_t size, 
+                                   bool is_mutable, bool send_to_owner = true);
       void attach_semantic_information(IndexSpace handle, SemanticTag tag,
                        const void *buffer, size_t size, bool is_mutable);
       void attach_semantic_information(IndexPartition handle, SemanticTag tag,
