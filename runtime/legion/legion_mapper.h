@@ -1,0 +1,1458 @@
+/* Copyright 2016 Stanford University, NVIDIA Corporation
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#ifndef __LEGION_MAPPER_H__
+#define __LEGION_MAPPER_H__
+
+namespace Legion {
+  namespace Mapping {
+
+    /**
+     * \class Mappable
+     * The mappable class provides a base class for all 
+     * the different types which can be passed to represent 
+     * an operation to a mapping call. The interface doesn't
+     * currently use this, but it is good to have a base
+     * class for all these operations in case mapper
+     * implementations want to abstract over different
+     * operation types.
+     */
+    class Mappable {
+    public:
+      enum MappableKind {
+        TASK_MAPPABLE,
+        COPY_MAPPABLE,
+        INLINE_MAPPABLE,
+        ACQUIRE_MAPPABLE,
+        RELEASE_MAPPABLE
+      };
+    public:
+      MapperID                                  map_id;
+      MappingTagID                              tag;
+    };
+
+    /**
+     * \class Task
+     * This class contains all the information from a task
+     * launch for either an individual or an index space
+     * task. It also provides information about the current
+     * state of the task from the runtime perspective so 
+     * that mappers can make informed decisions.
+     */
+    class Task : public Mappable {
+    public:
+      // Task argument information
+      Processor::TaskFuncID task_id; 
+      std::vector<IndexSpaceRequirement>  indexes;
+      std::vector<RegionRequirement>      regions;
+      std::vector<Future>                 futures;
+      std::vector<Grant>                  grants;
+      std::vector<PhaseBarrier>           wait_barriers;
+      std::vector<PhaseBarrier>           arrive_barriers;
+      void*                               args;                         
+      size_t                              arglen;
+    public:
+      // Index task argument information
+      bool                                is_index_space;
+      bool                                must_parallelism; 
+      Domain                              index_domain;
+      DomainPoint                         index_point;
+      void*                               local_args;
+      size_t                              local_arglen;
+    public:
+      // Meta data information from the runtime
+      Processor                           orig_proc;
+      Processor                           current_proc;
+      unsigned                            steal_count;
+      unsigned                            depth;  
+      bool                                speculated;
+      TaskVariantCollection*              variants;
+    };
+
+    /**
+     * \class Copy
+     * This class contains all the information about an
+     * explicit copy region-to-region copy operation.
+     */
+    class Copy : public Mappable {
+    public:
+      // Copy Launcher arguments
+      std::vector<RegionRequirement>    src_requirements;
+      std::vector<RegionRequirement>    dst_requirements;
+      std::vector<Grant>                grants;
+      std::vector<PhaseBarrier>         wait_barriers;
+      std::vector<PhaseBarrier>         arrive_barriers;
+    public:
+      // Parent task for the copy operation
+      Task*                             parent_task;
+    };
+
+    /**
+     * \class InlineMapping
+     * This class contains all the information about an
+     * inline mapping operation from its launcher
+     */
+    class InlineMapping : public Mappable {
+    public:
+      // Inline Launcher arguments
+      RegionRequirement                 requirement;
+    public:
+      // Parent task for the inline operation
+      Task*                             parent_task;
+    };
+
+    /**
+     * \class Acquire
+     * This class contains all the information about an
+     * acquire operation from the original launcher.
+     */
+    class Acquire : public Mappable {
+    public:
+      // Acquire Launcher arguments
+      LogicalRegion                     logical_region;
+      LogicalRegion                     parent_region;
+      std::set<FieldID>                 fields;
+      PhysicalRegion                    region;
+      std::vector<Grant>                grants;
+      std::vector<PhaseBarrier>         wait_barriers;
+      std::vector<PhaseBarrier>         arrive_barriers;
+    public:
+      // Parent task for the acquire operation
+      Task*                             parent_task;
+    };
+
+    /**
+     * \class Release
+     * This class contains all the information about a
+     * release operation from the original launcher.
+     */
+    class Release : public Mapper {
+    public:
+      // Release Launcher arguments
+      LogicalRegion                     logical_region;
+      LogicalRegion                     parent_region;
+      std::set<FieldID>                 fields;
+      PhysicalRegion                    region;
+      std::vector<Grant>                grants;
+      std::vector<PhaseBarrier>         wait_barriers;
+      std::vector<PhaseBarrier>         arrive_barriers;
+    public:
+      // Parent task for the release operation
+      Task*                             parent_task;
+    };
+
+    /**
+     * \class Close
+     * This class represents a close operation that has
+     * been requested by the runtime. The region requirement
+     * for this operation is synthesized by the runtime
+     * but will name the logical region and fields being
+     * closed.  The privileges and coherence will always
+     * be READ_WRITE EXCLUSIVE.
+     */
+    class Close : public Mappable {
+    public:
+      // Synthesized region requirement
+      RegionRequirement                 requirement;
+    public:
+      // Parent task for the inline operation
+      Task*                             parent_task;
+    };
+
+    /**
+     * \class PhysicalInstance
+     * The PhysicalInstance class provides an interface for
+     * garnering information about physical instances 
+     * throughout the mapping interface. Mappers can discover
+     * information about physical instances such as their
+     * location, layout, and validity of data. Mappers can
+     * make copies of these objects and store them permanently
+     * in their state, but must be prepared that the validity
+     * of field data can change under such circumstances.
+     * The instance itself can actually be garbage collected.
+     * Methods are provided for detecting such cases.
+     */
+    class PhysicalInstance {
+    public:
+      // Get the location of this physical instance
+      Memory get_location(void) const;
+      unsigned long get_instance_id(void) const;
+    public:
+      // These methods check to see if the data represented
+      // by the is object is still up to date
+
+      // See if our valid field data is still up to date
+      bool is_current(void) const;
+
+      // See if our instance still exists or if it has been
+      // garbage collected
+      bool exists(void) const;
+    public:
+      // Check to see which fields contain valid data
+      // These methods will only work during the current mapper
+      // call. If the mapper retains a reference to the physical
+      // instance after the mapper call, all results for these
+      // methods only are undefined.
+      bool is_valid(FieldID fid) const;
+      bool is_valid(const std::set<FieldID> &fids) const;
+      bool all_valid(const std::set<FieldID> &fids) const;
+      size_t valid_count(const std::set<FieldID> &fids) const;
+    public:
+      // Check to see if the instance contains certain fields
+      bool contains(FieldID fid) const;
+      bool contains(const std::set<FieldID> &fids) const;
+    public:
+      // Check to see if a whole set of constraints are satisfied
+      bool satisfies(const LayoutConstraintSet &constraint_set) const;
+      // Check to see if individual constraints are satisfied
+      bool satisfies(const SpecializeConstraint &constraint) const;   
+      bool satisfies(const PlacementConstraint &constraint) const;
+      bool satisfies(const OrderingConstraint &constraint) const;
+      bool satisfies(const SplittingConstraint &constraint) const;
+      bool satisfies(const FieldConstraint &constraint) const;
+      bool satisfies(const DimensionConstraint &constraint) const;
+      bool satisfies(const AlignmentConstraint &constraint) const;
+      bool satisfies(const OffsetConstraint &constraint) const;
+      bool satisfies(const PointerConstraint &constraint) const;
+    protected:   
+      Impl *impl;
+    };
+
+    // Set of profiling requests for task launches
+    // This struct will be filled out by the new faults
+    // branch so it's just here as a place holder for now
+    struct ProfilingRequestSet {
+    public:
+      unsigned long long                  start_time;
+      unsigned long long                  stop_time;
+    };
+
+    class Mapper {
+    public:
+      Mapper(HighLevelRuntime *rt);
+      virtual ~Mapper(void);
+    public: // Task mapping calls
+      /**
+       * ----------------------------------------------------------------------
+       *  Select Task Options
+       * ----------------------------------------------------------------------
+       * This mapper call happens immediately after the task is launched
+       * and before any other stages of the pipeline. This gives the mapper
+       * control over the execution of this task before the runtime puts it
+       * in the task pipeline. Below are the fields of the TaskOptions
+       * struct and their semantics.
+       *
+       * target_proc default:local processor
+       *     This field will only be obeyed by single task launches. It 
+       *     sets the initial processor where the task will be sent after
+       *     dependence analysis if the task is to be eagerly evaluated.
+       *     Index space tasks will invoke slice_domain to determine where
+       *     its components should be sent.
+       *
+       * inline_task default:false
+       *     Specify whether this task should be inlined directly into the
+       *     parent task using the parent task's regions. If the regions
+       *     are not already mapped, they will be re-mapped and the task
+       *     will be executed on the local processor. The mapper should
+       *     select an alternative call to the select_inline_variant call
+       *     to select the task variant to be used.
+       *
+       * spawn_task default:false
+       *     This field is inspired by Cilk and has equivalent semantics.
+       *     If a task is spawned, then it becomes eligible for stealing,
+       *     otherwise it will traverse the task pipeline as directed by
+       *     the mapper. The one deviation from Cilk stealing is that 
+       *     stealing in Legion is managed by the mappers instead of
+       *     implicitly by the Legion runtime.
+       *
+       * map_locally default:false
+       *     Tasks have the option of either being mapped on 
+       *     the processor on which they were created or being mapped
+       *     on their ultimate destination processor.  Mapping on the
+       *     local processor where the task was created can be
+       *     more efficient in some cases since it requires less
+       *     meta-data movement by the runtime, but can also be
+       *     subject to having an incomplete view of the destination
+       *     memories during the mapping process.  In general a task
+       *     should only be mapped locally if it is a leaf task as
+       *     the runtime will need to move the meta-data for a task
+       *     anyway if it is going to launch sub-tasks.  Note that
+       *     deciding to map a task locally disqualifies that task
+       *     from being stolen as it will have already been mapped
+       *     once it enters the ready queue.
+       *
+       * premap_task default:false
+       *     Specify whether the mapper wants to invoke the premap_task
+       *     call to map some regions early before mapping the 
+       *     entire task during the map_task call.
+       *
+       * postmap_task default:false
+       *     Request that the postmap_task mapper call be invoked
+       *     to generate any additional copies of the the data
+       *     generated by a task.
+       */
+      struct TaskOptions {
+        Processor                              target_pror;  // = local_proc
+        bool                                   inline_task;  // = false
+        bool                                   spawn_task;   // = false
+        bool                                   map_locally;  // = false
+        bool                                   premap_task;  // = false
+        bool                                   postmap_task; // = false
+      };
+      //----------------------------------------------------------------------------
+      virtual void select_task_options(  const Task&              task,
+                                               TaskOptions&       output) = 0;
+      //----------------------------------------------------------------------------
+      
+      /**
+       * ----------------------------------------------------------------------
+       *  Perform Task Fusion 
+       * ----------------------------------------------------------------------
+       * This mapper call is done exactly once per task launch (either single
+       * or index space) immediately after the logical dependence analysis 
+       * stage of the pipeline is complete. The purpose of this stage is to
+       * allow the mapper to fuse independent tasks of the same kind together
+       * to ammortize the cost of their analysis. 
+       *
+       * The semantics of this call are as follows. First, the mapper chooses
+       * whether to defer the processing of this task using the 'defer_task'
+       * field of TaskFusionOutput. If set to false, the task will enter the
+       * task pipeline immediately and not be eligible for any fusion. If
+       * 'defer_task' is set to false, then the task is added to a pool of
+       * tasks eligible to be fused. It will remain in this pool until it
+       * is either fused, or an operation which dependents on it is marked
+       * ineligible for fusing. If a task is deferred, then it will show up
+       * in the set of 'fusable_tasks' in the TaskFuseInput data structure
+       * for all tasks of the same kind for which it is eligible to fuse.
+       *
+       * Tasks that decide not to be deferred, can be fused with other
+       * eligible tasks. These tasks can be placed in the 'fuse_tasks'
+       * vector of TaskFusionOutput. The runtime will attempt to zip the
+       * region requirements to merge them. If this fails, the runtime
+       * will make an aggregate operation to represent the fused tasks.
+       * If the task variant collection supports a fuse operation, that
+       * will be invoked.
+       */
+      struct TaskFusionInput {
+        std::vector<const Task*>                fusable_tasks;
+      };
+      struct TaskFusionOuptut {
+        bool                                    defer_task; // = false
+        std::vector<const Task*>                fuse_tasks;
+      };
+      //----------------------------------------------------------------------------
+      virtual void perform_task_fusion(  const Task&              task,
+                                         const TaskFusionInput&   input,
+                                               TaskFusionOutput&  output) = 0;
+      //----------------------------------------------------------------------------
+      
+      /**
+       * ----------------------------------------------------------------------
+       *  Evaluate Lazily 
+       * ----------------------------------------------------------------------
+       * Determine whether this task is going to be eagerly or lazily
+       * evaluated. Eager evaluation will put this task immediately into
+       * the pipeline and will ensure that it is mapped. All of its output
+       * regions will also remain as valid instances of memory until they
+       * no longer contain valid data and will not be necessary for any
+       * roll-backs (either due to resilience or mis-speculation). Eagerly
+       * evaluated tasks will also receive a postmap task call for
+       * determining what if any regions to check point.
+       *
+       * Alternatively, lazily evaulated tasks will not be put in the pipeline
+       * for mapping. Instead, they will be deferred until a task or other
+       * operation which is eagerly evaulated requires their result. A
+       * lazily evaulated task is therefore replicated and re-executed each
+       * time its result is needed.  The mapping for lazily evaulated tasks
+       * will be done as part of a map_dataflow_graph mapper call where a
+       * set of the dataflow graph necessary for executing an eagerly 
+       * evaluated operation and all necessary lazily evaluated operations
+       * are mapped together.
+       *
+       * This mapper call occurs after dependence analysis for this task
+       * has completed, so the mapper can investigate the pending input
+       * dependences on this operation to determine whether it wants to
+       * execute the operation lazily or not.
+       *
+       * This call will be automatically skipped by the runtime for tasks
+       * which are not idempotent as non-idempotent tasks are not permitted
+       * to be executed multiple times and therefore must be eagerly
+       * evaluated.
+       */
+      struct LazyTaskOutput {
+        bool                                    evaluate_lazily; // = false
+      };
+      //----------------------------------------------------------------------------
+      virtual void evaluate_lazily(      const Task&              task,
+                                               LazyTaskOutput&    output) = 0;
+      //----------------------------------------------------------------------------
+
+      /**
+       * ----------------------------------------------------------------------
+       *  Premap Task 
+       * ----------------------------------------------------------------------
+       * This mapper call is only invoked for tasks which either explicitly
+       * requested it by setting 'premap_task' in the 'select_task_options'
+       * mapper call or by having a region requirement which needs to be 
+       * premapped (e.g. an in index space task launch with an individual
+       * region requirement with READ_WRITE EXCLUSIVE privileges that all
+       * tasks must share). The mapper is told the indicies of which 
+       * region requirements need to be premapped in the 'must_premap' set.
+       * All other regions can be optionally mapped. The mapper is given
+       * a vector containing sets of valid PhysicalInstances (if any) for
+       * each region requirement.
+       *
+       * The mapper performs the premapping by filling in premapping at
+       * least all the required premapped regions and indicates all premapped
+       * region indicies in 'premapped_region'. For each region requirement
+       * the mapper can specify a ranking of PhysicalInstances to re-use
+       * in 'chosen_ranking'. This can optionally be left empty. The mapper
+       * can also specify constraints on the creation of a physical instance
+       * in 'layout_constraints'. Finally, the mapper can force the creation
+       * of a new instance if an write-after-read dependences are detected
+       * on existing physical instances by enabling the WAR optimization.
+       * All vector data structures are size appropriately for the number of
+       * region requirements in the task.
+       */
+      struct PremapTaskInput {
+        std::set<unsigned>                                  must_premap;
+        std::vector<std::set<PhysicalInstance> >            valid_instances;
+      };
+      struct PremapTaskOutput {
+        std::set<unsigned>                                  premapped_regions;
+        std::vector<std::deque<PhysicalInstance> >          chosen_ranking;
+        std::vector<LayoutConstraintSet>                    layout_constraints;
+        std::vector<bool>                                   enable_WAR_optimzation;
+      };
+      //----------------------------------------------------------------------------
+      virtual void premap_task(          const Task&              task, 
+                                         const PremapTaskInput&   input,
+                                               PremapTaskOutput&  output) = 0; 
+      //----------------------------------------------------------------------------
+
+      /**
+       * ----------------------------------------------------------------------
+       *  Slice Domain 
+       * ----------------------------------------------------------------------
+       * Instead of needing to map an index space of tasks as a single
+       * domain, Legion allows index space of tasks to be decomposed
+       * into smaller sets of tasks that are mapped in parallel on
+       * different processors. To achieve this, the domain of the
+       * index space task launch must be sliced into subsets of points
+       * and distributed to the different processors which will actually
+       * run the tasks. Decomposing arbitrary domains in a way that
+       * matches the target architecture is clearly a mapping decision.
+       * Slicing the domain can be done recursively to match the 
+       * hierarchical nature of modern machines. By setting the
+       * 'recurse' field on a DomainSlice struct to true, the runtime
+       * will invoke slice_domain again on the destination node.
+       * It is acceptable to return a single slice consisting of the
+       * entire domain, but this will guarantee that all points in 
+       * an index space will map on the same node. The mapper can 
+       * request that the runtime check the correctness of the slicing
+       * (e.g. each point is in exactly one slice) dynamically by setting
+       * the 'verify_correctness' flag. Note that verification can be
+       * expensive and should only be used in testing or rare cases.
+       */
+      struct DomainSlice {
+        Domain                                  domain;
+        Processor                               proc;
+        bool                                    recurse;
+        bool                                    stealable;
+      };
+      struct SliceDomainInput {
+        Domain                                 domain;
+      };
+      struct SliceDomainOutput {
+        std::vector<DomainSlice>               slices;
+        bool                                   veryify_correctness; // = false
+      };
+      //----------------------------------------------------------------------------
+      virtual void slice_domain(         const Task&              task, 
+                                         const SliceDomainInput&  input,
+                                               SliceDomainOutput& output) = 0;
+      //----------------------------------------------------------------------------
+
+      /**
+       * ----------------------------------------------------------------------
+       *  Map Task 
+       * ----------------------------------------------------------------------
+       * The map task call is performed on every task which is eagerly
+       * (as opposed to lazily) executed and has all its input already
+       * eagerly executed. The call provides a set of physical instances
+       * which can be used for each of the different region requirements
+       * for the task. The mapper has the repsonsibility of filling in a
+       * ranking of physical instances to re-use for each region requirement
+       * in 'chosen_ranking'. The mapper can also specify what layout
+       * constraints to use in creating a new physical instance in the 
+       * 'layout_constraints' set for each region requirement. Finally,
+       * the mapper can see if the write-after-read optimization should
+       * be enforced on each individual region requirement by using the
+       * 'enable_WAR_optimization' vector.
+       *
+       * The runtime will then attempt to map physical regions for each
+       * region requirement based on these constraints. If the runtime
+       * succeeds it will progress through the ranking of task variant
+       * IDs in 'variant_ranking' in order to find a variant of the task
+       * to run. If no variant can be found in the 'target_ranking'
+       * that has all its constraints satisfied, the runtime will also
+       * proceed ot check any other variants for the given task kind.
+       * If none succeed the mapping will fail. The mapper can also
+       * request that it be notified of the ultimate mapping results
+       * of the task by setting the 'report_mapping' flag to true.
+       *
+       * The 'additional_procs' field allows the mapper to indicate that
+       * this task can actually be executed on one of a set of processors
+       * in addition to the target processor. All the processors in 
+       * 'additional_procs' must be of the same kind as the target
+       * processor as the target processor and be capable of seeing the
+       * memories where the physical instances of the mapped task are
+       * located or the runtime will silently omit these processors
+       * from consideration. The task will be run on the first of these
+       * processors or the target processor that become available.
+       * The mapper can influence the priority of the task by setting
+       * the 'task_priority' field. Negative priorities are lower and
+       * positive priorities are higher.
+       *
+       * The mapper can also request profiling information about this
+       * task as part of its execution. The mapper can specify a task
+       * profiling request set in 'task_prof_requests' for profiling
+       * statistics about the execution of the task. Additionally,
+       * the mapper can request profiling information about any of the
+       * copy operations for necessary for mapping a physical instance
+       * by specifying a profiling request set for the appropritate
+       * region requirement in 'region_prof_requests'.
+       */
+      struct MapTaskInput {
+        std::vector<std::set<PhysicalInstance> >        valid_instances;
+      }
+      struct MapTaskOutput {
+        std::vector<std::set<PhysicalInstance> >        chosen_instances; 
+        std::vector<LayoutConstraintSet> >              layout_constraints;
+        std::vector<bool>                               enable_WAR_optimization;
+        std::deque<TaskVariantID>                       variant_ranking;
+        std::set<Processor>                             additional_procs;
+        TaskPriority                                    task_priority;  // = 0
+        bool                                            report_mapping; // = false
+        ProfilingRequestSet                             task_prof_requests;
+        std::vector<ProfilingRequestSet>                region_prof_requests;
+      };
+      //----------------------------------------------------------------------------
+      virtual void map_task(             const Task&              task,
+                                         const MapTaskInput&      input,
+                                               MapTaskOutput&     output) = 0;
+      //----------------------------------------------------------------------------
+
+      /**
+       * ----------------------------------------------------------------------
+       *  Postmap Task 
+       * ----------------------------------------------------------------------
+       * This call will only be invoked if the postmap_task field was set
+       * in the 'select_task_options' call. The postmap task call gives the
+       * mapper the option to create additional copies of the output in 
+       * different memories. The mapper is told about the mapped regions for
+       * each of the different region requirements for the task in 
+       * 'mapped_regions', as well of any currently valid physical instances
+       * for those regions in the set of 'valid_instances' for each region
+       * requirement. The mapper then specifies the desired number of copies
+       * of each region requirement that it wants to generate in the 'copy_count'
+       * vector. Setting this count to 0 will prevent any copies from being
+       * made. The runtime will first walk through the list of physical
+       * instances in 'chosen_ranking' and issue copies to the target 
+       * physical instances for each region requirement. The runtime will
+       * continue issuing copies until the copy count has been met. If the
+       * copy count has still not been satisfied, the runtime will progress
+       * through the layout constraints until either it has met the copy
+       * count or the requested number of physical instances in the target
+       * memories have been created.
+       */
+      struct PostMapInput {
+        std::vector<std::set<PhysicalInstance> >        mapped_regions;
+        std::vector<std::set<PhysicalInstance> >        valid_instances;
+      };
+      struct PostMapOutput {
+        std::vector<unsigned>                           copy_count;
+        std::vector<std::deque<PhysicalInstance> >      chosen_ranking;
+        std::vector<LayoutConstraintSet>                layout_constraints;
+      };
+      //----------------------------------------------------------------------------
+      virtual void postmap_task(         const Task&              task,
+                                         const PostMapInput&      input,
+                                               PostMapOutput&     output) = 0;
+      //----------------------------------------------------------------------------
+
+      /**
+       * ----------------------------------------------------------------------
+       *  Rank Copy Sources 
+       * ----------------------------------------------------------------------
+       * The rank copy sources mapper call allows for the mapper to 
+       * select a ranking of potential source physical instances when
+       * making a copy to a new physical instance. The mapper is given
+       * the 'target_instance' and the set of 'source_instances' and
+       * asked to provide the 'chosen_ranking' of the physical instances.
+       * The runtime will issue copies from unranking instances in an
+       * undefined order until all fields have valid data. The
+       * 'region_req_index' field indicates the index of the region
+       * requirement for which this copy is being requested.
+       */
+      struct RankTaskCopyInput {
+        PhysicalInstance                        target;
+        std::set<PhysicalInstance>              source_instances;
+        unsigned                                region_req_index;
+      };
+      struct RankTaskCopyOutput {
+        std::deque<PhysicalInstance>            chosen_ranking;
+      };
+      //----------------------------------------------------------------------------
+      virtual void rank_copy_sources(    const Task&               task,
+                                         const RankTaskCopyInput&  input,
+                                               RankTaskCopyOutput& output) = 0;
+      //----------------------------------------------------------------------------
+
+      /**
+       * ----------------------------------------------------------------------
+       *  Notify Mapping Result
+       * ----------------------------------------------------------------------
+       * This mapper call provides information back to the mapper about
+       * the ultimate mapping of a task. The 'task_mapped' field indicates
+       * whether the task successfully mapped or not. If the task successfully
+       * mapped then the 'selected_variant' field will provide the ID of the
+       * task that mapped. The 'region_mapped' vector indicates which regions
+       * sucessfully mapped. The regions that successfully mapped record 
+       * their PhysicalInstances in 'mapped_instances'.
+       */
+      struct TaskMappingResult {
+        bool                                            task_mapped;
+        TaskVariantID                                   selected_variant;
+        std::vector<bool>                               region_mapped;
+        std::vector<std::set<PhysicalInstance> >        mapped_instances;  
+      };
+      //----------------------------------------------------------------------------
+      virtual void notify_mapping_result(const Task&              task,
+                                         const TaskMappingResult& input)  = 0;
+      //----------------------------------------------------------------------------
+
+      /**
+       * ----------------------------------------------------------------------
+       *  Speculate
+       * ----------------------------------------------------------------------
+       * The speculate mapper call asks the mapper to make a 
+       * decision about whether to speculatively execute a task
+       * or not. The mapper can say whether to speculate or not
+       * using the 'speculate' field. If it does choose to speculate
+       * then the mapper can control the guessed value for the
+       * predicate by setting the 'speculative_value' field.
+       */
+      struct SpeculativeOutput {
+        bool                                    speculate;
+        bool                                    speculative_value;
+      };
+      //----------------------------------------------------------------------------
+      virtual void speculate(            const Task&              task,
+                                               SpeculativeOutput& output) = 0;
+      //----------------------------------------------------------------------------
+
+      /**
+       * ----------------------------------------------------------------------
+       *  Report Profiling
+       * ----------------------------------------------------------------------
+       * This mapper call will report the profiling information
+       * requested either for the task execution and/or any copy
+       * operations that were issued on behalf of mapping the task.
+       */
+      struct TaskProfilingInfo {
+        // TODO: fill this in based on low-level profiling interface
+      };
+      //----------------------------------------------------------------------------
+      virtual void report_profiling(     const Task&              task,
+                                         const TaskProfilingInfo& input)  = 0;
+      //----------------------------------------------------------------------------
+    public: // Inline mapping
+      /**
+       * ----------------------------------------------------------------------
+       *  Map Inline 
+       * ----------------------------------------------------------------------
+       * The map inline mapper call is responsible for handling the mapping
+       * of an inline mapping operation to a specific physical region. The
+       * mapper is given a set of valid physical instances in the 
+       * 'valid_instances' field. The mapper has the option of either ranking
+       * specifying a physical instance from the set of valid instances to 
+       * use in the 'chosen_ranking' field , or providing layout constraints 
+       * for creating a physical instance in 'layout_constraints'. The mapper
+       * can also request profiling information for any copies issued by 
+       * filling in the 'profiling_requests' set. The mapper can also ask
+       * to be notified of the chosen mapping by setting the 'report_mappint'
+       * field to true.
+       */
+      struct MapInlineInput {
+        std::set<PhysicalInstance>              valid_instances; 
+      };
+      struct MapInlineOutput {
+        std::set<PhysicalInstance>              chosen_instances;
+        LayoutConstraintSet                     layout_constraints;
+        bool                                    report_mapping;
+        ProfilingRequestSet                     profiling_requests;
+      };
+      //----------------------------------------------------------------------------
+      virtual void map_inline(           const InlineMapping&       inline_op,
+                                         const MapInlineInput&      input,
+                                               MapInlineOutput&     output) = 0;
+      //----------------------------------------------------------------------------
+
+      /**
+       * ----------------------------------------------------------------------
+       *  Rank Copy Sources 
+       * ----------------------------------------------------------------------
+       * The rank copy sources mapper call allows for the mapper to select a
+       * ranking for source physical instances when generating copies for an
+       * inline mapping. The mapper is given the target physical instance in
+       * the 'target' field and the set of possible source instances in 
+       * 'source_instances'. The mapper speciefies a ranking of physical instances
+       * for copies to be issued from until all the fields contain valid data.
+       * The runtime will also issue copies from any instances not placed in
+       * the ranking in an undefined order.
+       */
+      struct RankInlineCopyInput {
+        PhysicalInstance                        target;
+        std::set<PhysicalInstance>              source_instances;
+      };
+      struct RankInlineCopyOutput {
+        std::deque<PhysicalInstance>            chosen_ranking;
+      };
+      //----------------------------------------------------------------------------
+      virtual void rank_copy_sources(    const InlineMapping&        inline_op,
+                                         const RankInlineCopyInput&  input,
+                                               RankInlineCopyOutput& output) = 0;
+      //----------------------------------------------------------------------------
+
+      /**
+       * ----------------------------------------------------------------------
+       *  Notify Mapping Result 
+       * ----------------------------------------------------------------------
+       * If the mapper requested to be notified of the resuling mapping
+       * for a inline mapping operation this call will be invoked to report
+       * the result. The mapper is told if the mapping succeeded in the 
+       * 'region_mapped' field. If the mapping succeeded, then the set of
+       * physical instances used are specified in 'mapped_instances'.
+       */
+      struct InlineMappingResult {
+        bool                                   region_mapped;
+        std::set<PhysicalInstance>             mapped_instances;
+      };
+      //----------------------------------------------------------------------------
+      virtual void notify_mapping_result(const InlineMapping&       inline_op,
+                                         const InlineMappingResult& input)  = 0;
+      //----------------------------------------------------------------------------
+
+      // No speculation for inline mappings
+
+      /**
+       * ----------------------------------------------------------------------
+       *  Report Profiling 
+       * ----------------------------------------------------------------------
+       * If the mapper requested profiling information on the copies
+       * generated during an inline mapping operations then this mapper
+       * call will be invoked to inform the mapper of the result.
+       */
+      struct InlineProfilingInfo {
+        // TODO: fill this in based on low-level profiling interface
+      };
+      //----------------------------------------------------------------------------
+      virtual void report_profiling(     const InlineMapping&       inline_op,
+                                         const InlineProfiingInfo&  input)  = 0;
+      //----------------------------------------------------------------------------
+    public: // Region-to-region copies
+      /**
+       * ----------------------------------------------------------------------
+       *  Map Copy 
+       * ----------------------------------------------------------------------
+       * When an application requests an explicit region-to-region copy, this
+       * mapper call is invoked to map both the source and destination 
+       * instances for the copy. The mapper is provided with a set of valid
+       * instances to be used for both the source and destination region
+       * requirements in the 'src_instances' and 'dst_instances' fields.
+       * The mapper can specify a ranking for both the source and destination
+       * instances to use by ranking instances in the 'src_ranking' and 
+       * 'dst_ranking' fields. The mapper can also set constraints on the 
+       * layouts of the physical instances to be used in the 
+       */
+      struct MapCopyInput {
+        std::vector<std::set<PhysicalInstance> >              src_instances;
+        std::vector<std::set<PhysicalInstance> >              dst_instances;
+      };
+      struct MapCopyOutput {
+        std::vector<std::deque<PhysicalInstance> >            src_ranking;
+        std::vector<std::deque<PhysicalInstance> >            dst_ranking;
+        std::vector<LayoutConstraintSet>                      src_layouts;
+        std::vector<LayoutConstraintSet>                      dst_layouts;
+        std::vector<bool>                                     dst_WAR_optimization;
+        bool                                                  report_mapping;
+        ProfilingRequestSet                                   profiling_requests;
+      };
+      //----------------------------------------------------------------------------
+      virtual void map_copy(             const Copy&              copy,
+                                         const MapCopyInput&      input,
+                                               MapCopyOutput&     output) = 0;
+      //----------------------------------------------------------------------------
+
+      /**
+       * ----------------------------------------------------------------------
+       *  Rank Copy Sources 
+       * ----------------------------------------------------------------------
+       * The rank copy sources mapper call allows the mapper to select a
+       * ranking of physical instances to use when updating the fields for
+       * a target physical instance. The physical instance is specified in 
+       * the 'target' field and the set of source physical instances are
+       * in the 'source_instances'. The 'is_src' and 'region_req_index'
+       * say which region requirement the copy is being issued. The mapper
+       * can specify an optional ranking in the 'chosen_ranking' field.
+       * The runtime will issue copies from the chosen ranking until all
+       * the fields in the target are made valid. Any instances not put
+       * in the chosen ranking will be considered by the runtime in an 
+       * undefined order for updating valid fields.
+       */
+      struct RankCopyInput {
+        PhysicalInstance                              target;
+        std::set<PhysicalInstance>                    source_instances;
+        bool                                          is_src;
+        unsigned                                      region_req_index;
+      };
+      struct RankCopyOutput {
+        std::deque<PhysicalInstance>                  chosen_ranking;
+      };
+      //----------------------------------------------------------------------------
+      virtual void rank_copy_sources(    const Copy&              copy,
+                                         const RankCopyInput&     input,
+                                               RankCopyOutput&    output) = 0;
+      //----------------------------------------------------------------------------
+
+      /**
+       * ----------------------------------------------------------------------
+       *  Notify Mapping Result 
+       * ----------------------------------------------------------------------
+       * The notify mapping result call will provide the result of the
+       * mapping attempt for an explicit copy operation. The 'copy_mapped'
+       * field indicates if the copy operation successfully mapped.
+       * If it failed, the vectors 'src_mapped' and 'dst_mapped' will 
+       * indicate which region requirements failed to map. For the
+       * region requirements that successfully mapped, the sets of 
+       * physical instances used to satisfy the mapping are specified
+       * in the 'src_instances' and 'dst_instances' fields.
+       */
+      struct CopyMappingResult {
+        bool                                          copy_mapped;
+        std::vector<bool>                             src_mapped;
+        std::vector<bool>                             dst_mapped;
+        std::vector<std::set<PhysicalInstance> >      src_instances;
+        std::vector<std::set<PhysicalInstance> >      dst_instances;
+      };
+      //----------------------------------------------------------------------------
+      virtual void notify_mapping_result(const Copy&              copy,
+                                         const CopyMappingResult& input)  = 0;
+      //----------------------------------------------------------------------------
+
+      /**
+       * ----------------------------------------------------------------------
+       *  Speculate 
+       * ----------------------------------------------------------------------
+       * The speculate mapper call gives the mapper the opportunity
+       * to optionally speculate on the predicate value for an explicit
+       * copy operation. The mapper sets the 'speculative' field to 
+       * indicate whether to speculate or not. If it does chose to 
+       * speculate, it can provide a speculative value in the
+       * 'speculative_value' field.
+       */
+      //----------------------------------------------------------------------------
+      virtual void speculate(            const Copy& copy,
+                                               SpeculativeOutput& output) = 0;
+      //----------------------------------------------------------------------------
+
+      /**
+       * ----------------------------------------------------------------------
+       *  Report Profiling 
+       * ----------------------------------------------------------------------
+       * If the mapper requested profiling information for an explicit
+       * copy operation then this call will return the profiling information.
+       */
+      struct CopyProflingInfo {
+        // TODO: fill this in based on low-level profiling interface
+      };
+      //----------------------------------------------------------------------------
+      virtual void report_profiling(     const Copy&              copy,
+                                         const CopyProfilingInfo& input)  = 0;
+      //----------------------------------------------------------------------------
+    public: // Close operations
+      /**
+       * ----------------------------------------------------------------------
+       *  Map Close 
+       * ----------------------------------------------------------------------
+       * Close operations are never explicitly requested by the application
+       * but are created by the runtime whenever a one partition of a
+       * region tree needs to be closed in order to access another partition.
+       * As part of this process, the close operation must be mapped. This
+       * can be done in one of two ways. First, the application can choose
+       * to create an explicit physical instance to be the target of the 
+       * close operation. Alternatively, the close operation can create a
+       * composite instance by setting the 'create_composite' field to true.
+       * A composite instance defers any necessary copy operations associated
+       * with a close to a later point in time, which allows mappers to avoid
+       * creating an explicit physical instance as the target of the close.
+       * Creating a composite instance is usually higher performance unless
+       * an application needs to actually use a physical instance of the 
+       * region being closed. While composite instances are usually higher
+       * performance they are also require a more expensive dynamic analysis
+       * when being used. Usually Legion will be able to hide this cost, 
+       * but it is possible that it can show up, especially if composite
+       * instances need to be moved between different nodes.
+       */
+      struct MapCloseInput {
+        std::vector<std::set<PhysicalInstance> >    valid_instances;
+      };
+      struct MapCloseOutput {
+        bool                                        create_composite; // = false
+        std::set<PhysicalInstance>                  chosen_instances;
+        LayoutConstraintSet                         layout_constraints;
+        bool                                        report_mapping;
+        ProfilingRequestSet                         profiling_requests;
+      };
+      //----------------------------------------------------------------------------
+      virtual void map_close(            const Close&              close,
+                                         const MapCloseInput&      input,
+                                               MapCloseOutput&     output) = 0;
+      //----------------------------------------------------------------------------
+
+      /**
+       * ----------------------------------------------------------------------
+       *  Rank Copy Sources 
+       * ----------------------------------------------------------------------
+       * The rank copy sources mapper call will be invoked whenever multiple
+       * physical instances can serve as the source for a copy aimed at the
+       * 'target' physical instance. The possible source instances are named
+       * in 'source_instances' and the mapper can specify a ranking in 
+       * 'chosen_ranking'. Any instances not explicitly listed in the order
+       * will be used by the runtime in an undefined order.
+       */
+      struct RankCloseCopyInput {
+        PhysicalInstance                            target;
+        std::set<PhysicalInstance>                  source_instances;
+      };
+      struct RankCloseCopyOutput {
+        std::deque<PhysicalInstance>                chosen_ranking;
+      };
+      //----------------------------------------------------------------------------
+      virtual void rank_copy_sources(    const Close&               close,
+                                         const RankCloseCopyInput&  input,
+                                               RankCloseCopyOutput& output) = 0;
+      //----------------------------------------------------------------------------
+
+      /**
+       * ----------------------------------------------------------------------
+       *  Notify Mapping Result 
+       * ----------------------------------------------------------------------
+       * If the mapper asked to be notified of the mapping result for this
+       * close operation then the notify mapping result call is invoked.
+       * The 'close_mapped' field indicates if the close operation successfully
+       * mapped. If it did, the 'composite_created' field will say if a composite
+       * instance was created. If a composite instance wasn't created then 
+       * the 'mapped_instances' field contains the sets of physical instances
+       * used as the target of the close oepration.
+       */
+      struct CloseMappingResult {
+        bool                                        close_mapped;
+        bool                                        composite_created;
+        std::set<PhysicalInstance>                  mapped_instances;
+      };
+      //----------------------------------------------------------------------------
+      virtual void notify_mapping_result(const Close&              close,
+                                         const CloseMappingResult& input)  = 0;
+      //----------------------------------------------------------------------------
+      // No speculation for close operations
+
+      /**
+       * ----------------------------------------------------------------------
+       *  Report Profiling 
+       * ----------------------------------------------------------------------
+       * If the mapper requested profiling information this close operation
+       * then this call will return the profiling data back to the mapper
+       * for all the copy operations issued by the close operation.
+       */
+      struct CloseProfilingInfo {
+        // TODO: fill this in based on low-level profiling interface
+      };
+      //----------------------------------------------------------------------------
+      virtual void report_profiling(     const Close&              close,
+                                         const CloseProfilingInfo& input)  = 0;
+      //----------------------------------------------------------------------------
+    public: // Acquire operations
+      /**
+       * ----------------------------------------------------------------------
+       *  Map Acquire 
+       * ----------------------------------------------------------------------
+       * Acquire operations do not actually need to be mapped since they
+       * are explicitly tied to a physical region when they are launched.
+       * Therefore the only information needed from the mapper is whether
+       * it would like to request any profiling information.
+       */
+      struct MapAcquireInput {
+        // Nothing
+      };
+      struct MapAcquireOutput {
+        ProfilingRequestSet                         profiling_requests;
+      };
+      //----------------------------------------------------------------------------
+      virtual void map_acquire(          const Acquire&              acquire,
+                                               MapAcquireInput&      input,
+                                               MapAcquireOutput&     output) = 0;
+      //----------------------------------------------------------------------------
+
+      /**
+       * ----------------------------------------------------------------------
+       *  Rank Copy Sources
+       * ----------------------------------------------------------------------
+       * If any copy operations need to be issued as part of the acquire
+       * operation and have multiple possible source physical instances,
+       * then this call will be invoked. The mapper selects a 'chosen_ranking'
+       * from the set of 'source_instances' for copying to the 'target'
+       * physical instance. Any physical instances not ranking will be 
+       * used in an unspecified order.
+       */
+      struct RankAcquireCopyInput {
+        PhysicalInstance                        target;
+        std::set<PhysicalInstance>              source_instances;
+      };
+      struct RankAcquireCopyOutput {
+        std::deque<PhysicalInstance>            chosen_ranking;
+      };
+      //----------------------------------------------------------------------------
+      virtual void rank_copy_sources(    const Acquire&               acquire,
+                                         const RankAcquireCopyInput&  input,
+                                               RankAcquireCopyOutput& output) = 0;
+      //----------------------------------------------------------------------------
+
+      // No mapping results for acquires 
+
+      /**
+       * ----------------------------------------------------------------------
+       *  Speculate
+       * ----------------------------------------------------------------------
+       * Speculation for acquire operations works just like any other
+       * operation. The mapper can choose whether to speculate with
+       * the 'speculate' field. If it does choose to speculate, then 
+       * it can predict the value with the 'speculative_value'.
+       */
+      //----------------------------------------------------------------------------
+      virtual void speculate(            const Acquire&              acquire,
+                                               SpeculativeOutput&    output) = 0;
+      //----------------------------------------------------------------------------
+
+      /**
+       * ----------------------------------------------------------------------
+       *  Report Profiling
+       * ----------------------------------------------------------------------
+       * If the mapper requested profiling information on this acquire
+       * operation, then this call will be invoked with the associated
+       * profiling data.
+       */
+      struct AcquireProfilingInfo {
+        // TODO: fill thisin based on low-level profiling interface
+      };
+      //----------------------------------------------------------------------------
+      virtual void report_profiling(     const Acquire&              acquire,
+                                         const AcquireProfilingInfo& input)  = 0;
+      //----------------------------------------------------------------------------
+    public: // Release operations 
+      /**
+       * ----------------------------------------------------------------------
+       *  Map Release 
+       * ----------------------------------------------------------------------
+       * Release operations don't actually have any mapping to perform since
+       * they are explicitly associated with a physical instance when they
+       * are launched by the application. Thereforefore the only output
+       * currently neecessary is whether the mapper would like profiling
+       * information for this release operation.
+       */
+      struct MapReleaseInput {
+        // Nothing
+      };
+      struct MapReleaseOutput {
+        ProfilingRequestSet                         profiling_requests;
+      };
+      //----------------------------------------------------------------------------
+      virtual void map_release(          const Release&              release,
+                                         const MapReleaseInput&      input,
+                                               MapReleaseOutput&     output) = 0;
+      //----------------------------------------------------------------------------
+
+      /**
+       * ----------------------------------------------------------------------
+       *  Rank Copy Sources 
+       * ----------------------------------------------------------------------
+       * The rank copy sources call allows mappers to specify a 'chosen_ranking'
+       * for different 'source_instances' of a region when copying to a 'target'
+       * phsyical instance. The mapper can rank any or all of the source 
+       * instances and any instances which are not ranked will be copied from 
+       * in an unspecified order by the runtime until all the necessary fields
+       * in the target contain valid data.
+       */
+      struct RankReleaseCopyInput {
+        PhysicalInstance                        target;
+        std::set<PhysicalInstance>              source_instances;
+      };
+      struct RankReleaseCopyOutput {
+        std::deque<PhysicalInstance>            chosen_ranking;
+      };
+      //----------------------------------------------------------------------------
+      virtual void rank_copy_sources(    const Release&              release,
+                                         const RankCopyInput&        input,
+                                               RankCopyOutput&       output) = 0;
+      //----------------------------------------------------------------------------
+
+      // No mapping results for release operations 
+
+      /**
+       * ----------------------------------------------------------------------
+       *  Speculate 
+       * ----------------------------------------------------------------------
+       * The speculate call will be invoked for any release operations with
+       * a predicate that has not yet been satisfied. The mapper can choose
+       * whether to speculate on the result with the 'speculate' field. If
+       * the mapper does choose to speculate, it can choose the set the
+       * 'speculative_value' field as a guess for the value the predicate
+       * will take.
+       */
+      //----------------------------------------------------------------------------
+      virtual void speculate(            const Release&              release,
+                                               SpeculativeOutput&    output) = 0;
+      //----------------------------------------------------------------------------
+
+      /**
+       * ----------------------------------------------------------------------
+       *  Report Profiling
+       * ----------------------------------------------------------------------
+       * If the mapper requested profiling data for the release operation
+       * then this call will be invoked to report the profiling results
+       * back to the mapper.
+       */
+      struct ReleaseProfilingInfo {
+        // TODO: fill this in based on the low-level profiling interface
+      };
+      //----------------------------------------------------------------------------
+      virtual void report_profiling(     const Release&              release,
+                                         const ReleaseProfilingInfo& input)  = 0;
+      //----------------------------------------------------------------------------
+    public: // Single Task Context 
+      /**
+       * ----------------------------------------------------------------------
+       *  Configure Context 
+       * ----------------------------------------------------------------------
+       * The configure_context mapping call is performed once for every 
+       * non-leaf task before it starts running. It allows the mapper 
+       * control over important aspects of the task's execution. First,
+       * the mapper can control how far the task runs ahead before it
+       * starts stalling due to resource constraints. The mapper can 
+       * specify either a maximum number of outstanding sub operations
+       * by specifying 'max_window_size' or if the task issues frame
+       * operations (see 'complete_frame') it can set the maximum
+       * number of outstanding frames with 'max_outstanding_frames.'
+       * For the task-based run ahead measure, the mapper can also
+       * apply a hysteresis factor by setting 'hysteresis_percentage'
+       * to reduce jitter. The hysteresis factor specifies what percentage
+       * of 'max_window_size' tasks have to finish executing before 
+       * execution can begin again after a stall.
+       *
+       * The mapper can also control how many outstanding sub-tasks need
+       * to be mapped before the mapping process is considered to be far
+       * enough ahead that it can be halted for this context by setting
+       * the 'min_tasks_to_schedule' parameter.
+       */
+      struct ContextConfigOutput {
+        unsigned                                max_window_size; // = 1024
+        unsigned                                hysteresis_percentage; // = 25
+        unsigned                                max_outstanding_frames; // = 2
+        unsigned                                min_tasks_to_schedule; // = 64
+        unsigned                                max_directory_size;
+      };
+      //----------------------------------------------------------------------------
+      virtual void configure_context(    const Task&                 task,
+                                               ContextConfigOutput&  output) = 0;
+      //----------------------------------------------------------------------------
+
+      /**
+       * ----------------------------------------------------------------------
+       *  Select Tunable Variable 
+       * ----------------------------------------------------------------------
+       * The select_tunable_value mapper call allows mappers to control
+       * decisions about tunable values for a given task execution. The
+       * mapper is told of the tunable ID and presented with the mapping
+       * tag for the operation. It then must select a value for the tunable
+       * variable and set it in 'int_value.'
+       */
+      struct SelectTunableInput {
+        TunableID                               tunable_id;
+        MappingTagID                            mapping_tag;
+      };
+      struct SelectTunableOutput {
+        int                                     int_value;
+      };
+      //----------------------------------------------------------------------------
+      virtual void select_tunable_value( const Task&                 task,
+                                         const SelectTunableInput&   input,
+                                               SelectTunableOutput&  output) = 0;
+      //----------------------------------------------------------------------------
+    public: // Mapping collections of operations 
+      /**
+       * ----------------------------------------------------------------------
+       *  Map Must Epoch 
+       * ----------------------------------------------------------------------
+       * The map_must_epoch mapper call is invoked for mapping groups of
+       * tasks which are required to execute concurrently, thereby allowing
+       * them to optionally synchronize with each other. Each of the tasks in
+       * the 'tasks' vector must be mapped with their resulting mapping being
+       * specified in the corresponding location in the 'task_mapping' field.
+       * The mapper is provided with the usual inputs for each task in the 
+       * 'task_inputs' vector. As part of the mapping process, the mapper 
+       * must abide by the mapping constraints specified in the 'constraints' 
+       * field which says which logical regions in different tasks must be 
+       * mapped to the same physical instance. The mapper is also given 
+       * the mapping tag passed at the callsite in 'mapping_tag'.
+       */
+      struct MappingConstraint{
+        const Task*                             t1;
+        const Task*                             t2;
+        unsigned                                idx1;
+        unsigned                                idx2;
+        DependenceType                          dtype;
+      };
+      struct MapMustEpochInput {
+        std::vector<const Task*>                tasks;
+        std::vector<MappingConstraint>          constraints;
+        MappingTagID                            mapping_tag;
+        std::vector<MapTaskInput>               task_inputs;
+      };
+      struct MapMustEpochOutput {
+        std::vector<MapTaskOutput>              task_mapping; 
+      };
+      //----------------------------------------------------------------------------
+      virtual void map_must_epoch(       const MapMustEpochInput&      input,
+                                               MapMustEpochOutput&     output) = 0;
+      //----------------------------------------------------------------------------
+
+      struct MapDataflowGraphInput {
+        std::vector<const Task*>                nodes;
+        std::vector<DataflowEdge>               edges;
+        std::vector<Callsite>                   callsites;
+      };
+      struct MapDataflowGraphOutput {
+          
+      };
+      //----------------------------------------------------------------------------
+      virtual void map_dataflow_graph(   const MapDataflowGraphInput&  input,
+                                         const MapDataflowGraphOutput& output) = 0;
+      //----------------------------------------------------------------------------
+    public: // Scheduling 
+      /**
+       * ----------------------------------------------------------------------
+       *  Select Tasks to Map 
+       * ----------------------------------------------------------------------
+       * Legion gives the mapper control over when application tasks are
+       * mapped, so application tasks can be kept available for stealing
+       * or dynamically sent to another node. The select_tasks_to_map
+       * mapper call presents the mapper for this processor with a list of
+       * tasks that are ready to map in the 'ready_tasks' list. For any
+       * of the tasks in this list, the mapper can either decide to map
+       * the task by placing it in the 'map_tasks' set, or send it to 
+       * another processor by placing it in the 'relocate_tasks' map 
+       * along with the target processor for the task. Finally, the
+       * mapper can also choose to leave the task on the ready queue
+       * by doing nothing. Note that if the mapper continues to leave
+       * tasks on the ready queue after repeated invocations of the 
+       * 'select_tasks_to_map' mapper call, it may appear like livelock.
+       */
+      struct SelectMappingInput {
+        std::list<const Task*>                  ready_tasks;
+      };
+      struct SelectMappingOutput {
+        std::set<const Task*>                   map_tasks;
+        std::map<const Task*,Processor>         relocate_tasks;
+      };
+      //----------------------------------------------------------------------------
+      virtual void select_tasks_to_map(  const SelectMappingInput&     input,
+                                               SelectMappingOutput&    output) = 0;
+      //----------------------------------------------------------------------------
+    public: // Stealing
+      /**
+       * ----------------------------------------------------------------------
+       *  Select Steal Targets
+       * ----------------------------------------------------------------------
+       * Control over stealing in Legion is explicitly given to the mappers.
+       * The select_steal_targets mapper call is invoked whenever the 
+       * select_tasks_to_map call is made for a mapper and asks the mapper
+       * if it would like to attempt to steal from any other processors in
+       * the machine. The mapper is provided with a list of 'blacklist'
+       * processors which are disallowed because of previous stealing 
+       * failures (the runtime automatically manages this blacklist and
+       * remove processors when it receives notification that they have
+       * additional work available for stealing). The mapper can put
+       * any set of processors in the potential 'targets' and steal requests
+       * will be sent. Note that any targets also contained in the blacklist
+       * will be ignored.
+       */
+      struct SelectStealingInput {
+        std::set<Processor>                     blacklist;
+      };
+      struct SelectStealingOutput {
+        std::set<Processor>                     targets;
+      };
+      //----------------------------------------------------------------------------
+      virtual void select_steal_targets( const SelectStealingInput&    input,
+                                               SelectStealingOutput&   output) = 0;
+      //----------------------------------------------------------------------------
+
+      /**
+       * ----------------------------------------------------------------------
+       *  Permit Steal Request 
+       * ----------------------------------------------------------------------
+       * Steal requests are also reported to mappers using the 
+       * 'permit_steal_request' mapper call. This gives mappers the option
+       * of deciding which tasks are stolen and which are kept on the 
+       * local node. Mappers are told which processor originated the steal
+       * request in the 'thief_proc' field along with a list of tasks which
+       * are eligible for stealing in 'stealable_tasks' (note all these
+       * tasks must have had 'spawn' set to true either in select_task_options
+       * or slice_domain). The mapper can then specify the tasks that are
+       * permitted to be stolen (if any) by place them in the stolen tasks
+       * data structure.
+       */
+      struct StealRequestInput {
+        Processor                               thief_proc;
+        std::vector<const Task*>                stealable_tasks;
+      };
+      struct StealRequestOutput {
+        std::set<const Task*>                   stolen_tasks;
+      };
+      //----------------------------------------------------------------------------
+      virtual void permit_steal_request( const StealRequestInput&      intput,
+                                               StealRequestOutput&     output) = 0;
+      //----------------------------------------------------------------------------
+    public: // Handling
+      /**
+       * ----------------------------------------------------------------------
+       *  Handle Message 
+       * ----------------------------------------------------------------------
+       * The handle_message call is invoked as the result of a message being
+       * delivered from another processor. The 'sender' field indicates the
+       * processor from which the message originated. The message is stored 
+       * in a buffer pointed to by 'message' and contains 'size' bytes. The
+       * mapper must make a copy of the buffer if it wants it to remain
+       * persistent. The 'broadcast' field indicates whether this message
+       * is the result of a broadcast or whether it is a single message
+       * send directly to this mapper.
+       */
+      struct MapperMessage {
+        Processor                               sender;
+        const void*                             message;
+        size_t                                  size;
+        bool                                    broadcast;
+      };
+      //----------------------------------------------------------------------------
+      virtual void handle_message(       const MapperMessage&          message) = 0;
+      //----------------------------------------------------------------------------
+
+      /**
+       * ----------------------------------------------------------------------
+       *  Handle Task Result 
+       * ----------------------------------------------------------------------
+       * The handle_task_result call is made after the mapper has requested
+       * an external computation be run by calling 'launch_mapper_task'. This
+       * calls gives the 'mapper_event' that says which task result is being
+       * returned. The result is passed in a buffer call 'result' of 
+       * 'result_size' bytes. The mapper must make a copy of this buffer if
+       * it wants the data to remain persistent.
+       */
+      struct MapperTaskResult {
+        MapperEvent                             mapper_event;
+        const void*                             result;
+        size_t                                  result_size;
+      };
+      //----------------------------------------------------------------------------
+      virtual void handle_task_result(   const MapperTaskResult&       result) = 0;
+      //----------------------------------------------------------------------------
+    protected:
+      // Utility functions that all mappers can do
+      // (Implementations provided)
+
+      // Send asynchronous messages to other mappers
+      void send_message(Processor target, const void *message, size_t message_size);
+      void broadcast(const void *message, size_t message_size, int radix = 4);
+
+      // Launch a mapper task
+      MapperEvent launch_mapper_task(Processor::TaskFuncID tid,
+                                     const TaskArgument &arg);
+
+      // Defer (almost) any mapper call to a future point in time
+      void defer_mapper_call(MapperEvent event);
+
+      // Merge mapper events together
+      MapperEvent merge_mapper_events(const std::set<MapperEvent> &events);
+    };
+
+    class TaskVariantProperties {
+    public:
+      TaskVariantProperties(bool single = true, bool index = true,
+                            bool leaf = false, bool inner = false,
+                            const char *name = NULL);
+    public:
+      template<typename T>
+      void add_variant_constraint(const T &constraint);
+      template<typename T>
+      void add_region_constraint(unsigned idx, const T &constraint);
+    public:
+      // Processor constraints for this task variant
+      VariantConstraintSet            proc_constraints;
+      // Set of region constraints for each region requirement
+      std::deque<LayoutConstraintSet> region_constraints;
+    public:
+      // Properties of this task variant
+      // These two are not necessarily mutually exclusive
+      bool                              single_task;
+      bool                              index_task;
+      // These two are mutually exclusive
+      bool                              leaf_task; 
+      bool                              inner_task;
+    public:
+      const char*                       name;
+    };
+
+    class TaskProperties {
+    public:
+      TaskProperties(TaskID task_id = 0, 
+                     bool idempotent = true,
+                     bool fissionable = false,
+                     const char *name = NULL);
+    public:
+      // Optional task ID
+      TaskID                            task_id;
+    public:
+      bool                              idempotent;
+      bool                              fissionable;
+    public:
+      const char*                       name;
+    };
+
+  }; // namespace Mapping
+}; // namespace Legion
+
+#endif // __LEGION_MAPPER_H__
+
