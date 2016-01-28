@@ -16898,7 +16898,7 @@ namespace LegionRuntime {
       // need to launch one task on a CPU processor on every node
       Event runtime_startup_event = realm.collective_spawn_by_kind(
           (separate_runtime_instances ? Processor::NO_KIND : 
-           Processor::LOC_PROC), INIT_TASK_ID, NULL, 0,
+           Processor::UTIL_PROC), INIT_TASK_ID, NULL, 0,
           !separate_runtime_instances, tasks_registered);
       // See if we are supposed to start the top-level task
       if (top_level_proc.exists())
