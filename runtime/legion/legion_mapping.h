@@ -13,8 +13,8 @@
  * limitations under the License.
  */
 
-#ifndef __LEGION_MAPPER_H__
-#define __LEGION_MAPPER_H__
+#ifndef __LEGION_MAPPING_H__
+#define __LEGION_MAPPING_H__
 
 #include "legion_types.h"
 
@@ -33,14 +33,6 @@ namespace Legion {
      */
     class Mappable {
     public:
-      enum MappableKind {
-        TASK_MAPPABLE,
-        COPY_MAPPABLE,
-        INLINE_MAPPABLE,
-        ACQUIRE_MAPPABLE,
-        RELEASE_MAPPABLE
-      };
-    public:
       MapperID                                  map_id;
       MappingTagID                              tag;
     };
@@ -54,6 +46,13 @@ namespace Legion {
      * that mappers can make informed decisions.
      */
     class Task : public Mappable {
+    protected:
+      FRIEND_ALL_RUNTIME_CLASSES
+      Task(void);
+    public:
+      UniqueID get_unique_task_id(void) const;
+      unsigned get_depth(void) const;
+      const char* get_task_name(void) const;
     public:
       // Task argument information
       Processor::TaskFuncID task_id; 
@@ -91,6 +90,12 @@ namespace Legion {
      * explicit copy region-to-region copy operation.
      */
     class Copy : public Mappable {
+    protected:
+      FRIEND_ALL_RUNTIME_CLASSES
+      Copy(void);
+    public:
+      UniqueID get_unique_copy_id(void) const;
+      unsigned get_depth(void) const;
     public:
       // Copy Launcher arguments
       std::vector<RegionRequirement>    src_requirements;
@@ -109,6 +114,12 @@ namespace Legion {
      * inline mapping operation from its launcher
      */
     class InlineMapping : public Mappable {
+    protected:
+      FRIEND_ALL_RUNTIME_CLASSES
+      InlineMapping(void);
+    public:
+      UniqueID get_unique_inline_id(void) const;
+      unsigned get_depth(void) const;
     public:
       // Inline Launcher arguments
       RegionRequirement                 requirement;
@@ -123,6 +134,12 @@ namespace Legion {
      * acquire operation from the original launcher.
      */
     class Acquire : public Mappable {
+    protected:
+      FRIEND_ALL_RUNTIME_CLASSES
+      Acquire(void);
+    public:
+      UniqueID get_unique_acquire_id(void) const;
+      unsigned get_depth(void) const;
     public:
       // Acquire Launcher arguments
       LogicalRegion                     logical_region;
@@ -143,6 +160,12 @@ namespace Legion {
      * release operation from the original launcher.
      */
     class Release : public Mapper {
+    protected:
+      FRIEND_ALL_RUNTIME_CLASSES
+      Release(void);
+    public:
+      UniqueID get_unique_release_id(void) const;
+      unsigned get_depth(void) const;
     public:
       // Release Launcher arguments
       LogicalRegion                     logical_region;
@@ -167,6 +190,12 @@ namespace Legion {
      * be READ_WRITE EXCLUSIVE.
      */
     class Close : public Mappable {
+    protected:
+      FRIEND_ALL_RUNTIME_CLASSES
+      Close(void);
+    public:
+      UniqueID get_unique_close_id(void) const;
+      unsigned get_depth(void);
     public:
       // Synthesized region requirement
       RegionRequirement                 requirement;
@@ -1423,5 +1452,5 @@ namespace Legion {
   }; // namespace Mapping
 }; // namespace Legion
 
-#endif // __LEGION_MAPPER_H__
+#endif // __LEGION_MAPPING_H__
 
