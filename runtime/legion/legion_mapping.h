@@ -16,6 +16,8 @@
 #ifndef __LEGION_MAPPER_H__
 #define __LEGION_MAPPER_H__
 
+#include "legion_types.h"
+
 namespace Legion {
   namespace Mapping { 
 
@@ -229,138 +231,7 @@ namespace Legion {
       bool satisfies(const OffsetConstraint &constraint) const;
       bool satisfies(const PointerConstraint &constraint) const;
     protected:   
-      class PhysicalInstanceImpl;
       PhysicalInstanceImpl *impl;
-    };
-
-    /**
-     * \class MapperRuntimeInterface
-     * This class provides the set of calls that are available to all
-     * mapper objects. The base abstract Mapper class inherits from
-     * this class so that all of these methods are automatically
-     * inherited. All the calls here take an opaque MapperContext
-     * handle as an argument which must be the same handle passed
-     * in to a mapper call. The invocation of any of these methods
-     * may result in pre-emption of the mapper. The mapper can
-     * control whether this pre-emption can enable re-entrant
-     * mapper calls via the 'get_mapper_sync_model' mapper call. 
-     */
-    class MapperRuntime {
-    protected:
-      // These calls are no-ops in the serialized mapper model
-      bool is_locked(MapperContext ctx) const;
-      void lock_mapper(MapperContext ctx) const;
-      void unlock_mapper(MapperContext ctx) const;
-    protected:
-      // These calls are no-ops in the concurrent mapper model
-      bool is_reentrant(MapperContext ctx) const;
-      void enable_reentrant(MapperContext ctx) const;
-      void disable_reentrant(MapperContext ctx) const;
-    protected:
-      // Send asynchronous messages to other mappers
-      void send_message(MapperContext ctx, Processor target, 
-                        const void *message, size_t message_size) const;
-      void broadcast(MapperContext ctx, const void *message, 
-                     size_t message_size, int radix = 4) const;
-    protected:
-      // Launch a mapper task
-      MapperEvent launch_mapper_task(MapperContext ctx, 
-                                     Processor::TaskFuncID tid,
-                                     const TaskArgument &arg) const;
-
-      // Defer (almost) any mapper call to a future point in time
-      void defer_mapper_call(MapperContext ctx, MapperEvent event) const;
-
-      // Merge mapper events together
-      MapperEvent merge_mapper_events(MapperContext ctx,
-                                      const std::set<MapperEvent> &events)const;
-    protected:
-      //------------------------------------------------------------------------
-      // Methods for introspecting index space trees 
-      // For documentation see methods of the same name in Runtime
-      //------------------------------------------------------------------------
-      IndexPartition get_index_partition(MapperContext ctx,
-                                         IndexSpace parent, Color color) const;
-
-      IndexSpace get_index_subspace(MapperContext ctx, 
-                                    IndexPartition p, Color c) const;
-      IndexSpace get_index_subspace(MapperContext ctx, IndexPartition p, 
-                                    const DomainPoint &color) const;
-
-      bool has_multiple_domains(MapperContext ctx, IndexSpace handle) const;
-
-      Domain get_index_space_domain(MapperContext ctx, IndexSpace handle) const;
-
-      void get_index_space_domains(MapperContext ctx, IndexSpace handle,
-                                   std::vector<Domain> &domains) const;
-
-      Domain get_index_partition_color_space(MapperContext ctx,
-                                             IndexPartition p) const;
-
-      void get_index_space_partition_colors(MapperContext ctx, IndexSpace sp, 
-                                            std::set<Color> &colors) const;
-
-      bool is_index_partition_disjoint(MapperContext ctx, 
-                                       IndexPartition p) const;
-
-      template<unsigned DIM>
-      IndexSpace get_index_subspace(MapperContext ctx, IndexPartition p, 
-                          LegionRuntime::Arrays::Point<DIM> &color_point) const;
-
-      Color get_index_space_color(MapperContext ctx, IndexSpace handle) const;
-
-      Color get_index_partition_color(MapperContext ctx, 
-                                      IndexPartition handle) const;
-
-      IndexSpace get_parent_index_space(MapperContext ctx,
-                                        IndexPartition handle) const;
-
-      bool has_parent_index_partition(MapperContext ctx, 
-                                      IndexSpace handle) const;
-      
-      IndexPartition get_parent_index_partition(MapperContext ctx,
-                                                IndexSpace handle) const;
-    protected:
-      //------------------------------------------------------------------------
-      // Methods for introspecting field spaces 
-      // For documentation see methods of the same name in Runtime
-      //------------------------------------------------------------------------
-      size_t get_field_size(FieldSpace handle, FieldID fid) const;
-
-      void get_field_space_fields(FieldSpace handle, std::set<FieldID> &fields);
-    protected:
-      //------------------------------------------------------------------------
-      // Methods for introspecting logical region trees
-      //------------------------------------------------------------------------
-      LogicalPartition get_logical_partition(LogicalRegion parent, 
-                                             IndexPartition handle) const;
-
-      LogicalPartition get_logical_partition_by_color(LogicalRegion parent,
-                                                      Color color) const;
-
-      LogicalPartition get_logical_partition_by_tree(IndexPartition handle,
-                                                     FieldSpace fspace,
-                                                     RegionTreeID tid) const;
-
-      LogicalRegion get_logical_subregion(LogicalPartition parent,
-                                          IndexSpace handle) const;
-
-      LogicalRegion get_logical_subregion_by_color(LogicalPartition parent,
-                                                   Color color) const;
-      
-      LogicalRegion get_logical_subregion_by_tree(IndexSpace handle,
-                                                  FieldSpace fspace,
-                                                  RegionTreeID tid) const;
-
-      Color get_logical_region_color(LogicalRegion handle) const;
-
-      Color get_logical_partition_color(LogicalPartition handle) const;
-
-      LogicalRegion get_parent_logical_region(LogicalPartition handle) const;
-
-      bool has_parent_logical_partition(LogicalRegion handle) const;
-
-      LogicalPartition get_parent_logical_partition(LogicalRegion handle) const;
     };
 
     // Set of profiling requests for task launches
@@ -370,7 +241,7 @@ namespace Legion {
       // TODO fill this in with the kinds of profiling requests
     };
 
-    class Mapper : public MapperRuntime {
+    class Mapper {
     public:
       Mapper(void);
       virtual ~Mapper(void);
@@ -552,7 +423,8 @@ namespace Legion {
         bool                                   veryify_correctness; // = false
       };
       //------------------------------------------------------------------------
-      virtual void slice_domain(const Task&              task, 
+      virtual void slice_domain(const MapperContext      ctx,
+                                const Task&              task, 
                                 const SliceDomainInput&  input,
                                       SliceDomainOutput& output) = 0;
       //------------------------------------------------------------------------
@@ -622,7 +494,8 @@ namespace Legion {
         std::vector<ProfilingRequestSet>                region_prof_requests;
       };
       //------------------------------------------------------------------------
-      virtual void map_task(const Task&              task,
+      virtual void map_task(const MapperContext      ctx,
+                            const Task&              task,
                             const MapTaskInput&      input,
                                   MapTaskOutput&     output) = 0;
       //------------------------------------------------------------------------
@@ -660,7 +533,8 @@ namespace Legion {
         std::vector<LayoutConstraintSet>                layout_constraints;
       };
       //------------------------------------------------------------------------
-      virtual void postmap_task(const Task&              task,
+      virtual void postmap_task(const MapperContext      ctx,
+                                const Task&              task,
                                 const PostMapInput&      input,
                                       PostMapOutput&     output) = 0;
       //------------------------------------------------------------------------
@@ -688,7 +562,8 @@ namespace Legion {
         std::deque<PhysicalInstance>            chosen_ranking;
       };
       //------------------------------------------------------------------------
-      virtual void rank_copy_sources(const Task&               task,
+      virtual void rank_copy_sources(const MapperContext       ctx,
+                                     const Task&               task,
                                      const RankTaskCopyInput&  input,
                                            RankTaskCopyOutput& output) = 0;
       //------------------------------------------------------------------------
@@ -709,7 +584,8 @@ namespace Legion {
         bool                                    speculative_value;
       };
       //------------------------------------------------------------------------
-      virtual void speculate(const Task&              task,
+      virtual void speculate(const MapperContext      ctx,
+                             const Task&              task,
                                    SpeculativeOutput& output) = 0;
       //------------------------------------------------------------------------
 
@@ -725,7 +601,8 @@ namespace Legion {
         // TODO: fill this in based on low-level profiling interface
       };
       //------------------------------------------------------------------------
-      virtual void report_profiling(const Task&              task,
+      virtual void report_profiling(const MapperContext      ctx,
+                                    const Task&              task,
                                     const TaskProfilingInfo& input)  = 0;
       //------------------------------------------------------------------------
     public: // Inline mapping
@@ -755,7 +632,8 @@ namespace Legion {
         ProfilingRequestSet                     profiling_requests;
       };
       //------------------------------------------------------------------------
-      virtual void map_inline(const InlineMapping&       inline_op,
+      virtual void map_inline(const MapperContext        ctx,
+                              const InlineMapping&       inline_op,
                               const MapInlineInput&      input,
                                     MapInlineOutput&     output) = 0;
       //------------------------------------------------------------------------
@@ -781,7 +659,8 @@ namespace Legion {
         std::deque<PhysicalInstance>            chosen_ranking;
       };
       //------------------------------------------------------------------------
-      virtual void rank_copy_sources(const InlineMapping&        inline_op,
+      virtual void rank_copy_sources(const MapperContext         ctx,
+                                     const InlineMapping&        inline_op,
                                      const RankInlineCopyInput&  input,
                                            RankInlineCopyOutput& output) = 0;
       //------------------------------------------------------------------------
@@ -800,7 +679,8 @@ namespace Legion {
         // TODO: fill this in based on low-level profiling interface
       };
       //------------------------------------------------------------------------
-      virtual void report_profiling(const InlineMapping&       inline_op,
+      virtual void report_profiling(const MapperContext        ctx,
+                                    const InlineMapping&       inline_op,
                                     const InlineProfiingInfo&  input)  = 0;
       //------------------------------------------------------------------------
     public: // Region-to-region copies
@@ -832,7 +712,8 @@ namespace Legion {
         ProfilingRequestSet                               profiling_requests;
       };
       //------------------------------------------------------------------------
-      virtual void map_copy(const Copy&              copy,
+      virtual void map_copy(const MapperContext      ctx,
+                            const Copy&              copy,
                             const MapCopyInput&      input,
                                   MapCopyOutput&     output) = 0;
       //------------------------------------------------------------------------
@@ -863,7 +744,8 @@ namespace Legion {
         std::deque<PhysicalInstance>                  chosen_ranking;
       };
       //------------------------------------------------------------------------
-      virtual void rank_copy_sources(const Copy&              copy,
+      virtual void rank_copy_sources(const MapperContext      ctx,
+                                     const Copy&              copy,
                                      const RankCopyInput&     input,
                                            RankCopyOutput&    output) = 0;
       //------------------------------------------------------------------------
@@ -880,7 +762,8 @@ namespace Legion {
        * 'speculative_value' field.
        */
       //------------------------------------------------------------------------
-      virtual void speculate(const Copy& copy,
+      virtual void speculate(const MapperContext      ctx,
+                             const Copy& copy,
                                    SpeculativeOutput& output) = 0;
       //------------------------------------------------------------------------
 
@@ -895,7 +778,8 @@ namespace Legion {
         // TODO: fill this in based on low-level profiling interface
       };
       //------------------------------------------------------------------------
-      virtual void report_profiling(const Copy&              copy,
+      virtual void report_profiling(const MapperContext      ctx,
+                                    const Copy&              copy,
                                     const CopyProfilingInfo& input)  = 0;
       //------------------------------------------------------------------------
     public: // Close operations
@@ -933,7 +817,8 @@ namespace Legion {
         ProfilingRequestSet                         profiling_requests;
       };
       //------------------------------------------------------------------------
-      virtual void map_close(const Close&              close,
+      virtual void map_close(const MapperContext       ctx,
+                             const Close&              close,
                              const MapCloseInput&      input,
                                    MapCloseOutput&     output) = 0;
       //------------------------------------------------------------------------
@@ -957,7 +842,8 @@ namespace Legion {
         std::deque<PhysicalInstance>                chosen_ranking;
       };
       //------------------------------------------------------------------------
-      virtual void rank_copy_sources(const Close&               close,
+      virtual void rank_copy_sources(const MapperContext        ctx,
+                                     const Close&               close,
                                      const RankCloseCopyInput&  input,
                                            RankCloseCopyOutput& output) = 0;
       //------------------------------------------------------------------------
@@ -976,7 +862,8 @@ namespace Legion {
         // TODO: fill this in based on low-level profiling interface
       };
       //------------------------------------------------------------------------
-      virtual void report_profiling(const Close&              close,
+      virtual void report_profiling(const MapperContext       ctx,
+                                    const Close&              close,
                                     const CloseProfilingInfo& input)  = 0;
       //------------------------------------------------------------------------
     public: // Acquire operations
@@ -996,7 +883,8 @@ namespace Legion {
         ProfilingRequestSet                         profiling_requests;
       };
       //------------------------------------------------------------------------
-      virtual void map_acquire(const Acquire&              acquire,
+      virtual void map_acquire(const MapperContext         ctx,
+                               const Acquire&              acquire,
                                const MapAcquireInput&      input,
                                      MapAcquireOutput&     output) = 0;
       //------------------------------------------------------------------------
@@ -1020,7 +908,8 @@ namespace Legion {
         std::deque<PhysicalInstance>            chosen_ranking;
       };
       //------------------------------------------------------------------------
-      virtual void rank_copy_sources(const Acquire&               acquire,
+      virtual void rank_copy_sources(const MapperContext          ctx,
+                                     const Acquire&               acquire,
                                      const RankAcquireCopyInput&  input,
                                            RankAcquireCopyOutput& output) = 0;
       //------------------------------------------------------------------------
@@ -1037,7 +926,8 @@ namespace Legion {
        * it can predict the value with the 'speculative_value'.
        */
       //------------------------------------------------------------------------
-      virtual void speculate(const Acquire&              acquire,
+      virtual void speculate(const MapperContext         ctx,
+                             const Acquire&              acquire,
                                    SpeculativeOutput&    output) = 0;
       //------------------------------------------------------------------------
 
@@ -1053,7 +943,8 @@ namespace Legion {
         // TODO: fill thisin based on low-level profiling interface
       };
       //------------------------------------------------------------------------
-      virtual void report_profiling(const Acquire&              acquire,
+      virtual void report_profiling(const MapperContext         ctx,
+                                    const Acquire&              acquire,
                                     const AcquireProfilingInfo& input) = 0;
       //------------------------------------------------------------------------
     public: // Release operations 
@@ -1074,7 +965,8 @@ namespace Legion {
         ProfilingRequestSet                         profiling_requests;
       };
       //------------------------------------------------------------------------
-      virtual void map_release(const Release&              release,
+      virtual void map_release(const MapperContext         ctx,
+                               const Release&              release,
                                const MapReleaseInput&      input,
                                      MapReleaseOutput&     output) = 0;
       //------------------------------------------------------------------------
@@ -1098,7 +990,8 @@ namespace Legion {
         std::deque<PhysicalInstance>            chosen_ranking;
       };
       //------------------------------------------------------------------------
-      virtual void rank_copy_sources(const Release&              release,
+      virtual void rank_copy_sources(const MapperContext         ctx,
+                                     const Release&              release,
                                      const RankCopyInput&        input,
                                            RankCopyOutput&       output) = 0;
       //------------------------------------------------------------------------
@@ -1117,7 +1010,8 @@ namespace Legion {
        * will take.
        */
       //------------------------------------------------------------------------
-      virtual void speculate(const Release&              release,
+      virtual void speculate(const MapperContext         ctx,
+                             const Release&              release,
                                    SpeculativeOutput&    output) = 0;
       //------------------------------------------------------------------------
 
@@ -1133,7 +1027,8 @@ namespace Legion {
         // TODO: fill this in based on the low-level profiling interface
       };
       //------------------------------------------------------------------------
-      virtual void report_profiling(const Release&              release,
+      virtual void report_profiling(const MapperContext         ctx,
+                                    const Release&              release,
                                     const ReleaseProfilingInfo& input)  = 0;
       //------------------------------------------------------------------------
     public: // Single Task Context 
@@ -1169,7 +1064,8 @@ namespace Legion {
         unsigned                                max_directory_size;
       };
       //------------------------------------------------------------------------
-      virtual void configure_context(const Task&                 task,
+      virtual void configure_context(const MapperContext         ctx,
+                                     const Task&                 task,
                                            ContextConfigOutput&  output) = 0;
       //------------------------------------------------------------------------
 
@@ -1191,7 +1087,8 @@ namespace Legion {
         void*                                   value;
       };
       //------------------------------------------------------------------------
-      virtual void select_tunable_value(const Task&                 task,
+      virtual void select_tunable_value(const MapperContext         ctx,
+                                        const Task&                 task,
                                         const SelectTunableInput&   input,
                                               SelectTunableOutput&  output) = 0;
       //------------------------------------------------------------------------
@@ -1229,7 +1126,8 @@ namespace Legion {
         std::vector<MapTaskOutput>              task_mapping; 
       };
       //------------------------------------------------------------------------
-      virtual void map_must_epoch(const MapMustEpochInput&      input,
+      virtual void map_must_epoch(const MapperContext           ctx,
+                                  const MapMustEpochInput&      input,
                                         MapMustEpochOutput&     output) = 0;
       //------------------------------------------------------------------------
 
@@ -1242,8 +1140,9 @@ namespace Legion {
           
       };
       //------------------------------------------------------------------------
-      virtual void map_dataflow_graph(const MapDataflowGraphInput&  input,
-                                      const MapDataflowGraphOutput& output) = 0;
+      virtual void map_dataflow_graph(const MapperContext           ctx,
+                                      const MapDataflowGraphInput&  input,
+                                            MapDataflowGraphOutput& output) = 0;
       //------------------------------------------------------------------------
     public: // Scheduling 
       /**
@@ -1272,7 +1171,8 @@ namespace Legion {
         std::map<const Task*,Processor>         relocate_tasks;
       };
       //------------------------------------------------------------------------
-      virtual void select_tasks_to_map(const SelectMappingInput&    input,
+      virtual void select_tasks_to_map(const MapperContext          ctx,
+                                       const SelectMappingInput&    input,
                                              SelectMappingOutput&   output) = 0;
       //------------------------------------------------------------------------
     public: // Stealing
@@ -1300,7 +1200,8 @@ namespace Legion {
         std::set<Processor>                     targets;
       };
       //------------------------------------------------------------------------
-      virtual void select_steal_targets(const SelectStealingInput&  input,
+      virtual void select_steal_targets(const MapperContext         ctx,
+                                        const SelectStealingInput&  input,
                                               SelectStealingOutput& output) = 0;
       //------------------------------------------------------------------------
 
@@ -1327,7 +1228,8 @@ namespace Legion {
         std::set<const Task*>                   stolen_tasks;
       };
       //------------------------------------------------------------------------
-      virtual void permit_steal_request(const StealRequestInput&    intput,
+      virtual void permit_steal_request(const MapperContext         ctx,
+                                        const StealRequestInput&    intput,
                                               StealRequestOutput&   output) = 0;
       //------------------------------------------------------------------------
     public: // Handling
@@ -1351,7 +1253,8 @@ namespace Legion {
         bool                                    broadcast;
       };
       //------------------------------------------------------------------------
-      virtual void handle_message(const MapperMessage&          message) = 0;
+      virtual void handle_message(const MapperContext           ctx,
+                                  const MapperMessage&          message) = 0;
       //------------------------------------------------------------------------
 
       /**
@@ -1371,16 +1274,151 @@ namespace Legion {
         size_t                                  result_size;
       };
       //------------------------------------------------------------------------
-      virtual void handle_task_result(const MapperTaskResult&       result) = 0;
+      virtual void handle_task_result(const MapperContext           ctx,
+                                      const MapperTaskResult&       result) = 0;
       //------------------------------------------------------------------------
     protected:
-      // Utility functions that all mappers can do
-      // (Implementations provided)
+      /* 
+       * All of the methods below this point are utility methods that mappers
+       * can use as part of their execution. They all require that the 
+       * MapperContext handle passed into one of the mapper calls above
+       * be passed as an argument to ensure that they are only invoked as
+       * part of a standard mapper call (as opposed to an application invoked
+       * mapper call). Any one of these calls may result in the mapper being
+       * pre-empted. The mapper can control whether other mapper calls can
+       * be made during this time by setting the mapper model in the 
+       * 'get_mapper_sync_model' mapper call and/or enabling/disabling
+       * the re-entrancy of mapper calls using the methods below.
+       */
+    protected:
+      //------------------------------------------------------------------------
+      // Methods for managing access to mapper state in the concurrent model
+      // These calls are no-ops in the serialized mapper model 
+      //------------------------------------------------------------------------
+      bool is_locked(MapperContext ctx) const;
+      void lock_mapper(MapperContext ctx) const;
+      void unlock_mapper(MapperContext ctx) const;
+    protected:
+      //------------------------------------------------------------------------
+      // Methods for managing the re-entrant state in the serialized model
+      // These calls are no-ops in the concurrent mapper model
+      //------------------------------------------------------------------------
+      bool is_reentrant(MapperContext ctx) const;
+      void enable_reentrant(MapperContext ctx) const;
+      void disable_reentrant(MapperContext ctx) const;
+    protected:
+      //------------------------------------------------------------------------
+      // Methods for communicating with other mappers of the same kind
+      //------------------------------------------------------------------------
+      void send_message(MapperContext ctx, Processor target, 
+                        const void *message, size_t message_size) const;
+      void broadcast(MapperContext ctx, const void *message, 
+                     size_t message_size, int radix = 4) const;
+    protected:
+      //------------------------------------------------------------------------
+      // Methods for managing the execution of mapper tasks 
+      //------------------------------------------------------------------------
+      MapperEvent launch_mapper_task(MapperContext ctx, 
+                                     Processor::TaskFuncID tid,
+                                     const TaskArgument &arg) const;
 
+      void defer_mapper_call(MapperContext ctx, MapperEvent event) const;
+
+      MapperEvent merge_mapper_events(MapperContext ctx,
+                                      const std::set<MapperEvent> &events)const;
+    protected:
+      //------------------------------------------------------------------------
+      // Methods for introspecting index space trees 
+      // For documentation see methods of the same name in Runtime
+      //------------------------------------------------------------------------
+      IndexPartition get_index_partition(MapperContext ctx,
+                                         IndexSpace parent, Color color) const;
+
+      IndexSpace get_index_subspace(MapperContext ctx, 
+                                    IndexPartition p, Color c) const;
+      IndexSpace get_index_subspace(MapperContext ctx, IndexPartition p, 
+                                    const DomainPoint &color) const;
+
+      bool has_multiple_domains(MapperContext ctx, IndexSpace handle) const;
+
+      Domain get_index_space_domain(MapperContext ctx, IndexSpace handle) const;
+
+      void get_index_space_domains(MapperContext ctx, IndexSpace handle,
+                                   std::vector<Domain> &domains) const;
+
+      Domain get_index_partition_color_space(MapperContext ctx,
+                                             IndexPartition p) const;
+
+      void get_index_space_partition_colors(MapperContext ctx, IndexSpace sp, 
+                                            std::set<Color> &colors) const;
+
+      bool is_index_partition_disjoint(MapperContext ctx, 
+                                       IndexPartition p) const;
+
+      template<unsigned DIM>
+      IndexSpace get_index_subspace(MapperContext ctx, IndexPartition p, 
+                          LegionRuntime::Arrays::Point<DIM> &color_point) const;
+
+      Color get_index_space_color(MapperContext ctx, IndexSpace handle) const;
+
+      Color get_index_partition_color(MapperContext ctx, 
+                                      IndexPartition handle) const;
+
+      IndexSpace get_parent_index_space(MapperContext ctx,
+                                        IndexPartition handle) const;
+
+      bool has_parent_index_partition(MapperContext ctx, 
+                                      IndexSpace handle) const;
       
+      IndexPartition get_parent_index_partition(MapperContext ctx,
+                                                IndexSpace handle) const;
+    protected:
+      //------------------------------------------------------------------------
+      // Methods for introspecting field spaces 
+      // For documentation see methods of the same name in Runtime
+      //------------------------------------------------------------------------
+      size_t get_field_size(MapperContext ctx, 
+                            FieldSpace handle, FieldID fid) const;
+
+      void get_field_space_fields(MapperContext ctx, FieldSpace handle, 
+                                  std::set<FieldID> &fields);
+    protected:
+      //------------------------------------------------------------------------
+      // Methods for introspecting logical region trees
+      //------------------------------------------------------------------------
+      LogicalPartition get_logical_partition(MapperContext ctx, 
+                            LogicalRegion parent, IndexPartition handle) const;
+
+      LogicalPartition get_logical_partition_by_color(MapperContext ctx,
+                                      LogicalRegion parent, Color color) const;
+
+      LogicalPartition get_logical_partition_by_tree(MapperContext ctx, 
+              IndexPartition handle, FieldSpace fspace, RegionTreeID tid) const;
+
+      LogicalRegion get_logical_subregion(MapperContext ctx, 
+                              LogicalPartition parent, IndexSpace handle) const;
+
+      LogicalRegion get_logical_subregion_by_color(MapperContext ctx,
+                                    LogicalPartition parent, Color color) const;
+      
+      LogicalRegion get_logical_subregion_by_tree(MapperContext ctx,
+                  IndexSpace handle, FieldSpace fspace, RegionTreeID tid) const;
+
+      Color get_logical_region_color(MapperContext ctx, 
+                                     LogicalRegion handle) const;
+
+      Color get_logical_partition_color(MapperContext ctx,
+                                        LogicalPartition handle) const;
+
+      LogicalRegion get_parent_logical_region(MapperContext ctx,
+                                              LogicalPartition handle) const;
+
+      bool has_parent_logical_partition(MapperContext ctx, 
+                                        LogicalRegion handle) const;
+
+      LogicalPartition get_parent_logical_partition(MapperContext ctx,
+                                                    LogicalRegion handle) const;
     };
-
-
 
   }; // namespace Mapping
 }; // namespace Legion
