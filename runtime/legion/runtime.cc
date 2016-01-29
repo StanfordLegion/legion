@@ -16729,7 +16729,7 @@ namespace LegionRuntime {
         fprintf(stderr,"\n");
         fprintf(stderr,"SLEEPING FOR 5 SECONDS SO YOU READ THIS WARNING...\n");
         fflush(stderr);
-        //sleep(5);
+        sleep(5);
       }
 #endif
 #ifdef LEGION_SPY

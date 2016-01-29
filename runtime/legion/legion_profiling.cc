@@ -469,7 +469,7 @@ namespace LegionRuntime {
       ProfilingInfo info(LEGION_PROF_TASK); 
       info.id = tid;
       info.op_id = task->get_unique_task_id();
-      Realm::ProfilingRequest &req = requests.add_request((target_proc.exists()) 
+      Realm::ProfilingRequest &req = requests.add_request((target_proc.exists())
                         ? target_proc : Processor::get_executing_processor(),
                         HLR_LEGION_PROFILING_ID, &info, sizeof(info));
       req.add_measurement<
@@ -487,7 +487,7 @@ namespace LegionRuntime {
       ProfilingInfo info(LEGION_PROF_META); 
       info.id = tid;
       info.op_id = (op != NULL) ? op->get_unique_op_id() : 0;
-      Realm::ProfilingRequest &req = requests.add_request((target_proc.exists()) 
+      Realm::ProfilingRequest &req = requests.add_request((target_proc.exists())
                         ? target_proc : Processor::get_executing_processor(),
                         HLR_LEGION_PROFILING_ID, &info, sizeof(info));
       req.add_measurement<
@@ -538,7 +538,7 @@ namespace LegionRuntime {
       ProfilingInfo info(LEGION_PROF_INST); 
       // No ID here
       info.op_id = (op != NULL) ? op->get_unique_op_id() : 0;
-      Realm::ProfilingRequest &req = requests.add_request((target_proc.exists()) 
+      Realm::ProfilingRequest &req = requests.add_request((target_proc.exists())
                         ? target_proc : Processor::get_executing_processor(),
                         HLR_LEGION_PROFILING_ID, &info, sizeof(info));
       req.add_measurement<
@@ -556,7 +556,7 @@ namespace LegionRuntime {
       ProfilingInfo info(LEGION_PROF_TASK); 
       info.id = tid;
       info.op_id = uid;
-      Realm::ProfilingRequest &req = requests.add_request((target_proc.exists()) 
+      Realm::ProfilingRequest &req = requests.add_request((target_proc.exists())
                         ? target_proc : Processor::get_executing_processor(),
                         HLR_LEGION_PROFILING_ID, &info, sizeof(info));
       req.add_measurement<
@@ -574,7 +574,7 @@ namespace LegionRuntime {
       ProfilingInfo info(LEGION_PROF_META); 
       info.id = tid;
       info.op_id = uid;
-      Realm::ProfilingRequest &req = requests.add_request((target_proc.exists()) 
+      Realm::ProfilingRequest &req = requests.add_request((target_proc.exists())
                         ? target_proc : Processor::get_executing_processor(),
                         HLR_LEGION_PROFILING_ID, &info, sizeof(info));
       req.add_measurement<
