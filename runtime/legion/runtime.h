@@ -794,6 +794,7 @@ namespace LegionRuntime {
       void send_response(void);
       bool handle_response(AddressSpaceID sender, bool result);
       void record_outstanding_tasks(void);
+      void record_outstanding_profiling_requests(void);
       void finalize(void);
     public:
       Internal *const runtime;

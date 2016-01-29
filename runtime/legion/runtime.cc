@@ -3918,6 +3918,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void ShutdownManager::record_outstanding_profiling_requests(void)
+    //--------------------------------------------------------------------------
+    {
+      // Instant death
+      result = false;
+    }
+
+    //--------------------------------------------------------------------------
     void ShutdownManager::finalize(void)
     //--------------------------------------------------------------------------
     {
@@ -4678,7 +4686,8 @@ namespace LegionRuntime {
         variant_name = strdup(registrar.task_variant_name);
       // register this with the runtime profiler if we have to
       if (runtime->profiler != NULL)
-        runtime->profiler->register_task_variant(vid, variant_name);
+        runtime->profiler->register_task_variant(own->task_id, vid,
+            variant_name);
       // Check that global registration has portable implementations
       if (global && (!realm_descriptor->has_portable_implementations() ||
                      !inline_descriptor->has_portable_implementations()))
@@ -14147,7 +14156,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(target.exists());
 #endif
-      if (profiler != NULL)
+      if (profiler != NULL && tid < HLR_SHUTDOWN_ATTEMPT_TASK_ID)
       {
         Realm::ProfilingRequestSet requests;
         profiler->add_meta_request(requests, tid, op);
@@ -14568,6 +14577,10 @@ namespace LegionRuntime {
       // Record if we have any outstanding tasks
       if (has_outstanding_tasks())
         local_manager->record_outstanding_tasks();
+
+      // Record if we have any outstanding profiling requests
+      if (profiler != NULL && profiler->has_outstanding_requests())
+        local_manager->record_outstanding_profiling_requests();
 
       // Check to see if we have any remote nodes
       if (local_manager->has_managers())
@@ -16716,7 +16729,7 @@ namespace LegionRuntime {
         fprintf(stderr,"\n");
         fprintf(stderr,"SLEEPING FOR 5 SECONDS SO YOU READ THIS WARNING...\n");
         fflush(stderr);
-        sleep(5);
+        //sleep(5);
       }
 #endif
 #ifdef LEGION_SPY
