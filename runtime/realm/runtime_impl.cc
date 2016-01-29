@@ -537,6 +537,14 @@ namespace Realm {
 	  }
 	}
       }
+
+      // and yet another GASNet workaround: the Infiniband conduit seems to
+      //  have a problem with AMRDMA mode, consuming receive buffers even for
+      //  request targets that are in AMRDMA mode - disable the mode by default
+#ifdef GASNET_CONDUIT_IBV
+      if(!getenv("GASNET_AMRDMA_MAX_PEERS"))
+        setenv("GASNET_AMRDMA_MAX_PEERS", "0", 0 /*no overwrite*/);
+#endif
 #endif
 
 #ifdef DEBUG_REALM_STARTUP
