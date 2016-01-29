@@ -14156,7 +14156,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(target.exists());
 #endif
-      if (profiler != NULL && tid < HLR_SHUTDOWN_ATTEMPT_TASK_ID)
+      if (profiler != NULL && tid < HLR_MESSAGE_ID)
       {
         Realm::ProfilingRequestSet requests;
         profiler->add_meta_request(requests, tid, op);
