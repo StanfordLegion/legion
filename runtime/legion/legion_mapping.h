@@ -282,13 +282,15 @@ namespace Legion {
        * Specify the mapper synchronization model. The concurrent mapper model 
        * will alternatively allow mapper calls to be performed at the same time 
        * and will rely on the mapper to lock itself to protect access to shared 
-       * data. The serialized model will guarantee that all mapper calls are 
-       * performed atomically with respect to each other unless they perform 
-       * a call to the mapper context that specifies that it is safe to permit 
-       * re-entrant mapper call(s) in the process of performing the runtime 
+       * data. If the mapper is locked when performing a utility call, it may
+       * be automatically unlocked and locked around the utility call. The 
+       * serialized model will guarantee that all mapper calls are performed 
+       * atomically with respect to each other unless they perform a utility 
+       * call when the mapper has indicated that it is safe to permit 
+       * re-entrant mapper call(s) in the process of performing the utility 
        * call. The reentrant version of the serialized mapper model will 
        * default to allowing reentrant calls to the mapper context. The 
-       * non-reentrant version will default to not allowing reentrant calls
+       * non-reentrant version will default to not allowing reentrant calls.
        */
       enum MapperSyncModel {
         CONCURRENT_MAPPER_MODEL,
@@ -1325,7 +1327,7 @@ namespace Legion {
       // These calls are no-ops in the serialized mapper model 
       //------------------------------------------------------------------------
       bool is_locked(MapperContext ctx) const;
-      void lock_mapper(MapperContext ctx) const;
+      void lock_mapper(MapperContext ctx, bool read_only = false) const;
       void unlock_mapper(MapperContext ctx) const;
     protected:
       //------------------------------------------------------------------------
@@ -1347,14 +1349,14 @@ namespace Legion {
       //------------------------------------------------------------------------
       // Methods for managing the execution of mapper tasks 
       //------------------------------------------------------------------------
-      MapperEvent launch_mapper_task(MapperContext ctx, 
-                                     Processor::TaskFuncID tid,
-                                     const TaskArgument &arg) const;
+      //MapperEvent launch_mapper_task(MapperContext ctx, 
+      //                               Processor::TaskFuncID tid,
+      //                               const TaskArgument &arg) const;
 
-      void defer_mapper_call(MapperContext ctx, MapperEvent event) const;
+      //void defer_mapper_call(MapperContext ctx, MapperEvent event) const;
 
-      MapperEvent merge_mapper_events(MapperContext ctx,
-                                      const std::set<MapperEvent> &events)const;
+      //MapperEvent merge_mapper_events(MapperContext ctx,
+      //                                const std::set<MapperEvent> &events)const;
     protected:
       //------------------------------------------------------------------------
       // Methods for introspecting index space trees 
@@ -1410,7 +1412,7 @@ namespace Legion {
                             FieldSpace handle, FieldID fid) const;
 
       void get_field_space_fields(MapperContext ctx, FieldSpace handle, 
-                                  std::set<FieldID> &fields);
+                                  std::set<FieldID> &fields) const;
     protected:
       //------------------------------------------------------------------------
       // Methods for introspecting logical region trees
