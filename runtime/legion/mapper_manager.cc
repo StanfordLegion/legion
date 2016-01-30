@@ -39,6 +39,212 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    IndexPartition MapperManager::get_index_partition(IndexSpace parent, 
+                                               Color color) const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_index_partition(parent, color);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace MapperManager::get_index_subspace(IndexPartition p,Color c) const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_index_subspace(p, c);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace MapperManager::get_index_subspace(IndexPartition p, 
+                                                 const DomainPoint &color) const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_index_subspace(p, color);
+    }
+
+    //--------------------------------------------------------------------------
+    bool MapperManager::has_multiple_domains(IndexSpace handle) const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->has_multiple_domains(handle);
+    }
+
+    //--------------------------------------------------------------------------
+    Domain MapperManager::get_index_space_domain(IndexSpace handle) const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_index_space_domain(handle);
+    }
+
+    //--------------------------------------------------------------------------
+    void MapperManager::get_index_space_domains(IndexSpace handle,
+                                         std::vector<Domain> &domains) const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_index_space_domains(handle, domains);
+    }
+
+    //--------------------------------------------------------------------------
+    Domain MapperManager::get_index_partition_color_space(IndexPartition p)const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_index_partition_color_space(p);
+    }
+
+    //--------------------------------------------------------------------------
+    void MapperManager::get_index_space_partition_colors(
+                               IndexSpace handle, std::set<Color> &colors) const
+    //--------------------------------------------------------------------------
+    {
+      runtime->get_index_space_partition_colors(handle, colors);
+    }
+
+    //--------------------------------------------------------------------------
+    bool MapperManager::is_index_partition_disjoint(IndexPartition p) const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->is_index_partition_disjoint(p);
+    }
+
+    //--------------------------------------------------------------------------
+    Color MapperManager::get_index_space_color(IndexSpace handle) const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_index_space_color(handle);
+    }
+
+    //--------------------------------------------------------------------------
+    Color MapperManager::get_index_partition_color(IndexPartition handle) const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_index_partition_color(handle);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace MapperManager::get_parent_index_space(IndexPartition handle)const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_parent_index_space(handle);
+    }
+
+    //--------------------------------------------------------------------------
+    bool MapperManager::has_parent_index_partition(IndexSpace handle) const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->has_parent_index_partition(handle);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition MapperManager::get_parent_index_partition(
+                                                        IndexSpace handle) const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_parent_index_partition(handle);
+    }
+
+    //--------------------------------------------------------------------------
+    size_t MapperManager::get_field_size(FieldSpace handle, FieldID fid) const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_field_size(handle, fid);
+    }
+
+    //--------------------------------------------------------------------------
+    void MapperManager::get_field_space_fields(FieldSpace handle, 
+                                               std::set<FieldID> &fields)
+    //--------------------------------------------------------------------------
+    {
+      runtime->get_field_space_fields(handle, fields);
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalPartition MapperManager::get_logical_partition(LogicalRegion parent,
+                                                   IndexPartition handle) const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_logical_partition(parent, handle);
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalPartition MapperManager::get_logical_partition_by_color(
+                                           LogicalRegion par, Color color) const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_logical_partition_by_color(par, color);
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalPartition MapperManager::get_logical_partition_by_tree(
+                                                        IndexPartition part,
+                                                        FieldSpace fspace, 
+                                                        RegionTreeID tid) const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_logical_partition_by_tree(part, fspace, tid);
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalRegion MapperManager::get_logical_subregion(LogicalPartition parent,
+                                                       IndexSpace handle) const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_logical_subregion(parent, handle);
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalRegion MapperManager::get_logical_subregion_by_color(
+                                        LogicalPartition par, Color color) const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_logical_subregion_by_color(par, color);
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalRegion MapperManager::get_logical_subregion_by_tree(
+                   IndexSpace handle, FieldSpace fspace, RegionTreeID tid) const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_logical_subregion_by_tree(handle, fspace, tid);
+    }
+
+    //--------------------------------------------------------------------------
+    Color MapperManager::get_logical_region_color(LogicalRegion handle) const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_logical_region_color(handle);
+    }
+
+    //--------------------------------------------------------------------------
+    Color MapperManager::get_logical_partition_color(
+                                                  LogicalPartition handle) const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_logical_partition_color(handle);
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalRegion MapperManager::get_parent_logical_region(
+                                                    LogicalPartition part) const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_parent_logical_region(part);
+    }
+    
+    //--------------------------------------------------------------------------
+    bool MapperManager::has_parent_logical_partition(LogicalRegion handle) const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->has_parent_logical_partition(handle);
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalPartition MapperManager::get_parent_logical_partition(
+                                                          LogicalRegion r) const
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_parent_logical_partition(r);
+    }
+
+    //--------------------------------------------------------------------------
     MappingCallInfo* MapperManager::allocate_call_info(MappingCallKind kind,
                                                        bool need_lock)
     //--------------------------------------------------------------------------
