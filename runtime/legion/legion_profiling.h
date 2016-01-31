@@ -50,7 +50,8 @@ namespace LegionRuntime {
       };
       struct TaskVariant {
       public:
-        VariantID func_id;
+        TaskID task_id;
+        VariantID variant_id;
         const char *variant_name;
       };
       struct OperationInstance {
@@ -65,8 +66,8 @@ namespace LegionRuntime {
       };
       struct TaskInfo {
       public:
-        UniqueID task_id;
-        TaskID func_id;
+        UniqueID op_id;
+        VariantID variant_id;
         Processor proc;
         unsigned long long create, ready, start, stop;
       };
@@ -114,7 +115,8 @@ namespace LegionRuntime {
       LegionProfInstance& operator=(const LegionProfInstance &rhs);
     public:
       void register_task_kind(TaskID task_id, const char *name);
-      void register_task_variant(VariantID variant_id, 
+      void register_task_variant(TaskID task_id,
+                                 VariantID variant_id, 
                                  const char *variant_name);
       void register_operation(Operation *op);
       void register_multi_task(Operation *op, TaskID kind);
@@ -194,7 +196,9 @@ namespace LegionRuntime {
       // Dynamically created things must be registered at runtime
       // Tasks
       void register_task_kind(TaskID task_id, const char *task_name);
-      void register_task_variant(VariantID var_id, const char *variant_name);
+      void register_task_variant(TaskID task_id,
+                                 VariantID var_id,
+                                 const char *variant_name);
       // Operations
       void register_operation(Operation *op);
       void register_multi_task(Operation *op, TaskID task_id);
@@ -236,8 +240,16 @@ namespace LegionRuntime {
 #endif
     public:
       const Processor target_proc;
+      inline bool has_outstanding_requests(void)
+        { return total_outstanding_requests != 0; }
     private:
+      inline void increment_total_outstanding_requests(void)
+        { __sync_fetch_and_add(&total_outstanding_requests,1); }
+      inline void decrement_total_outstanding_requests(void)
+        { __sync_fetch_and_sub(&total_outstanding_requests,1); }
+
       LegionProfInstance **const instances;
+      unsigned total_outstanding_requests;
     };
   };
 };

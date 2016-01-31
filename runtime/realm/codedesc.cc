@@ -253,14 +253,14 @@ namespace Realm {
     // try to detect symbols that are in the base executable and change the filename to ""
     const char *fname = inf.dli_fname;
     {
-      static const char *local_fname = 0;
-      if(!local_fname) {
+      static std::string local_fname;
+      if(local_fname.empty()) {
 	Dl_info inf2;
 	ret = dladdr((void *)main, &inf2);
 	assert(ret != 0);
-	local_fname = strdup(inf2.dli_fname);
+	local_fname = inf2.dli_fname;
       }
-      if(!strcmp(fname, local_fname))
+      if(local_fname.compare(fname) == 0)
 	fname = "";
     }
 

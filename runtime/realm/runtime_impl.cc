@@ -514,19 +514,18 @@ namespace Realm {
       //  spawners (e.g. the ssh spawner for gasnetrun_ibv) start with bogus args and
       //  fetch the real ones from somewhere during gasnet_init()
 
-      //GASNetNode::my_node = new GASNetNode(argc, argv, this);
+#ifdef USE_GASNET
       // SJT: WAR for issue on Titan with duplicate cookies on Gemini
       //  communication domains
       char *orig_pmi_gni_cookie = getenv("PMI_GNI_COOKIE");
       if(orig_pmi_gni_cookie) {
-        char *new_pmi_gni_cookie = (char *)malloc(256);
-        sprintf(new_pmi_gni_cookie, "PMI_GNI_COOKIE=%d", 1+atoi(orig_pmi_gni_cookie));
-        //printf("changing PMI cookie to: '%s'\n", new_pmi_gni_cookie);
-        putenv(new_pmi_gni_cookie);  // libc now owns the memory
+	char new_pmi_gni_cookie[32];
+	snprintf(new_pmi_gni_cookie, 32, "%d", 1+atoi(orig_pmi_gni_cookie));
+	setenv("PMI_GNI_COOKIE", new_pmi_gni_cookie, 1 /*overwrite*/);
       }
       // SJT: another GASNET workaround - if we don't have GASNET_IB_SPAWNER set, assume it was MPI
       if(!getenv("GASNET_IB_SPAWNER"))
-	putenv(strdup("GASNET_IB_SPAWNER=mpi"));
+	setenv("GASNET_IB_SPAWNER", "mpi", 0 /*no overwrite*/);
 
       // and one more... disable GASNet's probing of pinnable memory - it's
       //  painfully slow on most systems (the gemini conduit doesn't probe
@@ -547,14 +546,23 @@ namespace Realm {
 	const char *e = getenv("GASNET_PHYSMEM_NOPROBE");
 	if(!e || (atoi(e) > 0)) {
 	  if(!e)
-	    putenv(strdup("GASNET_PHYSMEM_NOPROBE=1"));
+	    setenv("GASNET_PHYSMEM_NOPROBE", "1", 0 /*no overwrite*/);
 	  if(!getenv("GASNET_PHYSMEM_MAX")) {
 	    // just because it's fun to read things like this 20 years later:
 	    // "nobody will ever build a system with more than 1 TB of RAM..."
-	    putenv(strdup("GASNET_PHYSMEM_MAX=1T"));
+	    setenv("GASNET_PHYSMEM_MAX", "1T", 0 /*no overwrite*/);
 	  }
 	}
       }
+
+      // and yet another GASNet workaround: the Infiniband conduit seems to
+      //  have a problem with AMRDMA mode, consuming receive buffers even for
+      //  request targets that are in AMRDMA mode - disable the mode by default
+#ifdef GASNET_CONDUIT_IBV
+      if(!getenv("GASNET_AMRDMA_MAX_PEERS"))
+        setenv("GASNET_AMRDMA_MAX_PEERS", "0", 0 /*no overwrite*/);
+#endif
+#endif
 
 #ifdef DEBUG_REALM_STARTUP
       { // we don't have rank IDs yet, so everybody gets to spew
@@ -1172,11 +1180,13 @@ namespace Realm {
 #define DEBUG_COLLECTIVES
 
 #if defined(USE_GASNET) && defined(DEBUG_COLLECTIVES)
+  static const int GASNET_COLL_FLAGS = GASNET_COLL_IN_MYSYNC | GASNET_COLL_OUT_MYSYNC | GASNET_COLL_LOCAL;
+  
   template <typename T>
   static void broadcast_check(const T& val, const char *name)
   {
     T bval;
-    gasnet_coll_broadcast(GASNET_TEAM_ALL, &bval, 0, const_cast<T *>(&val), sizeof(T), 0 /*flags*/);
+    gasnet_coll_broadcast(GASNET_TEAM_ALL, &bval, 0, const_cast<T *>(&val), sizeof(T), GASNET_COLL_FLAGS);
     if(val != bval) {
       log_collective.fatal() << "collective mismatch on node " << gasnet_mynode() << " for " << name << ": " << val << " != " << bval;
       assert(false);
@@ -1206,7 +1216,7 @@ namespace Realm {
 	// step 1: receive wait_on from every node
 	Event *all_events = 0;
 	all_events = new Event[gasnet_nodes()];
-	gasnet_coll_gather(GASNET_TEAM_ALL, root, all_events, &wait_on, sizeof(Event), 0 /*flags*/);
+	gasnet_coll_gather(GASNET_TEAM_ALL, root, all_events, &wait_on, sizeof(Event), GASNET_COLL_FLAGS);
 
 	// step 2: merge all the events
 	std::set<Event> event_set;
@@ -1224,7 +1234,7 @@ namespace Realm {
 	Event finish_event = target_proc.spawn(task_id, args, arglen, merged_event, priority);
 
 	// step 4: broadcast the finish event to everyone
-	gasnet_coll_broadcast(GASNET_TEAM_ALL, &finish_event, root, &finish_event, sizeof(Event), 0 /*flags*/);
+	gasnet_coll_broadcast(GASNET_TEAM_ALL, &finish_event, root, &finish_event, sizeof(Event), GASNET_COLL_FLAGS);
 
 	log_collective.info() << "collective spawn: proc=" << target_proc << " func=" << task_id << " priority=" << priority << " after=" << finish_event;
 
@@ -1233,13 +1243,13 @@ namespace Realm {
 	// NON-ROOT NODE
 
 	// step 1: send our wait_on to the root for merging
-	gasnet_coll_gather(GASNET_TEAM_ALL, root, 0, &wait_on, sizeof(Event), 0 /*flags*/);
+	gasnet_coll_gather(GASNET_TEAM_ALL, root, 0, &wait_on, sizeof(Event), GASNET_COLL_FLAGS);
 
 	// steps 2 and 3: twiddle thumbs
 
 	// step 4: receive finish event
 	Event finish_event;
-	gasnet_coll_broadcast(GASNET_TEAM_ALL, &finish_event, root, 0, sizeof(Event), 0 /*flags*/);
+	gasnet_coll_broadcast(GASNET_TEAM_ALL, &finish_event, root, 0, sizeof(Event), GASNET_COLL_FLAGS);
 
 	log_collective.info() << "collective spawn: proc=" << target_proc << " func=" << task_id << " priority=" << priority << " after=" << finish_event;
 
@@ -1280,7 +1290,7 @@ namespace Realm {
 	// step 1: receive wait_on from every node
 	Event *all_events = 0;
 	all_events = new Event[gasnet_nodes()];
-	gasnet_coll_gather(GASNET_TEAM_ALL, 0, all_events, &wait_on, sizeof(Event), 0 /*flags*/);
+	gasnet_coll_gather(GASNET_TEAM_ALL, 0, all_events, &wait_on, sizeof(Event), GASNET_COLL_FLAGS);
 
 	// step 2: merge all the events
 	std::set<Event> event_set;
@@ -1294,17 +1304,17 @@ namespace Realm {
 	merged_event = Event::merge_events(event_set);
 
 	// step 3: broadcast the merged event back to everyone
-	gasnet_coll_broadcast(GASNET_TEAM_ALL, &merged_event, 0, &merged_event, sizeof(Event), 0 /*flags*/);
+	gasnet_coll_broadcast(GASNET_TEAM_ALL, &merged_event, 0, &merged_event, sizeof(Event), GASNET_COLL_FLAGS);
       } else {
 	// NON-ROOT NODE
 
 	// step 1: send our wait_on to the root for merging
-	gasnet_coll_gather(GASNET_TEAM_ALL, 0, 0, &wait_on, sizeof(Event), 0 /*flags*/);
+	gasnet_coll_gather(GASNET_TEAM_ALL, 0, 0, &wait_on, sizeof(Event), GASNET_COLL_FLAGS);
 
 	// step 2: twiddle thumbs
 
 	// step 3: receive merged wait_on event
-	gasnet_coll_broadcast(GASNET_TEAM_ALL, &merged_event, 0, 0, sizeof(Event), 0 /*flags*/);
+	gasnet_coll_broadcast(GASNET_TEAM_ALL, &merged_event, 0, 0, sizeof(Event), GASNET_COLL_FLAGS);
       }
 #else
       // no GASNet, so our precondition is the only one
@@ -1340,7 +1350,7 @@ namespace Realm {
 	// step 1: receive wait_on from every node
 	Event *all_events = 0;
 	all_events = new Event[gasnet_nodes()];
-	gasnet_coll_gather(GASNET_TEAM_ALL, 0, all_events, &my_finish, sizeof(Event), 0 /*flags*/);
+	gasnet_coll_gather(GASNET_TEAM_ALL, 0, all_events, &my_finish, sizeof(Event), GASNET_COLL_FLAGS);
 
 	// step 2: merge all the events
 	std::set<Event> event_set;
@@ -1354,7 +1364,7 @@ namespace Realm {
 	Event merged_finish = Event::merge_events(event_set);
 
 	// step 3: broadcast the merged event back to everyone
-	gasnet_coll_broadcast(GASNET_TEAM_ALL, &merged_finish, 0, &merged_finish, sizeof(Event), 0 /*flags*/);
+	gasnet_coll_broadcast(GASNET_TEAM_ALL, &merged_finish, 0, &merged_finish, sizeof(Event), GASNET_COLL_FLAGS);
 
 	log_collective.info() << "collective spawn: kind=" << target_kind << " func=" << task_id << " priority=" << priority << " after=" << merged_finish;
 
@@ -1363,13 +1373,13 @@ namespace Realm {
 	// NON-ROOT NODE
 
 	// step 1: send our wait_on to the root for merging
-	gasnet_coll_gather(GASNET_TEAM_ALL, 0, 0, &my_finish, sizeof(Event), 0 /*flags*/);
+	gasnet_coll_gather(GASNET_TEAM_ALL, 0, 0, &my_finish, sizeof(Event), GASNET_COLL_FLAGS);
 
 	// step 2: twiddle thumbs
 
 	// step 3: receive merged wait_on event
 	Event merged_finish;
-	gasnet_coll_broadcast(GASNET_TEAM_ALL, &merged_finish, 0, 0, sizeof(Event), 0 /*flags*/);
+	gasnet_coll_broadcast(GASNET_TEAM_ALL, &merged_finish, 0, 0, sizeof(Event), GASNET_COLL_FLAGS);
 
 	log_collective.info() << "collective spawn: kind=" << target_kind << " func=" << task_id << " priority=" << priority << " after=" << merged_finish;
 

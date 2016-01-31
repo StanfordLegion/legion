@@ -794,6 +794,7 @@ namespace LegionRuntime {
       void send_response(void);
       bool handle_response(AddressSpaceID sender, bool result);
       void record_outstanding_tasks(void);
+      void record_outstanding_profiling_requests(void);
       void finalize(void);
     public:
       Internal *const runtime;
@@ -947,7 +948,7 @@ namespace LegionRuntime {
     public:
       const char* get_name(bool needs_lock = true) const;
       void attach_semantic_information(SemanticTag tag, AddressSpaceID source,
-                             const void *buffer, size_t size, bool is_mutable);
+         const void *buffer, size_t size, bool is_mutable, bool send_to_owner);
       void retrieve_semantic_information(SemanticTag tag,
                                          const void *&buffer, size_t &size);
       void send_semantic_info(AddressSpaceID target, SemanticTag tag,
@@ -1161,15 +1162,14 @@ namespace LegionRuntime {
                const std::set<Processor> &local_procs,
                const std::set<Processor> &local_util_procs,
                const std::set<AddressSpaceID> &address_spaces,
-               const std::map<Processor,AddressSpaceID> &proc_spaces,
-               Processor cleanup, Processor gc, Processor message);
+               const std::map<Processor,AddressSpaceID> &proc_spaces);
       Internal(const Internal &rhs);
       ~Internal(void);
     public:
       Internal& operator=(const Internal&rhs);
     public:
       void construct_mpi_rank_tables(Processor proc, int rank);
-      void launch_top_level_task(Processor proc);
+      void launch_top_level_task(Processor target);
       Event launch_mapper_task(Mapper *mapper, Processor proc, 
                                Processor::TaskFuncID tid,
                                const TaskArgument &arg, MapperID map_id);
@@ -1578,7 +1578,8 @@ namespace LegionRuntime {
       ProjectionFunctor* find_projection_functor(ProjectionID pid);
     public:
       void attach_semantic_information(TaskID task_id, SemanticTag,
-                       const void *buffer, size_t size, bool is_mutable);
+                                   const void *buffer, size_t size, 
+                                   bool is_mutable, bool send_to_owner = true);
       void attach_semantic_information(IndexSpace handle, SemanticTag tag,
                        const void *buffer, size_t size, bool is_mutable);
       void attach_semantic_information(IndexPartition handle, SemanticTag tag,
@@ -1907,12 +1908,6 @@ namespace LegionRuntime {
       inline unsigned get_context_count(void) { return total_contexts; }
       inline unsigned get_start_color(void) const { return address_space; }
       inline unsigned get_color_modulus(void) const { return runtime_stride; }
-#ifdef SPECIALIZED_UTIL_PROCS
-    public:
-      Processor get_cleanup_proc(Processor p) const;
-      Processor get_gc_proc(Processor p) const;
-      Processor get_message_proc(Processor p) const;
-#endif
 #ifdef HANG_TRACE
     public:
       void dump_processor_states(FILE *target);
@@ -2026,6 +2021,7 @@ namespace LegionRuntime {
       void issue_runtime_shutdown_attempt(void);
       void attempt_runtime_shutdown(void);
       void initiate_runtime_shutdown(AddressSpaceID source);
+      void finalize_runtime_shutdown(void);
     public:
       bool has_outstanding_tasks(void);
       inline void increment_total_outstanding_tasks(void)
@@ -2190,6 +2186,10 @@ namespace LegionRuntime {
                           const void *args, size_t arglen, 
 			  const void *userdata, size_t userlen,
 			  Processor p);
+      static void launch_top_level(
+                          const void *args, size_t arglen, 
+			  const void *userdata, size_t userlen,
+			  Processor p);
     protected:
       // Internal runtime methods invoked by the above static methods
       // after the find the right runtime instance to call
@@ -2215,12 +2215,6 @@ namespace LegionRuntime {
 #ifdef DEBUG_SHUTDOWN_HANG
     public:
       std::vector<int> outstanding_counts;
-#endif
-#ifdef SPECIALIZED_UTIL_PROCS
-    public:
-      const Processor cleanup_proc;
-      const Processor gc_proc;
-      const Processor message_proc;
 #endif
     protected:
       // Internal runtime state 
@@ -2475,17 +2469,11 @@ namespace LegionRuntime {
       static void check_bounds(void *impl, const DomainPoint &dp);
 #endif
     private:
-      static int* get_startup_arrivals(void);
       static RegionProjectionTable& get_region_projection_table(void);
       static PartitionProjectionTable& get_partition_projection_table(void);
       static Event register_runtime_tasks(RealmRuntime &realm);
       static Processor::TaskFuncID get_next_available_id(void);
       static void log_machine(Machine machine);
-#ifdef SPECIALIZED_UTIL_PROCS
-      static void get_utility_processor_mapping(
-          const std::set<Processor> &util_procs, Processor &cleanup_proc,
-          Processor &gc_proc, Processor &message_proc);
-#endif
     public:
       // Static member variables
       static Internal *runtime_map[(MAX_NUM_PROCS+1/*+1 for NO_PROC*/)];
@@ -2498,6 +2486,7 @@ namespace LegionRuntime {
       static unsigned max_message_size;
       static unsigned gc_epoch_size;
       static bool runtime_started;
+      static bool runtime_backgrounded;
       static bool separate_runtime_instances;
       static bool record_registration;
       static bool stealing_disabled;
@@ -2505,7 +2494,6 @@ namespace LegionRuntime {
       static bool unsafe_launch;
       static bool dynamic_independence_tests;
       static bool legion_spy_enabled;
-      static unsigned shutdown_counter;
       static int mpi_rank;
       static unsigned mpi_rank_table[MAX_NUM_NODES];
       static unsigned remaining_mpi_notifications;

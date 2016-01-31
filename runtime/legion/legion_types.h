@@ -88,12 +88,13 @@ namespace LegionRuntime {
 
     // Runtime task numbering 
     enum {
-      INIT_FUNC_ID            = Realm::Processor::TASK_ID_PROCESSOR_INIT,
-      SHUTDOWN_FUNC_ID        = Realm::Processor::TASK_ID_PROCESSOR_SHUTDOWN,
+      INIT_TASK_ID            = Realm::Processor::TASK_ID_PROCESSOR_INIT,
+      SHUTDOWN_TASK_ID        = Realm::Processor::TASK_ID_PROCESSOR_SHUTDOWN,
       HLR_TASK_ID             = Realm::Processor::TASK_ID_FIRST_AVAILABLE,
       HLR_LEGION_PROFILING_ID = Realm::Processor::TASK_ID_FIRST_AVAILABLE+1,
       HLR_MAPPER_PROFILING_ID = Realm::Processor::TASK_ID_FIRST_AVAILABLE+2,
-      TASK_ID_AVAILABLE       = Realm::Processor::TASK_ID_FIRST_AVAILABLE+3,
+      HLR_LAUNCH_TOP_LEVEL_ID = Realm::Processor::TASK_ID_FIRST_AVAILABLE+3,
+      TASK_ID_AVAILABLE       = Realm::Processor::TASK_ID_FIRST_AVAILABLE+4,
     };
 
     // redop IDs - none used in HLR right now, but 0 isn't allowed

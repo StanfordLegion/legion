@@ -1756,6 +1756,7 @@ function std.ispace(index_type)
   return st
 end
 
+local next_region_id = 1
 function std.region(ispace_symbol, fspace_type)
   if fspace_type == nil then
     fspace_type = ispace_symbol
@@ -1882,7 +1883,13 @@ function std.region(ispace_symbol, fspace_type)
     return self
   end
 
-  if not std.config["debug"] then
+  if std.config["debug"] then
+    local id = next_region_id
+    next_region_id = next_region_id + 1
+    function st.metamethods.__typename(st)
+      return "region#" .. tostring(id) .. "(" .. tostring(st.fspace_type) .. ")"
+    end
+  else
     function st.metamethods.__typename(st)
       return "region(" .. tostring(st.fspace_type) .. ")"
     end
@@ -1961,8 +1968,16 @@ function std.partition(disjointness, region)
     return self
   end
 
-  function st.metamethods.__typename(st)
-    return "partition(" .. tostring(st.disjointness) .. ", " .. tostring(st.parent_region_symbol) .. ")"
+  if std.config["debug"] then
+    local id = next_region_id
+    next_region_id = next_region_id + 1
+    function st.metamethods.__typename(st)
+      return "partition#" .. tostring(id) .. "(" .. tostring(st.disjointness) .. ", " .. tostring(st.parent_region_symbol) .. ")"
+    end
+  else
+    function st.metamethods.__typename(st)
+      return "partition(" .. tostring(st.disjointness) .. ", " .. tostring(st.parent_region_symbol) .. ")"
+    end
   end
 
   return st
