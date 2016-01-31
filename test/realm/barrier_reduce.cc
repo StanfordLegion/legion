@@ -219,8 +219,6 @@ void top_level_task(const void *args, size_t arglen,
   alarm(0);
 
   printf("done!\n");
-
-  Runtime::get_runtime().shutdown();
 }
 
 int main(int argc, char **argv)
@@ -238,11 +236,29 @@ int main(int argc, char **argv)
 
   signal(SIGALRM, sigalrm_handler);
 
-  // Start the machine running
-  // Control never returns from this call
-  // Note we only run the top level task on one processor
-  // You can also run the top level task on all processors or one processor per node
-  rt.run(TOP_LEVEL_TASK, Runtime::ONE_TASK_ONLY);
+  // select a processor to run the top level task on
+  Processor p = Processor::NO_PROC;
+  {
+    std::set<Processor> all_procs;
+    Machine::get_machine().get_all_processors(all_procs);
+    for(std::set<Processor>::const_iterator it = all_procs.begin();
+	it != all_procs.end();
+	it++)
+      if(it->kind() == Processor::LOC_PROC) {
+	p = *it;
+	break;
+      }
+  }
+  assert(p.exists());
 
+  // collective launch of a single task - everybody gets the same finish event
+  Event e = rt.collective_spawn(p, TOP_LEVEL_TASK, 0, 0);
+
+  // request shutdown once that task is complete
+  rt.shutdown(e);
+
+  // now sleep this thread until that shutdown actually happens
+  rt.wait_for_shutdown();
+  
   return 0;
 }
