@@ -252,6 +252,9 @@ namespace Realm {
       std::set<Thread *> all_hosts;
       std::set<Thread *> all_workers;
 
+      int host_startups_remaining;
+      GASNetCondVar host_startup_condvar;
+
     public:
       int cfg_num_host_threads;
     };
