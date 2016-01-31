@@ -19,6 +19,7 @@
 
 #include "legion.h"
 #include "region_tree.h"
+#include "legion_mapping.h"
 #include "legion_utilities.h"
 #include "legion_allocation.h"
 #include "legion_analysis.h"
@@ -542,7 +543,7 @@ namespace Legion {
      * will result in the entire enclosing task context
      * being restarted.
      */
-    class MapOp : public Inline, public Operation {
+    class MapOp : public Mapping::InlineMapping, public Operation {
     public:
       static const AllocationType alloc_type = MAP_OP_ALLOC;
     public:
@@ -577,13 +578,8 @@ namespace Legion {
       virtual void trigger_commit(void);
       virtual unsigned find_parent_index(unsigned idx);
     public:
-      virtual MappableKind get_mappable_kind(void) const;
-      virtual Task* as_mappable_task(void) const;
-      virtual Copy* as_mappable_copy(void) const;
-      virtual Inline* as_mappable_inline(void) const;
-      virtual Acquire* as_mappable_acquire(void) const;
-      virtual Release* as_mappable_release(void) const;
-      virtual UniqueID get_unique_mappable_id(void) const;
+      virtual UniqueID get_unique_id(void) const;
+      virtual int get_depth(void) const;
     protected:
       void check_privilege(void);
       void compute_parent_index(void);
@@ -604,7 +600,7 @@ namespace Legion {
      * from different region trees in an efficient way by
      * using the low-level runtime copy facilities. 
      */
-    class CopyOp : public Copy, public SpeculativeOp {
+    class CopyOp : public Mapping::Copy, public SpeculativeOp {
     public:
       static const AllocationType alloc_type = COPY_OP_ALLOC;
     public:
@@ -636,13 +632,8 @@ namespace Legion {
       virtual bool speculate(bool &value);
       virtual unsigned find_parent_index(unsigned idx);
     public:
-      virtual MappableKind get_mappable_kind(void) const;
-      virtual Task* as_mappable_task(void) const;
-      virtual Copy* as_mappable_copy(void) const;
-      virtual Inline* as_mappable_inline(void) const;
-      virtual Acquire* as_mappable_acquire(void) const;
-      virtual Release* as_mappable_release(void) const;
-      virtual UniqueID get_unique_mappable_id(void) const;
+      virtual UniqueID get_unique_id(void) const;
+      virtual int get_depth(void) const;
     protected:
       void check_copy_privilege(const RegionRequirement &req, 
                                 unsigned idx, bool src);
@@ -796,7 +787,7 @@ namespace Legion {
      * operations that both inherit from this class:
      * InterCloseOp and PostCloseOp.
      */
-    class CloseOp : public Operation {
+    class CloseOp : public Mapping::Close, public Operation {
     public:
       static const AllocationType alloc_type = CLOSE_OP_ALLOC;
     public:
@@ -805,6 +796,9 @@ namespace Legion {
       virtual ~CloseOp(void);
     public:
       CloseOp& operator=(const CloseOp &rhs);
+    public:
+      virtual UniqueID get_unique_id(void) const;
+      virtual int get_depth(void) const;
     public:
       void activate_close(void);
       void deactivate_close(void);
@@ -824,7 +818,6 @@ namespace Legion {
       virtual void trigger_remote_state_analysis(UserEvent ready_event);
       virtual void trigger_commit(void);
     protected:
-      RegionRequirement requirement;
       RegionTreePath privilege_path;
       VersionInfo  version_info;
       RestrictInfo restrict_info;
@@ -1015,7 +1008,7 @@ namespace Legion {
      * user-level software coherence when tasks own
      * regions with simultaneous coherence.
      */
-    class AcquireOp : public Acquire, public SpeculativeOp {
+    class AcquireOp : public Mapping::Acquire, public SpeculativeOp {
     public:
       static const AllocationType alloc_type = ACQUIRE_OP_ALLOC;
     public:
@@ -1043,14 +1036,9 @@ namespace Legion {
       virtual bool speculate(bool &value);
       virtual void trigger_commit(void);
       virtual unsigned find_parent_index(unsigned idx);
-    public:
-      virtual MappableKind get_mappable_kind(void) const;
-      virtual Task* as_mappable_task(void) const;
-      virtual Copy* as_mappable_copy(void) const;
-      virtual Inline* as_mappable_inline(void) const;
-      virtual Acquire* as_mappable_acquire(void) const;
-      virtual Release* as_mappable_release(void) const;
-      virtual UniqueID get_unique_mappable_id(void) const;
+    public: 
+      virtual UniqueID get_unique_id(void) const;
+      virtual int get_depth(void) const;
     public:
       const RegionRequirement& get_requirement(void) const;
     protected:
@@ -1070,7 +1058,7 @@ namespace Legion {
      * user-level software coherence when tasks own
      * regions with simultaneous coherence.
      */
-    class ReleaseOp : public Release, public SpeculativeOp {
+    class ReleaseOp : public Mapping::Release, public SpeculativeOp {
     public:
       static const AllocationType alloc_type = RELEASE_OP_ALLOC;
     public:
@@ -1099,13 +1087,8 @@ namespace Legion {
       virtual void trigger_commit(void);
       virtual unsigned find_parent_index(unsigned idx);
     public:
-      virtual MappableKind get_mappable_kind(void) const;
-      virtual Task* as_mappable_task(void) const;
-      virtual Copy* as_mappable_copy(void) const;
-      virtual Inline* as_mappable_inline(void) const;
-      virtual Acquire* as_mappable_acquire(void) const;
-      virtual Release* as_mappable_release(void) const;
-      virtual UniqueID get_unique_mappable_id(void) const;
+      virtual UniqueID get_unique_id(void) const;
+      virtual int get_depth(void) const;
     public:
       const RegionRequirement& get_requirement(void) const;
     protected:

@@ -48,53 +48,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Mappable::MappableKind TaskOp::get_mappable_kind(void) const
-    //--------------------------------------------------------------------------
-    {
-      return TASK_MAPPABLE;
-    }
-
-    //--------------------------------------------------------------------------
-    Task* TaskOp::as_mappable_task(void) const
-    //--------------------------------------------------------------------------
-    {
-      TaskOp *proxy_this = const_cast<TaskOp*>(this);
-      return proxy_this;
-    }
-
-    //--------------------------------------------------------------------------
-    Copy* TaskOp::as_mappable_copy(void) const
-    //--------------------------------------------------------------------------
-    {
-      return NULL;
-    }
-
-    //--------------------------------------------------------------------------
-    Inline* TaskOp::as_mappable_inline(void) const
-    //--------------------------------------------------------------------------
-    {
-      return NULL;
-    }
-
-    //--------------------------------------------------------------------------
-    Acquire* TaskOp::as_mappable_acquire(void) const
-    //--------------------------------------------------------------------------
-    {
-      return NULL;
-    }
-
-    //--------------------------------------------------------------------------
-    Release* TaskOp::as_mappable_release(void) const
-    //--------------------------------------------------------------------------
-    {
-      return NULL;
-    }
-
-    //--------------------------------------------------------------------------
-    UniqueID TaskOp::get_unique_mappable_id(void) const
+    UniqueID TaskOp::get_unique_id(void) const
     //--------------------------------------------------------------------------
     {
       return unique_op_id;
+    }
+
+    //--------------------------------------------------------------------------
+    int TaskOp::get_depth(void) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(parent_ctx != NULL);
+#endif
+      return (parent_ctx->get_depth() + 1);
     }
 
     //--------------------------------------------------------------------------
@@ -2590,6 +2557,8 @@ namespace Legion {
       // Get all the local fields from our enclosing contexts
       find_enclosing_local_fields(locals);
       RezCheck z(rez);
+      int depth = get_depth();
+      rez.serialize(depth);
       // Now pack them all up
       size_t num_local = locals.size();
       rez.serialize(num_local);
@@ -7984,6 +7953,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    int RemoteTask::get_depth(void) const
+    //--------------------------------------------------------------------------
+    {
+      return depth;
+    }
+
+    //--------------------------------------------------------------------------
     void RemoteTask::activate(void)
     //--------------------------------------------------------------------------
     {
@@ -7991,6 +7967,7 @@ namespace Legion {
       context = RegionTreeContext();
       remote_owner_uid = 0;
       remote_parent_ctx = NULL;
+      depth = -1;
       is_top_level_context = false;
     }
 
@@ -8057,6 +8034,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
+      derez.deserialize(depth);
       size_t num_local;
       derez.deserialize(num_local);
       std::deque<LocalFieldInfo> temp_local(num_local);

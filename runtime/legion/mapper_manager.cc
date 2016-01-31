@@ -39,6 +39,64 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void MapperManager::perform_continuation(Event pre, MappingCallKind call,
+                                             void *arg1, void *arg2, void *arg3,
+                                             Operation *op)
+    //--------------------------------------------------------------------------
+    {
+      MapperContinuationArgs args;
+      args.hlr_id = HLR_MAPPER_TASK_ID;
+      args.manager = this;
+      args.call = call;
+      args.arg1 = arg1;
+      args.arg2 = arg2;
+      args.arg3 = arg3;
+      Event wait_on = runtime->issue_runtime_meta_task(&args, sizeof(args),
+                                                  HLR_MAPPER_TASK_ID, op, pre);
+      wait_on.wait();
+    }
+
+    //--------------------------------------------------------------------------
+    void MapperManager::execute_continuation(MappingCallKind call,
+                                             void *arg1, void *arg2, void *arg3)
+    //--------------------------------------------------------------------------
+    {
+      switch (call)
+      {
+        case SELECT_TASK_OPTIONS_CALL:
+          {
+            TaskOp *task = static_cast<TaskOp*>(arg1);
+            TaskOptions *options = static_cast<TaskOptions*>(arg2);
+            invoke_select_task_options(task, options, false/*first*/);
+            break;
+          }
+        default:
+          assert(false);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void MapperManager::invoke_select_task_options(TaskOp *task, 
+                                    TaskOptions *options, bool first_invocation)
+    //--------------------------------------------------------------------------
+    {
+      Event continuation_precondition = Event::NO_EVENT;
+      MappingCallInfo *info = begin_mapper_call(SELECT_TASK_OPTIONS_CALL,
+                              first_invocation, continuation_precondition);
+      if (info != NULL)
+      {
+        mapper->select_task_options(info, *task, *options);
+        end_mapper_call(info);
+      }
+#ifdef DEBUG_HIGH_LEVEL
+      assert(first_invocation); // better only get here the first time
+#endif
+      // Otherwise make a continuation and launch it
+      perform_continuation(continuation_precondition, SELECT_TASK_OPTIONS_CALL, 
+                           task, options, NULL, task);
+    }
+
+    //--------------------------------------------------------------------------
     IndexPartition MapperManager::get_index_partition(IndexSpace parent, 
                                                Color color) const
     //--------------------------------------------------------------------------
@@ -370,7 +428,7 @@ namespace Legion {
       if (permit_reentrant)
       {
         // If there are paused calls, we need to wait for them all 
-        // to finish before we can 
+        // to finish before we can continue execution 
         if (paused_calls > 0)
         {
 #ifdef DEBUG_HIGH_LEVEL
@@ -391,25 +449,33 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    MappingCallInfo* SerializingManager::begin_mapper_call(MappingCallKind kind)
+    MappingCallInfo* SerializingManager::begin_mapper_call(MappingCallKind kind,
+                                     bool first_invocation, Event &precondition)
     //--------------------------------------------------------------------------
     {
       Event wait_on = Event::NO_EVENT;  
       MappingCallInfo *result = NULL;
+      // If this is the first invocation we have to ask for the lock
+      // otherwise we know we already have it
+      if (first_invocation)
       {
-        AutoLock m_lock(mapper_lock);
-        result = allocate_call_info(kind, false/*need lock*/);
-        // See if we are ready to run this or not
-        if (executing_call != NULL)
-        {
-          // Put this on the list of pending calls
-          info->resume = UserEvent::create_user_event();
-          wait_on = info->resume;
-          pending_calls.push_back(info);
-        }
-        else
-          executing_call = result;
+        precondition = mapper_lock.acquire(0, true/*exclusive*/);
+        if (!precondition.has_triggered())
+          return NULL;
       }
+      result = allocate_call_info(kind, false/*need lock*/);
+      // See if we are ready to run this or not
+      if ((executing_call != NULL) || (!permit_reentrant && 
+            ((paused_calls > 0) || !ready_calls.empty())))
+      {
+        // Put this on the list of pending calls
+        info->resume = UserEvent::create_user_event();
+        wait_on = info->resume;
+        pending_calls.push_back(info);
+      }
+      else
+        executing_call = result;
+      mapper_lock.release();
       // If we have an event to wait on, then wait until we can execute
       if (wait_on.exists())
         wait_on.wait();
@@ -431,14 +497,21 @@ namespace Legion {
         AutoLock m_lock(mapper_lock);
         // Increment the count of the paused mapper calls
         paused_calls++;
-        if (!pending_calls.empty())
+        if (permit_reentrant && !ready_calls.empty())
+        {
+          // Get the next ready call to continue executing
+          executing_call = ready_calls.front();
+          ready_calls.pop_front();
+          to_trigger = executing_call->resume;
+        }
+        else if (permit_reentrant && !pending_calls.empty())
         {
           // Get the next available call to handle
           executing_call = pending_calls.front();
           pending_calls.pop_front();
           to_trigger = executing_call->resume; 
         }
-        else // No one to wake up so just go to sleep
+        else // No one to wake up
           executing_call = NULL;
       }
       if (to_trigger.exists())
@@ -632,40 +705,7 @@ namespace Legion {
         current_holders.erase(finder);
         // See if we can now give the lock to someone else
         if (current_holders.empty())
-        {
-          switch (lock_state)
-          {
-            case READ_ONLY_STATE:
-              {
-                if (!exclusive_waiters.empty())
-                {
-                  // Pull off the first exlusive waiter
-                  to_trigger.push_back(exclusive_waiters.front()->resume);
-                  exclusive_waiters.pop_front();
-                  lock_state = EXCLUSIVE_STATE;
-                }
-                else
-                  lock_state = UNLOCKED_STATE;
-                break;
-              }
-            case EXCLUSIVE_STATE:
-              {
-                if (!read_only_waiters.empty())
-                {
-                  to_trigger.resize(read_only_waiters.size());
-                  for (unsigned idx = 0; idx < read_only_waiters.size(); idx++)
-                    to_trigger[idx] = read_only_waiters[idx]->resume;
-                  ready_only_waiters.clear();
-                  lock_state = READ_ONLY_STATE;
-                }
-                else
-                  lock_state = UNLOCKED_STATE;
-                break;
-              }
-            default:
-              assert(false);
-          }
-        }
+          release_lock(to_trigger);
       }
       if (!to_trigger.empty())
       {
@@ -698,10 +738,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    MappingCallInfo* ConcurrentManager::begin_mapper_call(MappingCallKind kind)
+    MappingCallInfo* ConcurrentManager::begin_mapper_call(MappingCallKind kind,
+                                     bool first_invocation, Event &precondition)
     //--------------------------------------------------------------------------
     {
-      return allocate_call_info(kind, true/*need lock*/);
+      if (first_invocation)
+      {
+        precondition = mapper_lock.acquire(0, true/*exclusive*/);
+        if (!precondition.has_triggered())
+          return NULL;
+      }
+      MappingCallInfo *result = allocate_call_info(kind, false/*need lock*/);
+      mapper_lock.release();
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -722,7 +771,63 @@ namespace Legion {
     void ConcurrentManager::finish_mapper_call(MappingCallInfo *info)
     //--------------------------------------------------------------------------
     {
-      free_call_info(info, true/*need lock*/);
+      std::vector<UserEvent> to_trigger;
+      {
+        AutoLock m_lock(mapper_lock);
+        // Check to see if we need to release the lock for the mapper call
+        std::set<MappingCallInfo*>::iterator finder = 
+            current_holders.find(info);     
+        if (finder != current_holders.end())
+        {
+          current_holders.erase(finder);
+          release_lock(to_trigger);
+        }
+        free_call_info(info, false/*need lock*/);
+      }
+      if (!to_trigger.empty())
+      {
+        for (std::vector<UserEvent>::const_iterator it = 
+              to_trigger.begin(); it != to_trigger.end(); it++)
+          it->trigger();
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ConcurrentManager::release_lock(std::vector<UserEvent> &to_trigger)
+    //--------------------------------------------------------------------------
+    {
+      switch (lock_state)
+      {
+        case READ_ONLY_STATE:
+          {
+            if (!exclusive_waiters.empty())
+            {
+              // Pull off the first exlusive waiter
+              to_trigger.push_back(exclusive_waiters.front()->resume);
+              exclusive_waiters.pop_front();
+              lock_state = EXCLUSIVE_STATE;
+            }
+            else
+              lock_state = UNLOCKED_STATE;
+            break;
+          }
+        case EXCLUSIVE_STATE:
+          {
+            if (!read_only_waiters.empty())
+            {
+              to_trigger.resize(read_only_waiters.size());
+              for (unsigned idx = 0; idx < read_only_waiters.size(); idx++)
+                to_trigger[idx] = read_only_waiters[idx]->resume;
+              ready_only_waiters.clear();
+              lock_state = READ_ONLY_STATE;
+            }
+            else
+              lock_state = UNLOCKED_STATE;
+            break;
+          }
+        default:
+          assert(false);
+      }
     }
 
   };

@@ -21,6 +21,7 @@
 #include "runtime.h"
 #include "legion_ops.h"
 #include "region_tree.h"
+#include "legion_mapping.h"
 #include "legion_utilities.h"
 #include "legion_allocation.h"
 
@@ -32,7 +33,7 @@ namespace Legion {
      * This is the base task operation class for all
      * kinds of tasks in the system.  
      */
-    class TaskOp : public Task, public SpeculativeOp {
+    class TaskOp : public Mapping::Task, public SpeculativeOp {
     public:
       enum TaskKind {
         INDIVIDUAL_TASK_KIND,
@@ -45,13 +46,8 @@ namespace Legion {
       TaskOp(Runtime *rt);
       virtual ~TaskOp(void);
     public:
-      virtual MappableKind get_mappable_kind(void) const;
-      virtual Task* as_mappable_task(void) const;
-      virtual Copy* as_mappable_copy(void) const;
-      virtual Inline* as_mappable_inline(void) const;
-      virtual Acquire* as_mappable_acquire(void) const;
-      virtual Release* as_mappable_release(void) const;
-      virtual UniqueID get_unique_mappable_id(void) const;
+      virtual UniqueID get_unique_id(void) const;
+      virtual int get_depth(void) const;
       virtual const char* get_task_name(void) const;
     public:
       bool is_remote(void) const;
@@ -972,6 +968,8 @@ namespace Legion {
     public:
       RemoteTask& operator=(const RemoteTask &rhs);
     public:
+      virtual int get_depth(void) const;
+    public:
       void initialize_remote(UniqueID uid, SingleTask *remote_parent,
                              bool is_top_level);
       void unpack_parent_task(Deserializer &derez);
@@ -1000,6 +998,7 @@ namespace Legion {
       UniqueID remote_owner_uid;
       SingleTask *remote_parent_ctx; // Never a valid pointer
     protected:
+      int depth;
       bool is_top_level_context;
       std::map<AddressSpaceID,RemoteTask*> remote_instances;
 #ifdef LEGION_SPY

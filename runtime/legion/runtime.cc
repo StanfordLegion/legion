@@ -469,12 +469,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (!ready_event.has_triggered())
-      {
-        Processor exec_proc = Processor::get_executing_processor();
-        runtime->pre_wait(exec_proc);
         ready_event.wait();
-        runtime->post_wait(exec_proc);
-      }
       if (empty)
       {
         if (producer_op != NULL)
@@ -493,12 +488,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (!ready_event.has_triggered())
-      {
-        Processor exec_proc = Processor::get_executing_processor();
-        runtime->pre_wait(exec_proc);
         ready_event.wait();
-        runtime->post_wait(exec_proc);
-      }
       if (empty)
       {
         if (producer_op != NULL)
@@ -527,12 +517,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (block && !ready_event.has_triggered())
-      {
-        Processor exec_proc = Processor::get_executing_processor();
-        runtime->pre_wait(exec_proc);
         ready_event.wait();
-        runtime->post_wait(exec_proc);
-      }
       if (block)
         mark_sampled();
       return empty;
@@ -995,17 +980,9 @@ namespace Legion {
     void FutureMapImpl::wait_all_results(void)
     //--------------------------------------------------------------------------
     {
-      if (valid)
-      {
-        // Wait on the event that indicates the entire task has finished
-        if (!ready_event.has_triggered())
-        {
-          Processor proc = context->get_executing_processor();
-          runtime->pre_wait(proc);
-          ready_event.wait();
-          runtime->post_wait(proc);
-        }
-      }
+      // Wait on the event that indicates the entire task has finished
+      if (valid && !ready_event.has_triggered())
+        ready_event.wait();
     }
 
     //--------------------------------------------------------------------------
@@ -1124,21 +1101,11 @@ namespace Legion {
       if (valid)
         return;
       if (!ready_event.has_triggered())
-      {
-        // Need to tell the runtime that we're about to
-        // wait on this value which will pre-empt the
-        // executing tasks
-        Processor proc = context->get_executing_processor();
-        runtime->pre_wait(proc);
         ready_event.wait();
-        runtime->post_wait(proc);
-      }
       // Now wait for the reference to be ready
       Event ref_ready = reference.get_ready_event();
       if (!ref_ready.has_triggered())
       {
-        Processor proc = context->get_executing_processor();
-        runtime->pre_wait(proc);
         // If we need a lock for this instance taken it
         // once the reference event is ready, we can also issue
         // the unlock operations contingent upon the termination 
@@ -1158,7 +1125,6 @@ namespace Legion {
         }
         else
           ref_ready.wait();
-        runtime->post_wait(proc);
       }
       valid = true;
     }
@@ -1644,7 +1610,6 @@ namespace Legion {
       }
       this->local_queue_lock = Reservation::create_reservation();
       this->queue_lock = Reservation::create_reservation();
-      this->message_lock = Reservation::create_reservation();
       this->stealing_lock = Reservation::create_reservation();
       this->thieving_lock = Reservation::create_reservation();
       context_states.resize(DEFAULT_CONTEXTS);
@@ -1688,8 +1653,6 @@ namespace Legion {
       local_queue_lock = Reservation::NO_RESERVATION;
       queue_lock.destroy_reservation();
       queue_lock = Reservation::NO_RESERVATION;
-      message_lock.destroy_reservation();
-      message_lock = Reservation::NO_RESERVATION;
       stealing_lock.destroy_reservation();
       stealing_lock = Reservation::NO_RESERVATION;
       thieving_lock.destroy_reservation();
@@ -1768,515 +1731,6 @@ namespace Legion {
 #endif
       return mapper_objects[mid];
     }
-
-    //--------------------------------------------------------------------------
-    template<typename MAPPER_CONTINUATION>
-    void ProcessorManager::invoke_mapper(MapperID map_id, 
-                   MAPPER_CONTINUATION &continuation, bool block, bool has_lock)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(map_id < mapper_objects.size());
-      assert(mapper_objects[map_id] != NULL);
-#endif
-      Mapper *mapper = mapper_objects[map_id];
-      Reservation map_lock = mapper_locks[map_id];
-      // If we don't have the lock try to get it
-      if (!has_lock)
-      {
-        Event acquire_event = map_lock.acquire();
-        if (!acquire_event.has_triggered())
-        {
-          // Failed to get the lock, defer the mapping
-          continuation.defer(runtime, acquire_event);
-          return;
-        }
-      }
-      // If we make it here we have the lock, go ahead and invoke the mapper
-      inside_mapper_call[map_id] = true;
-      continuation.invoke_mapper(mapper);
-      inside_mapper_call[map_id] = false;
-      // See if we have a deferal event
-      Event defer_event = defer_mapper_event[map_id];
-      // Clear it if necessary
-      if (defer_event.exists())
-        defer_mapper_event[map_id] = Event::NO_EVENT;
-      // Now we can release our lock
-      map_lock.release();
-      // If we have to defer mapping, do that now, otherwise mark complete
-      if (defer_event.exists())
-      {
-        if (block)
-        {
-          // Only reacquire lock after the event is ready
-          Event acquire_event = 
-            map_lock.acquire(0, true/*exclusive*/, defer_event);
-          continuation.defer(runtime, acquire_event);
-        }
-        else
-        {
-          log_run.warning("Ignoring mapper deferral request in "
-                          "non-blocking mapper call!");
-          continuation.complete_mapping();
-        }
-      }
-      else
-        continuation.complete_mapping();
-      // Now send any messages
-      check_mapper_messages(map_id, true/*need lock*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void ProcessorManager::check_mapper_messages(MapperID map_id,bool need_lock)
-    //--------------------------------------------------------------------------
-    {
-      if (need_lock)
-      {
-        Event acquire_event = message_lock.acquire(); 
-        // If we didn't get it we have to defer this operation
-        if (!acquire_event.has_triggered())
-        {
-          CheckMessagesContinuation continuation(this, map_id);
-          Event done_event = continuation.defer(runtime, acquire_event);
-          done_event.wait();
-          return;
-        }
-      }
-      // Once we get here we have the message lock
-      std::vector<MapperMessage> messages;
-      std::vector<MapperMessage> &current = mapper_messages[map_id]; 
-      if (!current.empty())
-      {
-        messages = current;
-        current.clear();
-      }
-      // Release the lock
-      message_lock.release();
-      if (!messages.empty())
-        send_mapper_messages(map_id, messages);
-    }
-
-    //--------------------------------------------------------------------------
-    void ProcessorManager::invoke_mapper_set_task_options(TaskOp *task)
-    //--------------------------------------------------------------------------
-    {
-      MapperContinuation1NoRet<Task*,&Mapper::select_task_options,true/*block*/>
-                                         continuation(this, task->map_id, task);
-      continuation.perform_mapping();
-    }
-
-    //--------------------------------------------------------------------------
-    bool ProcessorManager::invoke_mapper_pre_map_task(TaskOp *task)
-    //--------------------------------------------------------------------------
-    {
-      MapperContinuation1Ret<bool,Task*,&Mapper::pre_map_task,true/*block*/>
-                          continuation(this, task->map_id, false/*init*/, task);
-      return continuation.perform_mapping();
-    }
-
-    //--------------------------------------------------------------------------
-    void ProcessorManager::invoke_mapper_select_variant(TaskOp *task)
-    //--------------------------------------------------------------------------
-    {
-      MapperContinuation1NoRet<Task*,&Mapper::select_task_variant,true/*block*/>
-                                         continuation(this, task->map_id, task);
-      continuation.perform_mapping();
-    }
-
-    //--------------------------------------------------------------------------
-    bool ProcessorManager::invoke_mapper_map_task(TaskOp *task)
-    //--------------------------------------------------------------------------
-    {
-      // This one is special since it both maps a task and picks its variant
-      // This will be fixed with the new mapper interface so keep it for now
-#ifdef DEBUG_HIGH_LEVEL
-      assert(task->map_id < mapper_objects.size());
-      assert(mapper_objects[task->map_id] != NULL);
-#endif
-      // actually set on all possible paths below, but compiler can't tell
-      bool result = false;  
-      std::vector<MapperMessage> messages;
-      Event wait_on = Event::NO_EVENT;
-      do
-      {
-        if (wait_on.exists())
-        {
-          // Always send messages before waiting
-          if (!messages.empty())
-            send_mapper_messages(task->map_id, messages);
-          wait_on.wait();
-        }
-        AutoLock m_lock(mapper_locks[task->map_id]);
-        inside_mapper_call[task->map_id] = true;
-        // First select the variant
-        mapper_objects[task->map_id]->select_task_variant(task);
-        inside_mapper_call[task->map_id] = false;
-        if (defer_mapper_event[task->map_id].exists())
-        {
-          wait_on = defer_mapper_event[task->map_id];
-          defer_mapper_event[task->map_id] = Event::NO_EVENT;
-          AutoLock g_lock(message_lock);
-          if (!mapper_messages[task->map_id].empty())
-          {
-            messages = mapper_messages[task->map_id];
-            mapper_messages[task->map_id].clear();
-          }
-          continue;
-        }
-        // Then perform the mapping
-        inside_mapper_call[task->map_id] = true;
-        result = mapper_objects[task->map_id]->map_task(task);
-        inside_mapper_call[task->map_id] = false;
-        if (defer_mapper_event[task->map_id].exists())
-        {
-          wait_on = defer_mapper_event[task->map_id];
-          defer_mapper_event[task->map_id] = Event::NO_EVENT;
-        }
-        AutoLock g_lock(message_lock);
-        if (!mapper_messages[task->map_id].empty())
-        {
-          messages = mapper_messages[task->map_id];
-          mapper_messages[task->map_id].clear();
-        }
-      } while (wait_on.exists());
-      if (!messages.empty())
-        send_mapper_messages(task->map_id, messages);
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    void ProcessorManager::invoke_mapper_post_map_task(TaskOp *task)
-    //--------------------------------------------------------------------------
-    {
-      MapperContinuation1NoRet<Task*,&Mapper::post_map_task,true/*block*/>
-                                      continuation(this, task->map_id, task);
-      continuation.perform_mapping();
-    }
-
-    //--------------------------------------------------------------------------
-    void ProcessorManager::invoke_mapper_failed_mapping(Mappable *mappable)
-    //--------------------------------------------------------------------------
-    {
-      MapperContinuation1NoRet<const Mappable*,&Mapper::notify_mapping_failed,
-                  true/*block*/> continuation(this, mappable->map_id, mappable);
-      continuation.perform_mapping();
-    }
-
-    //--------------------------------------------------------------------------
-    void ProcessorManager::invoke_mapper_notify_result(Mappable *mappable)
-    //--------------------------------------------------------------------------
-    {
-      MapperContinuation1NoRet<const Mappable*,&Mapper::notify_mapping_result,
-                  true/*block*/> continuation(this, mappable->map_id, mappable);
-      continuation.perform_mapping();
-    }
-
-    //--------------------------------------------------------------------------
-    void ProcessorManager::invoke_mapper_slice_domain(TaskOp *task,
-                                      std::vector<Mapper::DomainSplit> &splits)
-    //--------------------------------------------------------------------------
-    {
-      MapperContinuation3NoRet<const Task*,const Domain&,
-                               std::vector<Mapper::DomainSplit>&,
-                               &Mapper::slice_domain,true/*block*/>
-             continuation(this, task->map_id, task, task->index_domain, splits);
-      continuation.perform_mapping();
-    }
-
-    //--------------------------------------------------------------------------
-    bool ProcessorManager::invoke_mapper_map_inline(Inline *op)
-    //--------------------------------------------------------------------------
-    {
-      MapperContinuation1Ret<bool,Inline*,&Mapper::map_inline,true/*block*/>
-                              continuation(this, op->map_id, false/*init*/, op);
-      return continuation.perform_mapping();
-    }
-
-    //--------------------------------------------------------------------------
-    bool ProcessorManager::invoke_mapper_map_copy(Copy *op)
-    //--------------------------------------------------------------------------
-    {
-      MapperContinuation1Ret<bool,Copy*,&Mapper::map_copy,true/*block*/>
-                              continuation(this, op->map_id, false/*init*/, op);
-      return continuation.perform_mapping();
-    }
-
-    //--------------------------------------------------------------------------
-    bool ProcessorManager::invoke_mapper_speculate(Mappable *op, bool &value)
-    //--------------------------------------------------------------------------
-    {
-      MapperContinuation2Ret<bool,const Mappable*,bool&,
-                             &Mapper::speculate_on_predicate, true/*block*/>
-                     continuation(this, op->map_id, false/*init*/, op, value);
-      return continuation.perform_mapping();
-    }
-
-    //--------------------------------------------------------------------------
-    void ProcessorManager::invoke_mapper_configure_context(TaskOp *task)
-    //--------------------------------------------------------------------------
-    {
-      MapperContinuation1NoRet<Task*,&Mapper::configure_context, true/*block*/>
-                                  continuation(this, task->map_id, task);
-      continuation.perform_mapping();
-    }
-
-    //--------------------------------------------------------------------------
-    bool ProcessorManager::invoke_mapper_rank_copy_targets(Mappable *mappable,
-                                           LogicalRegion handle, 
-                                           const std::set<Memory> &memories,
-                                           bool complete,
-                                           size_t max_blocking_factor,
-                                           std::set<Memory> &to_reuse,
-                                           std::vector<Memory> &to_create,
-                                           bool &create_one,
-                                           size_t &blocking_factor)
-    //--------------------------------------------------------------------------
-    {
-      // Don't both updating this one, it is going away soon
-#ifdef DEBUG_HIGH_LEVEL
-      assert(mappable->map_id < mapper_objects.size());
-      assert(mapper_objects[mappable->map_id] != NULL);
-#endif
-      bool result;
-      std::vector<MapperMessage> messages;
-      Event wait_on = Event::NO_EVENT;
-      do
-      {
-        if (wait_on.exists())
-        {
-          if (!messages.empty())
-            send_mapper_messages(mappable->map_id, messages);
-          wait_on.wait();
-        }
-        AutoLock m_lock(mapper_locks[mappable->map_id]);
-        inside_mapper_call[mappable->map_id] = true;
-        result = mapper_objects[mappable->map_id]->rank_copy_targets(mappable,
-            handle, memories, complete, max_blocking_factor, to_reuse, 
-            to_create, create_one, blocking_factor);
-        inside_mapper_call[mappable->map_id] = false;
-        if (defer_mapper_event[mappable->map_id].exists())
-        {
-          wait_on = defer_mapper_event[mappable->map_id];
-          defer_mapper_event[mappable->map_id] = Event::NO_EVENT;
-        }
-        AutoLock g_lock(message_lock);
-        if (!mapper_messages[mappable->map_id].empty())
-        {
-          messages = mapper_messages[mappable->map_id];
-          mapper_messages[mappable->map_id].clear();
-        }
-      } while (wait_on.exists());
-      if (!messages.empty())
-        send_mapper_messages(mappable->map_id, messages);
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    void ProcessorManager::invoke_mapper_rank_copy_sources(Mappable *mappable,
-                                           const std::set<Memory> &memories,
-                                           Memory destination,
-                                           std::vector<Memory> &order)
-    //--------------------------------------------------------------------------
-    {
-      MapperContinuation4NoRet<const Mappable*, const std::set<Memory>&,
-                               Memory,std::vector<Memory>&,
-                               &Mapper::rank_copy_sources,true/*block*/>
-                                continuation(this, mappable->map_id, mappable, 
-                                             memories, destination, order);
-      continuation.perform_mapping();
-    }
-
-    //--------------------------------------------------------------------------
-    void ProcessorManager::invoke_mapper_notify_profiling(TaskOp *task)
-    //--------------------------------------------------------------------------
-    {
-      MapperContinuation1NoRet<const Task*,&Mapper::notify_profiling_info,
-                         true/*block*/> continuation(this, task->map_id, task);
-      continuation.perform_mapping();
-    }
-
-    //--------------------------------------------------------------------------
-    bool ProcessorManager::invoke_mapper_map_must_epoch(
-        const std::vector<Task*> &tasks,
-        const std::vector<Mapper::MappingConstraint> &constraints,
-        MapperID map_id, MappingTagID tag)
-    //--------------------------------------------------------------------------
-    {
-      MapperContinuation3Ret<bool,const std::vector<Task*>&,
-                             const std::vector<Mapper::MappingConstraint>&,
-                             MappingTagID,&Mapper::map_must_epoch,true/*block*/>
-                               continuation(this, map_id, false/*init*/, 
-                                            tasks, constraints, tag);
-      return continuation.perform_mapping();
-    }
-
-    //--------------------------------------------------------------------------
-    int ProcessorManager::invoke_mapper_get_tunable_value(TaskOp *task,
-                                                          TunableID tid,
-                                                          MapperID map_id,
-                                                          MappingTagID tag)
-    //--------------------------------------------------------------------------
-    {
-      MapperContinuation3Ret<int,const Task*,TunableID,MappingTagID,
-                             &Mapper::get_tunable_value,true/*block*/>
-                         continuation(this, map_id, 0/*init*/, task, tid, tag);
-      return continuation.perform_mapping();
-    }
-
-    //--------------------------------------------------------------------------
-    void ProcessorManager::invoke_mapper_handle_message(MapperID map_id,
-                                                        Processor source,
-                                                        const void *message,
-                                                        size_t length)
-    //--------------------------------------------------------------------------
-    {
-      MapperContinuation3NoRet<Processor,const void*,size_t,
-                               &Mapper::handle_message,true/*block*/>
-                         continuation(this, map_id, source, message, length);
-      continuation.perform_mapping();
-    }
-
-    //--------------------------------------------------------------------------
-    void ProcessorManager::invoke_mapper_task_result(MapperID map_id,
-                                                     Event event,
-                                                     const void *result,
-                                                     size_t result_size)
-    //--------------------------------------------------------------------------
-    {
-      MapperContinuation3NoRet<MapperEvent,const void*,size_t,
-                               &Mapper::handle_mapper_task_result,true/*block*/>
-                         continuation(this, map_id, event, result, result_size);
-      continuation.perform_mapping();
-    }
-
-    //--------------------------------------------------------------------------
-    void ProcessorManager::invoke_mapper_permit_task_steal(MapperID map_id,
-                Processor thief, const std::vector<const Task*> &stealable,
-                std::set<const Task*> &to_steal)
-    //--------------------------------------------------------------------------
-    {
-      MapperContinuation3NoRet<Processor,const std::vector<const Task*>&,
-            std::set<const Task*>&,&Mapper::permit_task_steal,true/*block*/>
-                      continuation(this, map_id, thief, stealable, to_steal);
-      continuation.perform_mapping();
-    }
-
-    //--------------------------------------------------------------------------
-    void ProcessorManager::invoke_mapper_target_task_steal(MapperID map_id, 
-                                         const std::set<Processor> &blacklist,
-                                         std::set<Processor> &steal_targets)
-    //--------------------------------------------------------------------------
-    {
-      MapperContinuation2NoRet<const std::set<Processor>&,std::set<Processor>&,
-                               &Mapper::target_task_steal,false/*block*/>
-                           continuation(this, map_id, blacklist, steal_targets);
-      continuation.perform_mapping();
-    }
-
-    //--------------------------------------------------------------------------
-    void ProcessorManager::invoke_mapper_select_tasks_to_schedule(
-                          MapperID map_id, const std::list<Task*> &ready_tasks)
-    //--------------------------------------------------------------------------
-    {
-      MapperContinuation1NoRet<const std::list<Task*>&,
-                              &Mapper::select_tasks_to_schedule, false/*block*/>
-                               continuation(this, map_id, ready_tasks);
-      continuation.perform_mapping();
-    }
-
-    //--------------------------------------------------------------------------
-    void ProcessorManager::defer_mapper_message(Processor target, 
-                            MapperID map_id, const void *message, size_t length)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(map_id < mapper_messages.size());
-#endif
-      // Take the message lock
-      AutoLock g_lock(message_lock);
-      // Check to see if we are inside of a mapper call
-      if (inside_mapper_call[map_id])
-      {
-        // Need to make a copy here of the message
-        void *copy = malloc(length);
-        memcpy(copy, message, length);
-        // save the message
-        mapper_messages[map_id].push_back(MapperMessage(target, copy, length));
-      }
-      else
-      {
-        // Otherwise the application has explicitly invoked one
-        // of its mapper calls, so we can safely send the message now
-        // without needing to worry about deadlock 
-        runtime->invoke_mapper_handle_message(target, map_id, local_proc,
-                                              message, length);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void ProcessorManager::defer_mapper_broadcast(MapperID map_id, 
-                                                  const void *message,
-                                                  size_t length, int radix)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(map_id < mapper_messages.size());
-#endif
-      // Handle bad cases here
-      if (radix < 2)
-        radix = 2;
-      // Take the message lock
-      AutoLock g_lock(message_lock);
-      // Check to see if we are inside of a mapper call
-      if (inside_mapper_call[map_id])
-      {
-        // Need to make a copy of the message here
-        void *copy = malloc(length);
-        memcpy(copy, message, length);
-        mapper_messages[map_id].push_back(MapperMessage(copy, length, radix));
-      }
-      else
-      {
-        // Otherwise the application has explicitly invoked one of its
-        // mapper calls, so we can safely send the message now without
-        // needing to worry about deadlock.
-        runtime->invoke_mapper_broadcast(map_id, local_proc, 
-                                         message, length, radix, 1/*index*/);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void ProcessorManager::defer_mapper_call(MapperID map_id, Event wait_on)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(map_id < mapper_messages.size());
-      assert(inside_mapper_call[map_id]);
-#endif
-      defer_mapper_event[map_id] = wait_on;
-    }
-
-    //--------------------------------------------------------------------------
-    void ProcessorManager::send_mapper_messages(MapperID map_id, 
-                                           std::vector<MapperMessage> &messages)
-    //--------------------------------------------------------------------------
-    {
-      for (std::vector<MapperMessage>::iterator it = messages.begin();
-            it != messages.end(); it++)
-      {
-        // Check to see if this a specific message or a broadcast
-        if (it->target.exists())
-          runtime->invoke_mapper_handle_message(it->target, map_id, local_proc,
-                                                it->message, it->length);
-        else
-          runtime->invoke_mapper_broadcast(map_id, local_proc, 
-                                           it->message, it->length, 
-                                           it->radix, 1/*index*/);
-        // After we are done sending the message, we can free the memory
-        free(it->message);
-      }
-      messages.clear();
-    } 
 
     //--------------------------------------------------------------------------
     void ProcessorManager::perform_scheduling(void)
@@ -2899,28 +2353,6 @@ namespace Legion {
       }
     }
 
-    //--------------------------------------------------------------------------
-    size_t MemoryManager::sample_allocated_space(void)
-    //--------------------------------------------------------------------------
-    {
-      return (capacity - remaining_capacity); 
-    }
-
-    //--------------------------------------------------------------------------
-    size_t MemoryManager::sample_free_space(void)
-    //--------------------------------------------------------------------------
-    {
-      return remaining_capacity;
-    }
-
-    //--------------------------------------------------------------------------
-    unsigned MemoryManager::sample_allocated_instances(void)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock m_lock(manager_lock, 1, false/*exclusive*/);
-      return (physical_instances.size() + reduction_instances.size());
-    }
-
     /////////////////////////////////////////////////////////////
     // Virtual Channel 
     /////////////////////////////////////////////////////////////
@@ -3442,12 +2874,12 @@ namespace Legion {
             }
           case SEND_MAPPER_MESSAGE:
             {
-              runtime->handle_mapper_message(derez);
+              // TODO
               break;
             }
           case SEND_MAPPER_BROADCAST:
             {
-              runtime->handle_mapper_broadcast(derez);
+              // TODO
               break;
             }
           case SEND_TASK_IMPL_SEMANTIC_REQ:
@@ -5149,7 +4581,6 @@ namespace Legion {
         proc_spaces(processor_spaces),
         task_variant_lock(Reservation::create_reservation()),
         layout_constraints_lock(Reservation::create_reservation()),
-        mapper_info_lock(Reservation::create_reservation()),
         unique_index_space_id((unique == 0) ? runtime_stride : unique),
         unique_index_partition_id((unique == 0) ? runtime_stride : unique), 
         unique_field_space_id((unique == 0) ? runtime_stride : unique),
@@ -5413,8 +4844,6 @@ namespace Legion {
       message_manager_lock = Reservation::NO_RESERVATION;
       memory_managers.clear();
       projection_functors.clear();
-      mapper_info_lock.destroy_reservation();
-      mapper_info_lock = Reservation::NO_RESERVATION;
       available_lock.destroy_reservation();
       available_lock = Reservation::NO_RESERVATION;
       group_lock.destroy_reservation();
@@ -6098,11 +5527,7 @@ namespace Legion {
       add_to_dependence_queue(proc, op);
 #ifdef INORDER_EXECUTION
       if (program_order_execution && !term_event.has_triggered())
-      {
-        pre_wait(proc);
         term_event.wait();
-        post_wait(proc);
-      }
 #endif
     }
 
@@ -6689,11 +6114,7 @@ namespace Legion {
       add_to_dependence_queue(proc, op);
 #ifdef INORDER_EXECUTION
       if (program_order_execution && !term_event.has_triggered())
-      {
-        pre_wait(proc);
         term_event.wait();
-        post_wait(proc);
-      }
 #endif
     }
 
@@ -7008,11 +6429,7 @@ namespace Legion {
       add_to_dependence_queue(proc, part_op);
 #ifdef INORDER_EXECUTION
       if (program_order_execution && !term_event.has_triggered())
-      {
-        pre_wait(proc);
         term_event.wait();
-        post_wait(proc);
-      }
 #endif
       return pid; 
     }
@@ -7063,11 +6480,7 @@ namespace Legion {
       add_to_dependence_queue(proc, part_op);
 #ifdef INORDER_EXECUTION
       if (program_order_execution && !term_event.has_triggered())
-      {
-        pre_wait(proc);
         term_event.wait();
-        post_wait(proc);
-      }
 #endif
       return pid;
     }
@@ -7139,11 +6552,7 @@ namespace Legion {
       add_to_dependence_queue(proc, part_op);
 #ifdef INORDER_EXECUTION
       if (program_order_execution && !term_event.has_triggered())
-      {
-        pre_wait(proc);
         term_event.wait();
-        post_wait(proc);
-      }
 #endif
       return pid;
     }
@@ -7216,11 +6625,7 @@ namespace Legion {
       add_to_dependence_queue(proc, part_op);
 #ifdef INORDER_EXECUTION
       if (program_order_execution && !term_event.has_triggered())
-      {
-        pre_wait(proc);
         term_event.wait();
-        post_wait(proc);
-      }
 #endif
       return pid;
     }
@@ -7293,11 +6698,7 @@ namespace Legion {
       add_to_dependence_queue(proc, part_op);
 #ifdef INORDER_EXECUTION
       if (program_order_execution && !term_event.has_triggered())
-      {
-        pre_wait(proc);
         term_event.wait();
-        post_wait(proc);
-      }
 #endif
       return pid;
     }
@@ -7357,11 +6758,7 @@ namespace Legion {
       add_to_dependence_queue(proc, part_op);
 #ifdef INORDER_EXECUTION
       if (program_order_execution && !term_event.has_triggered())
-      {
-        pre_wait(proc);
         term_event.wait();
-        post_wait(proc);
-      }
 #endif
     }
 
@@ -7436,19 +6833,11 @@ namespace Legion {
         // Wait for all the re-mapping operations to complete
         Event mapped_event = Event::merge_events(mapped_events);
         if (!mapped_event.has_triggered())
-        {
-          pre_wait(proc);
           mapped_event.wait();
-          post_wait(proc);
-        }
       }
 #ifdef INORDER_EXECUTION
       if (program_order_execution && !term_event.has_triggered())
-      {
-        pre_wait(proc);
         term_event.wait();
-        post_wait(proc);
-      }
 #endif
       return pid;
     }
@@ -7524,19 +6913,11 @@ namespace Legion {
         // Wait for all the re-mapping operations to complete
         Event mapped_event = Event::merge_events(mapped_events);
         if (!mapped_event.has_triggered())
-        {
-          pre_wait(proc);
           mapped_event.wait();
-          post_wait(proc);
-        }
       }
 #ifdef INORDER_EXECUTION
       if (program_order_execution && !term_event.has_triggered())
-      {
-        pre_wait(proc);
         term_event.wait();
-        post_wait(proc);
-      }
 #endif
       return pid;
     }
@@ -7613,19 +6994,11 @@ namespace Legion {
         // Wait for all the re-mapping operations to complete
         Event mapped_event = Event::merge_events(mapped_events);
         if (!mapped_event.has_triggered())
-        {
-          pre_wait(proc);
           mapped_event.wait();
-          post_wait(proc);
-        }
       }
 #ifdef INORDER_EXECUTION
       if (program_order_execution && !term_event.has_triggered())
-      {
-        pre_wait(proc);
         term_event.wait();
-        post_wait(proc);
-      }
 #endif
       return pid;
     }
@@ -7713,11 +7086,7 @@ namespace Legion {
       add_to_dependence_queue(proc, part_op);
 #ifdef INORDER_EXECUTION
       if (program_order_execution && !term_event.has_triggered())
-      {
-        pre_wait(proc);
         term_event.wait();
-        post_wait(proc);
-      }
 #endif
       return result;
     }
@@ -7769,11 +7138,7 @@ namespace Legion {
       add_to_dependence_queue(proc, part_op);
 #ifdef INORDER_EXECUTION
       if (program_order_execution && !term_event.has_triggered())
-      {
-        pre_wait(proc);
         term_event.wait();
-        post_wait(proc);
-      }
 #endif
       return result;
     }
@@ -7827,11 +7192,7 @@ namespace Legion {
       add_to_dependence_queue(proc, part_op);
 #ifdef INORDER_EXECUTION
       if (program_order_execution && !term_event.has_triggered())
-      {
-        pre_wait(proc);
         term_event.wait();
-        post_wait(proc);
-      }
 #endif
       return result;
     }
@@ -7885,11 +7246,7 @@ namespace Legion {
       add_to_dependence_queue(proc, part_op);
 #ifdef INORDER_EXECUTION
       if (program_order_execution && !term_event.has_triggered())
-      {
-        pre_wait(proc);
         term_event.wait();
-        post_wait(proc);
-      }
 #endif
       return result;
     }
@@ -7944,11 +7301,7 @@ namespace Legion {
       add_to_dependence_queue(proc, part_op);
 #ifdef INORDER_EXECUTION
       if (program_order_execution && !term_event.has_triggered())
-      {
-        pre_wait(proc);
         term_event.wait();
-        post_wait(proc);
-      }
 #endif
       return result;
     }
@@ -8404,11 +7757,7 @@ namespace Legion {
       add_to_dependence_queue(proc, op);
 #ifdef INORDER_EXECUTION
       if (program_order_execution && !term_event.has_triggered())
-      {
-        pre_wait(proc);
         term_event.wait();
-        post_wait(proc);
-      }
 #endif
     }
 
@@ -8535,11 +7884,7 @@ namespace Legion {
       add_to_dependence_queue(proc, op);
 #ifdef INORDER_EXECUTION
       if (program_order_execution && !term_event.has_triggered())
-      {
-        pre_wait(proc);
         term_event.wait();
-        post_wait(proc);
-      }
 #endif
     }
 
@@ -8577,11 +7922,7 @@ namespace Legion {
       add_to_dependence_queue(proc, op);
 #ifdef INORDER_EXECUTION
       if (program_order_execution && !term_event.has_triggered())
-      {
-        pre_wait(proc);
         term_event.wait();
-        post_wait(proc);
-      }
 #endif
     }
 
@@ -9625,11 +8966,7 @@ namespace Legion {
       add_to_dependence_queue(proc, fill_op);
 #ifdef INORDER_EXECUTION
       if (program_order_execution && !term_event.has_triggered())
-      {
-        pre_wait(proc);
         term_event.wait();
-        post_wait(proc);
-      }
 #endif
       // Remap any regions which we unmapped
       if (!unmapped_regions.empty())
@@ -9645,11 +8982,7 @@ namespace Legion {
         // Wait for all the re-mapping operations to complete
         Event mapped_event = Event::merge_events(mapped_events);
         if (!mapped_event.has_triggered())
-        {
-          pre_wait(proc);
           mapped_event.wait();
-          post_wait(proc);
-        }
       }
     }
 
@@ -9705,11 +9038,7 @@ namespace Legion {
       add_to_dependence_queue(proc, fill_op);
 #ifdef INORDER_EXECUTION
       if (program_order_execution && !term_event.has_triggered())
-      {
-        pre_wait(proc);
         term_event.wait();
-        post_wait(proc);
-      }
 #endif
       // Remap any regions which we unmapped
       if (!unmapped_regions.empty())
@@ -9725,11 +9054,7 @@ namespace Legion {
         // Wait for all the re-mapping operations to complete
         Event mapped_event = Event::merge_events(mapped_events);
         if (!mapped_event.has_triggered())
-        {
-          pre_wait(proc);
           mapped_event.wait();
-          post_wait(proc);
-        }
       }
     }
 
@@ -9787,11 +9112,7 @@ namespace Legion {
       add_to_dependence_queue(proc, fill_op);
 #ifdef INORDER_EXECUTION
       if (program_order_execution && !term_event.has_triggered())
-      {
-        pre_wait(proc);
         term_event.wait();
-        post_wait(proc);
-      }
 #endif
       // Remap any regions which we unmapped
       if (!unmapped_regions.empty())
@@ -9807,11 +9128,7 @@ namespace Legion {
         // Wait for all the re-mapping operations to complete
         Event mapped_event = Event::merge_events(mapped_events);
         if (!mapped_event.has_triggered())
-        {
-          pre_wait(proc);
           mapped_event.wait();
-          post_wait(proc);
-        }
       }
     }
 
@@ -9868,11 +9185,7 @@ namespace Legion {
       add_to_dependence_queue(proc, fill_op);
 #ifdef INORDER_EXECUTION
       if (program_order_execution && !term_event.has_triggered())
-      {
-        pre_wait(proc);
         term_event.wait();
-        post_wait(proc);
-      }
 #endif
       // Remap any regions which we unmapped
       if (!unmapped_regions.empty())
@@ -9888,11 +9201,7 @@ namespace Legion {
         // Wait for all the re-mapping operations to complete
         Event mapped_event = Event::merge_events(mapped_events);
         if (!mapped_event.has_triggered())
-        {
-          pre_wait(proc);
           mapped_event.wait();
-          post_wait(proc);
-        }
       }
     }
 
@@ -10010,11 +9319,7 @@ namespace Legion {
       }
 #ifdef INORDER_EXECUTION
       if (program_order_execution && !term_event.has_triggered())
-      {
-        pre_wait(proc);
         term_event.wait();
-        post_wait(proc);
-      }
 #endif
     }
 
@@ -10134,11 +9439,7 @@ namespace Legion {
       }
 #ifdef INORDER_EXECUTION
       if (program_order_execution && !term_event.has_triggered())
-      {
-        pre_wait(proc);
         term_event.wait();
-        post_wait(proc);
-      }
 #endif
     }
 
@@ -10191,11 +9492,7 @@ namespace Legion {
       add_to_dependence_queue(proc, copy_op);
 #ifdef INORDER_EXECUTION
       if (program_order_execution && !term_event.has_triggered())
-      {
-        pre_wait(proc);
         term_event.wait();
-        post_wait(proc);
-      }
 #endif
       // Remap any regions which we unmapped
       if (!unmapped_regions.empty())
@@ -10211,11 +9508,7 @@ namespace Legion {
         // Wait for all the re-mapping operations to complete
         Event mapped_event = Event::merge_events(mapped_events);
         if (!mapped_event.has_triggered())
-        {
-          pre_wait(proc);
           mapped_event.wait();
-          post_wait(proc);
-        }
       }
     }
 
@@ -10264,11 +9557,7 @@ namespace Legion {
       add_to_dependence_queue(proc, pred_op);
 #ifdef INORDER_EXECUTION
       if (program_order_execution && !term_event.has_triggered())
-      {
-        pre_wait(proc);
         term_event.wait();
-        post_wait(proc);
-      }
 #endif
       return result;
     }
@@ -10308,11 +9597,7 @@ namespace Legion {
       add_to_dependence_queue(proc, pred_op);
 #ifdef INORDER_EXECUTION
       if (program_order_execution && !term_event.has_triggered())
-      {
-        pre_wait(proc);
         term_event.wait();
-        post_wait(proc);
-      }
 #endif
       return result;
     }
@@ -10353,11 +9638,7 @@ namespace Legion {
       add_to_dependence_queue(proc, pred_op);
 #ifdef INORDER_EXECUTION
       if (program_order_execution && !term_event.has_triggered())
-      {
-        pre_wait(proc);
         term_event.wait();
-        post_wait(proc);
-      }
 #endif
       return result;
     }
@@ -10398,11 +9679,7 @@ namespace Legion {
       add_to_dependence_queue(proc, pred_op);
 #ifdef INORDER_EXECUTION
       if (program_order_execution && !term_event.has_triggered())
-      {
-        pre_wait(proc);
         term_event.wait();
-        post_wait(proc);
-      }
 #endif
       return result;
     }
@@ -10618,11 +9895,7 @@ namespace Legion {
       add_to_dependence_queue(proc, collective);
 #ifdef INORDER_EXECUTION
       if (program_order_execution && !term_event.has_triggered())
-      {
-        pre_wait(proc);
         term_event.wait();
-        post_wait(proc);
-      }
 #endif
       return result;
     }
@@ -10709,19 +9982,11 @@ namespace Legion {
         // Wait for all the re-mapping operations to complete
         Event mapped_event = Event::merge_events(mapped_events);
         if (!mapped_event.has_triggered())
-        {
-          pre_wait(proc);
           mapped_event.wait();
-          post_wait(proc);
-        }
       }
 #ifdef INORDER_EXECUTION
       if (program_order_execution && !term_event.has_triggered())
-      {
-        pre_wait(proc);
         term_event.wait();
-        post_wait(proc);
-      }
 #endif
     }
 
@@ -10783,19 +10048,11 @@ namespace Legion {
         // Wait for all the re-mapping operations to complete
         Event mapped_event = Event::merge_events(mapped_events);
         if (!mapped_event.has_triggered())
-        {
-          pre_wait(proc);
           mapped_event.wait();
-          post_wait(proc);
-        }
       }
 #ifdef INORDER_EXECUTION
       if (program_order_execution && !term_event.has_triggered())
-      {
-        pre_wait(proc);
         term_event.wait();
-        post_wait(proc);
-      }
 #endif
     }
 
@@ -10829,12 +10086,7 @@ namespace Legion {
       add_to_dependence_queue(ctx->get_executing_processor(), fence_op);
 #ifdef INORDER_EXECUTION
       if (program_order_execution && !term_event.has_triggered())
-      {
-        Processor proc = ctx->get_executing_processor();
-        pre_wait(proc);
         term_event.wait();
-        post_wait(proc);
-      }
 #endif
     }
 
@@ -10868,12 +10120,7 @@ namespace Legion {
       add_to_dependence_queue(ctx->get_executing_processor(), fence_op);
 #ifdef INORDER_EXECUTION
       if (program_order_execution && !term_event.has_triggered())
-      {
-        Processor proc = ctx->get_executing_processor();
-        pre_wait(proc);
         term_event.wait();
-        post_wait(proc);
-      }
 #endif
     }
 
@@ -10959,12 +10206,7 @@ namespace Legion {
       add_to_dependence_queue(ctx->get_executing_processor(), frame_op);
 #ifdef INORDER_EXECUTION
       if (program_order_execution && !term_event.has_triggered())
-      {
-        Processor proc = ctx->get_executing_processor();
-        pre_wait(proc);
         term_event.wait();
-        post_wait(proc);
-      }
 #endif
     }
 
@@ -11032,11 +10274,7 @@ namespace Legion {
         // Wait for all the re-mapping operations to complete
         Event mapped_event = Event::merge_events(mapped_events);
         if (!mapped_event.has_triggered())
-        {
-          pre_wait(proc);
           mapped_event.wait();
-          post_wait(proc);
-        }
       }
 #ifdef INORDER_EXECUTION
       if (program_order_execution)
@@ -11087,12 +10325,7 @@ namespace Legion {
       add_to_dependence_queue(ctx->get_executing_processor(), timing_op);
 #ifdef INORDER_EXECUTION
       if (program_order_execution && !term_event.has_triggered())
-      {
-        Processor proc = ctx->get_executing_processor();
-        pre_wait(proc);
         term_event.wait();
-        post_wait(proc);
-      }
 #endif
       return result;
     }
@@ -11121,12 +10354,7 @@ namespace Legion {
       add_to_dependence_queue(ctx->get_executing_processor(), timing_op);
 #ifdef INORDER_EXECUTION
       if (program_order_execution && !term_event.has_triggered())
-      {
-        Processor proc = ctx->get_executing_processor();
-        pre_wait(proc);
         term_event.wait();
-        post_wait(proc);
-      }
 #endif
       return result;
     }
@@ -11154,12 +10382,7 @@ namespace Legion {
       add_to_dependence_queue(ctx->get_executing_processor(), timing_op);
 #ifdef INORDER_EXECUTION
       if (program_order_execution && !term_event.has_triggered())
-      {
-        Processor proc = ctx->get_executing_processor();
-        pre_wait(proc);
         term_event.wait();
-        post_wait(proc);
-      }
 #endif
       return result;
     }
@@ -11252,8 +10475,6 @@ namespace Legion {
       assert(proc_managers.find(proc) != proc_managers.end());
 #endif
       proc_managers[proc]->add_mapper(map_id, mapper, true/*check*/);
-      AutoLock m_lock(mapper_info_lock);
-      mapper_infos[mapper] = MapperInfo(proc, map_id);
     }
 
     //--------------------------------------------------------------------------
@@ -11265,8 +10486,6 @@ namespace Legion {
       assert(proc_managers.find(proc) != proc_managers.end());
 #endif
       proc_managers[proc]->replace_default_mapper(mapper);
-      AutoLock m_lock(mapper_info_lock);
-      mapper_infos[mapper] = MapperInfo(proc, 0/*mapper id*/);
     }
 
     //--------------------------------------------------------------------------
@@ -11531,11 +10750,7 @@ namespace Legion {
       add_to_dependence_queue(proc, op);
 #ifdef INORDER_EXECUTION
       if (program_order_execution && !term_event.has_triggered())
-      {
-        pre_wait(proc);
         term_event.wait();
-        post_wait(proc);
-      }
 #endif
     }
 
@@ -11611,11 +10826,7 @@ namespace Legion {
       add_to_dependence_queue(proc, op);
 #ifdef INORDER_EXECUTION
       if (program_order_execution && !term_event.has_triggered())
-      {
-        pre_wait(proc);
         term_event.wait();
-        post_wait(proc);
-      }
 #endif
     }
 
@@ -11763,55 +10974,6 @@ namespace Legion {
       // Just use the standard translation for now
       AddressSpaceID result = handle.address_space();
       return result;
-    }
-
-    //--------------------------------------------------------------------------
-    size_t Runtime::sample_allocated_space(Memory mem)
-    //--------------------------------------------------------------------------
-    {
-      MemoryManager *manager = find_memory(mem);
-      return manager->sample_allocated_space();
-    }
-
-    //--------------------------------------------------------------------------
-    size_t Runtime::sample_free_space(Memory mem)
-    //--------------------------------------------------------------------------
-    {
-      MemoryManager *manager = find_memory(mem);
-      return manager->sample_free_space();
-    }
-
-    //--------------------------------------------------------------------------
-    unsigned Runtime::sample_allocated_instances(Memory mem)
-    //--------------------------------------------------------------------------
-    {
-      MemoryManager *manager = find_memory(mem);
-      return manager->sample_allocated_instances();
-    }
-
-    //--------------------------------------------------------------------------
-    unsigned Runtime::sample_unmapped_tasks(Processor proc, Mapper *mapper)
-    //--------------------------------------------------------------------------
-    {
-      std::map<Processor,ProcessorManager*>::const_iterator finder = 
-        proc_managers.find(proc);
-      if (finder != proc_managers.end())
-      {
-        MapperID map_id;
-        // Find the ID of the mapper requesting the information
-        {
-          AutoLock m_lock(mapper_info_lock,1,false/*exclusive*/);
-          std::map<Mapper*,MapperInfo>::const_iterator finder = 
-            mapper_infos.find(mapper);
-#ifdef DEBUG_HIGH_LEVEL
-          assert(finder != mapper_infos.end());
-#endif
-          map_id = finder->second.map_id;
-        }
-        return finder->second->sample_unmapped_tasks(map_id);
-      }
-      else
-        return 0;
     }
 
     //--------------------------------------------------------------------------
@@ -13280,17 +12442,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
-      Processor target;
-      derez.deserialize(target);
-      MapperID map_id;
-      derez.deserialize(map_id);
-      Processor source;
-      derez.deserialize(source);
-      size_t length;
-      derez.deserialize(length);
-      const void *message = derez.get_current_pointer();
-      derez.advance_pointer(length);
-      invoke_mapper_handle_message(target, map_id, source, message, length);
+      // TODO 
     }
 
     //--------------------------------------------------------------------------
@@ -13298,18 +12450,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
-      MapperID map_id;
-      derez.deserialize(map_id);
-      Processor source;
-      derez.deserialize(source);
-      int radix, offset;
-      derez.deserialize(radix);
-      derez.deserialize(offset);
-      size_t length;
-      derez.deserialize(length);
-      const void *message = derez.get_current_pointer();
-      derez.advance_pointer(length);
-      invoke_mapper_broadcast(map_id, source, message, length, radix, offset);
+      // TODO 
     }
 
     //--------------------------------------------------------------------------
@@ -13724,11 +12865,7 @@ namespace Legion {
           // Wait for all the re-mapping operations to complete
           Event mapped_event = Event::merge_events(mapped_events);
           if (!mapped_event.has_triggered())
-          {
-            pre_wait(proc);
             mapped_event.wait();
-            post_wait(proc);
-          }
         }
       }
     }
@@ -13766,360 +12903,6 @@ namespace Legion {
       assert(proc_managers.find(p) != proc_managers.end());
 #endif
       proc_managers[p]->add_to_local_ready_queue(op, prev_fail);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::pre_wait(Processor proc)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(proc_managers.find(proc) != proc_managers.end());
-#endif
-      // Don't do anything for now
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::post_wait(Processor proc)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(proc_managers.find(proc) != proc_managers.end());
-#endif
-      // Don't do anything for now
-    }
-
-    //--------------------------------------------------------------------------
-    bool Runtime::invoke_mapper_pre_map_task(Processor proc, TaskOp *task)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(proc_managers.find(proc) != proc_managers.end());
-#endif
-      return proc_managers[proc]->invoke_mapper_pre_map_task(task);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::invoke_mapper_select_variant(Processor proc, TaskOp *task)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(proc_managers.find(proc) != proc_managers.end());
-#endif
-      proc_managers[proc]->invoke_mapper_select_variant(task);
-    }
-
-    //--------------------------------------------------------------------------
-    bool Runtime::invoke_mapper_map_task(Processor proc, SingleTask *task)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(proc_managers.find(proc) != proc_managers.end());
-#endif
-      return proc_managers[proc]->invoke_mapper_map_task(task);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::invoke_mapper_post_map_task(Processor proc, TaskOp *task)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(proc_managers.find(proc) != proc_managers.end());
-#endif
-      return proc_managers[proc]->invoke_mapper_post_map_task(task);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::invoke_mapper_failed_mapping(Processor proc,
-                                               Mappable *mappable)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(proc_managers.find(proc) != proc_managers.end());
-#endif
-      proc_managers[proc]->invoke_mapper_failed_mapping(mappable);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::invoke_mapper_notify_result(Processor proc,
-                                              Mappable *mappable)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(proc_managers.find(proc) != proc_managers.end());
-#endif
-      proc_managers[proc]->invoke_mapper_notify_result(mappable);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::invoke_mapper_slice_domain(Processor proc, 
-                      MultiTask *task, std::vector<Mapper::DomainSplit> &splits)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(proc_managers.find(proc) != proc_managers.end());
-#endif
-      proc_managers[proc]->invoke_mapper_slice_domain(task, splits);
-    }
-
-    //--------------------------------------------------------------------------
-    bool Runtime::invoke_mapper_map_inline(Processor proc, Inline *op)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(proc_managers.find(proc) != proc_managers.end());
-#endif
-      return proc_managers[proc]->invoke_mapper_map_inline(op);
-    }
-
-    //--------------------------------------------------------------------------
-    bool Runtime::invoke_mapper_map_copy(Processor proc, Copy *op)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(proc_managers.find(proc) != proc_managers.end());
-#endif
-      return proc_managers[proc]->invoke_mapper_map_copy(op);
-    }
-
-    //--------------------------------------------------------------------------
-    bool Runtime::invoke_mapper_speculate(Processor proc, 
-                                          Mappable *mappable, bool &value)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(proc_managers.find(proc) != proc_managers.end());
-#endif
-      return proc_managers[proc]->invoke_mapper_speculate(mappable, value);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::invoke_mapper_configure_context(Processor proc, TaskOp *task)
-    //--------------------------------------------------------------------------
-    {
- #ifdef DEBUG_HIGH_LEVEL
-      assert(proc_managers.find(proc) != proc_managers.end());
-#endif     
-      // Values are initialized in SingleTask::activate_single
-      proc_managers[proc]->invoke_mapper_configure_context(task);
-      // Should only be using one of these at a time
-      // Frames are the less common case so if we see them then use them
-      if ((task->max_outstanding_frames > 0) && 
-          (task->max_window_size > 0))
-        task->max_window_size = -1;
-    }
-
-    //--------------------------------------------------------------------------
-    bool Runtime::invoke_mapper_rank_copy_targets(Processor proc,
-                                                  Mappable *mappable,
-                                                  LogicalRegion handle,
-                                              const std::set<Memory> &memories,
-                                                  bool complete,
-                                                  size_t max_blocking_factor,
-                                                  std::set<Memory> &to_reuse,
-                                                std::vector<Memory> &to_create,
-                                                  bool &create_one,
-                                                  size_t &blocking_factor)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(proc_managers.find(proc) != proc_managers.end());
-#endif
-      return proc_managers[proc]->invoke_mapper_rank_copy_targets(mappable,
-          handle, memories, complete, max_blocking_factor, to_reuse, 
-          to_create, create_one, blocking_factor);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::invoke_mapper_rank_copy_sources(Processor proc, 
-                                           Mappable *mappable,
-                                           const std::set<Memory> &memories,
-                                           Memory destination,
-                                           std::vector<Memory> &chosen_order)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(proc_managers.find(proc) != proc_managers.end());
-#endif
-      proc_managers[proc]->invoke_mapper_rank_copy_sources(mappable,
-                                memories, destination, chosen_order);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::invoke_mapper_notify_profiling(Processor proc, TaskOp *task)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(proc_managers.find(proc) != proc_managers.end());
-#endif
-      proc_managers[proc]->invoke_mapper_notify_profiling(task);
-    }
-
-    //--------------------------------------------------------------------------
-    bool Runtime::invoke_mapper_map_must_epoch(Processor proc,
-        const std::vector<Task*> &tasks,
-        const std::vector<Mapper::MappingConstraint> &constraints,
-        MapperID map_id, MappingTagID tag)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(proc_managers.find(proc) != proc_managers.end());
-#endif
-      return proc_managers[proc]->invoke_mapper_map_must_epoch(tasks, 
-                                                      constraints, map_id, tag);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::invoke_mapper_handle_message(Processor target,
-          MapperID map_id, Processor source, const void *message, size_t length)
-    //--------------------------------------------------------------------------
-    {
-      if (is_local(target))
-      {
-#ifdef DEBUG_HIGH_LEVEL
-        assert(proc_managers.find(target) != proc_managers.end());
-#endif
-        proc_managers[target]->invoke_mapper_handle_message(map_id, source, 
-                                                            message, length);
-      }
-      else
-      {
-        // Package up the message
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(target);
-          rez.serialize(map_id);
-          rez.serialize(source);
-          rez.serialize(length);
-          rez.serialize(message,length);
-        }
-        send_mapper_message(find_address_space(target), rez);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::invoke_mapper_broadcast(MapperID map_id, Processor source,
-                                          const void *message, size_t length, 
-                                          int radix, int index)
-    //--------------------------------------------------------------------------
-    {
-      // First send the message on to any other remote nodes
-      int base = index * radix;
-      int init = source.address_space();
-      // The runtime stride is the same as the total number of address spaces
-      const int total_address_spaces = runtime_stride;
-      for (int r = 0; r < radix; r++)
-      {
-        int offset = base + r; 
-        // If we've handled all of our address spaces then we are done
-        if (offset > total_address_spaces)
-          break;
-        AddressSpaceID target = (init + offset - 1) % total_address_spaces; 
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(map_id);
-          rez.serialize(source);
-          rez.serialize(radix);
-          rez.serialize(offset);
-          rez.serialize(length);
-          rez.serialize(message,length);
-        }
-        send_mapper_broadcast(target, rez);
-      }
-      // Then send it to all of our local processors
-      for (std::map<Processor,ProcessorManager*>::const_iterator it = 
-            proc_managers.begin(); it != proc_managers.end(); it++)
-      {
-        it->second->invoke_mapper_handle_message(map_id, source, 
-                                                 message, length);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::invoke_mapper_task_result(MapperID map_id, Processor proc,
-                                            Event event, const void *result,
-                                            size_t result_size)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(proc_managers.find(proc) != proc_managers.end());
-#endif
-      proc_managers[proc]->invoke_mapper_task_result(map_id, event, 
-                                                     result, result_size);
-    }
-
-    //--------------------------------------------------------------------------
-    Processor Runtime::locate_mapper_info(Mapper *mapper, MapperID &map_id)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock m_lock(mapper_info_lock,1,false/*exclusive*/);
-      std::map<Mapper*,MapperInfo>::const_iterator finder = 
-        mapper_infos.find(mapper);
-#ifdef DEBUG_HIGH_LEVEL
-      assert(finder != mapper_infos.end());
-#endif
-      map_id = finder->second.map_id;
-      return finder->second.proc;
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_mapper_send_message(Mapper *mapper, Processor target,
-                                             const void *message, size_t length)
-    //--------------------------------------------------------------------------
-    {
-      MapperID map_id;
-      // Find the source processor and the corresponding mapper ID
-      Processor source = locate_mapper_info(mapper, map_id);
-      // Note we can't actually send the message without risking deadlock
-      // so instead lookup the processor manager for the mapper and 
-      // tell it that it has a pending message to send when the mapper
-      // call actually completes.
-#ifdef DEBUG_HIGH_LEVEL
-      assert(proc_managers.find(source) != proc_managers.end());
-#endif
-      proc_managers[source]->defer_mapper_message(target, map_id, 
-                                                  message, length);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_mapper_broadcast(Mapper *mapper, const void *message,
-                                          size_t length, int radix)
-    //--------------------------------------------------------------------------
-    {
-      MapperID map_id;
-      // Find the source processor and the corresponding mapper ID
-      Processor source = locate_mapper_info(mapper, map_id);
-      // Note that we can't actually send the broadcast without risking 
-      // deadlock so instead we're going to defer it until the mapper
-      // call finishes running.
-#ifdef DEBUG_HIGH_LEVEL
-      assert(proc_managers.find(source) != proc_managers.end());
-#endif
-      proc_managers[source]->defer_mapper_broadcast(map_id, message, 
-                                                    length, radix);
-    }
-
-    //--------------------------------------------------------------------------
-    Event Runtime::launch_mapper_task(Mapper *mapper, 
-                             Processor::TaskFuncID tid, const TaskArgument &arg)
-    //--------------------------------------------------------------------------
-    {
-      MapperID map_id;
-      Processor source = locate_mapper_info(mapper, map_id);
-      return launch_mapper_task(mapper, source, tid, arg, map_id);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::defer_mapper_call(Mapper *mapper, Event wait_on)
-    //--------------------------------------------------------------------------
-    {
-      MapperID map_id;
-      Processor source = locate_mapper_info(mapper, map_id);
-#ifdef DEBUG_HIGH_LEVEL
-      assert(proc_managers.find(source) != proc_managers.end());
-#endif
-      proc_managers[source]->defer_mapper_call(map_id, wait_on);
     }
 
     //--------------------------------------------------------------------------

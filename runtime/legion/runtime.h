@@ -474,69 +474,6 @@ namespace Legion {
       void replace_default_mapper(Mapper *m);
       Mapper* find_mapper(MapperID mid) const; 
     public:
-      template<typename MAPPER_CONTINUATION>
-      void invoke_mapper(MapperID map_id, MAPPER_CONTINUATION &continuation,
-                         bool block, bool has_lock);
-      void check_mapper_messages(MapperID map_id, bool need_lock);
-    public:
-      // Functions that perform mapping calls
-      // We really need variadic templates here
-      void invoke_mapper_set_task_options(TaskOp *task);
-      bool invoke_mapper_pre_map_task(TaskOp *task);
-      void invoke_mapper_select_variant(TaskOp *task);
-      bool invoke_mapper_map_task(TaskOp *task);
-      void invoke_mapper_post_map_task(TaskOp *task);
-      void invoke_mapper_failed_mapping(Mappable *mappable);
-      void invoke_mapper_notify_result(Mappable *mappable);
-      void invoke_mapper_slice_domain(TaskOp *task,
-                                      std::vector<Mapper::DomainSplit> &splits);
-      bool invoke_mapper_map_inline(Inline *op);
-      bool invoke_mapper_map_copy(Copy *op);
-      bool invoke_mapper_speculate(Mappable *op, bool &value); 
-      void invoke_mapper_configure_context(TaskOp *task);
-      bool invoke_mapper_rank_copy_targets(Mappable *mappable,
-                                           LogicalRegion handle, 
-                                           const std::set<Memory> &memories,
-                                           bool complete,
-                                           size_t max_blocking_factor,
-                                           std::set<Memory> &to_reuse,
-                                           std::vector<Memory> &to_create,
-                                           bool &create_one,
-                                           size_t &blocking_factor);
-      void invoke_mapper_rank_copy_sources(Mappable *mappable,
-                                           const std::set<Memory> &memories,
-                                           Memory destination,
-                                           std::vector<Memory> &order);
-      void invoke_mapper_notify_profiling(TaskOp *task);
-      bool invoke_mapper_map_must_epoch(const std::vector<Task*> &tasks,
-          const std::vector<Mapper::MappingConstraint> &constraints,
-          MapperID map_id, MappingTagID tag);
-      int invoke_mapper_get_tunable_value(TaskOp *task, TunableID tid,
-                                          MapperID mid, MappingTagID tag);
-      void invoke_mapper_handle_message(MapperID map_id, Processor source,
-                                        const void *message, size_t length);
-      void invoke_mapper_task_result(MapperID map_id, Event event,
-                                     const void *result, size_t result_size);
-      void invoke_mapper_permit_task_steal(MapperID map_id, Processor thief, 
-                                     const std::vector<const Task*> &stealable,
-                                     std::set<const Task*> &to_steal);
-      // This method cannot support waiting
-      void invoke_mapper_target_task_steal(MapperID map_id,
-                                           const std::set<Processor> &blacklist,
-                                           std::set<Processor> &steal_targets);
-      // This method cannot support waiting
-      void invoke_mapper_select_tasks_to_schedule(MapperID map_id,
-                                           const std::list<Task*> &ready_tasks);
-    public:
-      // Handle mapper messages
-      void defer_mapper_message(Processor target, MapperID map_id,
-                                const void *message, size_t length);
-      void defer_mapper_broadcast(MapperID map_id, const void *message,
-                                  size_t length, int radix);
-      void defer_mapper_call(MapperID map_id, Event wait_on);
-      void send_mapper_messages(MapperID map_id, 
-                                std::vector<MapperMessage> &messages);
-    public:
       void perform_scheduling(void);
       void launch_task_scheduler(void);
     public:
@@ -594,9 +531,6 @@ namespace Legion {
       };
       std::vector<ContextState> context_states;
     protected:
-      // Reservation for protecting the list of messages that
-      // need to be sent
-      Reservation message_lock;
       // For each mapper, a list of tasks that are ready to map
       std::vector<std::list<TaskOp*> > ready_queues;
       // Mapper objects
@@ -638,11 +572,6 @@ namespace Legion {
       // Update the manager with information about physical instances
       void allocate_physical_instance(PhysicalManager *manager);
       void free_physical_instance(PhysicalManager *manager);
-    public:
-      // Method for mapper introspection
-      size_t sample_allocated_space(void);
-      size_t sample_free_space(void);
-      unsigned sample_allocated_instances(void);
     protected:
       // The memory that we are managing
       const Memory memory;
@@ -1651,12 +1580,6 @@ namespace Legion {
       void free_physical_instance(PhysicalManager *instance);
       AddressSpaceID find_address_space(Memory handle) const;
     public:
-      // Mapper introspection methods
-      size_t sample_allocated_space(Memory mem);
-      size_t sample_free_space(Memory mem);
-      unsigned sample_allocated_instances(Memory mem);
-      unsigned sample_unmapped_tasks(Processor proc, Mapper *mapper);
-    public:
       // Messaging functions
       MessageManager* find_messenger(AddressSpaceID sid);
       MessageManager* find_messenger(Processor target);
@@ -1929,64 +1852,6 @@ namespace Legion {
       void add_to_dependence_queue(Processor p, Operation *op);
       void add_to_ready_queue(Processor p, TaskOp *task_op, bool prev_fail);
       void add_to_local_queue(Processor p, Operation *op, bool prev_fail);
-    public:
-      // These methods must be called before and after
-      // pre-empting a task for any reason to update
-      // the necessary processor manager to indicate
-      // that there is one fewer task running on the processor
-      void pre_wait(Processor proc);
-      void post_wait(Processor proc);
-    public:
-      // Invoke the mapper for a given processor
-      bool invoke_mapper_pre_map_task(Processor target, TaskOp *task);
-      void invoke_mapper_select_variant(Processor target, TaskOp *task);
-      bool invoke_mapper_map_task(Processor target, SingleTask *task);
-      void invoke_mapper_post_map_task(Processor target, TaskOp *task);
-      void invoke_mapper_failed_mapping(Processor target, Mappable *mappable);
-      void invoke_mapper_notify_result(Processor target, Mappable *mappable);
-      void invoke_mapper_slice_domain(Processor target, MultiTask *task,
-                                      std::vector<Mapper::DomainSplit> &splits);
-      bool invoke_mapper_map_inline(Processor target, Inline *op);
-      bool invoke_mapper_map_copy(Processor target, Copy *op);
-      bool invoke_mapper_speculate(Processor target, 
-                                   Mappable *mappable, bool &value);
-      void invoke_mapper_configure_context(Processor target, TaskOp *task);
-      bool invoke_mapper_rank_copy_targets(Processor target, Mappable *mappable,
-                                           LogicalRegion handle, 
-                                           const std::set<Memory> &memories,
-                                           bool complete,
-                                           size_t max_blocking_factor,
-                                           std::set<Memory> &to_reuse,
-                                           std::vector<Memory> &to_create,
-                                           bool &create_one,
-                                           size_t &blocking_factor);
-      void invoke_mapper_rank_copy_sources(Processor target, Mappable *mappable,
-                                           const std::set<Memory> &memories,
-                                           Memory destination,
-                                           std::vector<Memory> &chosen_order);
-      void invoke_mapper_notify_profiling(Processor target, TaskOp *task);
-      bool invoke_mapper_map_must_epoch(Processor target, 
-                                        const std::vector<Task*> &tasks,
-                      const std::vector<Mapper::MappingConstraint> &constraints,
-                                        MapperID map_id, MappingTagID tag);
-      void invoke_mapper_handle_message(Processor target, MapperID map_id,
-                          Processor source, const void *message, size_t length);
-      void invoke_mapper_broadcast(MapperID map_id, Processor source,
-                                   const void *message, size_t length,
-                                   int radix, int index);
-      void invoke_mapper_task_result(MapperID map_id, Processor source,
-                                     Event event, const void *result,
-                                     size_t result_size);
-    public:
-      // Handle directions and query requests from the mapper
-      Processor locate_mapper_info(Mapper *mapper, MapperID &map_id);
-      void handle_mapper_send_message(Mapper *mapper, Processor target, 
-                                      const void *message, size_t length);
-      void handle_mapper_broadcast(Mapper *mapper, const void *message,
-                                   size_t length, int radix);
-      Event launch_mapper_task(Mapper *mapper, Processor::TaskFuncID tid,
-                               const TaskArgument &arg);
-      void defer_mapper_call(Mapper *mapper, Event wait_on);
     public:
       inline Processor find_utility_group(void) { return utility_group; }
       Processor find_processor_group(const std::set<Processor> &procs);

@@ -179,6 +179,19 @@ namespace Legion {
   class PointerConstraint;
   class LayoutConstraintSet;
   class TaskLayoutConstraintSet;
+
+  namespace Mapping {
+    class Mappable;
+    class Task;
+    class Copy;
+    class InlineMapping;
+    class Acquire;
+    class Release;
+    class Close;
+    class PhysicalInstance;
+    class ProfilingRequestSet;
+    class Mapper;
+  };
   
   namespace Internal {
 
@@ -657,6 +670,12 @@ namespace Legion {
     class LegionProfiler;
     class LegionProfInstance;
 
+    // mapper_manager.h
+    class MappingCallInfo;
+    class MapperManager;
+    class SerializingManager;
+    class ConcurrentManager;
+
 #define FRIEND_ALL_RUNTIME_CLASSES                          \
     friend class Legion::Runtime;                           \
     friend class Internal::Runtime;                         \
@@ -883,6 +902,10 @@ namespace Legion {
                              const void*,size_t,Processor);
   // The most magical of typedefs
   typedef Internal::SingleTask* Context;
+  // Anothing magical typedef
+  namespace Mapping {
+    typedef Internal::MappingCallInfo* MapperContext;
+  };
 
   namespace Internal {
     // A little bit of logic here to figure out the 

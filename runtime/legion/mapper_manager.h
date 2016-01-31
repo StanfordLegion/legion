@@ -22,10 +22,45 @@ namespace Legion {
   namespace Internal {
 
     enum MappingCallKind {
-
+      GET_MAPER_SYNC_MODEL_CALL,
+      SELECT_TASK_OPTIONS_CALL,
+      PREMAP_TASK_CALL,
+      SLICE_DOMAIN_CALL,
+      MAP_TASK_CALL,
+      POSTMAP_TASK_CALL,
+      TASK_RANK_COPY_SOURCES_CALL,
+      TASK_SPECULATE_CALL,
+      TASK_REPORT_PROFILING_CALL,
+      MAP_INLINE_CALL,
+      INLINE_RANK_COPY_SOURCES_CALL,
+      INLINT_REPORT_PROFILING_CALL,
+      MAP_COPY_CALL,
+      COPY_RANK_COPY_SOURCES_CALL,
+      COPY_SPECULATE_CALL,
+      COPY_REPORT_PROFILING_CALL,
+      MAP_CLOSE_CALL,
+      CLOSE_RANK_COPY_SOURCES_CALL,
+      CLOSE_REPORT_PROFILING_CALL,
+      MAP_ACQUIRE_CALL,
+      ACQUIRE_RANK_COPY_SOURCES_CALL,
+      ACQUIRE_SPECULATE_CALL,
+      ACQUIRE_REPORT_PROFILING_CALL,
+      MAP_RELEASE_CALL,
+      RELEASE_RANK_COPY_SOURCES_CALL,
+      RELEASE_SPECULATE_CALL,
+      RELEASE_REPORT_PROFILING_CALL,
+      CONFIGURE_CONTEXT_CALL,
+      SELECT_TUNABLE_VALUE_CALL,
+      MAP_MUST_EPOCH_CALL,
+      MAP_DATAFLOW_GRAPH_CALL,
+      SELECT_TASKS_TO_MAP_CALL,
+      SELECT_STEAL_TARGETS_CALL,
+      PERMIT_STEAL_REQUEST_CALL,
+      HANDLE_MESSAGE_CALL,
+      HANDLE_TASK_RESULT_CALL,
     };
 
-    struct MappingCallInfo {
+    class MappingCallInfo {
     public:
       MappingCallInfo(MapperManager *man, MappingCallKind k)
         : manager(man), resume(UserEvent::NO_USER_EVENT), kind(k) { }
@@ -45,8 +80,25 @@ namespace Legion {
      */
     class MapperManager {
     public:
+      struct MapperContinuationArgs {
+      public:
+        HLRTaskID hlr_id;
+        MapperManager *manager;
+        MappingCallKind call;
+        void *arg1, *arg2, *arg3;
+      };
+    public:
       MapperManager(Runtime *runtime, Mapping::Mapper *mapper);
       virtual ~MapperManager(void);
+    public:
+      void perform_continuation(Event precondition, MappingCallKind call, 
+                                void *arg1, void *arg2, void *arg3 = NULL,
+                                Operation *op = NULL);
+      void execute_continuation(MappingCallKind call,
+                                void *arg1, void *arg2, void *arg3);
+    public:
+      void invoke_select_task_options(TaskOp *task, TaskOptions *output,
+                                      bool first_invocation = true);
     public:
       virtual bool is_locked(MappingCallInfo *info) = 0;
       virtual void lock_mapper(MappingCallInfo *info, bool read_only) = 0;
@@ -56,7 +108,8 @@ namespace Legion {
       virtual void enable_reentrant(MappingCallInfo *info) = 0;
       virtual void disable_reentrant(MappingCallInfo *info) = 0;
     protected:
-      virtual MappingCallInfo* begin_mapper_call(MappingCallKind kind) = 0;
+      virtual MappingCallInfo* begin_mapper_call(MappingCallKind kind,
+                bool first_invocation, Event &precondition) = 0;
       virtual void pause_mapper_call(MappingCallInfo *info) = 0;
       virtual void resume_mapper_call(MappingCallInfo *info) = 0;
       virtual void finish_mapper_call(MappingCallInfo *info) = 0;
@@ -127,7 +180,8 @@ namespace Legion {
       virtual void enable_reentrant(MappingCallInfo *info);
       virtual void disable_reentrant(MappingCallInfo *info);
     protected:
-      virtual MappingCallInfo* begin_mapper_call(MappingCallKind kind);
+      virtual MappingCallInfo* begin_mapper_call(MappingCallKind kind,
+                bool first_invocation, Event &precondition);
       virtual void pause_mapper_call(MappingCallInfo *info);
       virtual void resume_mapper_call(MappingCallInfo *info);
       virtual void finish_mapper_call(MappingCallInfo *info);
@@ -175,10 +229,14 @@ namespace Legion {
       virtual void enable_reentrant(MappingCallInfo *info);
       virtual void disable_reentrant(MappingCallInfo *info);
     protected:
-      virtual MappingCallInfo* begin_mapper_call(MappingCallKind kind);
+      virtual MappingCallInfo* begin_mapper_call(MappingCallKind kind,
+                bool first_invocation, Event &precondition);
       virtual void pause_mapper_call(MappingCallInfo *info);
       virtual void resume_mapper_call(MappingCallInfo *info);
       virtual void finish_mapper_call(MappingCallInfo *info);
+    protected:
+      // Must be called while holding the lock
+      void release_lock(std::vector<UserEvent> &to_trigger);
     protected:
       LockState lock_state;
       std::set<MappingCallInfo*> current_holders;

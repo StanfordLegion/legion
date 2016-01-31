@@ -33,6 +33,9 @@ namespace Legion {
      */
     class Mappable {
     public:
+      virtual UniqueID get_unique_id(void) const = 0;
+      virtual int get_depth(void) const = 0;
+    public:
       MapperID                                  map_id;
       MappingTagID                              tag;
     };
@@ -50,9 +53,7 @@ namespace Legion {
       FRIEND_ALL_RUNTIME_CLASSES
       Task(void);
     public:
-      UniqueID get_unique_task_id(void) const;
-      unsigned get_depth(void) const;
-      const char* get_task_name(void) const;
+      virtual const char* get_task_name(void) const = 0;
     public:
       // Task argument information
       Processor::TaskFuncID task_id; 
@@ -77,7 +78,6 @@ namespace Legion {
       Processor                           orig_proc;
       Processor                           current_proc;
       unsigned                            steal_count;
-      unsigned                            depth;  
       bool                                speculated;
     public:
       // Parent task (only good for one recursion)
@@ -93,9 +93,6 @@ namespace Legion {
     protected:
       FRIEND_ALL_RUNTIME_CLASSES
       Copy(void);
-    public:
-      UniqueID get_unique_copy_id(void) const;
-      unsigned get_depth(void) const;
     public:
       // Copy Launcher arguments
       std::vector<RegionRequirement>    src_requirements;
@@ -118,9 +115,6 @@ namespace Legion {
       FRIEND_ALL_RUNTIME_CLASSES
       InlineMapping(void);
     public:
-      UniqueID get_unique_inline_id(void) const;
-      unsigned get_depth(void) const;
-    public:
       // Inline Launcher arguments
       RegionRequirement                 requirement;
     public:
@@ -137,9 +131,6 @@ namespace Legion {
     protected:
       FRIEND_ALL_RUNTIME_CLASSES
       Acquire(void);
-    public:
-      UniqueID get_unique_acquire_id(void) const;
-      unsigned get_depth(void) const;
     public:
       // Acquire Launcher arguments
       LogicalRegion                     logical_region;
@@ -163,9 +154,6 @@ namespace Legion {
     protected:
       FRIEND_ALL_RUNTIME_CLASSES
       Release(void);
-    public:
-      UniqueID get_unique_release_id(void) const;
-      unsigned get_depth(void) const;
     public:
       // Release Launcher arguments
       LogicalRegion                     logical_region;
@@ -193,9 +181,6 @@ namespace Legion {
     protected:
       FRIEND_ALL_RUNTIME_CLASSES
       Close(void);
-    public:
-      UniqueID get_unique_close_id(void) const;
-      unsigned get_depth(void);
     public:
       // Synthesized region requirement
       RegionRequirement                 requirement;
@@ -266,7 +251,7 @@ namespace Legion {
     // Set of profiling requests for task launches
     // This struct will be filled out by the new faults
     // branch so it's just here as a place holder for now
-    struct ProfilingRequestSet {
+    class ProfilingRequestSet {
       // TODO fill this in with the kinds of profiling requests
     };
 
