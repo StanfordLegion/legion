@@ -26,6 +26,7 @@
 #include "legion_profiling.h"
 #include "legion_instances.h"
 #include "legion_views.h"
+#include "mapper_manager.h"
 #include "garbage_collection.h"
 #ifdef HANG_TRACE
 #include <signal.h>
@@ -16683,6 +16684,11 @@ namespace Legion {
         case HLR_CONTINUATION_TASK_ID:
           {
             LegionContinuation::handle_continuation(args);
+            break;
+          }
+        case HLR_MAPPER_CONTINUATION_TASK_ID:
+          {
+            MapperContinuation::handle_continuation(args);
             break;
           }
         case HLR_TASK_IMPL_SEMANTIC_INFO_REQ_TASK_ID:

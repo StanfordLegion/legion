@@ -32,6 +32,9 @@ namespace Legion {
      * operation types.
      */
     class Mappable {
+    protected:
+      FRIEND_ALL_RUNTIME_CLASSES
+      Mappable(void);
     public:
       virtual UniqueID get_unique_id(void) const = 0;
       virtual int get_depth(void) const = 0;
@@ -557,7 +560,7 @@ namespace Legion {
 
       /**
        * ----------------------------------------------------------------------
-       *  Rank Copy Sources 
+       *  Select Task Sources 
        * ----------------------------------------------------------------------
        * The rank copy sources mapper call allows for the mapper to 
        * select a ranking of potential source physical instances when
@@ -569,19 +572,19 @@ namespace Legion {
        * 'region_req_index' field indicates the index of the region
        * requirement for which this copy is being requested.
        */
-      struct RankTaskCopyInput {
+      struct SelectTaskSrcInput {
         PhysicalInstance                        target;
         std::set<PhysicalInstance>              source_instances;
         unsigned                                region_req_index;
       };
-      struct RankTaskCopyOutput {
+      struct SelectTaskSrcOutput {
         std::deque<PhysicalInstance>            chosen_ranking;
       };
       //------------------------------------------------------------------------
-      virtual void rank_copy_sources(const MapperContext       ctx,
-                                     const Task&               task,
-                                     const RankTaskCopyInput&  input,
-                                           RankTaskCopyOutput& output) = 0;
+      virtual void select_task_sources(const MapperContext        ctx,
+                                       const Task&                task,
+                                       const SelectTaskSrcInput&  input,
+                                             SelectTaskSrcOutput& output) = 0;
       //------------------------------------------------------------------------
 
       /**
@@ -656,7 +659,7 @@ namespace Legion {
 
       /**
        * ----------------------------------------------------------------------
-       *  Rank Copy Sources 
+       *  Select Inline Sources 
        * ----------------------------------------------------------------------
        * The rank copy sources mapper call allows for the mapper to select a
        * ranking for source physical instances when generating copies for an
@@ -667,18 +670,18 @@ namespace Legion {
        * valid data. The runtime will also issue copies from any instances not 
        * placed in the ranking in an unspecified order.
        */
-      struct RankInlineCopyInput {
+      struct SelectInlineSrcInput {
         PhysicalInstance                        target;
         std::set<PhysicalInstance>              source_instances;
       };
-      struct RankInlineCopyOutput {
+      struct SelectInlineSrcOutput {
         std::deque<PhysicalInstance>            chosen_ranking;
       };
       //------------------------------------------------------------------------
-      virtual void rank_copy_sources(const MapperContext         ctx,
-                                     const InlineMapping&        inline_op,
-                                     const RankInlineCopyInput&  input,
-                                           RankInlineCopyOutput& output) = 0;
+      virtual void select_inline_sources(const MapperContext        ctx,
+                                       const InlineMapping&         inline_op,
+                                       const SelectInlineSrcInput&  input,
+                                             SelectInlineSrcOutput& output) = 0;
       //------------------------------------------------------------------------
 
       // No speculation for inline mappings
@@ -736,9 +739,9 @@ namespace Legion {
 
       /**
        * ----------------------------------------------------------------------
-       *  Rank Copy Sources 
+       *  Select Copy Sources 
        * ----------------------------------------------------------------------
-       * The rank copy sources mapper call allows the mapper to select a
+       * The select copy sources mapper call allows the mapper to select a
        * ranking of physical instances to use when updating the fields for
        * a target physical instance. The physical instance is specified in 
        * the 'target' field and the set of source physical instances are
@@ -750,20 +753,20 @@ namespace Legion {
        * in the chosen ranking will be considered by the runtime in an 
        * undefined order for updating valid fields.
        */
-      struct RankCopyInput {
+      struct SelectCopySrcInput {
         PhysicalInstance                              target;
         std::set<PhysicalInstance>                    source_instances;
         bool                                          is_src;
         unsigned                                      region_req_index;
       };
-      struct RankCopyOutput {
+      struct SelectCopySrcOutput {
         std::deque<PhysicalInstance>                  chosen_ranking;
       };
       //------------------------------------------------------------------------
-      virtual void rank_copy_sources(const MapperContext      ctx,
-                                     const Copy&              copy,
-                                     const RankCopyInput&     input,
-                                           RankCopyOutput&    output) = 0;
+      virtual void select_copy_sources(const MapperContext          ctx,
+                                       const Copy&                  copy,
+                                       const SelectCopySrcInput&    input,
+                                             SelectCopySrcOutput&   output) = 0;
       //------------------------------------------------------------------------
 
       /**
@@ -841,7 +844,7 @@ namespace Legion {
 
       /**
        * ----------------------------------------------------------------------
-       *  Rank Copy Sources 
+       *  Select Close Sources 
        * ----------------------------------------------------------------------
        * The rank copy sources mapper call will be invoked whenever multiple
        * physical instances can serve as the source for a copy aimed at the
@@ -850,18 +853,18 @@ namespace Legion {
        * 'chosen_ranking'. Any instances not explicitly listed in the order
        * will be used by the runtime in an undefined order.
        */
-      struct RankCloseCopyInput {
+      struct SelectCloseSrcInput {
         PhysicalInstance                            target;
         std::set<PhysicalInstance>                  source_instances;
       };
-      struct RankCloseCopyOutput {
+      struct SelectCloseSrcOutput {
         std::deque<PhysicalInstance>                chosen_ranking;
       };
       //------------------------------------------------------------------------
-      virtual void rank_copy_sources(const MapperContext        ctx,
-                                     const Close&               close,
-                                     const RankCloseCopyInput&  input,
-                                           RankCloseCopyOutput& output) = 0;
+      virtual void select_close_sources(const MapperContext        ctx,
+                                        const Close&               close,
+                                        const SelectCloseSrcInput&  input,
+                                              SelectCloseSrcOutput& output) = 0;
       //------------------------------------------------------------------------
 
       // No speculation for close operations
@@ -904,33 +907,6 @@ namespace Legion {
                                const MapAcquireInput&      input,
                                      MapAcquireOutput&     output) = 0;
       //------------------------------------------------------------------------
-
-      /**
-       * ----------------------------------------------------------------------
-       *  Rank Copy Sources
-       * ----------------------------------------------------------------------
-       * If any copy operations need to be issued as part of the acquire
-       * operation and have multiple possible source physical instances,
-       * then this call will be invoked. The mapper selects a 'chosen_ranking'
-       * from the set of 'source_instances' for copying to the 'target'
-       * physical instance. Any physical instances not ranking will be 
-       * used in an unspecified order.
-       */
-      struct RankAcquireCopyInput {
-        PhysicalInstance                        target;
-        std::set<PhysicalInstance>              source_instances;
-      };
-      struct RankAcquireCopyOutput {
-        std::deque<PhysicalInstance>            chosen_ranking;
-      };
-      //------------------------------------------------------------------------
-      virtual void rank_copy_sources(const MapperContext          ctx,
-                                     const Acquire&               acquire,
-                                     const RankAcquireCopyInput&  input,
-                                           RankAcquireCopyOutput& output) = 0;
-      //------------------------------------------------------------------------
-
-      // No mapping results for acquires 
 
       /**
        * ----------------------------------------------------------------------
@@ -989,30 +965,28 @@ namespace Legion {
 
       /**
        * ----------------------------------------------------------------------
-       *  Rank Copy Sources 
+       *  Select Release Sources 
        * ----------------------------------------------------------------------
-       * The rank copy sources call allows mappers to specify a 'chosen_ranking'
-       * for different 'source_instances' of a region when copying to a 'target'
-       * phsyical instance. The mapper can rank any or all of the source 
-       * instances and any instances which are not ranked will be copied from 
-       * in an unspecified order by the runtime until all the necessary fields
-       * in the target contain valid data.
+       * The select release sources call allows mappers to specify a 
+       * 'chosen_ranking' for different 'source_instances' of a region when 
+       * copying to a 'target' phsyical instance. The mapper can rank any or 
+       * all of the source instances and any instances which are not ranked 
+       * will be copied from in an unspecified order by the runtime until all 
+       * the necessary fields in the target contain valid data.
        */
-      struct RankReleaseCopyInput {
+      struct SelectReleaseSrcInput {
         PhysicalInstance                        target;
         std::set<PhysicalInstance>              source_instances;
       };
-      struct RankReleaseCopyOutput {
+      struct SelectReleaseSrcOutput {
         std::deque<PhysicalInstance>            chosen_ranking;
       };
       //------------------------------------------------------------------------
-      virtual void rank_copy_sources(const MapperContext         ctx,
-                                     const Release&              release,
-                                     const RankCopyInput&        input,
-                                           RankCopyOutput&       output) = 0;
+      virtual void select_release_sources(const MapperContext       ctx,
+                                     const Release&                 release,
+                                     const SelectReleaseSrcInput&   input,
+                                           SelectReleaseSrcOutput&  output) = 0;
       //------------------------------------------------------------------------
-
-      // No mapping results for release operations 
 
       /**
        * ----------------------------------------------------------------------

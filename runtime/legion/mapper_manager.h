@@ -28,25 +28,24 @@ namespace Legion {
       SLICE_DOMAIN_CALL,
       MAP_TASK_CALL,
       POSTMAP_TASK_CALL,
-      TASK_RANK_COPY_SOURCES_CALL,
+      TASK_SELECT_SOURCES_CALL,
       TASK_SPECULATE_CALL,
       TASK_REPORT_PROFILING_CALL,
       MAP_INLINE_CALL,
-      INLINE_RANK_COPY_SOURCES_CALL,
+      INLINE_SELECT_SOURCES_CALL,
       INLINT_REPORT_PROFILING_CALL,
       MAP_COPY_CALL,
-      COPY_RANK_COPY_SOURCES_CALL,
+      COPY_SELECT_SOURCES_CALL,
       COPY_SPECULATE_CALL,
       COPY_REPORT_PROFILING_CALL,
       MAP_CLOSE_CALL,
-      CLOSE_RANK_COPY_SOURCES_CALL,
+      CLOSE_SELECT_SOURCES_CALL,
       CLOSE_REPORT_PROFILING_CALL,
       MAP_ACQUIRE_CALL,
-      ACQUIRE_RANK_COPY_SOURCES_CALL,
       ACQUIRE_SPECULATE_CALL,
       ACQUIRE_REPORT_PROFILING_CALL,
       MAP_RELEASE_CALL,
-      RELEASE_RANK_COPY_SOURCES_CALL,
+      RELEASE_SELECT_SOURCES_CALL,
       RELEASE_SPECULATE_CALL,
       RELEASE_REPORT_PROFILING_CALL,
       CONFIGURE_CONTEXT_CALL,
@@ -90,15 +89,125 @@ namespace Legion {
     public:
       MapperManager(Runtime *runtime, Mapping::Mapper *mapper);
       virtual ~MapperManager(void);
-    public:
-      void perform_continuation(Event precondition, MappingCallKind call, 
-                                void *arg1, void *arg2, void *arg3 = NULL,
-                                Operation *op = NULL);
-      void execute_continuation(MappingCallKind call,
-                                void *arg1, void *arg2, void *arg3);
-    public:
-      void invoke_select_task_options(TaskOp *task, TaskOptions *output,
+    public: // Task mapper calls
+      void invoke_select_task_options(TaskOp *task, Mapper::TaskOptions *output,
                                       bool first_invocation = true);
+      void invoke_premap_task(TaskOp *task, Mapper::PremapTaskInput *input,
+                              Mapper::PremapTaskOutput *output, 
+                              bool first_invocation = true);
+      void invoke_slice_domain(TaskOp *task, Mapper::SliceDomainInput *input,
+                               Mapper::SliceDomainOutput *output, 
+                               bool first_invocation = true);
+      void invoke_map_task(TaskOp *task, Mapper::MapTaskInput *input,
+                           Mapper::MapTaskOutput *output, 
+                           bool first_invocation = true);
+      void invoke_post_map_task(TaskOp *task, Mapper::PostMapInput *input,
+                                Mapper::PostMapOutput *output,
+                                bool first_invocation = true);
+      void invoke_select_task_sources(TaskOp *task, 
+                                      Mapper::SelectTaskSrcInput *input,
+                                      Mapper::SelectTaskSrcOutput *output,
+                                      bool first_invocation = true);
+      void invoke_task_speculate(TaskOp *task, 
+                                 Mapper::SpeculativeOutput *output,
+                                 bool first_invocation = true);
+      void invoke_task_report_profiling(TaskOp *task, 
+                                        Mapper::TaskProfilingInfo *input,
+                                        bool first_invocation = true);
+    public: // Inline mapper calls
+      void invoke_map_inline(MapOp *op, Mapper::InlineInput *input,
+                             Mapper::InlineOutput *output, 
+                             bool first_invocation = true);
+      void invoke_select_inline_sources(MapOp *op, 
+                                        Mapper::SelectInlineSrcInput *input,
+                                        Mapper::SelectInlineSrcOutput *output,
+                                        bool first_invocation = true);
+      void invoke_inline_report_profiling(MapOp *op, 
+                                          Mapper::InlineProfilingInfo *input,
+                                          bool first_invocation = true);
+    public: // Copy mapper calls
+      void invoke_map_copy(CopyOp *op,
+                           Mapper::MapCopyInput *input,
+                           Mapper::MapCopyOutput *output,
+                           bool first_invocation = true);
+      void invoke_select_copy_sources(CopyOp *op,
+                                      Mapper::SelectCopySrcInput *input,
+                                      Mapper::SelectCopySrcOutput *output,
+                                      bool first_invocation = true);
+      void invoke_copy_speculate(CopyOp *op, Mapper::SpeculativeOutput *output,
+                                 bool first_invocation = true);
+      void invoke_copy_report_profiling(CopyOp *op,
+                                        Mapper::CopyProfilingInfo *input,
+                                        bool first_invocation = true);
+    public: // Close mapper calls
+      void invoke_map_close(CloseOp *op,
+                            Mapper::MapCloseInput *input,
+                            Mapper::MapCloseOutput *output,
+                            bool first_invocation = true);
+      void invoke_select_close_sources(CloseOp *op,
+                                       Mapper::SelectCloseSrcInput *input,
+                                       Mapper::SelectCloseSrcOutput *output,
+                                       bool first_invocation = true);
+      void invoke_close_report_profiling(CloseOp *op,
+                                         Mapper::CloseProfilingInfo *input,
+                                         bool first_invocation = true);
+    public: // Acquire mapper calls
+      void invoke_map_acquire(AcquireOp *op,
+                              Mapper::MapAcquireInput *input,
+                              Mapper::MapAcquireOutput *output,
+                              bool first_invocation = true);
+      void invoke_acquire_speculate(AcquireOp *op,
+                                    Mapper::SpeculativeOutput *output,
+                                    bool first_invocation = true);
+      void invoke_acquire_report_profiling(AcquireOp *op,
+                                           Mapper::AcquireProfilingInfo *input,
+                                           bool first_invocation = true);
+    public: // Release mapper calls
+      void invoke_map_release(ReleaseOp *op,
+                              Mapper::MapReleaseInput *input,
+                              Mapper::MapReleaseOutput *output,
+                              bool first_invocation = true);
+      void invoke_select_release_sources(ReleaseOp *op,
+                                         Mapper::SelectReleaseSrcInput *input,
+                                         Mapper::SelectReleaseSrcOuput *output,
+                                         bool first_invocation = true);
+      void invoke_release_speculate(ReleaseOp *op,
+                                    Mapper::SpeculativeOutput *output,
+                                    bool first_invocation = true);
+      void invoke_release_report_profiling(ReleaseOp *op,
+                                           Mapper::ReleaseProfilingInfo *input,
+                                           bool first_invocation = true);
+    public: // Task execution mapper calls
+      void invoke_configure_context(TaskOp *task,
+                                    Mapper::ContextConfigOutput *output,
+                                    bool first_invocation = true);
+      void invoke_select_tunable_value(TaskOp *task,
+                                       Mapper::SelectTunableInput *input,
+                                       Mapper::SelectTunableOutput *output,
+                                       bool first_invocation = true);
+    public: // must epoch and graph mapper calls
+      void invoke_map_must_epoch(MustEpochOp *op,
+                                 Mapper::MapMustEpochInput *input,
+                                 Mapper::MapMustEpochOutput *output,
+                                 bool first_invocation = true);
+      void invoke_map_dataflow_graph(Mapper::MapDataflowGraphInput *input,
+                                     Mapper::MapDataflowGraphOutput *output,
+                                     bool first_invocation = true);
+    public: // scheduling and stealing mapper calls
+      void invoke_select_tasks_to_map(Mapper::SelectMappingInput *input,
+                                      Mapper::selectMappingOutput *output,
+                                      bool first_invocation = true);
+      void invoke_select_steal_targets(Mapper::SelectStealingInput *input,
+                                       Mapper::SelectStealingOutput *output,
+                                       bool first_invocation = true);
+      void invoke_permit_steal_request(Mapper::StealRequestInput *input,
+                                       Mapper::StealRequestOutput *output,
+                                       bool first_invocation = true);
+    public: // handling mapper calls
+      void invoke_handle_message(Mapper::MapperMessage *message,
+                                 bool first_invocation = true);
+      void invoke_handle_task_result(Mapper::MapperTaskResult *result,
+                                     bool first_invocation = true);
     public:
       virtual bool is_locked(MappingCallInfo *info) = 0;
       virtual void lock_mapper(MappingCallInfo *info, bool read_only) = 0;
@@ -242,6 +351,70 @@ namespace Legion {
       std::set<MappingCallInfo*> current_holders;
       std::deque<MappingCallInfo*> read_only_waiters;
       std::deque<MappingCallInfo*> exclusive_waiters;
+    };
+
+    /**
+     * \class MapperContinuation
+     * A class for deferring mapper calls
+     */
+    class MapperContinuation {
+    public:
+      struct ContinuationArgs {
+        HLRTaskID hlr_id;
+        MapperContinuation *continuation;
+      };
+    public:
+      MapperContinuation(MapperManager *manager);
+    public:
+      void defer(Runtime *runtime, Event precondition, Operation *op = NULL);
+    public:
+      virtual void execute(void) = 0;
+    public:
+      static void handle_continuation(const void *args);
+    public:
+      MapperManager *const manager;
+    };
+
+    template<typename T1,
+             void (MapperManager::*CALL)(T1*, bool)>
+    class MapperContinuation1 : public MapperContinuation {
+    public:
+      MapperContinuation1(MapperManager *man, T1 *a1)
+        : MapperContinuation(man), arg1(a1) { }
+    public:
+      virtual void execute(void)
+      { (manager->*CALL)(arg1, false/*first*/); }
+    public:
+      T1 *const arg1;
+    };
+
+    template<typename T1, typename T2, 
+             void (MapperManager::*CALL)(T1*, T2*, bool)>
+    class MapperContinuation2 : public MapperContinuation {
+    public:
+      MapperContinuation2(MapperManager *man, T1 *a1, T2 *a2)
+        : MapperContinuation(man), arg1(a1), arg2(a2) { }
+    public:
+      virtual void execute(void)
+      { (manager->*CALL)(arg1, arg2, false/*first*/); }
+    public:
+      T1 *const arg1;
+      T2 *const arg2;
+    };
+
+    template<typename T1, typename T2, typename T3,
+             void (MapperManager::*CALL)(T1*, T2*, T3*, bool)>
+    class MapperContinuation3 : public MapperContinuation {
+    public:
+      MapperContinuation3(MapperManager *man, T1 *a1, T2 *a2, T3 *a3)
+        : MapperContinuation(man), arg1(a1), arg2(a2), arg3(a3) { }
+    public:
+      virtual void execute(void)
+      { (manager->*CALL)(arg1, arg2, arg3, false/*first*/); }
+    public:
+      T1 *const arg1;
+      T2 *const arg2;
+      T3 *const arg3;
     };
 
   };

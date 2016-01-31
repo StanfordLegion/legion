@@ -105,14 +105,6 @@ namespace Legion {
   class Predicate;
   class PhysicalRegion;
   class IndexIterator;
-  class Mappable;
-  class Task;
-  class Copy;
-  class Inline;
-  class Acquire;
-  class Release;
-  class TaskVariantCollection;
-  class Mapper; 
   template<typename T> struct ColoredPoints; 
   struct InputArgs;
   class ProjectionFunctor;
@@ -259,6 +251,7 @@ namespace Legion {
       HLR_WINDOW_WAIT_TASK_ID,
       HLR_ISSUE_FRAME_TASK_ID,
       HLR_CONTINUATION_TASK_ID,
+      HLR_MAPPER_CONTINUATION_TASK_ID,
       HLR_TASK_IMPL_SEMANTIC_INFO_REQ_TASK_ID,
       HLR_INDEX_SPACE_SEMANTIC_INFO_REQ_TASK_ID,
       HLR_INDEX_PART_SEMANTIC_INFO_REQ_TASK_ID,
@@ -315,6 +308,7 @@ namespace Legion {
         "Window Wait",                                            \
         "Issue Frame",                                            \
         "Legion Continuation",                                    \
+        "Mapper Continuation",                                    \
         "Task Impl Semantic Request",                             \
         "Index Space Semantic Request",                           \
         "Index Partition Semantic Request",                       \
@@ -908,6 +902,9 @@ namespace Legion {
   };
 
   namespace Internal {
+    // Pull the mapper type into the internal space
+    typedef Mapping::Mapper Mapper;
+
     // A little bit of logic here to figure out the 
     // kind of bit mask to use for FieldMask
 
