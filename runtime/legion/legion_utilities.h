@@ -6449,20 +6449,23 @@ namespace LegionRuntime {
         case COMPOUND_NONE:
           {
             result.tag = COMPOUND_DENSE;
-            result.mask.dense = legion_new<BITMASK>(FIELD_ALL_ONES);
+            result.mask.dense = 
+              legion_new<BITMASK>(LEGION_FIELD_MASK_FIELD_ALL_ONES);
             break;
           }
         case COMPOUND_SINGLE:
           {
             result.tag = COMPOUND_DENSE;
-            result.mask.dense = legion_new<BITMASK>(FIELD_ALL_ONES);
+            result.mask.dense = 
+              legion_new<BITMASK>(LEGION_FIELD_MASK_FIELD_ALL_ONES);
             result.mask.dense->unset_bit(mask.index);
             break;
           }
         case COMPOUND_SPARSE:
           {
             result.tag = COMPOUND_DENSE;
-            result.mask.dense = legion_new<BITMASK>(FIELD_ALL_ONES);
+            result.mask.dense = 
+              legion_new<BITMASK>(LEGION_FIELD_MASK_FIELD_ALL_ONES);
             for (std::set<unsigned>::const_iterator it = 
                   mask.sparse->begin(); it != mask.sparse->end(); it++)
             {

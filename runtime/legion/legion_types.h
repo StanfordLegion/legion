@@ -731,10 +731,10 @@ namespace LegionRuntime {
 
 // The folowing macros are used in the FieldMask instantiation of BitMask
 // If you change one you probably have to change the others too
-#define FIELD_TYPE          uint64_t 
-#define FIELD_SHIFT         6
-#define FIELD_MASK          0x3F
-#define FIELD_ALL_ONES      0xFFFFFFFFFFFFFFFF
+#define LEGION_FIELD_MASK_FIELD_TYPE          uint64_t 
+#define LEGION_FIELD_MASK_FIELD_SHIFT         6
+#define LEGION_FIELD_MASK_FIELD_MASK          0x3F
+#define LEGION_FIELD_MASK_FIELD_ALL_ONES      0xFFFFFFFFFFFFFFFF
 
 #if defined(__AVX__)
 #if (MAX_FIELDS > 256)
@@ -744,7 +744,9 @@ namespace LegionRuntime {
 #elif (MAX_FIELDS > 64)
     typedef SSEBitMask<MAX_FIELDS> FieldMask;
 #else
-    typedef BitMask<FIELD_TYPE,MAX_FIELDS,FIELD_SHIFT,FIELD_MASK> FieldMask;
+    typedef BitMask<LEGION_FIELD_MASK_FIELD_TYPE,MAX_FIELDS,
+                    LEGION_FIELD_MASK_FIELD_SHIFT,
+                    LEGION_FIELD_MASK_FIELD_MASK> FieldMask;
 #endif
 #elif defined(__SSE2__)
 #if (MAX_FIELDS > 128)
@@ -752,28 +754,34 @@ namespace LegionRuntime {
 #elif (MAX_FIELDS > 64)
     typedef SSEBitMask<MAX_FIELDS> FieldMask;
 #else
-    typedef BitMask<FIELD_TYPE,MAX_FIELDS,FIELD_SHIFT,FIELD_MASK> FieldMask;
+    typedef BitMask<LEGION_FIELD_MASK_FIELD_TYPE,MAX_FIELDS,
+                    LEGION_FIELD_MASK_FIELD_SHIFT,
+                    LEGION_FIELD_MASK_FIELD_MASK> FieldMask;
 #endif
 #else
 #if (MAX_FIELDS > 64)
-    typedef TLBitMask<FIELD_TYPE,MAX_FIELDS,FIELD_SHIFT,FIELD_MASK> FieldMask;
+    typedef TLBitMask<LEGION_FIELD_MASK_FIELD_TYPE,MAX_FIELDS,
+                      LEGION_FIELD_MASK_FIELD_SHIFT,
+                      LEGION_FIELD_MASK_FIELD_MASK> FieldMask;
 #else
-    typedef BitMask<FIELD_TYPE,MAX_FIELDS,FIELD_SHIFT,FIELD_MASK> FieldMask;
+    typedef BitMask<LEGION_FIELD_MASK_FIELD_TYPE,MAX_FIELDS,
+                    LEGION_FIELD_MASK_FIELD_SHIFT,
+                    LEGION_FIELD_MASK_FIELD_MASK> FieldMask;
 #endif
 #endif
-    typedef BitPermutation<FieldMask,FIELD_LOG2> FieldPermutation;
+    typedef BitPermutation<FieldMask,LEGION_FIELD_LOG2> FieldPermutation;
     typedef Fraction<unsigned long> InstFrac;
-#undef FIELD_SHIFT
-#undef FIELD_MASK
+#undef LEGION_FIELD_MASK_FIELD_SHIFT
+#undef LEGION_FIELD_MASK_FIELD_MASK
 
     // Similar logic as field masks for node masks
 
 // The following macros are used in the NodeMask instantiation of BitMask
 // If you change one you probably have to change the others too
-#define NODE_TYPE           uint64_t
-#define NODE_SHIFT          6
-#define NODE_MASK           0x3F
-#define NODE_ALL_ONES       0xFFFFFFFFFFFFFFFF
+#define LEGION_NODE_MASK_NODE_TYPE           uint64_t
+#define LEGION_NODE_MASK_NODE_SHIFT          6
+#define LEGION_NODE_MASK_NODE_MASK           0x3F
+#define LEGION_NODE_MASK_NODE_ALL_ONES       0xFFFFFFFFFFFFFFFF
 
 #if defined(__AVX__)
 #if (MAX_NUM_NODES > 256)
@@ -783,7 +791,9 @@ namespace LegionRuntime {
 #elif (MAX_NUM_NODES > 64)
     typedef SSEBitMask<MAX_NUM_NODES> NodeMask;
 #else
-    typedef BitMask<NODE_TYPE,MAX_NUM_NODES,NODE_SHIFT,NODE_MASK> NodeMask;
+    typedef BitMask<LEGION_NODE_MASK_NODE_TYPE,MAX_NUM_NODES,
+                    LEGION_NODE_MASK_NODE_SHIFT,
+                    LEGION_NODE_MASK_NODE_MASK> NodeMask;
 #endif
 #elif defined(__SSE2__)
 #if (MAX_NUM_NODES > 128)
@@ -791,26 +801,32 @@ namespace LegionRuntime {
 #elif (MAX_NUM_NODES > 64)
     typedef SSEBitMask<MAX_NUM_NODES> NodeMask;
 #else
-    typedef BitMask<NODE_TYPE,MAX_NUM_NODES,NODE_SHIFT,NODE_MASK> NodeMask;
+    typedef BitMask<LEGION_NODE_MASK_NODE_TYPE,MAX_NUM_NODES,
+                    LEGION_NODE_MASK_NODE_SHIFT,
+                    LEGION_NODE_MASK_NODE_MASK> NodeMask;
 #endif
 #else
 #if (MAX_NUM_NODES > 64)
-    typedef TLBitMask<NODE_TYPE,MAX_NUM_NODES,NODE_SHIFT,NODE_MASK> NodeMask;
+    typedef TLBitMask<LEGION_NODE_MASK_NODE_TYPE,MAX_NUM_NODES,
+                      LEGION_NODE_MASK_NODE_SHIFT,
+                      LEGION_NODE_MASK_NODE_MASK> NodeMask;
 #else
-    typedef BitMask<NODE_TYPE,MAX_NUM_NODES,NODE_SHIFT,NODE_MASK> NodeMask;
+    typedef BitMask<LEGION_NODE_MASK_NODE_TYPE,MAX_NUM_NODES,
+                    LEGION_NODE_MASK_NODE_SHIFT,
+                    LEGION_NODE_MASK_NODE_MASK> NodeMask;
 #endif
 #endif
     typedef IntegerSet<AddressSpaceID,NodeMask> NodeSet;
 
-#undef NODE_SHIFT
-#undef NODE_MASK
+#undef LEGION_NODE_MASK_NODE_SHIFT
+#undef LEGION_NODE_MASK_NODE_MASK
 
 // The following macros are used in the ProcessorMask instantiation of BitMask
 // If you change one you probably have to change the others too
-#define PROC_TYPE           uint64_t
-#define PROC_SHIFT          6
-#define PROC_MASK           0x3F
-#define PROC_ALL_ONES       0xFFFFFFFFFFFFFFFF
+#define LEGION_PROC_MASK_PROC_TYPE           uint64_t
+#define LEGION_PROC_MASK_PROC_SHIFT          6
+#define LEGION_PROC_MASK_PROC_MASK           0x3F
+#define LEGION_PROC_MASK_PROC_ALL_ONES       0xFFFFFFFFFFFFFFFF
 
 #if defined(__AVX__)
 #if (MAX_NUM_PROCS > 256)
@@ -820,7 +836,9 @@ namespace LegionRuntime {
 #elif (MAX_NUM_PROCS > 64)
     typedef SSEBitMask<MAX_NUM_PROCS> ProcessorMask;
 #else
-    typedef BitMask<PROC_TYPE,MAX_NUM_PROCS,PROC_SHIFT,PROC_MASK> ProcessorMask;
+    typedef BitMask<LEGION_PROC_MASK_PROC_TYPE,MAX_NUM_PROCS,
+                    LEGION_PROC_MASK_PROC_SHIFT,
+                    LEGION_PROC_MASK_PROC_MASK> ProcessorMask;
 #endif
 #elif defined(__SSE2__)
 #if (MAX_NUM_PROCS > 128)
@@ -828,14 +846,19 @@ namespace LegionRuntime {
 #elif (MAX_NUM_PROCS > 64)
     typedef SSEBitMask<MAX_NUM_PROCS> ProcessorMask;
 #else
-    typedef BitMask<PROC_TYPE,MAX_NUM_PROCS,PROC_SHIFT,PROC_MASK> ProcessorMask;
+    typedef BitMask<LEGION_PROC_MASK_PROC_TYPE,MAX_NUM_PROCS,
+                    LEGION_PROC_MASK_PROC_SHIFT,
+                    LEGION_PROC_MASK_PROC_MASK> ProcessorMask;
 #endif
 #else
 #if (MAX_NUM_PROCS > 64)
-    typedef TLBitMask<PROC_TYPE,MAX_NUM_PROCS,PROC_SHIFT,PROC_MASK> 
-                                                                  ProcessorMask;
+    typedef TLBitMask<LEGION_PROC_MASK_PROC_TYPE,MAX_NUM_PROCS,
+                      LEGION_PROC_MASK_PROC_SHIFT,
+                      LEGION_PROC_MASK_PROC_MASK> ProcessorMask;
 #else
-    typedef BitMask<PROC_TYPE,MAX_NUM_PROCS,PROC_SHIFT,PROC_MASK> ProcessorMask;
+    typedef BitMask<LEGION_PROC_MASK_PROC_TYPE,MAX_NUM_PROCS,
+                    LEGION_PROC_MASK_PROC_SHIFT,
+                    LEGION_PROC_MASK_PROC_MASK> ProcessorMask;
 #endif
 #endif
 

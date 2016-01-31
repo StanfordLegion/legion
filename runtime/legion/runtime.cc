@@ -16573,7 +16573,7 @@ namespace LegionRuntime {
     {
       // Some static asserts that need to hold true for the runtime to work
       LEGION_STATIC_ASSERT(MAX_RETURN_SIZE > 0);
-      LEGION_STATIC_ASSERT((1 << FIELD_LOG2) == MAX_FIELDS);
+      LEGION_STATIC_ASSERT((1 << LEGION_FIELD_LOG2) == MAX_FIELDS);
       LEGION_STATIC_ASSERT(MAX_NUM_NODES > 0);
       LEGION_STATIC_ASSERT(MAX_NUM_PROCS > 0);
       LEGION_STATIC_ASSERT(DEFAULT_MAX_TASK_WINDOW > 0);

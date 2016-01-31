@@ -147,8 +147,8 @@
                    (x==24) ? 26 : (x==25) ? 12 : (x==26) ? 18 : (x==27) ? 6 : \
                    (x==28) ? 11 : (x==29) ? 5 : (x==30) ? 10 : 9)
 
-#ifndef FIELD_LOG2
-#define FIELD_LOG2         STATIC_LOG2(MAX_FIELDS) // log2(MAX_FIELDS)
+#ifndef LEGION_FIELD_LOG2
+#define LEGION_FIELD_LOG2         STATIC_LOG2(MAX_FIELDS) // log2(MAX_FIELDS)
 #endif
 
 // The following enums are all re-exported by
