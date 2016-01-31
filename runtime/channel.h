@@ -1057,7 +1057,7 @@ namespace LegionRuntime{
       }
       GPUChannel* create_gpu_peer_fb_channel(long max_nr, GPU* src_gpu) {
         gpu_peer_fb_channels[src_gpu] = new GPUChannel(src_gpu, max_nr, XferDes::XFER_GPU_PEER_FB);
-        return gpu_in_fb_channels[src_gpu];
+        return gpu_peer_fb_channels[src_gpu];
       }
 #endif
 #ifdef USE_HDF

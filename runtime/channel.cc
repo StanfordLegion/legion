@@ -922,7 +922,7 @@ namespace LegionRuntime {
             src_buf_base = dst_buf_base = NULL;
             assert(src_mem_impl->kind == MemoryImpl::MKIND_GPUFB);
             assert(src_mem_impl->kind == MemoryImpl::MKIND_GPUFB);
-            assert(((GPUFBMemory*)src_mem_impl)->gpu == dst_gpu);
+            assert(src_gpu != dst_gpu);
             //GPUpeerFBRequest* gpu_peer_fb_reqs = (GPUpeerFBRequest*) calloc(max_nr, sizeof(GPUpeerFBRequest));
             for (int i = 0; i < max_nr; i++) {
               GPUpeerFBRequest* gpu_peer_fb_req = new GPUpeerFBRequest;
@@ -1060,7 +1060,7 @@ namespace LegionRuntime {
             break;
           case XferDes::XFER_GPU_IN_FB:
             offset = ((GPUinFBRequest*)req)->dst_offset - dst_buf.alloc_offset;
-            size = ((GPUfromFBRequest*)req)->nbytes;
+            size = ((GPUinFBRequest*)req)->nbytes;
             break;
           case XferDes::XFER_GPU_PEER_FB:
             offset = ((GPUpeerFBRequest*)req)->dst_offset - dst_buf.alloc_offset;

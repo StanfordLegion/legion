@@ -267,7 +267,7 @@ void worker_task(const void *args, size_t arglen, const void *user_data, size_t 
         std::set<Memory> all_mem;
         machine.get_all_memories(all_mem);
         for(std::set<Memory>::iterator it = all_mem.begin(); it != all_mem.end(); it++) {
-          if (gasnet_mynode() == ID(*it).node() && it->kind() != Memory::HDF_MEM && it->kind() != Memory::FILE_MEM)
+          if (gasnet_mynode() == ID(*it).node() && it->kind() != Memory::HDF_MEM && it->kind() != Memory::FILE_MEM && it->kind() != Memory::GPU_FB_MEM)
             mem.insert(*it);
         }
       }
