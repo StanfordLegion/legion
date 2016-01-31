@@ -29,8 +29,8 @@ void sigalrm_handler(int sig)
 }
 
 // some of the code in here needs the fault-tolerance stuff in Realm to show up
-#define NO_TRACK_MACHINE_UPDATES
-#define NO_TEST_FAULTS
+#define TRACK_MACHINE_UPDATES
+#define TEST_FAULTS
 
 #ifdef TRACK_MACHINE_UPDATES
 class MyMachineUpdateTracker : public Machine::MachineUpdateSubscriber {
@@ -166,9 +166,8 @@ void top_level_task(const void *args, size_t arglen,
     bool poisoned;
     Event::NO_EVENT.has_triggered_faultaware(poisoned);
     Event::NO_EVENT.wait_faultaware(poisoned);
-    Processor::cancel_task(Event::NO_EVENT);
-    Domain::cancel_copy(Event::NO_EVENT);
-    UserEvent::create_user_event().cancel();
+    Event::NO_EVENT.external_wait_faultaware(poisoned);
+    Event::NO_EVENT.cancel_operation(0, 0);
   }
 #endif
   
@@ -186,7 +185,8 @@ void top_level_task(const void *args, size_t arglen,
 
   bool inject_fault = false;
   Event e1 = first_cpu.spawn(CHILD_TASK, &inject_fault, sizeof(inject_fault), prs);
-  inject_fault = true;
+  // TODO: re-enable once faults are implemented
+  //inject_fault = true;
   Event e2 = first_cpu.spawn(CHILD_TASK, &inject_fault, sizeof(inject_fault), prs, e1);
   inject_fault = false;
   Event e3 = first_cpu.spawn(CHILD_TASK, &inject_fault, sizeof(inject_fault), prs, e2);
@@ -219,6 +219,11 @@ int main(int argc, char **argv)
 
   signal(SIGALRM, sigalrm_handler);
 
+#ifdef TRACK_MACHINE_UPDATES
+  MyMachineUpdateTracker *tracker = new MyMachineUpdateTracker;
+  Machine::get_machine().add_subscription(tracker);
+#endif
+
   // select a processor to run the top level task on
   Processor p = Processor::NO_PROC;
   {
@@ -242,6 +247,12 @@ int main(int argc, char **argv)
 
   // now sleep this thread until that shutdown actually happens
   rt.wait_for_shutdown();
+
+#ifdef TRACK_MACHINE_UPDATES
+  // the machine is gone at this point, so no need to remove ourselves explicitly
+  //Machine::get_machine().remove_subscription(tracker);
+  delete tracker;
+#endif
   
   return 0;
 }

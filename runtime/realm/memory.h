@@ -64,6 +64,10 @@ namespace Realm {
       Kind kind(void) const;
       // Return the maximum capacity of this memory
       size_t capacity(void) const;
+
+      // reports a problem with a memory in general (this is primarily for fault injection)
+      void report_memory_fault(int reason,
+			       const void *reason_data, size_t reason_size) const;
     };
 
     inline std::ostream& operator<<(std::ostream& os, Memory m) { return os << std::hex << m.id << std::dec; }

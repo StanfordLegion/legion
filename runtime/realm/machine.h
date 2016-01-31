@@ -80,6 +80,30 @@ namespace Realm {
       int get_mem_mem_affinity(std::vector<MemoryMemoryAffinity>& result,
 			       Memory restrict_mem1 = Memory::NO_MEMORY,
 			       Memory restrict_mem2 = Memory::NO_MEMORY) const;
+
+      // subscription interface for dynamic machine updates
+      class MachineUpdateSubscriber {
+      public:
+       virtual ~MachineUpdateSubscriber(void) {}
+
+       enum UpdateType { THING_ADDED,
+                         THING_REMOVED,
+                         THING_UPDATED
+       };
+
+       // callbacks occur on a thread that belongs to the runtime - please defer any
+       //  complicated processing if possible
+       virtual void processor_updated(Processor p, UpdateType update_type, 
+                                      const void *payload, size_t payload_size) = 0;
+
+       virtual void memory_updated(Memory m, UpdateType update_type,
+                                   const void *payload, size_t payload_size) = 0;
+      };
+
+      // currently, all subscriptions are global - we expect updates to be rare enough that
+      //  subscribers can do filtering themselves
+      void add_subscription(MachineUpdateSubscriber *subscriber);
+      void remove_subscription(MachineUpdateSubscriber *subscriber);
     };
 	
 }; // namespace Realm

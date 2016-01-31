@@ -314,6 +314,22 @@ namespace Realm {
       return finish_event;
     }
 
+    // reports an execution fault in the currently running task
+    /*static*/ void Processor::report_execution_fault(int reason,
+						      const void *reason_data,
+						      size_t reason_size)
+    {
+      assert(0);
+    }
+
+    // reports a problem with a processor in general (this is primarily for fault injection)
+    void Processor::report_processor_fault(int reason,
+					   const void *reason_data,
+					   size_t reason_size) const
+    {
+      assert(0);
+    }
+
 
   ////////////////////////////////////////////////////////////////////////
   //

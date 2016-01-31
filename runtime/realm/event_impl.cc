@@ -43,6 +43,14 @@ namespace Realm {
     return e->has_triggered(gen);
   }
 
+  bool Event::has_triggered_faultaware(bool& poisoned) const
+  {
+    DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
+    if(!id) return true; // special case: NO_EVENT has always triggered
+    EventImpl *e = get_runtime()->get_event_impl(*this);
+    return e->has_triggered_faultaware(gen, poisoned);
+  }
+
   // creates an event that won't trigger until all input events have
   /*static*/ Event Event::merge_events(const std::set<Event>& wait_for)
   {
@@ -129,6 +137,12 @@ namespace Realm {
     //assert(ptr != 0);
   }
 
+  void Event::wait_faultaware(bool& poisoned) const
+  {
+    poisoned = false;
+    wait();
+  }
+
   void Event::external_wait(void) const
   {
     DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
@@ -144,6 +158,28 @@ namespace Realm {
     log_event.info() << "external thread blocked: event=" << *this;
     e->external_wait(gen);
     log_event.info() << "external thread resumed: event=" << *this;
+  }
+
+  void Event::external_wait_faultaware(bool& poisoned) const
+  {
+    DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
+    if(!id) return;  // special case: never wait for NO_EVENT
+    EventImpl *e = get_runtime()->get_event_impl(*this);
+
+    // early out case too
+    if(e->has_triggered_faultaware(gen, poisoned)) return;
+    
+    // waiting on an event does not count against the low level's time
+    DetailedTimer::ScopedPush sp2(TIME_NONE);
+    
+    log_event.info() << "external thread blocked: event=" << *this;
+    e->external_wait_faultaware(gen, poisoned);
+    log_event.info() << "external thread resumed: event=" << *this;
+  }
+
+  void Event::cancel_operation(const void *reason_data, size_t reason_len) const
+  {
+    assert(0 && "TODO: faults");
   }
 
 
@@ -752,6 +788,12 @@ namespace Realm {
       return (needed_gen <= generation);
     }
 
+    bool GenEventImpl::has_triggered_faultaware(Event::gen_t needed_gen, bool& poisoned)
+    {
+      poisoned = false;
+      return has_triggered(needed_gen);
+    }
+
     class PthreadCondWaiter : public EventWaiter {
     public:
       PthreadCondWaiter(GASNetCondVar &_cv)
@@ -790,6 +832,12 @@ namespace Realm {
 	  cv.wait();
 	}
       }
+    }
+
+    void GenEventImpl::external_wait_faultaware(Event::gen_t gen_needed, bool& poisoned)
+    {
+      poisoned = false;
+      external_wait(gen_needed);
     }
 
     class DeferredEventTrigger : public EventWaiter {
@@ -1382,9 +1430,21 @@ static void *bytedup(const void *data, size_t datalen)
       return false;
     }
 
+    bool BarrierImpl::has_triggered_faultaware(Event::gen_t needed_gen, bool& poisoned)
+    {
+      poisoned = false;
+      return has_triggered(needed_gen);
+    }
+
     void BarrierImpl::external_wait(Event::gen_t needed_gen)
     {
       assert(0);
+    }
+
+    void BarrierImpl::external_wait_faultaware(Event::gen_t needed_gen, bool& poisoned)
+    {
+      poisoned = false;
+      external_wait(needed_gen);
     }
 
     bool BarrierImpl::add_waiter(Event::gen_t needed_gen, EventWaiter *waiter/*, bool pre_subscribed = false*/)

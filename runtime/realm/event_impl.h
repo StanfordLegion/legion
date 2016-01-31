@@ -62,6 +62,9 @@ namespace Realm {
 
       virtual void external_wait(Event::gen_t needed_gen) = 0;
 
+      virtual bool has_triggered_faultaware(Event::gen_t needed_gen, bool& poisoned) = 0;
+      virtual void external_wait_faultaware(Event::gen_t needed_gen, bool& poisoned) = 0;
+
       virtual bool add_waiter(Event::gen_t needed_gen, EventWaiter *waiter/*, bool pre_subscribed = false*/) = 0;
 
       static bool add_waiter(Event needed, EventWaiter *waiter);
@@ -84,6 +87,9 @@ namespace Realm {
       virtual bool has_triggered(Event::gen_t needed_gen);
 
       virtual void external_wait(Event::gen_t needed_gen);
+
+      virtual bool has_triggered_faultaware(Event::gen_t needed_gen, bool& poisoned);
+      virtual void external_wait_faultaware(Event::gen_t needed_gen, bool& poisoned);
 
       virtual bool add_waiter(Event::gen_t needed_gen, EventWaiter *waiter/*, bool pre_subscribed = false*/);
 
@@ -132,6 +138,9 @@ namespace Realm {
       virtual bool has_triggered(Event::gen_t needed_gen);
 
       virtual void external_wait(Event::gen_t needed_gen);
+
+      virtual bool has_triggered_faultaware(Event::gen_t needed_gen, bool& poisoned);
+      virtual void external_wait_faultaware(Event::gen_t needed_gen, bool& poisoned);
 
       virtual bool add_waiter(Event::gen_t needed_gen, EventWaiter *waiter/*, bool pre_subscribed = false*/);
 

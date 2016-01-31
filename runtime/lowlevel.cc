@@ -1700,6 +1700,17 @@ namespace LegionRuntime {
     template void *AccessorType::Generic::Untyped::raw_dense_ptr<1>(const Rect<1>& r, Rect<1>& subrect, ByteOffset &elem_stride);
     template void *AccessorType::Generic::Untyped::raw_dense_ptr<2>(const Rect<2>& r, Rect<2>& subrect, ByteOffset &elem_stride);
     template void *AccessorType::Generic::Untyped::raw_dense_ptr<3>(const Rect<3>& r, Rect<3>& subrect, ByteOffset &elem_stride);
+
+    void AccessorType::Generic::Untyped::report_fault(ptr_t ptr, size_t bytes, off_t offset /*= 0*/) const
+    {
+      assert(0 && "fault injection not implemented yet");
+    }
+
+    void AccessorType::Generic::Untyped::report_fault(const Realm::DomainPoint& dp,
+                                                      size_t bytes, off_t offset /*= 0*/) const
+    {
+      assert(0 && "fault injection not implemented yet");
+    }
   };
 
   namespace Arrays {

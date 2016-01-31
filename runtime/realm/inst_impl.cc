@@ -110,6 +110,13 @@ namespace Realm {
       return LegionRuntime::Accessor::RegionAccessor<LegionRuntime::Accessor::AccessorType::Generic>(LegionRuntime::Accessor::AccessorType::Generic::Untyped((void *)i_impl));
     }
 
+    void RegionInstance::report_instance_fault(int reason,
+					       const void *reason_data,
+					       size_t reason_size) const
+    {
+      assert(0);
+    }
+
   
   ////////////////////////////////////////////////////////////////////////
   //
