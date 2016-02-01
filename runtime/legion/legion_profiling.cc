@@ -518,6 +518,7 @@ namespace LegionRuntime {
                                           Operation *op)
     //--------------------------------------------------------------------------
     {
+      increment_total_outstanding_requests();
       ProfilingInfo info(LEGION_PROF_FILL);
       // No ID here
       info.op_id = (op != NULL) ? op->get_unique_op_id() : 0;
@@ -605,6 +606,7 @@ namespace LegionRuntime {
                                           UniqueID uid)
     //--------------------------------------------------------------------------
     {
+      increment_total_outstanding_requests();
       ProfilingInfo info(LEGION_PROF_FILL);
       // No ID here
       info.op_id = uid;
@@ -732,6 +734,7 @@ namespace LegionRuntime {
                                               timeline, usage);
             delete timeline;
             delete usage;
+            decrement_total_outstanding_requests();
             break;
           }
         case LEGION_PROF_INST:
