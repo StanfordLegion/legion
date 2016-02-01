@@ -1598,6 +1598,181 @@ namespace Legion {
     };
 
     //==========================================================================
+    //                           Operation Classes
+    //==========================================================================
+
+    /**
+     * \class Mappable
+     * The mappable class provides a base class for all 
+     * the different types which can be passed to represent 
+     * an operation to a mapping call. The interface doesn't
+     * currently use this, but it is good to have a base
+     * class for all these operations in case mapper
+     * implementations want to abstract over different
+     * operation types.
+     */
+    class Mappable {
+    protected:
+      FRIEND_ALL_RUNTIME_CLASSES
+      Mappable(void);
+    public:
+      virtual UniqueID get_unique_id(void) const = 0;
+      virtual int get_depth(void) const = 0;
+    public:
+      MapperID                                  map_id;
+      MappingTagID                              tag;
+    };
+
+    /**
+     * \class Task
+     * This class contains all the information from a task
+     * launch for either an individual or an index space
+     * task. It also provides information about the current
+     * state of the task from the runtime perspective so 
+     * that mappers can make informed decisions.
+     */
+    class Task : public Mappable {
+    protected:
+      FRIEND_ALL_RUNTIME_CLASSES
+      Task(void);
+    public:
+      virtual const char* get_task_name(void) const = 0;
+    public:
+      // Task argument information
+      Processor::TaskFuncID task_id; 
+      std::vector<IndexSpaceRequirement>  indexes;
+      std::vector<RegionRequirement>      regions;
+      std::vector<Future>                 futures;
+      std::vector<Grant>                  grants;
+      std::vector<PhaseBarrier>           wait_barriers;
+      std::vector<PhaseBarrier>           arrive_barriers;
+      void*                               args;                         
+      size_t                              arglen;
+    public:
+      // Index task argument information
+      bool                                is_index_space;
+      bool                                must_parallelism; 
+      Domain                              index_domain;
+      DomainPoint                         index_point;
+      void*                               local_args;
+      size_t                              local_arglen;
+    public:
+      // Meta data information from the runtime
+      Processor                           orig_proc;
+      Processor                           current_proc;
+      unsigned                            steal_count;
+      bool                                speculated;
+    public:
+      // Parent task (only good for one recursion)
+      Task*                               parent_task;
+    };
+
+    /**
+     * \class Copy
+     * This class contains all the information about an
+     * explicit copy region-to-region copy operation.
+     */
+    class Copy : public Mappable {
+    protected:
+      FRIEND_ALL_RUNTIME_CLASSES
+      Copy(void);
+    public:
+      // Copy Launcher arguments
+      std::vector<RegionRequirement>    src_requirements;
+      std::vector<RegionRequirement>    dst_requirements;
+      std::vector<Grant>                grants;
+      std::vector<PhaseBarrier>         wait_barriers;
+      std::vector<PhaseBarrier>         arrive_barriers;
+    public:
+      // Parent task for the copy operation
+      Task*                             parent_task;
+    };
+
+    /**
+     * \class InlineMapping
+     * This class contains all the information about an
+     * inline mapping operation from its launcher
+     */
+    class InlineMapping : public Mappable {
+    protected:
+      FRIEND_ALL_RUNTIME_CLASSES
+      InlineMapping(void);
+    public:
+      // Inline Launcher arguments
+      RegionRequirement                 requirement;
+    public:
+      // Parent task for the inline operation
+      Task*                             parent_task;
+    };
+
+    /**
+     * \class Acquire
+     * This class contains all the information about an
+     * acquire operation from the original launcher.
+     */
+    class Acquire : public Mappable {
+    protected:
+      FRIEND_ALL_RUNTIME_CLASSES
+      Acquire(void);
+    public:
+      // Acquire Launcher arguments
+      LogicalRegion                     logical_region;
+      LogicalRegion                     parent_region;
+      std::set<FieldID>                 fields;
+      PhysicalRegion                    region;
+      std::vector<Grant>                grants;
+      std::vector<PhaseBarrier>         wait_barriers;
+      std::vector<PhaseBarrier>         arrive_barriers;
+    public:
+      // Parent task for the acquire operation
+      Task*                             parent_task;
+    };
+
+    /**
+     * \class Release
+     * This class contains all the information about a
+     * release operation from the original launcher.
+     */
+    class Release : public Mappable {
+    protected:
+      FRIEND_ALL_RUNTIME_CLASSES
+      Release(void);
+    public:
+      // Release Launcher arguments
+      LogicalRegion                     logical_region;
+      LogicalRegion                     parent_region;
+      std::set<FieldID>                 fields;
+      PhysicalRegion                    region;
+      std::vector<Grant>                grants;
+      std::vector<PhaseBarrier>         wait_barriers;
+      std::vector<PhaseBarrier>         arrive_barriers;
+    public:
+      // Parent task for the release operation
+      Task*                             parent_task;
+    };
+
+    /**
+     * \class Close
+     * This class represents a close operation that has
+     * been requested by the runtime. The region requirement
+     * for this operation is synthesized by the runtime
+     * but will name the logical region and fields being
+     * closed.  The privileges and coherence will always
+     * be READ_WRITE EXCLUSIVE.
+     */
+    class Close : public Mappable {
+    protected:
+      FRIEND_ALL_RUNTIME_CLASSES
+      Close(void);
+    public:
+      // Synthesized region requirement
+      RegionRequirement                 requirement;
+    public:
+      // Parent task for the inline operation
+      Task*                             parent_task;
+    };
+
+    //==========================================================================
     //                           Runtime Classes
     //==========================================================================
 
@@ -1678,7 +1853,7 @@ namespace Legion {
        * @param point the point of the task in the index space
        * @return logical region to be used by the child task
        */
-      virtual LogicalRegion project(Context ctx, Task *task, 
+      virtual LogicalRegion project(Context ctx, Task *task,
                                     unsigned index,
                                     LogicalRegion upper_bound,
                                     const DomainPoint &point) = 0;
@@ -3540,8 +3715,8 @@ namespace Legion {
        *               must be local to the address space
        * @return a pointer to the specified mapper object
        */
-      Mapper* get_mapper(Context ctx, MapperID id, 
-                         Processor target = Processor::NO_PROC);
+      Mapping::Mapper* get_mapper(Context ctx, MapperID id, 
+                                  Processor target = Processor::NO_PROC);
       
       /**
        * Return the processor on which the current task is
@@ -3863,10 +4038,11 @@ namespace Legion {
     public:
       /**
        * Add a mapper at the given mapper ID for the runtime
-       * to use when mapping tasks.  Note that this call should
-       * only be used in the mapper registration callback function
-       * that occurs before tasks begin executing.  It can have
-       * undefined results if used during regular runtime execution.
+       * to use when mapping tasks. If a specific processor is passed
+       * to the call then the mapper instance will only be registered
+       * on that processor. Alternatively, if no processor is passed,
+       * then the mapper will be registered with all processors on
+       * the local node.
        * @param map_id the mapper ID to associate with the mapper
        * @param mapper pointer to the mapper object
        * @param proc the processor to associate the mapper with
@@ -3876,10 +4052,11 @@ namespace Legion {
       
       /**
        * Replace the default mapper for a given processor with
-       * a new mapper.  Note that this call should only be used
-       * in the mapper registration callback function that occurs
-       * before tasks begin executing.  It can have undefined
-       * results if used during regular runtime execution.
+       * a new mapper.  If a specific processor is passed to the call
+       * then the mapper instance will only be registered on that
+       * processor. Alternatively, if no processor is passed, then
+       * the mapper will be registered with all processors on 
+       * the local node.
        * @param mapper pointer to the mapper object to use
        *    as the new default mapper
        * @param proc the processor to associate the mapper with

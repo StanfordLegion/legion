@@ -1364,41 +1364,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    inline UniqueID Task::get_unique_task_id(void) const
-    //--------------------------------------------------------------------------
-    {
-      return get_unique_mappable_id();
-    }
-
-    //--------------------------------------------------------------------------
-    inline UniqueID Copy::get_unique_copy_id(void) const
-    //--------------------------------------------------------------------------
-    {
-      return get_unique_mappable_id();
-    }
-
-    //--------------------------------------------------------------------------
-    inline UniqueID Inline::get_unique_inline_id(void) const
-    //--------------------------------------------------------------------------
-    {
-      return get_unique_mappable_id();
-    }
-
-    //--------------------------------------------------------------------------
-    inline UniqueID Acquire::get_unique_acquire_id(void) const
-    //--------------------------------------------------------------------------
-    {
-      return get_unique_mappable_id();
-    }
-
-    //--------------------------------------------------------------------------
-    inline UniqueID Release::get_unique_release_id(void) const
-    //--------------------------------------------------------------------------
-    {
-      return get_unique_mappable_id();
-    }
-
-    //--------------------------------------------------------------------------
     template<typename T>
     IndexPartition Runtime::create_index_partition(Context ctx,
         IndexSpace parent, const T& mapping, int part_color /*= AUTO_GENERATE*/)
@@ -1592,16 +1557,6 @@ namespace Legion {
                                   handle, reinterpret_cast<void *>(PROJ_PTR));
     }
 
-    //--------------------------------------------------------------------------
-    template<unsigned DIM>
-    IndexSpace Mapper::get_index_subspace(IndexPartition p,
-                           LegionRuntime::Arrays::Point<DIM> &color_point) const
-    //--------------------------------------------------------------------------
-    {
-      DomainPoint dom_point = DomainPoint::from_point<DIM>(color_point);
-      return get_index_subspace(p, dom_point);
-    }
-    
     //--------------------------------------------------------------------------
     // Wrapper functions for high-level tasks
     //--------------------------------------------------------------------------
@@ -2171,11 +2126,10 @@ namespace LegionRuntime {
     typedef Legion::Mappable Mappable;
     typedef Legion::Task Task;
     typedef Legion::Copy Copy;
-    typedef Legion::Inline Inline;
+    typedef Legion::InlineMapping Inline;
     typedef Legion::Acquire Acquire;
     typedef Legion::Release Release;
-    typedef Legion::TaskVariantCollection TaskVariantCollection;
-    typedef Legion::Mapper Mapper;
+    typedef Legion::Mapping::Mapper Mapper;
     typedef Legion::InputArgs InputArgs;
     typedef Legion::TaskConfigOptions TaskConfigOptions;
     typedef Legion::ProjectionFunctor ProjectionFunctor;

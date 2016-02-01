@@ -10414,7 +10414,7 @@ namespace Legion {
 #ifdef DEBUG_HIGH_LEVEL
         assert(proc_managers.find(proc) != proc_managers.end());
 #endif
-        return proc_managers[proc]->find_mapper(id);
+        return proc_managers[proc]->find_mapper(id)->mapper;
       }
       else
       {
@@ -10429,7 +10429,7 @@ namespace Legion {
 #endif
           exit(ERROR_INVALID_PROCESSOR_NAME);
         }
-        return finder->second->find_mapper(id);
+        return finder->second->find_mapper(id)->mapper;
       }
     }
 

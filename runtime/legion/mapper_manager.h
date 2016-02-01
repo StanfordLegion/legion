@@ -256,7 +256,7 @@ namespace Legion {
       // Both these must be called while holding the lock
       MappingCallInfo* allocate_call_info(MappingCallKind kind, bool need_lock);
       void free_call_info(MappingCallInfo *info, bool need_lock);
-    protected:
+    public:
       Runtime *const runtime;
       Mapping::Mapper *const mapper;
     protected:

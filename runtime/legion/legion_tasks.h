@@ -33,7 +33,7 @@ namespace Legion {
      * This is the base task operation class for all
      * kinds of tasks in the system.  
      */
-    class TaskOp : public Mapping::Task, public SpeculativeOp {
+    class TaskOp : public Task, public SpeculativeOp {
     public:
       enum TaskKind {
         INDIVIDUAL_TASK_KIND,

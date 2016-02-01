@@ -543,7 +543,7 @@ namespace Legion {
      * will result in the entire enclosing task context
      * being restarted.
      */
-    class MapOp : public Mapping::InlineMapping, public Operation {
+    class MapOp : public InlineMapping, public Operation {
     public:
       static const AllocationType alloc_type = MAP_OP_ALLOC;
     public:
@@ -600,7 +600,7 @@ namespace Legion {
      * from different region trees in an efficient way by
      * using the low-level runtime copy facilities. 
      */
-    class CopyOp : public Mapping::Copy, public SpeculativeOp {
+    class CopyOp : public Copy, public SpeculativeOp {
     public:
       static const AllocationType alloc_type = COPY_OP_ALLOC;
     public:
@@ -787,7 +787,7 @@ namespace Legion {
      * operations that both inherit from this class:
      * InterCloseOp and PostCloseOp.
      */
-    class CloseOp : public Mapping::Close, public Operation {
+    class CloseOp : public Close, public Operation {
     public:
       static const AllocationType alloc_type = CLOSE_OP_ALLOC;
     public:
@@ -1008,7 +1008,7 @@ namespace Legion {
      * user-level software coherence when tasks own
      * regions with simultaneous coherence.
      */
-    class AcquireOp : public Mapping::Acquire, public SpeculativeOp {
+    class AcquireOp : public Acquire, public SpeculativeOp {
     public:
       static const AllocationType alloc_type = ACQUIRE_OP_ALLOC;
     public:
@@ -1058,7 +1058,7 @@ namespace Legion {
      * user-level software coherence when tasks own
      * regions with simultaneous coherence.
      */
-    class ReleaseOp : public Mapping::Release, public SpeculativeOp {
+    class ReleaseOp : public Release, public SpeculativeOp {
     public:
       static const AllocationType alloc_type = RELEASE_OP_ALLOC;
     public:

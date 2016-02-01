@@ -108,6 +108,12 @@ namespace Legion {
   template<typename T> struct ColoredPoints; 
   struct InputArgs;
   class ProjectionFunctor;
+  class Task;
+  class Copy;
+  class InlineMapping;
+  class Acquire;
+  class Release;
+  class Close;
   class Runtime;
   // For backwards compatibility
   typedef Runtime HighLevelRuntime;
@@ -173,13 +179,7 @@ namespace Legion {
   class TaskLayoutConstraintSet;
 
   namespace Mapping {
-    class Mappable;
-    class Task;
-    class Copy;
-    class InlineMapping;
-    class Acquire;
-    class Release;
-    class Close;
+    class Mappable; 
     class PhysicalInstance;
     class ProfilingRequestSet;
     class Mapper;
@@ -902,7 +902,7 @@ namespace Legion {
   };
 
   namespace Internal {
-    // Pull the mapper type into the internal space
+    // Pull the mapper types into the internal space
     typedef Mapping::Mapper Mapper;
 
     // A little bit of logic here to figure out the 
