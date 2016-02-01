@@ -470,9 +470,9 @@ namespace Legion {
     public:
       ProcessorManager& operator=(const ProcessorManager &rhs);
     public:
-      void add_mapper(MapperID mid, Mapper *m, bool check);
-      void replace_default_mapper(Mapper *m);
-      Mapper* find_mapper(MapperID mid) const; 
+      void add_mapper(MapperID mid, MapperManager *m, bool check, bool own);
+      void replace_default_mapper(MapperMapper *m, bool own);
+      MapperManager* find_mapper(MapperID mid, bool need_lock = true) const;
     public:
       void perform_scheduling(void);
       void launch_task_scheduler(void);
@@ -487,9 +487,6 @@ namespace Legion {
     public:
       void add_to_ready_queue(TaskOp *op, bool previous_failure);
       void add_to_local_ready_queue(Operation *op, bool previous_failure);
-    public:
-      // Mapper introspection methods
-      unsigned sample_unmapped_tasks(MapperID map_id);
 #ifdef HANG_TRACE
     public:
       void dump_state(FILE *target);
@@ -532,22 +529,16 @@ namespace Legion {
       std::vector<ContextState> context_states;
     protected:
       // For each mapper, a list of tasks that are ready to map
-      std::vector<std::list<TaskOp*> > ready_queues;
+      std::map<MapperID,std::list<TaskOp*> > ready_queues;
       // Mapper objects
-      std::vector<Mapper*> mapper_objects;
-      // Mapper locks
-      std::vector<Reservation> mapper_locks;
-      // Pending mapper messages
-      std::vector<std::vector<MapperMessage> > mapper_messages;
-      // Keep track of whether we are inside of a mapper call
-      std::vector<bool> inside_mapper_call;
-      // Events to wait on before retrying the mapper call
-      std::vector<Event> defer_mapper_event;
+      std::map<MapperID,std::pair<MapperManager*,bool/*own*/> > mappers;
       // For each mapper, the set of processors to which it
       // has outstanding steal requests
       std::map<MapperID,std::set<Processor> > outstanding_steal_requests;
       // Failed thiefs to notify when tasks become available
       std::multimap<MapperID,Processor> failed_thiefs;
+      // Reservations for accessing mappers
+      Reservation mapper_lock;
       // Reservations for stealing and thieving
       Reservation stealing_lock;
       Reservation thieving_lock;
@@ -1509,6 +1500,8 @@ namespace Legion {
     public:
       void add_mapper(MapperID map_id, Mapper *mapper, Processor proc);
       void replace_default_mapper(Mapper *mapper, Processor proc);
+      MapperManager* find_mapper(Processor target, MapperID map_id);
+      static MapperManager* wrap_mapper(Mapper *mapper);
     public:
       void register_projection_functor(ProjectionID pid,
                                        ProjectionFunctor *func);
@@ -2452,6 +2445,26 @@ namespace Legion {
       const DistributedID did;
       DistributedCollectable *const dc;
       Runtime *const runtime;
+    };
+
+    /**
+     * \class FindMapperContinuation
+     */
+    class FindMapperContinuation : public LegionContinuation {
+    public:
+      FindMapperContinuation(ProcessorManager *man, MapperID mid)
+        : manager(man), mapper_id(mid), result(NULL) {  }
+    public:
+      virtual void execute(void)
+      {
+        result = manager->find_mapper(map_id, false/*need lock*/); 
+      }
+    public:
+      inline MapperManager* get_result(void) const { return result; }
+    protected:
+      ProcessorManager *const manager;
+      const MapperID map_id;
+      MapperManager *result;
     };
 
     //--------------------------------------------------------------------------

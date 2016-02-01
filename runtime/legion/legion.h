@@ -3861,12 +3861,6 @@ namespace Legion {
        */
       void retrieve_name(LogicalPartition handle, const char *&result);
     public:
-      //------------------------------------------------------------------------
-      // Registration Callback Operations
-      // All of these calls must be made while in the registration
-      // function called before start-up.  This function is specified
-      // by calling the 'set_registration_callback' static method.
-      //------------------------------------------------------------------------
       /**
        * Add a mapper at the given mapper ID for the runtime
        * to use when mapping tasks.  Note that this call should
@@ -3877,7 +3871,8 @@ namespace Legion {
        * @param mapper pointer to the mapper object
        * @param proc the processor to associate the mapper with
        */
-      void add_mapper(MapperID map_id, Mapper *mapper, Processor proc);
+      void add_mapper(MapperID map_id, Mapping::Mapper *mapper, 
+                      Processor proc = Processor::NO_PROC);
       
       /**
        * Replace the default mapper for a given processor with
@@ -3889,7 +3884,8 @@ namespace Legion {
        *    as the new default mapper
        * @param proc the processor to associate the mapper with
        */
-      void replace_default_mapper(Mapper *mapper, Processor proc);
+      void replace_default_mapper(Mapping::Mapper *mapper, 
+                                  Processor proc = Processor::NO_PROC);
 
       /**
        * Register a projection functor for handling projection

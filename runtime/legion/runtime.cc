@@ -1594,23 +1594,12 @@ namespace Legion {
         superscalar_width(width), 
         stealing_disabled(no_steal), max_outstanding_steals(max_steals),
         next_local_index(0),
-        task_scheduler_enabled(false), total_active_contexts(0),
-        ready_queues(std::vector<std::list<TaskOp*> >(def_mappers)),
-        mapper_objects(std::vector<Mapper*>(def_mappers,NULL)),
-        mapper_locks(
-            std::vector<Reservation>(def_mappers,Reservation::NO_RESERVATION)),
-        mapper_messages(std::vector<std::vector<MapperMessage> >(def_mappers)),
-        inside_mapper_call(std::vector<bool>(def_mappers,false)),
-        defer_mapper_event(std::vector<Event>(def_mappers,Event::NO_EVENT))
+        task_scheduler_enabled(false), total_active_contexts(0)
     //--------------------------------------------------------------------------
     {
-      for (unsigned idx = 0; idx < def_mappers; idx++)
-      {
-        ready_queues[idx].clear();
-        outstanding_steal_requests[idx] = std::set<Processor>();
-      }
       this->local_queue_lock = Reservation::create_reservation();
       this->queue_lock = Reservation::create_reservation();
+      this->mapper_lock = Reservation::create_reservation();
       this->stealing_lock = Reservation::create_reservation();
       this->thieving_lock = Reservation::create_reservation();
       context_states.resize(DEFAULT_CONTEXTS);
@@ -1634,26 +1623,20 @@ namespace Legion {
     ProcessorManager::~ProcessorManager(void)
     //--------------------------------------------------------------------------
     {
-      for (unsigned idx = 0; idx < mapper_objects.size(); idx++)
+      for (std::map<MapperID,std::pair<MapperManager*,bool> >::iterator it = 
+            mappers.begin(); it != mappers.end(); it++)
       {
-        if (mapper_objects[idx] != NULL)
-        {
-          delete mapper_objects[idx];
-          mapper_objects[idx] = NULL;
-#ifdef DEBUG_HIGH_LEVEL
-          assert(mapper_locks[idx].exists());
-#endif
-          mapper_locks[idx].destroy_reservation();
-          mapper_locks[idx] = Reservation::NO_RESERVATION;
-        }
+        if (it->second.second)
+          delete it->second.first;
       }
-      mapper_objects.clear();
-      mapper_locks.clear();
       ready_queues.clear();
+      mappers.clear();
       local_queue_lock.destroy_reservation();
       local_queue_lock = Reservation::NO_RESERVATION;
       queue_lock.destroy_reservation();
       queue_lock = Reservation::NO_RESERVATION;
+      mapper_lock.destroy_reservation();
+      mapper_lock = Reservation::NO_RESERVATION;
       stealing_lock.destroy_reservation();
       stealing_lock = Reservation::NO_RESERVATION;
       thieving_lock.destroy_reservation();
@@ -1670,7 +1653,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ProcessorManager::add_mapper(MapperID mid, Mapper *m, bool check)
+    void ProcessorManager::add_mapper(MapperID mid, MapperManager *m, 
+                                      bool check, bool own)
     //--------------------------------------------------------------------------
     {
       log_run.spew("Adding mapper %d on processor " IDFMT "", 
@@ -1683,54 +1667,65 @@ namespace Legion {
         exit(ERROR_RESERVED_MAPPING_ID);
       } 
 #endif
-      if (mid >= mapper_objects.size())
+      AutoLock m_lock(mapper_lock);
+      std::map<MapperID,std::pair<MapperManager*,bool> >::iterator finder = 
+        mappers.find(mid);
+      if (finder != mappers.end())
       {
-        int old_size = mapper_objects.size();
-        mapper_objects.resize(mid+1);
-        mapper_locks.resize(mid+1);
-        mapper_messages.resize(mid+1);
-        inside_mapper_call.resize(mid+1);
-        defer_mapper_event.resize(mid+1);
-        ready_queues.resize(mid+1);
-        for (unsigned int i=old_size; i<(mid+1); i++)
-        {
-          mapper_objects[i] = NULL;
-          mapper_locks[i].destroy_reservation();
-          mapper_locks[i] = Reservation::NO_RESERVATION;
-          inside_mapper_call[i] = false;
-          defer_mapper_event[i] = Event::NO_EVENT;
-          ready_queues[i].clear();
-          outstanding_steal_requests[i] = std::set<Processor>();
-        }
+        if (finder->second.second)
+          delete finder->second.first;
+        finder->second = std::pair<MapperManager*,bool>(m, own);
       }
-#ifdef DEBUG_HIGH_LEVEL
-      assert(mid < mapper_objects.size());
-      assert(mapper_objects[mid] == NULL);
-      assert(!mapper_locks[mid].exists());
-#endif
-      mapper_locks[mid] = Reservation::create_reservation();
-      mapper_objects[mid] = m;
+      else
+      {
+        mappers[mid] = std::pair<MapperManager*,bool>(m, own); 
+        AutoLock q_lock(queue_lock);
+        ready_queues[mid] = std::list<TaskOp*>();
+      }
     }
 
     //--------------------------------------------------------------------------
-    void ProcessorManager::replace_default_mapper(Mapper *m)
+    void ProcessorManager::replace_default_mapper(MapperManager *m, bool own)
     //--------------------------------------------------------------------------
     {
+      AutoLock m_lock(mapper_lock);
+      std::map<MapperID,std::pair<MapperManager*,bool> >::iterator finder = 
+        mappers.find(0);
 #ifdef DEBUG_HIGH_LEVEL
-      assert(mapper_objects[0] != NULL);
+      assert(finder != mappers.end());
 #endif
-      delete mapper_objects[0];
-      mapper_objects[0] = m;
+      if (finder->second.second)
+        delete finder->second.first;
+      finder->second = std::pair<MapperManager*,bool>(m, own);
     }
 
     //--------------------------------------------------------------------------
-    Mapper* ProcessorManager::find_mapper(MapperID mid) const
+    MapperManager* ProcessorManager::find_mapper(MapperID mid, 
+                                                 bool need_lock) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(mid < mapper_objects.size());
-#endif
-      return mapper_objects[mid];
+      // This call is frequently called from application tasks that are
+      // launching sub-tasks and therefore can never block on an acquire
+      Event precondtion = Event::NO_EVENT;
+      if (need_lock)
+        precondition = mapper_lock.acquire(1,false/*exclusive*/);
+      if (precondition.has_triggered())
+      {
+        MapperManager *result = NULL;
+        // We've got the lock, so do the operation
+        std::map<MapperID,std::pair<MapperManager*,bool> >::const_iterator
+          finder = mappers.find(mid);
+        if (finder != mappers.end())
+          result = finder->second.first;
+        // Unlock the lock
+        mapper_lock.release();
+        return result;
+      }
+      // Otherwise build the continuation to get the mapper
+      FindMapperContinuation continuation(this, mid);
+      Event wait_on = continuation.defer(runtime, precondition);
+      wait_on.wait();
+      return continuation.get_result();
     }
 
     //--------------------------------------------------------------------------
@@ -1845,52 +1840,47 @@ namespace Legion {
         // issue steal requests to another processor before the mappers 
         // have been initialized on that processor.  There's no 
         // correctness problem for ignoring a steal request so just do that.
-        if ((mapper_objects.size() <= stealer) ||
-            (mapper_objects[stealer] == NULL))
+        MapperManager *mapper = find_mapper(stealer);
+        if (mapper == NULL)
           continue;
         
         // Construct a vector of tasks eligible for stealing
-        std::vector<TaskOp*> mapper_tasks;
+        Mapper::StealRequestInput input;
+        input.thief_proc = thief;
+        std::vector<const Task*> &mapper_tasks = input.stealable_tasks;
         {
           AutoLock q_lock(queue_lock,1,false/*exclusive*/);
+          std::list<TaskOp*> &target_list = ready_queues[stealer];
           for (std::list<TaskOp*>::const_iterator it = 
-                ready_queues[stealer].begin(); it != 
-                ready_queues[stealer].end(); it++)
+                target_list.begin(); it != target_list.end(); it++)
           {
             if ((*it)->is_stealable() && !(*it)->is_locally_mapped())
               mapper_tasks.push_back(*it);
           }
         }
-        std::set<TaskOp*> to_steal;
+        Mapper::StealRequest output;
         // Ask the mapper what it wants to allow be stolen
         if (!mapper_tasks.empty())
-        {
-          // Time to stomp on the C++ type system again 
-          std::set<const Task*> &to_steal_prime = 
-            *((std::set<const Task*>*)(&to_steal));
-          std::vector<const Task*> &stealable = 
-            *((std::vector<const Task*>*)(&mapper_tasks));
-          invoke_mapper_permit_task_steal(stealer, thief, stealable,
-                                          to_steal_prime);
-        }
+          mapper->invoke_permit_task_steal(&input, &output);
         std::deque<TaskOp*> temp_stolen;
+        const std::set<const Task*> &to_steal = output.stolen_tasks;
         if (!to_steal.empty())
         {
           // See if we can still get it out of the queue
           AutoLock q_lock(queue_lock);
-          for (unsigned idx = 0; idx < to_steal.size(); idx++)
-          for (std::set<TaskOp*>::const_iterator steal_it = to_steal.begin();
-                steal_it != to_steal.end(); steal_it++)
+          std::list<TaskOp*> &target_list = ready_queues[stealer];
+          for (std::set<const Task*>::const_iterator steal_it = 
+                to_steal.begin(); steal_it != to_steal.end(); steal_it++)
           {
-            TaskOp *target = *steal_it;
+            TaskOp *target = static_cast<TaskOp*>(
+                              const_cast<Task*>(*steal_it));
             bool found = false;
-            for (std::list<TaskOp*>::iterator it = 
-                  ready_queues[stealer].begin(); it !=
-                  ready_queues[stealer].end(); it++)
+            for (std::list<TaskOp*>::iterator it = target_list.begin();
+                  it != target_list.end(); it++)
             {
               if ((*it) == target)
               {
-                ready_queues[stealer].erase(it);
+                target_list.erase(it);
                 found = true;
                 break;
               }
@@ -1990,7 +1980,6 @@ namespace Legion {
     {
 #ifdef DEBUG_HIGH_LEVEL
       assert(task != NULL);
-      assert(task->map_id <= ready_queues.size());
 #endif
       // always set this before putting something on the ready queue
       task->schedule = false; 
@@ -2000,6 +1989,9 @@ namespace Legion {
       // vector is of a fixed size
       ContextID ctx_id = task->get_parent()->get_context_id();
       AutoLock q_lock(queue_lock);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(ready_queues.find(task->map_id) != ready_queues.end());
+#endif
       ContextState &state = context_states[ctx_id];
       if (prev_failure)
         ready_queues[task->map_id].push_front(task);
@@ -2045,14 +2037,6 @@ namespace Legion {
                                          HLR_TRIGGER_OP_ID, op, precondition);
     }
 
-    //--------------------------------------------------------------------------
-    unsigned ProcessorManager::sample_unmapped_tasks(MapperID map_id)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock q_lock(queue_lock, 1, false/*exclusive*/);
-      return ready_queues[map_id].size();
-    }
-
 #ifdef HANG_TRACE
     //--------------------------------------------------------------------------
     void ProcessorManager::dump_state(FILE *target)
@@ -2069,9 +2053,10 @@ namespace Legion {
         fprintf(target,"    Queue at depth %d has %ld elements\n",
                 idx, dependence_queues[idx].queue.size());
       fprintf(target,"  Ready Queue Count: %ld\n", ready_queues.size());
-      for (unsigned idx = 0; idx < ready_queues.size(); idx++)
+      for (std::map<MapperID,std::list<TaskOp*> >::const_iterator it = 
+            ready_queues.begin(); it != ready_queues.end(); it++)
         fprintf(target,"    Ready queue %d has %ld elements\n",
-                idx, ready_queues[idx].size());
+                it->first, it->second.size());
       fprintf(target,"  Local Queue has %ld elements\n", 
               local_ready_queue.size());
       fflush(target);
@@ -2084,44 +2069,57 @@ namespace Legion {
     {
       std::multimap<Processor,MapperID> stealing_targets;
       std::vector<MapperID> mappers_with_work;
-      for (unsigned map_id = 0; map_id < ready_queues.size(); map_id++)
+      std::vector<std::pair<MapperID,MapperManager*> > current_mappers;
+      // Take a snapshot of our current mappers
       {
-        if (mapper_objects[map_id] == NULL)
-          continue;
-        std::list<TaskOp*> visible_tasks;
+        AutoLock m_lock(mapper_lock,1,false/*exclusive*/);
+        current_mappers.resize(mappers.size());
+        unsigned idx = 0;
+        for (std::map<MapperID,std::pair<MapperManager*,bool> >::
+              const_iterator it = mappers.begin(); it != 
+              mappers.end(); it++, idx++)
+        {
+          current_mappers[idx] = 
+            std::pair<MapperID,MapperManager*>(it->first, it->second.first);
+        }
+      }
+      for (std::vector<std::pair<MapperID,MapperManager*> >::const_iterator
+            it = current_mappers.begin(); it != current_mappers.end(); it++)
+      {
+        MapperID map_id = it->first;
+        MapperManager *mapper = it->second;
+        Mapper::SelectMappingInput input;
+        std::list<const Task*> &visible_tasks = input.ready_tasks;
         // We also need to capture the generations here
-        std::vector<GenerationID> visible_generations;
+        std::list<GenerationID> visible_generations;
         // Pull out the current tasks for this mapping operation
         {
           AutoLock q_lock(queue_lock,1,false/*exclusive*/);
-          visible_tasks.insert(visible_tasks.begin(),
-               ready_queues[map_id].begin(), ready_queues[map_id].end());
-          visible_generations.resize(visible_tasks.size());
-          unsigned idx = 0;
-          for (std::list<TaskOp*>::const_iterator it = visible_tasks.begin();
-                it != visible_tasks.end(); it++, idx++)
+          std::list<TaskOp*> &target_list = ready_queues[map_id];
+          for (std::list<TaskOp*>::const_iterator it = 
+                target_list.begin(); it != target_list.end(); it++)
           {
-            visible_generations[idx] = (*it)->get_generation();
+            visible_tasks.push_back(*it);
+            visible_generations.push_back((*it)->get_generation());
           }
         }
         // Ask the mapper which tasks it would like to schedule
+        Mapper::SelectMappingOutput output;
         if (!visible_tasks.empty())
-        {
-          // Watch me stomp all over the C++ type system here
-          const std::list<Task*> &ready_tasks = 
-                                *((std::list<Task*>*)(&(visible_tasks)));
-          invoke_mapper_select_tasks_to_schedule(map_id, ready_tasks); 
-        }
+          mapper->invoke_select_tasks_to_map(&input, &output);
         if (!stealing_disabled)
         {
-          std::set<Processor> black_copy;
+          Mapper::SelectStealingInput steal_input;
+          std::set<Processor> &black_copy = steal_input.blacklist;
           // Make a local copy of our blacklist
           {
             AutoLock steal_lock(stealing_lock,1,false/*exclusive*/);
             black_copy = outstanding_steal_requests[map_id];
           }
-          std::set<Processor> steal_targets;
-          invoke_mapper_target_task_steal(map_id, black_copy, steal_targets);
+          Mapper::SelectStealingOutput steal_output;
+          std::set<Processor> &steal_targets = steal_output.targets;
+          // Invoke the mapper
+          mapper->invoke_select_steal_targets(&steal_input, &steal_output);
           AutoLock steal_lock(stealing_lock);
           std::set<Processor> &blacklist = outstanding_steal_requests[map_id];
           for (std::set<Processor>::const_iterator it = 
@@ -2143,54 +2141,68 @@ namespace Legion {
         // map.  It's also possible the task is no longer in the same
         // place if the queue was prepended to.
         {
-          std::list<TaskOp*> &rqueue = ready_queues[map_id];
-          AutoLock q_lock(queue_lock);
-          unsigned gen_idx = 0;
-          for (std::list<TaskOp*>::iterator vis_it = visible_tasks.begin(); 
-                vis_it != visible_tasks.end(); gen_idx++)
+          // First things first: filter our visible list before we are holding
+          // the lock on the ready queues
+          std::list<GenerationID>::iterator gen_it = 
+            visible_generations.begin();
+          for (std::list<const Task*>::iterator vis_it = visible_tasks.begin();
+                vis_it != visible_tasks.end(); /*nothing*/)
           {
-            if ((*vis_it)->schedule || 
-                ((*vis_it)->target_proc != local_proc))
+            // Check to see if this is a task that we care about
+            if ((output.map_tasks.find(*vis_it) != output.map_tasks.end()) ||
+                (output.relocate_tasks.find(*vis_it) != 
+                 output.relocate_tasks.end()))
             {
-              bool found = false;
-              for (std::list<TaskOp*>::iterator it = rqueue.begin();
-                    it != rqueue.end(); it++)
+              vis_it++; // still care about it
+              gen_it++;
+            }
+            else // Otherwise we don't care so we can erase it
+            {
+              vis_it = visible_tasks.erase(vis_it);
+              gen_it = visible_generations.erase(gen_it);
+            }
+          }
+          // Reset the iterator to the start
+          gen_it = visible_generations.begin();
+          AutoLock q_lock(queue_lock);
+          std::list<TaskOp*> &rqueue = ready_queues[map_id];
+          unsigned gen_idx = 0;
+          for (std::list<const Task*>::iterator vis_it = visible_tasks.begin(); 
+                vis_it != visible_tasks.end(); gen_it++)
+          {
+            bool found = false;
+            for (std::list<TaskOp*>::iterator it = rqueue.begin();
+                  it != rqueue.end(); it++)
+            {
+              // In order to be the same task, they need to have the
+              // same pointer and have the same generation
+              if (((*it) == (*vis_it)) &&
+                  ((*gen_it) == (*it)->get_generation()))
               {
-                // In order to be the same task, they need to have the
-                // same pointer and have the same generation
-                if (((*it) == (*vis_it)) &&
-                    (visible_generations[gen_idx] == (*it)->get_generation()))
-                {
-                  rqueue.erase(it);
-                  found = true;
-                  break;
-                }
+                rqueue.erase(it);
+                found = true;
+                break;
               }
-              if (!found) // stolen
-              {
-                // Remove it from our list
-                vis_it = visible_tasks.erase(vis_it);
-              }
-              else
-              {
-                // Wait until we are not holding the queue lock
-                // to mark that this task is no longer outstanding
-                ContextID ctx_id = (*vis_it)->get_parent()->get_context_id(); 
-                ContextState &state = context_states[ctx_id];
-#ifdef DEBUG_HIGH_LEVEL
-                assert(state.owned_tasks > 0);
-#endif
-                state.owned_tasks--;
-                if (state.active && (state.owned_tasks == 0))
-                  decrement_active_contexts();
-                vis_it++;
-              }
+            }
+            if (!found) // stolen
+            {
+              // Remove it from our list
+              vis_it = visible_tasks.erase(vis_it);
             }
             else
             {
-              // Decided not to do anything so remove it
-              // from the list of things to do
-              vis_it = visible_tasks.erase(vis_it);
+              // Wait until we are not holding the queue lock
+              // to mark that this task is no longer outstanding
+              TaskOp *task = static_cast<TaskOp*>(const_cast<Task*>(*vis_it));
+              ContextID ctx_id = task->get_parent()->get_context_id(); 
+              ContextState &state = context_states[ctx_id];
+#ifdef DEBUG_HIGH_LEVEL
+              assert(state.owned_tasks > 0);
+#endif
+              state.owned_tasks--;
+              if (state.active && (state.owned_tasks == 0))
+                decrement_active_contexts();
+              vis_it++;
             }
           }
           if (!rqueue.empty())
@@ -2201,15 +2213,19 @@ namespace Legion {
         TriggerTaskArgs args;
         args.hlr_id = HLR_TRIGGER_TASK_ID;
         args.manager = this;
-        for (std::list<TaskOp*>::iterator vis_it = visible_tasks.begin();
+        for (std::list<const Task*>::iterator vis_it = visible_tasks.begin();
               vis_it != visible_tasks.end(); vis_it++)
         {
-#ifdef DEBUG_HIGH_LEVEL
-          assert((*vis_it)->schedule || 
-                 ((*vis_it)->target_proc != local_proc));
-#endif
-          (*vis_it)->deactivate_outstanding_task();
-          Event wait_on = (*vis_it)->invoke_state_analysis();
+          Task *task = static_cast<TaskOp*>(const_cast<Task*>(*vis_it));
+          // Update the target processor for this task if necessary
+          std::map<const Task*,Processor>::const_iterator finder = 
+            output.relocate_tasks.find(*vis_it);
+          Event wait_on = Event::NO_EVENT;
+          if (finder != output.relocate_tasks.end())
+            task->target_proc = finder->second;
+          else // if we're not sending it somewhere, invoke the state analysis
+            wait_on = task->invoke_state_analysis();
+          task->deactivate_outstanding_task();
           // We give a slight priority to triggering the execution
           // of tasks relative to other runtime operations because
           // they actually have a feedback mechanism controlling
@@ -4677,9 +4693,9 @@ namespace Legion {
                                     stealing_disabled,
 				    all_procs.size()-1);
         proc_managers[*it] = manager;
-        manager->add_mapper(0, 
-            new Mapping::DefaultMapper(machine, external, *it),
-                            false/*needs check*/);
+        Mapper *mapper = new Mapping::DefaultMapper(machine, external, *it);
+        MapperManager *wrapper = wrap_mapper(mapper);
+        manager->add_mapper(0, wrapper, false/*check*/, true/*owns*/); 
       }
       // Initialize the message manager array so that we can construct
       // message managers lazily as they are needed
@@ -10468,25 +10484,96 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::add_mapper(MapperID map_id, Mapper *mapper, 
-                                      Processor proc)
+    void Runtime::add_mapper(MapperID map_id, Mapper *mapper, Processor proc)
     //--------------------------------------------------------------------------
     {
+      // First, wrap this mapper in a mapper manager
+      MapperManager *manager = wrap_mapper(mapper);
+      if (!proc.exists())
+      {
+        bool own = true;
+        // Save it to all the managers
+        for (std::map<Processor,ProcessorManager*>::const_iterator it = 
+              proc_managers.begin(); it != proc_managers.end(); it++)
+        {
+          it->second->add_mapper(map_id, manager, true/*check*/, own);
+          own = false;
+        }
+      }
+      else
+      {
 #ifdef DEBUG_HIGH_LEVEL
-      assert(proc_managers.find(proc) != proc_managers.end());
+        assert(proc_managers.find(proc) != proc_managers.end());
 #endif
-      proc_managers[proc]->add_mapper(map_id, mapper, true/*check*/);
+        proc_managers[proc]->add_mapper(map_id, manager, 
+                                        true/*check*/, true/*own*/);
+      }
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::replace_default_mapper(Mapper *mapper, 
-                                                  Processor proc)
+    void Runtime::replace_default_mapper(Mapper *mapper, Processor proc)
     //--------------------------------------------------------------------------
     {
+      // First, wrap this mapper in a mapper manager
+      MapperManager *manager = wrap_mapper(mapper); 
+      if (!proc.exists())
+      {
+        bool own = true;
+        // Save it to all the managers
+        for (std::map<Processor,ProcessorManager*>::const_iterator it = 
+              proc_managers.begin(); it != proc_managers.end(); it++)
+        {
+          it->second->replace_default_mapper(manager, own);
+          own = false;
+        }
+      }
+      else
+      {
 #ifdef DEBUG_HIGH_LEVEL
-      assert(proc_managers.find(proc) != proc_managers.end());
+        assert(proc_managers.find(proc) != proc_managers.end());
 #endif
-      proc_managers[proc]->replace_default_mapper(mapper);
+        proc_managers[proc]->replace_default_mapper(manager, true/*own*/);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ MapperManager* Runtime::wrap_mapper(Mapper *mapper)
+    //--------------------------------------------------------------------------
+    {
+      MapperManager *manager = NULL;
+      switch (mapper->get_mapper_sync_model())
+      {
+        case Mapper::CONCURRENT_MAPPER_MODEL:
+          {
+            manager = new ConcurrentManager(this, mapper);
+            break;
+          }
+        case Mapper::SERIALIZED_REENTRANT_MAPPER_MODEL:
+          {
+            manager = new SerializingManager(this, mapper, true/*reentrant*/);
+            break;
+          }
+        case Mapper::SERIALIZED_NON_REENTRANT_MAPPER_MODEL:
+          {
+            manager = new SerializingManager(this, mapper, false/*reentrant*/);
+            break;
+          }
+        default:
+          assert(false);
+      }
+      return manager;
+    }
+
+    //--------------------------------------------------------------------------
+    MapperManager* Runtime::find_mapper(Processor target, MapperID map_id)
+    //--------------------------------------------------------------------------
+    {
+      std::map<Processor,ProcessorManager*>::const_iterator finder = 
+        proc_managers.find(target);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(finder != proc_managers.end());
+#endif
+      return finder->second->find_mapper(map_id);
     }
 
     //--------------------------------------------------------------------------
@@ -10936,7 +11023,7 @@ namespace Legion {
     {
       TaskImpl *impl = find_task_impl(task_id);
       return impl->get_collection();
-    }
+    } 
 
     //--------------------------------------------------------------------------
     MemoryManager* Runtime::find_memory(Memory mem)

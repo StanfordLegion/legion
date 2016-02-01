@@ -3298,16 +3298,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::add_mapper(MapperID map_id, Mapper *mapper, 
-                                      Processor proc)
+    void Runtime::add_mapper(MapperID map_id, Mapping::Mapper *mapper, 
+                             Processor proc)
     //--------------------------------------------------------------------------
     {
       runtime->add_mapper(map_id, mapper, proc);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::replace_default_mapper(Mapper *mapper, 
-                                                  Processor proc)
+    void Runtime::replace_default_mapper(Mapping::Mapper *mapper,Processor proc)
     //--------------------------------------------------------------------------
     {
       runtime->replace_default_mapper(mapper, proc);
