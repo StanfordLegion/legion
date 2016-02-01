@@ -684,17 +684,9 @@ namespace Realm {
       }
       if (gasnet_nodes() > ((1 << ID::NODE_BITS) - 1))
       {
-#ifdef LEGION_IDS_ARE_64BIT
         fprintf(stderr,"ERROR: Launched %d nodes, but low-level IDs are only "
                        "configured for at most %d nodes. Update the allocation "
                        "of bits in ID", gasnet_nodes(), (1 << ID::NODE_BITS) - 1);
-#else
-        fprintf(stderr,"ERROR: Launched %d nodes, but low-level IDs are only "
-                       "configured for at most %d nodes.  Update the allocation "
-                       "of bits in ID or switch to 64-bit IDs with the "
-                       "-DLEGION_IDS_ARE_64BIT compile-time flag",
-                       gasnet_nodes(), (1 << ID::NODE_BITS) - 1);
-#endif
         gasnet_exit(1);
       }
 
