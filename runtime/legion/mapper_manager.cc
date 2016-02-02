@@ -583,7 +583,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void MapperManager::invoke_select_release_sources(ReleaseOp *op,
                                        Mapper::SelectReleaseSrcInput *input,
-                                       Mapper::SelectReleaseSrcOuput *output,
+                                       Mapper::SelectReleaseSrcOutput *output,
                                        bool first_invocation)
     //--------------------------------------------------------------------------
     {

@@ -1181,109 +1181,6 @@ extern "C" {
   legion_projection_id_t
   legion_region_requirement_get_projection(legion_region_requirement_t handle);
 
-  /**
-   * @see Legion::RegionRequirement::virtual_map
-   */
-  bool
-  legion_region_requirement_get_virtual_map(legion_region_requirement_t handle);
-
-  /**
-   * @see Legion::RegionRequirement::virtual_map
-   */
-  void
-  legion_region_requirement_set_virtual_map(
-    legion_region_requirement_t handle,
-    bool value);
-
-  /**
-   * @see Legion::RegionRequirement::early_map
-   */
-  bool
-  legion_region_requirement_get_early_map(legion_region_requirement_t handle);
-
-  /**
-   * @see Legion::RegionRequirement::early_map
-   */
-  void
-  legion_region_requirement_set_early_map(
-    legion_region_requirement_t handle,
-    bool value);
-
-  /**
-   * @see Legion::RegionRequirement::enable_WAR_optimization
-   */
-  bool
-  legion_region_requirement_get_enable_WAR_optimization(
-    legion_region_requirement_t handle);
-
-  /**
-   * @see Legion::RegionRequirement::enable_WAR_optimization
-   */
-  void
-  legion_region_requirement_set_enable_WAR_optimization(
-    legion_region_requirement_t handle,
-    bool value);
-
-  /**
-   * @see Legion::RegionRequirement::reduction_list
-   */
-  bool
-  legion_region_requirement_get_reduction_list(
-    legion_region_requirement_t handle);
-
-  /**
-   * @see Legion::RegionRequirement::reduction_list
-   */
-  void
-  legion_region_requirement_set_reduction_list(
-    legion_region_requirement_t handle,
-    bool value);
-
-  /**
-   * @see Legion::RegionRequirement::make_persistent
-   */
-  unsigned
-  legion_region_requirement_get_make_persistent(
-    legion_region_requirement_t handle);
-
-  /**
-   * @see Legion::RegionRequirement::make_persistent
-   */
-  void
-  legion_region_requirement_set_make_persistent(
-    legion_region_requirement_t handle,
-    unsigned value);
-
-  /**
-   * @see Legion::RegionRequirement::blocking_factor
-   */
-  unsigned
-  legion_region_requirement_get_blocking_factor(
-    legion_region_requirement_t handle);
-
-  /**
-   * @see Legion::RegionRequirement::blocking_factor
-   */
-  void
-  legion_region_requirement_set_blocking_factor(
-    legion_region_requirement_t handle,
-    unsigned value);
-
-  /**
-   * @see Legion::RegionRequirement::max_blocking_factor
-   */
-  unsigned
-  legion_region_requirement_get_max_blocking_factor(
-    legion_region_requirement_t handle);
-
-  /**
-   * @see Legion::RegionRequirement::target_ranking
-   */
-  void
-  legion_region_requirement_add_target_ranking(
-    legion_region_requirement_t handle,
-    legion_memory_t memory);
-
   // -----------------------------------------------------------------------
   // Allocator and Argument Map Operations
   // -----------------------------------------------------------------------
@@ -2457,30 +2354,6 @@ extern "C" {
   legion_task_id_t
   legion_task_get_task_id(legion_task_t task);
 
-  /**
-   * @see Legion::Task::target_proc
-   */
-  legion_processor_t
-  legion_task_get_target_proc(legion_task_t task);
-
-  /**
-   * @see Legion::Task::variants::name
-   */
-  const char *
-  legion_task_get_name(legion_task_t task);
-
-  /**
-   * @see Legion::Task::target_proc
-   */
-  void
-  legion_task_set_target_proc(legion_task_t task, legion_processor_t proc);
-
-  /**
-   * @see Legion::Task::additional_procs
-   */
-  void
-  legion_task_add_additional_proc(legion_task_t task, legion_processor_t proc);
-
   // -----------------------------------------------------------------------
   // -----------------------------------------------------------------------
   // Inline Operations
@@ -2700,26 +2573,6 @@ extern "C" {
     legion_machine_query_interface_t handle,
     legion_processor_t proc,
     legion_memory_kind_t kind);
-
-  // -----------------------------------------------------------------------
-  // Default Mapper Operations
-  // -----------------------------------------------------------------------
-
-  /**
-   * @see Legion::DefaultMapper::map_task()
-   */
-  bool
-  legion_default_mapper_map_task(
-    legion_default_mapper_t mapper,
-    legion_task_t task);
-
-  /**
-   * @see Legion::DefaultMapper::map_inline()
-   */
-  bool
-  legion_default_mapper_map_inline(
-    legion_default_mapper_t mapper,
-    legion_inline_t inline_operation);
 
 #ifdef __cplusplus
 }

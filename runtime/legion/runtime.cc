@@ -3661,8 +3661,6 @@ namespace Legion {
         const char *name = (const char*)info.buffer;
         runtime->profiler->register_task_kind(task_id, name);
       }
-      collection = new TaskVariantCollection(task_id, get_name(), 
-                                             false/*idempotent*/, 0);
     }
 
     //--------------------------------------------------------------------------
@@ -3687,7 +3685,6 @@ namespace Legion {
                     it->second.size);
       }
       semantic_infos.clear();
-      delete collection;
     }
 
     //--------------------------------------------------------------------------
@@ -3741,9 +3738,6 @@ namespace Legion {
         all_idempotent  = impl->is_idempotent();
       }
       variants[impl->vid] = impl;
-      collection->add_variant(impl->vid, impl->get_processor_kind(false),
-                              true/*single*/, true/*index*/,
-                              impl->is_inner(), impl->is_leaf(), impl->vid); 
     }
 
     //--------------------------------------------------------------------------
@@ -3793,13 +3787,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    TaskVariantCollection* TaskImpl::get_collection(void)
-    //--------------------------------------------------------------------------
-    {
-      return collection;
-    }
-
-    //--------------------------------------------------------------------------
     const char* TaskImpl::get_name(bool needs_lock /*= true*/) const
     //--------------------------------------------------------------------------
     {
@@ -3836,8 +3823,6 @@ namespace Legion {
 
       void *local = legion_malloc(SEMANTIC_INFO_ALLOC, size);
       memcpy(local, buffer, size);
-      if (tag == NAME_SEMANTIC_TAG)
-        collection->name = (const char*)local;
       bool added = true;
       UserEvent to_trigger = UserEvent::NO_USER_EVENT;
       {
@@ -11016,14 +11001,6 @@ namespace Legion {
       TaskImpl *owner = find_or_create_task_impl(task_id);
       return owner->find_variant_impl(variant_id);
     }
-
-    //--------------------------------------------------------------------------
-    TaskVariantCollection* Runtime::get_collection(TaskID task_id)
-    //--------------------------------------------------------------------------
-    {
-      TaskImpl *impl = find_task_impl(task_id);
-      return impl->get_collection();
-    } 
 
     //--------------------------------------------------------------------------
     MemoryManager* Runtime::find_memory(Memory mem)

@@ -17,7 +17,6 @@
 #include "legion_c.h"
 #include "legion_c_util.h"
 #include "utilities.h"
-#include "default_mapper.h"
 
 #ifndef USE_LEGION_PARTAPI_SHIM
 #ifdef SHARED_LOWLEVEL
@@ -106,24 +105,6 @@ legion_domain_get_rect_3d(legion_domain_t d_)
 
   return CObjectWrapper::wrap(d.get_rect<3>());
 }
-
-#if 0
-size_t
-legion_domain_get_volume(legion_domain_t d_)
-{
-  Domain d = CObjectWrapper::unwrap(d_);
-
-  return d.get_volume();
-}
-
-legion_domain_t
-legion_domain_from_index_space(legion_index_space_t is_)
-{
-  IndexSpace is = CObjectWrapper::unwrap(is_);
-
-  return CObjectWrapper::wrap(Domain(is));
-}
-#endif
 
 // -----------------------------------------------------------------------
 // Domain Point Operations
@@ -1935,137 +1916,6 @@ legion_region_requirement_get_projection(legion_region_requirement_t req_)
   return req->projection;
 }
 
-bool
-legion_region_requirement_get_virtual_map(legion_region_requirement_t req_)
-{
-  RegionRequirement *req = CObjectWrapper::unwrap(req_);
-
-  return req->virtual_map;
-}
-
-void
-legion_region_requirement_set_virtual_map(
-  legion_region_requirement_t req_,
-  bool value)
-{
-  RegionRequirement *req = CObjectWrapper::unwrap(req_);
-
-  req->virtual_map = value;
-}
-
-bool
-legion_region_requirement_get_early_map(legion_region_requirement_t req_)
-{
-  RegionRequirement *req = CObjectWrapper::unwrap(req_);
-
-  return req->early_map;
-}
-
-void
-legion_region_requirement_set_early_map(
-  legion_region_requirement_t req_,
-  bool value)
-{
-  RegionRequirement *req = CObjectWrapper::unwrap(req_);
-
-  req->early_map = value;
-}
-
-bool
-legion_region_requirement_get_enable_WAR_optimization(
-  legion_region_requirement_t req_)
-{
-  RegionRequirement *req = CObjectWrapper::unwrap(req_);
-
-  return req->enable_WAR_optimization;
-}
-
-void
-legion_region_requirement_set_enable_WAR_optimization(
-  legion_region_requirement_t req_,
-  bool value)
-{
-  RegionRequirement *req = CObjectWrapper::unwrap(req_);
-
-  req->enable_WAR_optimization = value;
-}
-
-bool
-legion_region_requirement_get_reduction_list(
-  legion_region_requirement_t req_)
-{
-  RegionRequirement *req = CObjectWrapper::unwrap(req_);
-
-  return req->reduction_list;
-}
-
-void
-legion_region_requirement_set_reduction_list(
-  legion_region_requirement_t req_,
-  bool value)
-{
-  RegionRequirement *req = CObjectWrapper::unwrap(req_);
-
-  req->reduction_list = value;
-}
-
-unsigned
-legion_region_requirement_get_make_persistent(
-  legion_region_requirement_t req_)
-{
-  RegionRequirement *req = CObjectWrapper::unwrap(req_);
-
-  return req->make_persistent;
-}
-
-void
-legion_region_requirement_set_make_persistent(
-  legion_region_requirement_t req_,
-  unsigned value)
-{
-  RegionRequirement *req = CObjectWrapper::unwrap(req_);
-
-  req->make_persistent = value;
-}
-
-unsigned
-legion_region_requirement_get_blocking_factor(
-  legion_region_requirement_t req_)
-{
-  RegionRequirement *req = CObjectWrapper::unwrap(req_);
-
-  return req->blocking_factor;
-}
-
-void
-legion_region_requirement_set_blocking_factor(
-  legion_region_requirement_t req_,
-  unsigned value)
-{
-  RegionRequirement *req = CObjectWrapper::unwrap(req_);
-
-  req->blocking_factor = value;
-}
-
-unsigned
-legion_region_requirement_get_max_blocking_factor(
-  legion_region_requirement_t req_)
-{
-  RegionRequirement *req = CObjectWrapper::unwrap(req_);
-
-  return req->max_blocking_factor;
-}
-
-void
-legion_region_requirement_add_target_ranking(
-  legion_region_requirement_t req_,
-  legion_memory_t memory)
-{
-  RegionRequirement *req = CObjectWrapper::unwrap(req_);
-
-  req->target_ranking.push_back(CObjectWrapper::unwrap(memory));
-}
-
 // -------------------------------------------------------
 // Allocator and Argument Map Operations
 // -------------------------------------------------------
@@ -3579,40 +3429,6 @@ legion_task_get_task_id(legion_task_t task_)
   return task->task_id;
 }
 
-legion_processor_t
-legion_task_get_target_proc(legion_task_t task_)
-{
-  Task *task = CObjectWrapper::unwrap(task_);
-
-  return CObjectWrapper::wrap(task->target_proc);
-}
-
-const char *
-legion_task_get_name(legion_task_t task_)
-{
-  Task *task = CObjectWrapper::unwrap(task_);
-
-  return task->variants->name;
-}
-
-void
-legion_task_set_target_proc(legion_task_t task_, legion_processor_t proc_)
-{
-  Task *task = CObjectWrapper::unwrap(task_);
-  Processor proc = CObjectWrapper::unwrap(proc_);
-
-  task->target_proc = proc;
-}
-
-void
-legion_task_add_additional_proc(legion_task_t task_, legion_processor_t proc_)
-{
-  Task *task = CObjectWrapper::unwrap(task_);
-  Processor proc = CObjectWrapper::unwrap(proc_);
-
-  task->additional_procs.insert(proc);
-}
-
 // -----------------------------------------------------------------------
 // Inline Operations
 // -----------------------------------------------------------------------
@@ -3620,7 +3436,8 @@ legion_task_add_additional_proc(legion_task_t task_, legion_processor_t proc_)
 legion_region_requirement_t
 legion_inline_get_requirement(legion_inline_t inline_operation_)
 {
-  Inline *inline_operation = CObjectWrapper::unwrap(inline_operation_);
+  InlineMapping *inline_operation = 
+    CObjectWrapper::unwrap(inline_operation_);
 
   return CObjectWrapper::wrap(&inline_operation->requirement);
 }
@@ -4053,28 +3870,3 @@ legion_machine_query_interface_find_memory_kind(
   return CObjectWrapper::wrap(handle->find_memory_kind(proc, kind));
 }
 
-// -----------------------------------------------------------------------
-// Default Mapper Operations
-// -----------------------------------------------------------------------
-
-bool
-legion_default_mapper_map_task(
-  legion_default_mapper_t mapper_,
-  legion_task_t task_)
-{
-  DefaultMapper *mapper = CObjectWrapper::unwrap(mapper_);
-  Task *task = CObjectWrapper::unwrap(task_);
-
-  return mapper->DefaultMapper::map_task(task);
-}
-
-bool
-legion_default_mapper_map_inline(
-  legion_default_mapper_t mapper_,
-  legion_inline_t inline_operation_)
-{
-  DefaultMapper *mapper = CObjectWrapper::unwrap(mapper_);
-  Inline *inline_operation = CObjectWrapper::unwrap(inline_operation_);
-
-  return mapper->DefaultMapper::map_inline(inline_operation);
-}

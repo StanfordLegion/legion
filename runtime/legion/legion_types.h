@@ -183,6 +183,7 @@ namespace Legion {
     class PhysicalInstance;
     class ProfilingRequestSet;
     class Mapper;
+    class DefaultMapper;
   };
   
   namespace Internal {
@@ -620,6 +621,7 @@ namespace Legion {
 
     class DistributedCollectable;
     class LayoutDescription;
+    class PhysicalInstanceImpl;
     class PhysicalManager; // base class for instance and reduction
     class LogicalView; // base class for instance and reduction
     class InstanceManager;
@@ -899,6 +901,7 @@ namespace Legion {
   // Anothing magical typedef
   namespace Mapping {
     typedef Internal::MappingCallInfo* MapperContext;
+    typedef Internal::PhysicalInstanceImpl PhysicalInstanceImpl;
   };
 
   namespace Internal {

@@ -24,8 +24,8 @@
 
 #include "legion.h"
 #include "legion_c.h"
+#include "legion_mapping.h"
 #include "mapping_utilities.h"
-#include "default_mapper.h"
 
 #include <cstdlib>
 #include <cstring>
@@ -138,11 +138,11 @@ namespace Legion {
       NEW_OPAQUE_WRAPPER(legion_accessor_array_t, AccessorArray *);
       NEW_OPAQUE_WRAPPER(legion_index_iterator_t, IndexIterator *);
       NEW_OPAQUE_WRAPPER(legion_task_t, Task *);
-      NEW_OPAQUE_WRAPPER(legion_inline_t, Inline *);
+      NEW_OPAQUE_WRAPPER(legion_inline_t, InlineMapping *);
       NEW_OPAQUE_WRAPPER(legion_mappable_t, Mappable *);
       NEW_OPAQUE_WRAPPER(legion_region_requirement_t , RegionRequirement *);
       NEW_OPAQUE_WRAPPER(legion_machine_t, Machine *);
-      NEW_OPAQUE_WRAPPER(legion_mapper_t, Mapper *);
+      NEW_OPAQUE_WRAPPER(legion_mapper_t, Mapping::Mapper *);
       NEW_OPAQUE_WRAPPER(legion_machine_query_interface_t,
                          Mapping::Utilities::MachineQueryInterface*);
       NEW_OPAQUE_WRAPPER(legion_default_mapper_t, Mapping::DefaultMapper*);
@@ -507,7 +507,7 @@ namespace Legion {
       }
 
       static legion_domain_split_t
-      wrap(Mapper::DomainSplit domain_split) {
+      wrap(Mapping::Mapper::DomainSlice domain_split) {
         legion_domain_split_t domain_split_;
         domain_split_.domain = wrap(domain_split.domain);
         domain_split_.proc = wrap(domain_split.proc);
@@ -516,13 +516,13 @@ namespace Legion {
         return domain_split_;
       }
 
-      static Mapper::DomainSplit
+      static Mapping::Mapper::DomainSlice
       unwrap(legion_domain_split_t domain_split_) {
-        Mapper::DomainSplit domain_split(
-            unwrap(domain_split_.domain),
-            unwrap(domain_split_.proc),
-            domain_split_.recurse,
-            domain_split_.stealable);
+        Mapping::Mapper::DomainSlice domain_split;
+            domain_split.domain = unwrap(domain_split_.domain);
+            domain_split.proc = unwrap(domain_split_.proc);
+            domain_split.recurse = domain_split_.recurse;
+            domain_split.stealable = domain_split_.stealable;
         return domain_split;
       }
 

@@ -17,6 +17,7 @@
 #define __MAPPER_MANAGER_H__
 
 #include "legion_types.h"
+#include "legion_mapping.h"
 
 namespace Legion {
   namespace Internal {
@@ -115,8 +116,8 @@ namespace Legion {
                                         Mapper::TaskProfilingInfo *input,
                                         bool first_invocation = true);
     public: // Inline mapper calls
-      void invoke_map_inline(MapOp *op, Mapper::InlineInput *input,
-                             Mapper::InlineOutput *output, 
+      void invoke_map_inline(MapOp *op, Mapper::MapInlineInput *input,
+                             Mapper::MapInlineOutput *output, 
                              bool first_invocation = true);
       void invoke_select_inline_sources(MapOp *op, 
                                         Mapper::SelectInlineSrcInput *input,
@@ -169,7 +170,7 @@ namespace Legion {
                               bool first_invocation = true);
       void invoke_select_release_sources(ReleaseOp *op,
                                          Mapper::SelectReleaseSrcInput *input,
-                                         Mapper::SelectReleaseSrcOuput *output,
+                                         Mapper::SelectReleaseSrcOutput *output,
                                          bool first_invocation = true);
       void invoke_release_speculate(ReleaseOp *op,
                                     Mapper::SpeculativeOutput *output,
@@ -195,7 +196,7 @@ namespace Legion {
                                      bool first_invocation = true);
     public: // scheduling and stealing mapper calls
       void invoke_select_tasks_to_map(Mapper::SelectMappingInput *input,
-                                      Mapper::selectMappingOutput *output,
+                                      Mapper::SelectMappingOutput *output,
                                       bool first_invocation = true);
       void invoke_select_steal_targets(Mapper::SelectStealingInput *input,
                                        Mapper::SelectStealingOutput *output,

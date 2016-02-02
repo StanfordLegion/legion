@@ -23,6 +23,7 @@
 #include "legion_utilities.h"
 #include "legion_allocation.h"
 #include "legion_analysis.h"
+#include "mapper_manager.h"
 
 namespace Legion {
   namespace Internal {
@@ -584,6 +585,7 @@ namespace Legion {
       void check_privilege(void);
       void compute_parent_index(void);
     protected:
+      bool premapped;
       bool remap_region;
       UserEvent termination_event;
       PhysicalRegion region;
@@ -647,6 +649,7 @@ namespace Legion {
       std::vector<VersionInfo>    dst_versions;
       std::vector<RestrictInfo>   src_restrictions;
       std::vector<RestrictInfo>   dst_restrictions;
+      bool premapped;
     };
 
     /**
@@ -1050,6 +1053,7 @@ namespace Legion {
       VersionInfo       version_info;
       RestrictInfo      restrict_info;
       unsigned          parent_req_index;
+      bool              premapped;
     };
 
     /**
@@ -1100,6 +1104,7 @@ namespace Legion {
       VersionInfo       version_info;
       RestrictInfo      restrict_info;
       unsigned          parent_req_index;
+      bool              premapped;
     };
 
     /**
@@ -1737,6 +1742,7 @@ namespace Legion {
       IndexPartition projection; /* for pre-image only*/
       RegionTreePath privilege_path;
       unsigned parent_req_index;
+      bool premapped;
     };
 
     /**
@@ -1801,6 +1807,7 @@ namespace Legion {
       void *value;
       size_t value_size;
       Future future;
+      bool premapped;
     };
 
     /**
@@ -1863,6 +1870,7 @@ namespace Legion {
       ExternalType file_type;
       PhysicalRegion region;
       unsigned parent_req_index;
+      bool premapped;
     };
 
     /**
@@ -1901,6 +1909,7 @@ namespace Legion {
       VersionInfo version_info;
       RestrictInfo restrict_info;
       unsigned parent_req_index;
+      bool premapped;
     };
 
     /**

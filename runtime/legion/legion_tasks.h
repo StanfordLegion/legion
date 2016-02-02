@@ -200,6 +200,9 @@ namespace Legion {
       std::set<FieldSpace>                      deleted_field_spaces;
       std::set<IndexSpace>                      deleted_index_spaces;
     protected:
+      bool map_locally;
+      bool premapped;
+    protected:
       bool complete_received;
       bool commit_received;
       bool children_complete;

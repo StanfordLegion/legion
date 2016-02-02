@@ -152,7 +152,7 @@ namespace Legion {
 #ifdef DEBUG_HIGH_LEVEL
       assert(parent_ctx != NULL);
 #endif
-      return (parent_ctx->depth+1);
+      return (parent_ctx->get_depth()+1);
     }
 
     //--------------------------------------------------------------------------
@@ -1210,11 +1210,7 @@ namespace Legion {
       if (wait_event.exists())
       {
         if (!wait_event.has_triggered())
-        {
-          runtime->pre_wait(proc);
           wait_event.wait();
-          runtime->post_wait(proc);
-        }
         // Might be a little bit of a race here with cleanup
 #ifdef DEBUG_HIGH_LEVEL
         assert((speculation_state == RESOLVE_TRUE_STATE) ||
@@ -1445,14 +1441,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     MapOp::MapOp(Runtime *rt)
-      : Inline(), Operation(rt)
+      : InlineMapping(), Operation(rt)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     MapOp::MapOp(const MapOp &rhs)
-      : Inline(), Operation(NULL)
+      : InlineMapping(), Operation(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -1487,11 +1483,10 @@ namespace Legion {
         log_task.warning("WARNING: REGION REQUIREMENT OF INLINE MAPPING "
                                "IN TASK %s (ID %lld) HAS NO PRIVILEGE "
                                "FIELDS! DID YOU FORGET THEM?!?",
-                               parent_ctx->variants->name, 
-                               parent_ctx->get_unique_task_id());
+                               parent_ctx->get_task_name(), 
+                               parent_ctx->get_unique_id());
       }
-      requirement.copy_without_mapping_info(launcher.requirement);
-      requirement.initialize_mapping_fields(); 
+      requirement = launcher.requirement;
       map_id = launcher.map_id;
       tag = launcher.tag;
       termination_event = UserEvent::create_user_event();
@@ -1503,7 +1498,7 @@ namespace Legion {
       initialize_privilege_path(privilege_path, requirement);
       if (Runtime::legion_spy_enabled)
       {
-        LegionSpy::log_mapping_operation(parent_ctx->get_unique_task_id(),
+        LegionSpy::log_mapping_operation(parent_ctx->get_unique_id(),
                                          unique_op_id);
         LegionSpy::log_logical_requirement(unique_op_id,0/*index*/,
                                            true/*region*/,
@@ -1534,11 +1529,10 @@ namespace Legion {
         log_task.warning("WARNING: REGION REQUIREMENT OF INLINE MAPPING "
                                "IN TASK %s (ID %lld) HAS NO PRIVILEGE "
                                "FIELDS! DID YOU FORGET THEM?!?",
-                               parent_ctx->variants->name, 
-                               parent_ctx->get_unique_task_id());
+                               parent_ctx->get_task_name(), 
+                               parent_ctx->get_unique_id());
       }
-      requirement.copy_without_mapping_info(req);
-      requirement.initialize_mapping_fields();
+      requirement = req;
       map_id = id;
       tag = t;
       parent_task = ctx;
@@ -1551,7 +1545,7 @@ namespace Legion {
       initialize_privilege_path(privilege_path, requirement);
       if (Runtime::legion_spy_enabled)
       {
-        LegionSpy::log_mapping_operation(parent_ctx->get_unique_task_id(),
+        LegionSpy::log_mapping_operation(parent_ctx->get_unique_id(),
                                          unique_op_id);
         LegionSpy::log_logical_requirement(unique_op_id,0/*index*/,
                                            true/*region*/,
@@ -1573,8 +1567,7 @@ namespace Legion {
     {
       initialize_operation(ctx, true/*track*/);
       parent_task = ctx;
-      requirement.copy_without_mapping_info(reg.impl->get_requirement());
-      requirement.initialize_mapping_fields();
+      requirement = reg.impl->get_requirement();
       map_id = reg.impl->map_id;
       tag = reg.impl->tag;
       parent_task = ctx;
@@ -1589,7 +1582,7 @@ namespace Legion {
       initialize_privilege_path(privilege_path, requirement);
       if (Runtime::legion_spy_enabled)
       {
-        LegionSpy::log_mapping_operation(parent_ctx->get_unique_task_id(), 
+        LegionSpy::log_mapping_operation(parent_ctx->get_unique_id(), 
                                          unique_op_id);
         LegionSpy::log_logical_requirement(unique_op_id,0/*index*/,
                                            true/*region*/,
@@ -1610,6 +1603,7 @@ namespace Legion {
     {
       activate_operation();
       parent_ctx = NULL;
+      premapped = false;
       remap_region = false;
     }
 
@@ -1693,9 +1687,9 @@ namespace Legion {
         parent_ctx->find_enclosing_context(parent_req_index);
       Processor local_proc = parent_ctx->get_executing_processor();
       // If we haven't already premapped the path, then do so now
-      if (!requirement.premapped)
+      if (!premapped)
       {
-        requirement.premapped = runtime->forest->premap_physical_region(
+        premapped = runtime->forest->premap_physical_region(
                   physical_ctx, privilege_path, requirement, version_info, 
                   this, parent_ctx, local_proc
 #ifdef DEBUG_HIGH_LEVEL
@@ -1703,7 +1697,7 @@ namespace Legion {
 #endif
                   );
 #ifdef DEBUG_HIGH_LEVEL
-        assert(requirement.premapped);
+        assert(premapped);
 #endif
       }
       MappingRef map_ref;
@@ -1916,7 +1910,7 @@ namespace Legion {
       {
         log_region.error("Projection region requirements are not "
                                "permitted for inline mappings (in task %s)",
-                               parent_ctx->variants->name);
+                               parent_ctx->get_task_name());
 #ifdef DEBUG_HIGH_LEVEL
         assert(false);
 #endif
@@ -1986,8 +1980,8 @@ namespace Legion {
                                    "(ID %lld) does not have a region "
                                    "requirement for region (%x,%x,%x) "
                                    "as a parent of region requirement",
-                                   parent_ctx->variants->name, 
-                                   parent_ctx->get_unique_task_id(),
+                                   parent_ctx->get_task_name(), 
+                                   parent_ctx->get_unique_id(),
                                    unique_op_id, 
                                    requirement.region.index_space.id,
                                    requirement.region.field_space.id, 
@@ -2060,8 +2054,8 @@ namespace Legion {
                                    "(ID %lld) does not have a region "
                                    "requirement for region (%x,%x,%x) "
                                    "as a parent of region requirement.",
-                                   parent_ctx->variants->name, 
-                                   parent_ctx->get_unique_task_id(),
+                                   parent_ctx->get_task_name(), 
+                                   parent_ctx->get_unique_id(),
                                    unique_op_id, 
                                    requirement.region.index_space.id,
                                    requirement.region.field_space.id, 
@@ -2134,12 +2128,10 @@ namespace Legion {
                                  "COPY (ID %lld) IN TASK %s (ID %lld) HAS NO "
                                  "PRIVILEGE FIELDS! DID YOU FORGET THEM?!?",
                                  idx, get_unique_op_id(),
-                                 parent_ctx->variants->name, 
-                                 parent_ctx->get_unique_task_id());
+                                 parent_ctx->get_task_name(), 
+                                 parent_ctx->get_unique_id());
         }
-        src_requirements[idx].copy_without_mapping_info(
-            launcher.src_requirements[idx]);
-        src_requirements[idx].initialize_mapping_fields();
+        src_requirements[idx] = launcher.src_requirements[idx];
         src_requirements[idx].flags |= NO_ACCESS_FLAG;
       }
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
@@ -2150,12 +2142,10 @@ namespace Legion {
                                  " COPY (ID %lld) IN TASK %s (ID %lld) HAS NO "
                                  "PRIVILEGE FIELDS! DID YOU FORGET THEM?!?",
                                  idx, get_unique_op_id(),
-                                 parent_ctx->variants->name, 
-                                 parent_ctx->get_unique_task_id());
+                                 parent_ctx->get_task_name(), 
+                                 parent_ctx->get_unique_id());
         }
-        dst_requirements[idx].copy_without_mapping_info(
-            launcher.dst_requirements[idx]);
-        dst_requirements[idx].initialize_mapping_fields();
+        dst_requirements[idx] = launcher.dst_requirements[idx];
         dst_requirements[idx].flags |= NO_ACCESS_FLAG;
       }
       grants = launcher.grants;
@@ -2184,8 +2174,8 @@ namespace Legion {
                               "for copy operation (ID %lld) with parent "
                               "task %s (ID %lld)",
                               src_requirements.size(), dst_requirements.size(),
-                              get_unique_copy_id(), parent_ctx->variants->name,
-                              parent_ctx->get_unique_task_id());
+                              get_unique_copy_id(), parent_ctx->get_task_name(),
+                              parent_ctx->get_unique_id());
 #ifdef DEBUG_HIGH_LEVEL
           assert(false);
 #endif
@@ -2202,8 +2192,8 @@ namespace Legion {
                                 "Copy requirements must have exactly the same "
                                 "number of privilege and instance fields.",
                                 idx, get_unique_copy_id(), 
-                                parent_ctx->variants->name,
-                                parent_ctx->get_unique_task_id(),
+                                parent_ctx->get_task_name(),
+                                parent_ctx->get_unique_id(),
                                 src_requirements[idx].privilege_fields.size(),
                                 src_requirements[idx].instance_fields.size());
 #ifdef DEBUG_HIGH_LEVEL
@@ -2217,8 +2207,8 @@ namespace Legion {
                                 "(ID %lld) in parent task %s (ID %lld) must "
                                 "be requested with a read-only privilege.",
                                 idx, get_unique_copy_id(),
-                                parent_ctx->variants->name,
-                                parent_ctx->get_unique_task_id());
+                                parent_ctx->get_task_name(),
+                                parent_ctx->get_unique_id());
 #ifdef DEBUG_HIGH_LEVEL
             assert(false);
 #endif
@@ -2238,8 +2228,8 @@ namespace Legion {
                                 "have exactly the same number of privilege "
                                 "and instance fields.", idx, 
                                 get_unique_copy_id(), 
-                                parent_ctx->variants->name,
-                                parent_ctx->get_unique_task_id(),
+                                parent_ctx->get_task_name(),
+                                parent_ctx->get_unique_id(),
                                 dst_requirements[idx].privilege_fields.size(),
                                 dst_requirements[idx].instance_fields.size());
 #ifdef DEBUG_HIGH_LEVEL
@@ -2254,8 +2244,8 @@ namespace Legion {
                                 "(ID %lld) must be requested with a "
                                 "read-write or write-discard privilege.",
                                 idx, get_unique_copy_id(),
-                                parent_ctx->variants->name,
-                                parent_ctx->get_unique_task_id());
+                                parent_ctx->get_task_name(),
+                                parent_ctx->get_unique_id());
 #ifdef DEBUG_HIGH_LEVEL
             assert(false);
 #endif
@@ -2277,8 +2267,8 @@ namespace Legion {
                                 "same number of dimensions or the same number "
                                 "of elements in their element masks.",
                                 idx, get_unique_copy_id(),
-                                parent_ctx->variants->name, 
-                                parent_ctx->get_unique_task_id(),
+                                parent_ctx->get_task_name(), 
+                                parent_ctx->get_unique_id(),
                                 src_space.id, dst_space.id);
 #ifdef DEBUG_HIGH_LEVEL
             assert(false);
@@ -2292,8 +2282,8 @@ namespace Legion {
                                 "(ID %lld) in task %s (ID %lld) is not "
                                 "a sub-region of the source index space %x.", 
                                 dst_space.id, idx, get_unique_copy_id(),
-                                parent_ctx->variants->name,
-                                parent_ctx->get_unique_task_id(),
+                                parent_ctx->get_task_name(),
+                                parent_ctx->get_unique_id(),
                                 src_space.id);
 #ifdef DEBUG_HIGH_LEVEL
             assert(false);
@@ -2318,7 +2308,7 @@ namespace Legion {
       }
       if (Runtime::legion_spy_enabled)
       {
-        LegionSpy::log_copy_operation(parent_ctx->get_unique_task_id(),
+        LegionSpy::log_copy_operation(parent_ctx->get_unique_id(),
                                       unique_op_id);
         for (unsigned idx = 0; idx < src_requirements.size(); idx++)
         {
@@ -2355,6 +2345,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       activate_speculative();
+      premapped = false;
     }
 
     //--------------------------------------------------------------------------
@@ -2498,16 +2489,14 @@ namespace Legion {
       std::vector<RegionTreeContext> src_contexts(src_requirements.size());
       std::vector<RegionTreeContext> dst_contexts(dst_requirements.size());
       // Premap all the regions if we haven't already done so
-      bool premapped = true;
       Processor local_proc = parent_ctx->get_executing_processor();
-      for (unsigned idx = 0; idx < src_requirements.size(); idx++)
+      if (!premapped)
       {
-        src_contexts[idx] = parent_ctx->find_enclosing_context(
-                                                  src_parent_indexes[idx]);
-        if (!src_requirements[idx].premapped)
+        for (unsigned idx = 0; idx < src_requirements.size(); idx++)
         {
-          src_requirements[idx].premapped = 
-            runtime->forest->premap_physical_region(
+          src_contexts[idx] = parent_ctx->find_enclosing_context(
+                                                    src_parent_indexes[idx]);
+          premapped = runtime->forest->premap_physical_region(
                   src_contexts[idx],src_privilege_paths[idx],
                   src_requirements[idx], src_versions[idx],
                   this, parent_ctx, local_proc
@@ -2516,18 +2505,14 @@ namespace Legion {
 #endif
                   );
 #ifdef DEBUG_HIGH_LEVEL
-          assert(src_requirements[idx].premapped);
+          assert(premapped);
 #endif
         }
-      }
-      for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
-      {
-        dst_contexts[idx] = parent_ctx->find_enclosing_context(
-                                                  dst_parent_indexes[idx]);
-        if (!dst_requirements[idx].premapped)
+        for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
         {
-          dst_requirements[idx].premapped = 
-            runtime->forest->premap_physical_region(
+          dst_contexts[idx] = parent_ctx->find_enclosing_context(
+                                                    dst_parent_indexes[idx]);
+          premapped = runtime->forest->premap_physical_region(
                   dst_contexts[idx],dst_privilege_paths[idx],
                   dst_requirements[idx], dst_versions[idx],
                   this, parent_ctx, local_proc
@@ -2537,13 +2522,10 @@ namespace Legion {
 #endif
                   );
 #ifdef DEBUG_HIGH_LEVEL
-          assert(dst_requirements[idx].premapped);
+          assert(premapped);
 #endif
         }
       }
-      // If we couldn't premap, then we need to try again later
-      if (!premapped)
-        return false;
       // Now ask the mapper how to map this copy operation
       bool notify = runtime->invoke_mapper_map_copy(local_proc, this);
       // Map all the destination instances
@@ -2898,8 +2880,8 @@ namespace Legion {
                     "copy operation (UID %lld) in task %s (UID %lld).",
                     actual_idx1, is_src1 ? "source" : "destination",
                     actual_idx2, is_src2 ? "source" : "destination",
-                    unique_op_id, parent_ctx->variants->name,
-                    parent_ctx->get_unique_task_id());
+                    unique_op_id, parent_ctx->get_task_name(),
+                    parent_ctx->get_unique_id());
 #ifdef DEBUG_HIGH_LEVEL
       assert(false);
 #endif
@@ -2953,7 +2935,7 @@ namespace Legion {
       {
         log_region.error("Projection region requirements are not "
                                "permitted for copy operations (in task %s)",
-                               parent_ctx->variants->name);
+                               parent_ctx->get_task_name());
 #ifdef DEBUG_HIGH_LEVEL
         assert(false);
 #endif
@@ -3033,8 +3015,8 @@ namespace Legion {
                                    "requirement for region (%x,%x,%x) "
                                    "as a parent of index %d of %s region "
                                    "requirements",
-                                   parent_ctx->variants->name, 
-                                   parent_ctx->get_unique_task_id(),
+                                   parent_ctx->get_task_name(), 
+                                   parent_ctx->get_unique_id(),
                                    unique_op_id, 
                                    requirement.region.index_space.id,
                                    requirement.region.field_space.id, 
@@ -3120,8 +3102,8 @@ namespace Legion {
                                    "requirement for region (%x,%x,%x) "
                                    "as a parent of index %d of source region "
                                    "requirements",
-                                   parent_ctx->variants->name, 
-                                   parent_ctx->get_unique_task_id(),
+                                   parent_ctx->get_task_name(), 
+                                   parent_ctx->get_unique_id(),
                                    unique_op_id, 
                                    src_requirements[idx].region.index_space.id,
                                    src_requirements[idx].region.field_space.id, 
@@ -3145,8 +3127,8 @@ namespace Legion {
                                    "requirement for region (%x,%x,%x) "
                                    "as a parent of index %d of destination "
                                    "region requirements",
-                                   parent_ctx->variants->name, 
-                                   parent_ctx->get_unique_task_id(),
+                                   parent_ctx->get_task_name(), 
+                                   parent_ctx->get_unique_id(),
                                    unique_op_id, 
                                    dst_requirements[idx].region.index_space.id,
                                    dst_requirements[idx].region.field_space.id, 
@@ -3203,7 +3185,7 @@ namespace Legion {
       initialize_operation(ctx, true/*track*/);
       fence_kind = kind;
       if (Runtime::legion_spy_enabled)
-        LegionSpy::log_fence_operation(parent_ctx->get_unique_task_id(),
+        LegionSpy::log_fence_operation(parent_ctx->get_unique_id(),
                                        unique_op_id);
     }
 
@@ -3511,7 +3493,7 @@ namespace Legion {
       kind = INDEX_SPACE_DELETION;
       index_space = handle;
       if (Runtime::legion_spy_enabled)
-        LegionSpy::log_deletion_operation(parent_ctx->get_unique_task_id(),
+        LegionSpy::log_deletion_operation(parent_ctx->get_unique_id(),
                                           unique_op_id);
     }
 
@@ -3524,7 +3506,7 @@ namespace Legion {
       kind = INDEX_PARTITION_DELETION;
       index_part = handle;
       if (Runtime::legion_spy_enabled)
-        LegionSpy::log_deletion_operation(parent_ctx->get_unique_task_id(),
+        LegionSpy::log_deletion_operation(parent_ctx->get_unique_id(),
                                           unique_op_id);
     }
 
@@ -3537,7 +3519,7 @@ namespace Legion {
       kind = FIELD_SPACE_DELETION;
       field_space = handle;
       if (Runtime::legion_spy_enabled)
-        LegionSpy::log_deletion_operation(parent_ctx->get_unique_task_id(),
+        LegionSpy::log_deletion_operation(parent_ctx->get_unique_id(),
                                           unique_op_id);
     }
 
@@ -3551,7 +3533,7 @@ namespace Legion {
       field_space = handle;
       free_fields.insert(fid);
       if (Runtime::legion_spy_enabled)
-        LegionSpy::log_deletion_operation(parent_ctx->get_unique_task_id(),
+        LegionSpy::log_deletion_operation(parent_ctx->get_unique_id(),
                                           unique_op_id);
     }
 
@@ -3565,7 +3547,7 @@ namespace Legion {
       field_space = handle;
       free_fields = to_free;
       if (Runtime::legion_spy_enabled)
-        LegionSpy::log_deletion_operation(parent_ctx->get_unique_task_id(),
+        LegionSpy::log_deletion_operation(parent_ctx->get_unique_id(),
                                           unique_op_id);
     }
 
@@ -3578,7 +3560,7 @@ namespace Legion {
       kind = LOGICAL_REGION_DELETION;
       logical_region = handle;
       if (Runtime::legion_spy_enabled)
-        LegionSpy::log_deletion_operation(parent_ctx->get_unique_task_id(),
+        LegionSpy::log_deletion_operation(parent_ctx->get_unique_id(),
                                           unique_op_id);
     }
 
@@ -3591,7 +3573,7 @@ namespace Legion {
       kind = LOGICAL_PARTITION_DELETION;
       logical_part = handle;
       if (Runtime::legion_spy_enabled)
-        LegionSpy::log_deletion_operation(parent_ctx->get_unique_task_id(),
+        LegionSpy::log_deletion_operation(parent_ctx->get_unique_id(),
                                           unique_op_id);
     }
 
@@ -3792,8 +3774,7 @@ namespace Legion {
       assert(completion_event.exists());
 #endif
       initialize_operation(ctx, track);
-      requirement.copy_without_mapping_info(req);
-      requirement.initialize_mapping_fields();
+      requirement = req;
       initialize_privilege_path(privilege_path, requirement);
     } 
 
@@ -3803,7 +3784,7 @@ namespace Legion {
     {
       if (!Runtime::legion_spy_enabled)
         return;
-      LegionSpy::log_close_operation(parent_ctx->get_unique_task_id(),
+      LegionSpy::log_close_operation(parent_ctx->get_unique_id(),
                                      unique_op_id,
                                      is_intermediate_close_op);
       if (requirement.handle_type == PART_PROJECTION)
@@ -3906,8 +3887,7 @@ namespace Legion {
       // are tracing from the creation operation.
       if (trace != NULL)
         set_trace(trace, create->is_tracing());
-      requirement.copy_without_mapping_info(req);
-      requirement.initialize_mapping_fields();
+      requirement = req;
       initialize_privilege_path(privilege_path, requirement);
       target_children = targets;
       close_idx = close;
@@ -4578,7 +4558,6 @@ namespace Legion {
       // normal dependences.  We won't actually read or write anything.
       requirement = RegionRequirement(launcher.logical_region, READ_WRITE,
                                       EXCLUSIVE, launcher.parent_region); 
-      requirement.initialize_mapping_fields();
       // Do a little bit of error checking
       {
         const RegionRequirement &physical_req = 
@@ -4622,8 +4601,8 @@ namespace Legion {
         log_task.warning("WARNING: PRIVILEGE FIELDS OF ACQUIRE OPERATION"
                                "IN TASK %s (ID %lld) HAS NO PRIVILEGE "
                                "FIELDS! DID YOU FORGET THEM?!?",
-                               parent_ctx->variants->name, 
-                               parent_ctx->get_unique_task_id());
+                               parent_ctx->get_task_name(), 
+                               parent_ctx->get_unique_id());
       }
       requirement.privilege_fields = launcher.fields;
       logical_region = launcher.logical_region;
@@ -4653,7 +4632,7 @@ namespace Legion {
       initialize_privilege_path(privilege_path, requirement);
       if (Runtime::legion_spy_enabled)
       {
-        LegionSpy::log_acquire_operation(parent_ctx->get_unique_task_id(),
+        LegionSpy::log_acquire_operation(parent_ctx->get_unique_id(),
                                          unique_op_id);
         LegionSpy::log_logical_requirement(unique_op_id,0/*index*/,
                                            true/*region*/,
@@ -4673,6 +4652,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       activate_speculative();
+      premapped = false;
     }
 
     //--------------------------------------------------------------------------
@@ -4793,12 +4773,12 @@ namespace Legion {
         parent_ctx->find_enclosing_context(parent_req_index);
       Processor local_proc = parent_ctx->get_executing_processor();
       // If we haven't already premapped the path, then do so now
-      if (!requirement.premapped)
+      if (!premapped)
       {
         // Use our parent_ctx as the mappable since technically
         // we aren't a mappable.  Technically this shouldn't do anything
         // because we've marked ourselves as being restricted.
-        requirement.premapped = runtime->forest->premap_physical_region(
+        premapped = runtime->forest->premap_physical_region(
                   physical_ctx, privilege_path, requirement, version_info,
                   this, parent_ctx, local_proc
 #ifdef DEBUG_HIGH_LEVEL
@@ -4806,7 +4786,7 @@ namespace Legion {
 #endif
                   );
 #ifdef DEBUG_HIGH_LEVEL
-        assert(requirement.premapped);
+        assert(premapped);
 #endif
       }
       
@@ -5019,8 +4999,8 @@ namespace Legion {
             log_region.error("Parent task %s (ID %lld) of acquire "
                              "operation (ID %lld) does not have a region "
                              "requirement for region (%x,%x,%x) as a parent",
-                             parent_ctx->variants->name, 
-                             parent_ctx->get_unique_task_id(),
+                             parent_ctx->get_task_name(), 
+                             parent_ctx->get_unique_id(),
                              unique_op_id, 
                              requirement.region.index_space.id,
                              requirement.region.field_space.id, 
@@ -5078,8 +5058,8 @@ namespace Legion {
         log_region.error("Parent task %s (ID %lld) of acquire "
                                "operation (ID %lld) does not have a region "
                                "requirement for region (%x,%x,%x) as a parent",
-                               parent_ctx->variants->name, 
-                               parent_ctx->get_unique_task_id(),
+                               parent_ctx->get_task_name(), 
+                               parent_ctx->get_unique_id(),
                                unique_op_id, 
                                requirement.region.index_space.id,
                                requirement.region.field_space.id, 
@@ -5143,7 +5123,6 @@ namespace Legion {
       // normal dependences.  We won't actually read or write anything.
       requirement = RegionRequirement(launcher.logical_region, READ_WRITE, 
                                       EXCLUSIVE, launcher.parent_region); 
-      requirement.initialize_mapping_fields();
       // Do a little bit of error checking
       {
         const RegionRequirement &physical_req = 
@@ -5187,8 +5166,8 @@ namespace Legion {
         log_task.warning("WARNING: PRIVILEGE FIELDS OF RELEASE OPERATION"
                                "IN TASK %s (ID %lld) HAS NO PRIVILEGE "
                                "FIELDS! DID YOU FORGET THEM?!?",
-                               parent_ctx->variants->name, 
-                               parent_ctx->get_unique_task_id());
+                               parent_ctx->get_task_name(), 
+                               parent_ctx->get_unique_id());
       }
       requirement.privilege_fields = launcher.fields;
       logical_region = launcher.logical_region;
@@ -5217,7 +5196,7 @@ namespace Legion {
       initialize_privilege_path(privilege_path, requirement);
       if (Runtime::legion_spy_enabled)
       {
-        LegionSpy::log_release_operation(parent_ctx->get_unique_task_id(),
+        LegionSpy::log_release_operation(parent_ctx->get_unique_id(),
                                          unique_op_id);
         LegionSpy::log_logical_requirement(unique_op_id,0/*index*/,
                                            true/*region*/,
@@ -5237,6 +5216,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       activate_speculative(); 
+      premapped = false;
     }
 
     //--------------------------------------------------------------------------
@@ -5358,12 +5338,12 @@ namespace Legion {
         parent_ctx->find_enclosing_context(parent_req_index);
       Processor local_proc = parent_ctx->get_executing_processor();
       // If we haven't already premapped the path, then do so now
-      if (!requirement.premapped)
+      if (!premapped)
       {
         // Use our parent_ctx as the mappable since technically
         // we aren't a mappable.  Technically this shouldn't do anything
         // because we've marked ourselves as being restricted.
-        requirement.premapped = runtime->forest->premap_physical_region(
+        premapped = runtime->forest->premap_physical_region(
                   physical_ctx, privilege_path, requirement, version_info, 
                   this, parent_ctx, local_proc
 #ifdef DEBUG_HIGH_LEVEL
@@ -5371,7 +5351,7 @@ namespace Legion {
 #endif
                   );
 #ifdef DEBUG_HIGH_LEVEL
-        assert(requirement.premapped);
+        assert(premapped);
 #endif
       }
       
@@ -5590,8 +5570,8 @@ namespace Legion {
             log_region.error("Parent task %s (ID %lld) of release "
                              "operation (ID %lld) does not have a region "
                              "requirement for region (%x,%x,%x) as a parent",
-                             parent_ctx->variants->name, 
-                             parent_ctx->get_unique_task_id(),
+                             parent_ctx->get_task_name(), 
+                             parent_ctx->get_unique_id(),
                              unique_op_id, 
                              requirement.region.index_space.id,
                              requirement.region.field_space.id, 
@@ -5649,8 +5629,8 @@ namespace Legion {
         log_region.error("Parent task %s (ID %lld) of release "
                                "operation (ID %lld) does not have a region "
                                "requirement for region (%x,%x,%x) as a parent",
-                               parent_ctx->variants->name, 
-                               parent_ctx->get_unique_task_id(),
+                               parent_ctx->get_task_name(), 
+                               parent_ctx->get_unique_id(),
                                unique_op_id, 
                                requirement.region.index_space.id,
                                requirement.region.field_space.id, 
@@ -6831,8 +6811,8 @@ namespace Legion {
           log_run.error("MUST EPOCH ERROR: Task %s (ID %lld) and "
               "task %s (ID %lld) both requested to be run on processor "
               IDFMT "!",
-              (*it)->variants->name, (*it)->get_unique_task_id(),
-              other->variants->name, other->get_unique_task_id(),
+              (*it)->get_task_name(), (*it)->get_unique_id(),
+              other->get_task_name(), other->get_unique_id(),
               other->target_proc.id);
 #ifdef DEBUG_HIGH_LEVEL
           assert(false);
@@ -6867,9 +6847,9 @@ namespace Legion {
               "Task %s (ID %lld) mapped region %d to instance " IDFMT " in "
               "memory " IDFMT " , but task %s (ID %lld) mapped region %d to "
               "instance " IDFMT " in memory " IDFMT ".",
-              t1->variants->name, t1->get_unique_task_id(), it->idx1,
+              t1->get_task_name(), t1->get_unique_id(), it->idx1,
               inst1->get_instance().id, inst1->memory.id,
-              t2->variants->name, t2->get_unique_task_id(), it->idx2,
+              t2->get_task_name(), t2->get_unique_id(), it->idx2,
               inst2->get_instance().id, inst2->memory.id);
 #ifdef DEBUG_HIGH_LEVEL
           assert(false);
@@ -6975,8 +6955,8 @@ namespace Legion {
         TaskOp *dst_task = find_task_by_index(dst_index);
         log_run.error("MUST EPOCH ERROR: dependence between task "
             "%s (ID %lld) and task %s (ID %lld)\n",
-            src_task->variants->name, src_task->get_unique_task_id(),
-            dst_task->variants->name, dst_task->get_unique_task_id());
+            src_task->get_task_name(), src_task->get_unique_id(),
+            dst_task->get_task_name(), dst_task->get_unique_id());
 #ifdef DEBUG_HIGH_LEVEL
         assert(false);
 #endif
@@ -7007,9 +6987,9 @@ namespace Legion {
           TaskOp *dst_task = find_task_by_index(dst_index);
           log_run.error("MUST EPOCH ERROR: dependence between region %d "
               "of task %s (ID %lld) and region %d of task %s (ID %lld) of "
-              " type %s", src_idx, src_task->variants->name,
-              src_task->get_unique_task_id(), dst_idx, 
-              dst_task->variants->name, dst_task->get_unique_task_id(),
+              " type %s", src_idx, src_task->get_task_name(),
+              src_task->get_unique_id(), dst_idx, 
+              dst_task->get_task_name(), dst_task->get_unique_id(),
               (dtype == TRUE_DEPENDENCE) ? "TRUE DEPENDENCE" :
                 (dtype == ANTI_DEPENDENCE) ? "ANTI DEPENDENCE" :
                 "ATOMIC DEPENDENCE");
@@ -7803,7 +7783,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       LegionSpy::log_pending_partition_operation(
-          parent_ctx->get_unique_task_id(),
+          parent_ctx->get_unique_id(),
           unique_op_id);
       thunk->perform_logging(this);
     }
@@ -7919,7 +7899,6 @@ namespace Legion {
       requirement = RegionRequirement(handle, 0/*idx*/, READ_ONLY, 
                                       EXCLUSIVE, parent);
       requirement.add_field(fid);
-      requirement.initialize_mapping_fields();
       partition_handle = pid;
       color_space = space;
       if (Runtime::legion_spy_enabled)
@@ -7940,7 +7919,6 @@ namespace Legion {
       requirement = RegionRequirement(projection, 0/*id*/, READ_ONLY,
                                       EXCLUSIVE, parent);
       requirement.add_field(fid);
-      requirement.initialize_mapping_fields();
       partition_handle = pid;
       color_space = space;
       if (Runtime::legion_spy_enabled)
@@ -7960,7 +7938,6 @@ namespace Legion {
       requirement = RegionRequirement(handle, 0/*idx*/, READ_ONLY, 
                                       EXCLUSIVE, parent);
       requirement.add_field(fid);
-      requirement.initialize_mapping_fields();
       partition_handle = pid;
       color_space = space;
       projection = proj;
@@ -7973,7 +7950,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       LegionSpy::log_dependent_partition_operation(
-          parent_ctx->get_unique_task_id(),
+          parent_ctx->get_unique_id(),
           unique_op_id,
           partition_handle.id,
           partition_kind);
@@ -8045,9 +8022,9 @@ namespace Legion {
         parent_ctx->find_enclosing_context(parent_req_index);
       Processor local_proc = parent_ctx->get_executing_processor();
       // If we haven't already premapped the path, then do so now
-      if (!requirement.premapped)
+      if (!premapped)
       {
-        requirement.premapped = runtime->forest->premap_physical_region(
+        premapped = runtime->forest->premap_physical_region(
                   physical_ctx, privilege_path, requirement, version_info,
                   this, parent_ctx, local_proc
 #ifdef DEBUG_HIGH_LEVEL
@@ -8055,7 +8032,7 @@ namespace Legion {
 #endif
                   );
 #ifdef DEBUG_HIGH_LEVEL
-        assert(requirement.premapped);
+        assert(premapped);
 #endif
       }
 
@@ -8162,6 +8139,7 @@ namespace Legion {
     {
       activate_operation();
       handle_ready = UserEvent::create_user_event();
+      premapped = false;
     }
 
     //--------------------------------------------------------------------------
@@ -8217,8 +8195,8 @@ namespace Legion {
                                    "operation (ID %lld) does not have a region "
                                    "requirement for region (%x,%x,%x) "
                                    "as a parent of region requirement.",
-                                   parent_ctx->variants->name, 
-                                   parent_ctx->get_unique_task_id(),
+                                   parent_ctx->get_task_name(), 
+                                   parent_ctx->get_unique_id(),
                                    unique_op_id, 
                                    requirement.region.index_space.id,
                                    requirement.region.field_space.id, 
@@ -8352,7 +8330,6 @@ namespace Legion {
       initialize_speculation(ctx, true/*track*/, 1, pred);
       requirement = RegionRequirement(handle, WRITE_DISCARD, EXCLUSIVE, parent);
       requirement.privilege_fields.insert(fid);
-      requirement.initialize_mapping_fields();
       value_size = size;
       value = malloc(value_size);
       memcpy(value, ptr, value_size);
@@ -8373,7 +8350,6 @@ namespace Legion {
       initialize_speculation(ctx, true/*track*/, 1, pred);
       requirement = RegionRequirement(handle, WRITE_DISCARD, EXCLUSIVE, parent);
       requirement.privilege_fields.insert(fid);
-      requirement.initialize_mapping_fields();
       future = f;
       if (check_privileges)
         check_fill_privilege();
@@ -8393,7 +8369,6 @@ namespace Legion {
       initialize_speculation(ctx, true/*track*/, 1, pred);
       requirement = RegionRequirement(handle, WRITE_DISCARD, EXCLUSIVE, parent);
       requirement.privilege_fields = fields;
-      requirement.initialize_mapping_fields();
       value_size = size;
       value = malloc(value_size);
       memcpy(value, ptr, size);
@@ -8415,7 +8390,6 @@ namespace Legion {
       initialize_speculation(ctx, true/*track*/, 1, pred);
       requirement = RegionRequirement(handle, WRITE_DISCARD, EXCLUSIVE, parent);
       requirement.privilege_fields = fields;
-      requirement.initialize_mapping_fields();
       future = f;
       if (check_privileges)
         check_fill_privilege();
@@ -8428,7 +8402,7 @@ namespace Legion {
     void FillOp::perform_logging(void)
     //--------------------------------------------------------------------------
     {
-      LegionSpy::log_fill_operation(parent_ctx->get_unique_task_id(), 
+      LegionSpy::log_fill_operation(parent_ctx->get_unique_id(), 
                                     unique_op_id);
       LegionSpy::log_logical_requirement(unique_op_id, 0/*index*/,
                                          true/*region*/,
@@ -8449,6 +8423,7 @@ namespace Legion {
       activate_speculative();
       value = NULL;
       value_size = 0;
+      premapped = false;
     }
 
     //--------------------------------------------------------------------------
@@ -8558,10 +8533,10 @@ namespace Legion {
     {
       RegionTreeContext physical_ctx = 
         parent_ctx->find_enclosing_context(parent_req_index);
-      if (!requirement.premapped)
+      if (!premapped)
       {
         Processor local_proc = parent_ctx->get_executing_processor();
-        requirement.premapped = runtime->forest->premap_physical_region(
+        premapped = runtime->forest->premap_physical_region(
                   physical_ctx, privilege_path, requirement, version_info,
                   this, parent_ctx, local_proc
 #ifdef DEBUG_HIGH_LEVEL
@@ -8569,7 +8544,7 @@ namespace Legion {
 #endif
                   );
 #ifdef DEBUG_HIGH_LEVEL
-        assert(requirement.premapped);
+        assert(premapped);
 #endif
       }
       
@@ -8725,8 +8700,8 @@ namespace Legion {
                                    "(ID %lld) does not have a region "
                                    "requirement for region (%x,%x,%x) "
                                    "as a parent of region requirement",
-                                   parent_ctx->variants->name, 
-                                   parent_ctx->get_unique_task_id(),
+                                   parent_ctx->get_task_name(), 
+                                   parent_ctx->get_unique_id(),
                                    unique_op_id, 
                                    requirement.region.index_space.id,
                                    requirement.region.field_space.id, 
@@ -8798,8 +8773,8 @@ namespace Legion {
         log_region.error("Parent task %s (ID %lld) of fill "
                                "operation (ID %lld) does not have a region "
                                "requirement for region (%x,%x,%x) as a parent",
-                               parent_ctx->variants->name, 
-                               parent_ctx->get_unique_task_id(),
+                               parent_ctx->get_task_name(), 
+                               parent_ctx->get_unique_id(),
                                unique_op_id, 
                                requirement.region.index_space.id,
                                requirement.region.field_space.id, 
@@ -8863,15 +8838,14 @@ namespace Legion {
       {
         log_run.warning("WARNING: HDF5 ATTACH OPERATION ISSUED WITH NO "
                         "FIELD MAPPINGS IN TASK %s (ID %lld)! DID YOU "
-                        "FORGET THEM?!?", parent_ctx->variants->name,
-                        parent_ctx->get_unique_task_id());
+                        "FORGET THEM?!?", parent_ctx->get_task_name(),
+                        parent_ctx->get_unique_id());
 
       }
       file_type = HDF5_FILE;
       file_name = strdup(name);
       // Construct the region requirement for this task
       requirement = RegionRequirement(handle, WRITE_DISCARD, EXCLUSIVE, parent);
-      requirement.initialize_mapping_fields();
       for (std::map<FieldID,const char*>::const_iterator it = fmap.begin();
             it != fmap.end(); it++)
       {
@@ -8903,15 +8877,14 @@ namespace Legion {
       {
         log_run.warning("WARNING: FILE ATTACH OPERATION ISSUED WITH NO "
                         "FIELD MAPPINGS IN TASK %s (ID %lld)! DID YOU "
-                        "FORGET THEM?!?", parent_ctx->variants->name,
-                        parent_ctx->get_unique_task_id());
+                        "FORGET THEM?!?", parent_ctx->get_task_name(),
+                        parent_ctx->get_unique_id());
 
       }
       file_type = NORMAL_FILE;
       file_name = strdup(name);
       // Construct the region requirement for this task
       requirement = RegionRequirement(handle, WRITE_DISCARD, EXCLUSIVE, parent);
-      requirement.initialize_mapping_fields();
       for (std::vector<FieldID>::const_iterator it = fvec.begin();
             it != fvec.end(); it++)
       {
@@ -8933,6 +8906,7 @@ namespace Legion {
     {
       activate_operation();
       file_name = NULL;
+      premapped = false;
     }
 
     //--------------------------------------------------------------------------
@@ -9038,10 +9012,10 @@ namespace Legion {
     {
       RegionTreeContext physical_ctx = 
         parent_ctx->find_enclosing_context(parent_req_index);
-      if (!requirement.premapped)
+      if (!premapped)
       {
         Processor local_proc = parent_ctx->get_executing_processor();
-        requirement.premapped = runtime->forest->premap_physical_region(
+        premapped = runtime->forest->premap_physical_region(
                   physical_ctx, privilege_path, requirement, version_info,
                   this, parent_ctx, local_proc
 #ifdef DEBUG_HIGH_LEVEL
@@ -9049,7 +9023,7 @@ namespace Legion {
 #endif
                   );
 #ifdef DEBUG_HIGH_LEVEL
-        assert(requirement.premapped);
+        assert(premapped);
 #endif
       }
       
@@ -9196,8 +9170,8 @@ namespace Legion {
                                    "(ID %lld) does not have a region "
                                    "requirement for region (%x,%x,%x) "
                                    "as a parent of region requirement",
-                                   parent_ctx->variants->name, 
-                                   parent_ctx->get_unique_task_id(),
+                                   parent_ctx->get_task_name(), 
+                                   parent_ctx->get_unique_id(),
                                    unique_op_id, 
                                    requirement.region.index_space.id,
                                    requirement.region.field_space.id, 
@@ -9253,8 +9227,8 @@ namespace Legion {
         log_region.error("Parent task %s (ID %lld) of attach "
                                "operation (ID %lld) does not have a region "
                                "requirement for region (%x,%x,%x) as a parent",
-                               parent_ctx->variants->name, 
-                               parent_ctx->get_unique_task_id(),
+                               parent_ctx->get_task_name(), 
+                               parent_ctx->get_unique_id(),
                                unique_op_id, 
                                requirement.region.index_space.id,
                                requirement.region.field_space.id, 
@@ -9311,8 +9285,7 @@ namespace Legion {
       initialize_operation(ctx, true/*track*/);
       // No need to check privileges because we never would have been
       // able to attach in the first place anyway.
-      requirement.copy_without_mapping_info(region.impl->get_requirement());
-      requirement.initialize_mapping_fields();
+      requirement = region.impl->get_requirement();
       initialize_privilege_path(privilege_path, requirement);
       // Delay getting a reference until trigger_execution().  This means we
       //  have to keep region
@@ -9324,6 +9297,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       activate_operation();
+      premapped = false;
     }
 
     //--------------------------------------------------------------------------
@@ -9422,10 +9396,10 @@ namespace Legion {
 
       RegionTreeContext physical_ctx = 
         parent_ctx->find_enclosing_context(parent_req_index);
-      if (!requirement.premapped)
+      if (!premapped)
       {
         Processor local_proc = parent_ctx->get_executing_processor();
-        requirement.premapped = runtime->forest->premap_physical_region(
+        premapped = runtime->forest->premap_physical_region(
                   physical_ctx, privilege_path, requirement, version_info,
                   this, parent_ctx, local_proc
 #ifdef DEBUG_HIGH_LEVEL
@@ -9433,7 +9407,7 @@ namespace Legion {
 #endif
                   );
 #ifdef DEBUG_HIGH_LEVEL
-        assert(requirement.premapped);
+        assert(premapped);
 #endif
       }
       Event detach_event = 
@@ -9481,8 +9455,8 @@ namespace Legion {
         log_region.error("Parent task %s (ID %lld) of detach "
                                "operation (ID %lld) does not have a region "
                                "requirement for region (%x,%x,%x) as a parent",
-                               parent_ctx->variants->name, 
-                               parent_ctx->get_unique_task_id(),
+                               parent_ctx->get_task_name(), 
+                               parent_ctx->get_unique_id(),
                                unique_op_id, 
                                requirement.region.index_space.id,
                                requirement.region.field_space.id, 

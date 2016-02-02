@@ -19,6 +19,7 @@
 
 #include "legion.h"
 #include "region_tree.h"
+#include "mapper_manager.h"
 #include "legion_utilities.h"
 #include "legion_allocation.h"
 #include "garbage_collection.h"
@@ -471,7 +472,7 @@ namespace Legion {
       ProcessorManager& operator=(const ProcessorManager &rhs);
     public:
       void add_mapper(MapperID mid, MapperManager *m, bool check, bool own);
-      void replace_default_mapper(MapperMapper *m, bool own);
+      void replace_default_mapper(MapperManager *m, bool own);
       MapperManager* find_mapper(MapperID mid, bool need_lock = true) const;
     public:
       void perform_scheduling(void);
@@ -867,9 +868,6 @@ namespace Legion {
       void add_variant(VariantImpl *impl);
       VariantImpl* find_variant_impl(VariantID variant_id);
     public:
-      // For backwards compatibility only
-      TaskVariantCollection* get_collection(void); 
-    public:
       const char* get_name(bool needs_lock = true) const;
       void attach_semantic_information(SemanticTag tag, AddressSpaceID source,
          const void *buffer, size_t size, bool is_mutable, bool send_to_owner);
@@ -901,9 +899,6 @@ namespace Legion {
       bool has_return_type;
       // Track whether all these variants are idempotent or not
       bool all_idempotent;
-    private:
-      // This is for backwards compatibility only
-      TaskVariantCollection *collection;
     };
 
     /**
@@ -1564,8 +1559,6 @@ namespace Legion {
       TaskImpl* find_or_create_task_impl(TaskID task_id);
       TaskImpl* find_task_impl(TaskID task_id);
       VariantImpl* find_variant_impl(TaskID task_id, VariantID variant_id);
-      // For backwards compatiblity only
-      TaskVariantCollection* get_collection(TaskID task_id);
     public:
       // Memory manager functions
       MemoryManager* find_memory(Memory mem);
@@ -2453,7 +2446,7 @@ namespace Legion {
     class FindMapperContinuation : public LegionContinuation {
     public:
       FindMapperContinuation(ProcessorManager *man, MapperID mid)
-        : manager(man), mapper_id(mid), result(NULL) {  }
+        : manager(man), map_id(mid), result(NULL) {  }
     public:
       virtual void execute(void)
       {

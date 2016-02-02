@@ -17,6 +17,7 @@
 #define __LEGION_MAPPING_H__
 
 #include "legion_types.h"
+#include "legion_constraint.h"
 
 namespace Legion {
   namespace Mapping { 
@@ -67,8 +68,8 @@ namespace Legion {
       // Check to see if a whole set of constraints are satisfied
       bool satisfies(const LayoutConstraintSet &constraint_set) const;
       // Check to see if individual constraints are satisfied
-      bool satisfies(const SpecializeConstraint &constraint) const;   
-      bool satisfies(const PlacementConstraint &constraint) const;
+      bool satisfies(const SpecializedConstraint &constraint) const;   
+      bool satisfies(const MemoryConstraint &constraint) const;
       bool satisfies(const OrderingConstraint &constraint) const;
       bool satisfies(const SplittingConstraint &constraint) const;
       bool satisfies(const FieldConstraint &constraint) const;
@@ -221,10 +222,7 @@ namespace Legion {
         std::vector<std::set<PhysicalInstance> >        valid_instances;
       };
       struct PremapTaskOutput {
-        std::set<unsigned>                              premapped_regions;
-        std::vector<std::deque<PhysicalInstance> >      chosen_ranking;
-        std::vector<LayoutConstraintSet>                layout_constraints;
-        std::vector<bool>                               enable_WAR_optimzation;
+        std::map<unsigned,std::set<PhysicalInstance> >  premapped_instances;
       };
       //------------------------------------------------------------------------
       virtual void premap_task(const MapperContext      ctx,
@@ -329,12 +327,10 @@ namespace Legion {
        */
       struct MapTaskInput {
         std::vector<std::set<PhysicalInstance> >        valid_instances;
-      }
+      };
       struct MapTaskOutput {
         std::vector<std::set<PhysicalInstance> >        chosen_instances; 
-        std::vector<LayoutConstraintSet> >              layout_constraints;
-        std::vector<bool>                               enable_WAR_optimization;
-        std::deque<TaskVariantID>                       variant_ranking;
+        std::deque<VariantID>                           variant_ranking;
         std::set<Processor>                             additional_procs;
         TaskPriority                                    task_priority;  // = 0
         bool                                            report_mapping; //=false
@@ -377,8 +373,7 @@ namespace Legion {
       };
       struct PostMapOutput {
         std::vector<unsigned>                           copy_count;
-        std::vector<std::deque<PhysicalInstance> >      chosen_ranking;
-        std::vector<LayoutConstraintSet>                layout_constraints;
+        std::vector<std::set<PhysicalInstance> >        chosen_instances;
       };
       //------------------------------------------------------------------------
       virtual void postmap_task(const MapperContext      ctx,
@@ -475,8 +470,6 @@ namespace Legion {
       };
       struct MapInlineOutput {
         std::set<PhysicalInstance>              chosen_instances;
-        LayoutConstraintSet                     layout_constraints;
-        bool                                    report_mapping;
         ProfilingRequestSet                     profiling_requests;
       };
       //------------------------------------------------------------------------
@@ -527,9 +520,9 @@ namespace Legion {
         // TODO: fill this in based on low-level profiling interface
       };
       //------------------------------------------------------------------------
-      virtual void report_profiling(const MapperContext        ctx,
-                                    const InlineMapping&       inline_op,
-                                    const InlineProfiingInfo&  input)  = 0;
+      virtual void report_profiling(const MapperContext         ctx,
+                                    const InlineMapping&        inline_op,
+                                    const InlineProfilingInfo&  input)  = 0;
       //------------------------------------------------------------------------
     public: // Region-to-region copies
       /**
@@ -551,12 +544,8 @@ namespace Legion {
         std::vector<std::set<PhysicalInstance> >          dst_instances;
       };
       struct MapCopyOutput {
-        std::vector<std::deque<PhysicalInstance> >        src_ranking;
-        std::vector<std::deque<PhysicalInstance> >        dst_ranking;
-        std::vector<LayoutConstraintSet>                  src_layouts;
-        std::vector<LayoutConstraintSet>                  dst_layouts;
-        std::vector<bool>                                 dst_WAR_optimization;
-        bool                                              report_mapping;
+        std::vector<std::set<PhysicalInstance> >          src_instances;
+        std::vector<std::set<PhysicalInstance> >          dst_instances;
         ProfilingRequestSet                               profiling_requests;
       };
       //------------------------------------------------------------------------
@@ -622,7 +611,7 @@ namespace Legion {
        * If the mapper requested profiling information for an explicit
        * copy operation then this call will return the profiling information.
        */
-      struct CopyProflingInfo {
+      struct CopyProfilingInfo {
         // TODO: fill this in based on low-level profiling interface
       };
       //------------------------------------------------------------------------
@@ -655,13 +644,10 @@ namespace Legion {
        * instances need to be moved between different nodes.
        */
       struct MapCloseInput {
-        std::vector<std::set<PhysicalInstance> >    valid_instances;
+        std::set<PhysicalInstance>                  valid_instances;
       };
       struct MapCloseOutput {
-        bool                                        create_composite; // = false
         std::set<PhysicalInstance>                  chosen_instances;
-        LayoutConstraintSet                         layout_constraints;
-        bool                                        report_mapping;
         ProfilingRequestSet                         profiling_requests;
       };
       //------------------------------------------------------------------------
@@ -951,9 +937,11 @@ namespace Legion {
       //------------------------------------------------------------------------
 
       struct MapDataflowGraphInput {
+#if 0
         std::vector<const Task*>                nodes;
         std::vector<DataflowEdge>               edges;
         std::vector<Callsite>                   callsites;
+#endif
       };
       struct MapDataflowGraphOutput {
           
@@ -1179,7 +1167,7 @@ namespace Legion {
                           LegionRuntime::Arrays::Point<DIM> &color_point) const
       {
         DomainPoint dom_point = DomainPoint::from_point<DIM>(color_point);
-        return get_index_subspace(p, dom_point);
+        return get_index_subspace(ctx, p, dom_point);
       }
 
       Color get_index_space_color(MapperContext ctx, IndexSpace handle) const;
