@@ -54,6 +54,10 @@
 #ifndef MAX_NUM_PROCS
 #define MAX_NUM_PROCS                   64
 #endif
+// Maximum ID for an application task ID 
+#ifndef MAX_APPLICATION_TASK_ID
+#define MAX_APPLICATION_TASK_ID         (1<<20)
+#endif
 // Default number of mapper slots
 #ifndef DEFAULT_MAPPER_SLOTS
 #define DEFAULT_MAPPER_SLOTS            8

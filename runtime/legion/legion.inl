@@ -1912,6 +1912,17 @@ namespace LegionRuntime {
                              realm_desc, inline_desc, false/*ret*/, task_name);
     }
 
+    // A total hack just to keep backwards compatibilty for most older
+    // codes. This is in no way safe or correct, but ti works for now
+
+    //--------------------------------------------------------------------------
+    static inline TaskID generate_static_task_id(void)
+    //--------------------------------------------------------------------------
+    {
+      // Pick a reasonable number to start at that won't interfere anywhere
+      static TaskID next_task = MAX_APPLICATION_TASK_ID;
+      return next_task++;
+    }
 
     //--------------------------------------------------------------------------
     template<typename T,
@@ -1925,6 +1936,8 @@ namespace LegionRuntime {
                                                     const char *task_name)
     //--------------------------------------------------------------------------
     {
+      if (id == AUTO_GENERATE_ID)
+        id = generate_static_task_id();
       TaskVariantRegistrar registrar(id, task_name);
       registrar.set_leaf(options.leaf);
       registrar.set_inner(options.inner);
@@ -1934,8 +1947,9 @@ namespace LegionRuntime {
           LegionTaskWrapper::legion_task_wrapper<T,false,TASK_PTR>);
       CodeDescriptor *inline_desc = new CodeDescriptor(
           LegionTaskWrapper::legion_task_wrapper<T,true,TASK_PTR>);
-      return preregister_variant(registrar, NULL/*UDT*/, 0/*sizeof(UDT)*/,
-                               realm_desc, inline_desc, true/*ret*/, task_name);
+      preregister_variant(registrar, NULL/*UDT*/, 0/*sizeof(UDT)*/,
+                          realm_desc, inline_desc, true/*ret*/, task_name);
+      return id;
     }
 
     //--------------------------------------------------------------------------
@@ -1950,6 +1964,8 @@ namespace LegionRuntime {
                                                     const char *task_name)
     //--------------------------------------------------------------------------
     {
+      if (id == AUTO_GENERATE_ID)
+        id = generate_static_task_id();
       TaskVariantRegistrar registrar(id, task_name);
       registrar.set_leaf(options.leaf);
       registrar.set_inner(options.inner);
@@ -1959,8 +1975,9 @@ namespace LegionRuntime {
             LegionTaskWrapper::legion_task_wrapper<false,TASK_PTR>);
       CodeDescriptor *inline_desc = new CodeDescriptor(
             LegionTaskWrapper::legion_task_wrapper<true,TASK_PTR>);
-      return preregister_variant(registrar, NULL/*UDT*/, 0/*sizeof(UDT)*/,
-                             realm_desc, inline_desc, false/*ret*/, task_name);
+      preregister_variant(registrar, NULL/*UDT*/, 0/*sizeof(UDT)*/,
+                          realm_desc, inline_desc, false/*ret*/, task_name);
+      return id;
     }
 
     //--------------------------------------------------------------------------
@@ -1976,6 +1993,8 @@ namespace LegionRuntime {
                                                     const char *task_name)
     //--------------------------------------------------------------------------
     {
+      if (id == AUTO_GENERATE_ID)
+        id = generate_static_task_id();
       TaskVariantRegistrar registrar(id, task_name);
       registrar.set_leaf(options.leaf);
       registrar.set_inner(options.inner);
@@ -1985,8 +2004,9 @@ namespace LegionRuntime {
             LegionTaskWrapper::legion_udt_task_wrapper<T,UDT,false,TASK_PTR>);
       CodeDescriptor *inline_desc = new CodeDescriptor(
             LegionTaskWrapper::legion_udt_task_wrapper<T,UDT,true,TASK_PTR>);
-      return preregister_variant(registrar, &user_data, sizeof(UDT),
-                               realm_desc, inline_desc, true/*ret*/, task_name);
+      preregister_variant(registrar, &user_data, sizeof(UDT),
+                          realm_desc, inline_desc, true/*ret*/, task_name);
+      return id;
     }
 
     //--------------------------------------------------------------------------
@@ -2002,6 +2022,8 @@ namespace LegionRuntime {
                                                     const char *task_name)
     //--------------------------------------------------------------------------
     {
+      if (id == AUTO_GENERATE_ID)
+        id = generate_static_task_id();
       TaskVariantRegistrar registrar(id, task_name);
       registrar.set_leaf(options.leaf);
       registrar.set_inner(options.inner);
@@ -2011,8 +2033,9 @@ namespace LegionRuntime {
             LegionTaskWrapper::legion_udt_task_wrapper<UDT,false,TASK_PTR>);
       CodeDescriptor *inline_desc = new CodeDescriptor(
             LegionTaskWrapper::legion_udt_task_wrapper<UDT,true,TASK_PTR>);
-      return preregister_variant(registrar, &user_data, sizeof(UDT),
-                             realm_desc, inline_desc, false/*ret*/, task_name);
+      preregister_variant(registrar, &user_data, sizeof(UDT),
+                          realm_desc, inline_desc, false/*ret*/, task_name);
+      return id;
     }
 
     //--------------------------------------------------------------------------
