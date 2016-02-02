@@ -793,6 +793,14 @@ namespace Realm {
 	  AutoGPUContext agc(this);
 	  CHECK_CU( cuCtxEnablePeerAccess((*it)->context, 0) );
 	}
+	// <NEW_DMA> add mem mem affinity between GPU FB and ZC
+	Machine::MemoryMemoryAffinity mma;
+	mma.m1 = fbmem->me;
+	mma.m2 = (*it)->fbmem->me;
+	mma.bandwidth = 200;  // "big"
+	mma.latency = 5;      // "ok"
+	r->add_mem_mem_affinity(mma);
+	// </NEW_DMA>
 	peer_fbs.insert((*it)->fbmem->me);
 	log_gpu.print() << "peer access enabled from FB " << fbmem->me << " to FB " << (*it)->fbmem->me;
       }
@@ -2174,6 +2182,14 @@ namespace Realm {
 	    ret = cuMemHostGetDevicePointer(&gpuptr, zcmem_cpu_base, 0);
 	  }
 	  if((ret == CUDA_SUCCESS) && (gpuptr == zcmem_gpu_base)) {
+	    // <NEW_DMA> add mem mem affinity between GPU FB and ZC
+	    Machine::MemoryMemoryAffinity mma;
+	    mma.m1 = m;
+	    mma.m2 = gpus[i]->fbmem->me;
+	    mma.bandwidth = 200;  // "big"
+	    mma.latency = 5;      // "ok"
+	    runtime->add_mem_mem_affinity(mma);
+	    // </NEW_DMA>
 	    gpus[i]->pinned_sysmems.insert(zcmem->me);
 	  } else {
 	    log_gpu.warning() << "GPU #" << i << " has an unexpected mapping for ZC memory!";
@@ -2242,6 +2258,14 @@ namespace Realm {
 	    if(ret == CUDA_SUCCESS) {
 	      // no test for && ((void *)gpuptr == base)) {
 	      log_gpu.info() << "memory " << (*it)->me << " successfully registered with GPU " << gpus[i]->proc->me;
+	      // <NEW_DMA> add mem mem affinity between GPU FB and ZC
+	      Machine::MemoryMemoryAffinity mma;
+	      mma.m1 = gpus[i]->fbmem->me;
+	      mma.m2 = (*it)->me;
+	      mma.bandwidth = 200;  // "big"
+	      mma.latency = 5;      // "ok"
+	      runtime->add_mem_mem_affinity(mma);
+	      // </NEW_DMA>
 	      gpus[i]->pinned_sysmems.insert((*it)->me);
 	    } else {
 	      log_gpu.warning() << "GPU #" << i << " has no mapping for registered memory (" << (*it)->me << " at " << base << ") !?";

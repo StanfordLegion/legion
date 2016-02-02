@@ -2810,9 +2810,9 @@ namespace LegionRuntime {
           else if (dst_ll_kind == Memory::GLOBAL_MEM)
             return XferDes::XFER_GASNET_WRITE;
           else if (dst_ll_kind == Memory::GPU_FB_MEM) {
-            MemoryImpl *dst_impl = get_runtime()->get_memory_impl(dst_mem);
-            GPU *dst_gpu = ((GPUFBMemory *)dst_impl)->gpu;
-            if (dst_gpu->pinned_sysmems.count(src_mem) == 0)
+            std::set<Memory> visible_mems;
+            Machine::get_machine().get_visible_memories(dst_mem, visible_mems);
+            if (visible_mems.count(src_mem) == 0)
               return XferDes::XFER_NONE;
             return XferDes::XFER_GPU_TO_FB;
           }
@@ -2826,17 +2826,17 @@ namespace LegionRuntime {
           break;
         case Memory::GPU_FB_MEM:
         {
-          MemoryImpl *src_impl = get_runtime()->get_memory_impl(src_mem);
-          GPU *src_gpu = ((GPUFBMemory *)src_impl)->gpu;
-          if (src_gpu->pinned_sysmems.count(dst_mem) != 0)
-            return XferDes::XFER_GPU_FROM_FB;
-          else if (dst_ll_kind == Memory::GPU_FB_MEM) {
+          std::set<Memory> visible_mems;
+          Machine::get_machine().get_visible_memories(src_mem, visible_mems);
+          if (dst_ll_kind == Memory::GPU_FB_MEM) {
             if (src_mem == dst_mem)
               return XferDes::XFER_GPU_IN_FB;
-            else if (src_gpu->peer_fbs.count(dst_mem) != 0)
+            else if (visible_mems.count(dst_mem) != 0)
               return XferDes::XFER_GPU_PEER_FB;
             return XferDes::XFER_NONE;
           }
+          else if (is_cpu_mem(dst_ll_kind) && visible_mems.count(dst_mem) != 0)
+              return XferDes::XFER_GPU_FROM_FB;
           else
             return XferDes::XFER_NONE;
         }
