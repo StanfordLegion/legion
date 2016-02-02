@@ -396,10 +396,29 @@ int main(int argc, char **argv)
   get_input_args().argv = argv;
   get_input_args().argc = argc;
 
-  // We should never return from this call
-  rt.run(TOP_LEVEL_TASK, Runtime::ONE_TASK_ONLY, 0, 0, false/*!background*/);
+  // select a processor to run the top level task on
+  Processor p = Processor::NO_PROC;
+  {
+    std::set<Processor> all_procs;
+    Machine::get_machine().get_all_processors(all_procs);
+    for(std::set<Processor>::const_iterator it = all_procs.begin();
+	it != all_procs.end();
+	it++)
+      if(it->kind() == Processor::LOC_PROC) {
+	p = *it;
+	break;
+      }
+  }
+  assert(p.exists());
 
-  //rt.shutdown();
+  // collective launch of a single task - everybody gets the same finish event
+  Event e = rt.collective_spawn(p, TOP_LEVEL_TASK, 0, 0);
+
+  // request shutdown once that task is complete
+  rt.shutdown(e);
+
+  // now sleep this thread until that shutdown actually happens
+  rt.wait_for_shutdown();
   
-  return -1;
+  return 0;
 }
