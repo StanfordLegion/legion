@@ -326,6 +326,7 @@ namespace LegionRuntime {
         "Send Index Partition Node",                                  \
         "Send Index Partition Request",                               \
         "Send Index Partition Return",                                \
+        "Send Index Partition Child Request",                         \
         "Send Field Space Node",                                      \
         "Send Field Space Request",                                   \
         "Send Field Space Return",                                    \
