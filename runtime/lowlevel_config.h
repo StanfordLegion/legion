@@ -27,13 +27,9 @@
 // LegionRuntime::LowLevel. These versions are here to facilitate the
 // C API. If you are writing C++ code, use the namespaced versions.
 
-#ifdef LEGION_IDS_ARE_64BIT
+#define REALM_IDS_ARE_64BIT
 typedef unsigned long long legion_lowlevel_id_t;
 #define IDFMT "%llx"
-#else
-typedef unsigned legion_lowlevel_id_t;
-#define IDFMT "%x"
-#endif
 
 typedef unsigned int legion_lowlevel_address_space_t;
 typedef unsigned legion_lowlevel_task_func_id_t;

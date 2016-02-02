@@ -3185,6 +3185,11 @@ namespace LegionRuntime {
               runtime->handle_index_partition_return(derez);
               break;
             }
+          case SEND_INDEX_PARTITION_CHILD_REQUEST:
+            {
+              runtime->handle_index_partition_child_request(derez);
+              break;
+            }
           case SEND_FIELD_SPACE_NODE:
             {
               runtime->handle_field_space_node(derez, remote_address_space);
@@ -12083,6 +12088,16 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void Internal::send_index_partition_child_request(AddressSpaceID target,
+                                                      Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez,
+                                SEND_INDEX_PARTITION_CHILD_REQUEST,
+                                INDEX_AND_FIELD_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Internal::send_field_space_node(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -12886,6 +12901,13 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       IndexPartNode::handle_node_return(derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Internal::handle_index_partition_child_request(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      IndexPartNode::handle_node_child_request(forest, derez);
     }
 
     //--------------------------------------------------------------------------
@@ -16573,7 +16595,7 @@ namespace LegionRuntime {
     {
       // Some static asserts that need to hold true for the runtime to work
       LEGION_STATIC_ASSERT(MAX_RETURN_SIZE > 0);
-      LEGION_STATIC_ASSERT((1 << FIELD_LOG2) == MAX_FIELDS);
+      LEGION_STATIC_ASSERT((1 << LEGION_FIELD_LOG2) == MAX_FIELDS);
       LEGION_STATIC_ASSERT(MAX_NUM_NODES > 0);
       LEGION_STATIC_ASSERT(MAX_NUM_PROCS > 0);
       LEGION_STATIC_ASSERT(DEFAULT_MAX_TASK_WINDOW > 0);

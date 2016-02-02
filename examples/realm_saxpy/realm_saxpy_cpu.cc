@@ -252,9 +252,6 @@ void top_level_task(const void *args, size_t arglen,
                                 sizeof(saxpy_args), z_ready); 
   printf("Done Event is (" IDFMT ",%d)\n\n", done.id, done.gen);
   done.wait();
-
-  Runtime rt = Runtime::get_runtime();
-  rt.shutdown();
 }
 
 void cpu_saxpy_task(const void *args, size_t arglen,
@@ -335,7 +332,29 @@ int main(int argc, char **argv)
 #endif
   rt.register_task(CHECK_RESULT_TASK, check_result_task);
   
-  // Never return from this call
-  rt.run(TOP_LEVEL_TASK, Runtime::ONE_TASK_ONLY);
+  // select a processor to run the top level task on
+  Processor p = Processor::NO_PROC;
+  {
+    std::set<Processor> all_procs;
+    Machine::get_machine().get_all_processors(all_procs);
+    for(std::set<Processor>::const_iterator it = all_procs.begin();
+	it != all_procs.end();
+	it++)
+      if(it->kind() == Processor::LOC_PROC) {
+	p = *it;
+	break;
+      }
+  }
+  assert(p.exists());
+
+  // collective launch of a single task - everybody gets the same finish event
+  Event e = rt.collective_spawn(p, TOP_LEVEL_TASK, 0, 0);
+
+  // request shutdown once that task is complete
+  rt.shutdown(e);
+
+  // now sleep this thread until that shutdown actually happens
+  rt.wait_for_shutdown();
+  
   return 0;
 }

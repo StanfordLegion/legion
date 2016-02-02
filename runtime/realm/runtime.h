@@ -77,7 +77,8 @@ namespace Realm {
       };
 
       void run(Processor::TaskFuncID task_id = 0, RunStyle style = ONE_TASK_ONLY,
-	       const void *args = 0, size_t arglen = 0, bool background = false);
+	       const void *args = 0, size_t arglen = 0, bool background = false)
+	__attribute__((deprecated("use collect_spawn calls instead")));
 
       // requests a shutdown of the runtime
       void shutdown(Event wait_on = Event::NO_EVENT);

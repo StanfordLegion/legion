@@ -1136,11 +1136,15 @@ namespace LegionRuntime {
       static void handle_node_creation(RegionTreeForest *context,
                                        Deserializer &derez, 
                                        AddressSpaceID source);
+      void send_child_node(AddressSpaceID target,
+                           const ColorPoint &child_color, UserEvent to_trigger);
     public:
       static void handle_node_request(RegionTreeForest *context,
                                       Deserializer &derez,
                                       AddressSpaceID source);
       static void handle_node_return(Deserializer &derez);
+      static void handle_node_child_request(
+                                 RegionTreeForest *forest, Deserializer &derez);
     public:
       const IndexPartition handle;
       const Domain color_space;
@@ -1392,7 +1396,7 @@ namespace LegionRuntime {
       // Keep track of the layouts associated with this field space
       // Index them by their hash of their field mask to help
       // differentiate them.
-      std::map<FIELD_TYPE,LegionList<LayoutDescription*,
+      std::map<LEGION_FIELD_MASK_FIELD_TYPE,LegionList<LayoutDescription*,
                           LAYOUT_DESCRIPTION_ALLOC>::tracked> layouts;
     private:
       LegionMap<SemanticTag,SemanticInfo>::aligned semantic_info;

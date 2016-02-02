@@ -1667,6 +1667,8 @@ namespace LegionRuntime {
       void send_index_partition_node(AddressSpaceID target, Serializer &rez);
       void send_index_partition_request(AddressSpaceID target, Serializer &rez);
       void send_index_partition_return(AddressSpaceID target, Serializer &rez);
+      void send_index_partition_child_request(AddressSpaceID target,
+                                              Serializer &rez);
       void send_field_space_node(AddressSpaceID target, Serializer &rez);
       void send_field_space_request(AddressSpaceID target, Serializer &rez);
       void send_field_space_return(AddressSpaceID target, Serializer &rez);
@@ -1785,6 +1787,7 @@ namespace LegionRuntime {
       void handle_index_partition_request(Deserializer &derez,
                                           AddressSpaceID source);
       void handle_index_partition_return(Deserializer &derez);
+      void handle_index_partition_child_request(Deserializer &derez);
       void handle_field_space_node(Deserializer &derez, AddressSpaceID source);
       void handle_field_space_request(Deserializer &derez,
                                       AddressSpaceID source);

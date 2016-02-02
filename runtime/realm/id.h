@@ -18,11 +18,6 @@
 #ifndef REALM_ID_H
 #define REALM_ID_H
 
-// support old define name
-#ifdef LEGION_IDS_ARE_64BIT
-#  define REALM_IDS_ARE_64BIT
-#endif
-
 namespace Realm {
 
     class ID {

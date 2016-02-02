@@ -291,7 +291,7 @@ namespace Realm {
   {
     //define DEBUG_THREAD_SCHEDULER
 #ifdef DEBUG_THREAD_SCHEDULER
-    printf("UWC: %p a=%d%+d u=%d%+d\n", Thread::self(),
+    printf("UWC: %p %p a=%d%+d u=%d%+d\n", Thread::self(), this,
 	   active_worker_count, active_delta,
 	   unassigned_worker_count, unassigned_delta);
 #endif
@@ -817,6 +817,7 @@ namespace Realm {
 						   CoreReservation& _core_rsrv)
     : proc(_proc)
     , core_rsrv(_core_rsrv)
+    , host_startup_condvar(lock)
     , cfg_num_host_threads(1)
   {
   }
@@ -826,9 +827,10 @@ namespace Realm {
     // cleanup should happen before destruction
     assert(all_workers.empty());
     assert(all_hosts.empty());
+    assert(active_worker_count == 0);
   }
 
-  void  UserThreadTaskScheduler::add_task_queue(TaskQueue *queue)
+  void UserThreadTaskScheduler::add_task_queue(TaskQueue *queue)
   {
     // call the parent implementation first
     ThreadedTaskScheduler::add_task_queue(queue);
@@ -849,6 +851,8 @@ namespace Realm {
       ThreadLaunchParameters tlp;
       tlp.set_stack_size(4096);  // really small stack is fine here
 
+      host_startups_remaining = cfg_num_host_threads;
+
       for(int i = 0; i < cfg_num_host_threads; i++) {
 	Thread *t = Thread::create_kernel_thread<UserThreadTaskScheduler,
 						 &UserThreadTaskScheduler::host_thread_loop>(this,
@@ -865,6 +869,12 @@ namespace Realm {
     log_sched.info() << "scheduler shutdown requested: sched=" << this;
     // set the shutdown flag and wait for all the host threads to exit
     AutoHSLLock al(lock);
+
+    // make sure everybody actually started before we tell them to shut down
+    while(host_startups_remaining > 0) {
+      printf("wait\n");
+      host_startup_condvar.wait();
+    }
 
     shutdown_flag = true;
     // setting the shutdown flag adds "work" to the system
@@ -907,18 +917,26 @@ namespace Realm {
   {
     AutoHSLLock al(lock);
 
-    while(!shutdown_flag) {
-      // create a user worker thread - it won't start right away
-      Thread *worker = worker_create(false);
+    // create a user worker thread - it won't start right away
+    Thread *worker = worker_create(false);
 
+    // now signal that we've started
+    int left = --host_startups_remaining;
+    if(left == 0)
+      host_startup_condvar.broadcast();
+
+    while(true) {
       // for user ctx switching, lock is HELD during thread switches
       Thread::user_switch(worker);
       do_user_thread_cleanup();
 
-      if(!shutdown_flag) {
-	printf("HELP!  Lost a user worker thread - making a new one...\n");
-	update_worker_count(+1, +1);
-      }
+      if(shutdown_flag)
+	break;
+
+      // getting here is unexpected
+      printf("HELP!  Lost a user worker thread - making a new one...\n");
+      update_worker_count(+1, +1);
+      worker = worker_create(false);
     }
   }
 

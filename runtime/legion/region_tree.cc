@@ -1436,7 +1436,7 @@ namespace LegionRuntime {
                                      ctx.get_id(), true/*before*/, 
                                      false/*premap*/,
                                      false/*closing*/, true/*logical*/,
-                                     FieldMask(FIELD_ALL_ONES), user_mask);
+                       FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES), user_mask);
 #endif
       // Finally do the traversal, note that we don't need to hold the
       // context lock since the runtime guarantees that all dependence
@@ -1456,7 +1456,7 @@ namespace LegionRuntime {
                                      ctx.get_id(), false/*before*/, 
                                      false/*premap*/,
                                      false/*closing*/, true/*logical*/,
-                                     FieldMask(FIELD_ALL_ONES), user_mask);
+                       FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES), user_mask);
 #endif
 #ifdef DEBUG_PERF
       end_perf_trace(Internal::perf_trace_tolerance);
@@ -1496,7 +1496,7 @@ namespace LegionRuntime {
                                      ctx.get_id(), true/*before*/, 
                                      false/*premap*/,
                                      false/*closing*/, true/*logical*/,
-                                     FieldMask(FIELD_ALL_ONES), user_mask);
+                       FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES), user_mask);
 #endif
       parent_node->close_reduction_analysis(ctx.get_id(), user, version_info); 
 #ifdef DEBUG_HIGH_LEVEL
@@ -1505,7 +1505,7 @@ namespace LegionRuntime {
                                      ctx.get_id(), false/*before*/, 
                                      false/*premap*/,
                                      false/*closing*/, true/*logical*/,
-                                     FieldMask(FIELD_ALL_ONES), user_mask);
+                       FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES), user_mask);
 #endif
 #ifdef DEBUG_PERF
       end_perf_trace(Internal::perf_trace_tolerance);
@@ -1522,7 +1522,7 @@ namespace LegionRuntime {
       // Register dependences for this fence on all users in the tree
       RegionNode *top_node = get_node(handle);
       LogicalRegistrar registrar(ctx.get_id(), fence, 
-                                 FieldMask(FIELD_ALL_ONES), dominate);
+                       FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES), dominate);
       top_node->visit_node(&registrar);
     }
 
@@ -1550,7 +1550,7 @@ namespace LegionRuntime {
         RegionTreePath path;
         initialize_path(delete_node,start_node->row_source,path);
         LogicalPathRegistrar reg(ctx.get_id(), op, 
-                                 FieldMask(FIELD_ALL_ONES), path);
+                           FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES), path);
         reg.traverse(start_node); 
       }
     }
@@ -1580,7 +1580,7 @@ namespace LegionRuntime {
         RegionTreePath path;
         initialize_path(delete_node,start_node->row_source,path);
         LogicalPathRegistrar reg(ctx.get_id(), op, 
-                                 FieldMask(FIELD_ALL_ONES), path);
+                       FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES), path);
         reg.traverse(start_node);
       }
     }
@@ -1597,7 +1597,7 @@ namespace LegionRuntime {
       {
         RegionNode *start_node = get_node(region);
         LogicalRegistrar registrar(ctx.get_id(), op, 
-                                  FieldMask(FIELD_ALL_ONES), false/*dominate*/);
+                FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES), false/*dominate*/);
         start_node->visit_node(&registrar);
       }
     }
@@ -1634,7 +1634,7 @@ namespace LegionRuntime {
         RegionTreePath path;
         initialize_path(delete_node->row_source,start_node->row_source,path);
         LogicalPathRegistrar reg(ctx.get_id(), op, 
-                                 FieldMask(FIELD_ALL_ONES), path);
+                           FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES), path);
         reg.traverse(start_node);
       }
     }
@@ -1654,7 +1654,7 @@ namespace LegionRuntime {
         RegionTreePath path;
         initialize_path(delete_node->row_source,start_node->row_source,path);
         LogicalPathRegistrar reg(ctx.get_id(), op, 
-                                 FieldMask(FIELD_ALL_ONES), path);
+                             FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES), path);
         reg.traverse(start_node);
       }
     }
@@ -1747,7 +1747,7 @@ namespace LegionRuntime {
                                      parent_node, ctx.get_id(), 
                                      true/*before*/, true/*premap*/, 
                                      false/*closing*/, false/*logical*/,
-                                     FieldMask(FIELD_ALL_ONES), user_mask);
+                 FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES), user_mask);
 #endif
       const bool result = traverser.traverse(start_node);
 #ifdef DEBUG_HIGH_LEVEL
@@ -1757,7 +1757,7 @@ namespace LegionRuntime {
                                        parent_node, ctx.get_id(), 
                                        false/*before*/, true/*premap*/, 
                                        false/*closing*/, false/*logical*/,
-                                       FieldMask(FIELD_ALL_ONES), user_mask);
+                   FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES), user_mask);
       }
 #endif
 #ifdef DEBUG_PERF
@@ -1808,7 +1808,7 @@ namespace LegionRuntime {
                                      start_node, ctx.get_id(), 
                                      true/*before*/, false/*premap*/, 
                                      false/*closing*/, false/*logical*/,
-                                     FieldMask(FIELD_ALL_ONES), user_mask);
+                       FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES), user_mask);
 #endif
       bool result = traverser.traverse(start_node);
 #ifdef DEBUG_PERF
@@ -1853,7 +1853,7 @@ namespace LegionRuntime {
                                      target_node, ctx.get_id(), 
                                      true/*before*/, false/*premap*/, 
                                      false/*closing*/, false/*logical*/,
-                                     FieldMask(FIELD_ALL_ONES), user_mask);
+                 FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES), user_mask);
 #endif
       MaterializedView *view = ref.get_materialized_view();
       FieldMask needed_mask;
@@ -1904,7 +1904,7 @@ namespace LegionRuntime {
                                      child_node, ctx.get_id(), 
                                      true/*before*/, false/*premap*/, 
                                      false/*closing*/, false/*logical*/,
-                                     FieldMask(FIELD_ALL_ONES), user_mask);
+                     FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES), user_mask);
 #endif
       bool result = traverser.traverse(child_node);
 #ifdef DEBUG_HIGH_LEVEL
@@ -1913,7 +1913,7 @@ namespace LegionRuntime {
                                      child_node, ctx.get_id(), 
                                      false/*before*/, false/*premap*/, 
                                      false/*closing*/, false/*logical*/,
-                                     FieldMask(FIELD_ALL_ONES), user_mask);
+                     FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES), user_mask);
 #endif
 #ifdef DEBUG_PERF
       end_perf_trace(Internal::perf_trace_tolerance);
@@ -2015,7 +2015,7 @@ namespace LegionRuntime {
                                      start_node, ctx.get_id(), 
                                      false/*before*/, false/*premap*/, 
                                      false/*closing*/, false/*logical*/,
-                                     FieldMask(FIELD_ALL_ONES), user_mask);
+                   FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES), user_mask);
 #endif
 #ifdef DEBUG_PERF
       end_perf_trace(Internal::perf_trace_tolerance);
@@ -2187,7 +2187,7 @@ namespace LegionRuntime {
                                      top_node, ctx.get_id(), 
                                      true/*before*/, false/*premap*/,
                                      true/*closing*/, false/*logical*/,
-                                     FieldMask(FIELD_ALL_ONES), closing_mask);
+                   FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES), closing_mask);
 #endif
       RegionTreeNode *close_node = (req.handle_type == PART_PROJECTION) ?
                   static_cast<RegionTreeNode*>(get_node(req.partition)) : 
@@ -2219,7 +2219,7 @@ namespace LegionRuntime {
                                      top_node, ctx.get_id(), 
                                      false/*before*/, false/*premap*/,
                                      true/*closing*/, false/*logical*/,
-                                     FieldMask(FIELD_ALL_ONES), closing_mask);
+               FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES), closing_mask);
 #endif
 #ifdef DEBUG_PERF
       end_perf_trace(Internal::perf_trace_tolerance);
@@ -2256,7 +2256,7 @@ namespace LegionRuntime {
                                      top_node, ctx.get_id(), 
                                      true/*before*/, false/*premap*/, 
                                      true/*closing*/, false/*logical*/,
-                                     FieldMask(FIELD_ALL_ONES), user_mask);
+                 FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES), user_mask);
 #endif
       Event result = top_node->close_state(info, Event::NO_EVENT, usage,
                                            user_mask, ref);
@@ -2265,7 +2265,7 @@ namespace LegionRuntime {
                                      top_node, ctx.get_id(), 
                                      false/*before*/, false/*premap*/, 
                                      true/*closing*/, false/*logical*/,
-                                     FieldMask(FIELD_ALL_ONES), user_mask);
+                 FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES), user_mask);
 #endif
       return result;
     }
@@ -3986,7 +3986,7 @@ namespace LegionRuntime {
       TreeStateLogger dump_logger; 
       assert(region_nodes.find(region) != region_nodes.end());
       region_nodes[region]->dump_logical_context(ctx, &dump_logger,
-                                                 FieldMask(FIELD_ALL_ONES));
+                                 FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES));
     }
 
     //--------------------------------------------------------------------------
@@ -3997,7 +3997,7 @@ namespace LegionRuntime {
       TreeStateLogger dump_logger;
       assert(region_nodes.find(region) != region_nodes.end());
       region_nodes[region]->dump_physical_context(ctx, &dump_logger,
-                                                  FieldMask(FIELD_ALL_ONES));
+                                FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES));
     }
 #endif
 
@@ -6880,32 +6880,55 @@ namespace LegionRuntime {
         exit(ERROR_INVALID_INDEX_PART_COLOR);
       }
 #endif
-      // Didn't find it so now we try to make it.
-      // Make a unique handle name
-      IndexSpace is(context->runtime->get_unique_index_space_id(),
-                    handle.get_tree_id());
-      if (parent->kind == UNSTRUCTURED_KIND)
+      AddressSpaceID owner_space = get_owner_space();
+      AddressSpaceID local_space = context->runtime->address_space;
+      // If we own the index partition, create a new subspace here
+      if (owner_space == local_space)
       {
-        // Make a new sub-index space first based on the 
-        // parent. Determine if it is allocable based on the
-        // properties of this partition object.
-        const Domain &parent_dom = parent->get_domain_no_wait();
-        Realm::IndexSpace parent_space = parent_dom.get_index_space();
-        Realm::ElementMask new_mask(get_num_elmts());
-        Realm::IndexSpace new_space =  
-          Realm::IndexSpace::create_index_space(parent_space, new_mask,
-                                                   (mode & ALLOCABLE));
-        IndexSpaceNode *result = context->create_node(is, Domain(new_space),
-            this, c, UNSTRUCTURED_KIND, mode);
-        return result;
+        IndexSpace is(context->runtime->get_unique_index_space_id(),
+                      handle.get_tree_id());
+        if (parent->kind == UNSTRUCTURED_KIND)
+        {
+          // Make a new sub-index space first based on the 
+          // parent. Determine if it is allocable based on the
+          // properties of this partition object.
+          const Domain &parent_dom = parent->get_domain_no_wait();
+          Realm::IndexSpace parent_space = parent_dom.get_index_space();
+          Realm::ElementMask new_mask(get_num_elmts());
+          Realm::IndexSpace new_space =  
+            Realm::IndexSpace::create_index_space(parent_space, new_mask,
+                                                     (mode & ALLOCABLE));
+          IndexSpaceNode *result = context->create_node(is, Domain(new_space),
+              this, c, UNSTRUCTURED_KIND, mode);
+          return result;
+        }
+        else
+        {
+          // Easy case just make an empty domain and use that
+          Domain empty = Domain::NO_DOMAIN;
+          IndexSpaceNode *result = context->create_node(is, empty,
+              this, c, DENSE_ARRAY_KIND, parent->mode);
+          return result;
+        }
       }
+      // Otherwise, request a child node from the owner node
       else
       {
-        // Easy case just make an empty domain and use that
-        Domain empty = Domain::NO_DOMAIN;
-        IndexSpaceNode *result = context->create_node(is, empty,
-            this, c, DENSE_ARRAY_KIND, parent->mode);
-        return result;
+        UserEvent ready_event = UserEvent::create_user_event();
+        Serializer rez;
+        rez.serialize(handle);
+        rez.serialize(local_space);
+        rez.serialize(c);
+        rez.serialize(ready_event);
+        context->runtime->send_index_partition_child_request(owner_space, rez);
+        ready_event.wait();
+        // Retake the lock and get the result
+        AutoLock n_lock(node_lock,1,false/*exclusive*/);
+#ifdef DEBUG_HIGH_LEVEL
+        assert((color_map.find(c) != color_map.end()) &&
+                (color_map[c] != NULL));
+#endif
+        return color_map[c];
       }
     }
 
@@ -7806,6 +7829,23 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void IndexPartNode::send_child_node(AddressSpaceID target,
+                            const ColorPoint &child_color, UserEvent to_trigger)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      AddressSpaceID local_space = context->runtime->address_space;
+      // This message is only sent to the owner
+      assert(get_owner_space() == local_space);
+#endif
+      IndexSpaceNode* child_node = get_child(child_color);
+      child_node->send_node(target, false/*up*/, true/*down*/);
+      Serializer rez;
+      rez.serialize(to_trigger);
+      context->runtime->send_index_space_return(target, rez);
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ void IndexPartNode::handle_node_creation(
         RegionTreeForest *context, Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
@@ -7887,6 +7927,23 @@ namespace LegionRuntime {
       to_trigger.trigger();
     }
 
+    //--------------------------------------------------------------------------
+    /*static*/ void IndexPartNode::handle_node_child_request(
+                                  RegionTreeForest *forest, Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      IndexPartition handle;
+      derez.deserialize(handle);
+      AddressSpaceID source;
+      derez.deserialize(source);
+      ColorPoint child_color;
+      derez.deserialize(child_color);
+      UserEvent to_trigger;
+      derez.deserialize(to_trigger);
+      IndexPartNode *target = forest->get_node(handle);
+      target->send_child_node(source, child_color, to_trigger);
+    }
+
     /////////////////////////////////////////////////////////////
     // Field Space Node 
     /////////////////////////////////////////////////////////////
@@ -7918,7 +7975,7 @@ namespace LegionRuntime {
     {
       node_lock.destroy_reservation();
       node_lock = Reservation::NO_RESERVATION;
-      for (std::map<FIELD_TYPE,LegionList<LayoutDescription*,
+      for (std::map<LEGION_FIELD_MASK_FIELD_TYPE,LegionList<LayoutDescription*,
             LAYOUT_DESCRIPTION_ALLOC>::tracked>::iterator it =
             layouts.begin(); it != layouts.end(); it++)
       {
@@ -9387,7 +9444,7 @@ namespace LegionRuntime {
     {
       uint64_t hash_key = mask.get_hash_key();
       AutoLock n_lock(node_lock,1,false/*exclusive*/);
-      std::map<FIELD_TYPE,LegionList<LayoutDescription*,
+      std::map<LEGION_FIELD_MASK_FIELD_TYPE,LegionList<LayoutDescription*,
         LAYOUT_DESCRIPTION_ALLOC>::tracked>::const_iterator finder = 
                                                     layouts.find(hash_key);
       if (finder == layouts.end())
@@ -9842,8 +9899,8 @@ namespace LegionRuntime {
       allocated_indexes.unset_bit(index);
       // We also need to invalidate all our layout descriptions
       // that contain this field
-      std::vector<FIELD_TYPE> to_delete;
-      for (std::map<FIELD_TYPE,LegionList<LayoutDescription*,
+      std::vector<LEGION_FIELD_MASK_FIELD_TYPE> to_delete;
+      for (std::map<LEGION_FIELD_MASK_FIELD_TYPE,LegionList<LayoutDescription*,
                   LAYOUT_DESCRIPTION_ALLOC>::tracked>::iterator lit = 
             layouts.begin(); lit != layouts.end(); lit++)
       {
@@ -9873,8 +9930,8 @@ namespace LegionRuntime {
             to_delete.push_back(lit->first);
         }
       }
-      for (std::vector<FIELD_TYPE>::const_iterator it = to_delete.begin();
-            it != to_delete.end(); it++)
+      for (std::vector<LEGION_FIELD_MASK_FIELD_TYPE>::const_iterator it = 
+            to_delete.begin(); it != to_delete.end(); it++)
       {
         layouts.erase(*it);
       }

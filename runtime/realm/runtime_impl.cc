@@ -701,17 +701,9 @@ namespace Realm {
       }
       if (gasnet_nodes() > ((1 << ID::NODE_BITS) - 1))
       {
-#ifdef LEGION_IDS_ARE_64BIT
         fprintf(stderr,"ERROR: Launched %d nodes, but low-level IDs are only "
                        "configured for at most %d nodes. Update the allocation "
                        "of bits in ID", gasnet_nodes(), (1 << ID::NODE_BITS) - 1);
-#else
-        fprintf(stderr,"ERROR: Launched %d nodes, but low-level IDs are only "
-                       "configured for at most %d nodes.  Update the allocation "
-                       "of bits in ID or switch to 64-bit IDs with the "
-                       "-DLEGION_IDS_ARE_64BIT compile-time flag",
-                       gasnet_nodes(), (1 << ID::NODE_BITS) - 1);
-#endif
         gasnet_exit(1);
       }
 
@@ -1484,8 +1476,16 @@ namespace Realm {
       exit(0);
     }
 
+    // this is not member data of RuntimeImpl because we don't want use-after-free problems
+    static int shutdown_count = 0;
+
     void RuntimeImpl::shutdown(bool local_request /*= true*/)
     {
+      // filter out duplicate requests
+      bool already_started = (__sync_fetch_and_add(&shutdown_count, 1) > 0);
+      if(already_started)
+	return;
+
       if(local_request) {
 	log_runtime.info("shutdown request - notifying other nodes");
 	for(unsigned i = 0; i < gasnet_nodes(); i++)
@@ -1537,7 +1537,19 @@ namespace Realm {
 	log_runtime.info("shutdown request received - terminating");
       }
 
+#ifdef USE_GASNET
+      // don't start tearing things down until all processes agree
+      gasnet_barrier_notify(0, GASNET_BARRIERFLAG_ANONYMOUS);
+      gasnet_barrier_wait(0, GASNET_BARRIERFLAG_ANONYMOUS);
+#endif
+
       // Shutdown all the threads
+
+      // threads that cause inter-node communication have to stop first
+      // LegionRuntime::LowLevel::stop_dma_worker_threads();
+      LegionRuntime::LowLevel::stop_dma_system();
+      stop_activemsg_threads();
+
       {
 	std::vector<ProcessorImpl *>& local_procs = nodes[gasnet_mynode()].processors;
 	for(std::vector<ProcessorImpl *>::const_iterator it = local_procs.begin();
@@ -1611,12 +1623,6 @@ namespace Realm {
 
 	module_registrar.unload_module_sofiles();
       }
-
-      // need to kill other threads too so we can actually terminate process
-      // Exit out of the thread
-      // LegionRuntime::LowLevel::stop_dma_worker_threads();
-      LegionRuntime::LowLevel::stop_dma_system();
-      stop_activemsg_threads();
 
       // this terminates the process, so control never gets back to caller
       // would be nice to fix this...
