@@ -4266,6 +4266,17 @@ namespace LegionRuntime {
                                                      const_cast<Mapper*>(this));
     }
 
+    // A total hack just to keep backwards compatibilty for most older
+    // codes. This is in no way safe or correct, but it works for now
+    //--------------------------------------------------------------------------
+    TaskID generate_static_task_id(void)
+    //--------------------------------------------------------------------------
+    {
+      // Pick a reasonable number to start at that won't interfere anywhere
+      static TaskID next_task = MAX_APPLICATION_TASK_ID;
+      return next_task++;
+    }
+
   }; // namespace HighLevel
 }; // namespace LegionRuntime
 
