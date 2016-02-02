@@ -1836,7 +1836,9 @@ public:
   {
     endpoints[src]->handle_flip_ack(ack_buffer);
   }
-  void push_messages(int max_to_send = 0, bool wait = false)
+
+  // returns whether any more messages remain
+  bool push_messages(int max_to_send = 0, bool wait = false)
   {
     while(true) {
       // get the next entry from the todo list, waiting if requested
@@ -1849,7 +1851,8 @@ public:
       } else {
 	// try to take our lock so we can pop an endpoint from the todo list
 	int ret = gasnet_hsl_trylock(&mutex);
-	if(ret == GASNET_ERR_NOT_READY) return;
+	// no lock, so we don't actually know if we have any messages - be conservative
+	if(ret == GASNET_ERR_NOT_READY) return true;
 
 	// give up if list is empty too
 	if(todo_oldest == todo_newest) {
@@ -1858,7 +1861,7 @@ public:
 	  //  that have added messages but not been able to put themselves on
 	  //  the todo list yet
 	  gasnet_hsl_unlock(&mutex);
-	  return;
+	  return false;
 	}
       }
 
@@ -2131,12 +2134,40 @@ void EndpointManager::stop_threads(void)
     delete (*it);
   }
   polling_threads.clear();
+
+#ifdef CHECK_OUTGOING_MESSAGES
+  if(todo_oldest != todo_newest) {
+    fprintf(stderr, "HELP!  shutdown occured with messages outstanding on node %d!\n", gasnet_mynode());
+    while(todo_oldest != todo_newest) {
+      int target = todo_list[todo_oldest];
+      fprintf(stderr, "target = %d\n", target);
+      while(!endpoints[target]->out_short_hdrs.empty()) {
+	OutgoingMessage *m = endpoints[target]->out_short_hdrs.front();
+	fprintf(stderr, "  SHORT: %d %d %zd\n", m->msgid, m->num_args, m->payload_size);
+	endpoints[target]->out_short_hdrs.pop();
+      }
+      while(!endpoints[target]->out_long_hdrs.empty()) {
+	OutgoingMessage *m = endpoints[target]->out_long_hdrs.front();
+	fprintf(stderr, "  LONG: %d %d %zd\n", m->msgid, m->num_args, m->payload_size);
+	endpoints[target]->out_long_hdrs.pop();
+      }
+      todo_oldest++;
+      if(todo_oldest > total_endpoints)
+	todo_oldest = 0;
+    }
+    //assert(false);
+  }
+#endif
 }
 
 void EndpointManager::polling_worker_loop(void)
 {
-  while(!shutdown_flag) {
-    endpoint_manager->push_messages(max_msgs_to_send);
+  while(true) {
+    bool still_more = endpoint_manager->push_messages(max_msgs_to_send);
+
+    // check for shutdown, but only if we've pushed all of our messages
+    if(shutdown_flag && !still_more)
+      break;
 
     CHECK_GASNET( gasnet_AMPoll() );
 
