@@ -2786,8 +2786,7 @@ namespace LegionRuntime {
                                                   IndexPartNode *parent,
                                                   ColorPoint color, 
                                                   IndexSpaceKind kind,
-                                                  AllocateMode mode,
-                                                  Event subtree_ready)
+                                                  AllocateMode mode)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_PERF
@@ -2795,7 +2794,6 @@ namespace LegionRuntime {
 #endif
       IndexSpaceNode *result = new IndexSpaceNode(sp, d, ready_event, parent, 
                                                   color, kind, mode, this);
-      result->subtree_ready = subtree_ready;
 #ifdef DEBUG_HIGH_LEVEL
       assert(result != NULL);
 #endif
@@ -2862,8 +2860,7 @@ namespace LegionRuntime {
                                                  ColorPoint color, 
                                                  Domain color_space,
                                                  bool disjoint,
-                                                 AllocateMode mode,
-                                                 Event subtree_ready)
+                                                 AllocateMode mode)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_PERF
@@ -2871,7 +2868,6 @@ namespace LegionRuntime {
 #endif
       IndexPartNode *result = new IndexPartNode(p, parent, color, color_space,
                                                 disjoint, mode, this);
-      result->subtree_ready = subtree_ready;
 #ifdef DEBUG_HIGH_LEVEL
       assert(parent != NULL);
       assert(result != NULL);
@@ -4741,8 +4737,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     IndexTreeNode::IndexTreeNode(void)
-      : depth(0), color(ColorPoint()), context(NULL),
-        subtree_ready(Event::NO_EVENT)
+      : depth(0), color(ColorPoint()), context(NULL)
     //--------------------------------------------------------------------------
     {
     }
@@ -4751,8 +4746,7 @@ namespace LegionRuntime {
     IndexTreeNode::IndexTreeNode(ColorPoint c, unsigned d, 
                                  RegionTreeForest *ctx)
       : depth(d), color(c), context(ctx), 
-        node_lock(Reservation::create_reservation()),
-        subtree_ready(Event::NO_EVENT)
+        node_lock(Reservation::create_reservation())
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -6347,13 +6341,12 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void IndexSpaceNode::send_node(
-                 AddressSpaceID target, bool up, bool down, Event subtree_ready)
+    void IndexSpaceNode::send_node(AddressSpaceID target, bool up, bool down)
     //--------------------------------------------------------------------------
     {
       // Go up first so we know those nodes will be there
       if (up && (parent != NULL))
-        parent->send_node(target, true/*up*/, false/*down*/, subtree_ready);
+        parent->send_node(target, true/*up*/, false/*down*/);
       // Check to see if we need to wait for the handle event to be ready
       if (!handle_ready.has_triggered())
           handle_ready.wait();
@@ -6367,7 +6360,6 @@ namespace LegionRuntime {
           {
             RezCheck z(rez);
             rez.serialize(handle);
-            rez.serialize(subtree_ready);
             rez.serialize(domain);
             rez.serialize(domain_ready);
             rez.serialize(kind);
@@ -6415,8 +6407,7 @@ namespace LegionRuntime {
         for (std::map<ColorPoint,IndexPartNode*>::const_iterator it = 
               valid_copy.begin(); it != valid_copy.end(); it++)
         {
-          it->second->send_node(target, false/*up*/, true/*down*/,
-                                subtree_ready);
+          it->second->send_node(target, false/*up*/, true/*down*/);
         }
         // If we sent all our children, then we can record it
         AutoLock n_lock(node_lock);
@@ -6465,7 +6456,7 @@ namespace LegionRuntime {
       // If we got the node, send its information
       if (child_node != NULL)
       {
-        child_node->send_node(target, false/*up*/, true/*down*/, to_trigger);
+        child_node->send_node(target, false/*up*/, true/*down*/);
         // Then send the trigger
         Serializer rez;
         rez.serialize(to_trigger);
@@ -6495,8 +6486,6 @@ namespace LegionRuntime {
       DerezCheck z(derez);
       IndexSpace handle;
       derez.deserialize(handle);
-      Event subtree_ready;
-      derez.deserialize(subtree_ready);
       Domain domain;
       derez.deserialize(domain);
       Event ready_event;
@@ -6529,7 +6518,7 @@ namespace LegionRuntime {
       IndexSpaceNode *node = 
                   context->create_node(handle, domain, ready_event, 
                                        parent_node, color,
-                                       kind, mode, subtree_ready);
+                                       kind, mode);
 #ifdef DEBUG_HIGH_LEVEL
       assert(node != NULL);
 #endif
@@ -6563,7 +6552,7 @@ namespace LegionRuntime {
       UserEvent to_trigger;
       derez.deserialize(to_trigger);
       IndexSpaceNode *target = forest->get_node(handle);
-      target->send_node(source, true/*up*/, true/*down*/, to_trigger);
+      target->send_node(source, true/*up*/, true/*down*/);
       // Then send back the flush
       Serializer rez;
       rez.serialize(to_trigger);
@@ -6875,8 +6864,6 @@ namespace LegionRuntime {
     IndexSpaceNode* IndexPartNode::get_child(const ColorPoint &c)
     //--------------------------------------------------------------------------
     {
-      if (!subtree_ready.has_triggered())
-        subtree_ready.wait();
       // First check to see if we can find it
       {
         AutoLock n_lock(node_lock,1,false/*exclusive*/); 
@@ -6893,32 +6880,55 @@ namespace LegionRuntime {
         exit(ERROR_INVALID_INDEX_PART_COLOR);
       }
 #endif
-      // Didn't find it so now we try to make it.
-      // Make a unique handle name
-      IndexSpace is(context->runtime->get_unique_index_space_id(),
-                    handle.get_tree_id());
-      if (parent->kind == UNSTRUCTURED_KIND)
+      AddressSpaceID owner_space = get_owner_space();
+      AddressSpaceID local_space = context->runtime->address_space;
+      // If we own the index partition, create a new subspace here
+      if (owner_space == local_space)
       {
-        // Make a new sub-index space first based on the 
-        // parent. Determine if it is allocable based on the
-        // properties of this partition object.
-        const Domain &parent_dom = parent->get_domain_no_wait();
-        Realm::IndexSpace parent_space = parent_dom.get_index_space();
-        Realm::ElementMask new_mask(get_num_elmts());
-        Realm::IndexSpace new_space =  
-          Realm::IndexSpace::create_index_space(parent_space, new_mask,
-                                                   (mode & ALLOCABLE));
-        IndexSpaceNode *result = context->create_node(is, Domain(new_space),
-            this, c, UNSTRUCTURED_KIND, mode);
-        return result;
+        IndexSpace is(context->runtime->get_unique_index_space_id(),
+                      handle.get_tree_id());
+        if (parent->kind == UNSTRUCTURED_KIND)
+        {
+          // Make a new sub-index space first based on the 
+          // parent. Determine if it is allocable based on the
+          // properties of this partition object.
+          const Domain &parent_dom = parent->get_domain_no_wait();
+          Realm::IndexSpace parent_space = parent_dom.get_index_space();
+          Realm::ElementMask new_mask(get_num_elmts());
+          Realm::IndexSpace new_space =  
+            Realm::IndexSpace::create_index_space(parent_space, new_mask,
+                                                     (mode & ALLOCABLE));
+          IndexSpaceNode *result = context->create_node(is, Domain(new_space),
+              this, c, UNSTRUCTURED_KIND, mode);
+          return result;
+        }
+        else
+        {
+          // Easy case just make an empty domain and use that
+          Domain empty = Domain::NO_DOMAIN;
+          IndexSpaceNode *result = context->create_node(is, empty,
+              this, c, DENSE_ARRAY_KIND, parent->mode);
+          return result;
+        }
       }
+      // Otherwise, request a child node from the owner node
       else
       {
-        // Easy case just make an empty domain and use that
-        Domain empty = Domain::NO_DOMAIN;
-        IndexSpaceNode *result = context->create_node(is, empty,
-            this, c, DENSE_ARRAY_KIND, parent->mode);
-        return result;
+        UserEvent ready_event = UserEvent::create_user_event();
+        Serializer rez;
+        rez.serialize(handle);
+        rez.serialize(local_space);
+        rez.serialize(c);
+        rez.serialize(ready_event);
+        context->runtime->send_index_partition_child_request(owner_space, rez);
+        ready_event.wait();
+        // Retake the lock and get the result
+        AutoLock n_lock(node_lock,1,false/*exclusive*/);
+#ifdef DEBUG_HIGH_LEVEL
+        assert((color_map.find(c) != color_map.end()) &&
+                (color_map[c] != NULL));
+#endif
+        return color_map[c];
       }
     }
 
@@ -7748,15 +7758,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void IndexPartNode::send_node(
-                 AddressSpaceID target, bool up, bool down, Event subtree_ready)
+    void IndexPartNode::send_node(AddressSpaceID target, bool up, bool down)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
       assert(parent != NULL);
 #endif
       if (up)
-        parent->send_node(target, true/*up*/, false/*down*/, subtree_ready);
+        parent->send_node(target, true/*up*/, false/*down*/);
       std::map<ColorPoint,IndexSpaceNode*> valid_copy;
       {
         // Make sure we know if this is disjoint or not yet
@@ -7768,7 +7777,6 @@ namespace LegionRuntime {
           {
             RezCheck z(rez);
             rez.serialize(handle);
-            rez.serialize(subtree_ready);
             rez.serialize(color_space);
             rez.serialize(mode);
             rez.serialize(parent->handle); 
@@ -7813,12 +7821,28 @@ namespace LegionRuntime {
         for (std::map<ColorPoint,IndexSpaceNode*>::const_iterator it = 
               valid_copy.begin(); it != valid_copy.end(); it++)
         {
-          it->second->send_node(target, false/*up*/, true/*down*/,
-                                subtree_ready);
+          it->second->send_node(target, false/*up*/, true/*down*/);
         }
         AutoLock n_lock(node_lock);
         child_creation.add(target);
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexPartNode::send_child_node(AddressSpaceID target,
+                            const ColorPoint &child_color, UserEvent to_trigger)
+    //--------------------------------------------------------------------------
+    {
+      AddressSpaceID local_space = context->runtime->address_space;
+#ifdef DEBUG_HIGH_LEVEL
+      // This message is only sent to the owner
+      assert(get_owner_space() == local_space);
+#endif
+      IndexSpaceNode* child_node = get_child(child_color);
+      child_node->send_node(target, false/*up*/, true/*down*/);
+      Serializer rez;
+      rez.serialize(to_trigger);
+      context->runtime->send_index_space_return(target, rez);
     }
 
     //--------------------------------------------------------------------------
@@ -7829,8 +7853,6 @@ namespace LegionRuntime {
       DerezCheck z(derez);
       IndexPartition handle;
       derez.deserialize(handle);
-      Event subtree_ready;
-      derez.deserialize(subtree_ready);
       Domain color_space;
       derez.deserialize(color_space);
       AllocateMode mode;
@@ -7846,7 +7868,7 @@ namespace LegionRuntime {
       assert(parent_node != NULL);
 #endif
       IndexPartNode *node = context->create_node(handle, parent_node, color,
-                                color_space, disjoint, mode, subtree_ready);
+                                color_space, disjoint, mode);
 #ifdef DEBUG_HIGH_LEVEL
       assert(node != NULL);
 #endif
@@ -7890,7 +7912,7 @@ namespace LegionRuntime {
       UserEvent to_trigger;
       derez.deserialize(to_trigger);
       IndexPartNode *target = forest->get_node(handle);
-      target->send_node(source, true/*up*/, true/*down*/, to_trigger);
+      target->send_node(source, true/*up*/, true/*down*/);
       Serializer rez;
       rez.serialize(to_trigger);
       forest->runtime->send_index_partition_return(source, rez);
@@ -7903,6 +7925,23 @@ namespace LegionRuntime {
       UserEvent to_trigger;
       derez.deserialize(to_trigger);
       to_trigger.trigger();
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void IndexPartNode::handle_node_child_request(
+                                  RegionTreeForest *forest, Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      IndexPartition handle;
+      derez.deserialize(handle);
+      AddressSpaceID source;
+      derez.deserialize(source);
+      ColorPoint child_color;
+      derez.deserialize(child_color);
+      UserEvent to_trigger;
+      derez.deserialize(to_trigger);
+      IndexPartNode *target = forest->get_node(handle);
+      target->send_child_node(source, child_color, to_trigger);
     }
 
     /////////////////////////////////////////////////////////////

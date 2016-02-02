@@ -456,8 +456,7 @@ namespace LegionRuntime {
       // Give the event for when the domain is ready
       IndexSpaceNode* create_node(IndexSpace is, const Domain &d, Event ready,
                                   IndexPartNode *par, ColorPoint color,
-                                  IndexSpaceKind kind, AllocateMode mode,
-                                  Event subtree_ready = Event::NO_EVENT);
+                                  IndexSpaceKind kind, AllocateMode mode);
       // Give two events for when the domain handle and domain are ready
       IndexSpaceNode* create_node(IndexSpace is, 
                                   Event handle_ready, Event domain_ready,
@@ -466,8 +465,7 @@ namespace LegionRuntime {
       // We know the disjointness of the index partition
       IndexPartNode*  create_node(IndexPartition p, IndexSpaceNode *par,
                                   ColorPoint color, Domain color_space, 
-                                  bool disjoint, AllocateMode mode,
-                                  Event subtree_ready = Event::NO_EVENT);
+                                  bool disjoint, AllocateMode mode);
       // Give the event for when the disjointness information is ready
       IndexPartNode*  create_node(IndexPartition p, IndexSpaceNode *par,
                                   ColorPoint color, Domain color_space,
@@ -815,8 +813,7 @@ namespace LegionRuntime {
       virtual IndexTreeNode* get_parent(void) const = 0;
       virtual size_t get_num_elmts(void) = 0;
       virtual void get_colors(std::set<ColorPoint> &colors) = 0;
-      virtual void send_node(AddressSpaceID target, bool up, bool down,
-                             Event subtree_ready) = 0;
+      virtual void send_node(AddressSpaceID target, bool up, bool down) = 0;
     public:
       virtual bool is_index_space_node(void) const = 0;
       virtual IndexSpaceNode* as_index_space_node(void) = 0;
@@ -855,9 +852,6 @@ namespace LegionRuntime {
       NodeSet destruction_set;
     protected:
       Reservation node_lock;
-    public:
-      // Track whether a node has some child nodes being transmitted
-      Event subtree_ready;
     protected:
       std::map<IndexTreeNode*,IntersectInfo> intersections;
       std::map<IndexTreeNode*,bool> dominators;
@@ -990,8 +984,7 @@ namespace LegionRuntime {
                                            IndexPartNode *left,
                                            IndexPartNode *right);
     public:
-      virtual void send_node(AddressSpaceID target, bool up, bool down,
-                             Event subtree_ready);
+      virtual void send_node(AddressSpaceID target, bool up, bool down);
       static void handle_node_creation(RegionTreeForest *context,
                                        Deserializer &derez, 
                                        AddressSpaceID source);
@@ -1139,16 +1132,19 @@ namespace LegionRuntime {
                                            IndexSpaceNode *left,
                                            IndexSpaceNode *right);
     public:
-      virtual void send_node(AddressSpaceID target, bool up, bool down,
-                             Event subtree_ready);
+      virtual void send_node(AddressSpaceID target, bool up, bool down);
       static void handle_node_creation(RegionTreeForest *context,
                                        Deserializer &derez, 
                                        AddressSpaceID source);
+      void send_child_node(AddressSpaceID target,
+                           const ColorPoint &child_color, UserEvent to_trigger);
     public:
       static void handle_node_request(RegionTreeForest *context,
                                       Deserializer &derez,
                                       AddressSpaceID source);
       static void handle_node_return(Deserializer &derez);
+      static void handle_node_child_request(
+                                 RegionTreeForest *forest, Deserializer &derez);
     public:
       const IndexPartition handle;
       const Domain color_space;
