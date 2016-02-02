@@ -210,8 +210,8 @@ namespace Realm {
         // we do _NOT_ own the task - do not free it
       }
 
-      virtual bool event_triggered(Event e);
-      virtual void print_info(FILE *f);
+      virtual bool event_triggered(Event e, bool poisoned);
+      virtual void print(std::ostream& os) const;
 
     protected:
       ProcessorImpl *proc;

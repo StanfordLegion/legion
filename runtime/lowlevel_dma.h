@@ -132,8 +132,8 @@ namespace LegionRuntime {
 
 	void sleep_on_event(Event e, Reservation l = Reservation::NO_RESERVATION);
 
-	virtual bool event_triggered(Event e);
-	virtual void print_info(FILE *f);
+	virtual bool event_triggered(Event e, bool poisoned);
+	virtual void print(std::ostream& os) const;
       };
     };
 

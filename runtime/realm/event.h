@@ -100,6 +100,9 @@ namespace Realm {
       static UserEvent create_user_event(void);
       void trigger(Event wait_on = Event::NO_EVENT) const;
 
+      // cancels (poisons) the event
+      void cancel(void) const;
+
       static const UserEvent NO_USER_EVENT;
     };
 

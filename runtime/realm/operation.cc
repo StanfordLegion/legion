@@ -66,7 +66,7 @@ namespace Realm {
     send_profiling_data();
 
     // trigger the finish event last - the OperationTable will delete us shortly after we do
-    trigger_finish_event();
+    trigger_finish_event(false /*!poisoned*/);
   }
 
   bool Operation::attempt_cancellation(int error_code,
@@ -86,11 +86,12 @@ namespace Realm {
     }
   }
 
-  void Operation::trigger_finish_event(void)
+  void Operation::trigger_finish_event(bool poisoned)
   {
     if(finish_event.exists())
       get_runtime()->get_genevent_impl(finish_event)->trigger(finish_event.gen,
-                                                              gasnet_mynode());
+                                                              gasnet_mynode(),
+							      poisoned);
   }
 
   void Operation::clear_profiling(void)
@@ -145,15 +146,15 @@ namespace Realm {
     : table(_table)
   {}
 
-  bool OperationTable::TableCleaner::event_triggered(Event e)
+  bool OperationTable::TableCleaner::event_triggered(Event e, bool poisoned)
   {
     table->event_triggered(e);
     return false;  // never delete us
   }
 
-  void OperationTable::TableCleaner::print_info(FILE *f)
+  void OperationTable::TableCleaner::print(std::ostream& os) const
   {
-    fprintf(f, "operation table cleaner (table=%p)", table);
+    os << "operation table cleaner (table=" << table << ")";
   }
 
 

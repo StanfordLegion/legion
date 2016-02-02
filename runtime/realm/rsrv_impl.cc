@@ -36,16 +36,22 @@ namespace Realm {
 
       virtual ~DeferredLockRequest(void) { }
 
-      virtual bool event_triggered(Event e)
+      virtual bool event_triggered(Event e, bool poisoned)
       {
-	get_runtime()->get_lock_impl(lock)->acquire(mode, exclusive, after_lock);
+	// if input event is poisoned, do not attempt to take the lock - simply poison
+	//  the output event too
+	if(poisoned) {
+	  log_poison.info() << "poisoned deferred lock skipped - lock=" << lock << " after=" << after_lock->current_event();
+	  after_lock->trigger_current(true);
+	} else {
+	  get_runtime()->get_lock_impl(lock)->acquire(mode, exclusive, after_lock);
+	}
         return true;
       }
 
-      virtual void print_info(FILE *f)
+      virtual void print(std::ostream& os) const
       {
-	fprintf(f,"deferred lock: lock=" IDFMT " after=" IDFMT "/%d\n",
-		lock.id, after_lock->me.id(), after_lock->generation + 1);
+	os << "deferred lock: lock=" << lock << " after=" << after_lock->current_event();
       }
 
     protected:
@@ -67,17 +73,24 @@ namespace Realm {
 
       virtual ~DeferredUnlockRequest(void) { }
 
-      virtual bool event_triggered(Event e)
+      virtual bool event_triggered(Event e, bool poisoned)
       {
-	get_runtime()->get_lock_impl(lock)->release();
+	// if input event is poisoned, do not attempt to release the lock
+	// we don't have an output event here, so this may result in a hang if nobody is
+	//  paying attention
+	if(poisoned) {
+	  log_poison.warning() << "poisoned deferred unlock skipped - POSSIBLE HANG - lock=" << lock;
+	} else {
+	  get_runtime()->get_lock_impl(lock)->release();
+	}
         return true;
       }
 
-      virtual void print_info(FILE *f)
+      virtual void print(std::ostream& os) const
       {
-	fprintf(f,"deferred unlock: lock=" IDFMT "\n",
-	       lock.id);
+	os << "deferred unlock: lock=" << lock;
       }
+
     protected:
       Reservation lock;
     };
@@ -94,15 +107,22 @@ namespace Realm {
 
       virtual ~DeferredLockDestruction(void) { }
 
-      virtual bool event_triggered(Event e)
+      virtual bool event_triggered(Event e, bool poisoned)
       {
-	get_runtime()->get_lock_impl(lock)->release_reservation();
+	// if input event is poisoned, do not attempt to destroy the lock
+	// we don't have an output event here, so this may result in a leak if nobody is
+	//  paying attention
+	if(poisoned) {
+	  log_poison.info() << "poisoned deferred lock destruction skipped - POSSIBLE LEAK - lock=" << lock;
+	} else {
+	  get_runtime()->get_lock_impl(lock)->release_reservation();
+	}
         return true;
       }
 
-      virtual void print_info(FILE *f)
+      virtual void print(std::ostream& os) const
       {
-	fprintf(f,"deferred lock destruction: lock=" IDFMT "\n", lock.id);
+	os << "deferred lock destruction: lock=" << lock;
       }
 
     protected:
@@ -463,7 +483,7 @@ namespace Realm {
 	  it++) {
 	log_reservation.debug("release trigger: reservation=" IDFMT " event=" IDFMT "/%d",
 			args.lock.id, (*it)->me.id(), (*it)->generation+1);
-	(*it)->trigger_current();
+	(*it)->trigger_current(false /*!poisoned*/);
       }
     }
 
@@ -574,7 +594,8 @@ namespace Realm {
 
       // if we got the lock, trigger an event if we were given one
       if(got_lock && after_lock) 
-	after_lock->trigger(after_lock_event.gen, gasnet_mynode());
+	after_lock->trigger(after_lock_event.gen, gasnet_mynode(),
+			    false /*!poisoned*/);
 
       return after_lock_event;
     }
@@ -738,7 +759,7 @@ namespace Realm {
 	  it++) {
 	log_reservation.debug("release trigger: reservation=" IDFMT " event=" IDFMT "/%d",
 			me.id, (*it)->me.id(), (*it)->generation + 1);
-	(*it)->trigger_current();
+	(*it)->trigger_current(false /*!poisoned*/);
       }
     }
 

@@ -459,16 +459,24 @@ namespace Realm {
   // class DeferredTaskSpawn
   //
 
-    bool DeferredTaskSpawn::event_triggered(Event e)
+    bool DeferredTaskSpawn::event_triggered(Event e, bool poisoned)
     {
+      if(poisoned) {
+	// cancel the task - this has to work
+	log_poison.info() << "cancelling poisoned task - task=" << task << " after=" << task->get_finish_event();
+	bool did_cancel = task->attempt_cancellation(Realm::Faults::ERROR_POISONED_PRECONDITION,
+						     &e, sizeof(e));	
+	assert(did_cancel);
+	return true;
+      }
+
       proc->enqueue_task(task);
       return true;
     }
 
-    void DeferredTaskSpawn::print_info(FILE *f)
+    void DeferredTaskSpawn::print(std::ostream& os) const
     {
-      fprintf(f,"deferred task: func=%d proc=" IDFMT " finish=" IDFMT "/%d\n",
-             task->func_id, task->proc.id, task->get_finish_event().id, task->get_finish_event().gen);
+      os << "deferred task: func=" << task->func_id << " proc=" << task->proc << " finish=" << task->get_finish_event();
     }
 
 

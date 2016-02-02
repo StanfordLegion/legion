@@ -524,8 +524,17 @@ namespace LegionRuntime {
       EventImpl::add_waiter(e, this);
     }
 
-    bool DmaRequest::Waiter::event_triggered(Event e)
+    bool DmaRequest::Waiter::event_triggered(Event e, bool poisoned)
     {
+      if(poisoned) {
+	Realm::log_poison.info() << "cancelling poisoned dma operation - op=" << req << " after=" << req->get_finish_event();
+	// cancel the dma operation - this has to work
+	bool did_cancel = req->attempt_cancellation(Realm::Faults::ERROR_POISONED_PRECONDITION,
+						    &e, sizeof(e));	
+	assert(did_cancel);
+	return false;
+      }
+
       log_dma.info("request %p triggered in state %d (lock = " IDFMT ")",
 		   req, req->state, current_lock.id);
 
@@ -542,10 +551,9 @@ namespace LegionRuntime {
       return false;
     }
 
-    void DmaRequest::Waiter::print_info(FILE *f)
+    void DmaRequest::Waiter::print(std::ostream& os) const
     {
-      fprintf(f,"dma request %p: after " IDFMT "/%d\n", 
-	      req, req->get_finish_event().id, req->get_finish_event().gen);
+      os << "dma request " << req << ": after " << req->get_finish_event();
     }
 
     bool CopyRequest::check_readiness(bool just_check, DmaRequestQueue *rq)
@@ -4319,7 +4327,7 @@ namespace Realm {
         }
         finish_events.insert(ev);
       }
-      return GenEventImpl::merge_events(finish_events);
+      return GenEventImpl::merge_events(finish_events, false /*!ignore faults*/);
     }
     
     Event Domain::copy(RegionInstance src_inst, RegionInstance dst_inst,
@@ -4593,7 +4601,7 @@ namespace Realm {
 	}
 
 	// final event is merge of all individual copies' events
-	return GenEventImpl::merge_events(finish_events);
+	return GenEventImpl::merge_events(finish_events, false /*!ignore faults*/);
       } else {
 	// we're doing a reduction - the semantics require that all source fields be pulled
 	//  together and applied as a "structure" to the reduction op

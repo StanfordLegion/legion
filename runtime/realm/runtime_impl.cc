@@ -200,8 +200,8 @@ namespace Realm {
       DeferredShutdown(RuntimeImpl *_runtime);
       virtual ~DeferredShutdown(void);
 
-      virtual bool event_triggered(Event e);
-      virtual void print_info(FILE *f);
+      virtual bool event_triggered(Event e, bool poisoned);
+      virtual void print(std::ostream& os) const;
 
     protected:
       RuntimeImpl *runtime;
@@ -214,16 +214,21 @@ namespace Realm {
     DeferredShutdown::~DeferredShutdown(void)
     {}
 
-    bool DeferredShutdown::event_triggered(Event e)
+    bool DeferredShutdown::event_triggered(Event e, bool poisoned)
     {
+      // no real good way to deal with a poisoned shutdown precondition
+      if(poisoned) {
+	log_poison.fatal() << "HELP!  poisoned precondition for runtime shutdown";
+	assert(false);
+      }
       log_runtime.info() << "triggering deferred shutdown";
       runtime->shutdown(true);
       return true; // go ahead and delete us
     }
 
-    void DeferredShutdown::print_info(FILE *f)
+    void DeferredShutdown::print(std::ostream& os) const
     {
-      fprintf(f, "deferred shutdown");
+      os << "deferred shutdown";
     }
 
     void Runtime::shutdown(Event wait_on /*= Event::NO_EVENT*/)

@@ -34,18 +34,26 @@ namespace Realm {
       DeferredInstDestroy(RegionInstanceImpl *i) : impl(i) { }
       virtual ~DeferredInstDestroy(void) { }
     public:
-      virtual bool event_triggered(Event e)
+      virtual bool event_triggered(Event e, bool poisoned)
       {
-        log_inst.info("instance destroyed: space=" IDFMT " id=" IDFMT "",
-                 impl->metadata.is.id, impl->me.id);
-        get_runtime()->get_memory_impl(impl->memory)->destroy_instance(impl->me, true); 
+	// if input event is poisoned, do not attempt to destroy the lock
+	// we don't have an output event here, so this may result in a leak if nobody is
+	//  paying attention
+	if(poisoned) {
+	  log_poison.info() << "poisoned deferred instance destruction skipped - POSSIBLE LEAK - inst=" << impl->me;
+	} else {
+	  log_inst.info("instance destroyed: space=" IDFMT " id=" IDFMT "",
+			impl->metadata.is.id, impl->me.id);
+	  get_runtime()->get_memory_impl(impl->memory)->destroy_instance(impl->me, true); 
+	}
         return true;
       }
 
-      virtual void print_info(FILE *f)
+      virtual void print(std::ostream& os) const
       {
-        fprintf(f,"deferred instance destruction\n");
+        os << "deferred instance destruction";
       }
+
     protected:
       RegionInstanceImpl *impl;
     };

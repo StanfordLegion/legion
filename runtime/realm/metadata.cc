@@ -77,7 +77,7 @@ namespace Realm {
       }
 
       if(to_trigger)
-	to_trigger->trigger_current();
+	to_trigger->trigger_current(false /*!poisoned*/);
     }
 
     Event MetadataBase::request_data(int owner, ID::IDType id)

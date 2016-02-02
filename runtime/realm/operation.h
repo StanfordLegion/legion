@@ -80,7 +80,7 @@ namespace Realm {
     void clear_profiling(void);
     void reconstruct_measurements();
 
-    void trigger_finish_event(void);
+    void trigger_finish_event(bool poisoned);
 
     void send_profiling_data(void);
 
@@ -120,8 +120,8 @@ namespace Realm {
     class TableCleaner : public EventWaiter {
     public:
       TableCleaner(OperationTable *_table);
-      virtual bool event_triggered(Event e);
-      virtual void print_info(FILE *f);
+      virtual bool event_triggered(Event e, bool poisoned);
+      virtual void print(std::ostream& os) const;
 
     protected:
       OperationTable *table;

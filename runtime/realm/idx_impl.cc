@@ -1887,7 +1887,7 @@ namespace Realm {
     if(to_trigger) {
       //printf("triggering " IDFMT "/%d\n",
       //       r_impl->valid_mask_event.id, r_impl->valid_mask_event.gen);
-      to_trigger->trigger_current();
+      to_trigger->trigger_current(false /*!poisoned*/);
     }
   }
 

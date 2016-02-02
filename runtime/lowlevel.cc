@@ -74,9 +74,9 @@ namespace LegionRuntime {
     }
 #endif
 
-    void show_event_waiters(FILE *f = stdout)
+    void show_event_waiters(std::ostream& os)
     {
-      fprintf(f,"PRINTING ALL PENDING EVENTS:\n");
+      os << "PRINTING ALL PENDING EVENTS:\n";
       for(unsigned i = 0; i < gasnet_nodes(); i++) {
 	Node *n = &get_runtime()->nodes[i];
         // Iterate over all the events and get their implementations
@@ -90,15 +90,16 @@ namespace LegionRuntime {
 	  if(e->local_waiters.empty() && e->remote_waiters.empty())
 	    continue;
 
-          fprintf(f,"Event " IDFMT ": gen=%d subscr=%d local=%zd remote=%zd\n",
-		  e->me.id(), e->generation, e->gen_subscribed, 
-		  e->local_waiters.size(),
-                  e->remote_waiters.size());
+	  os << "Event " << e->me <<": gen=" << e->generation
+	     << " subscr=" << e->gen_subscribed
+	     << " local=" << e->local_waiters.size()
+	     << " remote=" << e->remote_waiters.size() << "\n";
 	  for(std::vector<EventWaiter *>::iterator it = e->local_waiters.begin();
 	      it != e->local_waiters.end();
 	      it++) {
-	      fprintf(f, "  [%d] L:%p ", e->generation + 1, *it);
-	      (*it)->print_info(f);
+	    os << "  [" << (e->generation+1) << "] L:" << (*it) << " - ";
+	    (*it)->print(os);
+	    os << "\n";
 	  }
 	  // for(std::map<Event::gen_t, NodeMask>::const_iterator it = e->remote_waiters.begin();
 	  //     it != e->remote_waiters.end();
@@ -119,17 +120,18 @@ namespace LegionRuntime {
           if (b->generations.empty())
             continue;
 
-          fprintf(f,"Barrier " IDFMT ": gen=%d subscr=%d\n",
-                  b->me.id(), b->generation, b->gen_subscribed);
+	  os << "Barrier " << b->me << ": gen=" << b->generation
+	     << " subscr=" << b->gen_subscribed << "\n";
           for (std::map<Event::gen_t, BarrierImpl::Generation*>::const_iterator git = 
                 b->generations.begin(); git != b->generations.end(); git++)
           {
             const std::vector<EventWaiter*> &waiters = git->second->local_waiters;
             for (std::vector<EventWaiter*>::const_iterator it = 
                   waiters.begin(); it != waiters.end(); it++)
-            {
-              fprintf(f, "  [%d] L:%p ", git->first, *it);
-              (*it)->print_info(f);
+            { 
+	      os << "  [" << (git->first) << "] L:" << (*it) << " - ";
+	      (*it)->print(os);
+	      os << "\n";
             }
           }
         }
@@ -178,8 +180,8 @@ namespace LegionRuntime {
       // }
 #endif
 
-      fprintf(f,"DONE\n");
-      fflush(f);
+      os << "DONE\n";
+      os.flush();
     }
 
 

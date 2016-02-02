@@ -21,6 +21,7 @@
 #include "event.h"
 #include "id.h"
 #include "nodeset.h"
+#include "faults.h"
 
 #include "activemsg.h"
 
@@ -44,11 +45,13 @@ namespace Realm {
     };
 #endif
 
+    extern Logger log_poison; // defined in event_impl.cc
+
     class EventWaiter {
     public:
       virtual ~EventWaiter(void) {}
-      virtual bool event_triggered(Event e) = 0;
-      virtual void print_info(FILE *f) = 0;
+      virtual bool event_triggered(Event e, bool poisoned) = 0;
+      virtual void print(std::ostream& os) const = 0;
     };
 
     // parent class of GenEventImpl and BarrierImpl
@@ -94,17 +97,18 @@ namespace Realm {
       virtual bool add_waiter(Event::gen_t needed_gen, EventWaiter *waiter/*, bool pre_subscribed = false*/);
 
       // creates an event that won't trigger until all input events have
-      static Event merge_events(const std::set<Event>& wait_for);
+      static Event merge_events(const std::set<Event>& wait_for,
+				bool ignore_faults);
       static Event merge_events(Event ev1, Event ev2,
 				Event ev3 = Event::NO_EVENT, Event ev4 = Event::NO_EVENT,
 				Event ev5 = Event::NO_EVENT, Event ev6 = Event::NO_EVENT);
 
       // record that the event has triggered and notify anybody who cares
-      void trigger(Event::gen_t gen_triggered, int trigger_node, Event wait_on = Event::NO_EVENT);
+      void trigger(Event::gen_t gen_triggered, int trigger_node, bool poisoned);
 
       // if you KNOW you want to trigger the current event (which by definition cannot
       //   have already been triggered) - this is quicker:
-      void trigger_current(void);
+      void trigger_current(bool poisoned);
 
       void check_for_catchup(Event::gen_t implied_trigger_gen);
 
@@ -219,6 +223,7 @@ namespace Realm {
     struct RequestArgs {
       gasnet_node_t node;
       Event event;
+      bool poisoned;
 
       void apply(gasnet_node_t target);
     };
@@ -229,8 +234,8 @@ namespace Realm {
 				      RequestArgs,
 				      handle_request> Message;
 
-    static void send_request(gasnet_node_t target, Event event);
-    static void broadcast_request(const NodeSet& targets, Event event);
+    static void send_request(gasnet_node_t target, Event event, bool poisoned);
+    static void broadcast_request(const NodeSet& targets, Event event, bool poisoned);
   };
 
     struct BarrierAdjustMessage {
