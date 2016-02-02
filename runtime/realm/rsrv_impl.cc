@@ -36,7 +36,7 @@ namespace Realm {
 
       virtual ~DeferredLockRequest(void) { }
 
-      virtual bool event_triggered(void)
+      virtual bool event_triggered(Event e)
       {
 	get_runtime()->get_lock_impl(lock)->acquire(mode, exclusive, after_lock);
         return true;
@@ -67,7 +67,7 @@ namespace Realm {
 
       virtual ~DeferredUnlockRequest(void) { }
 
-      virtual bool event_triggered(void)
+      virtual bool event_triggered(Event e)
       {
 	get_runtime()->get_lock_impl(lock)->release();
         return true;
@@ -94,7 +94,7 @@ namespace Realm {
 
       virtual ~DeferredLockDestruction(void) { }
 
-      virtual bool event_triggered(void)
+      virtual bool event_triggered(Event e)
       {
 	get_runtime()->get_lock_impl(lock)->release_reservation();
         return true;

@@ -65,7 +65,7 @@ namespace Realm {
     class Callback : public EventWaiter {
     public:
       virtual ~Callback(void);
-      virtual bool event_triggered(void);
+      virtual bool event_triggered(Event e);
       virtual void print_info(FILE *f);
       virtual void operator()(void) = 0;
     };
@@ -90,7 +90,7 @@ namespace Realm {
   {
   }
   
-  bool EventTriggeredCondition::Callback::event_triggered(void)
+  bool EventTriggeredCondition::Callback::event_triggered(Event e)
   {
     // call through to the actual callback
     (*this)();
@@ -319,11 +319,11 @@ namespace Realm {
       //  means the caller should delete this EventMerger)
       bool arm(void)
       {
-	bool nuke = event_triggered();
+	bool nuke = event_triggered(Event::NO_EVENT);
         return nuke;
       }
 
-      virtual bool event_triggered(void)
+      virtual bool event_triggered(Event triggered)
       {
 	// save ID and generation because we can't reference finish_event after the
 	// decrement (unless last_trigger ends up being true)
@@ -545,6 +545,7 @@ namespace Realm {
       if(implied_trigger_gen <= generation) return;
 
       // now take a lock and see if we really need to catch up
+      Event stale_event;
       std::vector<EventWaiter *> stale_waiters;
       {
 	AutoHSLLock a(mutex);
@@ -554,16 +555,18 @@ namespace Realm {
 
 	  log_event.info("event catchup: " IDFMT "/%d -> %d",
 			 me.id(), generation, implied_trigger_gen);
+	  stale_event.gen = generation;
 	  generation = implied_trigger_gen;
 	  stale_waiters.swap(local_waiters);  // we'll actually notify them below
 	}
       }
 
       if(!stale_waiters.empty()) {
+	stale_event.id = me.id();
 	for(std::vector<EventWaiter *>::iterator it = stale_waiters.begin();
 	    it != stale_waiters.end();
 	    it++)
-	  (*it)->event_triggered();
+	  (*it)->event_triggered(stale_event);
       }
     }
 
@@ -614,7 +617,10 @@ namespace Realm {
 	EventSubscribeMessage::send_request(owner, subscribe_event, previous_subscribe_gen);
 
       if(trigger_now) {
-	bool nuke = waiter->event_triggered();
+	Event e;
+	e.id = me.id();
+	e.gen = needed_gen;
+	bool nuke = waiter->event_triggered(e);
         if(nuke)
           delete waiter;
       }
@@ -756,7 +762,7 @@ namespace Realm {
       {
       }
 
-      virtual bool event_triggered(void)
+      virtual bool event_triggered(Event e)
       {
         // Need to hold the lock to avoid the race
         AutoHSLLock(cv.mutex);
@@ -794,7 +800,7 @@ namespace Realm {
 
       virtual ~DeferredEventTrigger(void) { }
 
-      virtual bool event_triggered(void)
+      virtual bool event_triggered(Event e)
       {
 	log_event.info("deferred trigger occuring: " IDFMT "/%d", after_event->me.id(), after_event->generation+1);
 	after_event->trigger_current();
@@ -897,10 +903,13 @@ namespace Realm {
       // now that we've let go of the lock, notify all the waiters who wanted
       //  this event generation (or an older one)
       {
+	Event e;
+	e.id = me.id();
+	e.gen = gen_triggered;
 	for(std::vector<EventWaiter *>::iterator it = to_wake.begin();
 	    it != to_wake.end();
 	    it++) {
-	  bool nuke = (*it)->event_triggered();
+	  bool nuke = (*it)->event_triggered(e);
           if(nuke) {
             //printf("deleting: "); (*it)->print_info(); fflush(stdout);
             delete (*it);
@@ -1062,7 +1071,7 @@ static void *bytedup(const void *data, size_t datalen)
 	  free(data);
       }
 
-      virtual bool event_triggered(void)
+      virtual bool event_triggered(Event e)
       {
 	log_barrier.info("deferred barrier arrival: " IDFMT "/%d (%llx), delta=%d",
 			 barrier.id, barrier.gen, barrier.timestamp, delta);
@@ -1314,10 +1323,13 @@ static void *bytedup(const void *data, size_t datalen)
 			 me.id(), trigger_gen);
 
 	// notify local waiters first
+	Event e;
+	e.id = me.id();
+	e.gen = trigger_gen;
 	for(std::vector<EventWaiter *>::const_iterator it = local_notifications.begin();
 	    it != local_notifications.end();
 	    it++) {
-	  bool nuke = (*it)->event_triggered();
+	  bool nuke = (*it)->event_triggered(e);
 	  if(nuke)
 	    delete (*it);
 	}
@@ -1403,7 +1415,10 @@ static void *bytedup(const void *data, size_t datalen)
       }
 
       if(trigger_now) {
-	bool nuke = waiter->event_triggered();
+	Event e;
+	e.id = me.id();
+	e.gen = needed_gen;
+	bool nuke = waiter->event_triggered(e);
 	if(nuke)
 	  delete waiter;
       }
@@ -1566,7 +1581,7 @@ static void *bytedup(const void *data, size_t datalen)
       for(std::vector<EventWaiter *>::const_iterator it = local_notifications.begin();
 	  it != local_notifications.end();
 	  it++) {
-	bool nuke = (*it)->event_triggered();
+	bool nuke = (*it)->event_triggered(b);
 	if(nuke)
 	  delete (*it);
       }

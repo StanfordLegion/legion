@@ -34,7 +34,7 @@ namespace Realm {
       DeferredInstDestroy(RegionInstanceImpl *i) : impl(i) { }
       virtual ~DeferredInstDestroy(void) { }
     public:
-      virtual bool event_triggered(void)
+      virtual bool event_triggered(Event e)
       {
         log_inst.info("instance destroyed: space=" IDFMT " id=" IDFMT "",
                  impl->metadata.is.id, impl->me.id);

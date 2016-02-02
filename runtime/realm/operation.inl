@@ -28,11 +28,24 @@ namespace Realm {
   inline Operation::Operation(Event _finish_event,
                               const ProfilingRequestSet &_requests)
     : finish_event(_finish_event)
+    , refcount(1)
     , requests(_requests)
     , pending_work_items(1 /* i.e. the main work item */)
   {
     measurements.import_requests(requests); 
     timeline.record_create_time();
+  }
+
+  inline void Operation::add_reference(void)
+  {
+    __sync_fetch_and_add(&refcount, 1);
+  }
+
+  inline void Operation::remove_reference(void)
+  {
+    int left = __sync_add_and_fetch(&refcount, -1);
+    if(left == 0)
+      delete this;
   }
 
   // must only be called by thread performing operation (i.e. not thread safe)

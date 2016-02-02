@@ -210,7 +210,7 @@ namespace Realm {
         // we do _NOT_ own the task - do not free it
       }
 
-      virtual bool event_triggered(void);
+      virtual bool event_triggered(Event e);
       virtual void print_info(FILE *f);
 
     protected:
@@ -226,6 +226,13 @@ namespace Realm {
 		       const ByteArrayRef& _userdata,
 		       Event _finish_event, const ProfilingRequestSet &_requests);
 
+    protected:
+      // deletion performed when reference count goes to zero
+      virtual ~TaskRegistration(void);
+
+    public:
+      virtual void print(std::ostream& os) const;
+
       CodeDescriptor codedesc;
       ByteArray userdata;
     };
@@ -235,6 +242,8 @@ namespace Realm {
       RemoteTaskRegistration(TaskRegistration *reg_op, int _target_node);
 
       virtual void request_cancellation(void);
+
+      virtual void print(std::ostream& os) const;
 
     protected:
       int target_node;

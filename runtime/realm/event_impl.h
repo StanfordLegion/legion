@@ -47,7 +47,7 @@ namespace Realm {
     class EventWaiter {
     public:
       virtual ~EventWaiter(void) {}
-      virtual bool event_triggered(void) = 0;
+      virtual bool event_triggered(Event e) = 0;
       virtual void print_info(FILE *f) = 0;
     };
 

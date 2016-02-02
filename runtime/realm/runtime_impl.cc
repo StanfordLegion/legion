@@ -200,7 +200,7 @@ namespace Realm {
       DeferredShutdown(RuntimeImpl *_runtime);
       virtual ~DeferredShutdown(void);
 
-      virtual bool event_triggered(void);
+      virtual bool event_triggered(Event e);
       virtual void print_info(FILE *f);
 
     protected:
@@ -214,7 +214,7 @@ namespace Realm {
     DeferredShutdown::~DeferredShutdown(void)
     {}
 
-    bool DeferredShutdown::event_triggered(void)
+    bool DeferredShutdown::event_triggered(Event e)
     {
       log_runtime.info() << "triggering deferred shutdown";
       runtime->shutdown(true);

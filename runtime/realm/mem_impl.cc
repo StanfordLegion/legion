@@ -1371,6 +1371,11 @@ namespace Realm {
   {
     // ignored
   }
+
+  void RemoteWriteFence::print(std::ostream& os) const
+  {
+    os << "RemoteWriteFence";
+  }
   
 
   ////////////////////////////////////////////////////////////////////////

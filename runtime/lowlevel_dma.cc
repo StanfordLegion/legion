@@ -117,6 +117,11 @@ namespace LegionRuntime {
     {
     }
 
+    void DmaRequest::print(std::ostream& os) const
+    {
+      os << "DmaRequest";
+    }
+
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -150,8 +155,11 @@ namespace LegionRuntime {
 		  int _priority,
                   const Realm::ProfilingRequestSet &reqs);
 
+    protected:
+      // deletion performed when reference count goes to zero
       virtual ~CopyRequest(void);
 
+    public:
       size_t compute_size(void) const;
       void serialize(void *buffer);
 
@@ -192,8 +200,11 @@ namespace LegionRuntime {
 		    int _priority,
                     const Realm::ProfilingRequestSet &reqs);
 
+    protected:
+      // deletion performed when reference count goes to zero
       virtual ~ReduceRequest(void);
 
+    public:
       size_t compute_size(void);
       void serialize(void *buffer);
 
@@ -234,8 +245,12 @@ namespace LegionRuntime {
                   Event _after_fill,
                   int priority,
                   const Realm::ProfilingRequestSet &reqs);
+
+    protected:
+      // deletion performed when reference count goes to zero
       virtual ~FillRequest(void);
 
+    public:
       size_t compute_size(void);
       void serialize(void *buffer);
 
@@ -509,7 +524,7 @@ namespace LegionRuntime {
       EventImpl::add_waiter(e, this);
     }
 
-    bool DmaRequest::Waiter::event_triggered(void)
+    bool DmaRequest::Waiter::event_triggered(Event e)
     {
       log_dma.info("request %p triggered in state %d (lock = " IDFMT ")",
 		   req, req->state, current_lock.id);
@@ -2042,7 +2057,8 @@ namespace LegionRuntime {
     class AIOFence : public Realm::Operation::AsyncWorkItem {
     public:
       AIOFence(Realm::Operation *_op) : Realm::Operation::AsyncWorkItem(_op) {}
-      void request_cancellation(void) {}
+      virtual void request_cancellation(void) {}
+      virtual void print(std::ostream& os) const { os << "AIOFence"; }
     };
 
     class AIOFenceOp : public AsyncFileIOContext::AIOOperation {
@@ -4168,7 +4184,7 @@ namespace LegionRuntime {
 
         virtual ~CopyCompletionProfiler(void) { }
 
-        virtual bool event_triggered(void)
+        virtual bool event_triggered(Event e)
         {
           mark_finished();
           return false;
@@ -4278,6 +4294,7 @@ namespace Realm {
         Memory mem = it->inst.get_location();
         int node = ID(mem).node();
         if (((unsigned)node) == gasnet_mynode()) {
+	  get_runtime()->optable.add_local_operation(ev, r);
           r->check_readiness(false, dma_queue);
         } else {
           RemoteFillArgs args;
@@ -4293,7 +4310,12 @@ namespace Realm {
 
           r->serialize(msgdata);
 
+	  get_runtime()->optable.add_remote_operation(ev, node);
+
           RemoteFillMessage::request(node, args, msgdata, msglen, PAYLOAD_FREE);
+
+	  // release local copy of operation
+	  r->remove_reference();
         }
         finish_events.insert(ev);
       }
@@ -4356,6 +4378,7 @@ namespace LegionRuntime {
 					 args.before_copy,
 					 args.after_copy,
 					 args.priority);
+	Realm::get_runtime()->optable.add_local_operation(args.after_copy, r);
 
 	r->check_readiness(false, dma_queue);
       } else {
@@ -4366,6 +4389,7 @@ namespace LegionRuntime {
 					     args.before_copy,
 					     args.after_copy,
 					     args.priority);
+	Realm::get_runtime()->optable.add_local_operation(args.after_copy, r);
 
 	r->check_readiness(false, dma_queue);
       }
@@ -4380,6 +4404,8 @@ namespace LegionRuntime {
                                        args.before_fill,
                                        args.after_fill,
                                        0 /* no room for args.priority */);
+      Realm::get_runtime()->optable.add_local_operation(args.after_fill, r);
+
       r->check_readiness(false, dma_queue);
     }
 
@@ -4448,6 +4474,7 @@ namespace Realm {
 
             if(((unsigned)dma_node) == gasnet_mynode()) {
               log_dma.info("performing serdez on local node");
+	      Realm::get_runtime()->optable.add_local_operation(ev, r);
               r->check_readiness(false, dma_queue);
               finish_events.insert(ev);
             } else {
@@ -4464,11 +4491,12 @@ namespace Realm {
               r->serialize(msgdata);
 
               log_dma.info("performing serdez on remote node (%d), event=" IDFMT "/%d", dma_node, args.after_copy.id, args.after_copy.gen);
+	      get_runtime()->optable.add_remote_operation(ev, dma_node);
               RemoteCopyMessage::request(dma_node, args, msgdata, msglen, PAYLOAD_FREE);
 
               finish_events.insert(ev);
               // done with the local copy of the request
-              delete r;
+	      r->remove_reference();
             }
 	  }
 	  else {
@@ -4534,6 +4562,8 @@ namespace Realm {
 	  
 	  if(((unsigned)dma_node) == gasnet_mynode()) {
 	    log_dma.info("performing copy on local node");
+
+	    get_runtime()->optable.add_local_operation(ev, r);
 	  
 	    r->check_readiness(false, dma_queue);
 
@@ -4552,12 +4582,13 @@ namespace Realm {
             r->serialize(msgdata);
 
 	    log_dma.info("performing copy on remote node (%d), event=" IDFMT "/%d", dma_node, args.after_copy.id, args.after_copy.gen);
+	    get_runtime()->optable.add_remote_operation(ev, dma_node);
 	    RemoteCopyMessage::request(dma_node, args, msgdata, msglen, PAYLOAD_FREE);
 	  
 	    finish_events.insert(ev);
 
 	    // done with the local copy of the request
-	    delete r;
+	    r->remove_reference();
 	  }
 	}
 
@@ -4600,6 +4631,8 @@ namespace Realm {
 
 	if(((unsigned)src_node) == gasnet_mynode()) {
 	  log_dma.info("performing reduction on local node");
+
+	  get_runtime()->optable.add_local_operation(ev, r);
 	  
 	  r->check_readiness(false, dma_queue);
 	} else {
@@ -4616,9 +4649,10 @@ namespace Realm {
 
 	  log_dma.info("performing reduction on remote node (%d), event=" IDFMT "/%d",
 		       src_node, args.after_copy.id, args.after_copy.gen);
+	  get_runtime()->optable.add_remote_operation(ev, src_node);
 	  RemoteCopyMessage::request(src_node, args, msgdata, msglen, PAYLOAD_FREE);
 	  // done with the local copy of the request
-	  delete r;
+	  r->remove_reference();
 	}
 
 	return ev;

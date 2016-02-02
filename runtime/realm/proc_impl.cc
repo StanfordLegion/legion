@@ -189,6 +189,7 @@ namespace Realm {
       TaskRegistration *tro = new TaskRegistration(codedesc, 
 						   ByteArrayRef(user_data, user_data_len),
 						   finish_event, prs);
+      get_runtime()->optable.add_local_operation(finish_event, tro);
       tro->mark_ready();
       tro->mark_started();
 
@@ -428,6 +429,7 @@ namespace Realm {
       // create a task object and insert it into the queue
       Task *task = new Task(me, func_id, args, arglen, reqs,
                             start_event, finish_event, priority);
+      get_runtime()->optable.add_local_operation(finish_event, task);
 
       if (start_event.has_triggered())
         enqueue_task(task);
@@ -441,7 +443,7 @@ namespace Realm {
   // class DeferredTaskSpawn
   //
 
-    bool DeferredTaskSpawn::event_triggered(void)
+    bool DeferredTaskSpawn::event_triggered(Event e)
     {
       proc->enqueue_task(task);
       return true;
@@ -651,7 +653,11 @@ namespace Realm {
 		       << " proc=" << me
 		       << " finish=" << finish_event;
 
-      SpawnTaskMessage::send_request(ID(me).node(), me, func_id,
+      gasnet_node_t target = ID(me).node();
+
+      get_runtime()->optable.add_remote_operation(finish_event, target);
+
+      SpawnTaskMessage::send_request(target, me, func_id,
 				     args, arglen, &reqs,
 				     start_event, finish_event, priority);
     }
@@ -722,6 +728,7 @@ namespace Realm {
     // create a task object for this
     Task *task = new Task(me, func_id, args, arglen, reqs,
 			  start_event, finish_event, priority);
+    get_runtime()->optable.add_local_operation(finish_event, task);
 
     // if the start event has already triggered, we can enqueue right away
     if(start_event.has_triggered()) {
@@ -935,6 +942,14 @@ namespace Realm {
     , codedesc(_codedesc), userdata(_userdata)
   {}
 
+  TaskRegistration::~TaskRegistration(void)
+  {}
+
+  void TaskRegistration::print(std::ostream& os) const
+  {
+    os << "TaskRegistration";
+  }
+
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -949,6 +964,11 @@ namespace Realm {
   void RemoteTaskRegistration::request_cancellation(void)
   {
     // ignored
+  }
+
+  void RemoteTaskRegistration::print(std::ostream& os) const
+  {
+    os << "RemoteTaskRegistration(node=" << target_node << ")";
   }
 
 

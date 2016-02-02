@@ -236,6 +236,8 @@ namespace Realm {
 
       CoreReservationSet core_reservations;
 
+      OperationTable optable;
+
     public:
       // used by modules to add processors, memories, etc.
       void add_memory(MemoryImpl *m);

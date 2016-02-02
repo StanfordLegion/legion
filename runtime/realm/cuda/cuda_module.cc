@@ -808,6 +808,11 @@ namespace Realm {
       // ignored - no way to shoot down CUDA work
     }
 
+    void GPUWorkFence::print(std::ostream& os) const
+    {
+      os << "GPUWorkFence";
+    }
+
     void GPUWorkFence::enqueue_on_stream(GPUStream *stream)
     {
       if(stream->get_gpu()->module->cfg_fences_use_callbacks) {

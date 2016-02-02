@@ -40,10 +40,15 @@ namespace Realm {
 	   Event _before_event,
 	   Event _finish_event, int _priority);
 
+    protected:
+      // deletion performed when reference count goes to zero
       virtual ~Task(void);
 
+    public:
       virtual void mark_ready(void);
       virtual void mark_started(void);
+
+      virtual void print(std::ostream& os) const;
 
       void execute_on_processor(Processor p);
 

@@ -46,6 +46,11 @@ namespace Realm {
   {
   }
 
+  void Task::print(std::ostream& os) const
+  {
+    os << "task(proc=" << proc << ", func=" << func_id << ")";
+  }
+
   void Task::mark_ready(void)
   {
     log_task.info() << "task " << this << " ready: func=" << func_id
