@@ -7833,8 +7833,8 @@ namespace LegionRuntime {
                             const ColorPoint &child_color, UserEvent to_trigger)
     //--------------------------------------------------------------------------
     {
-      AddressSpaceID local_space = context->runtime->address_space;
 #ifdef DEBUG_HIGH_LEVEL
+      AddressSpaceID local_space = context->runtime->address_space;
       // This message is only sent to the owner
       assert(get_owner_space() == local_space);
 #endif
