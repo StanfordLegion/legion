@@ -53,6 +53,7 @@ namespace Legion {
       bool is_remote(void) const;
       inline bool is_stolen(void) const { return (steal_count > 0); }
       inline bool is_locally_mapped(void) const { return map_locally; }
+      inline bool set_locally_mapped(bool local) { map_locally = local; }
       inline bool is_premapped(void) const { return premapped; }
     protected:
       void activate_task(void);

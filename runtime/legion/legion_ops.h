@@ -649,7 +649,9 @@ namespace Legion {
       std::vector<VersionInfo>    dst_versions;
       std::vector<RestrictInfo>   src_restrictions;
       std::vector<RestrictInfo>   dst_restrictions;
-      bool premapped;
+    protected:
+      MapperManager*              mapper;
+      bool                        premapped;
     };
 
     /**
@@ -1053,6 +1055,8 @@ namespace Legion {
       VersionInfo       version_info;
       RestrictInfo      restrict_info;
       unsigned          parent_req_index;
+    protected:
+      MapperManager*    mapper;
       bool              premapped;
     };
 
@@ -1104,6 +1108,8 @@ namespace Legion {
       VersionInfo       version_info;
       RestrictInfo      restrict_info;
       unsigned          parent_req_index;
+    protected:
+      MapperManager*    mapper;
       bool              premapped;
     };
 

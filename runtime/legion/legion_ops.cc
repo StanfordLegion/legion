@@ -2174,7 +2174,7 @@ namespace Legion {
                               "for copy operation (ID %lld) with parent "
                               "task %s (ID %lld)",
                               src_requirements.size(), dst_requirements.size(),
-                              get_unique_copy_id(), parent_ctx->get_task_name(),
+                              get_unique_id(), parent_ctx->get_task_name(),
                               parent_ctx->get_unique_id());
 #ifdef DEBUG_HIGH_LEVEL
           assert(false);
@@ -2191,7 +2191,7 @@ namespace Legion {
                                 "privilege fields and %ld instance fields.  "
                                 "Copy requirements must have exactly the same "
                                 "number of privilege and instance fields.",
-                                idx, get_unique_copy_id(), 
+                                idx, get_unique_id(), 
                                 parent_ctx->get_task_name(),
                                 parent_ctx->get_unique_id(),
                                 src_requirements[idx].privilege_fields.size(),
@@ -2206,7 +2206,7 @@ namespace Legion {
             log_run.error("Copy source requirement %d for copy operation "
                                 "(ID %lld) in parent task %s (ID %lld) must "
                                 "be requested with a read-only privilege.",
-                                idx, get_unique_copy_id(),
+                                idx, get_unique_id(),
                                 parent_ctx->get_task_name(),
                                 parent_ctx->get_unique_id());
 #ifdef DEBUG_HIGH_LEVEL
@@ -2227,7 +2227,7 @@ namespace Legion {
                                 "instance fields.  Copy requirements must "
                                 "have exactly the same number of privilege "
                                 "and instance fields.", idx, 
-                                get_unique_copy_id(), 
+                                get_unique_id(), 
                                 parent_ctx->get_task_name(),
                                 parent_ctx->get_unique_id(),
                                 dst_requirements[idx].privilege_fields.size(),
@@ -2243,7 +2243,7 @@ namespace Legion {
                                 "operation (ID %lld) in parent task %s "
                                 "(ID %lld) must be requested with a "
                                 "read-write or write-discard privilege.",
-                                idx, get_unique_copy_id(),
+                                idx, get_unique_id(),
                                 parent_ctx->get_task_name(),
                                 parent_ctx->get_unique_id());
 #ifdef DEBUG_HIGH_LEVEL
@@ -2266,7 +2266,7 @@ namespace Legion {
                                 "with index space %x do not have the "
                                 "same number of dimensions or the same number "
                                 "of elements in their element masks.",
-                                idx, get_unique_copy_id(),
+                                idx, get_unique_id(),
                                 parent_ctx->get_task_name(), 
                                 parent_ctx->get_unique_id(),
                                 src_space.id, dst_space.id);
@@ -2281,7 +2281,7 @@ namespace Legion {
                                 "requirement %d of cross-region copy "
                                 "(ID %lld) in task %s (ID %lld) is not "
                                 "a sub-region of the source index space %x.", 
-                                dst_space.id, idx, get_unique_copy_id(),
+                                dst_space.id, idx, get_unique_id(),
                                 parent_ctx->get_task_name(),
                                 parent_ctx->get_unique_id(),
                                 src_space.id);
@@ -2345,6 +2345,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       activate_speculative();
+      mapper = NULL;
       premapped = false;
     }
 
@@ -2477,8 +2478,20 @@ namespace Legion {
     bool CopyOp::speculate(bool &value)
     //--------------------------------------------------------------------------
     {
-      Processor exec_proc = parent_ctx->get_executing_processor();
-      return runtime->invoke_mapper_speculate(exec_proc, this, value);
+      if (mapper == NULL)
+      {
+        Processor exec_proc = parent_ctx->get_executing_processor();
+        mapper = runtime->find_mapper(exec_proc, map_id);
+      }
+      Mapper::SpeculativeOutput output;
+      output.speculate = false;
+      mapper->invoke_copy_speculate(this, &output);
+      if (output.speculate)
+      {
+        value = output.speculative_value;
+        return true;
+      }
+      return false;
     }
 
     //--------------------------------------------------------------------------
@@ -4652,6 +4665,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       activate_speculative();
+      mapper = NULL;
       premapped = false;
     }
 
@@ -4761,8 +4775,20 @@ namespace Legion {
     bool AcquireOp::speculate(bool &value)
     //--------------------------------------------------------------------------
     {
-      Processor exec_proc = parent_ctx->get_executing_processor();
-      return runtime->invoke_mapper_speculate(exec_proc, this, value);
+      if (mapper == NULL)
+      {
+        Processor exec_proc = parent_ctx->get_executing_processor();
+        mapper = runtime->find_mapper(exec_proc, map_id);
+      }
+      Mapper::SpeculativeOutput output;
+      output.speculate = false;
+      mapper->invoke_acquire_speculate(this, &output);
+      if (output.speculate)
+      {
+        value = output.speculative_value;
+        return true;
+      }
+      return false;
     }
 
     //--------------------------------------------------------------------------
@@ -5216,6 +5242,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       activate_speculative(); 
+      mapper = NULL;
       premapped = false;
     }
 
@@ -5326,8 +5353,20 @@ namespace Legion {
     bool ReleaseOp::speculate(bool &value)
     //--------------------------------------------------------------------------
     {
-      Processor exec_proc = parent_ctx->get_executing_processor();
-      return runtime->invoke_mapper_speculate(exec_proc, this, value);
+      if (mapper == NULL)
+      {
+        Processor exec_proc = parent_ctx->get_executing_processor();
+        mapper = runtime->find_mapper(exec_proc, map_id);
+      }
+      Mapper::SpeculativeOutput output;
+      output.speculate = false;
+      mapper->invoke_release_speculate(this, &output);
+      if (output.speculate)
+      {
+        value = output.speculative_value;
+        return true;
+      }
+      return false;
     }
 
     //--------------------------------------------------------------------------
@@ -6586,12 +6625,12 @@ namespace Legion {
       for (unsigned idx = 0; idx < indiv_tasks.size(); idx++)
       {
         manager->invoke_mapper_set_task_options(indiv_tasks[idx]);
-        indiv_tasks[idx]->map_locally = true;
+        indiv_tasks[idx]->set_locally_mapped(true);
       }
       for (unsigned idx = 0; idx < index_tasks.size(); idx++)
       {
         manager->invoke_mapper_set_task_options(index_tasks[idx]);
-        index_tasks[idx]->map_locally = true;
+        index_tasks[idx]->set_locally_mapped(true);
       }
     }
 
@@ -6772,10 +6811,13 @@ namespace Legion {
             for (std::set<SingleTask*>::const_iterator it2 = s2.begin();
                   it2 != s2.end(); it2++)
             {
-              constraints.push_back(Mapper::MappingConstraint(
-                                                       *it1, it->reg1_idx,
-                                                       *it2, it->reg2_idx,
-                                                       it->dtype));
+              Mapper::MappingConstraint constraint;
+              constraint.t1 = *it1;
+              constraint.t2 = *it2;
+              constraint.idx1 = it->reg1_idx;
+              constraint.idx2 = it->reg2_idx;
+              constraint.dtype = it->dtype;
+              constraints.push_back(constraint);
               mapping_dependences[*it1].push_back(*it2);
               mapping_dependences[*it2].push_back(*it1);
               // Tell the tasks they will need to refetch physical
