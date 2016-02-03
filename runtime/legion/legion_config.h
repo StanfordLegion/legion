@@ -58,6 +58,10 @@
 #ifndef MAX_APPLICATION_TASK_ID
 #define MAX_APPLICATION_TASK_ID         (1<<20)
 #endif
+// Maximum ID for an application mapper ID
+#ifndef MAX_APPLICATION_MAPPER_ID
+#define MAX_APPLICATION_MAPPER_ID       (1<<20)
+#endif
 // Default number of mapper slots
 #ifndef DEFAULT_MAPPER_SLOTS
 #define DEFAULT_MAPPER_SLOTS            8
@@ -154,6 +158,9 @@
 #ifndef LEGION_FIELD_LOG2
 #define LEGION_FIELD_LOG2         STATIC_LOG2(MAX_FIELDS) // log2(MAX_FIELDS)
 #endif
+
+#define LEGION_STRINGIFY(x) #x
+#define LEGION_MACRO_TO_STRING(x) LEGION_STRINGIFY(x)
 
 // The following enums are all re-exported by
 // LegionRuntime::HighLevel. These versions are here to facilitate the
@@ -307,6 +314,8 @@ typedef enum legion_error_t {
   ERROR_DUPLICATE_CONSTRAINT_ID = 144,
   ERROR_INVALID_CONSTRAINT_ID = 145,
   ERROR_ILLEGAL_WAIT_FOR_SHUTDOWN = 146,
+  ERROR_MAX_APPLICATION_TASK_ID_EXCEEDED = 147,
+  ERROR_MAX_APPLICATION_MAPPER_ID_EXCEEDED = 148,
 }  legion_error_t;
 
 // enum and namepsaces don't really get along well

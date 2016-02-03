@@ -5179,6 +5179,22 @@ namespace LegionRuntime {
       // function called before start-up.  This function is specified
       // by calling the 'set_registration_callback' static method.
       //------------------------------------------------------------------------
+
+      /**
+       * Dynamically generate a unique Mapper ID for use across the machine
+       * @return a Mapper ID that is globally unique across the machine
+       */
+      MapperID generate_dynamic_mapper_id(void);
+
+      /**
+       * Statically generate a unique Mapper ID for use across the machine.
+       * This can only be called prior to the runtime starting. It must
+       * be invoked symmetrically across all nodes in the machine prior
+       * to starting the rutnime.
+       * @return a MapperID that is globally unique across the machine
+       */
+      static MapperID generate_static_mapper_id(void);
+
       /**
        * Add a mapper at the given mapper ID for the runtime
        * to use when mapping tasks.  Note that this call should
@@ -5537,6 +5553,22 @@ namespace LegionRuntime {
       //------------------------------------------------------------------------
       // Task Registration Operations
       //------------------------------------------------------------------------
+      
+      /**
+       * Dynamically generate a unique Task ID for use across the machine
+       * @return a Task ID that is globally unique across the machine
+       */
+      TaskID generate_dynamic_task_id(void);
+
+      /**
+       * Statically generate a unique Task ID for use across the machine.
+       * This can only be called prior to the runtime starting. It must
+       * be invoked symmetrically across all nodes in the machine prior
+       * to starting the runtime.
+       * @return a TaskID that is globally unique across the machine
+       */
+      static TaskID generate_static_task_id(void);
+
       /**
        * Dynamically register a new task variant with the runtime with
        * a non-void return type.

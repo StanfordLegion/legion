@@ -5137,6 +5137,8 @@ namespace LegionRuntime {
         unique_field_id((unique == 0) ? runtime_stride : unique),
         unique_variant_id((unique == 0) ? runtime_stride : unique),
         unique_constraint_id((unique == 0) ? runtime_stride : unique),
+        unique_task_id(generate_static_task_id(false/*check*/)+unique),
+        unique_mapper_id(generate_static_mapper_id(false/*check*/+unique)),
         available_lock(Reservation::create_reservation()), total_contexts(0),
         group_lock(Reservation::create_reservation()),
         distributed_id_lock(Reservation::create_reservation()),
@@ -11221,10 +11223,51 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    MapperID Internal::generate_dynamic_mapper_id(void)
+    //--------------------------------------------------------------------------
+    {
+      MapperID result = __sync_fetch_and_add(&unique_mapper_id, runtime_stride);
+#ifdef DEBUG_HIGH_LEVEL
+      // Check for overflow
+      assert(result <= unique_mapper_id);
+#endif
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ MapperID Internal::generate_static_mapper_id(bool do_check)
+    //--------------------------------------------------------------------------
+    {
+      static MapperID next_mapper = MAX_APPLICATION_MAPPER_ID;
+      if (do_check && runtime_started)
+      {
+        log_run.error("Illegal call to 'generate_static_mapper_id' after "
+                      "the runtime has been started!");
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_STATIC_CALL_POST_RUNTIME_START);
+      }
+      return next_mapper++;
+    }
+
+    //--------------------------------------------------------------------------
     void Internal::add_mapper(MapperID map_id, Mapper *mapper, 
                                       Processor proc)
     //--------------------------------------------------------------------------
     {
+      if (map_id >= MAX_APPLICATION_MAPPER_ID)
+      {
+        log_run.error("Error registering mapper with ID %d. Exceeds the "
+                      "statically set bounds on application mapper IDs of %d. "
+                      "See %s in legion_config.h.", map_id, 
+                      MAX_APPLICATION_MAPPER_ID, 
+                      LEGION_MACRO_TO_STRING(MAX_APPLICATION_TASK_ID));
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_MAX_APPLICATION_MAPPER_ID_EXCEEDED);
+      }
 #ifdef DEBUG_HIGH_LEVEL
       assert(proc_managers.find(proc) != proc_managers.end());
 #endif
@@ -11633,12 +11676,36 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    TaskID Internal::generate_dynamic_task_id(void)
+    //--------------------------------------------------------------------------
+    {
+      TaskID result = __sync_fetch_and_add(&unique_task_id, runtime_stride);
+#ifdef DEBUG_HIGH_LEVEL
+      // Check for overflow
+      assert(result <= unique_task_id);
+#endif
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     VariantID Internal::register_variant(const TaskVariantRegistrar &registrar,
                                   const void *user_data, size_t user_data_size,
                                   CodeDescriptor *realm, CodeDescriptor *indesc,
                                   bool ret,VariantID vid /*= AUTO_GENERATE_ID*/)
     //--------------------------------------------------------------------------
     {
+      if (registrar.task_id >= MAX_APPLICATION_TASK_ID)
+      {
+        log_run.error("Error registering task with ID %d. Exceeds the "
+                      "statically set bounds on application task IDs of %d. "
+                      "See %s in legion_config.h.", 
+                      registrar.task_id, MAX_APPLICATION_TASK_ID, 
+                      LEGION_MACRO_TO_STRING(MAX_APPLICATION_TASK_ID));
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_MAX_APPLICATION_TASK_ID_EXCEEDED);
+      }
       // See if we need to make a new variant ID
       if (vid == AUTO_GENERATE_ID) // Make a variant ID to use
         vid = get_unique_variant_id();
@@ -14645,6 +14712,7 @@ namespace LegionRuntime {
       std::set<Processor> all_procs;
       machine.get_all_processors(all_procs);
       Realm::ProfilingRequestSet empty_requests;
+      // TODO: Make this work with Sam's internal collective framework
       if (Internal::separate_runtime_instances)
       {
         // If we are doing separate runtime instances, run it once on every
@@ -17208,6 +17276,23 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    /*static*/ TaskID Internal::generate_static_task_id(bool do_check)
+    //--------------------------------------------------------------------------
+    {
+      static TaskID next_task = MAX_APPLICATION_TASK_ID;
+      if (do_check && runtime_started)
+      {
+        log_run.error("Illegal call to 'generate_static_task_id' after "
+                      "the runtime has been started!");
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_STATIC_CALL_POST_RUNTIME_START);
+      }
+      return next_task++;
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ VariantID Internal::preregister_variant(
                           const TaskVariantRegistrar &registrar,
                           const void *user_data, size_t user_data_size,
@@ -17224,6 +17309,18 @@ namespace LegionRuntime {
         assert(false);
 #endif
         exit(ERROR_STATIC_CALL_POST_RUNTIME_START);
+      }
+      if (registrar.task_id >= MAX_APPLICATION_TASK_ID)
+      {
+        log_run.error("Error preregistering task with ID %d. Exceeds the "
+                      "statically set bounds on application task IDs of %d. "
+                      "See %s in legion_config.h.", 
+                      registrar.task_id, MAX_APPLICATION_TASK_ID, 
+                      LEGION_MACRO_TO_STRING(MAX_APPLICATION_TASK_ID));
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_MAX_APPLICATION_TASK_ID_EXCEEDED);
       }
       std::deque<PendingVariantRegistration*> &pending_table = 
         get_pending_variant_table();
