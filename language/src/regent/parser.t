@@ -62,6 +62,8 @@ function parser.option_name(p)
     return "spmd"
   elseif p:nextif("__vectorize") then
     return "vectorize"
+  else
+    p:error("expected option name")
   end
 end
 
