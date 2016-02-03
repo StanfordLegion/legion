@@ -1635,7 +1635,6 @@ namespace Realm {
       valid_mask = 0;
       valid_mask_complete = false;
       valid_mask_event = Event::NO_EVENT;
-      valid_mask_event_impl = 0;
     }
 
     void IndexSpaceImpl::init(IndexSpace _me, IndexSpace _parent,
@@ -1654,7 +1653,6 @@ namespace Realm {
 		    new ElementMask(_num_elmts));
       valid_mask_complete = true;
       valid_mask_event = Event::NO_EVENT;
-      valid_mask_event_impl = 0;
       if(_frozen) {
 	avail_mask = 0;
 	locked_data.first_elmt = valid_mask->first_enabled();
@@ -1713,8 +1711,7 @@ namespace Realm {
 	valid_mask_owner = ID(me).node(); // a good guess?
 	valid_mask_count = (valid_mask->raw_size() + 2047) >> 11;
 	valid_mask_complete = false;
-	valid_mask_event_impl = GenEventImpl::create_genevent();
-        valid_mask_event = valid_mask_event_impl->current_event();
+	valid_mask_event = GenEventImpl::create_genevent()->current_event();
         e = valid_mask_event;
       }
 
@@ -1845,7 +1842,7 @@ namespace Realm {
     DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
     IndexSpaceImpl *r_impl = get_runtime()->get_index_space_impl(args.is);
 
-    GenEventImpl *to_trigger = 0;
+    Event to_trigger = Event::NO_EVENT;
     {
       AutoHSLLock a(r_impl->valid_mask_mutex);
       log_meta.info() << "received valid mask data for " << args.is << ", " << datalen << " bytes (" << r_impl->valid_mask_count << " blocks expected)";
@@ -1879,15 +1876,15 @@ namespace Realm {
       r_impl->valid_mask_count--;
       if(r_impl->valid_mask_count == 0) {
 	r_impl->valid_mask_complete = true;
-	to_trigger = r_impl->valid_mask_event_impl;
-	r_impl->valid_mask_event_impl = 0;
+	to_trigger = r_impl->valid_mask_event;
+	r_impl->valid_mask_event = Event::NO_EVENT;
       }
     }
 
-    if(to_trigger) {
+    if(to_trigger.exists()) {
       //printf("triggering " IDFMT "/%d\n",
       //       r_impl->valid_mask_event.id, r_impl->valid_mask_event.gen);
-      to_trigger->trigger_current(false /*!poisoned*/);
+      GenEventImpl::trigger(to_trigger, false /*!poisoned*/);
     }
   }
 

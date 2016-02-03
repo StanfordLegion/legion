@@ -84,7 +84,10 @@ namespace Realm {
       static GenEventImpl *create_genevent(void);
 
       // get the Event (id+generation) for the current (i.e. untriggered) generation
-      Event current_event(void) const { Event e = me.convert<Event>(); e.gen = generation+1; return e; }
+      Event current_event(void) const;
+
+      // helper to create the Event for an arbitrary generation
+      Event make_event(Event::gen_t gen) const;
 
       // test whether an event has triggered without waiting
       virtual bool has_triggered(Event::gen_t needed_gen);
@@ -106,9 +109,8 @@ namespace Realm {
       // record that the event has triggered and notify anybody who cares
       void trigger(Event::gen_t gen_triggered, int trigger_node, bool poisoned);
 
-      // if you KNOW you want to trigger the current event (which by definition cannot
-      //   have already been triggered) - this is quicker:
-      void trigger_current(bool poisoned);
+      // helper for triggering with an Event (which must be backed by a GenEventImpl)
+      static void trigger(Event e, bool poisoned);
 
       void check_for_catchup(Event::gen_t implied_trigger_gen);
 
@@ -134,6 +136,12 @@ namespace Realm {
       BarrierImpl(void);
 
       void init(ID _me, unsigned _init_owner);
+
+      // get the Barrier (id+generation) for the current (i.e. untriggered) generation
+      Barrier current_barrier(Barrier::timestamp_t timestamp = 0) const;
+
+      // helper to create the Barrier for an arbitrary generation
+      Barrier make_barrier(Event::gen_t gen, Barrier::timestamp_t timestamp = 0) const;
 
       static BarrierImpl *create_barrier(unsigned expected_arrivals, ReductionOpID redopid,
 					 const void *initial_value = 0, size_t initial_value_size = 0);
@@ -296,7 +304,7 @@ namespace Realm {
 	
 }; // namespace Realm
 
-//include "event_impl.inl"
+#include "event_impl.inl"
 
 #endif // ifndef REALM_EVENT_IMPL_H
 
