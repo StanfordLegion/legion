@@ -5819,7 +5819,8 @@ namespace LegionRuntime {
       static VariantID preregister_variant(const TaskVariantRegistrar &reg,
                                  const void *user_data, size_t user_data_size,
                                  CodeDescriptor *realm, CodeDescriptor *indesc,
-                                 bool has_return, const char *task_name);
+                                 bool has_return, const char *task_name,
+                                 bool check_task_id = true);
     private:
       static ReductionOpTable& get_reduction_table(void);
       static SerdezOpTable& get_serdez_table(void);

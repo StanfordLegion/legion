@@ -3946,11 +3946,12 @@ namespace LegionRuntime {
                                   const TaskVariantRegistrar &registrar,
                                   const void *user_data, size_t user_data_size,
                                   CodeDescriptor *realm, CodeDescriptor *indesc,
-                                  bool has_return, const char *task_name)
+                                  bool has_return, const char *task_name, 
+                                  bool check_task_id)
     //--------------------------------------------------------------------------
     {
       return Internal::preregister_variant(registrar, user_data, user_data_size,
-                                          realm, indesc, has_return, task_name);
+                           realm, indesc, has_return, task_name, check_task_id);
     } 
 
     //--------------------------------------------------------------------------

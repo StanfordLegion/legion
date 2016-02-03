@@ -4147,7 +4147,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       runtime->register_variant(registrar, user_data, user_data_size,
-                                realm_desc, inline_desc, has_return, vid);
+                realm_desc, inline_desc, has_return, vid, false/*check task*/);
       // If we have a logical task name, attach the name info
       if (logical_task_name != NULL)
         runtime->attach_semantic_information(registrar.task_id, 
@@ -4896,8 +4896,7 @@ namespace LegionRuntime {
       registrar.layout_constraints.deserialize(derez);
       // Ask the runtime to perform the registration 
       runtime->register_variant(registrar, user_data, user_data_size,
-                                realm_desc, inline_desc, has_return,variant_id);
-
+          realm_desc, inline_desc, has_return, variant_id, false/*check task*/);
     }
 
     /////////////////////////////////////////////////////////////
@@ -11691,10 +11690,11 @@ namespace LegionRuntime {
     VariantID Internal::register_variant(const TaskVariantRegistrar &registrar,
                                   const void *user_data, size_t user_data_size,
                                   CodeDescriptor *realm, CodeDescriptor *indesc,
-                                  bool ret,VariantID vid /*= AUTO_GENERATE_ID*/)
+                                  bool ret,VariantID vid /*= AUTO_GENERATE_ID*/,
+                                  bool check_task_id /*= true*/)
     //--------------------------------------------------------------------------
     {
-      if (registrar.task_id >= MAX_APPLICATION_TASK_ID)
+      if (check_task_id && (registrar.task_id >= MAX_APPLICATION_TASK_ID))
       {
         log_run.error("Error registering task with ID %d. Exceeds the "
                       "statically set bounds on application task IDs of %d. "
@@ -17297,7 +17297,7 @@ namespace LegionRuntime {
                           const TaskVariantRegistrar &registrar,
                           const void *user_data, size_t user_data_size,
                           CodeDescriptor *realm, CodeDescriptor *inline_desc,
-                          bool has_ret, const char *task_name)
+                          bool has_ret, const char *task_name, bool check_id)
     //--------------------------------------------------------------------------
     {
       // Report an error if the runtime has already started
@@ -17310,7 +17310,7 @@ namespace LegionRuntime {
 #endif
         exit(ERROR_STATIC_CALL_POST_RUNTIME_START);
       }
-      if (registrar.task_id >= MAX_APPLICATION_TASK_ID)
+      if (check_id && (registrar.task_id >= MAX_APPLICATION_TASK_ID))
       {
         log_run.error("Error preregistering task with ID %d. Exceeds the "
                       "statically set bounds on application task IDs of %d. "

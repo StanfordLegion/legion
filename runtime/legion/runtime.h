@@ -1633,7 +1633,8 @@ namespace LegionRuntime {
       VariantID register_variant(const TaskVariantRegistrar &registrar,
                                  const void *user_data, size_t user_data_size,
                                  CodeDescriptor *realm, CodeDescriptor *indesc,
-                                 bool ret, VariantID vid = AUTO_GENERATE_ID);
+                                 bool ret, VariantID vid = AUTO_GENERATE_ID,
+                                 bool check_task_id = true);
       TaskImpl* find_or_create_task_impl(TaskID task_id);
       TaskImpl* find_task_impl(TaskID task_id);
       VariantImpl* find_variant_impl(TaskID task_id, VariantID variant_id);
@@ -2463,7 +2464,7 @@ namespace LegionRuntime {
                       const TaskVariantRegistrar &registrar,
                       const void *user_data, size_t user_data_size,
                       CodeDescriptor *realm_desc, CodeDescriptor *inline_desc,
-                      bool has_ret, const char *task_name);
+                      bool has_ret, const char *task_name,bool check_id = true);
       static PartitionProjectionFnptr 
                     find_partition_projection_function(ProjectionID pid);
       static RegionProjectionFnptr

@@ -1924,8 +1924,12 @@ namespace LegionRuntime {
                                                     const char *task_name)
     //--------------------------------------------------------------------------
     {
+      bool check_task_id = true;
       if (id == AUTO_GENERATE_ID)
+      {
         id = generate_static_task_id();
+        check_task_id = false;
+      }
       TaskVariantRegistrar registrar(id, task_name);
       registrar.set_leaf(options.leaf);
       registrar.set_inner(options.inner);
@@ -1936,7 +1940,8 @@ namespace LegionRuntime {
       CodeDescriptor *inline_desc = new CodeDescriptor(
           LegionTaskWrapper::legion_task_wrapper<T,true,TASK_PTR>);
       preregister_variant(registrar, NULL/*UDT*/, 0/*sizeof(UDT)*/,
-                          realm_desc, inline_desc, true/*ret*/, task_name);
+                          realm_desc, inline_desc, true/*ret*/, 
+                          task_name, check_task_id);
       return id;
     }
 
@@ -1952,8 +1957,12 @@ namespace LegionRuntime {
                                                     const char *task_name)
     //--------------------------------------------------------------------------
     {
+      bool check_task_id = true;
       if (id == AUTO_GENERATE_ID)
+      {
         id = generate_static_task_id();
+        check_task_id = false;
+      }
       TaskVariantRegistrar registrar(id, task_name);
       registrar.set_leaf(options.leaf);
       registrar.set_inner(options.inner);
@@ -1964,7 +1973,8 @@ namespace LegionRuntime {
       CodeDescriptor *inline_desc = new CodeDescriptor(
             LegionTaskWrapper::legion_task_wrapper<true,TASK_PTR>);
       preregister_variant(registrar, NULL/*UDT*/, 0/*sizeof(UDT)*/,
-                          realm_desc, inline_desc, false/*ret*/, task_name);
+                          realm_desc, inline_desc, false/*ret*/, 
+                          task_name, check_task_id);
       return id;
     }
 
@@ -1981,8 +1991,12 @@ namespace LegionRuntime {
                                                     const char *task_name)
     //--------------------------------------------------------------------------
     {
+      bool check_task_id = true;
       if (id == AUTO_GENERATE_ID)
+      {
         id = generate_static_task_id();
+        check_task_id = false;
+      }
       TaskVariantRegistrar registrar(id, task_name);
       registrar.set_leaf(options.leaf);
       registrar.set_inner(options.inner);
@@ -1993,7 +2007,8 @@ namespace LegionRuntime {
       CodeDescriptor *inline_desc = new CodeDescriptor(
             LegionTaskWrapper::legion_udt_task_wrapper<T,UDT,true,TASK_PTR>);
       preregister_variant(registrar, &user_data, sizeof(UDT),
-                          realm_desc, inline_desc, true/*ret*/, task_name);
+                          realm_desc, inline_desc, true/*ret*/, 
+                          task_name, check_task_id);
       return id;
     }
 
@@ -2010,8 +2025,12 @@ namespace LegionRuntime {
                                                     const char *task_name)
     //--------------------------------------------------------------------------
     {
+      bool check_task_id = true;
       if (id == AUTO_GENERATE_ID)
+      {
         id = generate_static_task_id();
+        check_task_id = false;
+      }
       TaskVariantRegistrar registrar(id, task_name);
       registrar.set_leaf(options.leaf);
       registrar.set_inner(options.inner);
@@ -2022,7 +2041,8 @@ namespace LegionRuntime {
       CodeDescriptor *inline_desc = new CodeDescriptor(
             LegionTaskWrapper::legion_udt_task_wrapper<UDT,true,TASK_PTR>);
       preregister_variant(registrar, &user_data, sizeof(UDT),
-                          realm_desc, inline_desc, false/*ret*/, task_name);
+                          realm_desc, inline_desc, false/*ret*/, 
+                          task_name, check_task_id);
       return id;
     }
 
