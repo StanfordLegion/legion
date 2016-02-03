@@ -1570,6 +1570,8 @@ namespace LegionRuntime {
       const std::map<int,AddressSpace>& find_forward_MPI_mapping(void);
       const std::map<AddressSpace,int>& find_reverse_MPI_mapping(void);
     public:
+      MapperID generate_dynamic_mapper_id(void);
+      static MapperID generate_static_mapper_id(bool do_check = true);
       void add_mapper(MapperID map_id, Mapper *mapper, Processor proc);
       void replace_default_mapper(Mapper *mapper, Processor proc);
     public:
@@ -1627,6 +1629,7 @@ namespace LegionRuntime {
                     bool owned);
       void end_inline_task(Context ctx, const void *result, size_t result_size,
                            bool owned);
+      TaskID generate_dynamic_task_id(void);
       VariantID register_variant(const TaskVariantRegistrar &registrar,
                                  const void *user_data, size_t user_data_size,
                                  CodeDescriptor *realm, CodeDescriptor *indesc,
@@ -2274,6 +2277,8 @@ namespace LegionRuntime {
       unsigned unique_field_id; 
       unsigned unique_variant_id;
       unsigned unique_constraint_id;
+      unsigned unique_task_id;
+      unsigned unique_mapper_id;
     protected:
       std::map<ProjectionID,ProjectionFunctor*> projection_functors;
     protected:
@@ -2453,6 +2458,7 @@ namespace LegionRuntime {
                                 get_pending_variant_table(void);
       static std::map<LayoutConstraintID,LayoutConstraintRegistrar>&
                                 get_pending_constraint_table(void);
+      static TaskID generate_static_task_id(bool do_check = true);
       static VariantID preregister_variant(
                       const TaskVariantRegistrar &registrar,
                       const void *user_data, size_t user_data_size,

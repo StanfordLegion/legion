@@ -3409,6 +3409,20 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    MapperID Runtime::generate_dynamic_mapper_id(void)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->generate_dynamic_mapper_id();
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ MapperID Runtime::generate_static_mapper_id(void)
+    //--------------------------------------------------------------------------
+    {
+      return Internal::generate_static_mapper_id();
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::add_mapper(MapperID map_id, Mapper *mapper, 
                                       Processor proc)
     //--------------------------------------------------------------------------
@@ -3904,6 +3918,20 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    TaskID Runtime::generate_dynamic_task_id(void)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->generate_dynamic_task_id();
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ TaskID Runtime::generate_static_task_id(void)
+    //--------------------------------------------------------------------------
+    {
+      return Internal::generate_static_task_id();
+    }
+
+    //--------------------------------------------------------------------------
     VariantID Runtime::register_variant(const TaskVariantRegistrar &registrar,
                   bool has_return, const void *user_data, size_t user_data_size,
                   CodeDescriptor *realm, CodeDescriptor *indesc)
@@ -4264,18 +4292,7 @@ namespace LegionRuntime {
     {
       return runtime->runtime->sample_unmapped_tasks(proc, 
                                                      const_cast<Mapper*>(this));
-    }
-
-    // A total hack just to keep backwards compatibilty for most older
-    // codes. This is in no way safe or correct, but it works for now
-    //--------------------------------------------------------------------------
-    TaskID generate_static_task_id(void)
-    //--------------------------------------------------------------------------
-    {
-      // Pick a reasonable number to start at that won't interfere anywhere
-      static TaskID next_task = MAX_APPLICATION_TASK_ID;
-      return next_task++;
-    }
+    } 
 
   }; // namespace HighLevel
 }; // namespace LegionRuntime

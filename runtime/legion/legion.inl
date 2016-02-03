@@ -1912,12 +1912,6 @@ namespace LegionRuntime {
                              realm_desc, inline_desc, false/*ret*/, task_name);
     }
 
-    // A total hack just to keep backwards compatibilty for most older
-    // codes. This is in no way safe or correct, but it works for now
-    //--------------------------------------------------------------------------
-    TaskID generate_static_task_id(void);
-    //--------------------------------------------------------------------------
-
     //--------------------------------------------------------------------------
     template<typename T,
       T (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
