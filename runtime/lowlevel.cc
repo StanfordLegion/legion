@@ -87,19 +87,33 @@ namespace LegionRuntime {
 	  AutoHSLLock a2(e->mutex);
 
 	  // print anything with either local or remote waiters
-	  if(e->local_waiters.empty() && e->remote_waiters.empty())
+	  if(e->current_local_waiters.empty() &&
+	     e->future_local_waiters.empty() &&
+	     e->remote_waiters.empty())
 	    continue;
 
 	  os << "Event " << e->me <<": gen=" << e->generation
 	     << " subscr=" << e->gen_subscribed
-	     << " local=" << e->local_waiters.size()
+	     << " local=" << e->current_local_waiters.size()
+	     << "+" << e->future_local_waiters.size()
 	     << " remote=" << e->remote_waiters.size() << "\n";
-	  for(std::vector<EventWaiter *>::iterator it = e->local_waiters.begin();
-	      it != e->local_waiters.end();
+	  for(std::vector<EventWaiter *>::const_iterator it = e->current_local_waiters.begin();
+	      it != e->current_local_waiters.end();
 	      it++) {
 	    os << "  [" << (e->generation+1) << "] L:" << (*it) << " - ";
 	    (*it)->print(os);
 	    os << "\n";
+	  }
+	  for(std::map<Event::gen_t, std::vector<EventWaiter *> >::const_iterator it = e->future_local_waiters.begin();
+	      it != e->future_local_waiters.end();
+	      it++) {
+	    for(std::vector<EventWaiter *>::const_iterator it2 = it->second.begin();
+		it2 != it->second.end();
+		it2++) {
+	      os << "  [" << (it->first) << "] L:" << (*it2) << " - ";
+	      (*it2)->print(os);
+	      os << "\n";
+	    }
 	  }
 	  // for(std::map<Event::gen_t, NodeMask>::const_iterator it = e->remote_waiters.begin();
 	  //     it != e->remote_waiters.end();

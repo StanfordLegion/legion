@@ -126,7 +126,7 @@ namespace Realm {
 #endif
 
     template <typename CONDTYPE>
-    static void wait_for_condition(const CONDTYPE& cond);
+    static void wait_for_condition(const CONDTYPE& cond, bool& poisoned);
 
   protected:
     friend class ThreadScheduler;

@@ -707,6 +707,7 @@ namespace Realm {
       hcount += LockGrantMessage::Message::add_handler_entries(&handlers[hcount], "Lock Grant AM");
       hcount += EventSubscribeMessage::Message::add_handler_entries(&handlers[hcount], "Event Subscribe AM");
       hcount += EventTriggerMessage::Message::add_handler_entries(&handlers[hcount], "Event Trigger AM");
+      hcount += EventUpdateMessage::Message::add_handler_entries(&handlers[hcount], "Event Update AM");
       hcount += RemoteMemAllocRequest::Request::add_handler_entries(&handlers[hcount], "Remote Memory Allocation Request AM");
       hcount += RemoteMemAllocRequest::Response::add_handler_entries(&handlers[hcount], "Remote Memory Allocation Response AM");
       hcount += CreateInstanceRequest::Request::add_handler_entries(&handlers[hcount], "Create Instance Request AM");
@@ -1621,12 +1622,6 @@ namespace Realm {
       Node *n = &nodes[id.node()];
       GenEventImpl *impl = n->events.lookup_entry(id.index(), id.node());
       assert(impl->me == id);
-
-      // check to see if this is for a generation more than one ahead of what we
-      //  know of - this should only happen for remote events, but if it does it means
-      //  there are some generations we don't know about yet, so we can catch up (and
-      //  notify any local waiters right away)
-      impl->check_for_catchup(e.gen - 1);
 
       return impl;
     }

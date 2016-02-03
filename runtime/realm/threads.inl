@@ -201,7 +201,7 @@ namespace Realm {
   }
 
   template <typename CONDTYPE>
-  /*static*/ void Thread::wait_for_condition(const CONDTYPE& cond)
+  /*static*/ void Thread::wait_for_condition(const CONDTYPE& cond, bool& poisoned)
   {
     Thread *thread = self();
     // first, indicate our intent to sleep
@@ -215,7 +215,8 @@ namespace Realm {
     assert(thread->scheduler != 0);
     thread->scheduler->thread_blocking(thread);
 
-    assert(!cb.poisoned);
+    // poison propagates to caller
+    poisoned = cb.poisoned;
   }
 
 
