@@ -6035,8 +6035,13 @@ namespace LegionRuntime {
 #endif
       // Perform the reduction, see if we have to do serdez reductions
       if (serdez_redop_fns != NULL)
+      {
+        // Need to hold the lock to make the serialize/deserialize
+        // process atomic
+        AutoLock o_lock(op_lock);
         (*(serdez_redop_fns->fold_fn))(reduction_op, reduction_state,
-                                       reduction_state_size, result, exclusive);
+                                       reduction_state_size, result);
+      }
       else
         reduction_op->fold(reduction_state, result, 1, exclusive);
 

@@ -679,7 +679,7 @@ namespace LegionRuntime {
             const Realm::ReductionOpUntyped *> ReductionOpTable;
     typedef void (*SerdezInitFnptr)(const ReductionOp*, void *&, size_t&);
     typedef void (*SerdezFoldFnptr)(const ReductionOp*, void *&, size_t&,
-                                    const void*, bool);
+                                    const void*);
     typedef std::map<Realm::ReductionOpID, SerdezRedopFns> SerdezRedopTable;
     typedef ::legion_address_space_t AddressSpace;
     typedef ::legion_task_priority_t TaskPriority;

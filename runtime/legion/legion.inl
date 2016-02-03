@@ -231,12 +231,12 @@ namespace LegionRuntime {
       template<typename REDOP_RHS>
       static void serdez_redop_fold(const ReductionOp *reduction_op,
                                     void *&lhs_ptr, size_t &lhs_size,
-                                    const void *rhs_ptr, bool exclusive)
+                                    const void *rhs_ptr)
       {
         REDOP_RHS lhs_serdez, rhs_serdez;
         lhs_serdez.legion_deserialize(lhs_ptr);
         rhs_serdez.legion_deserialize(rhs_ptr);
-        reduction_op->fold(&lhs_serdez, &rhs_serdez, 1, exclusive); 
+        reduction_op->fold(&lhs_serdez, &rhs_serdez, 1, true/*exclusive*/);
         size_t new_size = lhs_serdez.legion_buffer_size();
         // Reallocate the buffer if it has grown
         if (new_size > lhs_size)
