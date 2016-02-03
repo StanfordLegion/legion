@@ -5137,7 +5137,7 @@ namespace LegionRuntime {
         unique_variant_id((unique == 0) ? runtime_stride : unique),
         unique_constraint_id((unique == 0) ? runtime_stride : unique),
         unique_task_id(generate_static_task_id(false/*check*/)+unique),
-        unique_mapper_id(generate_static_mapper_id(false/*check*/+unique)),
+        unique_mapper_id(generate_static_mapper_id(false/*check*/)+unique),
         available_lock(Reservation::create_reservation()), total_contexts(0),
         group_lock(Reservation::create_reservation()),
         distributed_id_lock(Reservation::create_reservation()),
