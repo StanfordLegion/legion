@@ -426,11 +426,13 @@ namespace Realm {
       {
 	bool poisoned = false;
 	if(wait_for.has_triggered_faultaware(poisoned)) {
-	  // always count faults, but don't necessarily propagage
-	  bool first_fault = (__sync_fetch_and_add(&faults_observed, 1) == 0);
-	  if(first_fault && !ignore_faults) {
-	    log_poison.info() << "event merger early poison: after=" << finish_event;
-	    GenEventImpl::trigger(finish_event, true /*poisoned*/);
+	  if(poisoned) {
+	    // always count faults, but don't necessarily propagage
+	    bool first_fault = (__sync_fetch_and_add(&faults_observed, 1) == 0);
+	    if(first_fault && !ignore_faults) {
+	      log_poison.info() << "event merger early poison: after=" << finish_event;
+	      GenEventImpl::trigger(finish_event, true /*poisoned*/);
+	    }
 	  }
 	  // either way we return to the caller without updating the count_needed
 	  return;
