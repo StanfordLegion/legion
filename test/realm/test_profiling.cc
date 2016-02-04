@@ -75,7 +75,11 @@ void child_task(const void *args, size_t arglen,
     buffer[1] = 22;
     buffer[2] = 33;
     buffer[3] = 44;
+#ifdef REALM_USE_EXCEPTIONS
+    // this causes a fatal error if Realm doesn't have exception support, so don't
+    //  do it in that case
     Processor::report_execution_fault(44, buffer, 4*sizeof(int));
+#endif
   }
 #endif
   log_app.print() << "ending task on processor " << p;
@@ -119,6 +123,12 @@ void response_task(const void *args, size_t arglen,
     delete op_timeline;
   } else
     printf("no timeline\n");
+
+  if(pr.has_measurement<OperationBacktrace>()) {
+    OperationBacktrace *op_backtrace = pr.get_measurement<OperationBacktrace>();
+    std::cout << "op backtrace = " << op_backtrace->backtrace;
+    delete op_backtrace;
+  }
 
   if(pr.user_data_size() > 0) {
     printf("user data = %zd (", pr.user_data_size());
@@ -181,7 +191,8 @@ void top_level_task(const void *args, size_t arglen,
   ProfilingRequestSet prs;
   prs.add_request(profile_cpu, RESPONSE_TASK, &first_cpu, sizeof(first_cpu))
     .add_measurement<OperationStatus>()
-    .add_measurement<OperationTimeline>();
+    .add_measurement<OperationTimeline>()
+    .add_measurement<OperationBacktrace>();
 
   // we expect (exactly) three responses
   response_counter = Barrier::create_barrier(3);
@@ -189,8 +200,7 @@ void top_level_task(const void *args, size_t arglen,
 
   bool inject_fault = false;
   Event e1 = first_cpu.spawn(CHILD_TASK, &inject_fault, sizeof(inject_fault), prs);
-  // TODO: re-enable once faults are implemented
-  //inject_fault = true;
+  inject_fault = true;
   Event e2 = first_cpu.spawn(CHILD_TASK, &inject_fault, sizeof(inject_fault), prs, e1);
   inject_fault = false;
   Event e3 = first_cpu.spawn(CHILD_TASK, &inject_fault, sizeof(inject_fault), prs, e2);
