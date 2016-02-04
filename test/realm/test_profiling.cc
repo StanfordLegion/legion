@@ -14,6 +14,8 @@ using namespace Realm;
 using namespace Realm::ProfilingMeasurements;
 using namespace LegionRuntime::LowLevel;
 
+Logger log_app("app");
+
 // Task IDs, some IDs are reserved so start at first available number
 enum {
   TOP_LEVEL_TASK = Processor::TASK_ID_FIRST_AVAILABLE+0,
@@ -63,7 +65,7 @@ MyMachineUpdateTracker tracker;
 void child_task(const void *args, size_t arglen, 
 		const void *userdata, size_t userlen, Processor p)
 {
-  printf("starting task on processor " IDFMT "\n", p.id);
+  log_app.print() << "starting task on processor " << p;
   sleep(1);
 #ifdef TEST_FAULTS
   bool inject_fault = *(const bool *)args;
@@ -76,15 +78,16 @@ void child_task(const void *args, size_t arglen,
     Processor::report_execution_fault(44, buffer, 4*sizeof(int));
   }
 #endif
-  printf("ending task on processor " IDFMT "\n", p.id);
+  log_app.print() << "ending task on processor " << p;
 }
 
 Barrier response_counter;
-int expected_responses_remaining;
+int expected_responses_remaining = 0;
 
 void response_task(const void *args, size_t arglen,
 		   const void *userdata, size_t userlen, Processor p)
 {
+  log_app.print() << "profiling response task on processor " << p;
   printf("got profiling response - %zd bytes\n", arglen);
   printf("Bytes:");
   for(size_t i = 0; i < arglen; i++)
@@ -173,9 +176,10 @@ void top_level_task(const void *args, size_t arglen,
   
   // launch a child task and perform some measurements on it
   // choose the last cpu, which is likely to be on a different node
+  Processor profile_cpu = all_cpus.front();
   Processor first_cpu = all_cpus.back();
   ProfilingRequestSet prs;
-  prs.add_request(first_cpu, RESPONSE_TASK, &first_cpu, sizeof(first_cpu))
+  prs.add_request(profile_cpu, RESPONSE_TASK, &first_cpu, sizeof(first_cpu))
     .add_measurement<OperationStatus>()
     .add_measurement<OperationTimeline>();
 
