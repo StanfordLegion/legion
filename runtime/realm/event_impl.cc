@@ -91,7 +91,17 @@ namespace Realm {
     bool poisoned = false;
     if(e->has_triggered(gen, poisoned)) {
       // a poisoned event causes an exception because the caller isn't prepared for it
-      assert(poisoned == POISON_FIXME);
+      if(poisoned) {
+#ifdef REALM_USE_EXCEPTIONS
+	if(Thread::self()->exceptions_permitted()) {
+	  throw PoisonedEventException(*this);
+	} else
+#endif
+	  {
+	    log_poison.fatal() << "FATAL: no handler for test of poisoned event " << *this;
+	    assert(0);
+	  }
+      }
       return true;
     } else
       return false;
@@ -175,7 +185,17 @@ namespace Realm {
     bool poisoned = false;
     wait_faultaware(poisoned);
     // a poisoned event causes an exception because the caller isn't prepared for it
-    assert(poisoned == POISON_FIXME);
+    if(poisoned) {
+#ifdef REALM_USE_EXCEPTIONS
+      if(Thread::self()->exceptions_permitted()) {
+	throw PoisonedEventException(*this);
+      } else
+#endif
+      {
+	log_poison.fatal() << "FATAL: no handler for test of poisoned event " << *this;
+	assert(0);
+      }
+    }
   }
 
   void Event::wait_faultaware(bool& poisoned) const
@@ -208,7 +228,18 @@ namespace Realm {
   {
     bool poisoned = false;
     external_wait_faultaware(poisoned);
-    assert(poisoned == POISON_FIXME);
+    // a poisoned event causes an exception because the caller isn't prepared for it
+    if(poisoned) {
+#ifdef REALM_USE_EXCEPTIONS
+      if(Thread::self()->exceptions_permitted()) {
+	throw PoisonedEventException(*this);
+      } else
+#endif
+      {
+	log_poison.fatal() << "FATAL: no handler for test of poisoned event " << *this;
+	assert(0);
+      }
+    }
   }
 
   void Event::external_wait_faultaware(bool& poisoned) const

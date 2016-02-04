@@ -190,8 +190,11 @@ namespace Realm {
 						   ByteArrayRef(user_data, user_data_len),
 						   finish_event, prs);
       get_runtime()->optable.add_local_operation(finish_event, tro);
-      tro->mark_ready();
-      tro->mark_started();
+      // we haven't told anybody about this operation yet, so cancellation really shouldn't
+      //  be possible
+      bool ok_to_run = (tro->mark_ready() &&
+			tro->mark_started());
+      assert(ok_to_run);
 
       std::vector<Processor> local_procs;
       std::map<gasnet_node_t, std::vector<Processor> > remote_procs;
@@ -249,7 +252,7 @@ namespace Realm {
 					  reg_op);
       }
 
-      tro->mark_finished();
+      tro->mark_finished(true /*successful*/);
       return finish_event;
     }
 
@@ -274,8 +277,11 @@ namespace Realm {
       TaskRegistration *tro = new TaskRegistration(codedesc, 
 						   ByteArrayRef(user_data, user_data_len),
 						   finish_event, prs);
-      tro->mark_ready();
-      tro->mark_started();
+      // we haven't told anybody about this operation yet, so cancellation really shouldn't
+      //  be possible
+      bool ok_to_run = (tro->mark_ready() &&
+			tro->mark_started());
+      assert(ok_to_run);
 
       // do local processors first
       std::set<Processor> local_procs;
@@ -310,7 +316,7 @@ namespace Realm {
 	}
       }
 
-      tro->mark_finished();
+      tro->mark_finished(true /*successful*/);
       return finish_event;
     }
 
@@ -319,7 +325,18 @@ namespace Realm {
 						      const void *reason_data,
 						      size_t reason_size)
     {
-      assert(0);
+#ifdef REALM_USE_EXCEPTIONS
+      if(Thread::self()->exceptions_permitted()) {
+	throw ApplicationException(reason, reason_data, reason_size);
+      } else
+#endif
+      {
+	Processor p = get_executing_processor();
+	assert(p.exists());
+	log_poison.fatal() << "FATAL: no handler for reported processor fault: proc=" << p
+			   << " reason=" << reason;
+	assert(0);
+      }
     }
 
     // reports a problem with a processor in general (this is primarily for fault injection)
@@ -421,8 +438,10 @@ namespace Realm {
     void ProcessorGroup::enqueue_task(Task *task)
     {
       // put it into the task queue - one of the member procs will eventually grab it
-      task->mark_ready();
-      task_queue.put(task, task->priority);
+      if(task->mark_ready())
+	task_queue.put(task, task->priority);
+      else
+	task->mark_finished(false /*!successful*/);
     }
 
     void ProcessorGroup::add_to_group(ProcessorGroup *group)
@@ -467,6 +486,7 @@ namespace Realm {
 	bool did_cancel = task->attempt_cancellation(Realm::Faults::ERROR_POISONED_PRECONDITION,
 						     &e, sizeof(e));	
 	assert(did_cancel);
+	task->mark_finished(false);
 	return true;
       }
 
@@ -589,7 +609,8 @@ namespace Realm {
     }
 
     // TODO: include status/profiling eventually
-    RegisterTaskCompleteMessage::send_request(args.sender, args.reg_op);
+    RegisterTaskCompleteMessage::send_request(args.sender, args.reg_op,
+					      true /*successful*/);
   }
 
   /*static*/ void RegisterTaskMessage::send_request(gasnet_node_t target,
@@ -625,16 +646,18 @@ namespace Realm {
 
   /*static*/ void RegisterTaskCompleteMessage::handle_request(RequestArgs args)
   {
-    args.reg_op->mark_finished();
+    args.reg_op->mark_finished(args.successful);
   }
 
   /*static*/ void RegisterTaskCompleteMessage::send_request(gasnet_node_t target,
-							    RemoteTaskRegistration *reg_op)
+							    RemoteTaskRegistration *reg_op,
+							    bool successful)
   {
     RequestArgs args;
 
     args.sender = gasnet_mynode();
     args.reg_op = reg_op;
+    args.successful = successful;
 
     Message::request(target, args);
   }
@@ -738,8 +761,10 @@ namespace Realm {
   void LocalTaskProcessor::enqueue_task(Task *task)
   {
     // just jam it into the task queue
-    task->mark_ready();
-    task_queue.put(task, task->priority);
+    if(task->mark_ready())
+      task_queue.put(task, task->priority);
+    else
+      task->mark_finished(false /*!successful*/);
   }
 
   void LocalTaskProcessor::spawn_task(Processor::TaskFuncID func_id,

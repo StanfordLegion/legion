@@ -305,6 +305,7 @@ namespace Realm {
       struct RequestArgs {
 	gasnet_node_t sender;
 	RemoteTaskRegistration *reg_op;
+	bool successful;
       };
 
       static void handle_request(RequestArgs args);
@@ -314,7 +315,8 @@ namespace Realm {
 					handle_request> Message;
 
       static void send_request(gasnet_node_t target,
-			       RemoteTaskRegistration *reg_op);
+			       RemoteTaskRegistration *reg_op,
+			       bool successful);
     };
 
 }; // namespace Realm

@@ -305,8 +305,13 @@ namespace LegionRuntime {
 
     void DmaRequestQueue::enqueue_request(DmaRequest *r)
     {
-      // Record that it is ready
-      r->mark_ready();
+      // Record that it is ready - check for cancellation though
+      bool ok_to_run = r->mark_ready();
+      if(!ok_to_run) {
+	r->mark_finished(false /*!successful*/);
+	return;
+      }
+
       queue_mutex.lock();
 
       // there's a queue per priority level
@@ -2098,7 +2103,7 @@ namespace LegionRuntime {
     {
       assert(completed);
       log_aio.debug("fence completed: op=%p req=%p", this, req);
-      f->mark_finished();
+      f->mark_finished(true /*successful*/);
       return true;
     }
 
@@ -4229,12 +4234,14 @@ namespace LegionRuntime {
 	DmaRequest *r = dequeue_request(aio_idle);
 
 	if(r) {
-          r->mark_started();
+          bool ok_to_run = r->mark_started();
+	  if(ok_to_run) {
+	    // this will automatically add any necessary AsyncWorkItem's
+	    r->perform_dma();
 
-          // this will automatically add any necessary AsyncWorkItem's
-	  r->perform_dma();
-
-	  r->mark_finished();
+	    r->mark_finished(true /*successful*/);
+	  } else
+	    r->mark_finished(false /*!successful*/);
 	}
       }
 

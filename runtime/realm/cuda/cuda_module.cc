@@ -213,7 +213,7 @@ namespace Realm {
 	}
 
 	if(fence)
-	  fence->mark_finished();
+	  fence->mark_finished(true /*successful*/);
 
 	if(notification)
 	  notification->request_completed();
@@ -827,7 +827,7 @@ namespace Realm {
       GPUWorkFence *me = (GPUWorkFence *)data;
 
       assert(res == CUDA_SUCCESS);
-      me->mark_finished();
+      me->mark_finished(true /*succesful*/);
     }
 
 

@@ -39,9 +39,16 @@ namespace Realm {
     void add_reference(void);
     void remove_reference(void);
 
-    virtual void mark_ready(void);
-    virtual void mark_started(void);
-    virtual void mark_finished(void);
+    // marks operation ready - returns true if it should be enqueued for execution
+    //  (i.e. it hasn't been cancelled)
+    virtual bool mark_ready(void);
+
+    // marks operation started - returns true if successful, false if a cancellation
+    //  request has arrived
+    virtual bool mark_started(void);
+
+    virtual void mark_finished(bool successful);
+    virtual void mark_terminated(int error_code, const ByteArray& details);
 
     // returns true if its able to perform the cancellation (or if nothing can be done)
     // returns false if a subclass wants to try some other means to cancel an operation
@@ -56,7 +63,7 @@ namespace Realm {
       AsyncWorkItem(Operation *_op);
       virtual ~AsyncWorkItem(void);
 
-      void mark_finished(void);
+      void mark_finished(bool successful);
 
       virtual void request_cancellation(void) = 0;
 
@@ -73,7 +80,7 @@ namespace Realm {
 
   protected:
     // called by AsyncWorkItem::mark_finished from an arbitrary thread
-    void work_item_finished(AsyncWorkItem *item);
+    void work_item_finished(AsyncWorkItem *item, bool successful);
 
     virtual void mark_completed(void);
 
@@ -89,6 +96,7 @@ namespace Realm {
   public:
     Event get_finish_event(void) const { return finish_event; }
   protected:
+    typedef ProfilingMeasurements::OperationStatus Status;
     ProfilingMeasurements::OperationStatus status;
     ProfilingMeasurements::OperationTimeline timeline;
     ProfilingRequestSet requests; 
@@ -96,6 +104,7 @@ namespace Realm {
 
     std::set<AsyncWorkItem *> all_work_items;
     int pending_work_items;  // uses atomics so we don't have to take lock to check
+    int failed_work_items;
     
     friend std::ostream& operator<<(std::ostream& os, const Operation *op);
   };

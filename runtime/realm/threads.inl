@@ -77,7 +77,9 @@ namespace Realm {
   // class Thread
 
   inline Thread::Thread(ThreadScheduler *_scheduler)
-    : state(STATE_CREATED), scheduler(_scheduler)
+    : state(STATE_CREATED)
+    , scheduler(_scheduler)
+    , exception_handler_count(0)
   {
   }
 
@@ -217,6 +219,28 @@ namespace Realm {
 
     // poison propagates to caller
     poisoned = cb.poisoned;
+  }
+
+  inline bool Thread::exceptions_permitted(void) const
+  {
+    return (exception_handler_count > 0);
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class Thread::ExceptionHandlerPresence
+
+  inline Thread::ExceptionHandlerPresence::ExceptionHandlerPresence(void)
+  {
+    // no need for locks - only called within the thread
+    Thread::self()->exception_handler_count++;
+  }
+
+  inline Thread::ExceptionHandlerPresence::~ExceptionHandlerPresence(void)
+  {
+    // no need for locks - only called within the thread
+    Thread::self()->exception_handler_count--;
   }
 
 

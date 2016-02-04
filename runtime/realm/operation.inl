@@ -31,7 +31,10 @@ namespace Realm {
     , refcount(1)
     , requests(_requests)
     , pending_work_items(1 /* i.e. the main work item */)
+    , failed_work_items(0 /* hopefully it stays that way*/)
   {
+    status.result = ProfilingMeasurements::OperationStatus::WAITING;
+    status.error_code = 0;
     measurements.import_requests(requests); 
     timeline.record_create_time();
   }
@@ -59,8 +62,12 @@ namespace Realm {
   }
 
   // called by AsyncWorkItem::mark_finished
-  inline void Operation::work_item_finished(AsyncWorkItem *item)
+  inline void Operation::work_item_finished(AsyncWorkItem *item, bool successful)
   {
+    // update this count first
+    if(!successful)
+      __sync_fetch_and_add(&failed_work_items, 1);
+
     // no per-work-item data to record, so just decrement the count, and if it goes
     //  to zero, we're complete
     int remaining = __sync_sub_and_fetch(&pending_work_items, 1);
@@ -84,9 +91,9 @@ namespace Realm {
   {
   }
 
-  inline void Operation::AsyncWorkItem::mark_finished(void)
+  inline void Operation::AsyncWorkItem::mark_finished(bool successful)
   {
-    op->work_item_finished(this);
+    op->work_item_finished(this, successful);
   }
 
 

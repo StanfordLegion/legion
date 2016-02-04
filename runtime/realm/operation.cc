@@ -38,19 +38,69 @@ namespace Realm {
     all_work_items.clear();
   }
 
-  void Operation::mark_ready(void)
+  bool Operation::mark_ready(void)
   {
-    timeline.record_ready_time();
+    // attempt to switch from WAITING -> READY
+    Status::Result prev = __sync_val_compare_and_swap(&status.result,
+						      Status::WAITING,
+						      Status::READY);
+    switch(prev) {
+    case Status::WAITING:
+      {
+	// normal behavior
+	timeline.record_ready_time();
+	return true;
+      }
+
+    case Status::CANCELLED:
+      {
+	// lost the race to a cancellation request
+	return false;
+      }
+
+    default:
+      {
+	assert(0 && "mark_ready called when not WAITING or CANCELLED");
+      }
+    }
+    return false;
   }
 
-  void Operation::mark_started(void)
+  bool Operation::mark_started(void)
   {
-    timeline.record_start_time();
+    // attempt to switch from READY -> RUNNING
+    Status::Result prev = __sync_val_compare_and_swap(&status.result,
+						      Status::READY,
+						      Status::RUNNING);
+    switch(prev) {
+    case Status::READY:
+      {
+	// normal behavior
+	timeline.record_start_time();
+	return true;
+      }
+
+    case Status::CANCELLED:
+      {
+	// lost the race to a cancellation request
+	return false;
+      }
+
+    default:
+      {
+	assert(0 && "mark_started called when not READY or CANCELLED");
+      }
+    }
+    return false;
   }
 
-  void Operation::mark_finished(void)
+  void Operation::mark_finished(bool successful)
   {
     timeline.record_end_time();
+
+    // update this count first
+    if(!successful)
+      __sync_fetch_and_add(&failed_work_items, 1);
 
     // do an atomic decrement of the work counter to see if we're also complete
     int remaining = __sync_sub_and_fetch(&pending_work_items, 1);
@@ -59,26 +109,87 @@ namespace Realm {
       mark_completed();    
   }
 
+  void Operation::mark_terminated(int error_code, const ByteArray& details)
+  {
+    // attempt to switch from RUNNING -> TERMINATED_EARLY
+    Status::Result prev = __sync_val_compare_and_swap(&status.result,
+						      Status::RUNNING,
+						      Status::TERMINATED_EARLY);
+    assert(prev == Status::RUNNING);
+
+    status.error_code = error_code;
+    status.error_details = details;
+
+    timeline.record_complete_time();
+
+    __sync_fetch_and_add(&failed_work_items, 1);
+
+    // if this operation has async work items, try to cancel them
+    if(!all_work_items.empty()) {
+      for(std::set<AsyncWorkItem *>::iterator it = all_work_items.begin();
+	  it != all_work_items.end();
+	  it++)
+	(*it)->request_cancellation();
+    }
+
+    // can't trigger the finish event immediately if async work items are pending
+    int remaining = __sync_sub_and_fetch(&pending_work_items, 1);
+
+    if(remaining == 0)
+      mark_completed();    
+  }
+
   void Operation::mark_completed(void)
   {
+    // don't overwrite a TERMINATED_EARLY or CANCELLED status
+    Status::Result newresult = ((failed_work_items == 0) ?
+  				  Status::COMPLETED_SUCCESSFULLY :
+				  Status::COMPLETED_WITH_ERRORS);
+    Status::Result prev = __sync_val_compare_and_swap(&status.result,
+						      Status::RUNNING,
+						      newresult);
+    assert((prev == Status::RUNNING) ||
+	   (prev == Status::TERMINATED_EARLY) ||
+	   (prev == Status::CANCELLED));
+
     timeline.record_complete_time();
 
     send_profiling_data();
 
     // trigger the finish event last - the OperationTable will delete us shortly after we do
-    trigger_finish_event(false /*!poisoned*/);
+    // poison if there were any failed work items
+    trigger_finish_event(failed_work_items != 0);
   }
 
   bool Operation::attempt_cancellation(int error_code,
 				       const void *reason_data, size_t reason_size)
   {
-    // TODO: at least try
+    // all we know how to do here is convert from WAITING or READY to CANCELLED
+    // there's no mutex, so we'll attempt to update the status with a sequence of 
+    //  compare_and_swap's, making sure to follow the normal progression of status updates
+    if(__sync_bool_compare_and_swap(&status.result, Status::WAITING, Status::CANCELLED) ||
+       __sync_bool_compare_and_swap(&status.result, Status::READY, Status::CANCELLED)) {
+      status.error_code = error_code;
+      status.error_details.set(reason_data, reason_size);
+
+      // we can't call mark_finished here, because we don't know if the caller owns the 
+      //  reference that will be released by that call, so let the caller do that (or
+      //  the owner can do it when they call mark_ready/started and get a failure code)
+
+      return true;
+    }
+
+    // otherwise we return false - a subclass might override and add additional ways to
+    //  cancel an already-running operation
     return false;
   }
 
   void Operation::send_profiling_data(void)
   {
     if(requests.request_count() > 0) {
+      if(measurements.wants_measurement<ProfilingMeasurements::OperationStatus>())
+	measurements.add_measurement(status);
+
       if(measurements.wants_measurement<ProfilingMeasurements::OperationTimeline>())
 	measurements.add_measurement(timeline);
 

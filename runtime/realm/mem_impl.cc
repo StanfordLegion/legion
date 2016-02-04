@@ -1469,7 +1469,7 @@ namespace Realm {
     log_copy.debug("remote write fence ack: fence = %p",
 		   args.fence);
 
-    args.fence->mark_finished();
+    args.fence->mark_finished(true /*successful*/);
   }
 
   /*static*/ void RemoteWriteFenceAckMessage::send_request(gasnet_node_t target,

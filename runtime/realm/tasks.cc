@@ -51,20 +51,20 @@ namespace Realm {
     os << "task(proc=" << proc << ", func=" << func_id << ")";
   }
 
-  void Task::mark_ready(void)
+  bool Task::mark_ready(void)
   {
     log_task.info() << "task " << this << " ready: func=" << func_id
 		    << " proc=" << proc << " arglen=" << args.size()
 		    << " before=" << before_event << " after=" << finish_event;
-    Operation::mark_ready();
+    return Operation::mark_ready();
   }
 
-  void Task::mark_started(void)
+  bool Task::mark_started(void)
   {
     log_task.info() << "task " << this << " started: func=" << func_id
 		    << " proc=" << proc << " arglen=" << args.size()
 		    << " before=" << before_event << " after=" << finish_event;
-    Operation::mark_started();
+    return Operation::mark_started();
   }
 
   void Task::mark_completed(void)
@@ -103,32 +103,50 @@ namespace Realm {
       measurements.add_measurement(opu);
     }
 
-    mark_started();
+    // mark that we're starting the task, checking for cancellation
+    bool ok_to_run = mark_started();
 
-    // make sure the current processor is set during execution of the task
-    ThreadLocal::current_processor = p;
+    if(ok_to_run) {
+      // make sure the current processor is set during execution of the task
+      ThreadLocal::current_processor = p;
 
-    //(*fptr)(args.base(), args.size(), p);
+#ifdef REALM_USE_EXCEPTIONS
+      // even if exceptions are enabled, we only install handlers if somebody is paying
+      //  attention to the OperationStatus
+      if(measurements.wants_measurement<ProfilingMeasurements::OperationStatus>()) {
+	try {
+	  Thread::ExceptionHandlerPresence ehp;
+	  get_runtime()->get_processor_impl(p)->execute_task(func_id, args);
+	  mark_finished(true /*successful*/);
+	}
+	catch (const ExecutionException& e) {
+	  e.populate_profiling_measurements(measurements);
+	  mark_terminated(e.error_code, e.details);
+	}
+      } else
+#endif
+      {
+	// just run the task - if it completes, we assume it was successful
+	get_runtime()->get_processor_impl(p)->execute_task(func_id, args);
 
-    get_runtime()->get_processor_impl(p)->execute_task(func_id, args);
+	mark_finished(true /*successful*/);
+      }
 
-    // and clear the TLS when we're done
-    // TODO: get this right when using user threads
-    //ThreadLocal::current_processor = Processor::NO_PROC;
-
-    mark_finished();
+      // and clear the TLS when we're done
+      // TODO: get this right when using user threads
+      //ThreadLocal::current_processor = Processor::NO_PROC;
 
 #ifdef EVENT_GRAPH_TRACE
-    unsigned long long stop = TimeStamp::get_current_time_in_micros();
-    finish_enclosing();
-    log_event_graph.debug("Task Time: (" IDFMT ",%d) %lld",
-			  finish_event.id, finish_event.gen,
-			  (stop - start));
+      unsigned long long stop = TimeStamp::get_current_time_in_micros();
+      finish_enclosing();
+      log_event_graph.debug("Task Time: (" IDFMT ",%d) %lld",
+			    finish_event.id, finish_event.gen,
+			    (stop - start));
 #endif
-#if 0
-    log_util(((func_id == 3) ? LEVEL_SPEW : LEVEL_INFO), 
-	     "task end: %d (%p) (%s)", func_id, fptr, argstr);
-#endif
+    } else {
+      // !ok_to_run
+      mark_finished(false /*!successful*/);
+    }
   }
 
 

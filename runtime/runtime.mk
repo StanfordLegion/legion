@@ -290,6 +290,7 @@ LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/runtime_impl.cc \
 	           $(LG_RT_DIR)/lowlevel_dma.cc \
 	           $(LG_RT_DIR)/realm/module.cc \
 	           $(LG_RT_DIR)/realm/threads.cc \
+	           $(LG_RT_DIR)/realm/faults.cc \
 		   $(LG_RT_DIR)/realm/operation.cc \
 	           $(LG_RT_DIR)/realm/tasks.cc \
 	           $(LG_RT_DIR)/realm/metadata.cc \

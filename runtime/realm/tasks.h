@@ -45,8 +45,8 @@ namespace Realm {
       virtual ~Task(void);
 
     public:
-      virtual void mark_ready(void);
-      virtual void mark_started(void);
+      virtual bool mark_ready(void);
+      virtual bool mark_started(void);
 
       virtual void print(std::ostream& os) const;
 
