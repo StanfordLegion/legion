@@ -283,8 +283,84 @@ namespace Legion {
       void invalidate_current_context(RegionTreeContext ctx,
                                       LogicalRegion handle,
                                       bool logical_users_only);
-    public:
-      // Physical analysis methods
+    public: // Physical analysis methods
+#if 1
+      void physical_traverse_path(RegionTreeContext ctx,
+                                  RegionTreePath &path,
+                                  const RegionRequirement &req,
+                                  VersionInfo &version_info,
+                                  Operation *op, bool find_valid,
+                                  std::vector<InstanceRef> &valid_insts
+#ifdef DEBUG_HIGH_LEVEL
+                                  , unsigned index,
+                                  , const char *log_name
+                                  , UniqueID uid
+#endif
+                                  );
+      void traverse_and_register(RegionTreeContext ctx,
+                                 RegionTreePath &path,
+                                 const RegionRequirement &req,
+                                 VersionInfo &version_info,
+                                 Operation *op, Event term_event, 
+                                 const std::vector<InstanceRef> &targets
+#ifdef DEBUG_HIGH_LEVEL
+                                 , unsigned index
+                                 , const char *log_name
+                                 , UniqueID uid
+#endif
+                                 );
+      void physical_register_only(RegionTreeContext ctx,
+                                  const RegionRequirement &req,
+                                  VersionInfo &version_info,
+                                  Operation *op, Event term_event,
+                                  const std::vector<InstanceRef> &targets
+#ifdef DEBUG_HIGH_LEVEL
+                                 , unsigned index
+                                 , const char *log_name
+                                 , UniqueID uid
+#endif
+                                 );
+      void physical_perform_close(RegionTreeContext ctx,
+                                  const RegionRequirement &req,
+                                  VersionInfo &version_info,
+                                  Operation *op, Event &closed,
+                    const LegionMap<ColorPoint,FieldMask>::aligned &to_close,
+                    const std::set<ColorPoint> &next_children,
+                    const std::vector<InstanceRef> &targets
+#ifdef DEBUG_HIGH_LEVEL
+                                  , unsigned index
+                                  , const char *log_name
+                                  , UniqueID uid
+#endif
+                                  );
+      Event physical_close_context(RegionTreeContext ctx,
+                                   const RegionRequirement &req,
+                                   VersionInfo &version_info,
+                                   Operation *op,
+                                   const std::vector<InstanceRef> &targets
+#ifdef DEBUG_HIGH_LEVEL
+                                   , unsigned index
+                                   , const char *log_name
+                                   , UniqueID uid
+#endif
+                                   );
+      Event copy_across(RegionTreeContext src_ctx,
+                        RegionTreeContext dst_ctx,
+                        const RegionRequirement &src_req,
+                        const RegionRequirement &dst_req,
+                        const std::vector<InstanceRef> &src_targets,
+                        const std::vector<InstanceRef> &dst_targets,
+                        VersionInfo &version_info,
+                        Operation *op, Event precondition);
+      Event reduce_across(RegionTreeContext src_ctx,
+                          RegionTreeContext dst_ctx,
+                          const RegionRequirement &src_req,
+                          const RegionRequirement &dst_req,
+                          const std::vector<InstanceRef> &src_targets,
+                          const std::vector<InstanceRef> &dst_targets,
+                          VersionInfo &version_info,
+                          Operation *op, Event precondition);
+#else
       bool premap_physical_region(RegionTreeContext ctx,
                                   RegionTreePath &path,
                                   RegionRequirement &req,
@@ -428,6 +504,7 @@ namespace Legion {
                         const InstanceRef &src_ref,
                         const InstanceRef &dst_ref,
                         Event precondition);
+#endif
       // This takes ownership of the value buffer
       void fill_fields(RegionTreeContext ctx,
                        const RegionRequirement &req,
