@@ -69,33 +69,20 @@ task main()
 
   var prod = cross_product(part0, part1, part2)
 
-  var r0 = prod[0]
-  var r1 = prod[1]
+  var r0 = part0[0]
+  var r1 = part0[1]
 
   -- Check static constraints
   assert_disjoint(r0, r1)
 
-  var r00 = prod[0].partition[0]
-  var r01 = prod[0].partition[1]
-  var r10 = prod[1].partition[0]
-  var r11 = prod[1].partition[1]
-
-  -- Check static constraints
-  assert_disjoint(r00, r01)
-  assert_disjoint(r00, r10)
-  assert_disjoint(r00, r11)
-  assert_disjoint(r01, r10)
-  assert_disjoint(r01, r11)
-  assert_disjoint(r10, r11)
-
-  var r000 = prod[0].product[0].partition[0]
-  var r001 = prod[0].product[0].partition[1]
-  var r010 = prod[0].product[1].partition[0]
-  var r011 = prod[0].product[1].partition[1]
-  var r100 = prod[1].product[0].partition[0]
-  var r101 = prod[1].product[0].partition[1]
-  var r110 = prod[1].product[1].partition[0]
-  var r111 = prod[1].product[1].partition[1]
+  var r000 = prod[0][0][0]
+  var r001 = prod[0][0][1]
+  var r010 = prod[0][1][0]
+  var r011 = prod[0][1][1]
+  var r100 = prod[1][0][0]
+  var r101 = prod[1][0][1]
+  var r110 = prod[1][1][0]
+  var r111 = prod[1][1][1]
 
   -- Check static constraints
   assert_disjoint(r000, r001)

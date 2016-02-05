@@ -1692,58 +1692,6 @@ function std.ispace(index_type)
   st.index_type = index_type
   st.dim = index_type.dim
 
-  -- Ispace types can have an optional partition. This is used by
-  -- cross_product to enable patterns like prod[i][j]. Of course, the
-  -- ispace can have other partitions as well. This is simply used as
-  -- the default partition when attempting to access something out of
-  -- a ispace.
-  function st:set_default_partition(partition)
-    local previous_default = rawget(self, "partition")
-    if previous_default and previous_default ~= partition then
-      assert(false, "Ispace type can only have one default partition")
-    end
-    if not (std.is_partition(partition) or std.is_cross_product(partition)) then
-      assert(false, "Ispace type requires default partition to be a partition or cross product")
-    end
-    if partition:parent_ispace() ~= self then
-      assert(false, "Ispace type requires default partition to be a partition of self")
-    end
-    self.partition = partition
-  end
-
-  function st:has_default_partition()
-    return rawget(self, "partition")
-  end
-
-  function st:default_partition()
-    local partition = rawget(self, "partition")
-    if not partition then
-      assert(false, "Ispace type has no default partition")
-    end
-    return partition
-  end
-
-  -- Methods for the partition API:
-  function st:is_disjoint()
-    return self:default_partition():is_disjoint()
-  end
-
-  function st:parent_ispace()
-    return self
-  end
-
-  function st:subispace_constant(i)
-    return self:default_partition():subispace_constant(i)
-  end
-
-  function st:subispaces_constant()
-    return self:default_partition():subispaces_constant()
-  end
-
-  function st:subispace_dynamic(i)
-    return self:default_partition():subispace_dynamic(i)
-  end
-
   function st:force_cast(from, to, expr)
     assert(std.is_ispace(from) and std.is_ispace(to))
     return `([to] { impl = [expr].impl })
@@ -1794,84 +1742,6 @@ function std.region(ispace_symbol, fspace_type)
   -- For API compatibility with std.list:
   function st:list_depth()
     return 0
-  end
-
-  -- Region types can have an optional partition. This is used by
-  -- cross_product to enable patterns like prod[i][j]. Of course, the
-  -- region can have other partitions as well. This is simply used as
-  -- the default partition when attempting to access something out of
-  -- a region.
-  function st:set_default_partition(partition)
-    local previous_default = rawget(self, "partition")
-    if previous_default and previous_default ~= partition then
-      assert(false, "Region type can only have one default partition")
-    end
-    if not std.is_partition(partition) then
-      assert(false, "Region type requires default partition to be a partition")
-    end
-    if partition:parent_region() ~= self then
-      assert(false, "Region type requires default partition to be a partition of self")
-    end
-    self.partition = partition
-  end
-
-  function st:has_default_partition()
-    return rawget(self, "partition")
-  end
-
-  function st:default_partition()
-    local partition = rawget(self, "partition")
-    if not partition then
-      assert(false, "Region type has no default partition")
-    end
-    return partition
-  end
-
-  function st:set_default_product(product)
-    local previous_default = rawget(self, "product")
-    if previous_default and previous_default ~= product then
-      assert(false, "Region type can only have one default product")
-    end
-    if not std.is_cross_product(product) then
-      assert(false, "Region type requires default product to be a cross product")
-    end
-    if product:parent_region() ~= self then
-      assert(false, "Region type requires default product to be a partition of self")
-    end
-    self.product = product
-  end
-
-  function st:has_default_product()
-    return rawget(self, "product")
-  end
-
-  function st:default_product()
-    local product = rawget(self, "product")
-    if not product then
-      assert(false, "Region type has no default product")
-    end
-    return product
-  end
-
-  -- Methods for the partition API:
-  function st:is_disjoint()
-    return self:default_partition():is_disjoint()
-  end
-
-  function st:parent_region()
-    return self
-  end
-
-  function st:subregion_constant(i)
-    return self:default_partition():subregion_constant(i)
-  end
-
-  function st:subregions_constant()
-    return self:default_partition():subregions_constant()
-  end
-
-  function st:subregion_dynamic(i)
-    return self:default_partition():subregion_dynamic(i)
   end
 
   function st:force_cast(from, to, expr)
@@ -2031,15 +1901,6 @@ function std.cross_product(...)
 
   function st:subregion_constant(i)
     local region_type = self:partition():subregion_constant(i)
-    local partition_type = self:subpartition_constant(i, region_type)
-    if std.is_cross_product(partition_type) then
-      region_type:set_default_partition(partition_type:partition())
-      region_type:set_default_product(partition_type)
-    elseif std.is_partition(partition_type) then
-      region_type:set_default_partition(partition_type)
-    else
-      assert(false)
-    end
     return region_type
   end
 
@@ -2047,29 +1908,23 @@ function std.cross_product(...)
     return self:partition():subregions_constant()
   end
 
-  function st:subregion_dynamic(i)
-    local region_type = self:partition():subregion_dynamic(i)
-    local partition_type = self:subpartition_dynamic(i, region_type)
-    if std.is_cross_product(partition_type) then
-      region_type:set_default_partition(partition_type:partition())
-      region_type:set_default_product(partition_type)
-    elseif std.is_partition(partition_type) then
-      region_type:set_default_partition(partition_type)
-    else
-      assert(false)
-    end
+  function st:subregion_dynamic()
+    local region_type = self:partition():subregion_dynamic()
     return region_type
   end
 
-  function st:subpartition_constant(i, region_type)
+  function st:subpartition_constant(i)
+    local region_type = self:subregion_constant(i)
     if not self.subpartitions[i] then
-      local partition = st:subpartition_dynamic(i, region_type)
+      local partition = st:subpartition_dynamic(region_type)
       self.subpartitions[i] = partition
     end
     return self.subpartitions[i]
   end
 
-  function st:subpartition_dynamic(i, region_type)
+  function st:subpartition_dynamic(region_type)
+    region_type = region_type or self:subregion_dynamic()
+    assert(std.is_region(region_type))
     local region_symbol = terralib.newsymbol(region_type)
     local partition = std.partition(self:partition(2).disjointness, region_symbol)
     if #partition_symbols > 2 then
