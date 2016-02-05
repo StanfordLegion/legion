@@ -124,6 +124,8 @@ function std.copy_privileges(cx, from_region, to_region)
 end
 
 function std.add_constraint(cx, lhs, rhs, op, symmetric)
+  if std.is_cross_product(lhs) then lhs = lhs:partition() end
+  if std.is_cross_product(rhs) then rhs = rhs:partition() end
   assert(std.type_supports_constraints(lhs))
   assert(std.type_supports_constraints(rhs))
   if not cx.constraints[op] then
@@ -259,6 +261,7 @@ function std.check_constraint(cx, constraint)
   elseif terralib.issymbol(lhs) then
     lhs = lhs.type
   end
+  if std.is_cross_product(lhs) then lhs = lhs:partition() end
   assert(std.type_supports_constraints(lhs))
 
   local rhs = constraint.rhs
@@ -267,6 +270,7 @@ function std.check_constraint(cx, constraint)
   elseif terralib.issymbol(rhs) then
     rhs = rhs.type
   end
+  if std.is_cross_product(rhs) then rhs = rhs:partition() end
   assert(std.type_supports_constraints(rhs))
 
   local constraint = {
@@ -565,6 +569,10 @@ end
 
 function std.is_list_of_regions(t)
   return std.is_list(t) and t:is_list_of_regions()
+end
+
+function std.is_list_of_partitions(t)
+  return std.is_list(t) and t:is_list_of_partitions()
 end
 
 function std.is_list_of_phase_barriers(t)
@@ -1891,6 +1899,10 @@ function std.cross_product(...)
     return self:partitions()[i or 1]
   end
 
+  function st:fspace()
+    return self:partition():fspace()
+  end
+
   function st:is_disjoint()
     return self:partition():is_disjoint()
   end
@@ -2160,6 +2172,11 @@ std.list = terralib.memoize(function(element_type, partition_type, privilege_dep
   function st:is_list_of_regions()
     return std.is_region(self.element_type) or
       std.is_list_of_regions(self.element_type)
+  end
+
+  function st:is_list_of_partitions()
+    return std.is_partition(self.element_type) or
+      std.is_list_of_partitions(self.element_type)
   end
 
   function st:is_list_of_phase_barriers()
