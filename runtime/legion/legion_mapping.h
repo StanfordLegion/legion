@@ -254,11 +254,11 @@ namespace Legion {
        * region requirements in the task.
        */
       struct PremapTaskInput {
-        std::set<unsigned>                              must_premap;
-        std::vector<std::set<PhysicalInstance> >        valid_instances;
+        std::set<unsigned>                                 must_premap;
+        std::vector<std::vector<PhysicalInstance> >        valid_instances;
       };
       struct PremapTaskOutput {
-        std::map<unsigned,std::set<PhysicalInstance> >  premapped_instances;
+        std::map<unsigned,std::vector<PhysicalInstance> >  premapped_instances;
       };
       //------------------------------------------------------------------------
       virtual void premap_task(const MapperContext      ctx,
@@ -362,10 +362,10 @@ namespace Legion {
        * region requirement in 'region_prof_requests'.
        */
       struct MapTaskInput {
-        std::vector<std::set<PhysicalInstance> >        valid_instances;
+        std::vector<std::vector<PhysicalInstance> >     valid_instances;
       };
       struct MapTaskOutput {
-        std::vector<std::set<PhysicalInstance> >        chosen_instances; 
+        std::vector<std::vector<PhysicalInstance> >     chosen_instances; 
         std::deque<VariantID>                           variant_ranking;
         std::set<Processor>                             additional_procs;
         TaskPriority                                    task_priority;  // = 0
@@ -680,10 +680,10 @@ namespace Legion {
        * instances need to be moved between different nodes.
        */
       struct MapCloseInput {
-        std::set<PhysicalInstance>                  valid_instances;
+        std::vector<PhysicalInstance>               valid_instances;
       };
       struct MapCloseOutput {
-        std::set<PhysicalInstance>                  chosen_instances;
+        std::vector<PhysicalInstance>               chosen_instances;
         ProfilingRequestSet                         profiling_requests;
       };
       //------------------------------------------------------------------------
