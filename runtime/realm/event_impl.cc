@@ -458,7 +458,7 @@ namespace Realm {
 	bool poisoned = false;
 	if(wait_for.has_triggered_faultaware(poisoned)) {
 	  if(poisoned) {
-	    // always count faults, but don't necessarily propagage
+	    // always count faults, but don't necessarily propagate
 	    bool first_fault = (__sync_fetch_and_add(&faults_observed, 1) == 0);
 	    if(first_fault && !ignore_faults) {
 	      log_poison.info() << "event merger early poison: after=" << finish_event;
@@ -541,12 +541,14 @@ namespace Realm {
 	  it++) {
 	bool poisoned = false;
 	if((*it).has_triggered_faultaware(poisoned)) {
-	  // if we're not ignoring faults, we need to propagate this fault, and can do
-	  //  so by just returning this poisoned event
-	  if(!ignore_faults) {
-	    log_poison.info() << "merging events - " << (*it) << " already poisoned";
-	    return *it;
-	  }
+          if(poisoned) {
+	    // if we're not ignoring faults, we need to propagate this fault, and can do
+	    //  so by just returning this poisoned event
+	    if(!ignore_faults) {
+	      log_poison.info() << "merging events - " << (*it) << " already poisoned";
+	      return *it;
+	    }
+          }
 	} else {
 	  if(!wait_count) first_wait = *it;
 	  wait_count++;
