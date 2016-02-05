@@ -290,9 +290,9 @@ namespace Legion {
                                   const RegionRequirement &req,
                                   VersionInfo &version_info,
                                   Operation *op, bool find_valid,
-                                  std::vector<InstanceRef> &valid_insts
+                      LegionVector<InstanceRef>::aligned &valid_insts
 #ifdef DEBUG_HIGH_LEVEL
-                                  , unsigned index,
+                                  , unsigned index
                                   , const char *log_name
                                   , UniqueID uid
 #endif
@@ -302,7 +302,7 @@ namespace Legion {
                                  const RegionRequirement &req,
                                  VersionInfo &version_info,
                                  Operation *op, Event term_event, 
-                                 const std::vector<InstanceRef> &targets
+                      const LegionVector<InstanceRef>::aligned &targets
 #ifdef DEBUG_HIGH_LEVEL
                                  , unsigned index
                                  , const char *log_name
@@ -313,7 +313,7 @@ namespace Legion {
                                   const RegionRequirement &req,
                                   VersionInfo &version_info,
                                   Operation *op, Event term_event,
-                                  const std::vector<InstanceRef> &targets
+                      const LegionVector<InstanceRef>::aligned &targets
 #ifdef DEBUG_HIGH_LEVEL
                                  , unsigned index
                                  , const char *log_name
@@ -324,9 +324,10 @@ namespace Legion {
                                   const RegionRequirement &req,
                                   VersionInfo &version_info,
                                   Operation *op, Event &closed,
+                                  int composite_index,
                     const LegionMap<ColorPoint,FieldMask>::aligned &to_close,
                     const std::set<ColorPoint> &next_children,
-                    const std::vector<InstanceRef> &targets
+                    const LegionVector<InstanceRef>::aligned &targets
 #ifdef DEBUG_HIGH_LEVEL
                                   , unsigned index
                                   , const char *log_name
@@ -337,7 +338,7 @@ namespace Legion {
                                    const RegionRequirement &req,
                                    VersionInfo &version_info,
                                    Operation *op,
-                                   const std::vector<InstanceRef> &targets
+                      const LegionVector<InstanceRef>::aligned &targets
 #ifdef DEBUG_HIGH_LEVEL
                                    , unsigned index
                                    , const char *log_name
@@ -348,18 +349,23 @@ namespace Legion {
                         RegionTreeContext dst_ctx,
                         const RegionRequirement &src_req,
                         const RegionRequirement &dst_req,
-                        const std::vector<InstanceRef> &src_targets,
-                        const std::vector<InstanceRef> &dst_targets,
+                        const LegionVector<InstanceRef>::aligned &src_targets,
+                        const LegionVector<InstanceRef>::aligned &dst_targets,
                         VersionInfo &version_info,
                         Operation *op, Event precondition);
       Event reduce_across(RegionTreeContext src_ctx,
                           RegionTreeContext dst_ctx,
                           const RegionRequirement &src_req,
                           const RegionRequirement &dst_req,
-                          const std::vector<InstanceRef> &src_targets,
-                          const std::vector<InstanceRef> &dst_targets,
+                          const LegionVector<InstanceRef>::aligned &src_targets,
+                          const LegionVector<InstanceRef>::aligned &dst_targets,
                           VersionInfo &version_info,
                           Operation *op, Event precondition);
+      int physical_convert_mapping(const RegionRequirement &req,
+                               const std::vector<MappingInstance> &chosen,
+                               const LegionVector<InstanceRef>::aligned &valid,
+                               LegionVector<InstanceRef>::aligned &result,
+                               std::vector<FieldID> &missing_fields);
 #else
       bool premap_physical_region(RegionTreeContext ctx,
                                   RegionTreePath &path,

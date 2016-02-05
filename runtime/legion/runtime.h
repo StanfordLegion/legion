@@ -18,6 +18,7 @@
 #define __RUNTIME_H__
 
 #include "legion.h"
+#include "legion_spy.h"
 #include "region_tree.h"
 #include "mapper_manager.h"
 #include "legion_utilities.h"
@@ -299,11 +300,12 @@ namespace Legion {
       void unmap_region(void);
       void remap_region(Event new_ready_event);
       const RegionRequirement& get_requirement(void) const;
-      void set_reference(const InstanceRef &ref);
-      void reset_reference(const InstanceRef &ref, 
+      void set_reference(LegionVector<InstanceRef>::aligned &references);
+      void reset_references(const LegionVector<InstanceRef>::aligned &instances,
                            UserEvent term_event);
       Event get_ready_event(void) const;
-      const InstanceRef& get_reference(void) const;
+      bool has_references(void) const;
+      void get_references(LegionVector<InstanceRef>::aligned &instances) const;
       void get_memories(std::set<Memory>& memories) const;
       void get_fields(std::vector<FieldID>& fields) const;
 #if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS)
@@ -2375,6 +2377,8 @@ namespace Legion {
 #endif
     public:
       static unsigned num_profiling_nodes;
+    public:
+      static inline Event merge_events(const std::set<Event> &events);
     };
 
     /**
@@ -2491,6 +2495,23 @@ namespace Legion {
       assert(result != NULL);
 #endif
       result->activate();
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline Event Runtime::merge_events(const std::set<Event> &events)
+    //--------------------------------------------------------------------------
+    {
+      Event result = Event::merge_events(events);
+#ifdef LEGION_SPY
+      if (!result.exists())
+      {
+        UserEvent rename = UserEvent::create_user_event();
+        rename.trigger();
+        result = rename;
+      }
+      LegionSpy::log_event_dependences(events, result);
+#endif
       return result;
     }
 

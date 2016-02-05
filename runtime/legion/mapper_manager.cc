@@ -39,6 +39,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    const char* MapperManager::get_mapper_name(void)
+    //--------------------------------------------------------------------------
+    {
+      return mapper->get_mapper_name();
+    }
+
+    //--------------------------------------------------------------------------
     void MapperManager::invoke_select_task_options(TaskOp *task, 
                             Mapper::TaskOptions *options, bool first_invocation)
     //--------------------------------------------------------------------------

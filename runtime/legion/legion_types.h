@@ -621,7 +621,6 @@ namespace Legion {
 
     class DistributedCollectable;
     class LayoutDescription;
-    class PhysicalInstanceImpl;
     class PhysicalManager; // base class for instance and reduction
     class LogicalView; // base class for instance and reduction
     class InstanceManager;
@@ -901,12 +900,14 @@ namespace Legion {
   // Anothing magical typedef
   namespace Mapping {
     typedef Internal::MappingCallInfo* MapperContext;
-    typedef Internal::PhysicalInstanceImpl PhysicalInstanceImpl;
+    typedef const Internal::InstanceRef* PhysicalContextImpl;
+    typedef const Internal::InstanceManager* PhysicalInstanceImpl;
   };
 
   namespace Internal {
-    // Pull the mapper types into the internal space
+    // Pull some of the mapper types into the internal space
     typedef Mapping::Mapper Mapper;
+    typedef Mapping::PhysicalInstance MappingInstance;
 
     // A little bit of logic here to figure out the 
     // kind of bit mask to use for FieldMask

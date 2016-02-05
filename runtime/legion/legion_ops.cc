@@ -919,6 +919,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    /*static*/ void Operation::prepare_for_mapping(
+                                const LegionVector<InstanceRef>::aligned &valid,
+                                std::set<MappingInstance> &input_valid)
+    //--------------------------------------------------------------------------
+    {
+      input_valid.resize(valid.size());
+      for (unsigned idx = 0; idx < valid.size(); idx++)
+      {
+        const InstanceRef &ref = valid_instances[idx];
+        MappingInstance &inst = input.valid_instances[idx];
+        inst = ref.get_mapping_instance();
+        inst.ctx = &ref;
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void Operation::MappingDependenceTracker::issue_stage_triggers(
                       Operation *op, Runtime *runtime, MustEpochOp *must_epoch)
     //--------------------------------------------------------------------------
@@ -1576,7 +1592,7 @@ namespace Legion {
       region.impl->remap_region(completion_event);
       // We're only really remapping it if it already had a physical
       // instance that we can use to make a valid value
-      remap_region = region.impl->get_reference().has_ref();
+      remap_region = region.impl->has_references();
       // No need to check the privileges here since we know that we have
       // them from the first time that we made this physical region
       initialize_privilege_path(privilege_path, requirement);
@@ -1603,8 +1619,8 @@ namespace Legion {
     {
       activate_operation();
       parent_ctx = NULL;
-      premapped = false;
       remap_region = false;
+      mapper = NULL;
     }
 
     //--------------------------------------------------------------------------
@@ -1685,142 +1701,105 @@ namespace Legion {
     {
       RegionTreeContext physical_ctx = 
         parent_ctx->find_enclosing_context(parent_req_index);
-      Processor local_proc = parent_ctx->get_executing_processor();
-      // If we haven't already premapped the path, then do so now
-      if (!premapped)
-      {
-        premapped = runtime->forest->premap_physical_region(
-                  physical_ctx, privilege_path, requirement, version_info, 
-                  this, parent_ctx, local_proc
-#ifdef DEBUG_HIGH_LEVEL
-                  , 0/*idx*/, get_logging_name(), unique_op_id
-#endif
-                  );
-#ifdef DEBUG_HIGH_LEVEL
-        assert(premapped);
-#endif
-      }
-      MappingRef map_ref;
-      bool notify = false;
+      LegionVector<InstanceRef>::aligned mapped_instances;
       // If we are restricted we know the answer
       if (restrict_info.has_restrictions())
       {
-        InstanceRef target_inst = privilege_path.translate_ref(
-            parent_ctx->get_local_reference(parent_req_index));
-        map_ref = runtime->forest->map_restricted_region(physical_ctx,
-                                                         requirement,
-                                                         0/*idx*/,
-                                                         version_info,
-                                                         local_proc,
-                                                         target_inst
+        parent_ctx->get_local_references(parent_req_index, mapped_instances);
+        runtime->forest->traverse_and_register(physical_ctx, privilege_path,
+                                               requirement, version_info,
+                                               this, termination_event, 
+                                               mapped_instances
 #ifdef DEBUG_HIGH_LEVEL
-                                                         , get_logging_name()
-                                                         , unique_op_id
+                                               , 0/*idx*/, get_logging_name()
+                                               , unique_op_id
 #endif
-                                                         );
-#ifdef DEBUG_HIGH_LEVEL
-        assert(map_ref.has_ref());
-#endif
+                                               );
       }
       // If we are remapping then we also know the answer
       else if (remap_region)
       {
-        InstanceRef target = region.impl->get_reference();
-        // We're remapping the region so we don't actually
-        // need to ask the mapper about anything when doing the remapping
-        map_ref = runtime->forest->remap_physical_region(physical_ctx,
-                                                         requirement,
-                                                         0/*idx*/,
-                                                         version_info,
-                                                         target
+        region.impl->get_references(mapped_instances);
+        runtime->forest->traverse_and_register(physical_ctx, privilege_path,
+                                               requirement, version_info,
+                                               this, termination_event,
+                                               mapped_instances
 #ifdef DEBUG_HIGH_LEVEL
-                                                         , get_logging_name()
-                                                         , unique_op_id
+                                               , 0/*idx*/, get_logging_name()
+                                               , unique_op_id
 #endif
-                                                         );
-#ifdef DEBUG_HIGH_LEVEL
-        assert(map_ref.has_ref());
-#endif
-
+                                               );
       }
       else
       {
-        // Now ask the mapper how to map this inline mapping operation 
-        notify = runtime->invoke_mapper_map_inline(local_proc, this);
-        // Do the mapping and see if it succeeded 
-        map_ref = runtime->forest->map_physical_region(physical_ctx,
-                                                       requirement,
-                                                       0/*idx*/,
-                                                       version_info,
-                                                       this,
-                                                       local_proc,
-                                                       local_proc
+        // We're going to need to invoke the mapper, find the set of valid
+        // instances as part of our traversal
+        LegionVector<InstanceRef>::aligned valid_instances;
+        runtime->forest->physical_traverse_path(physical_ctx, privilege_path,
+                                                requirement, version_info,
+                                                this, true/*find valid*/,
+                                                valid_instances
 #ifdef DEBUG_HIGH_LEVEL
-                                                       , get_logging_name()
-                                                       , unique_op_id
+                                                , 0/*idx*/, get_logging_name()
+                                                , unique_op_id
 #endif
-                                                       );
-        if (!map_ref.has_ref())
-        {
-          requirement.mapping_failed = true;
-          requirement.selected_memory = Memory::NO_MEMORY;
-          // Tell the mapper that we failed to map
-          runtime->invoke_mapper_failed_mapping(local_proc, this);
-          // clear the version info
-          version_info.reset();
-          return false;
-        }
+                                                );
+        // Now we've got the valid instances so invoke the mapper
+        invoke_mapper(valid_instances, mapped_instances);
+        // Then we can register our mapped instances
+        runtime->forest->physical_register_only(physical_ctx, requirement,
+                                                version_info, this,
+                                                termination_event, 
+                                                mapped_instances
+#ifdef DEBUG_HIGH_LEVEL
+                                                , 0/*idx*/, get_logging_name()
+                                                , unique_op_id
+#endif
+                                                );
       }
-      InstanceRef result = runtime->forest->register_physical_region(
-                                                                physical_ctx,
-                                                                map_ref,
-                                                                requirement,
-                                                                0/*idx*/,
-                                                                version_info,
-                                                                this,
-                                                                local_proc,
-                                                            termination_event
 #ifdef DEBUG_HIGH_LEVEL
-                                                          , get_logging_name()
-                                                          , unique_op_id
-#endif
-                                                            );
-#ifdef DEBUG_HIGH_LEVEL
-      assert(result.has_ref());
+      assert(!mapped_instances.empty());
 #endif
       // We're done so apply our mapping changes
       std::set<Event> applied_conditions;
       version_info.apply_mapping(physical_ctx.get_id(), 
                                  runtime->address_space, applied_conditions);
-      // We succeeded in mapping, so set up our physical region with
-      // the reference information.  Note that the physical region
-      // becomes responsible for triggering the termination event
-      // when it unmaps so we can recycle this mapping operation 
-      // immediately.
-      if (notify)
+      // Update our physical instance with the newly mapped instances
+      // Have to do this before triggering the mapped event
+      region.impl->reset_references(mapped_instances, termination_event);
+      Event map_complete_event = Event::NO_EVENT;
+      if (mapped_instances.size() > 1)
       {
-        requirement.mapping_failed = false;
-        requirement.selected_memory = result.get_memory();
-        runtime->invoke_mapper_notify_result(local_proc, this);
+        std::set<Event> mapped_events;
+        for (LegionVector<InstanceRef>::aligned::const_iterator it = 
+              mapped_instances.begin(); it != mapped_instances.end(); it++)
+        {
+          mapped_events.insert(it->get_ready_event());
+        }
+        map_complete_event = Runtime::merge_events(mapped_events);
       }
+      else
+        map_complete_event = mapped_instances.front().get_ready_event();
 #ifdef LEGION_SPY
       // Log an implicit dependence on the parent's start event
       LegionSpy::log_implicit_dependence(parent_ctx->get_start_event(),
-                                         result.get_ready_event());
-      LegionSpy::log_op_events(unique_op_id, result.get_ready_event(),
+                                         map_complete_event);
+      LegionSpy::log_op_events(unique_op_id, map_complete_event,
                                 termination_event);
       // Log an implicit dependence on the parent's term event
       LegionSpy::log_implicit_dependence(termination_event, 
                                          parent_ctx->get_task_completion());
-      LegionSpy::log_op_user(unique_op_id, 0/*idx*/, 
-          result.get_manager()->get_instance().id);
+      for (LegionVector<InstanceRef>::aligned::const_iterator it = 
+            mapped_instances.begin(); it != mapped_instances.end(); it++)
+      {
+        LegionSpy::log_op_user(unique_op_id, 0/*idx*/, 
+            it->get_manager()->get_instance().id);
+      }
       {
         Processor proc = Processor::get_executing_processor();
         LegionSpy::log_op_proc_user(unique_op_id, proc.id);
       }
 #endif
-      // Have to do this before triggering the mapped event
-      region.impl->reset_reference(result, termination_event);
       // Now we can trigger the mapping event and indicate
       // to all our mapping dependences that we are mapped.
       if (!applied_conditions.empty())
@@ -1828,7 +1807,6 @@ namespace Legion {
       else
         complete_mapping();
       
-      Event map_complete_event = result.get_ready_event(); 
       if (!map_complete_event.has_triggered())
       {
         // Issue a deferred trigger on our completion event
@@ -2067,6 +2045,67 @@ namespace Legion {
       }
       else
         parent_req_index = unsigned(parent_index);
+    }
+
+    //--------------------------------------------------------------------------
+    void MapOp::invoke_mapper(
+        const LegionVector<InstanceRef>::aligned &valid_instances,
+              LegionVector<InstanceRef>::aligned &chosen_instances)
+    //--------------------------------------------------------------------------
+    {
+      Mapper::MapInlineInput input;
+      Mapper::MapInlineOutput output;
+      prepare_for_mapping(valid_instances, input.valid_instances);
+      // Invoke the mapper
+      if (mapper == NULL)
+      {
+        Processor exec_proc = parent_ctx->get_executing_processor();
+        mapper = runtime->find_mapper(exec_proc, map_id);
+      }
+      mapper->invoke_map_inline(this, &input, &output);
+      // Now we have to validate the output
+      // Go through the instances and make sure we got one for every field
+      // Also check to make sure that none of them are composite instances
+      std::vector<FieldID> missing_fields;
+      int composite_index = runtime->forest->physical_convert_mapping(
+          requirement, output.chosen_instances, valid_instances, 
+                              chosen_instances, missing_fields);
+      if (composite_index >= 0)
+      {
+        log_run.error("Invalid mapper output from invocation of 'map_inline' "
+                      "on mapper %s. Mapper requested creation of a composite "
+                      "instance for inline mapping in task %s (ID %lld).",
+                      mapper->get_mapper_name(), parent_ctx->get_task_name(),
+                      parent_ctx->get_unique_id());
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_INVALID_MAPPER_OUTPUT);
+      }
+      if (!missing_fields.empty())
+      {
+        log_run.error("Invalid mapper output from invocation of 'map_inline' "
+                      "on mapper %s. Mapper failed to specify a physical "
+                      "instance for %ld fields of the region requirement to "
+                      "an inline mapping in task %s (ID %lld). The missing "
+                      "fields are listed below.", mapper->get_mapper_name(),
+                      missing_fields.size(), parent_ctx->get_task_name(),
+                      parent_ctx->get_unique_id());
+        for (std::vector<FieldID>::const_iterator it = missing_fields.begin();
+              it != missing_fields.end(); it++)
+        {
+          const void *name; size_t name_size;
+          runtime->retrieve_semantic_information(
+              requirement.region.get_field_space(), *it, NAME_SEMANTIC_TAG,
+              name, name_size);
+          log_run.error("Missing instance for field %s (FieldID: %d)",
+                        static_cast<const char*>(name), *it);
+        }
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_INVALID_MAPPER_OUTPUT);
+      }
     }
 
     /////////////////////////////////////////////////////////////
@@ -2346,7 +2385,6 @@ namespace Legion {
     {
       activate_speculative();
       mapper = NULL;
-      premapped = false;
     }
 
     //--------------------------------------------------------------------------
@@ -2501,46 +2539,65 @@ namespace Legion {
       bool map_success = true;
       std::vector<RegionTreeContext> src_contexts(src_requirements.size());
       std::vector<RegionTreeContext> dst_contexts(dst_requirements.size());
-      // Premap all the regions if we haven't already done so
-      Processor local_proc = parent_ctx->get_executing_processor();
-      if (!premapped)
+      std::vector<LegionVector<InstanceRef>::aligned> valid_src_instances(
+                                                  src_requirements.size());
+      std::vector<LegionVector<InstanceRef>::aligned> valid_dst_instances(
+                                                  dst_requirements.size());
+      Mapper::MapCopyInput input;
+      Mapper::MapCopyOutput output;
+      input.src_instances.resize(src_requirements.size());
+      input.dst_instances.resize(dst_requirements.size());
+      // First go through and do the traversals to find the valid instances
+      for (unsigned idx = 0; idx < src_requirements.size(); idx++)
       {
-        for (unsigned idx = 0; idx < src_requirements.size(); idx++)
-        {
-          src_contexts[idx] = parent_ctx->find_enclosing_context(
+        src_contexts[idx] = parent_ctx->find_enclosing_context(
                                                     src_parent_indexes[idx]);
-          premapped = runtime->forest->premap_physical_region(
-                  src_contexts[idx],src_privilege_paths[idx],
-                  src_requirements[idx], src_versions[idx],
-                  this, parent_ctx, local_proc
+        LegionVector<InstanceRef>::aligned &valid_instances = 
+                                                    valid_src_instances[idx];
+        runtime->forest->physical_traverse_path(src_contexts[idx],
+                                                src_privilege_paths[idx],
+                                                src_requirements[idx],
+                                                src_versions[idx],
+                                                this, true/*find valid*/,
+                                                valid_instances
 #ifdef DEBUG_HIGH_LEVEL
-                  , idx, get_logging_name(), unique_op_id
+                                                , idx, get_logging_name()
+                                                , unique_op_id
 #endif
-                  );
-#ifdef DEBUG_HIGH_LEVEL
-          assert(premapped);
-#endif
-        }
-        for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
-        {
-          dst_contexts[idx] = parent_ctx->find_enclosing_context(
-                                                    dst_parent_indexes[idx]);
-          premapped = runtime->forest->premap_physical_region(
-                  dst_contexts[idx],dst_privilege_paths[idx],
-                  dst_requirements[idx], dst_versions[idx],
-                  this, parent_ctx, local_proc
-#ifdef DEBUG_HIGH_LEVEL
-                  , src_requirements.size()+idx
-                  , get_logging_name(), unique_op_id
-#endif
-                  );
-#ifdef DEBUG_HIGH_LEVEL
-          assert(premapped);
-#endif
-        }
+                                                );
+        // Convert these to the valid set of mapping instances
+        prepare_for_mapping(valid_instances, input.src_instances[idx]);
       }
-      // Now ask the mapper how to map this copy operation
-      bool notify = runtime->invoke_mapper_map_copy(local_proc, this);
+      for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
+      {
+        dst_contexts[idx] = parent_ctx->find_enclosing_context(
+                                                    dst_parent_indexes[idx]);
+        LegionVector<InstanceRef>::aligned &valid_instances = 
+                                                    valid_dst_instances[idx];
+        runtime->forest->physical_traverse_path(dst_contexts[idx],
+                                                dst_privilege_Paths[idx],
+                                                dst_requirements[idx],
+                                                dst_versions[idx],
+                                                this, true/*find valid*/,
+                                                valid_instances
+#ifdef DEBUG_HIGH_LEVEL
+                                                , src_requirement.size()+idx
+                                                , get_logging_name()
+                                                , unique_op_id
+#endif
+                                                );
+        prepare_for_mapping(valid_instances, input.dst_instances[idx]);
+      }
+      // Now we can ask the mapper what to do
+      if (mapper == NULL)
+      {
+        Processor exec_proc = parent_ctx->get_executing_processor();
+        mapper = runtime->find_mapper(exec_proc, map_id);
+      }
+      mapper->invoke_map_copy(this, &input, &output);
+      // Now we can carry out the mapping requested by the mapper
+
+
       // Map all the destination instances
       LegionVector<MappingRef>::aligned 
                             src_mapping_refs(src_requirements.size());

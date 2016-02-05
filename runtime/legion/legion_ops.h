@@ -353,6 +353,10 @@ namespace Legion {
       // been verified (flows up edges)
       void notify_regions_verified(const std::set<unsigned> &regions,
                                    GenerationID gen);
+    public: // Support for mapping operations
+      static void prepare_for_mapping(
+          const LegionVector<InstanceRef>::aligned &valid,
+          std::set<MappingInstance> &input_valid);
     public:
       Runtime *const runtime;
     protected:
@@ -584,8 +588,10 @@ namespace Legion {
     protected:
       void check_privilege(void);
       void compute_parent_index(void);
+      void invoke_mapper(
+          const LegionVector<InstanceRef>::aligned &valid_instances,
+                LegionVector<InstanceRef>::aligned &mapped_instances);
     protected:
-      bool premapped;
       bool remap_region;
       UserEvent termination_event;
       PhysicalRegion region;
@@ -593,6 +599,8 @@ namespace Legion {
       unsigned parent_req_index;
       VersionInfo version_info;
       RestrictInfo restrict_info;
+    protected:
+      MapperManager *mapper;
     };
 
     /**
@@ -651,7 +659,6 @@ namespace Legion {
       std::vector<RestrictInfo>   dst_restrictions;
     protected:
       MapperManager*              mapper;
-      bool                        premapped;
     };
 
     /**

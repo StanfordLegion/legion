@@ -37,6 +37,15 @@ namespace Legion {
      */
     class PhysicalInstance {
     public:
+      PhysicalInstance(void);
+      PhysicalInstance(const PhysicalInstance &rhs);
+      ~PhysicalInstance(void);
+    public:
+      PhysicalInstance& operator=(const PhysicalInstance &rhs); 
+    public:
+      bool operator<(const PhysicalInstance &rhs) const;
+      bool operator==(const PhysicalInstance &rhs) const;
+    public:
       // Get the location of this physical instance
       Memory get_location(void) const;
       unsigned long get_instance_id(void) const;
@@ -46,7 +55,6 @@ namespace Legion {
 
       // See if our valid field data is still up to date
       bool is_current(void) const;
-
       // See if our instance still exists or if it has been
       // garbage collected
       bool exists(void) const;
@@ -60,6 +68,13 @@ namespace Legion {
       bool is_valid(const std::set<FieldID> &fids) const;
       bool all_valid(const std::set<FieldID> &fids) const;
       size_t valid_count(const std::set<FieldID> &fids) const;
+    public:
+      // Use these to specify the fields for which this instance
+      // should be used. It is optional to specify this and is only
+      // necessary to disambiguate which fields should be used when
+      // multiple selected instances have the same field(s).
+      void add_use_field(FieldID fid);
+      void add_use_fields(const std::set<FieldID> &fids);
     public:
       // Check to see if the instance contains certain fields
       bool contains(FieldID fid) const;
@@ -77,8 +92,17 @@ namespace Legion {
       bool satisfies(const AlignmentConstraint &constraint) const;
       bool satisfies(const OffsetConstraint &constraint) const;
       bool satisfies(const PointerConstraint &constraint) const;
+    public:
+      bool is_composite(void) const;
+      static PhysicalInstance get_composite_instance(void);
+    protected:
+      // Only the runtime can make an instance like this
+      PhysicalInstance(PhysicalInstanceImpl *impl);
     protected:   
-      PhysicalInstanceImpl *impl;
+      FRIEND_ALL_RUNTIME_CLASSES
+      PhysicalContextImpl   ctx;
+      PhysicalInstanceImpl impl;
+      std::set<FieldID>  fields;
     };
 
     // Set of profiling requests for task launches
@@ -94,8 +118,20 @@ namespace Legion {
       virtual ~Mapper(void);
     public:
       /**
+       ** ----------------------------------------------------------------------
+       *  Get Mapper Name 
        * ----------------------------------------------------------------------
-       *  Select Task Options
+       *  Specify a name that the runtime can use for referring to this
+       *  mapper. This will primarily be used for providing helpful
+       *  error messages so semantically meaningful names are encouraged.
+       *  This mapper call must be immutable as it may be made before the
+       *  synchronization model has been chosen.
+       */
+      virtual const char* get_mapper_name(void) const = 0;
+    public:
+      /**
+       * ----------------------------------------------------------------------
+       *  Get Mapper Synchronization Model 
        * ----------------------------------------------------------------------
        * Specify the mapper synchronization model. The concurrent mapper model 
        * will alternatively allow mapper calls to be performed at the same time 
@@ -466,10 +502,10 @@ namespace Legion {
        * field to true.
        */
       struct MapInlineInput {
-        std::set<PhysicalInstance>              valid_instances; 
+        std::vector<PhysicalInstance>           valid_instances; 
       };
       struct MapInlineOutput {
-        std::set<PhysicalInstance>              chosen_instances;
+        std::vector<PhysicalInstance>           chosen_instances;
         ProfilingRequestSet                     profiling_requests;
       };
       //------------------------------------------------------------------------
@@ -540,12 +576,12 @@ namespace Legion {
        * layouts of the physical instances to be used in the 
        */
       struct MapCopyInput {
-        std::vector<std::set<PhysicalInstance> >          src_instances;
-        std::vector<std::set<PhysicalInstance> >          dst_instances;
+        std::vector<std::vector<PhysicalInstance> >       src_instances;
+        std::vector<std::vector<PhysicalInstance> >       dst_instances;
       };
       struct MapCopyOutput {
-        std::vector<std::set<PhysicalInstance> >          src_instances;
-        std::vector<std::set<PhysicalInstance> >          dst_instances;
+        std::vector<std::vector<PhysicalInstance> >       src_instances;
+        std::vector<std::vector<PhysicalInstance> >       dst_instances;
         ProfilingRequestSet                               profiling_requests;
       };
       //------------------------------------------------------------------------

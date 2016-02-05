@@ -90,6 +90,8 @@ namespace Legion {
     public:
       MapperManager(Runtime *runtime, Mapping::Mapper *mapper);
       virtual ~MapperManager(void);
+    public:
+      const char* get_mapper_name(void);
     public: // Task mapper calls
       void invoke_select_task_options(TaskOp *task, Mapper::TaskOptions *output,
                                       bool first_invocation = true);

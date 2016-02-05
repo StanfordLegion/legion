@@ -53,7 +53,7 @@ namespace Legion {
       bool is_remote(void) const;
       inline bool is_stolen(void) const { return (steal_count > 0); }
       inline bool is_locally_mapped(void) const { return map_locally; }
-      inline bool set_locally_mapped(bool local) { map_locally = local; }
+      inline void set_locally_mapped(bool local) { map_locally = local; }
       inline bool is_premapped(void) const { return premapped; }
     protected:
       void activate_task(void);
@@ -340,7 +340,8 @@ namespace Legion {
       void destroy_user_barrier(Barrier b);
     public:
       PhysicalRegion get_physical_region(unsigned idx);
-      InstanceRef get_local_reference(unsigned idx);
+      void get_local_references(unsigned idx, 
+          LegionVector<InstanceRef>::aligned &refs);
       void add_inline_task(InlineTask *inline_task);
     public:
       // The following set of operations correspond directly

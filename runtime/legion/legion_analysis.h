@@ -1198,6 +1198,8 @@ namespace Legion {
       inline PhysicalManager* get_manager(void) const { return manager; }
       inline InstanceView* get_instance_view(void) const { return view; }
     public:
+      MappingInstance get_mapping_instance(void) const;
+    public:
       // These methods are used by PhysicalRegion::Impl to hold
       // valid references to avoid premature collection
       void add_valid_reference(ReferenceSource source);
