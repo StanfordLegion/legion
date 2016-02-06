@@ -36,6 +36,9 @@
 #ifdef USE_CUDA
 #include "realm/cuda/cuda_module.h"
 #endif
+#ifdef REALM_USE_LLVM
+#include "realm/llvmjit/llvmjit_module.h"
+#endif
 
 namespace Realm {
 
