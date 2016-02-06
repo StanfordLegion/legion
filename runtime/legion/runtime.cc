@@ -10249,8 +10249,6 @@ namespace Legion {
       assert(proc_managers.find(proc) != proc_managers.end());
 #endif
       ProcessorManager *manager = proc_managers[proc];
-      // Set the task options for all the constituent tasks
-      epoch_op->set_task_options(manager);
       // Now find all the parent task regions we need to invalidate
       std::vector<PhysicalRegion> unmapped_regions;
       if (!unsafe_launch)

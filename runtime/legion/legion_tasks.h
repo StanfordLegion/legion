@@ -454,6 +454,8 @@ namespace Legion {
     public:
       void unmap_all_regions(void);
       void clear_physical_instances(void);
+    public:
+      void initialize_map_task_input(Mapper::MapTaskInput &input);
     protected:
       bool map_all_regions(Processor target, Event user_event, 
                            bool mapper_invoked); 

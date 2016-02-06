@@ -1329,7 +1329,6 @@ namespace Legion {
       FutureMap initialize(SingleTask *ctx,
                                    const MustEpochLauncher &launcher,
                                    bool check_privileges);
-      void set_task_options(ProcessorManager *manager);
       void find_conflicted_regions(
           std::vector<PhysicalRegion> &unmapped); 
     public:
@@ -1377,6 +1376,8 @@ namespace Legion {
       // The actual base operations
       // Use a deque to keep everything in order
       std::deque<SingleTask*>      single_tasks;
+    protected:
+      Mapper::MapMustEpochOutput   output;
     protected:
       MapperID                     mapper_id;
       MappingTagID                 mapper_tag;

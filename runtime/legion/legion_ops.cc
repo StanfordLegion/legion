@@ -2578,6 +2578,8 @@ namespace Legion {
       Mapper::MapCopyOutput output;
       input.src_instances.resize(src_requirements.size());
       input.dst_instances.resize(dst_requirements.size());
+      output.src_instances.resize(src_requirements.size());
+      output.dst_instances.resize(dst_requirements.size());
       // First go through and do the traversals to find the valid instances
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
       {
@@ -6550,24 +6552,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MustEpochOp::set_task_options(ProcessorManager *manager)
-    //--------------------------------------------------------------------------
-    {
-      // Mark that all these operations will map locally because we
-      // have to do a single mapping call for all our operations.
-      for (unsigned idx = 0; idx < indiv_tasks.size(); idx++)
-      {
-        manager->invoke_mapper_set_task_options(indiv_tasks[idx]);
-        indiv_tasks[idx]->set_locally_mapped(true);
-      }
-      for (unsigned idx = 0; idx < index_tasks.size(); idx++)
-      {
-        manager->invoke_mapper_set_task_options(index_tasks[idx]);
-        index_tasks[idx]->set_locally_mapped(true);
-      }
-    }
-
-    //--------------------------------------------------------------------------
     void MustEpochOp::find_conflicted_regions(
                                  std::vector<PhysicalRegion> &conflicts)
     //--------------------------------------------------------------------------
@@ -6622,6 +6606,8 @@ namespace Legion {
       task_sets.clear();
       dependences.clear();
       mapping_dependences.clear();
+      output.task_mapping.clear();
+      output.task_processors.clear();
       // Return this operation to the free list
       runtime->free_epoch_op(this);
     }
@@ -6711,12 +6697,18 @@ namespace Legion {
     bool MustEpochOp::trigger_execution(void)
     //--------------------------------------------------------------------------
     {
+      // First mark that each of the tasks will be locally mapped
+      for (unsigned idx = 0; idx < indiv_tasks.size(); idx++)
+        indiv_tasks[idx]->set_locally_mapped(true);
+      for (unsigned idx = 0; idx < index_tasks.size(); idx++)
+        index_tasks[idx]->set_locally_mapped(true);
       // Call trigger execution on each of our sub-operations, since they
       // each have marked that they have a must_epoch owner, they will
       // not actually map and launch, but instead will register all the base
       // operations with us.  Note this step requires that we mark everything
       // as needing to locally map in the 'initialize' method.  Check for
       // error codes indicating failed pre-mapping.
+      Mapper::MapMustEpochInput input;
       if (!triggering_complete)
       {
         task_sets.resize(indiv_tasks.size()+index_tasks.size());
@@ -6731,6 +6723,7 @@ namespace Legion {
 #endif 
         // Next build the set of single tasks and all their constraints.
         // Iterate over all the recorded dependences
+        std::vector<Mapper::MappingConstraint> &constraints = input.constraints;
         constraints.reserve(dependences.size());
         for (std::deque<DependenceRecord>::const_iterator it = 
               dependences.begin(); it != dependences.end(); it++)
@@ -6768,34 +6761,64 @@ namespace Legion {
         // we don't have to redo it if we end up failing a mapping.
         triggering_complete = true;
       }
-      // Next make the mapper call to perform the mapping for all the tasks
-      std::vector<Task*> copy_single_tasks(single_tasks.begin(),
-                                           single_tasks.end());
+      // Fill in the rest of the inputs to the mapper call
+      input.mapping_tag = mapper_tag;
+      input.tasks.insert(input.tasks.end(), single_tasks.begin(),
+                                            single_tasks.end());
+      input.task_inputs.resize(single_tasks.size());
+      for (unsigned idx = 0; idx < single_tasks.size(); idx++)
+        single_tasks[idx]->initialize_map_task_input(input.task_inputs[idx]);
+      // Also resize the outputs so the mapper knows what it is doing
+      output.task_mapping.resize(single_tasks.size());
+      output.task_processors.resize(single_tasks.size(), Processor::NO_PROC);
+      // We've got all our meta-data set up so go ahead and issue the call
       Processor mapper_proc = parent_ctx->get_executing_processor();
-      bool notify = runtime->invoke_mapper_map_must_epoch(
-          mapper_proc, copy_single_tasks, constraints, mapper_id, mapper_tag);
-
+      MapperManager *mapper = runtime->find_mapper(mapper_proc, mapper_id);
+      mapper->invoke_map_must_epoch(this, &input, &output);
       // Check that all the tasks have been assigned to different processors
-      std::map<Processor,SingleTask*> target_procs;
-      for (std::deque<SingleTask*>::const_iterator it = 
-            single_tasks.begin(); it != single_tasks.end(); it++)
       {
-        if (target_procs.find((*it)->target_proc) != target_procs.end())
+        std::map<Processor,SingleTask*> target_procs;
+        for (unsigned idx = 0; idx < single_tasks.size(); idx++)
         {
-          SingleTask *other = target_procs[(*it)->target_proc];
-          log_run.error("MUST EPOCH ERROR: Task %s (ID %lld) and "
-              "task %s (ID %lld) both requested to be run on processor "
-              IDFMT "!",
-              (*it)->get_task_name(), (*it)->get_unique_id(),
-              other->get_task_name(), other->get_unique_id(),
-              other->target_proc.id);
+          Processor proc = output.task_processors[idx];
+          SingleTask *task = single_tasks[idx];
+          if (!proc.exists())
+          {
+            log_run.error("Invalid mapper output from invocation of "
+                "'map_must_epoch' on mapper %s. Mapper failed to specify "
+                "a valid processor for task %s (ID %lld) at index %d. Call "
+                "occurred in parent task %s (ID %lld).", 
+                mapper->get_mapper_name(), task->get_task_name(),
+                task->get_unique_id(), idx, parent_ctx->get_task_name(),
+                parent_ctx->get_unique_id());
 #ifdef DEBUG_HIGH_LEVEL
-          assert(false);
+            assert(false);
 #endif
-          exit(ERROR_MUST_EPOCH_FAILURE);
+            exit(ERROR_INVALID_MAPPER_OUTPUT);
+          }
+          if (target_procs.find(proc) != target_procs.end())
+          {
+            SingleTask *other = target_procs[proc];
+            log_run.error("Invalid mapper output from invocation of "
+                "'map_must_epoch' on mapper %s. Mapper requests both tasks "
+                "%s (ID %lld) and %s (ID %lld) be mapped to the same "
+                "processor (" IDFMT ") which is illegal in a must epoch "
+                "launch. Must epoch was launched inside of task %s (ID %lld).",
+                mapper->get_mapper_name(), other->get_task_name(),
+                other->get_unique_id(), task->get_task_name(),
+                task->get_unique_id(), proc.id, parent_ctx->get_task_name(),
+                parent_ctx->get_unique_id());
+#ifdef DEBUG_HIGH_LEVEL
+            assert(false);
+#endif
+            exit(ERROR_INVALID_MAPPER_OUTPUT);
+          }
+          target_procs[proc] = task;
+          task->current_proc = proc;
         }
-        target_procs[(*it)->target_proc] = *it;
       }
+      // Now we can clear our target processors
+      output.task_processors.clear();
 
       // Then we need to actually perform the mapping
       {
@@ -6803,9 +6826,12 @@ namespace Legion {
         if (!mapper.map_tasks(single_tasks, mapping_dependences))
           return false;
       }
+      // Once we're done here, we can clear our output
+      output.task_mapping.clear();
 
       // Everybody successfully mapped so now check that all
       // of the constraints have been satisfied
+      std::vector<Mapper::MappingConstraint> &constraints = input.constraints;
       for (std::vector<Mapper::MappingConstraint>::const_iterator it = 
             constraints.begin(); it != constraints.end(); it++)
       {
@@ -6818,29 +6844,21 @@ namespace Legion {
         // Check to make sure they selected the same instance 
         if (inst1 != inst2)
         {
-          log_run.error("MUST EPOCH ERROR: failed constraint! "
-              "Task %s (ID %lld) mapped region %d to instance " IDFMT " in "
-              "memory " IDFMT " , but task %s (ID %lld) mapped region %d to "
-              "instance " IDFMT " in memory " IDFMT ".",
+          log_run.error("Invalid mapper output from invocation of "
+              "'map_must_epoch' on mapper %s. Task %s (ID %lld) mapped "
+              "region %d to instance " IDFMT " in memory " IDFMT ", but task "
+              "%s (ID %lld) mapped region %d to instance " IDFMT " in memory "
+              IDFMT " resulting in a failed constraint. The must epoch launch "
+              "occurred inside task %s (ID %lld).", mapper->get_mapper_name(),
               t1->get_task_name(), t1->get_unique_id(), it->idx1,
               inst1->get_instance().id, inst1->memory.id,
               t2->get_task_name(), t2->get_unique_id(), it->idx2,
-              inst2->get_instance().id, inst2->memory.id);
+              inst2->get_instance().id, inst2->memory.id,
+              parent_ctx->get_task_name(), parent_ctx->get_unique_id());
 #ifdef DEBUG_HIGH_LEVEL
           assert(false);
 #endif
-          exit(ERROR_MUST_EPOCH_FAILURE);
-        }
-      }
-
-      // If the mapper wanted to know on success, then tell it
-      if (notify)
-      {
-        // Notify the mappers that the tasks successfully mapped
-        for (std::deque<SingleTask*>::const_iterator it = 
-              single_tasks.begin(); it != single_tasks.end(); it++)
-        {
-          runtime->invoke_mapper_notify_result(mapper_proc, *it);
+          exit(ERROR_INVALID_MAPPER_OUTPUT);
         }
       }
 
@@ -6862,7 +6880,7 @@ namespace Legion {
       }
       // If we passed all the constraints, then kick everything off
       MustEpochDistributor distributor(this);
-      distributor.distribute_tasks(runtime, indiv_tasks, slice_tasks);
+      distributor.distribute_tasks(runtime, indiv_tasks, slice_tasks); 
       
       // Mark that we are done mapping and executing this operation
       Event all_mapped = Event::merge_events(tasks_all_mapped);
@@ -7486,7 +7504,7 @@ namespace Legion {
       for (std::vector<IndividualTask*>::const_iterator it = 
             indiv_tasks.begin(); it != indiv_tasks.end(); it++)
       {
-        if (!runtime->is_local((*it)->target_proc))
+        if (!runtime->is_local((*it)->current_proc))
         {
           dist_args.task = *it;
           Event wait = runtime->issue_runtime_meta_task(&dist_args,
@@ -7506,7 +7524,7 @@ namespace Legion {
       for (std::set<SliceTask*>::const_iterator it = 
             slice_tasks.begin(); it != slice_tasks.end(); it++)
       {
-        if (!runtime->is_local((*it)->target_proc))
+        if (!runtime->is_local((*it)->current_proc))
         {
           dist_args.task = *it;
           Event wait = runtime->issue_runtime_meta_task(&dist_args,

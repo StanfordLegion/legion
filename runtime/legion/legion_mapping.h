@@ -965,6 +965,7 @@ namespace Legion {
       };
       struct MapMustEpochOutput {
         std::vector<MapTaskOutput>              task_mapping; 
+        std::vector<Processor>                  task_processors;
       };
       //------------------------------------------------------------------------
       virtual void map_must_epoch(const MapperContext           ctx,
