@@ -23,6 +23,7 @@
 namespace llvm {
   class LLVMContext;
   class TargetMachine;
+  class ExecutionEngine;
 };
 
 namespace Realm {
@@ -38,6 +39,7 @@ namespace Realm {
     protected:
       llvm::LLVMContext *context;
       llvm::TargetMachine *host_cpu_machine;
+      llvm::ExecutionEngine *host_exec_engine;
       llvm::TargetMachine *nvptx_machine;
     };
 

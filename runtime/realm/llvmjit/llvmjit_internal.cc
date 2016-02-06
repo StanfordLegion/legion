@@ -15,6 +15,8 @@
 
 #include "llvmjit_internal.h"
 
+#include "realm/logging.h"
+
 #include <iostream>
 
 // xcode's clang isn't defining these?
@@ -44,6 +46,8 @@
 
 namespace Realm {
 
+  extern Logger log_llvmjit;  // defined in llvmjit_module.cc
+
   namespace LLVMJit {
 
     ////////////////////////////////////////////////////////////////////////
@@ -58,27 +62,34 @@ namespace Realm {
       {
 	llvm::InitializeNativeTarget();
 
+	std::string triple = llvm::sys::getDefaultTargetTriple();
+	log_llvmjit.debug() << "default target triple = " << triple;
+
+	std::string err;
+	const llvm::Target *target = llvm::TargetRegistry::lookupTarget(triple, err);
+	if(!target) {
+	  log_llvmjit.fatal() << "target not found: triple='" << triple << "'";
+	  assert(0);
+	}
+
+	// TODO - allow configuration options to steer these
+	llvm::Reloc::Model reloc_model = llvm::Reloc::Default;
+	llvm::CodeModel::Model code_model = llvm::CodeModel::Large;
+	llvm::CodeGenOpt::Level opt_level = llvm::CodeGenOpt::Aggressive;
+
 	llvm::TargetOptions options;
 	options.NoFramePointerElim = true;
 
-	llvm::CodeGenOpt::Level OptLevel = llvm::CodeGenOpt::Aggressive;
-	std::string Triple = llvm::sys::getDefaultTargetTriple();
-	std::cout << Triple;
-	printf("triple = '%s'\n", Triple.c_str());
-	std::string err;
-	const llvm::Target *TheTarget = llvm::TargetRegistry::lookupTarget(Triple, err);
-	if(TheTarget) {
-	  host_cpu_machine = TheTarget->createTargetMachine(Triple, "", 
-							    0/*HostHasAVX()*/ ? "+avx" : "", 
-							    options,
-							    llvm::Reloc::Default,
-							    llvm::CodeModel::Large,//Default,
-							    OptLevel);
-	  assert(host_cpu_machine != 0);
-	} else {
-	  std::cerr << "couldn't find target '" << Triple << "': " << err;
-	  host_cpu_machine = 0;
-	}
+	host_cpu_machine = target->createTargetMachine(triple, "", 
+						       0/*HostHasAVX()*/ ? "+avx" : "", 
+						       options,
+						       reloc_model,
+						       code_model,
+						       opt_level);
+	assert(host_cpu_machine != 0);
+
+	// would be nice to build this up front, but current construction process requires a module
+	host_exec_engine = 0;
       }
 
       nvptx_machine = 0;
@@ -86,7 +97,12 @@ namespace Realm {
 
     LLVMJitInternal::~LLVMJitInternal(void)
     {
-      delete host_cpu_machine;
+      // ugh - if we make an execution engine, it takes ownership of the target machine
+      if(host_exec_engine) {
+	delete host_exec_engine;
+      } else {
+	delete host_cpu_machine;
+      }
       delete context;
     }
     
@@ -101,36 +117,45 @@ namespace Realm {
       llvm::MemoryBuffer *mb = llvm::MemoryBuffer::getMemBuffer((const char *)ir.base());
       llvm::Module *m = llvm::ParseIR(mb, sm, *context);
       if(!m) {
-	llvm::raw_os_ostream oo(std::cout);
-	std::cout << "LLVM IR PARSE ERROR:\n";
-	sm.print("foo", oo);
-	assert(1 != 2);
+	std::string errstr;
+	llvm::raw_string_ostream s(errstr);
+	sm.print(entry_symbol.c_str(), s);
+	log_llvmjit.fatal() << "LLVM IR PARSE ERROR:\n" << s.str();
+	assert(0);
       }
       m->setDataLayout("e-p:64:64:64-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:64:64-f32:32:32-f64:64:64-v16:16:16-v32:32:32-v64:64:64-v128:128:128-n16:32:64");
-      assert(host_cpu_machine != 0);
 
-      llvm::EngineBuilder eb(m);
+      if(host_exec_engine) {
+	host_exec_engine->addModule(m);
+      } else {
+	// build one now
+	llvm::EngineBuilder eb(m);
 
-      std::string err;
+	std::string err;
   
-      eb.setErrorStr(&err)
-	.setEngineKind(llvm::EngineKind::JIT)
-	.setAllocateGVsWithCode(false)
-	.setUseMCJIT(true);
-      // relocation and code models are controlled by arguments to createTargetMachine() above
- 
-      llvm::ExecutionEngine *ee = eb.create(host_cpu_machine);
+	eb
+	  .setErrorStr(&err)
+	  .setEngineKind(llvm::EngineKind::JIT)
+	  .setAllocateGVsWithCode(false)
+	  .setUseMCJIT(true);
+	
+	host_exec_engine = eb.create(host_cpu_machine);
 
-      llvm::Function* func = ee->FindFunctionNamed(entry_symbol.c_str());
-      //printf("func = %p\n", func);
+	if(!host_exec_engine) {
+	  log_llvmjit.fatal() << "failed to create execution engine: " << err;
+	  assert(0);
+	}
+      }
+
+      llvm::Function* func = host_exec_engine->FindFunctionNamed(entry_symbol.c_str());
+      if(!func) {
+	log_llvmjit.fatal() << "entry symbol not found: " << entry_symbol;
+	assert(0);
+      }
       
-      void *fnptr = ee->getPointerToFunction(func);
-      //printf("fnptr = %p\n", fnptr);
-      //((void(*)())fnptr)();
-      //printf("here\n");
+      void *fnptr = host_exec_engine->getPointerToFunction(func);
+      assert(fnptr != 0);
 
-      // TODO: should (or even can) we delete the execution engine?
-      //  or maybe can we have it not tied to a particular module?
       return fnptr;
     }
 

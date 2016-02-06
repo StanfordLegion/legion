@@ -18,8 +18,11 @@
 #include "llvmjit_internal.h"
 
 #include "realm/runtime_impl.h"
+#include "realm/logging.h"
 
 namespace Realm {
+
+  Logger log_llvmjit("llvmjit");
 
   namespace LLVMJit {
 
