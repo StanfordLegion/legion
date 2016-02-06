@@ -24,6 +24,9 @@
 
 namespace Realm {
 
+  Logger log_codetrans("codetrans");
+
+
   ////////////////////////////////////////////////////////////////////////
   //
   // class Type
@@ -196,77 +199,178 @@ namespace Realm {
   {
     return true;
   }
+
+#ifdef REALM_USE_DLADDR
+  namespace {
+    extern "C" { int main(int argc, const char *argv[]); };
+
+    DSOReferenceImplementation *dladdr_helper(void *ptr, bool quiet)
+    {
+      // if dladdr() gives us something with the same base pointer, assume that's portable
+      // note: return code is not-POSIX-y (i.e. 0 == failure)
+      Dl_info inf;
+      int ret = dladdr(ptr, &inf);
+      if(ret == 0) {
+	if(!quiet)
+	  log_codetrans.warning() << "couldn't map fnptr " << ptr << " to a dynamic symbol";
+	return 0;
+      }
+
+      if(inf.dli_saddr != ptr) {
+	if(!quiet)
+	  log_codetrans.warning() << "pointer " << ptr << " in middle of symbol '" << inf.dli_sname << " (" << inf.dli_saddr << ")?";
+	return 0;
+      }
+
+      // try to detect symbols that are in the base executable and change the filename to ""
+      const char *fname = inf.dli_fname;
+      {
+	static std::string local_fname;
+	if(local_fname.empty()) {
+	  Dl_info inf2;
+	  ret = dladdr((void *)main, &inf2);
+	  assert(ret != 0);
+	  local_fname = inf2.dli_fname;
+	}
+	if(local_fname.compare(fname) == 0)
+	  fname = "";
+      }
+
+      return new DSOReferenceImplementation(fname, inf.dli_sname);
+    }
+  };
 #endif
+
+  /*static*/ DSOReferenceImplementation *DSOReferenceImplementation::cvt_fnptr_to_dsoref(const FunctionPointerImplementation *fpi,
+											 bool quiet /*= false*/)
+  {
+    return dladdr_helper((void *)(fpi->fnptr), quiet);
+  } 
+#endif
+
 
   ////////////////////////////////////////////////////////////////////////
   //
-  // code translators
+  // class CodeTranslator
 
-  Logger log_codetrans("codetrans");
+  CodeTranslator::CodeTranslator(const std::string& _name)
+    : name(_name)
+  {}
+
+  CodeTranslator::~CodeTranslator(void)
+  {}
+
+  // default version just iterates over all the implementations in the source
+  bool CodeTranslator::can_translate(const CodeDescriptor& source_codedesc,
+				     const std::type_info& target_impl_type)
+  {
+    const std::vector<CodeImplementation *>& impls = source_codedesc.implementations();
+    for(std::vector<CodeImplementation *>::const_iterator it = impls.begin();
+	it != impls.end();
+	it++)
+      if(can_translate(typeid(**it), target_impl_type))
+	return true;
+
+    return false;
+  }
+
+  // default version just iterates over all the implementations in the source
+  CodeImplementation *CodeTranslator::translate(const CodeDescriptor& source_codedesc,
+						const std::type_info& target_impl_type)
+  {
+    const std::vector<CodeImplementation *>& impls = source_codedesc.implementations();
+    for(std::vector<CodeImplementation *>::const_iterator it = impls.begin();
+	it != impls.end();
+	it++)
+      if(can_translate(typeid(**it), target_impl_type))
+	return translate(*it, target_impl_type);
+
+    return 0;
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class DSOCodeTranslator
 
 #ifdef REALM_USE_DLFCN
-  FunctionPointerImplementation *cvt_dsoref_to_fnptr(const DSOReferenceImplementation *dso)
+  DSOCodeTranslator::DSOCodeTranslator(void)
+    : CodeTranslator("dso")
+  {}
+
+  DSOCodeTranslator::~DSOCodeTranslator(void)
   {
-    // TODO: once this moves to a "code translator" object with state, actually keep
-    //  track of all the handles we open, reuse when possible, and clean up at end
-
-    // an empty string means we should look in the main executable
-    const char *dso_name = dso->dso_name.c_str();
-    void *handle = dlopen(*dso_name ? dso_name : 0, RTLD_NOW | RTLD_LOCAL);
-    if(!handle) {
-      log_codetrans.warning() << "could not open DSO '" << dso->dso_name << "': " << dlerror();
-      return 0;
+    // unload any modules we have loaded
+    for(std::map<std::string, void *>::iterator it = modules_loaded.begin();
+	it != modules_loaded.end();
+	it++) {
+      int ret = dlclose(it->second);
+      if(ret != 0)
+	log_codetrans.warning() << "error on dlclose of '" << it->first << "': " << dlerror();
     }
-
-    void *ptr = dlsym(handle, dso->symbol_name.c_str());
-    if(!ptr) {
-      log_codetrans.warning() << "could not find symbol '" << dso->symbol_name << "' in  DSO '" << dso->dso_name << "': " << dlerror();
-      return 0;
-    }
-
-    return new FunctionPointerImplementation((void(*)())ptr);
   }
+
+  bool DSOCodeTranslator::can_translate(const std::type_info& source_impl_type,
+					   const std::type_info& target_impl_type)
+  {
+    // DSO ref -> function pointer
+    if((source_impl_type == typeid(DSOReferenceImplementation)) &&
+       (target_impl_type == typeid(FunctionPointerImplementation)))
+      return true;
 
 #ifdef REALM_USE_DLADDR
-  extern "C" { int main(int argc, const char *argv[]); };
-  DSOReferenceImplementation *cvt_fnptr_to_dsoref(const FunctionPointerImplementation *fpi, bool quiet /*= false*/)
+    if((source_impl_type == typeid(FunctionPointerImplementation)) &&
+       (target_impl_type == typeid(DSOReferenceImplementation)))
+      return true;
+#endif
+
+      return false;
+    }
+
+  CodeImplementation *DSOCodeTranslator::translate(const CodeImplementation *source,
+						   const std::type_info& target_impl_type)
   {
-    // if dladdr() gives us something with the same base pointer, assume that's portable
-    Dl_info inf;
-    int ret;
+    if(target_impl_type == typeid(FunctionPointerImplementation)) {
+      const DSOReferenceImplementation *dsoref = dynamic_cast<const DSOReferenceImplementation *>(source);
+      assert(dsoref != 0);
 
-    // note: return code is not-POSIX-y (i.e. 0 == failure)
-    void *ptr = (void *)(fpi->fnptr);
-    ret = dladdr(ptr, &inf);
-    if(ret == 0) {
-      if(!quiet)
-	log_codetrans.warning() << "couldn't map fnptr " << ptr << " to a dynamic symbol";
-      return 0;
-    }
-
-    if(inf.dli_saddr != ptr) {
-      if(!quiet)
-	log_codetrans.warning() << "pointer " << ptr << " in middle of symbol '" << inf.dli_sname << " (" << inf.dli_saddr << ")?";
-      return 0;
-    }
-
-    // try to detect symbols that are in the base executable and change the filename to ""
-    const char *fname = inf.dli_fname;
-    {
-      static std::string local_fname;
-      if(local_fname.empty()) {
-	Dl_info inf2;
-	ret = dladdr((void *)main, &inf2);
-	assert(ret != 0);
-	local_fname = inf2.dli_fname;
+      void *handle = 0;
+      // check to see if we've already loaded the module?
+      std::map<std::string, void *>::iterator it = modules_loaded.find(dsoref->dso_name);
+      if(it != modules_loaded.end()) {
+	handle = it->second;
+      } else {
+	// try to load it - empty string for dso_name means the main executable
+	const char *dso_name = dsoref->dso_name.c_str();
+	handle = dlopen(*dso_name ? dso_name : 0, RTLD_NOW | RTLD_LOCAL);
+	if(!handle) {
+	  log_codetrans.warning() << "could not open DSO '" << dsoref->dso_name << "': " << dlerror();
+	  return 0;
+	}
+	modules_loaded[dsoref->dso_name] = handle;
       }
-      if(local_fname.compare(fname) == 0)
-	fname = "";
+
+      void *ptr = dlsym(handle, dsoref->symbol_name.c_str());
+      if(!ptr) {
+	log_codetrans.warning() << "could not find symbol '" << dsoref->symbol_name << "' in  DSO '" << dsoref->dso_name << "': " << dlerror();
+	return 0;
+      }
+
+      return new FunctionPointerImplementation((void(*)())ptr);
     }
 
-    return new DSOReferenceImplementation(fname, inf.dli_sname);
+#ifdef REALM_USE_DLADDR
+    if(target_impl_type == typeid(DSOReferenceImplementation)) {
+      const FunctionPointerImplementation *fpi = dynamic_cast<const FunctionPointerImplementation *>(source);
+      assert(fpi != 0);
+
+      return dladdr_helper((void *)(fpi->fnptr), false /*!quiet*/);
+    }
+#endif
+
+    return 0;
   }
 #endif
-#endif
+
 
 };

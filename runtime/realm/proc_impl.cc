@@ -745,23 +745,24 @@ namespace Realm {
     Processor::TaskFuncPtr fnptr;
     const FunctionPointerImplementation *fpi = codedesc.find_impl<FunctionPointerImplementation>();
 
-    while(!fpi) {
-#ifdef REALM_USE_DLFCN
-      // can we make it from a DSO reference?
-      const DSOReferenceImplementation *dsoref = codedesc.find_impl<DSOReferenceImplementation>();
-      if(dsoref) {
-        FunctionPointerImplementation *newfpi = cvt_dsoref_to_fnptr(dsoref);
-	if(newfpi) {
-	  codedesc.add_implementation(newfpi);
-	  fpi = newfpi;
-	  continue;
-        }
-      }
-#endif
-
-      // no other options?  give up
-      assert(0);
+    // if we don't have a function pointer implementation, see if we can make one
+    if(!fpi) {
+      const std::vector<CodeTranslator *>& translators = get_runtime()->get_code_translators();
+      for(std::vector<CodeTranslator *>::const_iterator it = translators.begin();
+	  it != translators.end();
+	  it++)
+	if((*it)->can_translate<FunctionPointerImplementation>(codedesc)) {
+	  FunctionPointerImplementation *newfpi = (*it)->translate<FunctionPointerImplementation>(codedesc);
+	  if(newfpi) {
+	    log_taskreg.info() << "function pointer created: trans=" << (*it)->name << " fnptr=" << (void *)(newfpi->fnptr);
+	    codedesc.add_implementation(newfpi);
+	    fpi = newfpi;
+	    break;
+	  }
+	}
     }
+
+    assert(fpi != 0);
 
     fnptr = (Processor::TaskFuncPtr)(fpi->fnptr);
 
