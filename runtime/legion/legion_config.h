@@ -338,6 +338,7 @@ typedef enum legion_region_flags_t {
   NO_FLAG         = 0x00000000,
   VERIFIED_FLAG   = 0x00000001,
   NO_ACCESS_FLAG  = 0x00000002,
+  RESTRICTED_FLAG = 0x00000004,
 } legion_region_flags_T;
 
 typedef enum legion_index_space_kind_t {

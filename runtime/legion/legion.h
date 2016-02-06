@@ -808,6 +808,13 @@ namespace Legion {
 
       inline RegionRequirement& add_flags(RegionFlags new_flags);
     public:
+      inline bool is_verified(void) const 
+        { return (flags & VERIFIED_FLAG); }
+      inline bool is_no_access(void) const 
+        { return (flags & NO_ACCESS_FLAG); }
+      inline bool is_restricted(void) const 
+        { return (flags & RESTRICTED_FLAG); }
+    public:
 #ifdef PRIVILEGE_CHECKS
       unsigned get_accessor_privilege(void) const;
 #endif

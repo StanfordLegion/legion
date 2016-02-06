@@ -320,11 +320,10 @@ namespace Legion {
                                  , UniqueID uid
 #endif
                                  );
-      void physical_perform_close(RegionTreeContext ctx,
-                                  const RegionRequirement &req,
-                                  VersionInfo &version_info,
-                                  Operation *op, Event &closed,
-                                  int composite_index,
+      Event physical_perform_close(RegionTreeContext ctx,
+                                   const RegionRequirement &req,
+                                   VersionInfo &version_info,
+                                   Operation *op, int composite_index,
                     const LegionMap<ColorPoint,FieldMask>::aligned &to_close,
                     const std::set<ColorPoint> &next_children,
                     const LegionVector<InstanceRef>::aligned &targets
@@ -345,13 +344,22 @@ namespace Legion {
                                    , UniqueID uid
 #endif
                                    );
+      CompositeRef virtual_close_context(RegionTreeContext ctx,
+                                         const RegionRequirement &req,
+                                         VersionInfo &version_info
+#ifdef DEBUG_HIGH_LEVEL
+                                         , unsigned index
+                                         , const char *log_name
+                                         , UniqueID uid
+#endif
+                                         );
       Event copy_across(RegionTreeContext src_ctx,
                         RegionTreeContext dst_ctx,
                         const RegionRequirement &src_req,
                         const RegionRequirement &dst_req,
                         const LegionVector<InstanceRef>::aligned &src_targets,
                         const LegionVector<InstanceRef>::aligned &dst_targets,
-                        VersionInfo &version_info,
+                        VersionInfo &src_version_info, int src_composite,
                         Operation *op, Event precondition);
       Event reduce_across(RegionTreeContext src_ctx,
                           RegionTreeContext dst_ctx,
@@ -359,7 +367,7 @@ namespace Legion {
                           const RegionRequirement &dst_req,
                           const LegionVector<InstanceRef>::aligned &src_targets,
                           const LegionVector<InstanceRef>::aligned &dst_targets,
-                          VersionInfo &version_info,
+                          VersionInfo &src_version_info, int src_composite,
                           Operation *op, Event precondition);
       int physical_convert_mapping(const RegionRequirement &req,
                                const std::vector<MappingInstance> &chosen,

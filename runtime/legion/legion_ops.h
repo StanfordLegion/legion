@@ -356,7 +356,7 @@ namespace Legion {
     public: // Support for mapping operations
       static void prepare_for_mapping(
           const LegionVector<InstanceRef>::aligned &valid,
-          std::set<MappingInstance> &input_valid);
+          std::vector<MappingInstance> &input_valid);
     public:
       Runtime *const runtime;
     protected:
@@ -598,7 +598,6 @@ namespace Legion {
       RegionTreePath privilege_path;
       unsigned parent_req_index;
       VersionInfo version_info;
-      RestrictInfo restrict_info;
     protected:
       MapperManager *mapper;
     };
@@ -648,6 +647,11 @@ namespace Legion {
       void check_copy_privilege(const RegionRequirement &req, 
                                 unsigned idx, bool src);
       void compute_parent_indexes(void);
+      template<bool IS_SRC>
+      int perform_conversion(unsigned idx, const RegionRequirement &req,
+                             std::vector<MappingInstance> &output,
+                             const LegionVector<InstanceRef>::aligned &valid,
+                             LegionVector<InstanceRef>::aligned &targets);
     public:
       std::vector<RegionTreePath> src_privilege_paths;
       std::vector<RegionTreePath> dst_privilege_paths;
@@ -655,8 +659,6 @@ namespace Legion {
       std::vector<unsigned>       dst_parent_indexes;
       std::vector<VersionInfo>    src_versions;
       std::vector<VersionInfo>    dst_versions;
-      std::vector<RestrictInfo>   src_restrictions;
-      std::vector<RestrictInfo>   dst_restrictions;
     protected:
       MapperManager*              mapper;
     };
@@ -831,8 +833,8 @@ namespace Legion {
       virtual void trigger_commit(void);
     protected:
       RegionTreePath privilege_path;
-      VersionInfo  version_info;
-      RestrictInfo restrict_info;
+      VersionInfo    version_info;
+      RestrictInfo   restrict_info;
     };
 
     /**
@@ -917,7 +919,13 @@ namespace Legion {
       virtual bool trigger_execution(void);
       virtual unsigned find_parent_index(unsigned idx);
     protected:
+      int invoke_mapper(
+          const LegionVector<InstanceRef>::aligned &valid_instances,
+                LegionVector<InstanceRef>::aligned &chosen_instances);
+    protected:
       unsigned parent_req_index;
+    protected:
+      MapperManager *mapper;
     };
     
     /**
@@ -983,6 +991,8 @@ namespace Legion {
     protected:
       InstanceRef reference;
       unsigned parent_idx;
+    protected:
+      MapperManager *mapper;
     };
 
     /**
@@ -1056,15 +1066,14 @@ namespace Legion {
     protected:
       void check_acquire_privilege(void);
       void compute_parent_index(void);
+      void invoke_mapper(void);
     protected:
       RegionRequirement requirement;
       RegionTreePath    privilege_path;
       VersionInfo       version_info;
-      RestrictInfo      restrict_info;
       unsigned          parent_req_index;
     protected:
       MapperManager*    mapper;
-      bool              premapped;
     };
 
     /**
@@ -1109,15 +1118,14 @@ namespace Legion {
     protected:
       void check_release_privilege(void);
       void compute_parent_index(void);
+      void invoke_mapper(void);
     protected:
       RegionRequirement requirement;
       RegionTreePath    privilege_path;
       VersionInfo       version_info;
-      RestrictInfo      restrict_info;
       unsigned          parent_req_index;
     protected:
       MapperManager*    mapper;
-      bool              premapped;
     };
 
     /**
@@ -1755,7 +1763,6 @@ namespace Legion {
       IndexPartition projection; /* for pre-image only*/
       RegionTreePath privilege_path;
       unsigned parent_req_index;
-      bool premapped;
     };
 
     /**
@@ -1820,7 +1827,6 @@ namespace Legion {
       void *value;
       size_t value_size;
       Future future;
-      bool premapped;
     };
 
     /**
@@ -1883,7 +1889,6 @@ namespace Legion {
       ExternalType file_type;
       PhysicalRegion region;
       unsigned parent_req_index;
-      bool premapped;
     };
 
     /**
@@ -1922,7 +1927,6 @@ namespace Legion {
       VersionInfo version_info;
       RestrictInfo restrict_info;
       unsigned parent_req_index;
-      bool premapped;
     };
 
     /**

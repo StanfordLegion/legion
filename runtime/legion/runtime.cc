@@ -1604,6 +1604,8 @@ namespace Legion {
       this->thieving_lock = Reservation::create_reservation();
       context_states.resize(DEFAULT_CONTEXTS);
       local_scheduler_preconditions.resize(superscalar_width, Event::NO_EVENT);
+      // Find our set of visible memories
+      runtime->machine.get_visible_memories(proc, visible_memories);
     }
 
     //--------------------------------------------------------------------------
@@ -14517,6 +14519,24 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return (local_procs.find(proc) != local_procs.end());
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::find_visible_memories(Processor proc, 
+                                        std::set<Memory> &visible)
+    //--------------------------------------------------------------------------
+    {
+      // If we cached it locally for our processors, then just go
+      // ahead and get the result
+      std::map<Processor,ProcessorManager*>::const_iterator finder = 
+        proc_managers.find(proc);
+      if (finder != proc_managers.end())
+      {
+        finder->second->find_visible_memories(visible);
+        return;
+      }
+      // Otherwise look up the result
+      machine.get_visible_memories(proc, visible);
     }
 
     //--------------------------------------------------------------------------

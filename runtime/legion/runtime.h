@@ -300,7 +300,7 @@ namespace Legion {
       void unmap_region(void);
       void remap_region(Event new_ready_event);
       const RegionRequirement& get_requirement(void) const;
-      void set_reference(LegionVector<InstanceRef>::aligned &references);
+      void set_reference(const InstanceRef &references);
       void reset_references(const LegionVector<InstanceRef>::aligned &instances,
                            UserEvent term_event);
       Event get_ready_event(void) const;
@@ -494,6 +494,9 @@ namespace Legion {
     public:
       void dump_state(FILE *target);
 #endif
+    public:
+      inline void find_visible_memories(std::set<Memory> &visible) const
+        { visible = visible_memories; }
     protected:
       void perform_mapping_operations(void);
       void issue_advertisements(MapperID mid);
@@ -545,6 +548,8 @@ namespace Legion {
       // Reservations for stealing and thieving
       Reservation stealing_lock;
       Reservation thieving_lock;
+      // The set of visible memories from this processor
+      std::set<Memory> visible_memories;
     };
 
     /**
@@ -1995,7 +2000,7 @@ namespace Legion {
       void release_remote_context(UniqueID remote_owner_uid);
     public:
       bool is_local(Processor proc) const;
-      Processor find_utility_processor(Processor proc);
+      void find_visible_memories(Processor proc, std::set<Memory> &visible);
     public:
       IndexSpaceID       get_unique_index_space_id(void);
       IndexPartitionID   get_unique_index_partition_id(void);
