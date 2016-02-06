@@ -16,6 +16,11 @@
 #include "llvmjit_internal.h"
 
 #include <iostream>
+
+// xcode's clang isn't defining these?
+#define __STDC_LIMIT_MACROS
+#define __STDC_CONSTANT_MACROS
+
 #include <cstdint>
 
 #include <llvm/IR/LLVMContext.h>

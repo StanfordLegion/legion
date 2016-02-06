@@ -147,7 +147,9 @@ ifeq ($(strip $(USE_LLVM)),1)
   LEGION_LD_FLAGS += $(shell $(LLVM_CONFIG) --ldflags --libs irreader jit x86)
   # llvm-config --system-libs gives you all the libraries you might need for anything,
   #  which includes things we don't need, and might not be installed
-  LEGION_LD_FLAGS += -lz -ltinfo
+  # by default, filter out libedit
+  LLVM_SYSTEM_LIBS ?= $(filter-out -ledit,$(shell $(LLVM_CONFIG) --system-libs))
+  LEGION_LD_FLAGS += $(LLVM_SYSTEM_LIBS)
 endif
 
 # Flags for running in the general low-level runtime
