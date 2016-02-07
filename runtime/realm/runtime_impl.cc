@@ -1596,6 +1596,9 @@ namespace Realm {
 	// delete all the DMA channels that we were given
 	delete_container_contents(dma_channels);
 
+	// same for code translators
+	delete_container_contents(code_translators);
+
 	for(std::vector<Module *>::iterator it = modules.begin();
 	    it != modules.end();
 	    it++) {

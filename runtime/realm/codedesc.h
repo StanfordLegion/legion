@@ -363,7 +363,7 @@ namespace Realm {
     CodeTranslator(const std::string& _name);
 
   public:
-    ~CodeTranslator(void);
+    virtual ~CodeTranslator(void);
 
     virtual bool can_translate(const std::type_info& source_impl_type,
 			       const std::type_info& target_impl_type) = 0;
