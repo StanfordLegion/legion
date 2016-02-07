@@ -80,16 +80,36 @@ namespace Realm {
 	llvm::TargetOptions options;
 	options.NoFramePointerElim = true;
 
-	host_cpu_machine = target->createTargetMachine(triple, "", 
-						       0/*HostHasAVX()*/ ? "+avx" : "", 
-						       options,
-						       reloc_model,
-						       code_model,
-						       opt_level);
+	llvm::TargetMachine *host_cpu_machine = target->createTargetMachine(triple, "", 
+									    0/*HostHasAVX()*/ ? "+avx" : "", 
+									    options,
+									    reloc_model,
+									    code_model,
+									    opt_level);
 	assert(host_cpu_machine != 0);
 
-	// would be nice to build this up front, but current construction process requires a module
-	host_exec_engine = 0;
+	// you have to have a module to build an execution engine, so create
+	//  a dummy one
+	{
+	  llvm::Module *m = new llvm::Module("eebuilder", *context);
+	  m->setTargetTriple(triple);
+	  llvm::EngineBuilder eb(m);
+
+	  std::string err;
+  
+	  eb
+	    .setErrorStr(&err)
+	    .setEngineKind(llvm::EngineKind::JIT)
+	    .setAllocateGVsWithCode(false)
+	    .setUseMCJIT(true);
+	  
+	  host_exec_engine = eb.create(host_cpu_machine);
+
+	  if(!host_exec_engine) {
+	    log_llvmjit.fatal() << "failed to create execution engine: " << err;
+	    assert(0);
+	  }
+	}
       }
 
       nvptx_machine = 0;
@@ -97,12 +117,7 @@ namespace Realm {
 
     LLVMJitInternal::~LLVMJitInternal(void)
     {
-      // ugh - if we make an execution engine, it takes ownership of the target machine
-      if(host_exec_engine) {
-	delete host_exec_engine;
-      } else {
-	delete host_cpu_machine;
-      }
+      delete host_exec_engine;
       delete context;
     }
     
@@ -110,7 +125,7 @@ namespace Realm {
 					   const std::string& entry_symbol)
     {
       // do we even know how to jit?
-      if(!host_cpu_machine)
+      if(!host_exec_engine)
 	return 0;
 
       llvm::SMDiagnostic sm;
@@ -125,27 +140,7 @@ namespace Realm {
       }
       m->setDataLayout("e-p:64:64:64-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:64:64-f32:32:32-f64:64:64-v16:16:16-v32:32:32-v64:64:64-v128:128:128-n16:32:64");
 
-      if(host_exec_engine) {
-	host_exec_engine->addModule(m);
-      } else {
-	// build one now
-	llvm::EngineBuilder eb(m);
-
-	std::string err;
-  
-	eb
-	  .setErrorStr(&err)
-	  .setEngineKind(llvm::EngineKind::JIT)
-	  .setAllocateGVsWithCode(false)
-	  .setUseMCJIT(true);
-	
-	host_exec_engine = eb.create(host_cpu_machine);
-
-	if(!host_exec_engine) {
-	  log_llvmjit.fatal() << "failed to create execution engine: " << err;
-	  assert(0);
-	}
-      }
+      host_exec_engine->addModule(m);
 
       llvm::Function* func = host_exec_engine->FindFunctionNamed(entry_symbol.c_str());
       if(!func) {
