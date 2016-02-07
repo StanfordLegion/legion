@@ -1195,9 +1195,10 @@ namespace Legion {
       inline Event get_ready_event(void) const { return ready_event; }
       inline void add_reservation(Reservation handle) 
                                   { needed_locks.push_back(handle); }
-      inline PhysicalManager* get_manager(void) const { return manager; }
+      inline InstanceManager* get_manager(void) const { return manager; }
       inline InstanceView* get_instance_view(void) const { return view; }
     public:
+      bool is_composite_ref(void) const;
       MappingInstance get_mapping_instance(void) const;
     public:
       // These methods are used by PhysicalRegion::Impl to hold
@@ -1223,7 +1224,7 @@ namespace Legion {
     private:
       Event ready_event;
       InstanceView *view; // only valid on creation node
-      PhysicalManager *manager;
+      InstanceManager *manager;
       std::vector<Reservation> needed_locks;
     };
 

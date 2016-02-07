@@ -6900,9 +6900,7 @@ namespace Legion {
       {
         it->release();
       }
-      commit_operation();
-      // Finally we can deactivate this task now that it has commited
-      deactivate();
+      commit_operation(true/*deactivate*/);
     }
 
     //--------------------------------------------------------------------------
@@ -7621,10 +7619,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Commit this operation
-      commit_operation();
+      // Don't deactivate ourselves, our slice will do that for us
+      commit_operation(false/*deactivate*/);
       // Then tell our slice owner that we're done
       slice_owner->record_child_committed();
-      // Don't deactivate ourselves, our slice will do that for us
     }
 
     //--------------------------------------------------------------------------
@@ -9300,9 +9298,7 @@ namespace Legion {
         it->release();
       }
       // Mark that this operation is now committed
-      commit_operation();
-      // Now we get to deactivate this task
-      deactivate();
+      commit_operation(true/*deactivate*/);
     }
 
     //--------------------------------------------------------------------------
@@ -10708,9 +10704,7 @@ namespace Legion {
         it->release();
       }
       version_infos.clear();
-      commit_operation();
-      // After we're done with this, then we can reclaim oursleves
-      deactivate();
+      commit_operation(true/*deactivate*/);
     }
 
     //--------------------------------------------------------------------------

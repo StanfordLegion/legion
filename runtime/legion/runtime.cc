@@ -15416,6 +15416,7 @@ namespace Legion {
     /*sattic*/ bool Runtime::stealing_disabled = false;
     /*static*/ bool Runtime::resilient_mode = false;
     /*static*/ bool Runtime::unsafe_launch = false;
+    /*static*/ bool Runtime::unsafe_mapper = false;
     /*static*/ bool Runtime::dynamic_independence_tests = true;
     /*static*/ bool Runtime::legion_spy_enabled = false;
     /*static*/ int Runtime::mpi_rank = -1;
@@ -15523,6 +15524,7 @@ namespace Legion {
         stealing_disabled = false;
         resilient_mode = false;
         unsafe_launch = false;
+        unsafe_mapper = false;
         // We always turn this on as the Legion Spy will 
         // now understand how to handle it.
         dynamic_independence_tests = true;
@@ -15557,6 +15559,7 @@ namespace Legion {
           BOOL_ARG("-hl:nosteal",stealing_disabled);
           BOOL_ARG("-hl:resilient",resilient_mode);
           BOOL_ARG("-hl:unsafe_launch",unsafe_launch);
+          BOOL_ARG("-hl:unsafe_mapper",unsafe_mapper);
 #ifdef INORDER_EXECUTION
           if (!strcmp(argv[i],"-hl:outorder"))
             program_order_execution = false;
@@ -16479,6 +16482,14 @@ namespace Legion {
             deferred_execute_args->proxy_this->deferred_execute();
             break;
           }
+        case HLR_DEFERRED_COMMIT_TRIGGER_ID:
+          {
+            const Operation::DeferredCommitTriggerArgs *deferred_commit_args =
+              (const Operation::DeferredCommitTriggerArgs*)args;
+            deferred_commit_args->proxy_this->deferred_commit_trigger(
+                deferred_commit_args->gen);
+            break;
+          }
         case HLR_DEFERRED_POST_MAPPED_ID:
           {
             const SingleTask::DeferredPostMappedArgs *post_mapped_args = 
@@ -16499,13 +16510,13 @@ namespace Legion {
               (const Operation::DeferredCompleteArgs*)args;
             deferred_complete_args->proxy_this->trigger_complete();
             break;
-          }
+          } 
         case HLR_DEFERRED_COMMIT_ID:
           {
             const Operation::DeferredCommitArgs *deferred_commit_args = 
               (const Operation::DeferredCommitArgs*)args;
-            deferred_commit_args->proxy_this->deferred_commit(
-                deferred_commit_args->gen);
+            deferred_commit_args->proxy_this->commit_operation(
+                deferred_commit_args->deactivate);
             break;
           }
         case HLR_RECLAIM_LOCAL_FIELD_ID:

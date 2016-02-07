@@ -311,9 +311,7 @@ namespace Legion {
     void Operation::trigger_commit(void)
     //--------------------------------------------------------------------------
     {
-      commit_operation();
-      // Once we're done with this, we can deactivate the object
-      deactivate();
+      commit_operation(true/*deactivate*/);
     }
 
     //--------------------------------------------------------------------------
@@ -325,7 +323,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Operation::deferred_commit(GenerationID our_gen)
+    void Operation::deferred_commit_trigger(GenerationID our_gen)
     //--------------------------------------------------------------------------
     {
       bool need_trigger = false;
@@ -375,6 +373,16 @@ namespace Legion {
       // Should only be called for inherited types
       assert(false);
       return NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    void Operation::select_sources(const InstanceRef &target,
+                              const LegionVector<InstanceRef>::aligned &sources,
+                                    std::vector<unsigned> &ranking)
+    //--------------------------------------------------------------------------
+    {
+      // Should only be called for inherited types
+      assert(false);
     }
 
     //--------------------------------------------------------------------------
@@ -514,9 +522,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Operation::commit_operation(void)
+    void Operation::commit_operation(bool do_deactivate,
+                                     Event wait_on /*= Event::NO_EVENT*/)
     //--------------------------------------------------------------------------
     {
+      if (!wait_on.has_triggered())
+      {
+        DeferredCommitArgs args;
+        args.hlr_id = HLR_DEFERRED_COMMIT_ID;
+        args.proxy_this = this;
+        args.deactivate = do_deactivate;
+        runtime->issue_runtime_meta_task(&args, sizeof(args),
+                                         HLR_DEFERRED_COMMIT_ID,
+                                         this, wait_on);
+        return;
+      }
       // Tell our parent context that we are committed
       // Do this before actually committing to avoid race conditions
       if (track_parent)
@@ -538,6 +558,8 @@ namespace Legion {
       // Trigger the commit event
       if (Runtime::resilient_mode)
         commit_event.trigger();
+      if (do_deactivate)
+        deactivate();
     }
 
     //--------------------------------------------------------------------------
@@ -919,6 +941,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    /*static*/ void Operation::prepare_for_mapping(const InstanceRef &ref,
+                                                   MappingInstance &instance) 
+    //--------------------------------------------------------------------------
+    {
+      instance = ref.get_mapping_instance();
+      instance.ctx = &ref;
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ void Operation::prepare_for_mapping(
                                 const LegionVector<InstanceRef>::aligned &valid,
                                 std::vector<MappingInstance> &input_valid)
@@ -931,6 +962,30 @@ namespace Legion {
         MappingInstance &inst = input_valid[idx];
         inst = ref.get_mapping_instance();
         inst.ctx = &ref;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void Operation::compute_ranking(
+                              const std::deque<MappingInstance> &output,
+                              const LegionVector<InstanceRef>::aligned &sources,
+                              std::vector<unsigned> &ranking)
+    //--------------------------------------------------------------------------
+    {
+      ranking.reserve(output.size());
+      for (std::deque<MappingInstance>::const_iterator it = 
+            output.begin(); it != output.end(); it++)
+      {
+        const InstanceManager *manager = it->impl;
+        for (unsigned idx = 0; idx < sources.size(); idx++)
+        {
+          if (manager == sources[idx].get_manager())
+          {
+            ranking.push_back(idx);
+            break;
+          }
+        }
+        // Ignore any instances which are not in the original set of sources
       }
     }
 
@@ -991,12 +1046,12 @@ namespace Legion {
         Event commit_precondition = Event::merge_events(commit_dependences);
         if (!commit_precondition.has_triggered())
         {
-          DeferredCommitArgs args;
-          args.hlr_id = HLR_DEFERRED_COMMIT_ID;
+          DeferredCommitTriggerArgs args;
+          args.hlr_id = HLR_DEFERRED_COMMIT_TRIGGER_ID;
           args.proxy_this = op;
           args.gen = op->get_generation();
           runtime->issue_runtime_meta_task(&args, sizeof(args),
-                                           HLR_DEFERRED_COMMIT_ID,
+                                           HLR_DEFERRED_COMMIT_TRIGGER_ID,
                                            op, commit_precondition);
           return false;
         }
@@ -1621,6 +1676,7 @@ namespace Legion {
       parent_ctx = NULL;
       remap_region = false;
       mapper = NULL;
+      profiling_reported = UserEvent::NO_USER_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -1632,6 +1688,7 @@ namespace Legion {
       region = PhysicalRegion();
       privilege_path.clear();
       version_info.clear();
+      profiling_results = Mapper::InlineProfilingInfo();
       // Now return this operation to the queue
       runtime->free_map_op(this);
     } 
@@ -1854,7 +1911,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       version_info.release();
-      Operation::trigger_commit();
+      // Don't commit this operation until we've reported our profiling
+      commit_operation(true/*deactivate*/, profiling_reported); 
     }
 
     //--------------------------------------------------------------------------
@@ -1866,6 +1924,25 @@ namespace Legion {
 #endif
       return parent_req_index;
     }
+
+    //--------------------------------------------------------------------------
+    void MapOp::select_sources(const InstanceRef &target,
+                              const LegionVector<InstanceRef>::aligned &sources,
+                              std::vector<unsigned> &ranking)
+    //--------------------------------------------------------------------------
+    {
+      Mapper::SelectInlineSrcInput input;
+      Mapper::SelectInlineSrcOutput output;
+      prepare_for_mapping(sources, input.source_instances); 
+      prepare_for_mapping(target, input.target);
+      if (mapper == NULL)
+      {
+        Processor exec_proc = parent_ctx->get_executing_processor();
+        mapper = runtime->find_mapper(exec_proc, map_id);
+      }
+      mapper->invoke_select_inline_sources(this, &input, &output);
+      compute_ranking(output.chosen_ranking, sources, ranking);
+    } 
 
     //--------------------------------------------------------------------------
     UniqueID MapOp::get_unique_id(void) const
@@ -2072,6 +2149,9 @@ namespace Legion {
       int composite_index = runtime->forest->physical_convert_mapping(
           requirement, output.chosen_instances, valid_instances, 
                               chosen_instances, missing_fields);
+      // If we are doing unsafe mapping, then we can return
+      if (Runtime::unsafe_mapper)
+        return;
       if (composite_index >= 0)
       {
         log_run.error("Invalid mapper output from invocation of 'map_inline' "
@@ -2136,6 +2216,42 @@ namespace Legion {
           }
         }
       }
+      // Iterate over the instances and make sure they are all valid
+      // for the given logical region which we are mapping
+      for (LegionVector<InstanceRef>::aligned::const_iterator it = 
+            chosen_instances.begin(); it != chosen_instances.end(); it++)
+      {
+        if (!runtime->forest->is_valid_mapping(*it, requirement))
+        {
+          log_run.error("Invalid mapper output from invocation of 'map_inline' "
+                        "on mapper %s. Mapper specified an instance that does "
+                        "not meet the logical region requirement. The inline "
+                        "mapping operation was issued in task %s (ID %lld).",
+                        mapper->get_mapper_name(), parent_ctx->get_task_name(),
+                        parent_ctx->get_unique_id());
+#ifdef DEBUG_HIGH_LEVEL
+          assert(false);
+#endif
+          exit(ERROR_INVALID_MAPPER_OUTPUT);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void MapOp::report_profiling_results(void)
+    //--------------------------------------------------------------------------
+    {
+      if (mapper == NULL)
+      {
+        Processor exec_proc = parent_ctx->get_executing_processor();
+        mapper = runtime->find_mapper(exec_proc, map_id);
+      }
+      mapper->invoke_inline_report_profiling(this, &profiling_results);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(profiling_reported.exists());
+#endif
+      // Trigger the event indicating we are done reporting profiling
+      profiling_reported.trigger();
     }
 
     /////////////////////////////////////////////////////////////
@@ -2413,6 +2529,7 @@ namespace Legion {
     {
       activate_speculative();
       mapper = NULL;
+      profiling_reported = UserEvent::NO_USER_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -2432,6 +2549,7 @@ namespace Legion {
       dst_parent_indexes.clear();
       src_versions.clear();
       dst_versions.clear();
+      profiling_results = Mapper::CopyProfilingInfo();
       // Return this operation to the runtime
       runtime->free_copy_op(this);
     }
@@ -2671,6 +2789,7 @@ namespace Legion {
                                             valid_src_instances[idx],
                                             src_targets);
           // Now do the registration
+          set_mapping_state(idx, true/*src*/);
           runtime->forest->physical_register_only(src_contexts[idx],
                                                   src_requirements[idx],
                                                   src_versions[idx],
@@ -2686,6 +2805,7 @@ namespace Legion {
         {
           // Restricted case, get the instances from the parent
           parent_ctx->get_local_references(src_parent_indexes[idx],src_targets);
+          set_mapping_state(idx, true/*src*/);
           runtime->forest->traverse_and_register(src_contexts[idx],
                                                  src_privilege_paths[idx],
                                                  src_requirements[idx],
@@ -2705,6 +2825,7 @@ namespace Legion {
                                            valid_dst_instances[idx],
                                            dst_targets);
           // Now do the registration
+          set_mapping_state(idx, false/*src*/);
           runtime->forest->physical_register_only(dst_contexts[idx],
                                                   dst_requirements[idx],
                                                   dst_versions[idx],
@@ -2720,6 +2841,7 @@ namespace Legion {
         {
           // Restricted case, get the instances from the parent
           parent_ctx->get_local_references(dst_parent_indexes[idx],dst_targets);
+          set_mapping_state(idx, false/*src*/);
           runtime->forest->traverse_and_register(dst_contexts[idx],
                                                  dst_privilege_paths[idx],
                                                  dst_requirements[idx],
@@ -2800,7 +2922,8 @@ namespace Legion {
       {
         it->release();
       }
-      Operation::trigger_commit();
+      // Don't commit this operation until we've reported our profiling
+      commit_operation(true/*deactivate*/, profiling_reported);
     }
 
     //--------------------------------------------------------------------------
@@ -2846,6 +2969,28 @@ namespace Legion {
       }
       else
         return src_parent_indexes[idx];
+    }
+
+    //--------------------------------------------------------------------------
+    void CopyOp::select_sources(const InstanceRef &target,
+                              const LegionVector<InstanceRef>::aligned &sources,
+                              std::vector<unsigned> &ranking)
+    //--------------------------------------------------------------------------
+    {
+      Mapper::SelectCopySrcInput input;
+      Mapper::SelectCopySrcOutput output;
+      prepare_for_mapping(sources, input.source_instances);
+      prepare_for_mapping(target, input.target);
+      input.is_src = current_src;
+      input.region_req_index = current_index;
+      if (mapper == NULL)
+      {
+        Processor exec_proc = parent_ctx->get_executing_processor();
+        mapper = runtime->find_mapper(exec_proc, map_id);
+      }
+      mapper->invoke_select_copy_sources(this, &input, &output);
+      // Fill in the ranking based on the output
+      compute_ranking(output.chosen_ranking, sources, ranking);
     }
 
     //--------------------------------------------------------------------------
@@ -3091,6 +3236,8 @@ namespace Legion {
       std::vector<FieldID> missing_fields;
       int composite_idx = runtime->forest->physical_convert_mapping(
                               req, output, valid, targets, missing_fields);
+      if (Runtime::unsafe_mapper)
+        return composite_idx;
       // Destination is not allowed to have composite instances
       if (!IS_SRC && (composite_idx >= 0))
       {
@@ -3132,7 +3279,45 @@ namespace Legion {
 #endif
         exit(ERROR_INVALID_MAPPER_OUTPUT);
       }
+      for (LegionVector<InstanceRef>::aligned::const_iterator it = 
+            targets.begin(); it != targets.end(); it++)
+      {
+        if (it->is_composite_ref())
+          continue;
+        if (!runtime->forest->is_valid_mapping(*it, req))
+        {
+          log_run.error("Invalid mapper output from invocation of 'map_copy' "
+                        "on mapper %s. Mapper specified an instance for %s "
+                        "region requirement at index %d that does not meet "
+                        "the logical region requirement. The copy operation "
+                        "was issued in task %s (ID %lld).",
+                        mapper->get_mapper_name(), 
+                        IS_SRC ? "source" : "destination", idx,
+                        parent_ctx->get_task_name(),
+                        parent_ctx->get_unique_id());
+#ifdef DEBUG_HIGH_LEVEL
+          assert(false);
+#endif
+          exit(ERROR_INVALID_MAPPER_OUTPUT);
+        }
+      }
       return composite_idx;
+    }
+
+    //--------------------------------------------------------------------------
+    void CopyOp::report_profiling_results(void)
+    //--------------------------------------------------------------------------
+    {
+      if (mapper == NULL)
+      {
+        Processor exec_proc = parent_ctx->get_executing_processor();
+        mapper = runtime->find_mapper(exec_proc, map_id);
+      }
+      mapper->invoke_copy_report_profiling(this, &profiling_results);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(profiling_reported.exists());
+#endif
+      profiling_reported.trigger();
     }
 
     /////////////////////////////////////////////////////////////
@@ -3696,9 +3881,7 @@ namespace Legion {
           assert(false); // should never get here
       }
       // Commit this operation
-      commit_operation();
-      // Then deactivate it
-      deactivate();
+      commit_operation(true/*deactivate*/);
     }
 
     /////////////////////////////////////////////////////////////
@@ -3841,7 +4024,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       version_info.release();
-      Operation::trigger_commit();
+      commit_operation(true/*deactivate*/);
     }
 
     /////////////////////////////////////////////////////////////
@@ -4013,6 +4196,7 @@ namespace Legion {
     {
       activate_trace_close();  
       mapper = NULL;
+      profiling_reported = UserEvent::NO_USER_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -4020,6 +4204,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       deactivate_trace_close();
+      profiling_results = Mapper::CloseProfilingInfo();
       runtime->free_inter_close_op(this);
     }
 
@@ -4106,6 +4291,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void InterCloseOp::trigger_commit(void)
+    //--------------------------------------------------------------------------
+    {
+      version_info.release();
+      // Don't commit this operation until the profiling information is reported
+      commit_operation(true/*deactivate*/, profiling_reported);
+    }
+
+    //--------------------------------------------------------------------------
     unsigned InterCloseOp::find_parent_index(unsigned idx)
     //--------------------------------------------------------------------------
     {
@@ -4114,6 +4308,25 @@ namespace Legion {
       assert(create_op != NULL);
 #endif
       return create_op->find_parent_index(close_idx);
+    }
+
+    //--------------------------------------------------------------------------
+    void InterCloseOp::select_sources(const InstanceRef &target,
+                              const LegionVector<InstanceRef>::aligned &sources,
+                              std::vector<unsigned> &ranking)
+    //--------------------------------------------------------------------------
+    {
+      Mapper::SelectCloseSrcInput input;
+      Mapper::SelectCloseSrcOutput output;
+      prepare_for_mapping(target, input.target);
+      prepare_for_mapping(sources, input.source_instances);
+      if (mapper == NULL)
+      {
+        Processor exec_proc = parent_ctx->get_executing_processor();
+        mapper = runtime->find_mapper(exec_proc, map_id);
+      }
+      mapper->invoke_select_close_sources(this, &input, &output);
+      compute_ranking(output.chosen_ranking, sources, ranking);
     }
 
     //--------------------------------------------------------------------------
@@ -4137,6 +4350,8 @@ namespace Legion {
       int composite_index = runtime->forest->physical_convert_mapping(
             requirement, output.chosen_instances, valid_instances,
                                 chosen_instances, missing_fields);
+      if (Runtime::unsafe_mapper)
+        return composite_index;
       if (!missing_fields.empty())
       {
         log_run.error("Invalid mapper output from invocation of 'map_close' "
@@ -4161,7 +4376,42 @@ namespace Legion {
 #endif
         exit(ERROR_INVALID_MAPPER_OUTPUT);
       }
+      for (LegionVector<InstanceRef>::aligned::const_iterator it = 
+            chosen_instances.begin(); it != chosen_instances.end(); it++)
+      {
+        if (it->is_composite_ref())
+          continue;
+        if (!runtime->forest->is_valid_mapping(*it, requirement))
+        {
+          log_run.error("Invalid mapper output from invocation of 'map_close' "
+                        "on mapper %s. Mapper specified an instance which does "
+                        "not meet the logical region requirement. The close "
+                        "operation was issued in task %s (ID %lld).",
+                        mapper->get_mapper_name(), parent_ctx->get_task_name(),
+                        parent_ctx->get_unique_id());
+#ifdef DEBUG_HIGH_LEVEL
+          assert(false);
+#endif
+          exit(ERROR_INVALID_MAPPER_OUTPUT);
+        }
+      }
       return composite_index;
+    }
+
+    //--------------------------------------------------------------------------
+    void InterCloseOp::report_profiling_results(void)
+    //--------------------------------------------------------------------------
+    {
+      if (mapper == NULL)
+      {
+        Processor exec_proc = parent_ctx->get_executing_processor();
+        mapper = runtime->find_mapper(exec_proc, map_id);
+      }
+      mapper->invoke_close_report_profiling(this, &profiling_results);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(profiling_reported.exists());
+#endif
+      profiling_reported.trigger();
     }
 
     /////////////////////////////////////////////////////////////
@@ -4310,6 +4560,7 @@ namespace Legion {
     {
       activate_close();
       mapper = NULL;
+      profiling_reported = UserEvent::NO_USER_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -4318,6 +4569,7 @@ namespace Legion {
     {
       deactivate_close();
       reference = InstanceRef();
+      profiling_results = Mapper::CloseProfilingInfo();
       runtime->free_post_close_op(this);
     }
 
@@ -4408,6 +4660,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void PostCloseOp::trigger_commit(void)
+    //--------------------------------------------------------------------------
+    {
+      version_info.release();
+      // Only commit this operation if we are done profiling
+      commit_operation(true/*deactivate*/, profiling_reported);
+    }
+
+    //--------------------------------------------------------------------------
     unsigned PostCloseOp::find_parent_index(unsigned idx)
     //--------------------------------------------------------------------------
     {
@@ -4415,6 +4676,41 @@ namespace Legion {
       assert(idx == 0);
 #endif
       return parent_idx;
+    }
+
+    //--------------------------------------------------------------------------
+    void PostCloseOp::select_sources(const InstanceRef &target,
+                              const LegionVector<InstanceRef>::aligned &sources,
+                              std::vector<unsigned> &ranking)
+    //--------------------------------------------------------------------------
+    {
+      Mapper::SelectCloseSrcInput input;
+      Mapper::SelectCloseSrcOutput output;
+      prepare_for_mapping(target, input.target);
+      prepare_for_mapping(sources, input.source_instances);
+      if (mapper == NULL)
+      {
+        Processor exec_proc = parent_ctx->get_executing_processor();
+        mapper = runtime->find_mapper(exec_proc, map_id);
+      }
+      mapper->invoke_select_close_sources(this, &input, &output);
+      compute_ranking(output.chosen_ranking, sources, ranking);
+    }
+
+    //--------------------------------------------------------------------------
+    void PostCloseOp::report_profiling_results(void)
+    //--------------------------------------------------------------------------
+    {
+      if (mapper == NULL)
+      {
+        Processor exec_proc = parent_ctx->get_executing_processor();
+        mapper = runtime->find_mapper(exec_proc, map_id);
+      }
+      mapper->invoke_close_report_profiling(this, &profiling_results);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(profiling_reported.exists());
+#endif
+      profiling_reported.trigger();
     }
 
     /////////////////////////////////////////////////////////////
@@ -4687,6 +4983,7 @@ namespace Legion {
     {
       activate_speculative();
       mapper = NULL;
+      profiling_reported = UserEvent::NO_USER_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -4702,6 +4999,7 @@ namespace Legion {
       wait_barriers.clear();
       arrive_barriers.clear();
       version_info.clear();
+      profiling_results = Mapper::AcquireProfilingInfo();
       // Return this operation to the runtime
       runtime->free_acquire_op(this);
     }
@@ -4908,7 +5206,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       version_info.release();
-      Operation::trigger_commit();
+      // Don't commit thisoperation until we've reported profiling information
+      commit_operation(true/*deactivate*/, profiling_reported);
     }
 
     //--------------------------------------------------------------------------
@@ -5079,6 +5378,22 @@ namespace Legion {
       mapper->invoke_map_acquire(this, &input, &output);
     }
 
+    //--------------------------------------------------------------------------
+    void AcquireOp::report_profiling_results(void)
+    //--------------------------------------------------------------------------
+    {
+      if (mapper == NULL)
+      {
+        Processor exec_proc = parent_ctx->get_executing_processor();
+        mapper = runtime->find_mapper(exec_proc, map_id);
+      }
+      mapper->invoke_acquire_report_profiling(this, &profiling_results);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(profiling_reported.exists());
+#endif
+      profiling_reported.trigger();
+    }
+
     /////////////////////////////////////////////////////////////
     // Release Operation 
     /////////////////////////////////////////////////////////////
@@ -5223,6 +5538,7 @@ namespace Legion {
     {
       activate_speculative(); 
       mapper = NULL;
+      profiling_reported = UserEvent::NO_USER_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -5238,6 +5554,7 @@ namespace Legion {
       wait_barriers.clear();
       arrive_barriers.clear();
       version_info.clear();
+      profiling_results = Mapper::ReleaseProfilingInfo();
       // Return this operation to the runtime
       runtime->free_release_op(this);
     }
@@ -5444,7 +5761,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       version_info.release();
-      Operation::trigger_commit();
+      // Don't commit this operation until the profiling is done
+      commit_operation(true/*deactivate*/, profiling_reported);
     }
 
     //--------------------------------------------------------------------------
@@ -5455,6 +5773,25 @@ namespace Legion {
       assert(idx == 0);
 #endif
       return parent_req_index;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReleaseOp::select_sources(const InstanceRef &target,
+                              const LegionVector<InstanceRef>::aligned &sources,
+                              std::vector<unsigned> &ranking)
+    //--------------------------------------------------------------------------
+    {
+      Mapper::SelectReleaseSrcInput input;
+      Mapper::SelectReleaseSrcOutput output;
+      prepare_for_mapping(target, input.target);
+      prepare_for_mapping(sources, input.source_instances);
+      if (mapper == NULL)
+      {
+        Processor exec_proc = parent_ctx->get_executing_processor();
+        mapper = runtime->find_mapper(exec_proc, map_id);
+      }
+      mapper->invoke_select_release_sources(this, &input, &output);
+      compute_ranking(output.chosen_ranking, sources, ranking);
     }
 
     //--------------------------------------------------------------------------
@@ -5616,6 +5953,22 @@ namespace Legion {
         mapper = runtime->find_mapper(exec_proc, map_id);
       }
       mapper->invoke_map_release(this, &input, &output);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReleaseOp::report_profiling_results(void)
+    //--------------------------------------------------------------------------
+    {
+      if (mapper == NULL)
+      {
+        Processor exec_proc = parent_ctx->get_executing_processor();
+        mapper = runtime->find_mapper(exec_proc, map_id);
+      }
+      mapper->invoke_release_report_profiling(this, &profiling_results);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(profiling_reported.exists());
+#endif
+      profiling_reported.trigger();
     }
 
     /////////////////////////////////////////////////////////////
@@ -6924,7 +7277,7 @@ namespace Legion {
         need_commit = (remaining_subop_commits == 0);
       }
       if (need_commit)
-        commit_operation();
+        commit_operation(true/*deactivate*/);
     }
 
     //--------------------------------------------------------------------------
@@ -7101,7 +7454,7 @@ namespace Legion {
         need_commit = (remaining_subop_commits == 0);
       }
       if (need_commit)
-        commit_operation();
+        commit_operation(true/*deactivate*/);
     }
 
     //--------------------------------------------------------------------------
@@ -8169,7 +8522,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       version_info.release();
-      Operation::trigger_commit();
+      commit_operation(true/*deactivate*/);
     }
 
     //--------------------------------------------------------------------------
@@ -8613,7 +8966,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       version_info.release();
-      Operation::trigger_commit();
+      commit_operation(true/*deactivate*/);
     }
 
     //--------------------------------------------------------------------------
@@ -9044,7 +9397,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       version_info.release();
-      Operation::trigger_commit();
+      commit_operation(true/*deactivate*/);
     }
 
     //--------------------------------------------------------------------------
@@ -9410,7 +9763,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       version_info.release();
-      Operation::trigger_commit();
+      commit_operation(true/*deactivate*/);
     }
 
     //--------------------------------------------------------------------------

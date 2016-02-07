@@ -219,6 +219,7 @@ namespace Legion {
       HLR_DEFERRED_MAPPING_TRIGGER_ID,
       HLR_DEFERRED_RESOLUTION_TRIGGER_ID,
       HLR_DEFERRED_EXECUTION_TRIGGER_ID,
+      HLR_DEFERRED_COMMIT_TRIGGER_ID,
       HLR_DEFERRED_POST_MAPPED_ID,
       HLR_DEFERRED_EXECUTE_ID,
       HLR_DEFERRED_COMPLETE_ID,
@@ -276,6 +277,7 @@ namespace Legion {
         "Deferred Mapping Trigger",                               \
         "Deferred Resolution Trigger",                            \
         "Deferred Execution Trigger",                             \
+        "Deferred Commit Trigger",                                \
         "Deferred Post Mapped",                                   \
         "Deferred Execute",                                       \
         "Deferred Complete",                                      \

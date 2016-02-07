@@ -4153,6 +4153,11 @@ namespace Legion {
        *              can and will deadlock if any currently mapped
        *              regions conflict with those requested by a child
        *              task or other operation.
+       * -hl:unsafe_mapper Tell the runtime to skip any checks for 
+       *              validating the correctness of the results from 
+       *              mapper calls. Turning this off may result in 
+       *              internal crashes in the runtime if the mapper
+       *              provides invalid output from any mapper call.
        * ---------------------
        *  Resiliency
        * ---------------------

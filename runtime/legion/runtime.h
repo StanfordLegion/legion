@@ -2358,6 +2358,7 @@ namespace Legion {
       static bool stealing_disabled;
       static bool resilient_mode;
       static bool unsafe_launch;
+      static bool unsafe_mapper;
       static bool dynamic_independence_tests;
       static bool legion_spy_enabled;
       static int mpi_rank;

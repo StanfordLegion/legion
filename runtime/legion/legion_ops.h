@@ -116,11 +116,17 @@ namespace Legion {
         HLRTaskID hlr_id;
         Operation *proxy_this;
       };
-      struct DeferredCommitArgs {
+      struct DeferredCommitTriggerArgs {
       public:
         HLRTaskID hlr_id;
         Operation *proxy_this;
         GenerationID gen;
+      };
+      struct DeferredCommitArgs {
+      public:
+        HLRTaskID hlr_id;
+        Operation *proxy_this;
+        bool deactivate;
       };
       struct StateAnalysisArgs {
       public:
@@ -243,7 +249,7 @@ namespace Legion {
       // part of the default pipeline)
       virtual void deferred_execute(void);
       // Helper function for deferring commit operations
-      virtual void deferred_commit(GenerationID commit_gen);
+      virtual void deferred_commit_trigger(GenerationID commit_gen);
       // A helper method for deciding what to do when we have
       // aliased region requirements for an operation
       virtual void report_interfering_requirements(unsigned idx1,unsigned idx2);
@@ -265,6 +271,11 @@ namespace Legion {
       virtual bool is_close_op(void) const { return false; }
       // Determine if this operation is a partition operation
       virtual bool is_partition_op(void) const { return false; }
+    public: // virtual methods for mapping
+      // Pick the sources for a copy operations
+      virtual void select_sources(const InstanceRef &target,
+          const LegionVector<InstanceRef>::aligned &sources,
+                std::vector<unsigned> &ranking);
     public:
       // The following are sets of calls that we can use to 
       // indicate mapping, execution, resolution, completion, and commit
@@ -280,7 +291,7 @@ namespace Legion {
       // which will also verify any regions for our producers
       void complete_operation(void);
       // Indicate that we are committing this operation
-      void commit_operation(void);
+      void commit_operation(bool do_deactivate,Event wait_on = Event::NO_EVENT);
       // Indicate that this operation is hardened against failure
       void harden_operation(void);
       // Quash this task and do what is necessary to the
@@ -354,9 +365,15 @@ namespace Legion {
       void notify_regions_verified(const std::set<unsigned> &regions,
                                    GenerationID gen);
     public: // Support for mapping operations
+      static void prepare_for_mapping(const InstanceRef &ref,
+                                      MappingInstance &instance);
       static void prepare_for_mapping(
           const LegionVector<InstanceRef>::aligned &valid,
-          std::vector<MappingInstance> &input_valid);
+          std::vector<MappingInstance>             &input_valid);
+      static void compute_ranking(
+          const std::deque<MappingInstance>         &output,
+          const LegionVector<InstanceRef>::aligned  &sources,
+          std::vector<unsigned>                     &ranking);
     public:
       Runtime *const runtime;
     protected:
@@ -582,6 +599,9 @@ namespace Legion {
       virtual void deferred_execute(void);
       virtual void trigger_commit(void);
       virtual unsigned find_parent_index(unsigned idx);
+      virtual void select_sources(const InstanceRef &target,
+          const LegionVector<InstanceRef>::aligned &sources,
+                std::vector<unsigned> &ranking);
     public:
       virtual UniqueID get_unique_id(void) const;
       virtual int get_depth(void) const;
@@ -591,6 +611,7 @@ namespace Legion {
       void invoke_mapper(
           const LegionVector<InstanceRef>::aligned &valid_instances,
                 LegionVector<InstanceRef>::aligned &mapped_instances);
+      void report_profiling_results(void);
     protected:
       bool remap_region;
       UserEvent termination_event;
@@ -600,6 +621,9 @@ namespace Legion {
       VersionInfo version_info;
     protected:
       MapperManager *mapper;
+    protected:
+      Mapper::InlineProfilingInfo profiling_results;
+      UserEvent                   profiling_reported;
     };
 
     /**
@@ -640,6 +664,9 @@ namespace Legion {
       virtual void resolve_false(void);
       virtual bool speculate(bool &value);
       virtual unsigned find_parent_index(unsigned idx);
+      virtual void select_sources(const InstanceRef &target,
+          const LegionVector<InstanceRef>::aligned &sources,
+          std::vector<unsigned> &ranking);
     public:
       virtual UniqueID get_unique_id(void) const;
       virtual int get_depth(void) const;
@@ -652,6 +679,9 @@ namespace Legion {
                              std::vector<MappingInstance> &output,
                              const LegionVector<InstanceRef>::aligned &valid,
                              LegionVector<InstanceRef>::aligned &targets);
+      inline void set_mapping_state(unsigned idx, bool is_src) 
+        { current_index = idx; current_src = is_src; }
+      void report_profiling_results(void);
     public:
       std::vector<RegionTreePath> src_privilege_paths;
       std::vector<RegionTreePath> dst_privilege_paths;
@@ -659,8 +689,13 @@ namespace Legion {
       std::vector<unsigned>       dst_parent_indexes;
       std::vector<VersionInfo>    src_versions;
       std::vector<VersionInfo>    dst_versions;
-    protected:
+    protected: // for support with mapping
       MapperManager*              mapper;
+      unsigned                    current_index;
+      bool                        current_src;
+    protected:
+      Mapper::CopyProfilingInfo   profiling_results;
+      UserEvent                   profiling_reported;
     };
 
     /**
@@ -917,15 +952,23 @@ namespace Legion {
       virtual OpKind get_operation_kind(void);
     public:
       virtual bool trigger_execution(void);
+      virtual void trigger_commit(void);
       virtual unsigned find_parent_index(unsigned idx);
+      virtual void select_sources(const InstanceRef &target,
+                            const LegionVector<InstanceRef>::aligned &sources,
+                            std::vector<unsigned> &ranking);
     protected:
       int invoke_mapper(
           const LegionVector<InstanceRef>::aligned &valid_instances,
                 LegionVector<InstanceRef>::aligned &chosen_instances);
+      void report_profiling_results(void);
     protected:
       unsigned parent_req_index;
     protected:
       MapperManager *mapper;
+    protected:
+      Mapper::CloseProfilingInfo  profiling_results;
+      UserEvent                   profiling_reported;
     };
     
     /**
@@ -987,12 +1030,21 @@ namespace Legion {
     public:
       virtual void trigger_dependence_analysis(void);
       virtual bool trigger_execution(void);
+      virtual void trigger_commit(void);
       virtual unsigned find_parent_index(unsigned idx);
+      virtual void select_sources(const InstanceRef &target,
+                            const LegionVector<InstanceRef>::aligned &sources,
+                            std::vector<unsigned> &ranking);
+    protected:
+      void report_profiling_results(void);
     protected:
       InstanceRef reference;
       unsigned parent_idx;
     protected:
       MapperManager *mapper;
+    protected:
+      Mapper::CloseProfilingInfo  profiling_results;
+      UserEvent                   profiling_reported;
     };
 
     /**
@@ -1067,6 +1119,7 @@ namespace Legion {
       void check_acquire_privilege(void);
       void compute_parent_index(void);
       void invoke_mapper(void);
+      void report_profiling_results(void);
     protected:
       RegionRequirement requirement;
       RegionTreePath    privilege_path;
@@ -1074,6 +1127,9 @@ namespace Legion {
       unsigned          parent_req_index;
     protected:
       MapperManager*    mapper;
+    protected:
+      Mapper::AcquireProfilingInfo  profiling_results;
+      UserEvent                     profiling_reported;
     };
 
     /**
@@ -1110,6 +1166,9 @@ namespace Legion {
       virtual bool speculate(bool &value);
       virtual void trigger_commit(void);
       virtual unsigned find_parent_index(unsigned idx);
+      virtual void select_sources(const InstanceRef &target,
+                          const LegionVector<InstanceRef>::aligned &sources,
+                          std::vector<unsigned> &ranking);
     public:
       virtual UniqueID get_unique_id(void) const;
       virtual int get_depth(void) const;
@@ -1119,6 +1178,7 @@ namespace Legion {
       void check_release_privilege(void);
       void compute_parent_index(void);
       void invoke_mapper(void);
+      void report_profiling_results(void);
     protected:
       RegionRequirement requirement;
       RegionTreePath    privilege_path;
@@ -1126,6 +1186,9 @@ namespace Legion {
       unsigned          parent_req_index;
     protected:
       MapperManager*    mapper;
+    protected:
+      Mapper::ReleaseProfilingInfo  profiling_results;
+      UserEvent                     profiling_reported;
     };
 
     /**

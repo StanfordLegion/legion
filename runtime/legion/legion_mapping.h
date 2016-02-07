@@ -50,6 +50,8 @@ namespace Legion {
       Memory get_location(void) const;
       unsigned long get_instance_id(void) const;
     public:
+      LogicalRegion get_logical_region(void) const;
+    public:
       // These methods check to see if the data represented
       // by the is object is still up to date
 
@@ -530,7 +532,7 @@ namespace Legion {
        */
       struct SelectInlineSrcInput {
         PhysicalInstance                        target;
-        std::set<PhysicalInstance>              source_instances;
+        std::vector<PhysicalInstance>           source_instances;
       };
       struct SelectInlineSrcOutput {
         std::deque<PhysicalInstance>            chosen_ranking;
@@ -609,7 +611,7 @@ namespace Legion {
        */
       struct SelectCopySrcInput {
         PhysicalInstance                              target;
-        std::set<PhysicalInstance>                    source_instances;
+        std::vector<PhysicalInstance>                 source_instances;
         bool                                          is_src;
         unsigned                                      region_req_index;
       };
@@ -706,7 +708,7 @@ namespace Legion {
        */
       struct SelectCloseSrcInput {
         PhysicalInstance                            target;
-        std::set<PhysicalInstance>                  source_instances;
+        std::vector<PhysicalInstance>               source_instances;
       };
       struct SelectCloseSrcOutput {
         std::deque<PhysicalInstance>                chosen_ranking;
@@ -827,7 +829,7 @@ namespace Legion {
        */
       struct SelectReleaseSrcInput {
         PhysicalInstance                        target;
-        std::set<PhysicalInstance>              source_instances;
+        std::vector<PhysicalInstance>           source_instances;
       };
       struct SelectReleaseSrcOutput {
         std::deque<PhysicalInstance>            chosen_ranking;

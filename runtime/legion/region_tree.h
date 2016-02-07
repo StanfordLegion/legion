@@ -374,6 +374,8 @@ namespace Legion {
                                const LegionVector<InstanceRef>::aligned &valid,
                                LegionVector<InstanceRef>::aligned &result,
                                std::vector<FieldID> &missing_fields);
+      bool is_valid_mapping(const InstanceRef &ref, 
+                            const RegionRequirement &req);
 #else
       bool premap_physical_region(RegionTreeContext ctx,
                                   RegionTreePath &path,
