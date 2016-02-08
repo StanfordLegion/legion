@@ -256,8 +256,7 @@ namespace Legion {
        * region requirements in the task.
        */
       struct PremapTaskInput {
-        std::set<unsigned>                                 must_premap;
-        std::vector<std::vector<PhysicalInstance> >        valid_instances;
+        std::map<unsigned,std::vector<PhysicalInstance> >  valid_instances;
       };
       struct PremapTaskOutput {
         std::map<unsigned,std::vector<PhysicalInstance> >  premapped_instances;
@@ -904,7 +903,7 @@ namespace Legion {
         unsigned                                hysteresis_percentage; // = 25
         unsigned                                max_outstanding_frames; // = 2
         unsigned                                min_tasks_to_schedule; // = 64
-        unsigned                                max_directory_size;
+        unsigned                                min_frames_to_schedule; // -1
       };
       //------------------------------------------------------------------------
       virtual void configure_context(const MapperContext         ctx,

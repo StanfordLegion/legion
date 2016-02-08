@@ -1668,6 +1668,7 @@ namespace Legion {
       Processor                           orig_proc;
       Processor                           current_proc;
       unsigned                            steal_count;
+      bool                                stealable;
       bool                                speculated;
     public:
       // Parent task (only good for one recursion)

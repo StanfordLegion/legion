@@ -54,7 +54,6 @@ namespace Legion {
       inline bool is_stolen(void) const { return (steal_count > 0); }
       inline bool is_locally_mapped(void) const { return map_locally; }
       inline void set_locally_mapped(bool local) { map_locally = local; }
-      inline bool is_premapped(void) const { return premapped; }
     protected:
       void activate_task(void);
       void deactivate_task(void);
@@ -62,7 +61,7 @@ namespace Legion {
       void pack_base_task(Serializer &derez, AddressSpaceID target);
       void unpack_base_task(Deserializer &derez);
     public:
-      void mark_stolen(Processor new_target);
+      void mark_stolen(void);
       void initialize_base_task(SingleTask *ctx, bool track, 
                                 const Predicate &p, 
                                 Processor::TaskFuncID tid);
@@ -166,7 +165,8 @@ namespace Legion {
       void update_grants(const std::vector<Grant> &grants);
       void update_arrival_barriers(const std::vector<PhaseBarrier> &barriers);
       bool compute_point_region_requirements(MinimalPoint *mp = NULL);
-      bool early_map_regions(std::set<Event> &applied_conditions);
+      bool early_map_regions(std::set<Event> &applied_conditions,
+                             const std::vector<unsigned> &must_premap);
       bool prepare_steal(void);
     protected:
       void compute_parent_indexes(void);
@@ -201,20 +201,21 @@ namespace Legion {
       std::set<FieldSpace>                      deleted_field_spaces;
       std::set<IndexSpace>                      deleted_index_spaces;
     protected:
-      bool map_locally;
-      bool premapped;
-    protected:
       bool complete_received;
       bool commit_received;
       bool children_complete;
       bool children_commit;
       bool children_complete_invoked;
       bool children_commit_invoked;
+    protected:
+      bool map_locally;
     private:
       mutable bool is_local;
       mutable bool local_cached;
     protected:
       AllocManager *arg_manager;
+    protected:
+      MapperManager *mapper;
     public:
       // Static methods
       static void process_unpack_task(Runtime *rt,
@@ -539,14 +540,14 @@ namespace Legion {
       // Boolean indicating if any index requirements have been deleted
       std::vector<bool> index_deleted;
       Processor executing_processor;
+    protected:
       // Hold the result of the mapping 
-      LegionDeque<InstanceRef,TASK_INSTANCE_REGION_ALLOC>::tracked
-                                                    physical_instances;
-      std::map<unsigned/*idx*/,CompositeRef> virtual_instances;
+      std::deque<LegionVector<InstanceRef,
+        TASK_INSTANCE_REGION_ALLOC>::track_aligned> physical_instances;
       // Hold the local instances mapped regions in our context
       // which we will need to close when the task completes
-      LegionDeque<InstanceRef,TASK_LOCAL_REGION_ALLOC>::tracked
-                                                    local_instances;
+      std::deque<LegionVector<InstanceRef,
+        TASK_LOCAL_REGION_ALLOC>::track_aligned> local_instances;
       // Hold the physical regions for the task's execution
       std::vector<PhysicalRegion> physical_regions;
       // Keep track of inline mapping regions for this task
@@ -556,6 +557,9 @@ namespace Legion {
       // Context for this task
       RegionTreeContext context; 
       unsigned initial_region_count;
+    protected: // Mapper choices 
+      Mapper::ContextConfigOutput           context_configuration;
+      VariantID                             selected_variant;
     protected:
       // Track whether this task has finished executing
       int outstanding_children_count;
@@ -576,7 +580,7 @@ namespace Legion {
       Event pending_done;
       Event last_registration;
       Event dependence_precondition;
-      Event profiling_done;
+      Event profiling_done; 
     protected:
       mutable bool leaf_cached, is_leaf_result;
       mutable bool inner_cached, is_inner_result;

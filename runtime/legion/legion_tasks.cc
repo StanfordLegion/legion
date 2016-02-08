@@ -97,8 +97,11 @@ namespace Legion {
       children_commit = false;
       children_complete_invoked = false;
       children_commit_invoked = false;
+      stealable = false;
+      map_locally = false;
       local_cached = false;
       arg_manager = NULL;
+      mapper = NULL;
       orig_proc = Processor::NO_PROC; // for is_remote
     }
 
@@ -113,7 +116,6 @@ namespace Legion {
       grants.clear();
       wait_barriers.clear();
       arrive_barriers.clear();
-      additional_procs.clear();
       if (args != NULL)
       {
         if (arg_manager != NULL)
@@ -188,25 +190,10 @@ namespace Legion {
       rez.serialize(orig_proc);
       // No need to pack current proc, it will get set when we unpack
       rez.serialize(steal_count);
-      rez.serialize(depth);
       // No need to pack remote, it will get set
       rez.serialize(speculated);
-      rez.serialize(premapped);
-      // Can figure out variants remotely
-      rez.serialize(selected_variant);
-      rez.serialize(target_proc);
-      rez.serialize<size_t>(additional_procs.size());
-      for (std::set<Processor>::const_iterator it = additional_procs.begin();
-            it != additional_procs.end(); it++)
-      {
-        rez.serialize(*it);
-      }
-      // Can't be sending inline tasks remotely
-      rez.serialize(spawn_task);
       rez.serialize(map_locally);
-      rez.serialize(profile_task);
-      rez.serialize(post_map_task);
-      rez.serialize(task_priority);
+      // Can't be sending inline tasks remotely
       rez.serialize(early_mapped_regions.size());
       for (std::map<unsigned,InstanceRef>::iterator it = 
             early_mapped_regions.begin(); it != 
@@ -289,26 +276,8 @@ namespace Legion {
       }
       derez.deserialize(orig_proc);
       derez.deserialize(steal_count);
-      derez.deserialize(depth);
       derez.deserialize(speculated);
-      derez.deserialize(premapped);
-      variants = runtime->find_or_create_task_impl(task_id)->get_collection();
-      derez.deserialize(selected_variant);
-      derez.deserialize(target_proc);
-      size_t num_additional_procs;
-      derez.deserialize(num_additional_procs);
-      for (unsigned idx = 0; idx < num_additional_procs; idx++)
-      {
-        Processor add_proc;
-        derez.deserialize(add_proc);
-        additional_procs.insert(add_proc);
-      }
-      inline_task = false;
-      derez.deserialize(spawn_task);
       derez.deserialize(map_locally);
-      derez.deserialize(profile_task);
-      derez.deserialize(post_map_task);
-      derez.deserialize(task_priority);
       size_t num_early;
       derez.deserialize(num_early);
       for (unsigned idx = 0; idx < num_early; idx++)
@@ -359,11 +328,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TaskOp::mark_stolen(Processor new_target)
+    void TaskOp::mark_stolen(void)
     //--------------------------------------------------------------------------
     {
       steal_count++;
-      target_proc = new_target;
     }
 
     //--------------------------------------------------------------------------
@@ -377,20 +345,7 @@ namespace Legion {
       orig_proc = ctx->get_executing_processor();
       current_proc = orig_proc;
       steal_count = 0;
-      depth = parent_ctx->depth+1;
       speculated = false;
-      premapped = false;
-      variants = runtime->find_or_create_task_impl(task_id)->get_collection();
-      selected_variant = 0;
-      target_proc = orig_proc;
-      inline_task = false;
-      spawn_task = false;
-      map_locally = false;
-      profile_task = false;
-      post_map_task = false;
-      task_priority = 0;
-      start_time = 0;
-      stop_time = 0;
     }
 
     //--------------------------------------------------------------------------
@@ -402,10 +357,9 @@ namespace Legion {
         if (regions[idx].privilege_fields.empty())
         {
           log_task.warning("WARNING: REGION REQUIREMENT %d OF "
-                                 "TASK %s (ID %lld) HAS NO PRIVILEGE "
-                                 "FIELDS! DID YOU FORGET THEM?!?",
-                                 idx, variants->name, 
-                                 get_unique_task_id());
+                           "TASK %s (ID %lld) HAS NO PRIVILEGE "
+                           "FIELDS! DID YOU FORGET THEM?!?",
+                           idx, get_task_name(), get_unique_id());
         }
       }
     }
@@ -418,20 +372,24 @@ namespace Legion {
       assert(impl != NULL);
 #endif
       const size_t result_size = impl->get_untyped_size();
+      // TODO: figure out a way to put this check back in with dynamic task
+      // registration where we might not know the return size until later
+#if 0
       if (result_size != variants->return_size)
       {
         log_run.error("Predicated task launch for task %s "
-                            "in parent task %s (UID %lld) has predicated "
-                            "false future of size %ld bytes, but the "
-                            "expected return size is %ld bytes.",
-                            variants->name, parent_ctx->variants->name,
-                            parent_ctx->get_unique_task_id(),
-                            result_size, variants->return_size);
+                      "in parent task %s (UID %lld) has predicated "
+                      "false future of size %ld bytes, but the "
+                      "expected return size is %ld bytes.",
+                      variants->name, parent_ctx->variants->name,
+                      parent_ctx->get_unique_task_id(),
+                      result_size, variants->return_size);
 #ifdef DEBUG_HIGH_LEVEL
         assert(false);
 #endif
         exit(ERROR_PREDICATE_RESULT_SIZE_MISMATCH);
       }
+#endif
       return result_size;
     }
 
@@ -439,7 +397,7 @@ namespace Legion {
     const char* TaskOp::get_logging_name(void)
     //--------------------------------------------------------------------------
     {
-      return variants->name;
+      return get_task_name();
     }
 
     //--------------------------------------------------------------------------
@@ -514,8 +472,13 @@ namespace Legion {
     bool TaskOp::speculate(bool &value)
     //--------------------------------------------------------------------------
     {
-      Processor exec_proc = parent_ctx->get_executing_processor();
-      return runtime->invoke_mapper_speculate(exec_proc, this, value);
+      Mapper::SpeculativeOutput output;
+      if (mapper == NULL)  
+        mapper = runtime->find_mapper(current_proc, map_id);
+      mapper->invoke_task_speculate(this, &output);
+      if (output.speculate)
+        value = output.speculative_value;
+      return output.speculate;
     }
 
     //--------------------------------------------------------------------------
@@ -1188,14 +1151,13 @@ namespace Legion {
           case ERROR_BAD_PARENT_INDEX:
             {
               log_index.error("Parent task %s (ID %lld) of task %s "
-                                    "(ID %lld) "
-                                    "does not have an index requirement for "
-                                    "index space %x as a parent of "
-                                    "child task's index requirement index %d",
-                                    parent_ctx->variants->name, 
-                                    parent_ctx->get_unique_task_id(),
-                                    this->variants->name, get_unique_task_id(), 
-                                    indexes[idx].parent.id, idx);
+                              "(ID %lld) "
+                              "does not have an index requirement for "
+                              "index space %x as a parent of "
+                              "child task's index requirement index %d",
+                              parent_ctx->get_task_name(),
+                              parent_ctx->get_unique_id(), get_task_name(),
+                              get_unique_id(), indexes[idx].parent.id, idx);
 #ifdef DEBUG_HIGH_LEVEL
               assert(false);
 #endif
@@ -1204,11 +1166,11 @@ namespace Legion {
           case ERROR_BAD_INDEX_PATH:
             {
               log_index.error("Index space %x is not a sub-space "
-                                    "of parent index space %x for index "
-                                    "requirement %d of task %s (ID %lld)",
-                                    indexes[idx].handle.id, 
-                                    indexes[idx].parent.id, idx,
-                                    this->variants->name, get_unique_task_id());
+                              "of parent index space %x for index "
+                              "requirement %d of task %s (ID %lld)",
+                              indexes[idx].handle.id, 
+                              indexes[idx].parent.id, idx,
+                              get_task_name(), get_unique_id());
 #ifdef DEBUG_HIGH_LEVEL
               assert(false);
 #endif
@@ -1217,12 +1179,12 @@ namespace Legion {
           case ERROR_BAD_INDEX_PRIVILEGES:
             {
               log_index.error("Privileges %x for index space %x "
-                                    " are not a subset of privileges of parent "
-                                    "task's privileges for index space "
-                                    "requirement %d of task %s (ID %lld)",
-                                    indexes[idx].privilege, 
-                                    indexes[idx].handle.id, idx, 
-                                    this->variants->name, get_unique_task_id());
+                              " are not a subset of privileges of parent "
+                              "task's privileges for index space "
+                              "requirement %d of task %s (ID %lld)",
+                              indexes[idx].privilege, 
+                              indexes[idx].handle.id, idx, 
+                              get_task_name(), get_unique_id());
 #ifdef DEBUG_HIGH_LEVEL
               assert(false);
 #endif
@@ -1253,12 +1215,12 @@ namespace Legion {
           case ERROR_INVALID_REGION_HANDLE:
             {
               log_region.error("Invalid region handle (%x,%d,%d)"
-                                    " for region requirement %d of task %s "
-                                    "(ID %lld)",
-                                    regions[idx].region.index_space.id, 
-                                    regions[idx].region.field_space.id, 
-                                    regions[idx].region.tree_id, idx, 
-                                    variants->name, get_unique_task_id());
+                              " for region requirement %d of task %s "
+                              "(ID %lld)",
+                              regions[idx].region.index_space.id, 
+                              regions[idx].region.field_space.id, 
+                              regions[idx].region.tree_id, idx, 
+                              get_task_name(), get_unique_id());
 #ifdef DEBUG_HIGH_LEVEL
               assert(false);
 #endif
@@ -1267,12 +1229,12 @@ namespace Legion {
           case ERROR_INVALID_PARTITION_HANDLE:
             {
               log_region.error("Invalid partition handle (%x,%d,%d) "
-                            "for partition requirement %d of task %s "
-                            "(ID %lld)",
-                                    regions[idx].partition.index_partition.id, 
-                                    regions[idx].partition.field_space.id, 
-                                    regions[idx].partition.tree_id, idx, 
-                                    variants->name, get_unique_task_id());
+                               "for partition requirement %d of task %s "
+                               "(ID %lld)",
+                               regions[idx].partition.index_partition.id, 
+                               regions[idx].partition.field_space.id, 
+                               regions[idx].partition.tree_id, idx, 
+                               get_task_name(), get_unique_id());
 #ifdef DEBUG_HIGH_LEVEL
               assert(false);
 #endif
@@ -1281,8 +1243,8 @@ namespace Legion {
           case ERROR_BAD_PROJECTION_USE:
             {
               log_region.error("Projection region requirement %d used "
-                                      "in non-index space task %s",
-                                      idx, this->variants->name);
+                                "in non-index space task %s",
+                                idx, get_task_name());
 #ifdef DEBUG_HIGH_LEVEL
               assert(false);
 #endif
@@ -1291,11 +1253,11 @@ namespace Legion {
           case ERROR_NON_DISJOINT_PARTITION:
             {
               log_region.error("Non disjoint partition selected for "
-                                      "writing region requirement %d of task "
-                                      "%s.  All projection partitions "
-                                      "which are not read-only and not reduce "
-                                      "must be disjoint", 
-                                      idx, this->variants->name);
+                                "writing region requirement %d of task "
+                                "%s.  All projection partitions "
+                                "which are not read-only and not reduce "
+                                "must be disjoint", 
+                                idx, get_task_name());
 #ifdef DEBUG_HIGH_LEVEL
               assert(false);
 #endif
@@ -1308,10 +1270,10 @@ namespace Legion {
                   ? regions[idx].region.field_space : 
                     regions[idx].partition.field_space;
               log_region.error("Field %d is not a valid field of field "
-                                    "space %d for region %d of task %s "
-                                    "(ID %lld)",
-                                    bad_field, sp.id, idx, this->variants->name,
-                                    get_unique_task_id());
+                              "space %d for region %d of task %s "
+                              "(ID %lld)",
+                              bad_field, sp.id, idx, get_task_name(),
+                              get_unique_id());
 #ifdef DEBUG_HIGH_LEVEL
               assert(false);
 #endif
@@ -1320,10 +1282,10 @@ namespace Legion {
           case ERROR_INVALID_INSTANCE_FIELD:
             {
               log_region.error("Instance field %d is not one of the "
-                                      "privilege fields for region %d of "
-                                      "task %s (ID %lld)",
-                                      bad_field, idx, this->variants->name, 
-                                      get_unique_task_id());
+                                "privilege fields for region %d of "
+                                "task %s (ID %lld)",
+                                bad_field, idx, get_task_name(), 
+                                get_unique_id());
 #ifdef DEBUG_HIGH_LEVEL
               assert(false);
 #endif
@@ -1332,9 +1294,9 @@ namespace Legion {
           case ERROR_DUPLICATE_INSTANCE_FIELD:
             {
               log_region.error("Instance field %d is a duplicate for "
-                                      "region %d of task %s (ID %lld)",
-                                      bad_field, idx, this->variants->name, 
-                                      get_unique_task_id());
+                                "region %d of task %s (ID %lld)",
+                                bad_field, idx, get_task_name(), 
+                                get_unique_id());
 #ifdef DEBUG_HIGH_LEVEL
               assert(false);
 #endif
@@ -1343,17 +1305,16 @@ namespace Legion {
           case ERROR_BAD_PARENT_REGION:
             {
               log_region.error("Parent task %s (ID %lld) of task %s "
-                                      "(ID %lld) does not have a region "
-                                      "requirement for region " 
-                                      "(%x,%x,%x) as a parent of child task's "
-                                      "region requirement index %d",
-                                      parent_ctx->variants->name, 
-                                      parent_ctx->get_unique_task_id(),
-                                      this->variants->name, 
-                                      get_unique_task_id(), 
-                                      regions[idx].region.index_space.id,
-                                      regions[idx].region.field_space.id, 
-                                      regions[idx].region.tree_id, idx);
+                                "(ID %lld) does not have a region "
+                                "requirement for region " 
+                                "(%x,%x,%x) as a parent of child task's "
+                                "region requirement index %d",
+                                parent_ctx->get_task_name(), 
+                                parent_ctx->get_unique_id(),
+                                get_task_name(), get_unique_id(),
+                                regions[idx].region.index_space.id,
+                                regions[idx].region.field_space.id, 
+                                regions[idx].region.tree_id, idx);
 #ifdef DEBUG_HIGH_LEVEL
               assert(false);
 #endif
@@ -1362,15 +1323,14 @@ namespace Legion {
           case ERROR_BAD_REGION_PATH:
             {
               log_region.error("Region (%x,%x,%x) is not a "
-                                      "sub-region of parent region "
-                                      "(%x,%x,%x) for region requirement %d of "
-                                      "task %s (ID %lld)",
-                                      regions[idx].region.index_space.id,
-                                      regions[idx].region.field_space.id, 
-                                      regions[idx].region.tree_id,
-                                      PRINT_REG(regions[idx].parent), idx,
-                                      this->variants->name, 
-                                      get_unique_task_id());
+                                "sub-region of parent region "
+                                "(%x,%x,%x) for region requirement %d of "
+                                "task %s (ID %lld)",
+                                regions[idx].region.index_space.id,
+                                regions[idx].region.field_space.id, 
+                                regions[idx].region.tree_id,
+                                PRINT_REG(regions[idx].parent), idx,
+                                get_task_name(), get_unique_id());
 #ifdef DEBUG_HIGH_LEVEL
               assert(false);
 #endif
@@ -1379,15 +1339,14 @@ namespace Legion {
           case ERROR_BAD_PARTITION_PATH:
             {
               log_region.error("Partition (%x,%x,%x) is not a "
-                                     "sub-partition of parent region "
-                                     "(%x,%x,%x) for region "
-                                     "requirement %d task %s (ID %lld)",
-                                     regions[idx].partition.index_partition.id,
-                                     regions[idx].partition.field_space.id, 
-                                     regions[idx].partition.tree_id, 
-                                     PRINT_REG(regions[idx].parent), idx,
-                                     this->variants->name, 
-                                     get_unique_task_id());
+                               "sub-partition of parent region "
+                               "(%x,%x,%x) for region "
+                               "requirement %d task %s (ID %lld)",
+                               regions[idx].partition.index_partition.id,
+                               regions[idx].partition.field_space.id, 
+                               regions[idx].partition.tree_id, 
+                               PRINT_REG(regions[idx].parent), idx,
+                               get_task_name(), get_unique_id());
 #ifdef DEBUG_HIGH_LEVEL
               assert(false);
 #endif
@@ -1399,8 +1358,8 @@ namespace Legion {
                                      "(ID %lld) "
                                      "cannot find privileges for field %d in "
                                      "parent task",
-                                      idx, this->variants->name, 
-                                      get_unique_task_id(), bad_field);
+                                      idx, get_task_name(), 
+                                      get_unique_id(), bad_field);
 #ifdef DEBUG_HIGH_LEVEL
               assert(false);
 #endif
@@ -1417,8 +1376,7 @@ namespace Legion {
                                regions[idx].region.index_space.id,
                                regions[idx].region.field_space.id, 
                                regions[idx].region.tree_id, idx, 
-                               this->variants->name, 
-                               get_unique_task_id());
+                               get_task_name(), get_unique_id());
 #ifdef DEBUG_HIGH_LEVEL
               assert(false);
 #endif
@@ -1427,16 +1385,15 @@ namespace Legion {
           case ERROR_BAD_PARTITION_PRIVILEGES:
             {
               log_region.error("Privileges %x for partition (%x,%x,%x) "
-                                     "are not a subset of privileges of parent "
-                                     "task's privileges for "
-                                     "region requirement %d of task %s "
-                                     "(ID %lld)",
-                                     regions[idx].privilege, 
-                                     regions[idx].partition.index_partition.id,
-                                     regions[idx].partition.field_space.id, 
-                                     regions[idx].partition.tree_id, idx, 
-                                     this->variants->name, 
-                                     get_unique_task_id());
+                               "are not a subset of privileges of parent "
+                               "task's privileges for "
+                               "region requirement %d of task %s "
+                               "(ID %lld)",
+                               regions[idx].privilege, 
+                               regions[idx].partition.index_partition.id,
+                               regions[idx].partition.field_space.id, 
+                               regions[idx].partition.tree_id, idx, 
+                               get_task_name(), get_unique_id());
 #ifdef DEBUG_HIGH_LEVEL
               assert(false);
 #endif
@@ -1462,7 +1419,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void TaskOp::clone_task_op_from(TaskOp *rhs, Processor p, 
-                                    bool stealable, bool duplicate_args)
+                                    bool can_steal, bool duplicate_args)
     //--------------------------------------------------------------------------
     {
       // From Operation
@@ -1510,20 +1467,10 @@ namespace Legion {
       this->orig_proc = rhs->orig_proc;
       this->current_proc = rhs->current_proc;
       this->steal_count = rhs->steal_count;
-      this->depth = rhs->depth;
+      this->stealable = can_steal;
       this->speculated = rhs->speculated;
       // Premapping should never get cloned
-      this->variants = rhs->variants;
-      this->selected_variant = rhs->selected_variant;
-      this->schedule = rhs->schedule;
-      this->target_proc = p; // set the target processor
-      this->additional_procs = rhs->additional_procs;
-      this->inline_task = rhs->inline_task;
-      this->spawn_task = stealable; // set spawn to stealable
       this->map_locally = rhs->map_locally;
-      this->profile_task = rhs->profile_task;
-      this->post_map_task = rhs->post_map_task;
-      this->task_priority = rhs->task_priority;
       // From TaskOp
       this->early_mapped_regions = rhs->early_mapped_regions;
       this->parent_req_indexes = rhs->parent_req_indexes;
@@ -1586,7 +1533,7 @@ namespace Legion {
                                "points are larger than three dimensional "
                                "unsigned integers.  Points for task %s "
                                "have elements of %d dimensions",
-                                this->variants->name, index_point.get_dim());
+                                get_task_name(), index_point.get_dim());
 #ifdef DEBUG_HIGH_LEVEL
                 assert(false);
 #endif
@@ -1617,9 +1564,6 @@ namespace Legion {
           }
           // Update the region requirement kind 
           regions[idx].handle_type = SINGULAR;
-          // Update the blocking factor as well
-          regions[idx].max_blocking_factor = 
-            runtime->forest->get_domain_volume(regions[idx].region);
         }
         else if (regions[idx].handle_type == REG_PROJECTION)
         {
@@ -1652,12 +1596,10 @@ namespace Legion {
           // case we don't need to do anything
           // Update the region requirement kind
           regions[idx].handle_type = SINGULAR;
-          // Update the blocking factor as well
-          regions[idx].max_blocking_factor = 
-            runtime->forest->get_domain_volume(regions[idx].region);
         }
         // Always check to see if there are any restrictions
-        regions[idx].restricted = has_restrictions(idx, regions[idx].region);
+        if (has_restrictions(idx, regions[idx].region))
+          regions[idx].flags |= RESTRICTED_FLAG;
         // Check to see if the region is a NO_REGION,
         // if it is then switch the privilege to NO_ACCESS
         if (regions[idx].region == LogicalRegion::NO_REGION)
@@ -1670,127 +1612,141 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool TaskOp::early_map_regions(std::set<Event> &applied_conditions)
+    bool TaskOp::early_map_regions(std::set<Event> &applied_conditions,
+                                   const std::vector<unsigned> &must_premap)
     //--------------------------------------------------------------------------
     {
-      // Invoke the mapper to perform the early mappings
-      bool notify = runtime->invoke_mapper_pre_map_task(current_proc, this);
-      LegionVector<MappingRef>::aligned mapping_refs(regions.size());
-      bool success = true;
-      bool has_early_maps = false;
-      for (unsigned idx = 0; idx < regions.size(); idx++)
+      Mapper::PremapTaskInput input;
+      Mapper::PremapTaskOutput output;
+      // Set up the inputs and outputs 
+      std::vector<LegionVector<InstanceRef>::aligned> 
+        valid_instances(must_premap.size());
+      for (unsigned idx = 0; idx < must_premap.size(); idx++)
       {
-        RegionRequirement &req = regions[idx];
-        if (req.must_early_map || req.early_map)
-        {
-          if (req.handle_type == SINGULAR)
-          {
-            // Premap it first
-            VersionInfo &version_info = get_version_info(idx);
-            RegionTreeContext req_ctx = get_parent_context(idx);
-            if (!regions[idx].premapped)
-            {
-              RegionTreePath &privilege_path = get_privilege_path(idx);
-              regions[idx].premapped = runtime->forest->premap_physical_region(
-                                       req_ctx, privilege_path, regions[idx], 
-                                       version_info, this, parent_ctx,
-                                       parent_ctx->get_executing_processor()
+        VersionInfo &version_info = get_version_info(must_premap[idx]);
+        RegionTreeContext req_ctx = get_parent_context(must_premap[idx]);
+        RegionTreePath &privilege_path = get_privilege_path(must_premap[idx]);
+        LegionVector<InstanceRef>::aligned &valid = valid_instances[idx];    
+        // Do the premapping
+        runtime->forest->physical_traverse_path(req_ctx, privilege_path,
+                                                regions[must_premap[idx]],
+                                                version_info, this, 
+                                                true/*find valid*/, valid
 #ifdef DEBUG_HIGH_LEVEL
-                                       , idx, get_logging_name(), unique_op_id
+                                                , must_premap[idx]
+                                                , get_logging_name()
+                                                , unique_op_id
 #endif
-                                       );
-#ifdef DEBUG_HIGH_LEVEL
-              assert(regions[idx].premapped);
-#endif
-            }
-            has_early_maps = true;
-            mapping_refs[idx] = runtime->forest->map_physical_region(req_ctx,
-                                                      req, idx, 
-                                                      version_info, 
-                                                      this,
-                                                      current_proc,
-                                                      current_proc
-#ifdef DEBUG_HIGH_LEVEL
-                                                      , get_logging_name()
-                                                      , unique_op_id
-#endif
-                                                      );
-            if (!mapping_refs[idx].has_ref())
-            {
-              success = false;
-              regions[idx].mapping_failed = true;
-              break;
-            }
-          }
-          else
-          {
-            log_task.warning("Ignoring request to early map region %d "
-                                    "for task %s (ID %lld) which is a non-"
-                                    "singular region requirement and therefore"
-                                    "cannot be early mapped.",
-                                    idx, variants->name, get_unique_task_id());
-            req.early_map = false;
-          }
-        }
+                                                );
+        prepare_for_mapping(valid, input.valid_instances[must_premap[idx]]);
       }
-      if (has_early_maps)
+      // Now invoke the mapper call
+      if (mapper == NULL)
+        mapper = runtime->find_mapper(current_proc, map_id);
+      mapper->invoke_premap_task(this, &input, &output);
+      // Now do the registration
+      for (unsigned idx = 0; idx < must_premap.size(); idx++)
       {
-        if (success)
+        std::map<unsigned,std::vector<MappingInstance> >::const_iterator 
+          finder = output.premapped_instances.find(must_premap[idx]);
+        if (finder == output.premapped_instances.end())
         {
-          for (unsigned idx = 0; idx < regions.size(); idx++)
+          log_run.error("Invalid mapper output from 'premap_task' invocation "
+                        "on mapper %s. Mapper failed to map required premap "
+                        "region requirement %d of task %s (ID %lld) launched "
+                        "in parent task %s (ID %lld).", 
+                        mapper->get_mapper_name(), must_premap[idx], 
+                        get_task_name(), get_unique_id(),
+                        parent_ctx->get_task_name(), 
+                        parent_ctx->get_unique_id());
+#ifdef DEBUG_HIGH_LEVEL
+          assert(false);
+#endif
+          exit(ERROR_INVALID_MAPPER_OUTPUT);
+        }
+        VersionInfo &version_info = get_version_info(must_premap[idx]);
+        RegionTreeContext req_ctx = get_parent_context(must_premap[idx]);
+        LegionVector<InstanceRef>::aligned chosen_instances;
+        std::vector<FieldID> missing_fields;
+        int composite_index = runtime->forest->physical_convert_mapping(
+            regions[must_premap[idx]], finder->second, valid_instances[idx],
+            chosen_instances, missing_fields);
+        if (composite_index >= 0)
+        {
+          log_run.error("Invalid mapper output from 'premap_task' invocation "
+                        "on mapper %s. Mapper requested composite instance "
+                        "creation on region requirement %d of task %s (ID %lld)"
+                        " launched in parent task %s (ID %lld).",
+                        mapper->get_mapper_name(), must_premap[idx],
+                        get_task_name(), get_unique_id(),
+                        parent_ctx->get_task_name(),
+                        parent_ctx->get_unique_id());
+#ifdef DEBUG_HIGH_LEVEL
+          assert(false);
+#endif
+          exit(ERROR_INVALID_MAPPER_OUTPUT);
+        }
+        if (!missing_fields.empty())
+        {
+          log_run.error("Invalid mapper output from 'premap_task' invocation "
+                        "on mapper %s. Mapper failed to specify instances for "
+                        "%ld fields of region requirement %d of task %s "
+                        "(ID %lld) launched in parent task %s (ID %lld). "
+                        "The missing fields are listed below.",
+                        mapper->get_mapper_name(), missing_fields.size(),
+                        must_premap[idx], get_task_name(), get_unique_id(),
+                        parent_ctx->get_task_name(), 
+                        parent_ctx->get_unique_id());
+          for (std::vector<FieldID>::const_iterator it = 
+                missing_fields.begin(); it != missing_fields.end(); it++)
           {
-            RegionRequirement &req = regions[idx];
-            if (mapping_refs[idx].has_ref())
+            const void *name; size_t name_size;
+            runtime->retrieve_semantic_information(
+                regions[must_premap[idx]].region.get_field_space(), *it,
+                NAME_SEMANTIC_TAG, name, name_size);
+            log_run.error("MIssing instance for field %s (FieldID: %d)",
+                          static_cast<const char*>(name), *it);
+          }
+#ifdef DEBUG_HIGH_LEVEL
+          assert(false);
+#endif
+          exit(ERROR_INVALID_MAPPER_OUTPUT);
+        }
+        if (!Runtime::unsafe_mapper)
+        {
+          for (LegionVector<InstanceRef>::aligned::const_iterator it =
+                chosen_instances.begin(); it != chosen_instances.end(); it++)
+          {
+            if (!runtime->forest->is_valid_mapping(*it, 
+                                                   regions[must_premap[idx]]))
             {
-              Event term_event = get_task_completion();
+              log_run.error("Invalid mapper output from invocation of "
+                            "'premap_task' on mapper %s. Mapper specified an "
+                            "instance region requirement %d of task %s "
+                            "(ID %lld) that does not meet the logical region "
+                            "requirement. Task was launched in task %s "
+                            "(ID %lld).", mapper->get_mapper_name(), 
+                            must_premap[idx], get_task_name(), get_unique_id(),
+                            parent_ctx->get_task_name(), 
+                            parent_ctx->get_unique_id());
 #ifdef DEBUG_HIGH_LEVEL
-              RegionTreePath mapping_path;
-              assert(req.handle_type == SINGULAR);
-              initialize_mapping_path(mapping_path, req, req.region);
+              assert(false);
 #endif
-              VersionInfo &version_info = get_version_info(idx);
-              RegionTreeContext req_ctx = get_parent_context(idx);
-              early_mapped_regions[idx] = 
-                runtime->forest->register_physical_region(req_ctx,
-                                                          mapping_refs[idx],
-                                                          req, idx, 
-                                                          version_info, 
-                                                          this, current_proc,
-                                                          term_event
-#ifdef DEBUG_HIGH_LEVEL
-                                                          , get_logging_name()
-                                                          , unique_op_id
-#endif
-                                                          );
-#ifdef DEBUG_HIGH_LEVEL
-              assert(early_mapped_regions[idx].has_ref());
-#endif
-              if (notify)
-              {
-                regions[idx].mapping_failed = false;
-                regions[idx].selected_memory = 
-                  early_mapped_regions[idx].get_memory();
-              }
-              // Apply any version info updates
-              version_info.apply_mapping(req_ctx.get_id(),
-                                 runtime->address_space, applied_conditions);
+              exit(ERROR_INVALID_MAPPER_OUTPUT);
             }
           }
-          if (notify)
-            runtime->invoke_mapper_notify_result(current_proc, this);
         }
-        else
-        {
-          runtime->invoke_mapper_failed_mapping(current_proc, this);
-          mapping_refs.clear(); 
-          for (unsigned idx = 0; idx < regions.size(); idx++)
-          {
-            VersionInfo &version_info = get_version_info(idx);
-            version_info.reset();
-          }
-        }
+        // Passed all the error checking tests so register it
+        runtime->forest->physical_register_only(req_ctx, 
+                              regions[must_premap[idx]], version_info, 
+                              this, completion_event, chosen_instances
+#ifdef DEBUG_HIGH_LEVEL
+                              , must_premap[idx], get_logging_name()
+                              , unique_op_id
+#endif
+                              );
       }
-      return success;
+      return true;
     }
 
     //--------------------------------------------------------------------------
@@ -1899,17 +1855,16 @@ namespace Legion {
         if (parent_index < 0)
         {
           log_region.error("Parent task %s (ID %lld) of task %s "
-                                 "(ID %lld) does not have a region "
-                                 "requirement for region "
-                                 "(%x,%x,%x) as a parent of child task's "
-                                 "region requirement index %d",
-                                 parent_ctx->variants->name, 
-                                 parent_ctx->get_unique_task_id(),
-                                 this->variants->name, 
-                                 get_unique_task_id(), 
-                                 regions[idx].parent.index_space.id,
-                                 regions[idx].parent.field_space.id, 
-                                 regions[idx].parent.tree_id, idx);
+                           "(ID %lld) does not have a region "
+                           "requirement for region "
+                           "(%x,%x,%x) as a parent of child task's "
+                           "region requirement index %d",
+                           parent_ctx->get_task_name(), 
+                           parent_ctx->get_unique_id(),
+                           get_task_name(), get_unique_id(),
+                           regions[idx].parent.index_space.id,
+                           regions[idx].parent.field_space.id, 
+                           regions[idx].parent.tree_id, idx);
 #ifdef DEBUG_HIGH_LEVEL
           assert(false);
 #endif
@@ -2007,18 +1962,6 @@ namespace Legion {
       rez.serialize(req.flags);
       rez.serialize(req.handle_type);
       rez.serialize(req.projection);
-      rez.serialize(req.current_instances.size());
-      for (std::map<Memory,bool>::const_iterator it = 
-            req.current_instances.begin(); it != 
-            req.current_instances.end(); it++)
-      {
-        rez.serialize(it->first);
-        rez.serialize(it->second);
-      }
-      rez.serialize(req.max_blocking_factor);
-      rez.serialize(req.must_early_map);
-      rez.serialize(req.restricted);
-      rez.serialize(req.selected_memory);
     }
 
     //--------------------------------------------------------------------------
@@ -2053,20 +1996,6 @@ namespace Legion {
       derez.deserialize(req.flags);
       derez.deserialize(req.handle_type);
       derez.deserialize(req.projection);
-      size_t num_current_instances;
-      derez.deserialize(num_current_instances);
-      for (unsigned idx = 0; idx < num_current_instances; idx++)
-      {
-        Memory mem;
-        derez.deserialize(mem);
-        bool full;
-        derez.deserialize(full);
-        req.current_instances[mem] = full;
-      }
-      derez.deserialize(req.max_blocking_factor);
-      derez.deserialize(req.must_early_map);
-      derez.deserialize(req.restricted);
-      derez.deserialize(req.selected_memory);
       req.flags |= VERIFIED_FLAG;
     }
 
@@ -2176,7 +2105,6 @@ namespace Legion {
     {
       activate_task();
       executing_processor = Processor::NO_PROC;
-      profile_task = false;
       current_fence = NULL;
       fence_gen = 0;
       context = RegionTreeContext();
@@ -2196,11 +2124,14 @@ namespace Legion {
       pending_frames = 0;
       context_order_event = Event::NO_EVENT;
       // Set some of the default values for a context
-      max_window_size = Runtime::initial_task_window_size;
-      hysteresis_percentage = Runtime::initial_task_window_hysteresis;
-      max_outstanding_frames = -1;
-      min_tasks_to_schedule = Runtime::initial_tasks_to_schedule;
-      min_frames_to_schedule = 0;
+      context_configuration.max_window_size = 
+        Runtime::initial_task_window_size;
+      context_configuration.hysteresis_percentage = 
+        Runtime::initial_task_window_hysteresis;
+      context_configuration.max_outstanding_frames = -1;
+      context_configuration.min_tasks_to_schedule = 
+        Runtime::initial_tasks_to_schedule;
+      context_configuration.min_frames_to_schedule = 0;
       leaf_cached = false;
       inner_cached = false;
     }
@@ -2211,7 +2142,6 @@ namespace Legion {
     {
       deactivate_task();
       clear_physical_instances();
-      virtual_instances.clear();
       local_instances.clear();
       physical_regions.clear();
       inline_regions.clear();
@@ -2360,14 +2290,16 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    InstanceRef SingleTask::get_local_reference(unsigned idx)
+    void SingleTask::get_local_references(unsigned idx,
+                                       LegionVector<InstanceRef>::aligned &refs)
     //--------------------------------------------------------------------------
     {
       AutoLock o_lock(op_lock,1,false/*exclusive*/);
 #ifdef DEBUG_HIGH_LEVEL
       assert(idx < local_instances.size());
 #endif
-      return local_instances[idx];
+      refs.insert(refs.end(), 
+                  local_instances[idx].begin(), local_instances[idx].end());
     }
 
     //--------------------------------------------------------------------------
@@ -2498,6 +2430,8 @@ namespace Legion {
     {
       RezCheck z(rez);
       pack_base_task(rez, target);
+      if (map_locally)
+        rez.serialize(selected_variant);
       rez.serialize<size_t>(virtual_mapped.size());
       for (unsigned idx = 0; idx < virtual_mapped.size(); idx++)
       {
@@ -2525,6 +2459,8 @@ namespace Legion {
     {
       DerezCheck z(derez);
       unpack_base_task(derez);
+      if (map_locally)
+        derez.deserialize(selected_variant);
       size_t num_virtual;
       derez.deserialize(num_virtual);
       virtual_mapped.resize(num_virtual);
@@ -4380,7 +4316,6 @@ namespace Legion {
     void SingleTask::unmap_all_regions(void)
     //--------------------------------------------------------------------------
     {
-      virtual_mapped.clear();
       region_deleted.clear();
       clear_physical_instances();
     }
