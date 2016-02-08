@@ -377,8 +377,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void Operation::select_sources(const InstanceRef &target,
-                              const LegionVector<InstanceRef>::aligned &sources,
-                                    std::vector<unsigned> &ranking)
+                                   const InstanceSet &sources,
+                                   std::vector<unsigned> &ranking)
     //--------------------------------------------------------------------------
     {
       // Should only be called for inherited types
@@ -950,9 +950,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void Operation::prepare_for_mapping(
-                                const LegionVector<InstanceRef>::aligned &valid,
-                                std::vector<MappingInstance> &input_valid)
+    /*static*/ void Operation::prepare_for_mapping(const InstanceSet &valid,
+                                      std::vector<MappingInstance> &input_valid)
     //--------------------------------------------------------------------------
     {
       input_valid.resize(valid.size());
@@ -968,7 +967,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     /*static*/ void Operation::compute_ranking(
                               const std::deque<MappingInstance> &output,
-                              const LegionVector<InstanceRef>::aligned &sources,
+                              const InstanceSet &sources,
                               std::vector<unsigned> &ranking)
     //--------------------------------------------------------------------------
     {
@@ -1760,7 +1759,7 @@ namespace Legion {
     {
       RegionTreeContext physical_ctx = 
         parent_ctx->find_enclosing_context(parent_req_index);
-      LegionVector<InstanceRef>::aligned mapped_instances;
+      InstanceSet mapped_instances;
       // If we are restricted we know the answer
       if (requirement.is_restricted())
       {
@@ -1793,7 +1792,7 @@ namespace Legion {
       {
         // We're going to need to invoke the mapper, find the set of valid
         // instances as part of our traversal
-        LegionVector<InstanceRef>::aligned valid_instances;
+        InstanceSet valid_instances;
         runtime->forest->physical_traverse_path(physical_ctx, privilege_path,
                                                 requirement, version_info,
                                                 this, true/*find valid*/,
@@ -1830,15 +1829,12 @@ namespace Legion {
       if (mapped_instances.size() > 1)
       {
         std::set<Event> mapped_events;
-        for (LegionVector<InstanceRef>::aligned::const_iterator it = 
-              mapped_instances.begin(); it != mapped_instances.end(); it++)
-        {
-          mapped_events.insert(it->get_ready_event());
-        }
+        for (unsigned idx = 0; idx < mapped_instances.size(); idx++)
+          mapped_events.insert(mapped_instances[idx].get_ready_event());
         map_complete_event = Runtime::merge_events(mapped_events);
       }
       else
-        map_complete_event = mapped_instances.front().get_ready_event();
+        map_complete_event = mapped_instances[0].get_ready_event();
 #ifdef LEGION_SPY
       // Log an implicit dependence on the parent's start event
       LegionSpy::log_implicit_dependence(parent_ctx->get_start_event(),
@@ -1848,11 +1844,10 @@ namespace Legion {
       // Log an implicit dependence on the parent's term event
       LegionSpy::log_implicit_dependence(termination_event, 
                                          parent_ctx->get_task_completion());
-      for (LegionVector<InstanceRef>::aligned::const_iterator it = 
-            mapped_instances.begin(); it != mapped_instances.end(); it++)
+      for (unsigned idx = 0; idx < mapped_instances.size(); idx++)
       {
         LegionSpy::log_op_user(unique_op_id, 0/*idx*/, 
-            it->get_manager()->get_instance().id);
+            mapped_instances[idx].get_manager()->get_instance().id);
       }
       {
         Processor proc = Processor::get_executing_processor();
@@ -1927,8 +1922,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void MapOp::select_sources(const InstanceRef &target,
-                              const LegionVector<InstanceRef>::aligned &sources,
-                              std::vector<unsigned> &ranking)
+                               const InstanceSet &sources,
+                               std::vector<unsigned> &ranking)
     //--------------------------------------------------------------------------
     {
       Mapper::SelectInlineSrcInput input;
@@ -2127,9 +2122,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MapOp::invoke_mapper(
-        const LegionVector<InstanceRef>::aligned &valid_instances,
-              LegionVector<InstanceRef>::aligned &chosen_instances)
+    void MapOp::invoke_mapper(const InstanceSet &valid_instances,
+                                    InstanceSet &chosen_instances)
     //--------------------------------------------------------------------------
     {
       Mapper::MapInlineInput input;
@@ -2195,10 +2189,9 @@ namespace Legion {
         Processor exec_proc = parent_ctx->get_executing_processor();
         std::set<Memory> visible_memories;
         runtime->find_visible_memories(exec_proc, visible_memories);
-        for (LegionVector<InstanceRef>::aligned::const_iterator it = 
-              chosen_instances.begin(); it != chosen_instances.end(); it++)
+        for (unsigned idx = 0; idx < chosen_instances.size(); idx++)
         {
-          Memory mem = it->get_memory();   
+          Memory mem = chosen_instances[idx].get_memory();   
           if (visible_memories.find(mem) == visible_memories.end())
           {
             log_run.error("Invalid mapper output from invocation of "
@@ -2218,10 +2211,10 @@ namespace Legion {
       }
       // Iterate over the instances and make sure they are all valid
       // for the given logical region which we are mapping
-      for (LegionVector<InstanceRef>::aligned::const_iterator it = 
-            chosen_instances.begin(); it != chosen_instances.end(); it++)
+      for (unsigned idx = 0; idx < chosen_instances.size(); idx++)
       {
-        if (!runtime->forest->is_valid_mapping(*it, requirement))
+        if (!runtime->forest->is_valid_mapping(chosen_instances[idx], 
+                                               requirement))
         {
           log_run.error("Invalid mapper output from invocation of 'map_inline' "
                         "on mapper %s. Mapper specified an instance that does "
@@ -2688,10 +2681,8 @@ namespace Legion {
     {
       std::vector<RegionTreeContext> src_contexts(src_requirements.size());
       std::vector<RegionTreeContext> dst_contexts(dst_requirements.size());
-      std::vector<LegionVector<InstanceRef>::aligned> valid_src_instances(
-                                                  src_requirements.size());
-      std::vector<LegionVector<InstanceRef>::aligned> valid_dst_instances(
-                                                  dst_requirements.size());
+      std::vector<InstanceSet> valid_src_instances(src_requirements.size());
+      std::vector<InstanceSet> valid_dst_instances(dst_requirements.size());
       Mapper::MapCopyInput input;
       Mapper::MapCopyOutput output;
       input.src_instances.resize(src_requirements.size());
@@ -2706,8 +2697,7 @@ namespace Legion {
         // No need to find the valid instances if this is restricted
         if (src_requirements[idx].is_restricted())
           continue;
-        LegionVector<InstanceRef>::aligned &valid_instances = 
-                                                    valid_src_instances[idx];
+        InstanceSet &valid_instances = valid_src_instances[idx];
         runtime->forest->physical_traverse_path(src_contexts[idx],
                                                 src_privilege_paths[idx],
                                                 src_requirements[idx],
@@ -2729,8 +2719,7 @@ namespace Legion {
         // No need to find the valid instances if this is restricted
         if (dst_requirements[idx].is_restricted())
           continue;
-        LegionVector<InstanceRef>::aligned &valid_instances = 
-                                                    valid_dst_instances[idx];
+        InstanceSet &valid_instances = valid_dst_instances[idx];
         runtime->forest->physical_traverse_path(dst_contexts[idx],
                                                 dst_privilege_paths[idx],
                                                 dst_requirements[idx],
@@ -2776,8 +2765,7 @@ namespace Legion {
       std::set<Event> copy_complete_events, applied_conditions;
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
       {
-        LegionVector<InstanceRef>::aligned src_targets;
-        LegionVector<InstanceRef>::aligned dst_targets;
+        InstanceSet src_targets, dst_targets;
         // The common case 
         int src_composite = -1;
         if (!src_requirements[idx].is_restricted())
@@ -2973,8 +2961,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void CopyOp::select_sources(const InstanceRef &target,
-                              const LegionVector<InstanceRef>::aligned &sources,
-                              std::vector<unsigned> &ranking)
+                                const InstanceSet &sources,
+                                std::vector<unsigned> &ranking)
     //--------------------------------------------------------------------------
     {
       Mapper::SelectCopySrcInput input;
@@ -3229,8 +3217,8 @@ namespace Legion {
     template<bool IS_SRC>
     int CopyOp::perform_conversion(unsigned idx, const RegionRequirement &req,
                                    std::vector<MappingInstance> &output,
-                                const LegionVector<InstanceRef>::aligned &valid,
-                                   LegionVector<InstanceRef>::aligned &targets)
+                                   const InstanceSet &valid, 
+                                   InstanceSet &targets)
     //--------------------------------------------------------------------------
     {
       std::vector<FieldID> missing_fields;
@@ -3279,12 +3267,12 @@ namespace Legion {
 #endif
         exit(ERROR_INVALID_MAPPER_OUTPUT);
       }
-      for (LegionVector<InstanceRef>::aligned::const_iterator it = 
-            targets.begin(); it != targets.end(); it++)
+      for (unsigned idx = 0; idx < targets.size(); idx++)
       {
-        if (it->is_composite_ref())
+        const InstanceRef &ref = targets[idx];
+        if (ref.is_composite_ref())
           continue;
-        if (!runtime->forest->is_valid_mapping(*it, req))
+        if (!runtime->forest->is_valid_mapping(ref, req))
         {
           log_run.error("Invalid mapper output from invocation of 'map_copy' "
                         "on mapper %s. Mapper specified an instance for %s "
@@ -4232,11 +4220,11 @@ namespace Legion {
       RegionTreeContext physical_ctx = 
         parent_ctx->find_enclosing_context(parent_req_index);
       // See if we are restricted or not and if not find our valid instances 
-      LegionVector<InstanceRef>::aligned chosen_instances;
+      InstanceSet chosen_instances;
       int composite_idx = -1;
       if (!restrict_info.has_restrictions())
       {
-        LegionVector<InstanceRef>::aligned valid_instances;
+        InstanceSet valid_instances;
         runtime->forest->physical_traverse_path(physical_ctx, privilege_path,
                                                 requirement, version_info,
                                                 this, true/*find valid*/,
@@ -4312,8 +4300,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void InterCloseOp::select_sources(const InstanceRef &target,
-                              const LegionVector<InstanceRef>::aligned &sources,
-                              std::vector<unsigned> &ranking)
+                                      const InstanceSet &sources,
+                                      std::vector<unsigned> &ranking)
     //--------------------------------------------------------------------------
     {
       Mapper::SelectCloseSrcInput input;
@@ -4330,9 +4318,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    int InterCloseOp::invoke_mapper(
-        const LegionVector<InstanceRef>::aligned &valid_instances,
-              LegionVector<InstanceRef>::aligned &chosen_instances)
+    int InterCloseOp::invoke_mapper(const InstanceSet &valid_instances,
+                                          InstanceSet &chosen_instances)
     //--------------------------------------------------------------------------
     {
       Mapper::MapCloseInput input;
@@ -4376,12 +4363,12 @@ namespace Legion {
 #endif
         exit(ERROR_INVALID_MAPPER_OUTPUT);
       }
-      for (LegionVector<InstanceRef>::aligned::const_iterator it = 
-            chosen_instances.begin(); it != chosen_instances.end(); it++)
+      for (unsigned idx = 0; idx < chosen_instances.size(); idx++)
       {
-        if (it->is_composite_ref())
+        const InstanceRef &ref = chosen_instances[idx];
+        if (ref.is_composite_ref())
           continue;
-        if (!runtime->forest->is_valid_mapping(*it, requirement))
+        if (!runtime->forest->is_valid_mapping(ref, requirement))
         {
           log_run.error("Invalid mapper output from invocation of 'map_close' "
                         "on mapper %s. Mapper specified an instance which does "
@@ -4624,7 +4611,7 @@ namespace Legion {
       RegionTreeContext physical_ctx = 
         parent_ctx->find_enclosing_context(parent_idx);
       // We already know the instances that we are going to need
-      LegionVector<InstanceRef>::aligned chosen_instances;
+      InstanceSet chosen_instances;
       parent_ctx->get_local_references(parent_idx, chosen_instances);
       Event close_event = 
         runtime->forest->physical_close_context(physical_ctx, requirement,
@@ -4680,8 +4667,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PostCloseOp::select_sources(const InstanceRef &target,
-                              const LegionVector<InstanceRef>::aligned &sources,
-                              std::vector<unsigned> &ranking)
+                                     const InstanceSet &sources,
+                                     std::vector<unsigned> &ranking)
     //--------------------------------------------------------------------------
     {
       Mapper::SelectCloseSrcInput input;
@@ -5117,7 +5104,7 @@ namespace Legion {
         parent_ctx->find_enclosing_context(parent_req_index);
       // Map this is a restricted region. We already know the 
       // physical region that we want to map.
-      LegionVector<InstanceRef>::aligned mapped_instances;
+      InstanceSet mapped_instances;
       parent_ctx->get_local_references(parent_req_index, mapped_instances);
       // Invoke the mapper before doing anything else 
       invoke_mapper();
@@ -5137,11 +5124,8 @@ namespace Legion {
       // Get all the events that need to happen before we can consider
       // ourselves acquired: reference ready and all synchronization
       std::set<Event> acquire_preconditions;
-      for (LegionVector<InstanceRef>::aligned::const_iterator it = 
-            mapped_instances.begin(); it != mapped_instances.end(); it++)
-      {
-        acquire_preconditions.insert(it->get_ready_event());
-      }
+      for (unsigned idx = 0; idx < mapped_instances.size(); idx++)
+        acquire_preconditions.insert(mapped_instances[idx].get_ready_event());
       if (!wait_barriers.empty())
       {
         for (std::vector<PhaseBarrier>::const_iterator it = 
@@ -5672,7 +5656,7 @@ namespace Legion {
       RegionTreeContext physical_ctx = 
         parent_ctx->find_enclosing_context(parent_req_index);
       // We already know what the answer has to be here 
-      LegionVector<InstanceRef>::aligned mapped_instances;
+      InstanceSet mapped_instances;
       parent_ctx->get_local_references(parent_req_index, mapped_instances);
       // Invoke the mapper before doing anything else 
       invoke_mapper();
@@ -5690,11 +5674,8 @@ namespace Legion {
       version_info.apply_mapping(physical_ctx.get_id(),
                                  runtime->address_space, applied_conditions);
       std::set<Event> release_preconditions;
-      for (LegionVector<InstanceRef>::aligned::const_iterator it = 
-            mapped_instances.begin(); it != mapped_instances.end(); it++)
-      {
-        release_preconditions.insert(it->get_ready_event()); 
-      }
+      for (unsigned idx = 0; idx < mapped_instances.size(); idx++)
+        release_preconditions.insert(mapped_instances[idx].get_ready_event());
       if (!wait_barriers.empty())
       {
         for (std::vector<PhaseBarrier>::const_iterator it = 
@@ -5719,10 +5700,9 @@ namespace Legion {
           release_complete);
       LegionSpy::log_op_events(unique_op_id, release_complete,
           completion_event);
-      for (LegionVector<InstanceRef>::aligned::const_iterator it = 
-            mapped_instances.begin(); it != mapped_intances.end(); it++)
+      for (unsigned idx = 0; idx < mapped_instances.size(); idx++)
         LegionSpy::log_op_user(unique_op_id, 0, 
-            it->get_view()->get_manager()->get_instance().id);
+            mapped_instances[idx].get_view()->get_manager()->get_instance().id);
       LegionSpy::log_implicit_dependence(release_complete,
           parent_ctx->get_task_completion());
       LegionSpy::log_event_dependence(release_complete, completion_event);
@@ -5777,8 +5757,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ReleaseOp::select_sources(const InstanceRef &target,
-                              const LegionVector<InstanceRef>::aligned &sources,
-                              std::vector<unsigned> &ranking)
+                                   const InstanceSet &sources,
+                                   std::vector<unsigned> &ranking)
     //--------------------------------------------------------------------------
     {
       Mapper::SelectReleaseSrcInput input;
@@ -7192,21 +7172,20 @@ namespace Legion {
         // so doing static casts are safe
         SingleTask *t1 = static_cast<SingleTask*>(const_cast<Task*>(it->t1));
         SingleTask *t2 = static_cast<SingleTask*>(const_cast<Task*>(it->t2));
-        PhysicalManager *inst1 = t1->get_instance(it->idx1);
-        PhysicalManager *inst2 = t2->get_instance(it->idx2);
+        InstanceSet inst1, inst2;
+        t1->get_physical_references(it->idx1, inst1);
+        t2->get_physical_references(it->idx2, inst2);
         // Check to make sure they selected the same instance 
         if (inst1 != inst2)
         {
           log_run.error("Invalid mapper output from invocation of "
-              "'map_must_epoch' on mapper %s. Task %s (ID %lld) mapped "
-              "region %d to instance " IDFMT " in memory " IDFMT ", but task "
-              "%s (ID %lld) mapped region %d to instance " IDFMT " in memory "
-              IDFMT " resulting in a failed constraint. The must epoch launch "
-              "occurred inside task %s (ID %lld).", mapper->get_mapper_name(),
-              t1->get_task_name(), t1->get_unique_id(), it->idx1,
-              inst1->get_instance().id, inst1->memory.id,
-              t2->get_task_name(), t2->get_unique_id(), it->idx2,
-              inst2->get_instance().id, inst2->memory.id,
+              "'map_must_epoch' on mapper %s. Region requirement %d of task %s "
+              "(ID %lld) and region requirement %d of task %s (ID %lld) were "
+              "mapped to non-equivalent sets of physical instances resulting "
+              "in a failed constraint. The must epoch launch occurred inside "
+              "task %s (ID %lld).", mapper->get_mapper_name(), it->idx1, 
+              t1->get_task_name(), t1->get_unique_id(), it->idx2,
+              t2->get_task_name(), t2->get_unique_id(), 
               parent_ctx->get_task_name(), parent_ctx->get_unique_id());
 #ifdef DEBUG_HIGH_LEVEL
           assert(false);
@@ -8368,7 +8347,7 @@ namespace Legion {
         parent_ctx->find_enclosing_context(parent_req_index);
       Processor local_proc = parent_ctx->get_executing_processor();
       // We still have to do the traversal to flush any reductions
-      LegionVector<InstanceRef>::aligned empty_instances;
+      InstanceSet empty_instances;
       runtime->forest->physical_traverse_path(physical_ctx, privilege_path,
                                               requirement, version_info,
                                               this, false/*find valid*/,
@@ -8874,7 +8853,7 @@ namespace Legion {
       RegionTreeContext physical_ctx = 
         parent_ctx->find_enclosing_context(parent_req_index);
       // Still have to walk the path
-      LegionVector<InstanceRef>::aligned empty_instances;
+      InstanceSet empty_instances;
       runtime->forest->physical_traverse_path(physical_ctx, privilege_path,
                                               requirement, version_info,
                                               this, false/*find valid*/,
@@ -9348,7 +9327,7 @@ namespace Legion {
       RegionTreeContext physical_ctx = 
         parent_ctx->find_enclosing_context(parent_req_index);
       // We still have to do a traversal to make sure everything is open
-      LegionVector<InstanceRef>::aligned empty_instances;
+      InstanceSet empty_instances;
       runtime->forest->physical_traverse_path(physical_ctx, privilege_path,
                                               requirement, version_info,
                                               this, false/*find valid*/,
@@ -9707,7 +9686,7 @@ namespace Legion {
       if (region.impl->is_mapped())
         region.impl->unmap_region();
       // Now we can get the reference we need for the detach operation
-      LegionVector<InstanceRef>::aligned references;
+      InstanceSet references;
       region.impl->get_references(references);
 #ifdef DEBUG_HIGH_LEVEL
       assert(references.size() == 1);

@@ -341,8 +341,8 @@ namespace Legion {
       void destroy_user_barrier(Barrier b);
     public:
       PhysicalRegion get_physical_region(unsigned idx);
-      void get_local_references(unsigned idx, 
-          LegionVector<InstanceRef>::aligned &refs);
+      void get_physical_references(unsigned idx, InstanceSet &refs);
+      void get_local_references(unsigned idx, InstanceSet &refs); 
       void add_inline_task(InlineTask *inline_task);
     public:
       // The following set of operations correspond directly
@@ -477,14 +477,15 @@ namespace Legion {
       void end_task(const void *res, size_t res_size, bool owned);
       void post_end_task(const void *res, size_t res_size, bool owned);
       void unmap_all_mapped_regions(void);
+    public:
+      VariantImpl* select_inline_variant(TaskOp *child);
       void inline_child_task(TaskOp *child);
+    public:
       void restart_task(void);
       const std::vector<PhysicalRegion>& get_physical_regions(void) const;
     public:
       void notify_profiling_results(Realm::ProfilingResponse &results);
       static void process_mapper_profiling(const void *args, size_t arglen);
-    public:
-      PhysicalManager* get_instance(unsigned idx);
     public:
       virtual void activate(void) = 0;
       virtual void deactivate(void) = 0;
@@ -541,13 +542,12 @@ namespace Legion {
       std::vector<bool> index_deleted;
       Processor executing_processor;
     protected:
+      std::vector<Processor> target_processors;
       // Hold the result of the mapping 
-      std::deque<LegionVector<InstanceRef,
-        TASK_INSTANCE_REGION_ALLOC>::track_aligned> physical_instances;
+      std::deque<InstanceSet> physical_instances;
       // Hold the local instances mapped regions in our context
       // which we will need to close when the task completes
-      std::deque<LegionVector<InstanceRef,
-        TASK_LOCAL_REGION_ALLOC>::track_aligned> local_instances;
+      std::deque<InstanceSet> local_instances;
       // Hold the physical regions for the task's execution
       std::vector<PhysicalRegion> physical_regions;
       // Keep track of inline mapping regions for this task

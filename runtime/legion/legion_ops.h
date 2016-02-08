@@ -274,8 +274,8 @@ namespace Legion {
     public: // virtual methods for mapping
       // Pick the sources for a copy operations
       virtual void select_sources(const InstanceRef &target,
-          const LegionVector<InstanceRef>::aligned &sources,
-                std::vector<unsigned> &ranking);
+                                  const InstanceSet &sources,
+                                  std::vector<unsigned> &ranking);
     public:
       // The following are sets of calls that we can use to 
       // indicate mapping, execution, resolution, completion, and commit
@@ -367,12 +367,11 @@ namespace Legion {
     public: // Support for mapping operations
       static void prepare_for_mapping(const InstanceRef &ref,
                                       MappingInstance &instance);
-      static void prepare_for_mapping(
-          const LegionVector<InstanceRef>::aligned &valid,
-          std::vector<MappingInstance>             &input_valid);
+      static void prepare_for_mapping(const InstanceSet &valid,
+                           std::vector<MappingInstance> &input_valid);
       static void compute_ranking(
           const std::deque<MappingInstance>         &output,
-          const LegionVector<InstanceRef>::aligned  &sources,
+          const InstanceSet                         &sources,
           std::vector<unsigned>                     &ranking);
     public:
       Runtime *const runtime;
@@ -600,17 +599,16 @@ namespace Legion {
       virtual void trigger_commit(void);
       virtual unsigned find_parent_index(unsigned idx);
       virtual void select_sources(const InstanceRef &target,
-          const LegionVector<InstanceRef>::aligned &sources,
-                std::vector<unsigned> &ranking);
+                                  const InstanceSet &sources,
+                                  std::vector<unsigned> &ranking);
     public:
       virtual UniqueID get_unique_id(void) const;
       virtual int get_depth(void) const;
     protected:
       void check_privilege(void);
       void compute_parent_index(void);
-      void invoke_mapper(
-          const LegionVector<InstanceRef>::aligned &valid_instances,
-                LegionVector<InstanceRef>::aligned &mapped_instances);
+      void invoke_mapper(const InstanceSet &valid_instances,
+                               InstanceSet &mapped_instances);
       void report_profiling_results(void);
     protected:
       bool remap_region;
@@ -665,8 +663,8 @@ namespace Legion {
       virtual bool speculate(bool &value);
       virtual unsigned find_parent_index(unsigned idx);
       virtual void select_sources(const InstanceRef &target,
-          const LegionVector<InstanceRef>::aligned &sources,
-          std::vector<unsigned> &ranking);
+                                  const InstanceSet &sources,
+                                  std::vector<unsigned> &ranking);
     public:
       virtual UniqueID get_unique_id(void) const;
       virtual int get_depth(void) const;
@@ -677,8 +675,7 @@ namespace Legion {
       template<bool IS_SRC>
       int perform_conversion(unsigned idx, const RegionRequirement &req,
                              std::vector<MappingInstance> &output,
-                             const LegionVector<InstanceRef>::aligned &valid,
-                             LegionVector<InstanceRef>::aligned &targets);
+                             const InstanceSet &valid, InstanceSet &targets);
       inline void set_mapping_state(unsigned idx, bool is_src) 
         { current_index = idx; current_src = is_src; }
       void report_profiling_results(void);
@@ -955,12 +952,11 @@ namespace Legion {
       virtual void trigger_commit(void);
       virtual unsigned find_parent_index(unsigned idx);
       virtual void select_sources(const InstanceRef &target,
-                            const LegionVector<InstanceRef>::aligned &sources,
-                            std::vector<unsigned> &ranking);
+                                  const InstanceSet &sources,
+                                  std::vector<unsigned> &ranking);
     protected:
-      int invoke_mapper(
-          const LegionVector<InstanceRef>::aligned &valid_instances,
-                LegionVector<InstanceRef>::aligned &chosen_instances);
+      int invoke_mapper(const InstanceSet &valid_instances,
+                              InstanceSet &chosen_instances);
       void report_profiling_results(void);
     protected:
       unsigned parent_req_index;
@@ -1033,8 +1029,8 @@ namespace Legion {
       virtual void trigger_commit(void);
       virtual unsigned find_parent_index(unsigned idx);
       virtual void select_sources(const InstanceRef &target,
-                            const LegionVector<InstanceRef>::aligned &sources,
-                            std::vector<unsigned> &ranking);
+                                  const InstanceSet &sources,
+                                  std::vector<unsigned> &ranking);
     protected:
       void report_profiling_results(void);
     protected:
@@ -1167,8 +1163,8 @@ namespace Legion {
       virtual void trigger_commit(void);
       virtual unsigned find_parent_index(unsigned idx);
       virtual void select_sources(const InstanceRef &target,
-                          const LegionVector<InstanceRef>::aligned &sources,
-                          std::vector<unsigned> &ranking);
+                                  const InstanceSet &sources,
+                                  std::vector<unsigned> &ranking);
     public:
       virtual UniqueID get_unique_id(void) const;
       virtual int get_depth(void) const;

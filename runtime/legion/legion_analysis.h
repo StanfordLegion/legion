@@ -1248,6 +1248,28 @@ namespace Legion {
       bool local;
     };
 
+    class InstanceSet {
+    public:
+      InstanceSet(size_t init_size = 0);
+      InstanceSet(const InstanceSet &rhs);
+      ~InstanceSet(void);
+    public:
+      InstanceSet& operator=(const InstanceSet &rhs);
+      bool operator==(const InstanceSet &rhs) const;
+      bool operator!=(const InstanceSet &rhs) const;
+    public:
+      InstanceRef& operator[](unsigned idx);
+      const InstanceRef& operator[](unsigned idx) const;
+    public:
+      bool empty(void) const;
+      size_t size(void) const;
+      void reserve(size_t size);
+      void add_instance(const InstanceRef &ref);
+    public:
+      void pack_references(Serializer &rez, AddressSpaceID target) const;
+      void unpack_references(Runtime *runtime, Deserializer &derez);
+    };
+
     /**
      * \class PremapTraverser
      * A traverser of the physical region tree for

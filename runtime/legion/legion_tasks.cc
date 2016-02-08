@@ -1619,14 +1619,13 @@ namespace Legion {
       Mapper::PremapTaskInput input;
       Mapper::PremapTaskOutput output;
       // Set up the inputs and outputs 
-      std::vector<LegionVector<InstanceRef>::aligned> 
-        valid_instances(must_premap.size());
+      std::vector<InstanceSet> valid_instances(must_premap.size());
       for (unsigned idx = 0; idx < must_premap.size(); idx++)
       {
         VersionInfo &version_info = get_version_info(must_premap[idx]);
         RegionTreeContext req_ctx = get_parent_context(must_premap[idx]);
         RegionTreePath &privilege_path = get_privilege_path(must_premap[idx]);
-        LegionVector<InstanceRef>::aligned &valid = valid_instances[idx];    
+        InstanceSet &valid = valid_instances[idx];    
         // Do the premapping
         runtime->forest->physical_traverse_path(req_ctx, privilege_path,
                                                 regions[must_premap[idx]],
@@ -1666,7 +1665,7 @@ namespace Legion {
         }
         VersionInfo &version_info = get_version_info(must_premap[idx]);
         RegionTreeContext req_ctx = get_parent_context(must_premap[idx]);
-        LegionVector<InstanceRef>::aligned chosen_instances;
+        InstanceSet chosen_instances;
         std::vector<FieldID> missing_fields;
         int composite_index = runtime->forest->physical_convert_mapping(
             regions[must_premap[idx]], finder->second, valid_instances[idx],
@@ -1714,10 +1713,10 @@ namespace Legion {
         }
         if (!Runtime::unsafe_mapper)
         {
-          for (LegionVector<InstanceRef>::aligned::const_iterator it =
-                chosen_instances.begin(); it != chosen_instances.end(); it++)
+          for (unsigned check_idx = 0; 
+                check_idx < chosen_instances.size(); check_idx++)
           {
-            if (!runtime->forest->is_valid_mapping(*it, 
+            if (!runtime->forest->is_valid_mapping(chosen_instances[check_idx],
                                                    regions[must_premap[idx]]))
             {
               log_run.error("Invalid mapper output from invocation of "
@@ -2141,6 +2140,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       deactivate_task();
+      target_processors.clear();
       clear_physical_instances();
       local_instances.clear();
       physical_regions.clear();
@@ -2290,16 +2290,25 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    void SingleTask::get_local_references(unsigned idx,
-                                       LegionVector<InstanceRef>::aligned &refs)
+    void SingleTask::get_physical_references(unsigned idx, InstanceSet &set)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock o_lock(op_lock,1,false/*exclusive*/);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(idx < physical_instances.size());
+#endif
+      set = physical_instances[idx];
+    }
+
+    //--------------------------------------------------------------------------
+    void SingleTask::get_local_references(unsigned idx, InstanceSet &set)
     //--------------------------------------------------------------------------
     {
       AutoLock o_lock(op_lock,1,false/*exclusive*/);
 #ifdef DEBUG_HIGH_LEVEL
       assert(idx < local_instances.size());
 #endif
-      refs.insert(refs.end(), 
-                  local_instances[idx].begin(), local_instances[idx].end());
+      set = local_instances[idx];
     }
 
     //--------------------------------------------------------------------------
@@ -2341,11 +2350,7 @@ namespace Legion {
       unsigned orig_child_regions = inline_task->regions.size();
 
       // Pick a variant to use for executing this task
-      runtime->invoke_mapper_select_variant(executing_processor, child);
-
-      // Find the task variant to use for performing the inlining
-      VariantImpl *variant = 
-        runtime->find_variant_impl(child->task_id, child->selected_variant);
+      VariantImpl *variant = select_inline_variant(child);    
       
       // Do the inlining
       child->perform_inlining(inline_task, variant);
@@ -2389,11 +2394,7 @@ namespace Legion {
       {
         Event wait_on = Event::merge_events(wait_events);
         if (!wait_on.has_triggered())
-        {
-          runtime->pre_wait(executing_processor);
           wait_on.wait();
-          runtime->post_wait(executing_processor);
-        }
       }
     }
 
@@ -2414,43 +2415,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalManager* SingleTask::get_instance(unsigned idx)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(idx < physical_instances.size());
-      assert(physical_instances[idx].has_ref());
-#endif
-      return physical_instances[idx].get_manager(); 
-    }
-
-    //--------------------------------------------------------------------------
     void SingleTask::pack_single_task(Serializer &rez, AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
       RezCheck z(rez);
       pack_base_task(rez, target);
       if (map_locally)
-        rez.serialize(selected_variant);
-      rez.serialize<size_t>(virtual_mapped.size());
-      for (unsigned idx = 0; idx < virtual_mapped.size(); idx++)
       {
-        bool virt = virtual_mapped[idx];
-        rez.serialize(virt);
-        if (virt)
-        {
-#ifdef DEBUG_HIGH_LEVEL
-          assert(virtual_instances.find(idx) != virtual_instances.end());
-#endif
-          virtual_instances[idx].pack_reference(rez, target);
-        }
+        rez.serialize(selected_variant);
+        rez.serialize<size_t>(target_processors.size());
+        for (unsigned idx = 0; idx < target_processors.size(); idx++)
+          rez.serialize(target_processors[idx]);
       }
-      rez.serialize(executing_processor);
       rez.serialize<size_t>(physical_instances.size());
       for (unsigned idx = 0; idx < physical_instances.size(); idx++)
-      {
-        physical_instances[idx].pack_reference(rez, target);
-      }
+        physical_instances[idx].pack_references(rez, target);
     }
 
     //--------------------------------------------------------------------------
@@ -2460,26 +2439,19 @@ namespace Legion {
       DerezCheck z(derez);
       unpack_base_task(derez);
       if (map_locally)
-        derez.deserialize(selected_variant);
-      size_t num_virtual;
-      derez.deserialize(num_virtual);
-      virtual_mapped.resize(num_virtual);
-      for (unsigned idx = 0; idx < num_virtual; idx++)
       {
-        bool virt;
-        derez.deserialize(virt);
-        virtual_mapped[idx] = virt;
-        if (virt)
-          virtual_instances[idx].unpack_reference(runtime, derez);
+        derez.deserialize(selected_variant);
+        size_t num_target_processors;
+        derez.deserialize(num_target_processors);
+        target_processors.resize(num_target_processors);
+        for (unsigned idx = 0; idx < num_target_processors; idx++)
+          derez.deserialize(target_processors[idx]);
       }
-      derez.deserialize(executing_processor);
       size_t num_phy;
       derez.deserialize(num_phy);
       physical_instances.resize(num_phy);
       for (unsigned idx = 0; idx < num_phy; idx++)
-      {
-        physical_instances[idx].unpack_reference(runtime, derez);
-      }
+        physical_instances[idx].unpack_references(runtime, derez);
       locally_mapped.resize(num_phy,false);
     }
 
@@ -2511,7 +2483,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Assume we are the owner in this case
-      UniqueID remote_owner_proxy = get_unique_task_id();
+      UniqueID remote_owner_proxy = get_unique_id();
       rez.serialize(remote_owner_proxy);
       SingleTask *proxy_this = this;
       rez.serialize(proxy_this);
@@ -2527,8 +2499,9 @@ namespace Legion {
       int outstanding_count = 
         __sync_add_and_fetch(&outstanding_children_count,1);
       // Only need to check if we are not tracing by frames
-      if ((max_outstanding_frames <= 0) && (max_window_size > 0) && 
-            (outstanding_count >= max_window_size))
+      if ((context_configuration.max_outstanding_frames <= 0) && 
+          (context_configuration.max_window_size > 0) && 
+            (outstanding_count >= context_configuration.max_window_size))
       {
         // Launch a window-wait task and then wait on the event 
         WindowWaitArgs args;
@@ -2551,7 +2524,7 @@ namespace Legion {
         // We can read this without locking because we know the application
         // task isn't running if we are here and the lock serializes us
         // with all the other meta-tasks
-        if (outstanding_children_count >= max_window_size)
+        if (outstanding_children_count >= context_configuration.max_window_size)
         {
 #ifdef DEBUG_HIGH_LEVEL
           assert(!valid_wait_event);
@@ -2630,9 +2603,10 @@ namespace Legion {
 #ifdef DEBUG_HIGH_LEVEL
       assert(outstanding_count >= 0);
 #endif
-      if (valid_wait_event && (max_window_size > 0) &&
+      if (valid_wait_event && (context_configuration.max_window_size > 0) &&
           (outstanding_count <=
-           int(hysteresis_percentage * max_window_size / 100)))
+           int(context_configuration.hysteresis_percentage * 
+               context_configuration.max_window_size / 100)))
       {
         window_wait.trigger();
         valid_wait_event = false;
@@ -2709,9 +2683,10 @@ namespace Legion {
 #ifdef DEBUG_HIGH_LEVEL
       assert(outstanding_count >= 0);
 #endif
-      if (valid_wait_event && (max_window_size > 0) &&
+      if (valid_wait_event && (context_configuration.max_window_size > 0) &&
           (outstanding_count <=
-           int(hysteresis_percentage * max_window_size / 100)))
+           int(context_configuration.hysteresis_percentage * 
+               context_configuration.max_window_size / 100)))
       {
         window_wait.trigger();
         valid_wait_event = false;
@@ -2822,8 +2797,8 @@ namespace Legion {
       if (current_trace != NULL)
       {
         log_task.error("Illegal nested trace with ID %d attempted in "
-                             "task %s (ID %lld)", tid, variants->name,
-                             get_unique_task_id());
+                       "task %s (ID %lld)", tid, get_task_name(),
+                       get_unique_id());
 #ifdef DEBUG_HIGH_LEVEL
         assert(false);
 #endif
@@ -2852,8 +2827,8 @@ namespace Legion {
       if (current_trace == NULL)
       {
         log_task.error("Unmatched end trace for ID %d in task %s "
-                             "(ID %lld)", tid, variants->name,
-                             get_unique_task_id());
+                       "(ID %lld)", tid, get_task_name(),
+                       get_unique_id());
 #ifdef DEBUG_HIGH_LEVEL
         assert(false);
 #endif
@@ -2870,12 +2845,7 @@ namespace Legion {
         runtime->add_to_dependence_queue(get_executing_processor(),complete_op);
 #ifdef INORDER_EXECUTION
         if (Runtime::program_order_execution && !term_event.has_triggered())
-        {
-          Processor proc = get_executing_processor();
-          runtime->pre_wait(proc);
           term_event.wait();
-          runtime->post_wait(proc);
-        }
 #endif
       }
       else
@@ -2889,12 +2859,7 @@ namespace Legion {
         runtime->add_to_dependence_queue(get_executing_processor(), capture_op);
 #ifdef INORDER_EXECUTION
         if (Runtime::program_order_execution && !term_event.has_triggered())
-        {
-          Processor proc = get_executing_processor();
-          runtime->pre_wait(proc);
           term_event.wait();
-          runtime->post_wait(proc);
-        }
 #endif
         // Mark that the current trace is now fixed
         current_trace->fix_trace();
@@ -2909,7 +2874,7 @@ namespace Legion {
     {
       // This happens infrequently enough that we can just issue
       // a meta-task to see what we should do without holding the lock
-      if (max_outstanding_frames > 0)
+      if (context_configuration.max_outstanding_frames > 0)
       {
         IssueFrameArgs args;
         args.hlr_id = HLR_ISSUE_FRAME_TASK_ID;
@@ -2935,8 +2900,10 @@ namespace Legion {
         const size_t current_frames = frame_events.size();
         if (current_frames > 0)
           previous = frame_events.back();
-        if (current_frames > (size_t)max_outstanding_frames)
-          wait_on = frame_events[current_frames - max_outstanding_frames];
+        if (current_frames > 
+            (size_t)context_configuration.max_outstanding_frames)
+          wait_on = frame_events[current_frames - 
+                                 context_configuration.max_outstanding_frames];
         frame_events.push_back(frame_termination); 
       }
       frame->set_previous(previous);
@@ -2949,7 +2916,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Pull off all the frame events until we reach ours
-      if (max_outstanding_frames > 0)
+      if (context_configuration.max_outstanding_frames > 0)
       {
         AutoLock o_lock(op_lock);
 #ifdef DEBUG_HIGH_LEVEL
@@ -2964,18 +2931,22 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
-      assert((min_tasks_to_schedule == 0) || (min_frames_to_schedule == 0));
-      assert((min_tasks_to_schedule > 0) || (min_frames_to_schedule > 0));
+      assert((context_configuration.min_tasks_to_schedule == 0) || 
+             (context_configuration.min_frames_to_schedule == 0));
+      assert((context_configuration.min_tasks_to_schedule > 0) || 
+             (context_configuration.min_frames_to_schedule > 0));
 #endif
       Event wait_on = Event::NO_EVENT;
       UserEvent to_trigger = UserEvent::NO_USER_EVENT;
       {
         AutoLock o_lock(op_lock);
         if ((outstanding_subtasks == 0) && 
-            (((min_tasks_to_schedule > 0) && 
-              (pending_subtasks < min_tasks_to_schedule)) ||
-             ((min_frames_to_schedule > 0) &&
-              (pending_frames < min_frames_to_schedule))))
+            (((context_configuration.min_tasks_to_schedule > 0) && 
+              (pending_subtasks < 
+               context_configuration.min_tasks_to_schedule)) ||
+             ((context_configuration.min_frames_to_schedule > 0) &&
+              (pending_frames < 
+               context_configuration.min_frames_to_schedule))))
         {
           wait_on = context_order_event;
           to_trigger = UserEvent::create_user_event();
@@ -2996,8 +2967,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
-      assert((min_tasks_to_schedule == 0) || (min_frames_to_schedule == 0));
-      assert((min_tasks_to_schedule > 0) || (min_frames_to_schedule > 0));
+      assert((context_configuration.min_tasks_to_schedule == 0) || 
+             (context_configuration.min_frames_to_schedule == 0));
+      assert((context_configuration.min_tasks_to_schedule > 0) || 
+             (context_configuration.min_frames_to_schedule > 0));
 #endif
       Event wait_on = Event::NO_EVENT;
       UserEvent to_trigger = UserEvent::NO_USER_EVENT;
@@ -3008,10 +2981,12 @@ namespace Legion {
 #endif
         outstanding_subtasks--;
         if ((outstanding_subtasks == 0) && 
-            (((min_tasks_to_schedule > 0) &&
-              (pending_subtasks < min_tasks_to_schedule)) ||
-             ((min_frames_to_schedule > 0) &&
-              (pending_frames < min_frames_to_schedule))))
+            (((context_configuration.min_tasks_to_schedule > 0) &&
+              (pending_subtasks < 
+               context_configuration.min_tasks_to_schedule)) ||
+             ((context_configuration.min_frames_to_schedule > 0) &&
+              (pending_frames < 
+               context_configuration.min_frames_to_schedule))))
         {
           wait_on = context_order_event;
           to_trigger = UserEvent::create_user_event();
@@ -3031,7 +3006,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Don't need to do this if we are scheduling based on mapped frames
-      if (min_tasks_to_schedule == 0)
+      if (context_configuration.min_tasks_to_schedule == 0)
         return;
       Event wait_on = Event::NO_EVENT;
       UserEvent to_trigger = UserEvent::NO_USER_EVENT;
@@ -3039,7 +3014,7 @@ namespace Legion {
         AutoLock o_lock(op_lock);
         pending_subtasks++;
         if ((outstanding_subtasks > 0) &&
-            (pending_subtasks == min_tasks_to_schedule))
+            (pending_subtasks == context_configuration.min_tasks_to_schedule))
         {
           wait_on = context_order_event;
           to_trigger = UserEvent::create_user_event();
@@ -3059,7 +3034,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Don't need to do this if we are schedule based on mapped frames
-      if (min_tasks_to_schedule == 0)
+      if (context_configuration.min_tasks_to_schedule == 0)
         return;
       Event wait_on = Event::NO_EVENT;
       UserEvent to_trigger = UserEvent::NO_USER_EVENT;
@@ -3069,7 +3044,7 @@ namespace Legion {
         assert(pending_subtasks > 0);
 #endif
         if ((outstanding_subtasks > 0) &&
-            (pending_subtasks == min_tasks_to_schedule))
+            (pending_subtasks == context_configuration.min_tasks_to_schedule))
         {
           wait_on = context_order_event;
           to_trigger = UserEvent::create_user_event();
@@ -3090,7 +3065,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Don't need to do this if we are scheduling based on mapped tasks
-      if (min_frames_to_schedule == 0)
+      if (context_configuration.min_frames_to_schedule == 0)
         return;
       Event wait_on = Event::NO_EVENT;
       UserEvent to_trigger = UserEvent::NO_USER_EVENT;
@@ -3098,7 +3073,7 @@ namespace Legion {
         AutoLock o_lock(op_lock);
         pending_frames++;
         if ((outstanding_subtasks > 0) &&
-            (pending_frames == min_frames_to_schedule))
+            (pending_frames == context_configuration.min_frames_to_schedule))
         {
           wait_on = context_order_event;
           to_trigger = UserEvent::create_user_event();
@@ -3118,7 +3093,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Don't need to do this if we are scheduling based on mapped tasks
-      if (min_frames_to_schedule == 0)
+      if (context_configuration.min_frames_to_schedule == 0)
         return;
       Event wait_on = Event::NO_EVENT;
       UserEvent to_trigger = UserEvent::NO_USER_EVENT;
@@ -3128,7 +3103,7 @@ namespace Legion {
         assert(pending_frames > 0);
 #endif
         if ((outstanding_subtasks > 0) &&
-            (pending_frames == min_frames_to_schedule))
+            (pending_frames == context_configuration.min_frames_to_schedule))
         {
           wait_on = context_order_event;
           to_trigger = UserEvent::create_user_event();
@@ -3266,8 +3241,8 @@ namespace Legion {
       physical_regions.push_back(PhysicalRegion(
             legion_new<PhysicalRegionImpl>(regions.back(), Event::NO_EVENT,
                  false/*mapped*/, this, map_id, tag, is_leaf(), runtime)));
-      physical_instances.push_back(InstanceRef());
-      local_instances.push_back(InstanceRef());
+      physical_instances.push_back(InstanceSet());
+      local_instances.push_back(InstanceSet());
       // Mark that this region was virtually mapped so we don't
       // try to close it when we are done executing.
       virtual_mapped.push_back(true);
@@ -3293,8 +3268,8 @@ namespace Legion {
         physical_regions.push_back(PhysicalRegion(
               legion_new<PhysicalRegionImpl>(regions.back(), Event::NO_EVENT,
                     false/*mapped*/, this, map_id, tag, is_leaf(), runtime)));
-        physical_instances.push_back(InstanceRef());
-        local_instances.push_back(InstanceRef());
+        physical_instances.push_back(InstanceSet());
+        local_instances.push_back(InstanceSet());
         // Mark that the region was virtually mapped
         virtual_mapped.push_back(true);
         locally_mapped.push_back(true);
@@ -3921,17 +3896,15 @@ namespace Legion {
           return idx;
       }
       log_region.error("Parent task %s (ID %lld) of inline task %s "
-                              "(ID %lld) does not have a region "
-                              "requirement for region (%x,%x,%x) "
-                              "as a parent of child task's region "
-                              "requirement index %d",
-                              variants->name, 
-                              get_unique_task_id(),
-                              child->variants->name, 
-                              child->get_unique_task_id(), 
-                              child->regions[index].region.index_space.id,
-                              child->regions[index].region.field_space.id, 
-                              child->regions[index].region.tree_id, index);
+                        "(ID %lld) does not have a region "
+                        "requirement for region (%x,%x,%x) "
+                        "as a parent of child task's region "
+                        "requirement index %d", get_task_name(),
+                        get_unique_id(), child->get_task_name(),
+                        child->get_unique_id(), 
+                        child->regions[index].region.index_space.id,
+                        child->regions[index].region.field_space.id, 
+                        child->regions[index].region.tree_id, index);
 #ifdef DEBUG_HIGH_LEVEL
       assert(false);
 #endif
@@ -3957,11 +3930,8 @@ namespace Legion {
                             "(ID %lld) does not have an index space "
                             "requirement for index space %x "
                             "as a parent of chlid task's index requirement "
-                            "index %d",
-                            variants->name,
-                            get_unique_task_id(),
-                            child->variants->name,
-                            child->get_unique_task_id(),
+                            "index %d", get_task_name(), get_unique_id(),
+                            child->get_task_name(), child->get_unique_id(),
                             child->indexes[index].handle.id, index);
 #ifdef DEBUG_HIGH_LEVEL
       assert(false);
@@ -7085,12 +7055,7 @@ namespace Legion {
 
       // See if we need to wait for anything
       if (start_condition.exists() && !start_condition.has_triggered())
-      {
-        Processor proc = ctx->get_executing_processor();
-        runtime->pre_wait(proc);
         start_condition.wait();
-        runtime->post_wait(proc);
-      }
 
       // Run the task  
       Processor current = parent_ctx->get_executing_processor();
@@ -9291,12 +9256,7 @@ namespace Legion {
 
       // See if we need to wait for anything
       if (start_condition.exists() && !start_condition.has_triggered())
-      {
-        Processor proc = ctx->get_executing_processor();
-        runtime->pre_wait(proc);
         start_condition.wait();
-        runtime->post_wait(proc);
-      }
 
       // Enumerate all of the points of our index space and run
       // the task for each one of them either saving or reducing their futures

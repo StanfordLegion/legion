@@ -28,6 +28,7 @@ namespace Legion {
       PREMAP_TASK_CALL,
       SLICE_DOMAIN_CALL,
       MAP_TASK_CALL,
+      SELECT_VARIANT_CALL,
       POSTMAP_TASK_CALL,
       TASK_SELECT_SOURCES_CALL,
       TASK_SPECULATE_CALL,
@@ -104,6 +105,10 @@ namespace Legion {
       void invoke_map_task(TaskOp *task, Mapper::MapTaskInput *input,
                            Mapper::MapTaskOutput *output, 
                            bool first_invocation = true);
+      void invoke_select_task_variant(TaskOp *task, 
+                                      Mapper::SelectVariantInput *input,
+                                      Mapper::SelectVariantOutput *output,
+                                      bool first_invocation = true);
       void invoke_post_map_task(TaskOp *task, Mapper::PostMapInput *input,
                                 Mapper::PostMapOutput *output,
                                 bool first_invocation = true);

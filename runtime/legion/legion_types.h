@@ -637,6 +637,7 @@ namespace Legion {
     class MappingRef;
     class InstanceRef;
     class CompositeRef;
+    class InstanceSet;
     class InnerTaskView;
     class ReductionManager;
     class ListReductionManager;

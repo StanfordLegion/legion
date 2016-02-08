@@ -301,11 +301,11 @@ namespace Legion {
       void remap_region(Event new_ready_event);
       const RegionRequirement& get_requirement(void) const;
       void set_reference(const InstanceRef &references);
-      void reset_references(const LegionVector<InstanceRef>::aligned &instances,
-                           UserEvent term_event);
+      void reset_references(const InstanceSet &instances,
+                            UserEvent term_event);
       Event get_ready_event(void) const;
       bool has_references(void) const;
-      void get_references(LegionVector<InstanceRef>::aligned &instances) const;
+      void get_references(InstanceSet &instances) const;
       void get_memories(std::set<Memory>& memories) const;
       void get_fields(std::vector<FieldID>& fields) const;
 #if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS)

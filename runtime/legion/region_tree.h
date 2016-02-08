@@ -290,7 +290,7 @@ namespace Legion {
                                   const RegionRequirement &req,
                                   VersionInfo &version_info,
                                   Operation *op, bool find_valid,
-                      LegionVector<InstanceRef>::aligned &valid_insts
+                                  InstanceSet &valid_insts
 #ifdef DEBUG_HIGH_LEVEL
                                   , unsigned index
                                   , const char *log_name
@@ -302,7 +302,7 @@ namespace Legion {
                                  const RegionRequirement &req,
                                  VersionInfo &version_info,
                                  Operation *op, Event term_event, 
-                      const LegionVector<InstanceRef>::aligned &targets
+                                 const InstanceSet &targets
 #ifdef DEBUG_HIGH_LEVEL
                                  , unsigned index
                                  , const char *log_name
@@ -313,7 +313,7 @@ namespace Legion {
                                   const RegionRequirement &req,
                                   VersionInfo &version_info,
                                   Operation *op, Event term_event,
-                      const LegionVector<InstanceRef>::aligned &targets
+                                  const InstanceSet &targets
 #ifdef DEBUG_HIGH_LEVEL
                                  , unsigned index
                                  , const char *log_name
@@ -326,7 +326,7 @@ namespace Legion {
                                    Operation *op, int composite_index,
                     const LegionMap<ColorPoint,FieldMask>::aligned &to_close,
                     const std::set<ColorPoint> &next_children,
-                    const LegionVector<InstanceRef>::aligned &targets
+                    const InstanceSet &targets
 #ifdef DEBUG_HIGH_LEVEL
                                   , unsigned index
                                   , const char *log_name
@@ -337,7 +337,7 @@ namespace Legion {
                                    const RegionRequirement &req,
                                    VersionInfo &version_info,
                                    Operation *op,
-                      const LegionVector<InstanceRef>::aligned &targets
+                                   const InstanceSet &targets
 #ifdef DEBUG_HIGH_LEVEL
                                    , unsigned index
                                    , const char *log_name
@@ -357,22 +357,21 @@ namespace Legion {
                         RegionTreeContext dst_ctx,
                         const RegionRequirement &src_req,
                         const RegionRequirement &dst_req,
-                        const LegionVector<InstanceRef>::aligned &src_targets,
-                        const LegionVector<InstanceRef>::aligned &dst_targets,
+                        const InstanceSet &src_targets, 
+                        const InstanceSet &dst_targets,
                         VersionInfo &src_version_info, int src_composite,
                         Operation *op, Event precondition);
       Event reduce_across(RegionTreeContext src_ctx,
                           RegionTreeContext dst_ctx,
                           const RegionRequirement &src_req,
                           const RegionRequirement &dst_req,
-                          const LegionVector<InstanceRef>::aligned &src_targets,
-                          const LegionVector<InstanceRef>::aligned &dst_targets,
+                          const InstanceSet &src_targets,
+                          const InstanceSet &dst_targets,
                           VersionInfo &src_version_info, int src_composite,
                           Operation *op, Event precondition);
       int physical_convert_mapping(const RegionRequirement &req,
                                const std::vector<MappingInstance> &chosen,
-                               const LegionVector<InstanceRef>::aligned &valid,
-                               LegionVector<InstanceRef>::aligned &result,
+                               const InstanceSet &valid, InstanceSet &result,
                                std::vector<FieldID> &missing_fields);
       bool is_valid_mapping(const InstanceRef &ref, 
                             const RegionRequirement &req);

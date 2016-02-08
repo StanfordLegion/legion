@@ -219,7 +219,6 @@ namespace Legion {
         bool                                   inline_task;  // = false
         bool                                   spawn_task;   // = false
         bool                                   map_locally;  // = false
-        bool                                   premap_task;  // = false
         bool                                   postmap_task; // = false
       };
       //------------------------------------------------------------------------
@@ -367,10 +366,10 @@ namespace Legion {
       };
       struct MapTaskOutput {
         std::vector<std::vector<PhysicalInstance> >     chosen_instances; 
-        std::deque<VariantID>                           variant_ranking;
-        std::set<Processor>                             additional_procs;
+        std::vector<Processor>                          target_procs;
+        VariantID                                       chosen_variant;
+        bool                                            defer_variant_selection;
         TaskPriority                                    task_priority;  // = 0
-        bool                                            report_mapping; //=false
         ProfilingRequestSet                             task_prof_requests;
         std::vector<ProfilingRequestSet>                region_prof_requests;
       };
@@ -379,6 +378,34 @@ namespace Legion {
                             const Task&              task,
                             const MapTaskInput&      input,
                                   MapTaskOutput&     output) = 0;
+      //------------------------------------------------------------------------
+
+      /**
+       * ----------------------------------------------------------------------
+       *  Select Task Variant 
+       * ----------------------------------------------------------------------
+       * This mapper call will only invoked in one of two cases. First, it 
+       * will be called if the mapper set 'defer_variant_selection' to true
+       * in the 'map_task' call and multiple candidate variants were found
+       * to be valid choices. If there is only one choice the runtime will
+       * not invoke this method. The other case is when a task is selected
+       * to be inlined by the 'select_task_options' mapper call. If this 
+       * occurs then the instances will already be selected, but a variant
+       * must still be chosen.
+       */
+      struct SelectVariantInput {
+        std::vector<Processor>                          target_procs;
+        std::vector<std::vector<PhysicalInstance> >     chosen_instances;
+        std::vector<VariantID>                          variant_options;
+      };
+      struct SelectVariantOutput {
+        VariantID                                       chosen_variant;
+      };
+      //------------------------------------------------------------------------
+      virtual void select_task_variant(const MapperContext          ctx,
+                                       const Task&                  task,
+                                       const SelectVariantInput&    input,
+                                             SelectVariantOutput&   output) = 0;
       //------------------------------------------------------------------------
 
       /**

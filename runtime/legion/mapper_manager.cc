@@ -145,6 +145,31 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void MapperManager::invoke_select_task_variant(TaskOp *task,
+                                            Mapper::SelectVariantInput *input,
+                                            Mapper::SelectVariantOutput *output,
+                                            bool first_invocation)
+    //--------------------------------------------------------------------------
+    {
+      Event continuation_precondition = Event::NO_EVENT;
+      MappingCallInfo *info = begin_mapper_call(SELECT_VARIANT_CALL,
+                                first_invocation, continuation_precondition);
+      if (info != NULL)
+      {
+        mapper->select_task_variant(info, *task, *input, *output);
+        end_mapper_call(info);
+        return;
+      }
+#ifdef DEBUG_HIGH_LEVEL
+      assert(first_invocation);
+#endif
+      MapperContinuation3<TaskOp, Mapper::SelectVariantInput, 
+        Mapper::SelectVariantOutput, &MapperManager::invoke_select_task_variant>
+          continuation(this, task, input, output);
+      continuation.defer(runtime, continuation_precondition, task);
+    }
+
+    //--------------------------------------------------------------------------
     void MapperManager::invoke_post_map_task(TaskOp *task, 
                                              Mapper::PostMapInput *input,
                                              Mapper::PostMapOutput *output,
