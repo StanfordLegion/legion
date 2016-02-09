@@ -78,6 +78,18 @@ namespace Realm {
     return !(*this == rhs);
   }
 
+  template <typename T>
+  /*static*/ Type Type::from_cpp_type(void)
+  {
+    return TypeConv::from_cpp_type<T>();
+  }
+
+  template <typename T>
+  /*static*/ Type Type::from_cpp_value(const T& value)
+  {
+    return TypeConv::from_cpp_type<T>();
+  }
+
   inline bool Type::is_valid(void) const
   {
     return (f_common.kind != InvalidKind);
