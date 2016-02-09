@@ -5618,6 +5618,22 @@ namespace LegionRuntime {
                                       const UDT &user_data);
 
       /**
+       * Dynamically register a new task variant with the runtime that
+       * has already built in the necessary preamble/postamble (i.e.
+       * calls to LegionTaskWrapper::legion_task_{pre,post}amble)
+       * @param registrar the task variant registrar for describing the task
+       * @param codedesc the code descriptor for the pre-wrapped task
+       * @param user_data pointer to optional user data to associate with the
+       * task variant
+       * @param user_len size of optional user_data in bytes
+       * @return variant ID for the task
+       */
+      VariantID register_task_variant(const TaskVariantRegistrar &registrar,
+				      const CodeDescriptor &codedesc,
+				      const void *user_data = NULL,
+				      size_t user_len = 0);
+
+      /**
        * Statically register a new task variant with the runtime with
        * a non-void return type prior to the runtime starting. This call
        * must be made on all nodes and it will fail if done after the
@@ -5682,6 +5698,26 @@ namespace LegionRuntime {
       static VariantID preregister_task_variant(
               const TaskVariantRegistrar &registrar, 
               const UDT &user_data, const char *task_name = NULL);
+
+      /**
+       * Statically register a new task variant with the runtime that
+       * has already built in the necessary preamble/postamble (i.e.
+       * calls to LegionTaskWrapper::legion_task_{pre,post}amble).
+       * This call must be made on all nodes and it will fail if done 
+       * after the Runtime::start method has been invoked.
+       * @param registrar the task variant registrar for describing the task
+       * @param codedesc the code descriptor for the pre-wrapped task
+       * @param user_data pointer to optional user data to associate with the
+       * task variant
+       * @param user_len size of optional user_data in bytes
+       * @return variant ID for the task
+       */
+      static VariantID preregister_task_variant(
+              const TaskVariantRegistrar &registrar,
+	      const CodeDescriptor &codedesc,
+	      const void *user_data = NULL,
+	      size_t user_len = 0,
+	      const char *task_name = NULL);
 
     public:
       // ------------------ Deprecated task registration -----------------------

@@ -1635,6 +1635,19 @@ namespace LegionRuntime {
                          Context, Runtime*, const UDT&)>
       static void legion_udt_task_wrapper(const void*, size_t, 
                                           const void*, size_t, Processor);
+
+    public:
+      // Do-it-yourself pre/post-ambles for code generators
+      static void legion_task_preamble(const void *data,
+				       size_t datalen,
+				       Processor p,
+				       const Task *& task,
+				       const std::vector<PhysicalRegion> *& regionsptr,
+				       Context& ctx,
+				       Runtime *& runtime);
+      static void legion_task_postamble(Runtime *runtime, Context ctx,
+					const void *retvalptr = NULL,
+					size_t retvalsize = 0);
     };
     
     //--------------------------------------------------------------------------
