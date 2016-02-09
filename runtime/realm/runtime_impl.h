@@ -236,6 +236,8 @@ namespace Realm {
 
       CoreReservationSet core_reservations;
 
+      OperationTable optable;
+
     public:
       // used by modules to add processors, memories, etc.
       void add_memory(MemoryImpl *m);
@@ -261,6 +263,12 @@ namespace Realm {
 
     extern RuntimeImpl *runtime_singleton;
     inline RuntimeImpl *get_runtime(void) { return runtime_singleton; }
+
+    // due to circular dependencies in include files, we need versions of these that
+    //  hide the RuntimeImpl intermediate
+    inline EventImpl *get_event_impl(Event e) { return get_runtime()->get_event_impl(e); }
+    inline GenEventImpl *get_genevent_impl(Event e) { return get_runtime()->get_genevent_impl(e); }
+    inline BarrierImpl *get_barrier_impl(Event e) { return get_runtime()->get_barrier_impl(e); }
 
     // active messages
 

@@ -213,7 +213,7 @@ namespace Realm {
 	}
 
 	if(fence)
-	  fence->mark_finished();
+	  fence->mark_finished(true /*successful*/);
 
 	if(notification)
 	  notification->request_completed();
@@ -808,6 +808,11 @@ namespace Realm {
       // ignored - no way to shoot down CUDA work
     }
 
+    void GPUWorkFence::print(std::ostream& os) const
+    {
+      os << "GPUWorkFence";
+    }
+
     void GPUWorkFence::enqueue_on_stream(GPUStream *stream)
     {
       if(stream->get_gpu()->module->cfg_fences_use_callbacks) {
@@ -822,7 +827,7 @@ namespace Realm {
       GPUWorkFence *me = (GPUWorkFence *)data;
 
       assert(res == CUDA_SUCCESS);
-      me->mark_finished();
+      me->mark_finished(true /*succesful*/);
     }
 
 

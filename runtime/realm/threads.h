@@ -126,7 +126,17 @@ namespace Realm {
 #endif
 
     template <typename CONDTYPE>
-    static void wait_for_condition(const CONDTYPE& cond);
+    static void wait_for_condition(const CONDTYPE& cond, bool& poisoned);
+
+    // does this thread have exception handlers installed?
+    bool exceptions_permitted(void) const;
+
+    // put one of these in a try {} block to indicate that exceptions are allowed
+    class ExceptionHandlerPresence {
+    public:
+      ExceptionHandlerPresence(void);
+      ~ExceptionHandlerPresence(void);
+    };
 
   protected:
     friend class ThreadScheduler;
@@ -143,6 +153,7 @@ namespace Realm {
 
     State state;
     ThreadScheduler *scheduler;
+    int exception_handler_count;
   };
 
   // Finally, a Thread may operate as a co-routine, "yielding" intermediate values and 

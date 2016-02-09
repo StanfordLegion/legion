@@ -66,10 +66,14 @@ namespace Realm {
       void add_proc_mem_affinity(const Machine::ProcessorMemoryAffinity& pma);
       void add_mem_mem_affinity(const Machine::MemoryMemoryAffinity& mma);
 
+      void add_subscription(Machine::MachineUpdateSubscriber *subscriber);
+      void remove_subscription(Machine::MachineUpdateSubscriber *subscriber);
+
     protected:
       mutable GASNetHSL mutex;
       std::vector<Machine::ProcessorMemoryAffinity> proc_mem_affinities;
       std::vector<Machine::MemoryMemoryAffinity> mem_mem_affinities;
+      std::set<Machine::MachineUpdateSubscriber *> subscribers;
     };
 
     extern MachineImpl *machine_singleton;
