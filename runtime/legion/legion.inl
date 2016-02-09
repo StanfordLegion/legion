@@ -1833,7 +1833,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     template<typename UDT,
       void (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
-                       Context, Runtime*)>
+                       Context, Runtime*, const UDT&)>
     VariantID Runtime::register_task_variant(
                     const TaskVariantRegistrar &registrar, const UDT &user_data)
     //--------------------------------------------------------------------------
