@@ -541,7 +541,7 @@ namespace LegionRuntime {
 	, physical_regions(_physical_regions.size())
       {
 	for (size_t i = 0; i < _physical_regions.size(); i++) {
-	  physical_regions.push_back(CObjectWrapper::wrap_const(&_physical_regions[i]));
+	  physical_regions[i] = CObjectWrapper::wrap_const(&_physical_regions[i]);
 	}
       }
 

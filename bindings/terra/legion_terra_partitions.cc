@@ -243,7 +243,7 @@ legion_terra_index_cross_product_create(legion_runtime_t runtime_,
                                         legion_index_partition_t rhs_)
 {
   HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
-  Context ctx = CObjectWrapper::unwrap(ctx_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   IndexPartition lhs = CObjectWrapper::unwrap(lhs_);
   IndexPartition rhs = CObjectWrapper::unwrap(rhs_);
 
@@ -263,7 +263,7 @@ legion_terra_index_cross_product_create_multi(
   size_t npartitions)
 {
   HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
-  Context ctx = CObjectWrapper::unwrap(ctx_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
 
   std::vector<IndexPartition> partitions;
   for (size_t i = 0; i < npartitions; i++) {
@@ -296,7 +296,7 @@ legion_terra_index_cross_product_get_subpartition_by_color(
   legion_color_t color)
 {
   HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
-  Context ctx = CObjectWrapper::unwrap(ctx_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   IndexPartition partition = CObjectWrapper::unwrap(prod.partition);
   IndexPartition other = CObjectWrapper::unwrap(prod.other);
 
@@ -313,7 +313,7 @@ legion_terra_cached_index_iterator_create(
   legion_index_space_t handle_)
 {
   HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
-  Context ctx = CObjectWrapper::unwrap(ctx_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   IndexSpace handle = CObjectWrapper::unwrap(handle_);
 
   CachedIndexIterator *result = new CachedIndexIterator(runtime, ctx, handle, true);
