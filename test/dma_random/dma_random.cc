@@ -11,10 +11,10 @@
 
 #define DIM_X 128
 #define DIM_Y 128
-#define DIM_Z 10
-#define NUM_TEST 20
-#define PATH_LEN 20
-#define NUM_FIELDS 5
+#define DIM_Z 32
+#define NUM_TEST 4
+#define PATH_LEN 10
+#define NUM_FIELDS 200
 #define MEM_KIND_SIZE 20
 
 using namespace LegionRuntime::LowLevel;
@@ -223,11 +223,12 @@ void top_level_task(const void *args, size_t arglen, const void *user_data, size
 void worker_task(const void *args, size_t arglen, const void *user_data, size_t user_data_len, Processor p)
 {
   printf("start worker task\n");
-  double tp[2][MEM_KIND_SIZE][MEM_KIND_SIZE];
+  double tp[2][MEM_KIND_SIZE][MEM_KIND_SIZE], max_tp[2][MEM_KIND_SIZE][MEM_KIND_SIZE];
   int count[2][MEM_KIND_SIZE][MEM_KIND_SIZE];
   for (int i = 0; i < MEM_KIND_SIZE; i++)
     for (int j = 0; j < MEM_KIND_SIZE; j++) {
       tp[0][i][j] = tp[1][i][j] = 0;
+      max_tp[0][i][j] = max_tp[1][i][j] = 0;
       count[0][i][j] = count[1][i][j] = 0;
     }
   std::vector<size_t> field_sizes;
@@ -340,12 +341,16 @@ void worker_task(const void *args, size_t arglen, const void *user_data, size_t 
         double throughput = totalsize * sizeof(int) * NUM_FIELDS / (stoptime - starttime);
         int src_kind = get_runtime()->get_instance_impl(inst_vec[j-1])->memory.kind();
         int dst_kind = get_runtime()->get_instance_impl(inst_vec[j])->memory.kind();
-        if (gasnet_mynode() == ID(get_runtime()->get_instance_impl(inst_vec[j-1])->memory).node()) {
+        if (ID(get_runtime()->get_instance_impl(inst_vec[j])->memory).node() == ID(get_runtime()->get_instance_impl(inst_vec[j-1])->memory).node()) {
           tp[0][src_kind][dst_kind] += throughput;
           count[0][src_kind][dst_kind] ++;
+          if (throughput > max_tp[0][src_kind][dst_kind])
+            max_tp[0][src_kind][dst_kind] = throughput;
         } else {
           tp[1][src_kind][dst_kind] += throughput;
           count[1][src_kind][dst_kind] ++;
+          if (throughput > max_tp[1][src_kind][dst_kind])
+            max_tp[1][src_kind][dst_kind] = throughput;
         }
         printf("time = %.2lfus, tp = %.2lfMB/s\n", stoptime - starttime, throughput);
         //if (verify_region_data(domain, inst_vec[j], field_order[j]))
@@ -366,6 +371,7 @@ void worker_task(const void *args, size_t arglen, const void *user_data, size_t 
     }
   }
 
+  // print average tp stats
   for (int k = 0; k < 2; k++) {
     if (k == 0)
       printf("Local xfer path throughput stats:\n");
@@ -375,6 +381,19 @@ void worker_task(const void *args, size_t arglen, const void *user_data, size_t 
       for (int j = 0; j < MEM_KIND_SIZE; j++) {
         if (count[k][i][j] > 0)
           printf("(%d)->(%d): %.2lfMB/s\n", i, j, tp[k][i][j] / count[k][i][j]);
+      }
+  }
+
+  // print max tp stats
+  for (int k = 0; k < 2; k++) {
+    if (k == 0)
+      printf("Local xfer path max throughput stats:\n");
+    else
+      printf("Remote xfer path max throughput stats:\n");
+    for (int i = 0; i < MEM_KIND_SIZE; i++)
+      for (int j = 0; j < MEM_KIND_SIZE; j++) {
+        if (max_tp[k][i][j] > 0)
+          printf("(%d)->(%d): %.2lfMB/s\n", i, j, max_tp[k][i][j]);
       }
   }
   printf("all check passed......\n");

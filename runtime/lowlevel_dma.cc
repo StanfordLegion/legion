@@ -2760,7 +2760,7 @@ namespace LegionRuntime {
           tgt_mem = *it;
         }
       assert(tgt_mem != Memory::NO_MEMORY);
-      size_t ib_size = 64 * 1024; /*size of ib (bytes)*/
+      size_t ib_size = 16 * 1024 * 1024; /*size of ib (bytes)*/
       off_t ib_offset = get_runtime()->get_memory_impl(tgt_mem)->alloc_bytes(ib_size);
       std::sort(oasvec.begin(), oasvec.end(), oas_sort_by_dst);
       off_t ib_elmnt_size = 0;
@@ -2967,12 +2967,12 @@ namespace LegionRuntime {
               Rect<1> new_rect(make_point(data->first_elmt), make_point(data->last_elmt));
               Domain new_domain = Domain::from_rect<1>(new_rect);
               create_xfer_des<1>(this, gasnet_mynode(), xd_guid, pre_xd_guid, next_xd_guid,
-                                   pre_buf, cur_buf, new_domain, oasvec_src, 16 * 1024/*max_req_size*/,
+                                   pre_buf, cur_buf, new_domain, oasvec_src, 1024 * 1024/*max_req_size*/,
                                    100/*max_nr*/, priority, order, kind, complete_fence, hdf_inst);
             }
             else {
               create_xfer_des<DIM>(this, gasnet_mynode(), xd_guid, pre_xd_guid, next_xd_guid,
-                                   pre_buf, cur_buf, domain, oasvec_src, 16 * 1024/*max_req_size*/,
+                                   pre_buf, cur_buf, domain, oasvec_src, 1024 * 1024/*max_req_size*/,
                                    100/*max_nr*/, priority, order, kind, complete_fence, hdf_inst);
             }
             pre_buf = cur_buf;
