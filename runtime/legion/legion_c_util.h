@@ -33,6 +33,9 @@
 
 namespace LegionRuntime {
   namespace HighLevel {
+
+    class CContext;
+
     class TaskResult {
     public:
       TaskResult(void) : value(NULL), value_size(0) {}
@@ -120,10 +123,11 @@ namespace LegionRuntime {
       }
 
       NEW_OPAQUE_WRAPPER(legion_runtime_t, Runtime *);
-      NEW_OPAQUE_WRAPPER(legion_context_t, Context);
+      NEW_OPAQUE_WRAPPER(legion_context_t, CContext *);
       NEW_OPAQUE_WRAPPER(legion_coloring_t, Coloring *);
       NEW_OPAQUE_WRAPPER(legion_domain_coloring_t, DomainColoring *);
       NEW_OPAQUE_WRAPPER(legion_index_space_allocator_t, IndexSpaceAllocator *);
+      NEW_OPAQUE_WRAPPER(legion_field_allocator_t, FieldAllocator *);
       NEW_OPAQUE_WRAPPER(legion_argument_map_t, ArgumentMap *);
       NEW_OPAQUE_WRAPPER(legion_predicate_t, Predicate *);
       NEW_OPAQUE_WRAPPER(legion_future_t, Future *);
@@ -347,25 +351,6 @@ namespace LegionRuntime {
         return r;
       }
 
-      static legion_field_allocator_t
-      wrap(FieldAllocator allocator)
-      {
-        legion_field_allocator_t allocator_;
-        allocator_.field_space = wrap(allocator.field_space);
-        allocator_.parent = wrap(allocator.parent);
-        allocator_.runtime = wrap(allocator.runtime);
-        return allocator_;
-      }
-
-      static FieldAllocator
-      unwrap(legion_field_allocator_t allocator_)
-      {
-        FieldAllocator allocator(unwrap(allocator_.field_space),
-                                 unwrap(allocator_.parent),
-                                 unwrap(allocator_.runtime));
-        return allocator;
-      }
-
       static legion_task_argument_t
       wrap(TaskArgument arg)
       {
@@ -544,6 +529,48 @@ namespace LegionRuntime {
         return barrier;
       }
     };
+
+    class CContext {
+    public:
+      CContext(Context _ctx)
+	: ctx(_ctx)
+      {}
+
+      CContext(Context _ctx, const std::vector<PhysicalRegion>& _physical_regions)
+	: ctx(_ctx)
+	, physical_regions(_physical_regions.size())
+      {
+	for (size_t i = 0; i < _physical_regions.size(); i++) {
+	  physical_regions.push_back(CObjectWrapper::wrap_const(&_physical_regions[i]));
+	}
+      }
+
+      ~CContext(void)
+      {}
+
+      Context context(void) const
+      {
+	return ctx;
+      }
+
+      const legion_physical_region_t *regions(void) const
+      {
+	if(physical_regions.empty())
+	  return 0;
+	else
+	  return &physical_regions[0];
+      }
+
+      size_t num_regions(void) const
+      {
+	return physical_regions.size();
+      }
+
+    protected:
+      Context ctx;
+      std::vector<legion_physical_region_t> physical_regions;
+    };
+
   }
 }
 

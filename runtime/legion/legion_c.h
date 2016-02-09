@@ -49,6 +49,7 @@ extern "C" {
   NEW_OPAQUE_TYPE(legion_coloring_t);
   NEW_OPAQUE_TYPE(legion_domain_coloring_t);
   NEW_OPAQUE_TYPE(legion_index_space_allocator_t);
+  NEW_OPAQUE_TYPE(legion_field_allocator_t);
   NEW_OPAQUE_TYPE(legion_argument_map_t);
   NEW_OPAQUE_TYPE(legion_predicate_t);
   NEW_OPAQUE_TYPE(legion_future_t);
@@ -144,15 +145,6 @@ extern "C" {
   typedef struct legion_field_space_t {
     legion_field_space_id_t id;
   } legion_field_space_t;
-
-  /**
-   * @see LegionRuntime::HighLevel::FieldAllocator
-   */
-  typedef struct legion_field_allocator_t {
-    legion_field_space_t field_space;
-    legion_context_t parent;
-    legion_runtime_t runtime;
-  } legion_field_allocator_t;
 
   /**
    * @see LegionRuntime::HighLevel::LogicalRegion
@@ -301,6 +293,12 @@ extern "C" {
       unsigned /* num_regions */,
       legion_context_t /* ctx */,
       legion_runtime_t /* runtime */);
+
+  /**
+   * Interface for a Legion C task that is wrapped (i.e. this is the Realm
+   * task interface)
+   */
+  typedef legion_lowlevel_task_pointer_t legion_task_pointer_wrapped_t;
 
   /**
    * Interface for a Legion C projection functor (Logical Region
@@ -2595,6 +2593,30 @@ extern "C" {
     legion_task_config_options_t options,
     const char *task_name /* = NULL*/,
     legion_task_pointer_uint64_t task_pointer);
+
+  /**
+   * @see LegionRuntime::LegionTaskWrapper::legion_task_preamble()
+   */
+  void
+  legion_task_preamble(
+    const void *data,
+    size_t datalen,
+    legion_lowlevel_id_t proc_id,
+    legion_task_t *taskptr,
+    const legion_physical_region_t **regionptr,
+    unsigned * num_regions_ptr,
+    legion_context_t * ctxptr,
+    legion_runtime_t * runtimeptr);
+
+  /**
+   * @see LegionRuntime::LegionTaskWrapper::legion_task_postamble()
+   */
+  void
+  legion_task_postamble(
+    legion_runtime_t runtime,
+    legion_context_t ctx,
+    const void *retval,
+    size_t retsize);
 
   /**
    * @see LegionRuntime::HighLevel::Runtime::register_projection_functor()
