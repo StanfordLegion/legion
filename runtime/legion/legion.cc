@@ -1487,17 +1487,20 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     TaskVariantRegistrar::TaskVariantRegistrar(void)
-      : task_id(0), global_registration(true), task_variant_name(NULL), 
-        leaf_variant(false), inner_variant(false), idempotent_variant(false)
+      : task_id(0), generator(NULL), global_registration(true), 
+        task_variant_name(NULL), leaf_variant(false), 
+        inner_variant(false), idempotent_variant(false)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
-    TaskVariantRegistrar::TaskVariantRegistrar(TaskID tid, bool global/*=true*/, 
+    TaskVariantRegistrar::TaskVariantRegistrar(TaskID tid, bool global/*=true*/,
+                                               GeneratorContext ctx/*=NULL*/,
                                                const char *name/*= NULL*/)
-      : task_id(tid), global_registration(global), task_variant_name(name), 
-        leaf_variant(false), inner_variant(false), idempotent_variant(false)
+      : task_id(tid), generator(ctx), global_registration(global), 
+        task_variant_name(name), leaf_variant(false), 
+        inner_variant(false), idempotent_variant(false)
     //--------------------------------------------------------------------------
     {
     }

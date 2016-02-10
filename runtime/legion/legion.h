@@ -1348,6 +1348,7 @@ namespace LegionRuntime {
     public:
       TaskVariantRegistrar(void);
       TaskVariantRegistrar(TaskID task_id, bool global = true,
+                           GeneratorContext ctx = NULL,
                            const char *variant_name = NULL);
     public: // Add execution constraints
       inline TaskVariantRegistrar& 
@@ -1369,6 +1370,7 @@ namespace LegionRuntime {
       inline void set_idempotent(bool is_idempotent = true);
     public:
       TaskID                            task_id;
+      GeneratorContext                  generator;
       bool                              global_registration;
       const char*                       task_variant_name;
     public: // constraints
@@ -1379,7 +1381,42 @@ namespace LegionRuntime {
       bool                              inner_variant;
       bool                              idempotent_variant;
     };
- 
+
+    //==========================================================================
+    //                          Task Generators 
+    //==========================================================================
+
+    struct TaskGeneratorArguments {
+    public:
+      TaskID                            task_id;
+    public:
+      const void*                       user_data;
+      size_t                            user_data_size;
+    public:
+      MapperID                          mapper_id;
+      const void*                       mapper_args;
+      size_t                            mapper_args_size;
+    public:
+      std::vector<Processor>            target_procs;
+      // TODO: std::vector<PhysicalInstance> valid_instances;
+    };
+
+    struct TaskGeneratorRegistrar {
+    public:
+      TaskGeneratorRegistrar(void);
+      TaskGeneratorRegistrar(GeneratorID id, GeneratorFnptr fn,
+                             const void *udata = NULL, size_t udata_size = 0,
+                             const char *name = NULL);
+    public:
+      GeneratorID                       generator_id;
+      GeneratorFnptr                    generator;
+    public:
+      const void*                       user_data;
+      size_t                            user_data_size;
+    public:
+      const char*                       name;
+    };
+
     //==========================================================================
     //                          Physical Data Classes
     //==========================================================================
@@ -5682,6 +5719,41 @@ namespace LegionRuntime {
       static VariantID preregister_task_variant(
               const TaskVariantRegistrar &registrar, 
               const UDT &user_data, const char *task_name = NULL);
+    public:
+      //------------------------------------------------------------------------
+      // Task Generator Registration Operations
+      //------------------------------------------------------------------------
+     
+      /**
+       * Dynamically generate a unique generator ID for use across the machine.
+       * @return a Generator ID that is globally unique across the machine
+       */
+      GeneratorID generate_dynamic_generator_id(void);
+
+      /**
+       * Statically generate a unique Generator ID for use across the machine.
+       * This can only be called prior to the runtime starting. It must be 
+       * invoked symmetrically across all nodes in the machine prior to 
+       * starting the runtime.
+       * @return a Generator ID that is globally unique across the machine
+       */
+      static GeneratorID generate_static_generator_id(void);
+
+      /**
+       * Dynamically register a new task generator function with the runtime
+       * @param registrar the task generator registrar
+       */
+      void register_task_generator(const TaskGeneratorRegistrar &registrar);
+
+      /**
+       * Statically register a new task generator function with the runtime.
+       * This call must be made on all nodes and it will fail if done after
+       * the runtime has been started.
+       * @param registrar the task generator registrar
+       */
+      static void preregister_task_generator(
+                                   const TaskGeneratorRegistrar &registrar);
+                                   
 
     public:
       // ------------------ Deprecated task registration -----------------------
