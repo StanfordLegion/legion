@@ -88,7 +88,7 @@ namespace Legion {
     public:
       virtual bool early_map_task(void) = 0;
       virtual bool distribute_task(void) = 0;
-      virtual bool perform_mapping(bool mapper_invoked = false) = 0;
+      virtual bool perform_mapping(MustEpochOp *owner = NULL) = 0;
       virtual void launch_task(void) = 0;
       virtual bool is_stealable(void) const = 0;
       virtual bool has_restrictions(unsigned idx, LogicalRegion handle) = 0;
@@ -159,7 +159,7 @@ namespace Legion {
       void unpack_privilege_state(Deserializer &derez);
       void perform_privilege_checks(void);
     public:
-      InstanceRef find_premapped_region(unsigned idx);
+      void find_early_mapped_region(unsigned idx, InstanceSet &ref);
       void clone_task_op_from(TaskOp *rhs, Processor p, 
                               bool stealable, bool duplicate_args);
       void update_grants(const std::vector<Grant> &grants);
@@ -188,7 +188,7 @@ namespace Legion {
       virtual void trigger_task_commit(void) = 0;
     protected:
       // Early mapped regions
-      std::map<unsigned/*idx*/,InstanceRef>     early_mapped_regions;
+      std::map<unsigned/*idx*/,InstanceSet>     early_mapped_regions;
     protected:
       std::vector<unsigned>                     parent_req_indexes;
     protected:
@@ -453,13 +453,24 @@ namespace Legion {
       bool has_tree_restriction(RegionTreeID tid, const FieldMask &mask);
       void add_tree_restriction(RegionTreeID tid, const FieldMask &mask);
     public:
-      void unmap_all_regions(void);
-      void clear_physical_instances(void);
-    public:
-      void initialize_map_task_input(Mapper::MapTaskInput &input);
+      void initialize_map_task_input(Mapper::MapTaskInput &input,
+                                     Mapper::MapTaskOutput &output,
+                                     std::vector<RegionTreeContext> &enclosing,
+                                     std::vector<InstanceSet> &valid_instances);
+      void finalize_map_task_output(Mapper::MapTaskInput &input,
+                                    Mapper::MapTaskOutput &output,
+                                    std::vector<RegionTreeContext> &enclosing,
+                                    std::vector<InstanceSet> &valid_instances,
+                                    bool must_epoch_map = false);
+    protected: // mapper helper calls
+      void validate_target_processors(const std::vector<Processor> &procss,
+                                      bool must_epoch_map) const;
+      void find_visible_memories(std::set<Memory> &visible_memories) const;
+      void validate_variant_selection(VariantImpl *impl, 
+                                      bool must_epoch_map) const;
     protected:
-      bool map_all_regions(Processor target, Event user_event, 
-                           bool mapper_invoked); 
+      bool map_all_regions(Processor target, Event user_event,
+                           MustEpochOp *must_epoch_owner = NULL); 
       void perform_post_mapping(Processor target);
       void initialize_region_tree_contexts(
           const std::vector<RegionRequirement> &clone_requirements,
@@ -495,7 +506,7 @@ namespace Legion {
       virtual void launch_task(void);
       virtual bool early_map_task(void) = 0;
       virtual bool distribute_task(void) = 0;
-      virtual bool perform_mapping(bool mapper_invoked = false) = 0;
+      virtual bool perform_mapping(MustEpochOp *owner = NULL) = 0;
       virtual bool is_stealable(void) const = 0;
       virtual bool has_restrictions(unsigned idx, LogicalRegion handle) = 0;
       virtual bool can_early_complete(UserEvent &chain_event) = 0;
@@ -519,6 +530,8 @@ namespace Legion {
       virtual void trigger_task_complete(void) = 0;
       virtual void trigger_task_commit(void) = 0;
     public:
+      virtual void perform_physical_traversal(unsigned idx,
+                                RegionTreeContext ctx, InstanceSet &valid) = 0;
       virtual bool pack_task(Serializer &rez, Processor target) = 0;
       virtual bool unpack_task(Deserializer &derez, Processor current) = 0;
       virtual void find_enclosing_local_fields(
@@ -531,11 +544,8 @@ namespace Legion {
     public:
       virtual InstanceRef find_restricted_instance(unsigned index) = 0;
     protected:
-      std::vector<RegionTreePath> mapping_paths;
       // Boolean for each region saying if it is virtual mapped
       std::vector<bool> virtual_mapped;
-      // Boolean for tracking if regions were mapped locally
-      std::vector<bool> locally_mapped;
       // Boolean indicating if any regions have been deleted
       std::vector<bool> region_deleted; 
       // Boolean indicating if any index requirements have been deleted
@@ -544,10 +554,11 @@ namespace Legion {
     protected:
       std::vector<Processor> target_processors;
       // Hold the result of the mapping 
-      std::deque<InstanceSet> physical_instances;
+      LegionDeque<InstanceSet,TASK_INSTANCE_REGION_ALLOC>::tracked 
+                                                             physical_instances;
       // Hold the local instances mapped regions in our context
       // which we will need to close when the task completes
-      std::deque<InstanceSet> local_instances;
+      LegionDeque<InstanceSet,TASK_LOCAL_REGION_ALLOC>::tracked local_instances;
       // Hold the physical regions for the task's execution
       std::vector<PhysicalRegion> physical_regions;
       // Keep track of inline mapping regions for this task
@@ -648,7 +659,7 @@ namespace Legion {
       virtual void resolve_false(void) = 0;
       virtual bool early_map_task(void) = 0;
       virtual bool distribute_task(void) = 0;
-      virtual bool perform_mapping(bool mapper_invoked = false) = 0;
+      virtual bool perform_mapping(MustEpochOp *owner = NULL) = 0;
       virtual void launch_task(void) = 0;
       virtual bool is_stealable(void) const = 0;
       virtual bool has_restrictions(unsigned idx, LogicalRegion handle) = 0;
@@ -747,7 +758,7 @@ namespace Legion {
       virtual void resolve_false(void);
       virtual bool early_map_task(void);
       virtual bool distribute_task(void);
-      virtual bool perform_mapping(bool mapper_invoked = false);
+      virtual bool perform_mapping(MustEpochOp *owner = NULL);
       virtual bool is_stealable(void) const;
       virtual bool has_restrictions(unsigned idx, LogicalRegion handle);
       virtual bool can_early_complete(UserEvent &chain_event);
@@ -775,6 +786,8 @@ namespace Legion {
     public:
       virtual InstanceRef find_restricted_instance(unsigned index);
     public:
+      virtual void perform_physical_traversal(unsigned idx,
+                                RegionTreeContext ctx, InstanceSet &valid);
       virtual bool pack_task(Serializer &rez, Processor target);
       virtual bool unpack_task(Deserializer &derez, Processor current);
       virtual void find_enclosing_local_fields(
@@ -853,7 +866,7 @@ namespace Legion {
       virtual void resolve_false(void);
       virtual bool early_map_task(void);
       virtual bool distribute_task(void);
-      virtual bool perform_mapping(bool mapper_invoked = false);
+      virtual bool perform_mapping(MustEpochOp *owner = NULL);
       virtual bool is_stealable(void) const;
       virtual bool has_restrictions(unsigned idx, LogicalRegion handle);
       virtual bool can_early_complete(UserEvent &chain_event);
@@ -874,6 +887,8 @@ namespace Legion {
       virtual void trigger_task_complete(void);
       virtual void trigger_task_commit(void);
     public:
+      virtual void perform_physical_traversal(unsigned idx,
+                                RegionTreeContext ctx, InstanceSet &valid);
       virtual bool pack_task(Serializer &rez, Processor target);
       virtual bool unpack_task(Deserializer &derez, Processor current);
       virtual void find_enclosing_local_fields(
@@ -923,7 +938,7 @@ namespace Legion {
       virtual void resolve_false(void);
       virtual bool early_map_task(void);
       virtual bool distribute_task(void);
-      virtual bool perform_mapping(bool mapper_invoked = false);
+      virtual bool perform_mapping(MustEpochOp *owner = NULL);
       virtual bool is_stealable(void) const;
       virtual bool has_restrictions(unsigned idx, LogicalRegion handle);
       virtual bool can_early_complete(UserEvent &chain_event);
@@ -942,6 +957,8 @@ namespace Legion {
       virtual void trigger_task_complete(void);
       virtual void trigger_task_commit(void);
     public:
+      virtual void perform_physical_traversal(unsigned idx,
+                                RegionTreeContext ctx, InstanceSet &valid);
       virtual bool pack_task(Serializer &rez, Processor target);
       virtual bool unpack_task(Deserializer &derez, Processor current);
       virtual void find_enclosing_local_fields(
@@ -1138,7 +1155,7 @@ namespace Legion {
       virtual void resolve_false(void);
       virtual bool early_map_task(void);
       virtual bool distribute_task(void);
-      virtual bool perform_mapping(bool mapper_invoked = false);
+      virtual bool perform_mapping(MustEpochOp *owner = NULL);
       virtual void launch_task(void);
       virtual bool is_stealable(void) const;
       virtual bool has_restrictions(unsigned idx, LogicalRegion handle);
@@ -1237,7 +1254,7 @@ namespace Legion {
       virtual void resolve_false(void);
       virtual bool early_map_task(void);
       virtual bool distribute_task(void);
-      virtual bool perform_mapping(bool mapper_invoke = false);
+      virtual bool perform_mapping(MustEpochOp *owner = NULL);
       virtual void launch_task(void);
       virtual bool is_stealable(void) const;
       virtual bool has_restrictions(unsigned idx, LogicalRegion handle);

@@ -7099,15 +7099,29 @@ namespace Legion {
       input.tasks.insert(input.tasks.end(), single_tasks.begin(),
                                             single_tasks.end());
       input.task_inputs.resize(single_tasks.size());
-      for (unsigned idx = 0; idx < single_tasks.size(); idx++)
-        single_tasks[idx]->initialize_map_task_input(input.task_inputs[idx]);
       // Also resize the outputs so the mapper knows what it is doing
       output.task_mapping.resize(single_tasks.size());
       output.task_processors.resize(single_tasks.size(), Processor::NO_PROC);
-      // We've got all our meta-data set up so go ahead and issue the call
       Processor mapper_proc = parent_ctx->get_executing_processor();
       MapperManager *mapper = runtime->find_mapper(mapper_proc, mapper_id);
-      mapper->invoke_map_must_epoch(this, &input, &output);
+      {
+        std::vector<std::vector<RegionTreeContext> > 
+          contexts(single_tasks.size());
+        std::vector<std::vector<InstanceSet> > 
+          valid_instances(single_tasks.size());
+        // Do the before mapping call
+        for (unsigned idx = 0; idx < single_tasks.size(); idx++)
+          single_tasks[idx]->initialize_map_task_input(
+              input.task_inputs[idx], output.task_mapping[idx], 
+              contexts[idx], valid_instances[idx]);
+        // We've got all our meta-data set up so go ahead and issue the call
+        mapper->invoke_map_must_epoch(this, &input, &output);
+        // Now do the after mapping call
+        for (unsigned idx = 0; idx < single_tasks.size(); idx++)
+          single_tasks[idx]->finalize_map_task_output(
+              input.task_inputs[idx], output.task_mapping[idx],
+              contexts[idx], valid_instances[idx], true/*must epoch*/);
+      }
       // Check that all the tasks have been assigned to different processors
       {
         std::map<Processor,SingleTask*> target_procs;
@@ -7152,7 +7166,6 @@ namespace Legion {
       }
       // Now we can clear our target processors
       output.task_processors.clear();
-
       // Then we need to actually perform the mapping
       {
         MustEpochMapper mapper(this); 
@@ -7161,7 +7174,6 @@ namespace Legion {
       }
       // Once we're done here, we can clear our output
       output.task_mapping.clear();
-
       // Everybody successfully mapped so now check that all
       // of the constraints have been satisfied
       std::vector<Mapper::MappingConstraint> &constraints = input.constraints;
@@ -7754,16 +7766,9 @@ namespace Legion {
         Event mapped_event = Event::merge_events(wait_events);
         mapped_event.wait();
       }
-
-      // If we failed to map then unmap all the tasks 
-      if (!success)
-      {
-        for (std::deque<SingleTask*>::const_iterator it = single_tasks.begin();
-              it != single_tasks.end(); it++)
-        {
-          (*it)->unmap_all_regions();
-        }
-      }
+#ifdef DEBUG_HIGH_LEVEL
+      assert(success); // should always succeed now
+#endif
       return success;
     }
 
@@ -7774,7 +7779,7 @@ namespace Legion {
       // Note we don't need to hold a lock here because this is
       // a monotonic change.  Once it fails for anyone then it
       // fails for everyone.
-      if (!task->perform_mapping(true/*mapper invoked already*/))
+      if (!task->perform_mapping(owner))
         success = false;
     }
 
