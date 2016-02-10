@@ -139,6 +139,7 @@ local function analyze_is_side_effect_free_node(cx)
       node:is(ast.typed.expr.Preimage) or
       node:is(ast.typed.expr.CrossProduct) or
       node:is(ast.typed.expr.ListDuplicatePartition) or
+      node:is(ast.typed.expr.ListSliceCrossProduct) or
       node:is(ast.typed.expr.ListCrossProduct) or
       node:is(ast.typed.expr.ListPhaseBarriers) or
       node:is(ast.typed.expr.PhaseBarrier) or
@@ -175,6 +176,7 @@ local function analyze_is_loop_invariant_node(cx)
       node:is(ast.typed.expr.Preimage) or
       node:is(ast.typed.expr.CrossProduct) or
       node:is(ast.typed.expr.ListDuplicatePartition) or
+      node:is(ast.typed.expr.ListSliceCrossProduct) or
       node:is(ast.typed.expr.ListCrossProduct) or
       node:is(ast.typed.expr.ListPhaseBarriers) or
       node:is(ast.typed.expr.PhaseBarrier) or
