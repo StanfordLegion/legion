@@ -1386,6 +1386,13 @@ namespace LegionRuntime {
     //                          Task Generators 
     //==========================================================================
 
+    /**
+     * \struct TaskGeneratorArguments
+     * This structure defines the arguments that will be passed to a 
+     * task generator function. The task generator function will then
+     * be expected to generate one or more variants and register them
+     * with the runtime.
+     */
     struct TaskGeneratorArguments {
     public:
       TaskID                            task_id;
@@ -1401,6 +1408,17 @@ namespace LegionRuntime {
       // TODO: std::vector<PhysicalInstance> valid_instances;
     };
 
+    /**
+     * \struct TaskGeneratorRegistrar
+     * The TaskGeneratorRegistrar records the arguments for registering
+     * a new task generator function with the runtime. The application
+     * must specify a unique generator ID to associate with the generator
+     * function pointer. The application must also explicitly state the
+     * application TaskIDs for which this generator is available in the
+     * 'valid_tasks' vector. This vector cannot be empty.  All other 
+     * arguments are optional and can be filled in at the application's
+     * discretion.
+     */
     struct TaskGeneratorRegistrar {
     public:
       TaskGeneratorRegistrar(void);
@@ -1408,8 +1426,12 @@ namespace LegionRuntime {
                              const void *udata = NULL, size_t udata_size = 0,
                              const char *name = NULL);
     public:
+      TaskGeneratorRegistrar& add_valid_task(TaskID task_id);
+    public:
       GeneratorID                       generator_id;
       GeneratorFnptr                    generator;
+    public:
+      std::vector<TaskID>               valid_tasks;
     public:
       const void*                       user_data;
       size_t                            user_data_size;
