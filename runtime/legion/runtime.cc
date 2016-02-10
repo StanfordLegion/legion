@@ -4083,10 +4083,10 @@ namespace LegionRuntime {
     PendingVariantRegistration::PendingVariantRegistration(VariantID v,
                                   bool has_ret, const TaskVariantRegistrar &reg,
                                   const void *udata, size_t udata_size,
-                                  CodeDescriptor *realm, CodeDescriptor *app,
+                                  CodeDescriptor *realm,
                                   const char *task_name)
       : vid(v), has_return(has_ret), registrar(reg), 
-        realm_desc(realm), inline_desc(app), logical_task_name(NULL)
+        realm_desc(realm), logical_task_name(NULL)
     //--------------------------------------------------------------------------
     {
       // If we're doing a pending registration, this is a static
@@ -4147,7 +4147,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       runtime->register_variant(registrar, user_data, user_data_size,
-                realm_desc, inline_desc, has_return, vid, false/*check task*/);
+                      realm_desc, has_return, vid, false/*check task*/);
       // If we have a logical task name, attach the name info
       if (logical_task_name != NULL)
         runtime->attach_semantic_information(registrar.task_id, 
@@ -4658,10 +4658,10 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     VariantImpl::VariantImpl(Internal *rt, VariantID v, TaskImpl *own, 
                            const TaskVariantRegistrar &registrar, bool ret,
-                           CodeDescriptor *realm, CodeDescriptor *app,
+                           CodeDescriptor *realm,
                            const void *udata /*=NULL*/, size_t udata_size/*=0*/)
       : vid(v), owner(own), runtime(rt), global(registrar.global_registration),
-        has_return_value(ret), realm_descriptor(realm), inline_descriptor(app), 
+        has_return_value(ret), realm_descriptor(realm),
         execution_constraints(registrar.execution_constraints),
         layout_constraints(registrar.layout_constraints),
         user_data_size(udata_size), leaf_variant(registrar.leaf_variant), 
@@ -4694,8 +4694,7 @@ namespace LegionRuntime {
         runtime->profiler->register_task_variant(own->task_id, vid,
             variant_name);
       // Check that global registration has portable implementations
-      if (global && (!realm_descriptor->has_portable_implementations() ||
-                     !inline_descriptor->has_portable_implementations()))
+      if (global && (!realm_descriptor->has_portable_implementations()))
       {
         log_run.error("Variant %s requested global registration without "
                       "a portable implementation.", variant_name);
@@ -4724,8 +4723,7 @@ namespace LegionRuntime {
     VariantImpl::VariantImpl(const VariantImpl &rhs) 
       : vid(rhs.vid), owner(rhs.owner), runtime(rhs.runtime), 
         global(rhs.global), has_return_value(rhs.has_return_value),
-        realm_descriptor(rhs.realm_descriptor), 
-        inline_descriptor(rhs.inline_descriptor)
+        realm_descriptor(rhs.realm_descriptor) 
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -4737,7 +4735,6 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       delete realm_descriptor;
-      delete inline_descriptor;
       if (user_data != NULL)
         free(user_data);
       if (variant_name != NULL)
@@ -4773,14 +4770,15 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void VariantImpl::dispatch_inline(Processor current, Task *task)
+    void VariantImpl::dispatch_inline(Processor current, TaskOp *task)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
-      assert(inline_descriptor != NULL);
+      assert(realm_descriptor != NULL);
+      assert(task->is_inline_task());
 #endif
       const Realm::FunctionPointerImplementation *fp_impl = 
-        inline_descriptor->find_impl<Realm::FunctionPointerImplementation>();
+        realm_descriptor->find_impl<Realm::FunctionPointerImplementation>();
 #ifdef DEBUG_HIGH_LEVEL
       assert(fp_impl != NULL);
 #endif
@@ -4827,14 +4825,12 @@ namespace LegionRuntime {
         // pack the code descriptors 
         Realm::Serialization::ByteCountSerializer counter;
         realm_descriptor->serialize(counter, true/*portable*/);
-        inline_descriptor->serialize(counter, true/*portable*/);
         const size_t impl_size = counter.bytes_used();
         rez.serialize(impl_size);
         {
           Realm::Serialization::FixedBufferSerializer 
             serializer(rez.reserve_bytes(impl_size), impl_size);
           realm_descriptor->serialize(serializer, true/*portable*/);
-          inline_descriptor->serialize(serializer, true/*portable*/);
         }
         rez.serialize(user_data_size);
         if (user_data_size > 0)
@@ -4878,8 +4874,6 @@ namespace LegionRuntime {
       derez.advance_pointer(impl_size);
       CodeDescriptor *realm_desc = new CodeDescriptor();
       realm_desc->deserialize(deserializer);
-      CodeDescriptor *inline_desc = new CodeDescriptor();
-      inline_desc->deserialize(deserializer);
       size_t user_data_size;
       derez.deserialize(user_data_size);
       const void *user_data = derez.get_current_pointer();
@@ -4896,7 +4890,7 @@ namespace LegionRuntime {
       registrar.layout_constraints.deserialize(derez);
       // Ask the runtime to perform the registration 
       runtime->register_variant(registrar, user_data, user_data_size,
-          realm_desc, inline_desc, has_return, variant_id, false/*check task*/);
+                    realm_desc, has_return, variant_id, false/*check task*/);
     }
 
     /////////////////////////////////////////////////////////////
@@ -11639,39 +11633,41 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    const std::vector<PhysicalRegion>& Internal::begin_task(SingleTask *ctx)
+    const std::vector<PhysicalRegion>& Internal::begin_task(TaskOp *task)
     //--------------------------------------------------------------------------
     {
-      return ctx->begin_task();
+      if (!task->is_inline_task())
+      {
+#ifdef DEBUG_HIGH_LEVEL
+        SingleTask *ctx = dynamic_cast<SingleTask*>(task);
+        assert(ctx != NULL);
+#else
+        SingleTask *ctx = static_cast<SingleTask*>(task);
+#endif
+        return ctx->begin_task();
+      }
+      else
+        return task->begin_inline_task();
     }
 
     //--------------------------------------------------------------------------
-    const std::vector<PhysicalRegion>& Internal::begin_inline_task(
-                                                                SingleTask *ctx)
+    void Internal::end_task(TaskOp *task, const void *result, 
+                            size_t result_size, bool owned)
     //--------------------------------------------------------------------------
     {
-      // It's possible we lied about this being a single task :)
-      TaskOp *task = ctx;
-      return task->begin_inline_task();
-    }
-
-    //--------------------------------------------------------------------------
-    void Internal::end_task(SingleTask *ctx, const void *result, 
-                                 size_t result_size, bool owned)
-    //--------------------------------------------------------------------------
-    {
-      ctx->end_task(result, result_size, owned);
-      decrement_total_outstanding_tasks();
-    }
-
-    //--------------------------------------------------------------------------
-    void Internal::end_inline_task(SingleTask *ctx, const void *result,
-                                   size_t result_size, bool owned)
-    //--------------------------------------------------------------------------
-    {
-      // It's possible we lied about this being a single task :)
-      TaskOp *task = ctx;
-      task->end_inline_task(result, result_size, owned);
+      if (!task->is_inline_task())
+      {
+#ifdef DEBUG_HIGH_LEVEL
+        SingleTask *ctx = dynamic_cast<SingleTask*>(task);
+        assert(ctx != NULL);
+#else
+        SingleTask *ctx = static_cast<SingleTask*>(task);
+#endif
+        ctx->end_task(result, result_size, owned);
+        decrement_total_outstanding_tasks();
+      }
+      else
+        task->end_inline_task(result, result_size, owned);
     }
 
     //--------------------------------------------------------------------------
@@ -11689,7 +11685,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     VariantID Internal::register_variant(const TaskVariantRegistrar &registrar,
                                   const void *user_data, size_t user_data_size,
-                                  CodeDescriptor *realm, CodeDescriptor *indesc,
+                                  CodeDescriptor *realm,
                                   bool ret,VariantID vid /*= AUTO_GENERATE_ID*/,
                                   bool check_task_id /*= true*/)
     //--------------------------------------------------------------------------
@@ -11713,7 +11709,7 @@ namespace LegionRuntime {
       TaskImpl *task_impl = find_or_create_task_impl(registrar.task_id);
       // Make our variant and add it to the set of variants
       VariantImpl *impl = legion_new<VariantImpl>(this, vid, task_impl, 
-                                                  registrar, ret, realm, indesc,
+                                                  registrar, ret, realm,
                                                   user_data, user_data_size);
       // Add this variant to the owner
       task_impl->add_variant(impl);
@@ -17296,7 +17292,7 @@ namespace LegionRuntime {
     /*static*/ VariantID Internal::preregister_variant(
                           const TaskVariantRegistrar &registrar,
                           const void *user_data, size_t user_data_size,
-                          CodeDescriptor *realm, CodeDescriptor *inline_desc,
+                          CodeDescriptor *realm,
                           bool has_ret, const char *task_name, bool check_id)
     //--------------------------------------------------------------------------
     {
@@ -17328,7 +17324,7 @@ namespace LegionRuntime {
       VariantID vid = TASK_ID_AVAILABLE + pending_table.size();
       pending_table.push_back(new PendingVariantRegistration(vid, has_ret,
                               registrar, user_data, user_data_size, 
-                              realm, inline_desc, task_name));
+                              realm, task_name));
       return vid;
     }
 

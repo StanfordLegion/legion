@@ -5801,11 +5801,8 @@ namespace LegionRuntime {
       friend class LegionTaskWrapper;
       friend class LegionSerialization;
       const std::vector<PhysicalRegion>& begin_task(Context ctx);
-      const std::vector<PhysicalRegion>& begin_inline_task(Context ctx);
       void end_task(Context ctx, const void *result, size_t result_size,
                     bool owned = false);
-      void end_inline_task(Context ctx, const void *result, size_t result_size,
-                           bool owned = false);
       Future from_value(const void *value, size_t value_size, bool owned);
     private:
       static ProjectionID register_region_projection_function(
@@ -5815,10 +5812,10 @@ namespace LegionRuntime {
     private:
       VariantID register_variant(const TaskVariantRegistrar &registrar,bool ret,
                                  const void *user_data, size_t user_data_size,
-                                 CodeDescriptor *realm, CodeDescriptor *indesc);
+                                 CodeDescriptor *realm);
       static VariantID preregister_variant(const TaskVariantRegistrar &reg,
                                  const void *user_data, size_t user_data_size,
-                                 CodeDescriptor *realm, CodeDescriptor *indesc,
+                                 CodeDescriptor *realm,
                                  bool has_return, const char *task_name,
                                  bool check_task_id = true);
     private:

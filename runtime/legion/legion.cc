@@ -17,6 +17,7 @@
 #include "legion.h"
 #include "runtime.h"
 #include "legion_ops.h"
+#include "legion_tasks.h"
 #include "legion_profiling.h"
 #include "legion_allocation.h"
 
@@ -3760,26 +3761,11 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    const std::vector<PhysicalRegion>& Runtime::begin_inline_task(Context ctx)
-    //--------------------------------------------------------------------------
-    {
-      return runtime->begin_inline_task(ctx);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::end_task(Context ctx, const void *result, 
                                     size_t result_size, bool owned /*= false*/)
     //--------------------------------------------------------------------------
     {
       runtime->end_task(ctx, result, result_size, owned);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::end_inline_task(Context ctx, const void *result,
-                                  size_t result_size, bool owned /*= false*/)
-    //--------------------------------------------------------------------------
-    {
-      runtime->end_inline_task(ctx, result, result_size, owned);
     }
 
     //--------------------------------------------------------------------------
@@ -3934,24 +3920,24 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     VariantID Runtime::register_variant(const TaskVariantRegistrar &registrar,
                   bool has_return, const void *user_data, size_t user_data_size,
-                  CodeDescriptor *realm, CodeDescriptor *indesc)
+                  CodeDescriptor *realm)
     //--------------------------------------------------------------------------
     {
       return runtime->register_variant(registrar, user_data, user_data_size,
-                                       realm, indesc, has_return);
+                                       realm, has_return);
     }
     
     //--------------------------------------------------------------------------
     /*static*/ VariantID Runtime::preregister_variant(
                                   const TaskVariantRegistrar &registrar,
                                   const void *user_data, size_t user_data_size,
-                                  CodeDescriptor *realm, CodeDescriptor *indesc,
+                                  CodeDescriptor *realm,
                                   bool has_return, const char *task_name, 
                                   bool check_task_id)
     //--------------------------------------------------------------------------
     {
       return Internal::preregister_variant(registrar, user_data, user_data_size,
-                           realm, indesc, has_return, task_name, check_task_id);
+                                   realm, has_return, task_name, check_task_id);
     } 
 
     //--------------------------------------------------------------------------
