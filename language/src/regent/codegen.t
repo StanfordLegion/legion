@@ -3357,6 +3357,46 @@ function codegen.expr_list_duplicate_partition(cx, node)
     expr_type)
 end
 
+function codegen.expr_list_slice_cross_product(cx, node)
+  local product_type = std.as_read(node.product.expr_type)
+  local product = codegen.expr(cx, node.product):read(cx, product_type)
+  local indices_type = std.as_read(node.indices.expr_type)
+  local indices = codegen.expr(cx, node.indices):read(cx, indices_type)
+  local expr_type = std.as_read(node.expr_type)
+  local actions = quote
+    [product.actions]
+    [indices.actions]
+    [emit_debuginfo(node)]
+  end
+
+  local result = terralib.newsymbol(expr_type, "result")
+
+  actions = quote
+    [actions]
+    var data = c.malloc(
+      terralib.sizeof([expr_type.element_type]) * [indices.value].__size)
+    regentlib.assert(data ~= nil, "malloc failed in list_slice_cross_product")
+    var [result] = expr_type {
+      __size = [indices.value].__size,
+      __data = data,
+    }
+    for i = 0, [indices.value].__size do
+      var color = [indices_type:data(indices.value)][i]
+      var ip = c.legion_terra_index_cross_product_get_subpartition_by_color(
+        [cx.runtime], [cx.context],
+        [product.value].product, color)
+      var lp = c.legion_logical_partition_create_by_tree(
+        [cx.runtime], [cx.context], ip,
+        [product.value].impl.field_space, [product.value].impl.tree_id)
+      [expr_type:data(result)][i] = [expr_type.element_type] { impl = lp }
+    end
+  end
+
+  return values.value(
+    expr.just(actions, result),
+    expr_type)
+end
+
 function codegen.expr_list_cross_product(cx, node)
   local lhs_type = std.as_read(node.lhs.expr_type)
   local lhs = codegen.expr(cx, node.lhs):read(cx, lhs_type)
@@ -4620,6 +4660,9 @@ function codegen.expr(cx, node)
 
   elseif node:is(ast.typed.expr.ListDuplicatePartition) then
     return codegen.expr_list_duplicate_partition(cx, node)
+
+  elseif node:is(ast.typed.expr.ListSliceCrossProduct) then
+    return codegen.expr_list_slice_cross_product(cx, node)
 
   elseif node:is(ast.typed.expr.ListCrossProduct) then
     return codegen.expr_list_cross_product(cx, node)

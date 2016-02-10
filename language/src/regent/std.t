@@ -593,7 +593,7 @@ end
 
 function std.type_supports_constraints(t)
   return std.is_region(t) or std.is_partition(t) or
-    std.is_list_of_regions(t)
+    std.is_list_of_regions(t) or std.is_list_of_partitions(t)
 end
 
 function std.is_ctor(t)
@@ -2203,41 +2203,56 @@ std.list = terralib.memoize(function(element_type, partition_type, privilege_dep
     return self.element_type
   end
 
-  function st:region()
-    assert(std.is_list_of_regions(self))
+  function st:base_type()
     if std.is_list(self.element_type) then
-      return self.element_type:region()
+      return self.element_type:base_type()
     end
     return self.element_type
   end
 
   function st:ispace()
     assert(std.is_list_of_regions(self))
-    return self.element_type:ispace()
+    return self:base_type():ispace()
   end
 
   function st:fspace()
-    assert(std.is_list_of_regions(self))
-    return self.element_type:fspace()
+    assert(std.is_list_of_regions(self) or std.is_list_of_partitions(self))
+    return self:base_type():fspace()
   end
 
   function st:subregion_dynamic()
     assert(std.is_list_of_regions(self))
     local ispace = terralib.newsymbol(
       std.ispace(self:ispace().index_type),
-      self:region().ispace_symbol.displayname)
+      self:base_type().ispace_symbol.displayname)
     return std.region(ispace, self:fspace())
+  end
+
+  function st:subpartition_dynamic()
+    assert(std.is_list_of_partitions(self))
+    return std.partition(
+      self:base_type().disjointness, self:base_type().parent_region_symbol)
   end
 
   function st:slice(strip_levels)
     if strip_levels == nil then strip_levels = 0 end
-    assert(std.is_list_of_regions(self))
-    local slice_type = self:subregion_dynamic()
-    for i = 1 + strip_levels, self:list_depth() do
-      slice_type = std.list(
-        slice_type, self:partition(), self.privilege_depth)
+    if std.is_list_of_regions(self) then
+      local slice_type = self:subregion_dynamic()
+      for i = 1 + strip_levels, self:list_depth() do
+        slice_type = std.list(
+          slice_type, self:partition(), self.privilege_depth)
+      end
+      return slice_type
+    elseif std.is_list_of_partitions(self) then
+      local slice_type = self:subpartition_dynamic()
+      for i = 1 + strip_levels, self:list_depth() do
+        slice_type = std.list(
+          slice_type, self:partition(), self.privilege_depth)
+      end
+      return slice_type
+    else
+      assert(false)
     end
-    return slice_type
   end
 
   -- FIXME: Make the compiler manage cleanups, including lists.
