@@ -95,26 +95,26 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MapperManager::invoke_slice_domain(TaskOp *task, 
-                                            Mapper::SliceDomainInput *input,
-                                            Mapper::SliceDomainOutput *output, 
-                                            bool first_invocation)
+    void MapperManager::invoke_slice_task(TaskOp *task, 
+                                          Mapper::SliceTaskInput *input,
+                                          Mapper::SliceTaskOutput *output, 
+                                          bool first_invocation)
     //--------------------------------------------------------------------------
     {
       Event continuation_precondition = Event::NO_EVENT;
-      MappingCallInfo *info = begin_mapper_call(SLICE_DOMAIN_CALL,
+      MappingCallInfo *info = begin_mapper_call(SLICE_TASK_CALL,
                                 first_invocation, continuation_precondition);
       if (info != NULL)
       {
-        mapper->slice_domain(info, *task, *input, *output);
+        mapper->slice_task(info, *task, *input, *output);
         end_mapper_call(info);
         return;
       }
 #ifdef DEBUG_HIGH_LEVEL
       assert(first_invocation);
 #endif
-      MapperContinuation3<TaskOp, Mapper::SliceDomainInput,
-        Mapper::SliceDomainOutput, &MapperManager::invoke_slice_domain>
+      MapperContinuation3<TaskOp, Mapper::SliceTaskInput,
+        Mapper::SliceTaskOutput, &MapperManager::invoke_slice_task>
           continuation(this, task, input, output);
       continuation.defer(runtime, continuation_precondition, task);
     }

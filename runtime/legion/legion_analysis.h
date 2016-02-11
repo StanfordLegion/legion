@@ -1266,8 +1266,15 @@ namespace Legion {
       void reserve(size_t size);
       void add_instance(const InstanceRef &ref);
     public:
+      bool has_composite_ref(void) const;
+      const CompositeRef& get_composite_ref(void) const;
+    public:
       void pack_references(Serializer &rez, AddressSpaceID target) const;
       void unpack_references(Runtime *runtime, Deserializer &derez);
+    public:
+      void update_wait_on_events(std::set<Event> &wait_on_events);
+      bool has_required_locks(void) const;
+      void update_atomic_locks(std::map<Reservation,bool> &locks, bool excl);
     };
 
     /**

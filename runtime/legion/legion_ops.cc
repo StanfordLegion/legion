@@ -4523,15 +4523,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PostCloseOp::initialize(SingleTask *ctx, unsigned idx, 
-                                 const InstanceRef &ref)
+    void PostCloseOp::initialize(SingleTask *ctx, unsigned idx) 
     //--------------------------------------------------------------------------
     {
       initialize_close(ctx, ctx->regions[idx], true/*track*/);
-#ifdef DEBUG_HIGH_LEVEL
-      assert(ref.has_ref());
-#endif
-      reference = ref;
       // If it was write-discard from the task's perspective, make it
       // read-write within the task's context
       if (requirement.privilege == WRITE_DISCARD)
@@ -4555,7 +4550,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       deactivate_close();
-      reference = InstanceRef();
       profiling_results = Mapper::CloseProfilingInfo();
       runtime->free_post_close_op(this);
     }

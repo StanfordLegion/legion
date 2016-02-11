@@ -814,6 +814,8 @@ namespace Legion {
         { return (flags & NO_ACCESS_FLAG); }
       inline bool is_restricted(void) const 
         { return (flags & RESTRICTED_FLAG); }
+      inline bool must_premap(void) const
+        { return (flags & MUST_PREMAP_FLAG); }
     public:
 #ifdef PRIVILEGE_CHECKS
       unsigned get_accessor_privilege(void) const;

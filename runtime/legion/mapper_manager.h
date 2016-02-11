@@ -26,7 +26,7 @@ namespace Legion {
       GET_MAPER_SYNC_MODEL_CALL,
       SELECT_TASK_OPTIONS_CALL,
       PREMAP_TASK_CALL,
-      SLICE_DOMAIN_CALL,
+      SLICE_TASK_CALL,
       MAP_TASK_CALL,
       SELECT_VARIANT_CALL,
       POSTMAP_TASK_CALL,
@@ -99,8 +99,8 @@ namespace Legion {
       void invoke_premap_task(TaskOp *task, Mapper::PremapTaskInput *input,
                               Mapper::PremapTaskOutput *output, 
                               bool first_invocation = true);
-      void invoke_slice_domain(TaskOp *task, Mapper::SliceDomainInput *input,
-                               Mapper::SliceDomainOutput *output, 
+      void invoke_slice_task(TaskOp *task, Mapper::SliceTaskInput *input,
+                               Mapper::SliceTaskOutput *output, 
                                bool first_invocation = true);
       void invoke_map_task(TaskOp *task, Mapper::MapTaskInput *input,
                            Mapper::MapTaskOutput *output, 

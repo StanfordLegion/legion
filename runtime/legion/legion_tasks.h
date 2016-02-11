@@ -215,6 +215,7 @@ namespace Legion {
     protected:
       AllocManager *arg_manager;
     protected:
+      Processor     next_proc;
       MapperManager *mapper;
     public:
       // Static methods
@@ -331,6 +332,7 @@ namespace Legion {
       // the task has had its variant selected
       bool is_leaf(void) const;
       bool is_inner(void) const;
+      bool has_virtual_instances(void) const;
     public:
       void assign_context(RegionTreeContext ctx);
       RegionTreeContext release_context(void);
@@ -469,9 +471,9 @@ namespace Legion {
       void validate_variant_selection(VariantImpl *impl, 
                                       bool must_epoch_map) const;
     protected:
-      bool map_all_regions(Processor target, Event user_event,
+      bool map_all_regions(Event user_event,
                            MustEpochOp *must_epoch_owner = NULL); 
-      void perform_post_mapping(Processor target);
+      void perform_post_mapping(void);
       void initialize_region_tree_contexts(
           const std::vector<RegionRequirement> &clone_requirements,
           const std::vector<UserEvent> &unmap_events,
@@ -501,7 +503,6 @@ namespace Legion {
       virtual void activate(void) = 0;
       virtual void deactivate(void) = 0;
     public:
-      virtual void premap_task(void) = 0;
       virtual void resolve_false(void) = 0;
       virtual void launch_task(void);
       virtual bool early_map_task(void) = 0;
@@ -541,8 +542,6 @@ namespace Legion {
       virtual void handle_future(const void *res, 
                                  size_t res_size, bool owned) = 0; 
       virtual void handle_post_mapped(Event pre = Event::NO_EVENT) = 0;
-    public:
-      virtual InstanceRef find_restricted_instance(unsigned index) = 0;
     protected:
       // Boolean for each region saying if it is virtual mapped
       std::vector<bool> virtual_mapped;
@@ -571,6 +570,9 @@ namespace Legion {
     protected: // Mapper choices 
       Mapper::ContextConfigOutput           context_configuration;
       VariantID                             selected_variant;
+      TaskPriority                          task_priority;
+      bool                                  perform_postmap;
+      Mapper::TaskProfilingInfo             profiling_info;
     protected:
       // Track whether this task has finished executing
       int outstanding_children_count;
@@ -595,6 +597,7 @@ namespace Legion {
     protected:
       mutable bool leaf_cached, is_leaf_result;
       mutable bool inner_cached, is_inner_result;
+      mutable bool has_virtual_instances_cached, has_virtual_instances_result;
     protected:
       // Number of sub-tasks ready to map
       unsigned outstanding_subtasks;
@@ -754,7 +757,6 @@ namespace Legion {
       virtual void report_interfering_requirements(unsigned idx1,unsigned idx2);
       virtual void report_interfering_close_requirement(unsigned idx);
     public:
-      virtual void premap_task(void);
       virtual void resolve_false(void);
       virtual bool early_map_task(void);
       virtual bool distribute_task(void);
@@ -783,8 +785,6 @@ namespace Legion {
       virtual void handle_future(const void *res, 
                                  size_t res_size, bool owned);
       virtual void handle_post_mapped(Event pre = Event::NO_EVENT);
-    public:
-      virtual InstanceRef find_restricted_instance(unsigned index);
     public:
       virtual void perform_physical_traversal(unsigned idx,
                                 RegionTreeContext ctx, InstanceSet &valid);
@@ -862,7 +862,6 @@ namespace Legion {
     public:
       virtual void trigger_dependence_analysis(void);
     public:
-      virtual void premap_task(void);
       virtual void resolve_false(void);
       virtual bool early_map_task(void);
       virtual bool distribute_task(void);
@@ -899,8 +898,6 @@ namespace Legion {
                                  size_t res_size, bool owned);
       virtual void handle_post_mapped(Event pre = Event::NO_EVENT);
     public:
-      virtual InstanceRef find_restricted_instance(unsigned index);
-    public:
       void initialize_point(SliceTask *owner, MinimalPoint *mp);
       void send_back_created_state(AddressSpaceID target, unsigned start,
                                    RegionTreeContext remote_outermost_context);
@@ -934,7 +931,6 @@ namespace Legion {
     public:
       virtual void trigger_dependence_analysis(void);
     public:
-      virtual void premap_task(void);
       virtual void resolve_false(void);
       virtual bool early_map_task(void);
       virtual bool distribute_task(void);
@@ -968,8 +964,6 @@ namespace Legion {
       virtual void handle_future(const void *res, 
                                  size_t res_size, bool owned);
       virtual void handle_post_mapped(Event pre = Event::NO_EVENT);
-    public:
-      virtual InstanceRef find_restricted_instance(unsigned index);
     public:
       void activate_wrapper(void);
       void deactivate_wrapper(void);
@@ -1181,8 +1175,6 @@ namespace Legion {
       virtual void handle_future(const DomainPoint &point, const void *result,
                                  size_t result_size, bool owner);
     public:
-      InstanceRef find_restricted_instance(unsigned index);
-    public:
       virtual void register_must_epoch(void);
     public:
       void enumerate_points(void);
@@ -1273,13 +1265,11 @@ namespace Legion {
       virtual void handle_future(const DomainPoint &point, const void *result,
                                  size_t result_size, bool owner);
     public:
-      InstanceRef find_restricted_instance(unsigned index);
-    public:
       virtual void register_must_epoch(void);
       PointTask* clone_as_point_task(const DomainPoint &p,
                                      MinimalPoint *mp);
       void enumerate_points(void);
-      void premap_slice(void);
+      void prewalk_slice(void);
       void apply_local_version_infos(std::set<Event> &map_conditions);
     protected:
       virtual void trigger_task_complete(void);

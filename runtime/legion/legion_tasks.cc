@@ -101,6 +101,7 @@ namespace Legion {
       map_locally = false;
       local_cached = false;
       arg_manager = NULL;
+      next_proc = Processor::NO_PROC;
       mapper = NULL;
       orig_proc = Processor::NO_PROC; // for is_remote
     }
@@ -381,8 +382,8 @@ namespace Legion {
                       "in parent task %s (UID %lld) has predicated "
                       "false future of size %ld bytes, but the "
                       "expected return size is %ld bytes.",
-                      variants->name, parent_ctx->variants->name,
-                      parent_ctx->get_unique_task_id(),
+                      get_task_name(), parent_ctx->get_task_name(),
+                      parent_ctx->get_unique_id(),
                       result_size, variants->return_size);
 #ifdef DEBUG_HIGH_LEVEL
         assert(false);
@@ -1472,6 +1473,7 @@ namespace Legion {
       // From TaskOp
       this->early_mapped_regions = rhs->early_mapped_regions;
       this->parent_req_indexes = rhs->parent_req_indexes;
+      this->next_proc = p;
     }
 
     //--------------------------------------------------------------------------
@@ -1644,92 +1646,104 @@ namespace Legion {
       // Now do the registration
       for (unsigned idx = 0; idx < must_premap.size(); idx++)
       {
-        std::map<unsigned,std::vector<MappingInstance> >::const_iterator 
-          finder = output.premapped_instances.find(must_premap[idx]);
-        if (finder == output.premapped_instances.end())
-        {
-          log_run.error("Invalid mapper output from 'premap_task' invocation "
-                        "on mapper %s. Mapper failed to map required premap "
-                        "region requirement %d of task %s (ID %lld) launched "
-                        "in parent task %s (ID %lld).", 
-                        mapper->get_mapper_name(), must_premap[idx], 
-                        get_task_name(), get_unique_id(),
-                        parent_ctx->get_task_name(), 
-                        parent_ctx->get_unique_id());
-#ifdef DEBUG_HIGH_LEVEL
-          assert(false);
-#endif
-          exit(ERROR_INVALID_MAPPER_OUTPUT);
-        }
         VersionInfo &version_info = get_version_info(must_premap[idx]);
         RegionTreeContext req_ctx = get_parent_context(must_premap[idx]);
         InstanceSet chosen_instances;
-        std::vector<FieldID> missing_fields;
-        int composite_index = runtime->forest->physical_convert_mapping(
-            regions[must_premap[idx]], finder->second, valid_instances[idx],
-            chosen_instances, missing_fields);
-        if (composite_index >= 0)
+        // If this is restricted then we know what the answer is so
+        // just ignore whatever the mapper did
+        if (regions[idx].is_restricted())
         {
-          log_run.error("Invalid mapper output from 'premap_task' invocation "
-                        "on mapper %s. Mapper requested composite instance "
-                        "creation on region requirement %d of task %s (ID %lld)"
-                        " launched in parent task %s (ID %lld).",
-                        mapper->get_mapper_name(), must_premap[idx],
-                        get_task_name(), get_unique_id(),
-                        parent_ctx->get_task_name(),
-                        parent_ctx->get_unique_id());
-#ifdef DEBUG_HIGH_LEVEL
-          assert(false);
-#endif
-          exit(ERROR_INVALID_MAPPER_OUTPUT);
+          // Since we know we are on the owner node, we know we can
+          // always ask our parent context to find the restricted instances
+          parent_ctx->get_local_references(must_premap[idx], chosen_instances);
         }
-        if (!missing_fields.empty())
+        else
         {
-          log_run.error("Invalid mapper output from 'premap_task' invocation "
-                        "on mapper %s. Mapper failed to specify instances for "
-                        "%ld fields of region requirement %d of task %s "
-                        "(ID %lld) launched in parent task %s (ID %lld). "
-                        "The missing fields are listed below.",
-                        mapper->get_mapper_name(), missing_fields.size(),
-                        must_premap[idx], get_task_name(), get_unique_id(),
-                        parent_ctx->get_task_name(), 
-                        parent_ctx->get_unique_id());
-          for (std::vector<FieldID>::const_iterator it = 
-                missing_fields.begin(); it != missing_fields.end(); it++)
+          // Otherwise this was not restricted, so do what the mapper wants
+          std::map<unsigned,std::vector<MappingInstance> >::const_iterator 
+            finder = output.premapped_instances.find(must_premap[idx]);
+          if (finder == output.premapped_instances.end())
           {
-            const void *name; size_t name_size;
-            runtime->retrieve_semantic_information(
-                regions[must_premap[idx]].region.get_field_space(), *it,
-                NAME_SEMANTIC_TAG, name, name_size);
-            log_run.error("MIssing instance for field %s (FieldID: %d)",
-                          static_cast<const char*>(name), *it);
+            log_run.error("Invalid mapper output from 'premap_task' invocation "
+                          "on mapper %s. Mapper failed to map required premap "
+                          "region requirement %d of task %s (ID %lld) launched "
+                          "in parent task %s (ID %lld).", 
+                          mapper->get_mapper_name(), must_premap[idx], 
+                          get_task_name(), get_unique_id(),
+                          parent_ctx->get_task_name(), 
+                          parent_ctx->get_unique_id());
+#ifdef DEBUG_HIGH_LEVEL
+            assert(false);
+#endif
+            exit(ERROR_INVALID_MAPPER_OUTPUT);
           }
-#ifdef DEBUG_HIGH_LEVEL
-          assert(false);
-#endif
-          exit(ERROR_INVALID_MAPPER_OUTPUT);
-        }
-        if (!Runtime::unsafe_mapper)
-        {
-          for (unsigned check_idx = 0; 
-                check_idx < chosen_instances.size(); check_idx++)
+          std::vector<FieldID> missing_fields;
+          int composite_index = runtime->forest->physical_convert_mapping(
+              regions[must_premap[idx]], finder->second, valid_instances[idx],
+              chosen_instances, missing_fields);
+          if (composite_index >= 0)
           {
-            if (!runtime->forest->is_valid_mapping(chosen_instances[check_idx],
-                                                   regions[must_premap[idx]]))
-            {
-              log_run.error("Invalid mapper output from invocation of "
-                            "'premap_task' on mapper %s. Mapper specified an "
-                            "instance region requirement %d of task %s "
-                            "(ID %lld) that does not meet the logical region "
-                            "requirement. Task was launched in task %s "
-                            "(ID %lld).", mapper->get_mapper_name(), 
-                            must_premap[idx], get_task_name(), get_unique_id(),
-                            parent_ctx->get_task_name(), 
-                            parent_ctx->get_unique_id());
+            log_run.error("Invalid mapper output from 'premap_task' invocation "
+                          "on mapper %s. Mapper requested composite instance "
+                          "creation on region requirement %d of task %s "
+                          "(ID %lld) launched in parent task %s (ID %lld).",
+                          mapper->get_mapper_name(), must_premap[idx],
+                          get_task_name(), get_unique_id(),
+                          parent_ctx->get_task_name(),
+                          parent_ctx->get_unique_id());
 #ifdef DEBUG_HIGH_LEVEL
-              assert(false);
+            assert(false);
 #endif
-              exit(ERROR_INVALID_MAPPER_OUTPUT);
+            exit(ERROR_INVALID_MAPPER_OUTPUT);
+          }
+          if (!missing_fields.empty())
+          {
+            log_run.error("Invalid mapper output from 'premap_task' invocation "
+                          "on mapper %s. Mapper failed to specify instances "
+                          "for %ld fields of region requirement %d of task %s "
+                          "(ID %lld) launched in parent task %s (ID %lld). "
+                          "The missing fields are listed below.",
+                          mapper->get_mapper_name(), missing_fields.size(),
+                          must_premap[idx], get_task_name(), get_unique_id(),
+                          parent_ctx->get_task_name(), 
+                          parent_ctx->get_unique_id());
+            for (std::vector<FieldID>::const_iterator it = 
+                  missing_fields.begin(); it != missing_fields.end(); it++)
+            {
+              const void *name; size_t name_size;
+              runtime->retrieve_semantic_information(
+                  regions[must_premap[idx]].region.get_field_space(), *it,
+                  NAME_SEMANTIC_TAG, name, name_size);
+              log_run.error("MIssing instance for field %s (FieldID: %d)",
+                            static_cast<const char*>(name), *it);
+            }
+#ifdef DEBUG_HIGH_LEVEL
+            assert(false);
+#endif
+            exit(ERROR_INVALID_MAPPER_OUTPUT);
+          }
+          if (!Runtime::unsafe_mapper)
+          {
+            for (unsigned check_idx = 0; 
+                  check_idx < chosen_instances.size(); check_idx++)
+            {
+              if (!runtime->forest->is_valid_mapping(
+                    chosen_instances[check_idx], regions[must_premap[idx]]))
+              {
+                log_run.error("Invalid mapper output from invocation of "
+                              "'premap_task' on mapper %s. Mapper specified an "
+                              "instance region requirement %d of task %s "
+                              "(ID %lld) that does not meet the logical region "
+                              "requirement. Task was launched in task %s "
+                              "(ID %lld).", mapper->get_mapper_name(), 
+                              must_premap[idx], get_task_name(), 
+                              get_unique_id(), parent_ctx->get_task_name(), 
+                              parent_ctx->get_unique_id());
+#ifdef DEBUG_HIGH_LEVEL
+                assert(false);
+#endif
+                exit(ERROR_INVALID_MAPPER_OUTPUT);
+              }
             }
           }
         }
@@ -2129,8 +2143,13 @@ namespace Legion {
       context_configuration.min_tasks_to_schedule = 
         Runtime::initial_tasks_to_schedule;
       context_configuration.min_frames_to_schedule = 0;
+      selected_variant = 0;
+      task_priority = 0;
+      perform_postmap = false;
       leaf_cached = false;
       inner_cached = false;
+      has_virtual_instances_result = false;
+      has_virtual_instances_cached = false;
     }
 
     //--------------------------------------------------------------------------
@@ -2214,6 +2233,25 @@ namespace Legion {
         inner_cached = true;
       }
       return is_inner_result;
+    }
+
+    //--------------------------------------------------------------------------
+    bool SingleTask::has_virtual_instances(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (!has_virtual_instances_cached)
+      {
+        for (unsigned idx = 0; idx < physical_instances.size(); idx++)
+        {
+          if (physical_instances[idx].has_composite_ref())
+          {
+            has_virtual_instances_result = true;
+            break;
+          }
+        }
+        has_virtual_instances_cached = true;
+      }
+      return has_virtual_instances_result;
     }
 
     //--------------------------------------------------------------------------
@@ -4237,7 +4275,8 @@ namespace Legion {
             // remotely in which case we need to do the
             // mapping now, otherwise we can defer it
             // until the task ends up on the target processor
-            if (is_locally_mapped() && !runtime->is_local(target_processors[0]))
+            if (is_locally_mapped() && next_proc.exists() &&
+                !runtime->is_local(next_proc))
             {
               if (perform_mapping())
               {
@@ -4306,6 +4345,9 @@ namespace Legion {
           input.premapped_instances.push_back(idx);
           continue;
         }
+        // Skip any NO_ACCESS or empty privilege field regions
+        if (IS_NO_ACCESS(regions[idx]) || regions[idx].privilege_fields.empty())
+          continue;
         InstanceSet &current_valid = valid[idx];
         perform_physical_traversal(idx, enclosing[idx], current_valid);
         // Now we can prepare this for mapping
@@ -4314,7 +4356,6 @@ namespace Legion {
       // Prepare the output too
       output.chosen_instances.resize(regions.size());
       output.chosen_variant = 0;
-      output.chosen_generator = 0;
       output.postmap_task = false;
       output.task_priority = 0;
     }
@@ -4357,6 +4398,47 @@ namespace Legion {
         if (finder != early_mapped_regions.end())
         {
           physical_instances[idx] = finder->second;
+          // Check to see if it is visible or not from the target processors
+          if (!Runtime::unsafe_mapper && !regions[idx].is_no_access())
+          {
+            for (unsigned idx2 = 0; idx2 < finder->second.size(); idx2++)
+            {
+              Memory mem = finder->second[idx2].get_memory();
+              if (visible_memories.find(mem) == visible_memories.end())
+              {
+                // Not visible from all target processors
+                // Different error messages depending on the cause
+                if (regions[idx].is_restricted())
+                  log_run.error("Invalid mapper output from invocation of '%s' "
+                                "on mapper %s. Mapper selected processor(s) "
+                                "which restricted instance of region "
+                                "requirement %d in memory " IDFMT " is not "
+                                "visible for task %s (ID %lld).",
+                                (must_epoch_map ? "map_must_epoch" : 
+                                 "map_task"), mapper->get_mapper_name(), idx,
+                                mem.id, get_task_name(), get_unique_id());
+                else
+                  log_run.error("Invalid mapper output from invocation of '%s' "
+                                "on mapper %s. Mapper selected processor(s) " 
+                                "for which premapped instance of region "
+                                "requirement %d in memory " IDFMT " is not "
+                                "visible for task %s (ID %lld).", 
+                                (must_epoch_map ? "map_must_epoch" : 
+                                  "map_task"), mapper->get_mapper_name(), idx,
+                                mem.id, get_task_name(), get_unique_id());
+#ifdef DEBUG_HIGH_LEVEL
+                assert(false);
+#endif
+                exit(ERROR_INVALID_MAPPER_OUTPUT);
+              }
+            }
+          }
+          continue;
+        }
+        // Skip any NO_ACCESS or empty privilege field regions
+        if (IS_NO_ACCESS(regions[idx]) || regions[idx].privilege_fields.empty())
+        {
+          virtual_mapped[idx] = true;
           continue;
         }
         // Do the conversion
@@ -4472,18 +4554,20 @@ namespace Legion {
       VariantImpl *variant_impl = NULL;
       if (output.chosen_variant > 0)
       {
-
-      }
-      else if (output.chosen_generator > 0)
-      {
-
+        variant_impl = runtime->find_variant_impl(task_id, 
+                                output.chosen_variant, true/*can fail*/);
       }
       else
       {
-        // No variant and no generator is instant death 
-        log_run.error("Invalid mapper output from invocatino of '%s' on "
-                      "mapper %s. Mapper failed to specify a specific "
-                      "task variant or generator to use for the task "
+        // TODO: invoke a generator if one exists
+        assert(false); 
+      }
+      if (variant_impl == NULL)
+      {
+        // If we couldn't find or make a variant that is bad
+        log_run.error("Invalid mapper output from invocation of '%s' on "
+                      "mapper %s. Mapper failed to specify a valid "
+                      "task variant or generator capable of create a variant "
                       "implementation of task %s (ID %lld).",
                       (must_epoch_map ? "map_must_epoch" : "map_task"),
                       mapper->get_mapper_name(), get_task_name(),
@@ -4493,17 +4577,17 @@ namespace Legion {
 #endif
         exit(ERROR_INVALID_MAPPER_OUTPUT);
       }
-#ifdef DEBUG_HIGH_LEVEL
-      assert(variant_impl != NULL);
-#endif
       // Now that we know which variant to use, we can validate it
       if (!Runtime::unsafe_mapper)
         validate_variant_selection(variant_impl, must_epoch_map);
       // Record anything else that needs to be recorded 
+      selected_variant = output.chosen_variant;
+      task_priority = output.task_priority;
+      perform_postmap = output.postmap_task;
     }
 
     //--------------------------------------------------------------------------
-    bool SingleTask::map_all_regions(Processor target, Event user_event,
+    bool SingleTask::map_all_regions(Event local_termination_event,
                                      MustEpochOp *must_epoch_op /*=NULL*/)
     //--------------------------------------------------------------------------
     {
@@ -4538,7 +4622,7 @@ namespace Legion {
         // apply the results of the mapping to the tree
         runtime->forest->physical_register_only(enclosing_contexts[idx],
                                     regions[idx], get_version_info(idx), 
-                                    this, completion_event, 
+                                    this, local_termination_event, 
                                     physical_instances[idx]
 #ifdef DEBUG_HIGH_LEVEL
                                     , idx, get_logging_name()
@@ -4546,243 +4630,107 @@ namespace Legion {
 #endif
                                     );
       }
+      if (perform_postmap)
+        perform_post_mapping();
       // See if we need to invoke a post-map mapper call for this task
       return true;
-
-      
-      bool map_success = true; 
-      // Initialize all the region information
-      for (unsigned idx = 0; idx < regions.size(); idx++)
-      {
-        regions[idx].mapping_failed = false;
-        regions[idx].selected_memory = Memory::NO_MEMORY;
-      }
-      bool notify = false;
-      if (!mapper_invoked)
-        notify = runtime->invoke_mapper_map_task(current_proc, this);
-      // Info for virtual mappings
-      
-      // Info for actual mappings
-      LegionVector<MappingRef>::aligned mapping_refs(regions.size());
-      physical_instances.resize(regions.size());
-      for (unsigned idx = 0; idx < regions.size(); idx++)
-      {
-        // First check to see if the region was premapped
-        // If it was then just continue onto the next
-        // since we have nothing to do
-        if (early_mapped_regions.find(idx) != early_mapped_regions.end())
-        {
-          virtual_mapped[idx] = false;
-          continue;
-        }
-        // Now see if the mapper asked for a virtual mapping
-        // or there are no fields in which case we also give
-        // them a virtual mapping
-        if (regions[idx].virtual_map || regions[idx].privilege_fields.empty())
-        {
-          virtual_mapped[idx] = true;
-          // Check to see if we already virtually mapped it
-          if (virtual_instances.find(idx) != virtual_instances.end())
-            continue;
-          // At the moment we don't allow virtual mappings for pure-reductions
-          if (IS_REDUCE(regions[idx]) && regions[idx].virtual_map)
-          {
-            
-          }
-          // Virtually map this region if necessary
-          if (!regions[idx].privilege_fields.empty())
-            virtual_instances[idx] = runtime->forest->map_virtual_region(
-                                          enclosing_contexts[idx], regions[idx],
-                                          idx, get_version_info(idx)
-#ifdef DEBUG_HIGH_LEVEL
-                                          , get_logging_name()
-                                          , unique_op_id
-#endif
-                                          );
-          else
-            virtual_instances[idx] = CompositeRef();
-          continue;
-        }
-        // Check to see if we have to do a restricted mapping
-        if (has_restrictions(idx, regions[idx].region))
-        {
-          InstanceRef target_inst = find_restricted_instance(idx);
-          mapping_refs[idx] = runtime->forest->map_restricted_region(
-                                          enclosing_contexts[idx],
-                                                    regions[idx],
-                                                    idx, get_version_info(idx),
-                                                    target, target_inst
-#ifdef DEBUG_HIGH_LEVEL
-                                                    , get_logging_name()
-                                                    , unique_op_id
-#endif
-                                                    );
-        }
-        else
-        {
-          // Otherwise we're going to do an actual mapping
-          mapping_refs[idx] = runtime->forest->map_physical_region(
-                                                    enclosing_contexts[idx],
-                                                    regions[idx],
-                                                    idx, get_version_info(idx),
-                                                    this,
-                                                    current_proc,
-                                                    target
-#ifdef DEBUG_HIGH_LEVEL
-                                                    , get_logging_name()
-                                                    , unique_op_id
-#endif
-                                                    );
-        }
-        if (mapping_refs[idx].has_ref() || IS_NO_ACCESS(regions[idx]))
-        {
-          virtual_mapped[idx] = false;
-        }
-        else
-        {
-          // Otherwise the mapping failed so break out
-          map_success = false;
-          regions[idx].mapping_failed = true;
-          break;
-        }
-      }
-
-      if (!map_success)
-      {
-        // Clean up our mess
-        virtual_mapped.clear();
-        // Finally notify the mapper about the failed mapping
-        runtime->invoke_mapper_failed_mapping(current_proc, this);
-        for (unsigned idx = 0; idx < regions.size(); idx++)
-        {
-          VersionInfo &version_info = get_version_info(idx);
-          version_info.reset();
-        }
-      }
-      else 
-      {
-        // Mapping succeeded, so now we can fill in our 
-        // list of InstanceRefs for this task
-        for (unsigned idx = 0; idx < regions.size(); idx++)
-        {
-          // See if this is a virtual mapping or a region
-          // with no privileges
-          if ((virtual_mapped[idx]) || IS_NO_ACCESS(regions[idx]))
-          {
-            physical_instances[idx] = InstanceRef();
-            continue;
-          }
-          // Now check to see if the regions was premapped
-          InstanceRef premapped = find_early_mapped_region(idx);
-          if (premapped.has_ref())
-          {
-#ifdef DEBUG_HIGH_LEVEL
-	    if (!(regions[idx].flags & NO_ACCESS_FLAG))
-	    {
-	      // Check to make sure the pre-mapped region is visible to
-	      // the target processor
-	      Machine machine = Machine::get_machine();
-	      std::set<Memory> visible_memories;
-	      machine.get_visible_memories(target, visible_memories);
-	      Memory premap_memory = premapped.get_memory();
-	      if (visible_memories.find(premap_memory) == 
-                  visible_memories.end())
-              {
-		log_region.error("Illegal premapped region for logical "
-			               "region (%x,%d,%d) index %d of "
-			               "task %s (UID %lld)!  Memory " IDFMT 
-                                       " is not visible from processor " IDFMT 
-                                       "!", 
-                                       regions[idx].region.index_space.id, 
-                                       regions[idx].region.field_space.id, 
-                                       regions[idx].region.tree_id, idx, 
-                                       this->variants->name, 
-                                       this->get_unique_task_id(), 
-                                       premap_memory.id, target.id);
-		assert(false);
-		exit(ERROR_INVALID_PREMAPPED_REGION_LOCATION);
-	      }
-	    }
-#endif
-            physical_instances[idx] = premapped;
-            continue;
-          }
-          // Finally, finish setting up the actual instance
-#ifdef DEBUG_HIGH_LEVEL
-          assert(mapping_refs[idx].has_ref());
-#endif
-          VersionInfo &version_info = get_version_info(idx);
-          physical_instances[idx] = 
-                  runtime->forest->register_physical_region(
-                                                    enclosing_contexts[idx],
-                                                          mapping_refs[idx],
-                                                          regions[idx],
-                                                          idx, version_info,
-                                                          this,
-                                                          current_proc,
-                                                          user_event
-#ifdef DEBUG_HIGH_LEVEL
-                                                          , get_logging_name()
-                                                          , unique_op_id
-#endif
-                                                          );
-          if (notify)
-            regions[idx].selected_memory = physical_instances[idx].get_memory();
-#ifdef DEBUG_HIGH_LEVEL
-          // All these better succeed since we already made the instances
-          assert(physical_instances[idx].has_ref());
-#endif 
-        }
-        executing_processor = target;
-        if (notify)
-          runtime->invoke_mapper_notify_result(current_proc, this);
-        // See if we are supposed to post-map this task
-        if (post_map_task)
-          perform_post_mapping(target);
-      }
-      return map_success;
     }  
 
     //--------------------------------------------------------------------------
-    void SingleTask::perform_post_mapping(Processor target)
+    void SingleTask::perform_post_mapping(void)
     //--------------------------------------------------------------------------
     {
-      // Clear out all the region requirements
+      Mapper::PostMapInput input;
+      Mapper::PostMapOutput output;
+      input.mapped_regions.resize(regions.size());
+      input.valid_instances.resize(regions.size());
+      output.chosen_instances.resize(regions.size());
+      std::vector<InstanceSet> postmap_valid(regions.size());
+      std::vector<RegionTreeContext> enclosing_contexts(regions.size());
       for (unsigned idx = 0; idx < regions.size(); idx++)
-        regions[idx].initialize_mapping_fields();
-      // Invoke the mapper
-      runtime->invoke_mapper_post_map_task(current_proc, this); 
-      // Iterate over the regions and see if we need to make any instances
+        enclosing_contexts[idx] = get_parent_context(idx);
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
-        RegionRequirement &req = regions[idx];
-        if (req.target_ranking.empty() || has_restrictions(idx, req.region))
+        // Don't need to actually traverse very far, but we do need the
+        // valid instances for all the regions
+        RegionTreePath path;
+        initialize_mapping_path(path, regions[idx], regions[idx].region);
+        runtime->forest->physical_traverse_path(enclosing_contexts[idx],
+                              path, regions[idx], get_version_info(idx), 
+                              this, true/*valid*/, postmap_valid[idx]
+#ifdef DEBUG_HIGH_LEVEL
+                              , idx, get_logging_name()
+                              , unique_op_id
+#endif
+                              );
+        prepare_for_mapping(postmap_valid[idx], input.valid_instances[idx]);  
+        prepare_for_mapping(physical_instances[idx], input.mapped_regions[idx]);
+      }
+      // Now we can do the mapper call
+      if (mapper == NULL)
+        mapper = runtime->find_mapper(current_proc, map_id);
+      mapper->invoke_post_map_task(this, &input, &output);
+      // Check and register the results
+      for (unsigned idx = 0; idx < regions.size(); idx++)
+      {
+        if (output.chosen_instances.empty())
           continue;
-        VersionInfo &version_info = get_version_info(idx);
-        // Otherwise we need to do to make an instance and issue the copy
-        RegionTreeContext req_ctx = get_parent_context(idx);
-        MappingRef ref = runtime->forest->map_physical_region(req_ctx, req,
-                                              idx, version_info,
-                                              this, current_proc, target
+        RegionRequirement &req = regions[idx];
+        if (has_restrictions(idx, req.region))
+        {
+          log_run.warning("WARNING: Mapper %s requested post mapping "
+                          "instances be created for region requirement %d "
+                          "of task %s (ID %lld), but this region requirement "
+                          "is restricted. The request is being ignored.",
+                          mapper->get_mapper_name(), idx, 
+                          get_task_name(), get_unique_id());
+          continue;
+        }
+        if (IS_NO_ACCESS(req))
+        {
+          log_run.warning("WARNING: Mapper %s requested post mapping "
+                          "instances be created for region requirement %d "
+                          "of task %s (ID %lld), but this region requirement "
+                          "has NO_ACCESS privileges. The request is being "
+                          "ignored.", mapper->get_mapper_name(), idx,
+                          get_task_name(), get_unique_id());
+          continue;
+        }
+        if (IS_REDUCE(req))
+        {
+          log_run.warning("WARNING: Mapper %s requested post mapping "
+                          "instances be created for region requirement %d "
+                          "of task %s (ID %lld), but this region requirement "
+                          "has REDUCE privileges. The request is being "
+                          "ignored.", mapper->get_mapper_name(), idx,
+                          get_task_name(), get_unique_id());
+          continue;
+        }
+        // Convert the post-mapping  
+        InstanceSet result;
+        bool had_composite = 
+          runtime->forest->physical_convert_postmapping(req,
+              output.chosen_instances[idx], postmap_valid[idx], result); 
+        if (had_composite)
+        {
+          log_run.warning("WARNING: Mapper %s requested a composite "
+                          "instance be created for region requirement %d "
+                          "of task %s (ID %lld) for a post mapping. The "
+                          "request is being ignored.",
+                          mapper->get_mapper_name(), idx,
+                          get_task_name(), get_unique_id());
+          continue;
+        }
+        // Register this with a no-event so that the instance can
+        // be used as soon as it is valid from the copy to it
+        runtime->forest->physical_register_only(enclosing_contexts[idx],
+                          regions[idx], get_version_info(idx),
+                          this, Event::NO_EVENT/*done immediately*/,
+                          result
 #ifdef DEBUG_HIGH_LEVEL
-                                              , get_logging_name()
-                                              , unique_op_id
+                          , idx, get_logging_name(), unique_op_id
 #endif
-                                              );
-        // If we failed the mapping, then just assert for now
-        if (!ref.has_ref())
-          assert(false);
-        // Now do the registration, but with a NO_EVENT for the termination
-        // event since there won't actually be anyone immediately using
-        // the result
-        runtime->forest->register_physical_region(req_ctx, ref,
-                                              req, idx, version_info, this,
-                                              current_proc, Event::NO_EVENT
-#ifdef DEBUG_HIGH_LEVEL
-                                              , get_logging_name()
-                                              , unique_op_id
-#endif
-                                              );
+                          );
       }
     }
 
@@ -4802,7 +4750,7 @@ namespace Legion {
       // For all of the physical contexts that were mapped, initialize them
       // with a specified reference to the current instance, otherwise
       // they were a virtual reference and we can ignore it.
-      local_instances.resize(regions.size(), InstanceRef());
+      local_instances.resize(regions.size());
       std::map<PhysicalManager*,InstanceView*> top_views;
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
@@ -4810,17 +4758,18 @@ namespace Legion {
         // this better be true for single tasks
         assert(regions[idx].handle_type == SINGULAR);
 #endif
+        // If this is a NO_ACCESS or had no privilege fields we can skip this
+        if (IS_NO_ACCESS(regions[idx]) || regions[idx].privilege_fields.empty())
+          continue;
         // Only need to initialize the context if this is
         // not a leaf and it wasn't virtual mapped
-        if ((!virtual_mapped[idx]) && (regions[idx].privilege != NO_ACCESS))
+        if (!virtual_mapped[idx])
         {
-          local_instances[idx] = 
-            runtime->forest->initialize_current_context(context,
-                clone_requirements[idx], 
-                physical_instances[idx].get_manager(),
-                unmap_events[idx], depth+1, top_views);
+          runtime->forest->initialize_current_context(context,
+              clone_requirements[idx], physical_instances[idx],
+              unmap_events[idx], get_depth()+1, top_views,local_instances[idx]);
 #ifdef DEBUG_HIGH_LEVEL
-          assert(local_instances[idx].has_ref());
+          assert(!local_instances[idx].empty());
 #endif
           // If we need to add restricted coherence, do that now
           // Not we only need to do this for non-virtually mapped task
@@ -4829,36 +4778,32 @@ namespace Legion {
             runtime->forest->restrict_user_coherence(context, this, 
                       regions[idx].region, regions[idx].privilege_fields);
         }
-        else if (virtual_mapped[idx])
+        else
         {
-          std::map<unsigned,CompositeRef>::iterator finder = 
-            virtual_instances.find(idx);
 #ifdef DEBUG_HIGH_LEVEL
-          assert(finder != virtual_instances.end());
+          assert(physical_instances[idx].has_composite_ref());
 #endif
-          if (finder->second.has_ref())
-          {
-            CompositeView *composite_view = finder->second.get_view();
-            // First get any events necessary to make this view local
-            if (!finder->second.is_local())
-              composite_view->make_local(preconditions);
-            // There is something really scary here so pay attention!
-            // We're about to put a composite view from one context into
-            // a different context. This composite view has captured
-            // certain version numbers internally in its version info,
-            // or possibly nested version infos. In theory this could
-            // cause issues for the physical analysis since it sometimes
-            // uses version numbers to avoid catching dependences when 
-            // version numbers are the same. This would be really bad
-            // if we tried to do this with version numbers from different
-            // contexts. However, we know that it will never happen because
-            // the physical analysis only permits this optimization for
-            // WAR and WAW dependences, but composite instances are only
-            // ever being read from, so all the dependences it will catch
-            // are true dependences, therefore making it safe. :)
-            runtime->forest->initialize_current_context(context,
-                clone_requirements[idx], composite_view);
-          }
+          const CompositeRef &ref = physical_instances[idx].get_composite_ref();
+          CompositeView *composite_view = ref.get_view();
+          // First get any events necessary to make this view local
+          if (!ref.is_local())
+            composite_view->make_local(preconditions);
+          // There is something really scary here so pay attention!
+          // We're about to put a composite view from one context into
+          // a different context. This composite view has captured
+          // certain version numbers internally in its version info,
+          // or possibly nested version infos. In theory this could
+          // cause issues for the physical analysis since it sometimes
+          // uses version numbers to avoid catching dependences when 
+          // version numbers are the same. This would be really bad
+          // if we tried to do this with version numbers from different
+          // contexts. However, we know that it will never happen because
+          // the physical analysis only permits this optimization for
+          // WAR and WAW dependences, but composite instances are only
+          // ever being read from, so all the dependences it will catch
+          // are true dependences, therefore making it safe. :)
+          runtime->forest->initialize_current_context(context,
+              clone_requirements[idx], composite_view);
         }
       }
     }
@@ -4907,118 +4852,21 @@ namespace Legion {
       std::map<Reservation,bool/*exlusive*/> atomic_locks;
       // If we're debugging do one last check to make sure
       // that all the memories are visible on this processor
-#ifdef DEBUG_HIGH_LEVEL
-      std::set<Memory> visible_memories;
-      runtime->machine.get_visible_memories(executing_processor, 
-                                            visible_memories);
-#endif
-      // If we have any additional processors, filter them on processor
-      // kind before we actually do the launch
-      std::map<Processor,std::set<Memory> > additional_visible_memories;
-      if (!additional_procs.empty())
-      {
-        std::vector<Processor> to_erase;
-        Processor::Kind exec_kind = executing_processor.kind();
-        AddressSpace exec_space = executing_processor.address_space();
-        for (std::set<Processor>::const_iterator it = additional_procs.begin();
-              it != additional_procs.end(); it++)
-        {
-          Processor::Kind add_kind = (*it).kind();
-          if (add_kind != exec_kind)
-          {
-            to_erase.push_back(*it);
-            continue;
-          }
-          AddressSpace add_space = it->address_space();
-          if (add_space != exec_space)
-            to_erase.push_back(*it);
-        }
-        for (std::vector<Processor>::const_iterator it = to_erase.begin();
-              it != to_erase.end(); it++)
-        {
-          additional_procs.erase(*it);
-        }
-        // Now compute the visible memories for all the additional processors
-        for (std::set<Processor>::const_iterator it = additional_procs.begin();
-              it != additional_procs.end(); it++)
-        {
-	  runtime->machine.get_visible_memories(*it, 
-                                    additional_visible_memories[*it]);
-        }
-      }
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
         if (!virtual_mapped[idx])
         {
+          InstanceSet &instances = physical_instances[idx];
           // Get the event to wait on unless we are doing the inner
           // task optimization
           if (!variant->is_inner())
-            wait_on_events.insert(physical_instances[idx].get_ready_event());
+            instances.update_wait_on_events(wait_on_events);
           // See if we need a lock for this region
-          if (physical_instances[idx].has_required_locks())
+          if (instances.has_required_locks())
           {
             // Check to see if it is needed exclusively or not
             bool exclusive = !IS_READ_ONLY(regions[idx]);
-            physical_instances[idx].update_atomic_locks(atomic_locks,exclusive);
-          }
-#ifdef DEBUG_HIGH_LEVEL
-          // We can only do this check if we actually have the reference
-          // which we might not if this is locally mapped.  We also don't
-          // need to do this if the user has promised us that they will
-          // never actually access the physical instance with an accessor.
-          if (physical_instances[idx].has_ref() &&
-              !(regions[idx].flags & NO_ACCESS_FLAG))
-          {
-            Memory inst_mem = physical_instances[idx].get_memory();
-            if (visible_memories.find(inst_mem) == visible_memories.end())
-            {
-              log_region.error("Illegal mapped region for region requirement "
-                               "%d of task %s (UID %lld)! Memory " IDFMT 
-                               " is not visible from processor " IDFMT "!",
-                               idx, this->variants->name, 
-                               this->get_unique_task_id(),
-                               inst_mem.id, target_proc.id);
-              assert(false);
-              exit(ERROR_INVALID_MAPPED_REGION_LOCATION);
-            }
-            assert(visible_memories.find(inst_mem) != visible_memories.end());
-          }
-#endif
-          // If we have additional processors, then check to see if
-          // they are also visible from the chosen mapped instances 
-          if (!additional_procs.empty() && 
-              physical_instances[idx].has_ref() &&
-              !(regions[idx].flags & NO_ACCESS_FLAG))
-          {
-            Memory inst_mem = physical_instances[idx].get_memory();
-            std::vector<Processor> to_erase;
-            for (std::set<Processor>::const_iterator it = 
-                  additional_procs.begin(); it != additional_procs.end(); it++)
-            {
-#ifdef DEBUG_HIGH_LEVEL
-              if (additional_visible_memories.find(*it) ==
-                  additional_visible_memories.end())
-              {
-                log_region.error("Illegal mapped region for region requirement "
-                                 "%d of task %s (UID %lld)! Memory " IDFMT 
-                                 " is not visible from processor " IDFMT "!",
-                                 idx, this->variants->name, 
-                                 this->get_unique_task_id(), it->id,
-                                 target_proc.id);
-                assert(false);
-                exit(ERROR_INVALID_MAPPED_REGION_LOCATION);
-              }
-#endif
-              const std::set<Memory> &visible_mems = 
-                              additional_visible_memories[*it];
-              if (visible_mems.find(inst_mem) == visible_mems.end())
-                to_erase.push_back(*it); 
-            }
-            for (std::vector<Processor>::const_iterator it = 
-                  to_erase.begin(); it != to_erase.end(); it++)
-            {
-              additional_procs.erase(*it);
-            }
+            instances.update_atomic_locks(atomic_locks, exclusive);
           }
         }
       }
@@ -5060,7 +4908,7 @@ namespace Legion {
           // If it was virtual mapper so it doesn't matter anyway.
           if (virtual_mapped[idx])
           {
-            clone_requirements[idx].copy_without_mapping_info(regions[idx]);
+            clone_requirements[idx] = regions[idx];
             localize_region_requirement(clone_requirements[idx]);
             physical_regions.push_back(PhysicalRegion(
                   legion_new<PhysicalRegionImpl>(regions[idx],
@@ -5077,7 +4925,7 @@ namespace Legion {
             // we mark that the unmap event which marks when
             // the region can be used by child tasks should
             // be the ready event.
-            clone_requirements[idx].copy_without_mapping_info(regions[idx]);
+            clone_requirements[idx] = regions[idx];
             localize_region_requirement(clone_requirements[idx]);
             // Also make the region requirement read-write to force
             // people to wait on the value
@@ -5089,8 +4937,13 @@ namespace Legion {
             unmap_events[idx] = UserEvent::create_user_event();
             // Trigger the user event when the region is 
             // actually ready to be used
-            unmap_events[idx].trigger(
-                    physical_instances[idx].get_ready_event());
+            std::set<Event> ready_events;
+            physical_instances[idx].update_wait_on_events(ready_events);
+            Event precondition = Runtime::merge_events(ready_events);
+#ifdef LEGION_SPY
+            LegionSpy::log_event_dependence(precondition, unmap_events[idx]);
+#endif
+            unmap_events[idx].trigger(precondition);
           }
           else
           { 
@@ -5098,7 +4951,7 @@ namespace Legion {
             // switch coherence modes from whatever they are in
             // the enclosing context to exclusive within the
             // context of this task
-            clone_requirements[idx].copy_without_mapping_info(regions[idx]);
+            clone_requirements[idx] = regions[idx];
             localize_region_requirement(clone_requirements[idx]);
             physical_regions.push_back(PhysicalRegion(
                   legion_new<PhysicalRegionImpl>(clone_requirements[idx],
@@ -5117,32 +4970,42 @@ namespace Legion {
         // If we're a leaf task and we have virtual mappings
         // then it's possible for the application to do inline
         // mappings which require a physical context
-        if (!variant->is_leaf() || !virtual_instances.empty())
+        if (!variant->is_leaf() || has_virtual_instances())
         {
           // Request a context from the runtime
           runtime->allocate_context(this);
           initial_region_count = regions.size();
           // Have the mapper configure the properties of the context
-          this->min_tasks_to_schedule = Runtime::initial_tasks_to_schedule;
-          this->min_frames_to_schedule = 0;
-          runtime->invoke_mapper_configure_context(current_proc, this);
+          context_configuration.max_window_size = 
+            Runtime::initial_task_window_size;
+          context_configuration.hysteresis_percentage = 
+            Runtime::initial_task_window_hysteresis;
+          context_configuration.max_outstanding_frames = 2; 
+          context_configuration.min_tasks_to_schedule = 
+            Runtime::initial_tasks_to_schedule;
+          context_configuration.min_frames_to_schedule = 0;
+          if (mapper == NULL)
+            mapper = runtime->find_mapper(current_proc, map_id);
+          mapper->invoke_configure_context(this, &context_configuration);
           // Do a little bit of checking on the output.  Make
           // sure that we only set one of the two cases so we
           // are counting by frames or by outstanding tasks.
-          if ((min_tasks_to_schedule == 0) && (min_frames_to_schedule == 0))
+          if ((context_configuration.min_tasks_to_schedule == 0) && 
+              (context_configuration.min_frames_to_schedule == 0))
           {
-            log_task.error("Illegal output from configure context call: "
-                     "one of 'min_tasks_to_schedule' and "
-                     "'min_frames_to_schedule' must be non-zero for "
-                     "task %s (ID %lld)", variants->name, get_unique_task_id());
+            log_run.error("Invalid mapper output from call 'configure_context' "
+                          "on mapper %s. One of 'min_tasks_to_schedule' and "
+                          "'min_frames_to_schedule' must be non-zero for task "
+                          "%s (ID %lld)", mapper->get_mapper_name(),
+                          get_task_name(), get_unique_id());
 #ifdef DEBUG_HIGH_LEVEL
             assert(false);
 #endif
             exit(ERROR_INVALID_CONTEXT_CONFIGURATION);
           }
           // If we're counting by frames set min_tasks_to_schedule to zero
-          if (min_frames_to_schedule > 0)
-            min_tasks_to_schedule = 0;
+          if (context_configuration.min_frames_to_schedule > 0)
+            context_configuration.min_tasks_to_schedule = 0;
           // otherwise we know min_frames_to_schedule is zero
 #ifdef DEBUG_HIGH_LEVEL
           assert(context.exists());
@@ -5160,7 +5023,7 @@ namespace Legion {
             {
               if (!virtual_mapped[idx])
               {
-                physical_regions[idx].impl->reset_reference(
+                physical_regions[idx].impl->reset_references(
                     local_instances[idx], unmap_events[idx]);
               }
             }
@@ -5170,30 +5033,19 @@ namespace Legion {
         {
           // Leaf and all non-virtual mappings
           // Mark that all the local instances are empty
-          local_instances.resize(regions.size(),InstanceRef());
+          local_instances.resize(regions.size());
           for (unsigned idx = 0; idx < regions.size(); idx++)
           {
             if (!virtual_mapped[idx])
             {
-              physical_regions[idx].impl->reset_reference(
+              physical_regions[idx].impl->reset_references(
                   physical_instances[idx], unmap_events[idx]);
             }
           }
         }
       }
       // Merge together all the events for the start condition 
-      Event start_condition = Event::merge_events(wait_on_events);
-#ifdef LEGION_SPY
-      if (!start_condition.exists())
-      {
-        UserEvent new_start = UserEvent::create_user_event();
-        new_start.trigger();
-        start_condition = new_start;
-      }
-
-      // Record the dependences
-      LegionSpy::log_event_dependences(wait_on_events, start_condition);
-#endif
+      Event start_condition = Runtime::merge_events(wait_on_events);
       // Take all the locks in order in the proper way
       if (!atomic_locks.empty())
       {
@@ -5214,20 +5066,16 @@ namespace Legion {
             new_next.trigger();
             next = new_next;
           }
-
           LegionSpy::log_event_dependence(start_condition, next);
 #endif
           start_condition = next;
         }
       }
       // STEP 3: Finally we get to launch the task
-#ifdef DEBUG_HIGH_LEVEL
-      assert(this->executing_processor.exists());
-#endif
 #ifdef LEGION_SPY
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
-        LegionSpy::log_task_instance_requirement(get_unique_task_id(), idx,
+        LegionSpy::log_task_instance_requirement(get_unique_id(), idx,
                                  regions[idx].region.get_index_space().id);
       }
       {
@@ -5237,17 +5085,11 @@ namespace Legion {
           if (!virtual_mapped[idx])
             unmap_set.insert(unmap_events[idx]);
         }
-        Event all_unmap_event = Event::merge_events(unmap_set);
-        if (!all_unmap_event.exists())
-        {
-          UserEvent new_all_unmap = UserEvent::create_user_event();
-          new_all_unmap.trigger();
-          all_unmap_event = new_all_unmap;
-        }
+        Event all_unmap_event = Runtime::merge_events(unmap_set);
         // Log an implicit dependence on the parent's start event
         LegionSpy::log_implicit_dependence(parent_ctx->get_start_event(),
                                            start_condition);
-        LegionSpy::log_op_events(get_unique_task_id(), 
+        LegionSpy::log_op_events(get_unique_id(), 
                                  start_condition, all_unmap_event);
         this->legion_spy_start = start_condition; 
         // Record the start
@@ -5275,7 +5117,7 @@ namespace Legion {
       // avoid the race.
       bool perform_chaining_optimization = false; 
       UserEvent chain_complete_event;
-      if (variant->is_leaf() && virtual_instances.empty() &&
+      if (variant->is_leaf() && !has_virtual_instances() &&
           can_early_complete(chain_complete_event))
         perform_chaining_optimization = true;
       // Note there is a potential scary race condition to be aware of here: 
@@ -5285,16 +5127,19 @@ namespace Legion {
       // that we need to save any variables we need for after the task
       // launch here on the stack before they can be invalidated.
       Event term_event = get_task_completion();
-      Processor launch_processor = executing_processor;
-      if (!additional_procs.empty())
+#ifdef DEBUG_HIGH_LEVEL
+      assert(!target_processors.empty());
+#endif
+      Processor launch_processor = target_processors[0];
+      if (target_processors.size() > 1)
       {
-        // Find the processor group on which to launch the task
-        // Add the executing processor to the set as well
-        additional_procs.insert(executing_processor);
-        launch_processor = runtime->find_processor_group(additional_procs);
+        // Find the processor group for all the target processors
+        launch_processor = runtime->find_processor_group(target_processors);
       }
       Realm::ProfilingRequestSet profiling_requests;
       // If the mapper requested profiling add that now too
+      // TODO: fill in the profiling requests
+#if 0
       if (profile_task)
       {
         // Make a user event for signaling when we've reporting profiling
@@ -5310,6 +5155,7 @@ namespace Legion {
         // Record the event for when we are done profiling
         profiling_done = info.profiling_done;
       } 
+#endif
       Event task_launch_event = variant->dispatch_task(launch_processor, this,
                           start_condition, task_priority, profiling_requests);
       // Finish the chaining optimization if we're doing it
@@ -5331,32 +5177,26 @@ namespace Legion {
     const std::vector<PhysicalRegion>& SingleTask::begin_task(void)
     //--------------------------------------------------------------------------
     {
+      // Switch over the executing processor to the one
+      // that has actually been assigned to run this task.
+      executing_processor = Processor::get_executing_processor();
 #ifdef DEBUG_HIGH_LEVEL
       log_task.debug("Task %s (ID %lld) starting on processor " IDFMT "",
-                            this->variants->name, get_unique_task_id(), 
-                            executing_processor.id);
+                    get_task_name(), get_unique_id(), executing_processor.id);
       assert(regions.size() == physical_regions.size());
       assert(regions.size() == physical_instances.size());
       assert(regions.size() == virtual_mapped.size());
       assert(regions.size() == region_deleted.size());
       assert(regions.size() == local_instances.size());
 #endif
-      // Switch over the executing processor to the one
-      // that has actually been assigned to run this task.
-      executing_processor = Processor::get_executing_processor();
 #ifdef LEGION_SPY
       for (unsigned idx = 0; idx < physical_instances.size(); idx++)
       {
-        if (physical_instances[idx].has_ref())
-        {
+        for (unsigned idx2 = 0; idx2 < physical_instances[idx].size(); idx2++)
           LegionSpy::log_op_user(unique_op_id, idx, 
-           physical_instances[idx].get_manager()->get_instance().id);
-        }
+              physical_instances[idx][idx2].get_manager()->get_instance().id);
       }
-      {
-        Processor proc = Processor::get_executing_processor();
-        LegionSpy::log_op_proc_user(unique_op_id, proc.id);
-      }
+      LegionSpy::log_op_proc_user(unique_op_id, executing_processor.id);
 #endif
       // Issue a utility task to decrement the number of outstanding
       // tasks now that this task has started running
@@ -5374,17 +5214,7 @@ namespace Legion {
     void SingleTask::notify_profiling_results(Realm::ProfilingResponse &results)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(results.has_measurement<
-          Realm::ProfilingMeasurements::OperationTimeline>());
-#endif
-      Realm::ProfilingMeasurements::OperationTimeline *timeline = 
-              results.get_measurement<
-                    Realm::ProfilingMeasurements::OperationTimeline>();
-      this->start_time = timeline->start_time;
-      this->stop_time = timeline->end_time;
-      // Now tell the mapper the results
-      runtime->invoke_mapper_notify_profiling(executing_processor, this);
+      // TODO: Save the results into the task profiling info 
     }
 
     //--------------------------------------------------------------------------
@@ -5419,7 +5249,7 @@ namespace Legion {
       if (current_trace != NULL)
       {
         log_task.error("Task %s (UID %lld) failed to end trace before exiting!",
-                        variants->name, get_unique_task_id());
+                        get_task_name(), get_unique_id());
 #ifdef DEBUG_HIGH_LEVEL
         assert(false);
 #endif
@@ -5442,7 +5272,7 @@ namespace Legion {
       }
       inline_regions.clear();
 
-      if (!is_leaf() || !virtual_instances.empty())
+      if (!is_leaf() || has_virtual_instances())
       {
         for (unsigned idx = 0; idx < local_instances.size(); idx++)
         {
@@ -5454,34 +5284,24 @@ namespace Legion {
             if (!is_leaf())
             {
 #ifdef DEBUG_HIGH_LEVEL
-              assert(local_instances[idx].has_ref());
+              assert(!local_instances[idx].empty());
 #endif
-              PostCloseOp *close_op = runtime->get_available_post_close_op(true);
-              close_op->initialize(this, idx, local_instances[idx]);
+              PostCloseOp *close_op = 
+                runtime->get_available_post_close_op(true);
+              close_op->initialize(this, idx);
               runtime->add_to_dependence_queue(executing_processor, close_op);
             }
           }
-          else
+          else if (physical_instances[idx].has_composite_ref())
           {
-            std::map<unsigned,CompositeRef>::iterator finder = 
-              virtual_instances.find(idx);
-            if (finder != virtual_instances.end())
-            {
-              if (finder->second.has_ref())
-              {
-                // Make a virtual close op to close up the instance
-                VirtualCloseOp *close_op = 
-                  runtime->get_available_virtual_close_op(true);
-                close_op->initialize(this, finder->first);
-                runtime->add_to_dependence_queue(executing_processor, close_op);
-              }
-              else // otherwise we can erase it
-                virtual_instances.erase(finder);
-            }
+            // Make a virtual close op to close up the instance
+            VirtualCloseOp *close_op = 
+              runtime->get_available_virtual_close_op(true);
+            close_op->initialize(this, idx);
+            runtime->add_to_dependence_queue(executing_processor, close_op);
           }
         }
       } 
-
       // See if we want to move the rest of this computation onto
       // the utility processor. We also need to be sure that we have 
       // registered all of our operations before we can do the post end task
@@ -5700,15 +5520,20 @@ namespace Legion {
       assert(!sliced);
 #endif
       sliced = true;
-      spawn_task = false; // cannot steal something that has been sliced
-      std::vector<Mapper::DomainSplit> splits;
-      runtime->invoke_mapper_slice_domain(current_proc, this, splits);
-      if (splits.empty())
+      stealable = false; // cannot steal something that has been sliced
+      Mapper::SliceTaskInput input;
+      Mapper::SliceTaskOutput output;
+      input.domain = index_domain;
+      output.verify_correctness = false;
+      if (mapper == NULL)
+        mapper = runtime->find_mapper(current_proc, map_id);
+      mapper->invoke_slice_task(this, &input, &output);
+      if (output.slices.empty())
       {
-        log_run.error("Invalid mapper domain slice result for mapper %d "
-                            "on processor " IDFMT " for task %s (ID %lld)",
-                            map_id, current_proc.id, variants->name, 
-                            get_unique_task_id());
+        log_run.error("Invalid mapper output from invocation of 'slice_task' "
+                      "call on mapper %s. Mapper failed to specify an slices "
+                      "for task %s (ID %lld).", mapper->get_mapper_name(),
+                      get_task_name(), get_unique_id());
 #ifdef DEBUG_HIGH_LEVEL
         assert(false);
 #endif
@@ -5718,99 +5543,71 @@ namespace Legion {
 #ifdef DEBUG_HIGH_LEVEL
       assert(minimal_points_assigned == 0);
 #endif
-      for (unsigned idx = 0; idx < splits.size(); idx++)
+      for (unsigned idx = 0; idx < output.slices.size(); idx++)
       {
 #ifdef DEBUG_HIGH_LEVEL
         // Check to make sure the domain is not empty
+        const Domain &d = output.slices[idx].domain;
+        bool empty = false;
+        switch (d.dim)
         {
-          const Domain &d = splits[idx].domain;
-          switch (d.dim)
-          {
-            case 0:
-              {
-                if (d.get_volume() <= 0)
-                {
-                  log_run.error("Invalid mapper domain slice result for "
-                            "mapper %d on processor " IDFMT " for task %s "
-                            "(ID %lld). Mapper returned an empty domain for "
-                            "split %d.",
-                            map_id, current_proc.id, variants->name,
-                            get_unique_task_id(), idx);
-                  assert(false);
-                  exit(ERROR_INVALID_MAPPER_DOMAIN_SLICE);
-                }
-                break;
-              }
-            case 1:
-              {
-                Rect<1> rec = d.get_rect<1>();
-                if (rec.volume() <= 0)
-                {
-                  log_run.error(
-                            "Invalid mapper domain slice result for mapper %d "
-                            "on processor " IDFMT " for task %s (ID %lld).  "
-                            "Mapper returned an empty domain for split %d.",
-                            map_id, current_proc.id, variants->name, 
-                            get_unique_task_id(), idx);
-                  assert(false);
-                  exit(ERROR_INVALID_MAPPER_DOMAIN_SLICE);
-                }
-                break;
-              }
-            case 2:
-              {
-                Rect<2> rec = d.get_rect<2>();
-                if (rec.volume() <= 0)
-                {
-                  log_run.error(                            
-                            "Invalid mapper domain slice result for mapper %d "
-                            "on processor " IDFMT " for task %s (ID %lld).  "
-                            "Mapper returned an empty domain for split %d.",
-                            map_id, current_proc.id, variants->name, 
-                            get_unique_task_id(), idx);
-                  assert(false);
-                  exit(ERROR_INVALID_MAPPER_DOMAIN_SLICE);
-                }
-                break;
-              }
-            case 3:
-              {
-                Rect<3> rec = d.get_rect<3>();
-                if (rec.volume() <= 0)
-                {
-                  log_run.error(                            
-                            "Invalid mapper domain slice result for mapper %d "
-                            "on processor " IDFMT " for task %s (ID %lld).  "
-                            "Mapper returned an empty domain for split %d.",
-                            map_id, current_proc.id, variants->name, 
-                            get_unique_task_id(), idx);
-                  assert(false);
-                  exit(ERROR_INVALID_MAPPER_DOMAIN_SLICE);
-                }
-                break;
-              }
-            default:
-              assert(false);
-          }
+          case 0:
+            {
+              if (d.get_volume() <= 0)
+                empty = true;
+              break;
+            }
+          case 1:
+            {
+              Rect<1> rec = d.get_rect<1>();
+              if (rec.volume() <= 0)
+                empty = true;
+              break;
+            }
+          case 2:
+            {
+              Rect<2> rec = d.get_rect<2>();
+              if (rec.volume() <= 0)
+                empty = true;
+              break;
+            }
+          case 3:
+            {
+              Rect<3> rec = d.get_rect<3>();
+              if (rec.volume() <= 0)
+                empty = true;
+              break;
+            }
+          default:
+            assert(false);
+        }
+        if (empty)
+        {
+          log_run.error("Invalid mapper output from invocation of 'slice_task' "
+                        "on mapper %s. Mapper returned an empty slice for task "
+                        "%s (ID %lld).", mapper->get_mapper_name(),
+                        get_task_name(), get_unique_id());
+          assert(false);
+          exit(ERROR_INVALID_MAPPER_DOMAIN_SLICE);
         }
 #endif
-        SliceTask *slice = this->clone_as_slice_task(splits[idx].domain,
-                                                     splits[idx].proc,
-                                                     splits[idx].recurse,
-                                                     splits[idx].stealable,
-                                                     splits.size());
+        SliceTask *slice = this->clone_as_slice_task(output.slices[idx].domain,
+                                                   output.slices[idx].proc,
+                                                   output.slices[idx].recurse,
+                                                   output.slices[idx].stealable,
+                                                   output.slices.size());
         slices.push_back(slice);
       }
       // If the volumes don't match, then something bad happend in the mapper
       if (minimal_points_assigned != minimal_points.size())
       {
-        log_run.error("Invalid mapper domain slice result for mapper %d "
-                      "on processor " IDFMT " for task %s (ID %lld). "
-                      "Mapper returned slices with total volume %d that "
-                      "does not match expected volume %ld.", map_id,
-                      current_proc.id, variants->name, 
-                      get_unique_task_id(), minimal_points_assigned,
-                      index_domain.get_volume());
+        log_run.error("Invalid mapper output from invocation of 'slice_task' "
+                      "on mapper %s. Mapper returned slices with a total "
+                      "volume %d that does not match the expected volume of "
+                      "%ld when slicing task %s (ID %lld).", 
+                      mapper->get_mapper_name(), minimal_points_assigned,
+                      index_domain.get_volume(), 
+                      get_task_name(), get_unique_id());
 #ifdef DEBUG_HIGH_LEVEL
         assert(false);
 #endif
@@ -5897,7 +5694,7 @@ namespace Legion {
                         "on processor " IDFMT " for task %s (ID %lld). "
                         "Mapper returned slices with additional points "
                         "beyond the original index space.", map_id,
-                        current_proc.id, variants->name, get_unique_task_id());
+                        current_proc.id, get_task_name(), get_unique_id());
 #ifdef DEBUG_HIGH_LEVEL
           assert(false);
 #endif
@@ -5908,7 +5705,7 @@ namespace Legion {
           log_run.error("Invalid mapper domain slice result for mapper %d "
                         "on processor " IDFMT " for task %s (ID %lld). "
                         "Mapper returned overlapping slices.", map_id,
-                        current_proc.id, variants->name, get_unique_task_id());
+                        current_proc.id, get_task_name(), get_unique_id());
 #ifdef DEBUG_HIGH_LEVEL
           assert(false);
 #endif
@@ -5975,7 +5772,7 @@ namespace Legion {
                 // the mapping now.  Otherwise we
                 // can defer the mapping until we get
                 // on the target processor.
-                if (!runtime->is_local(target_proc))
+                if (next_proc.exists() && !runtime->is_local(next_proc))
                 {
                   if (perform_mapping())
                   {
@@ -6224,7 +6021,7 @@ namespace Legion {
       remote_owner_uid = 0;
       remote_parent_ctx = NULL;
       remote_completion_event = get_completion_event();
-      remote_unique_id = get_unique_task_id();
+      remote_unique_id = get_unique_id();
       sent_remotely = false;
       top_level_task = false;
       has_remote_subtasks = false;
@@ -6240,7 +6037,7 @@ namespace Legion {
       deactivate_single();
       if (!remote_instances.empty())
       {
-        UniqueID local_uid = get_unique_task_id();
+        UniqueID local_uid = get_unique_id();
         Serializer rez;
         {
           RezCheck z(rez);
@@ -6300,11 +6097,7 @@ namespace Legion {
       regions = launcher.region_requirements;
       regions.resize(launcher.region_requirements.size());
       for (unsigned idx = 0; idx < regions.size(); idx++)
-      {
-        regions[idx].copy_without_mapping_info(
-            launcher.region_requirements[idx]);
-        regions[idx].initialize_mapping_fields();
-      }
+        regions[idx] = launcher.region_requirements[idx];
       futures = launcher.futures;
       grants = launcher.grants;
       update_grants(launcher.grants);
@@ -6321,7 +6114,7 @@ namespace Legion {
       index_point = launcher.point;
       is_index_space = false;
       initialize_base_task(ctx, track, launcher.predicate, task_id);
-      remote_owner_uid = ctx->get_unique_task_id();
+      remote_owner_uid = ctx->get_unique_id();
       remote_parent_ctx = parent_ctx;
       if (launcher.predicate != Predicate::TRUE_PRED)
       {
@@ -6332,6 +6125,8 @@ namespace Legion {
           predicate_false_size = launcher.predicate_false_result.get_size();
           if (predicate_false_size == 0)
           {
+            // TODO: Put this check back in
+#if 0
             if (variants->return_size > 0)
             {
               log_run.error("Predicated task launch for task %s "
@@ -6342,30 +6137,34 @@ namespace Legion {
                                   "'predicate_false_result' or "
                                   "'predicate_false_future' fields of the "
                                   "TaskLauncher struct.",
-                                  variants->name, ctx->variants->name,
-                                  ctx->get_unique_task_id());
+                                  get_task_name(), ctx->get_task_name(),
+                                  ctx->get_unique_id());
 #ifdef DEBUG_HIGH_LEVEL
               assert(false);
 #endif
               exit(ERROR_MISSING_DEFAULT_PREDICATE_RESULT);
             }
+#endif
           }
           else
           {
+            // TODO: Put this check back in
+#if 0
             if (predicate_false_size != variants->return_size)
             {
               log_run.error("Predicated task launch for task %s "
                                  "in parent task %s (UID %lld) has predicated "
                                  "false return type of size %ld bytes, but the "
                                  "expected return size is %ld bytes.",
-                                 variants->name, parent_ctx->variants->name,
-                                 parent_ctx->get_unique_task_id(),
+                                 get_task_name(), parent_ctx->get_task_name(),
+                                 parent_ctx->get_unique_id(),
                                  predicate_false_size, variants->return_size);
 #ifdef DEBUG_HIGH_LEVEL
               assert(false);
 #endif
               exit(ERROR_PREDICATE_RESULT_SIZE_MISMATCH);
             }
+#endif
 #ifdef DEBUG_HIGH_LEVEL
             assert(predicate_false_result == NULL);
 #endif
@@ -6392,10 +6191,9 @@ namespace Legion {
       check_empty_field_requirements();
       if (Runtime::legion_spy_enabled)
       {
-        LegionSpy::log_individual_task(parent_ctx->get_unique_task_id(),
+        LegionSpy::log_individual_task(parent_ctx->get_unique_id(),
                                        unique_op_id,
-                                       task_id,
-                                       variants->name);
+                                       task_id, get_task_name());
         for (unsigned idx = 0; idx < regions.size(); idx++)
         {
           log_requirement(unique_op_id, idx, regions[idx]);
@@ -6421,10 +6219,7 @@ namespace Legion {
       regions = region_requirements;
       regions.resize(region_requirements.size());
       for (unsigned idx = 0; idx < regions.size(); idx++)
-      { 
-        regions[idx].copy_without_mapping_info(region_requirements[idx]);
-        regions[idx].initialize_mapping_fields();
-      }
+        regions[idx] = region_requirements[idx];
       arglen = arg.get_size();
       if (arglen > 0)
       {
@@ -6435,7 +6230,7 @@ namespace Legion {
       tag = t;
       is_index_space = false;
       initialize_base_task(ctx, track, pred, task_id);
-      remote_owner_uid = ctx->get_unique_task_id();
+      remote_owner_uid = ctx->get_unique_id();
       remote_parent_ctx = parent_ctx;
       if (check_privileges)
         perform_privilege_checks();
@@ -6451,10 +6246,9 @@ namespace Legion {
       check_empty_field_requirements();
       if (Runtime::legion_spy_enabled)
       {
-        LegionSpy::log_individual_task(parent_ctx->get_unique_task_id(),
+        LegionSpy::log_individual_task(parent_ctx->get_unique_id(),
                                        unique_op_id,
-                                       task_id,
-                                       variants->name);
+                                       task_id, get_task_name());
         for (unsigned idx = 0; idx < regions.size(); idx++)
         {
           log_requirement(unique_op_id, idx, regions[idx]);
@@ -6509,8 +6303,8 @@ namespace Legion {
 #ifdef LEGION_SPY
         if (it->impl->producer_op != NULL)
           LegionSpy::log_mapping_dependence(
-              parent_ctx->get_unique_task_id(), it->impl->producer_uid, 0,
-              get_unique_task_id(), 0, TRUE_DEPENDENCE);
+              parent_ctx->get_unique_id(), it->impl->producer_uid, 0,
+              get_unique_id(), 0, TRUE_DEPENDENCE);
 #endif
       }
       // Also have to register any dependences on our predicate
@@ -6599,14 +6393,13 @@ namespace Legion {
         }
         else
         {
-          // Otherwise, only request any data for early mapped regions
+          // We only early map restricted regions for individual tasks
           for (unsigned idx = 0; idx < version_infos.size(); idx++)
           {
-            const RegionRequirement &req = regions[idx];
-            if ((req.handle_type == SINGULAR) && 
-                (req.must_early_map || req.early_map))
-              version_infos[idx].make_local(preconditions, runtime->forest,
-                                            get_parent_context(idx).get_id());
+            if (!regions[idx].is_restricted())
+              continue;
+            version_infos[idx].make_local(preconditions, runtime->forest,
+                                          get_parent_context(idx).get_id());
           }
         }
       }
@@ -6625,9 +6418,9 @@ namespace Legion {
       log_run.error("Aliased region requirements for individual tasks "
                           "are not permitted. Region requirements %d and %d "
                           "of task %s (UID %lld) in parent task %s (UID %lld) "
-                          "are interfering.", idx1, idx2, variants->name,
-                          get_unique_task_id(), parent_ctx->variants->name,
-                          parent_ctx->get_unique_task_id());
+                          "are interfering.", idx1, idx2, get_task_name(),
+                          get_unique_id(), parent_ctx->get_task_name(),
+                          parent_ctx->get_unique_id());
 #ifdef DEBUG_HIGH_LEVEL
       assert(false);
 #endif
@@ -6637,9 +6430,9 @@ namespace Legion {
                       "%s (UID %lld) in parent task %s (UID %lld) are "
                       "interfering.  This behavior is currently "
                       "undefined. You better really know what you are "
-                      "doing.", idx1, idx2, variants->name, 
-                      get_unique_task_id(), parent_ctx->variants->name, 
-                      parent_ctx->get_unique_task_id());
+                      "doing.", idx1, idx2, get_task_name(), 
+                      get_unique_id(), parent_ctx->get_task_name(), 
+                      parent_ctx->get_unique_id());
 #endif
     }
 
@@ -6650,41 +6443,6 @@ namespace Legion {
       rerun_analysis_requirements.insert(idx);
     }
 
-    //--------------------------------------------------------------------------
-    void IndividualTask::premap_task(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(!premapped);
-#endif
-      // If we're remote then we don't need to do anything because
-      // we were premapped on the owner node before being sent remotely
-      if (!is_remote())
-      {
-        for (unsigned idx = 0; idx < regions.size(); idx++)
-        {
-          // Do the premapping if it is not already premapped or early mapped
-          if (!regions[idx].premapped && 
-              (early_mapped_regions.find(idx) == early_mapped_regions.end()))
-          {
-            regions[idx].premapped = runtime->forest->premap_physical_region(
-                                         get_parent_context(idx),
-                                         privilege_paths[idx], regions[idx], 
-                                         version_infos[idx], this, parent_ctx,
-                                         parent_ctx->get_executing_processor()
-#ifdef DEBUG_HIGH_LEVEL
-                                         , idx, get_logging_name(), unique_op_id
-#endif
-                                         );
-#ifdef DEBUG_HIGH_LEVEL
-            assert(regions[idx].premapped);
-#endif
-          }
-        }
-      }
-      premapped = true;
-    }
-    
     //--------------------------------------------------------------------------
     void IndividualTask::resolve_false(void)
     //--------------------------------------------------------------------------
@@ -6736,16 +6494,25 @@ namespace Legion {
     bool IndividualTask::early_map_task(void)
     //--------------------------------------------------------------------------
     {
-      return early_map_regions(map_applied_conditions);
+      // For individual tasks we always early map restricted regions
+      std::vector<unsigned> early_map_indexes;
+      for (unsigned idx = 0; idx < regions.size(); idx++)
+      {
+        if (regions[idx].is_restricted())
+          early_map_indexes.push_back(idx);
+      }
+      if (!early_map_indexes.empty())
+        return early_map_regions(map_applied_conditions, early_map_indexes);
+      return true;
     }
 
     //--------------------------------------------------------------------------
     bool IndividualTask::distribute_task(void)
     //--------------------------------------------------------------------------
     {
-      if (target_proc != current_proc)
+      if (next_proc.exists() && (next_proc != current_proc))
       {
-        runtime->send_task(target_proc, this);
+        runtime->send_task(this);
         return false;
       }
       return true;
@@ -6755,43 +6522,15 @@ namespace Legion {
     bool IndividualTask::perform_mapping(MustEpochOp *must_epoch_owner/*=NULL*/)
     //--------------------------------------------------------------------------
     {
-      // Check to see if we need to localize anymore state before starting
-      if (!is_remote() && parent_ctx->has_remote_state())
-      {
-        std::set<Event> preconditions;
-        for (unsigned idx = 0; idx < version_infos.size(); idx++)
-          version_infos[idx].make_local(preconditions, runtime->forest,
-                                        get_parent_context(idx).get_id());
-        if (!preconditions.empty())
-        {
-          Event wait_on = Event::merge_events(preconditions);
-          wait_on.wait();
-        }
-      }
-      // Do our premapping of all the regions before we do any mapper calls
-      if (!premapped)
-        premap_task();
-      // Before we try mapping the task, ask the mapper to pick a task variant
-      runtime->invoke_mapper_select_variant(current_proc, this);
-#ifdef DEBUG_HIGH_LEVEL
-      if (!variants->has_variant(selected_variant))
-      {
-        log_task.error("Invalid task variant %ld selected by mapper "
-                             "for task %s (ID %lld)", selected_variant,
-                             variants->name, get_unique_task_id());
-        assert(false);
-        exit(ERROR_INVALID_VARIANT_SELECTION);
-      }
-#endif
       // Now try to do the mapping, we can just use our completion
       // event since we know this task will object will be active
       // throughout the duration of the computation
-      bool map_success = map_all_regions(target_proc, 
-                             get_task_completion(), must_epoch_owner);
+      bool map_success = map_all_regions(get_task_completion(), 
+                                         must_epoch_owner);
       if (map_success)
       {
         // If we mapped, then we are no longer stealable
-        spawn_task = false;
+        stealable = false;
         // Also flush out physical regions
         if (is_remote())
         {
@@ -6838,7 +6577,7 @@ namespace Legion {
     bool IndividualTask::is_stealable(void) const
     //--------------------------------------------------------------------------
     {
-      return ((!map_locally) && spawn_task);
+      return ((!map_locally) && stealable);
     }
 
     //--------------------------------------------------------------------------
@@ -6881,8 +6620,6 @@ namespace Legion {
 #ifdef DEBUG_HIGH_LEVEL
       assert(virtual_mapped[index]);
 #endif
-      // Overwrite our virtual instances so we keep a reference
-      virtual_instances[index] = ref;
       runtime->forest->register_virtual_region(virtual_ctx,
                                           composite_view, regions[index],
                                           version_infos[index]);
@@ -7005,8 +6742,9 @@ namespace Legion {
         pack_remote_complete(rez);
         runtime->send_individual_remote_complete(orig_proc,rez);
       }
+      
       // Invalidate any state that we had if we didn't already
-      if (context.exists() && (!is_leaf() || !virtual_instances.empty()))
+      if (context.exists() && (!is_leaf() || has_virtual_instances()))
         invalidate_region_tree_contexts();
       // See if we need to trigger that our children are complete
       // Note it is only safe to do this if we were not sent remotely
@@ -7081,7 +6819,7 @@ namespace Legion {
     {
       // If this is either a remote task or we have virtual mappings, then
       // we need to wait before completing our mapping
-      if ((is_remote() || !virtual_instances.empty()) && 
+      if ((is_remote() || has_virtual_instances()) && 
           !mapped_precondition.has_triggered())
       {
         SingleTask::DeferredPostMappedArgs args;
@@ -7094,32 +6832,34 @@ namespace Legion {
       }
       // If we have any virtual instances then we need to apply
       // the changes for them now
-      if (!virtual_instances.empty())
+      if (has_virtual_instances())
       {
         if (is_remote())
         {
           AddressSpaceID owner_space = runtime->find_address_space(orig_proc);
-          for (std::map<unsigned,CompositeRef>::iterator it = 
-                virtual_instances.begin(); it != virtual_instances.end(); it++)
+          for (unsigned idx = 0; idx < physical_instances.size(); idx++)
           {
+            if (!physical_instances[idx].has_composite_ref())
+              continue;
 #ifdef DEBUG_HIGH_LEVEL
-            assert(virtual_mapped[it->first]);
+            assert(virtual_mapped[idx]);
 #endif
-            version_infos[it->first].apply_mapping(
-                get_parent_context(it->first).get_id(),
+            version_infos[idx].apply_mapping(
+                get_parent_context(idx).get_id(),
                 owner_space, map_applied_conditions);
           }
         }
         else
         {
-          for (std::map<unsigned,CompositeRef>::iterator it = 
-                virtual_instances.begin(); it != virtual_instances.end(); it++)
+          for (unsigned idx = 0; idx < physical_instances.size(); idx++)
           {
+            if (!physical_instances[idx].has_composite_ref())
+              continue;
 #ifdef DEBUG_HIGH_LEVEL
-            assert(virtual_mapped[it->first]);
+            assert(virtual_mapped[idx]);
 #endif
-            version_infos[it->first].apply_mapping(
-                get_parent_context(it->first).get_id(),
+            version_infos[idx].apply_mapping(
+                get_parent_context(idx).get_id(),
                 runtime->address_space, map_applied_conditions);
           }
         }
@@ -7146,29 +6886,6 @@ namespace Legion {
       runtime->send_individual_remote_mapped(orig_proc, rez);
       // Now we can complete this task
       complete_mapping(applied_condition);
-    }
-
-    //--------------------------------------------------------------------------
-    InstanceRef IndividualTask::find_restricted_instance(unsigned index)
-    //--------------------------------------------------------------------------
-    {
-      if (is_remote())
-      {
-        // TODO: support remote tracking of restricted instances
-        assert(false);
-        return InstanceRef();
-      }
-      else
-      {
-#ifdef DEBUG_HIGH_LEVEL
-        assert(index < privilege_paths.size());
-        assert(index < parent_req_indexes.size());
-#endif
-        InstanceRef parent_ref = 
-          parent_ctx->get_local_reference(parent_req_indexes[index]);
-        // Now get the proper sub-view for our privilege path
-        return privilege_paths[index].translate_ref(parent_ref);
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -7249,7 +6966,7 @@ namespace Legion {
       // If we're remote, we've already resolved speculation for now
       resolve_speculation();
       if (Runtime::legion_spy_enabled)
-        LegionSpy::log_point_point(remote_unique_id, get_unique_task_id());
+        LegionSpy::log_point_point(remote_unique_id, get_unique_id());
       // Return true to add ourselves to the ready queue
       return true;
     }
@@ -7495,7 +7212,7 @@ namespace Legion {
       deactivate_single();
       if (!remote_instances.empty())
       {
-        UniqueID local_uid = get_unique_task_id();
+        UniqueID local_uid = get_unique_id();
         Serializer rez;
         {
           RezCheck z(rez);
@@ -7520,43 +7237,6 @@ namespace Legion {
     {
       // should never be called
       assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void PointTask::premap_task(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(!premapped);
-#endif
-      for (unsigned idx = 0; idx < regions.size(); idx++)
-      {
-        if (early_mapped_regions.find(idx) == early_mapped_regions.end())
-        {
-          const RegionRequirement &slice_req = slice_owner->regions[idx];
-          RegionTreePath mapping_path;
-          if (slice_req.handle_type == PART_PROJECTION)
-            initialize_mapping_path(mapping_path, regions[idx],
-                                    slice_req.partition);
-          else
-            initialize_mapping_path(mapping_path, regions[idx],
-                                    slice_req.region);
-          VersionInfo &version_info = slice_owner->get_version_info(idx);
-          regions[idx].premapped = runtime->forest->premap_physical_region(
-                                     get_parent_context(idx),
-                                     mapping_path, regions[idx], 
-                                     version_info, this, parent_ctx,
-                                     parent_ctx->get_executing_processor()
-#ifdef DEBUG_HIGH_LEVEL
-                                     , idx, get_logging_name(), unique_op_id
-#endif
-                                     );
-#ifdef DEBUG_HIGH_LEVEL
-          assert(regions[idx].premapped);
-#endif
-        }
-      }
-      premapped = true;
     }
 
     //--------------------------------------------------------------------------
@@ -7587,16 +7267,11 @@ namespace Legion {
     bool PointTask::perform_mapping(MustEpochOp *must_epoch_owner/*=NULL*/)
     //--------------------------------------------------------------------------
     {
-      // Premap all the regions that are not early mapped before we
-      // call the mapper
-      if (!premapped)
-        premap_task();
       // For point tasks we use the point termination event which as the
       // end event for this task since point tasks can be moved and
       // the completion event is therefore not guaranteed to survive
       // the length of the task's execution
-      bool map_success = map_all_regions(target_proc, 
-                                         point_termination, must_epoch_owner);
+      bool map_success = map_all_regions(point_termination, must_epoch_owner);
       // If we succeeded in mapping and had no virtual mappings
       // then we are done mapping
       if (map_success && is_leaf()) 
@@ -7728,12 +7403,12 @@ namespace Legion {
       // this if we're a leaf task with no virtual mappings
       // because we would have performed the leaf task
       // early complete chaining operation.
-      if (!is_leaf() || !virtual_instances.empty())
+      if (!is_leaf() || has_virtual_instances())
         point_termination.trigger();
 
       // Invalidate any context that we had so that the child
       // operations can begin committing
-      if (context.exists() && (!is_leaf() || !virtual_instances.empty()))
+      if (context.exists() && (!is_leaf() || has_virtual_instances()))
         invalidate_region_tree_contexts();
       // See if we need to trigger that our children are complete
       bool need_commit = false;
@@ -7832,13 +7507,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    InstanceRef PointTask::find_restricted_instance(unsigned index)
-    //--------------------------------------------------------------------------
-    {
-      return slice_owner->find_restricted_instance(index);
-    }
-
-    //--------------------------------------------------------------------------
     void PointTask::initialize_point(SliceTask *owner, MinimalPoint *mp)
     //--------------------------------------------------------------------------
     {
@@ -7886,14 +7554,6 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void WrapperTask::trigger_dependence_analysis(void)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void WrapperTask::premap_task(void)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -8030,15 +7690,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    InstanceRef WrapperTask::find_restricted_instance(unsigned index)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return InstanceRef();
-    }
-
-    //--------------------------------------------------------------------------
     void WrapperTask::activate_wrapper(void)
     //--------------------------------------------------------------------------
     {
@@ -8126,7 +7777,7 @@ namespace Legion {
 #ifdef DEBUG_HIGH_LEVEL
         assert(is_top_level_context);
 #endif
-        UniqueID local_uid = get_unique_task_id();
+        UniqueID local_uid = get_unique_id();
         Serializer rez;
         {
           RezCheck z(rez);
@@ -8581,11 +8232,7 @@ namespace Legion {
       indexes = launcher.index_requirements;
       regions.resize(launcher.region_requirements.size());
       for (unsigned idx = 0; idx < regions.size(); idx++)
-      {
-        regions[idx].copy_without_mapping_info(
-            launcher.region_requirements[idx]);
-        regions[idx].initialize_mapping_fields();
-      }
+        regions[idx] = launcher.region_requirements[idx];
       futures = launcher.futures;
       update_grants(launcher.grants);
       wait_barriers = launcher.wait_barriers;
@@ -8622,9 +8269,9 @@ namespace Legion {
       check_empty_field_requirements();
       if (Runtime::legion_spy_enabled)
       {
-        LegionSpy::log_index_task(parent_ctx->get_unique_task_id(),
+        LegionSpy::log_index_task(parent_ctx->get_unique_id(),
                                   unique_op_id, task_id,
-                                  variants->name);
+                                  get_task_name());
         for (unsigned idx = 0; idx < regions.size(); idx++)
         {
           TaskOp::log_requirement(unique_op_id, idx, regions[idx]);
@@ -8646,11 +8293,7 @@ namespace Legion {
       indexes = launcher.index_requirements;
       regions.resize(launcher.region_requirements.size());
       for (unsigned idx = 0; idx < regions.size(); idx++)
-      {
-        regions[idx].copy_without_mapping_info(
-            launcher.region_requirements[idx]);
-        regions[idx].initialize_mapping_fields();
-      }
+        regions[idx] = launcher.region_requirements[idx];
       futures = launcher.futures;
       update_grants(launcher.grants);
       wait_barriers = launcher.wait_barriers;
@@ -8678,8 +8321,8 @@ namespace Legion {
       if (!reduction_op->is_foldable)
       {
         log_run.error("Reduction operation %d for index task launch %s "
-                            "(ID %lld) is not foldable.",
-                            redop, variants->name, get_unique_task_id());
+                      "(ID %lld) is not foldable.",
+                      redop, get_task_name(), get_unique_id());
 #ifdef DEBUG_HIGH_LEVEL
         assert(false);
 #endif
@@ -8701,9 +8344,9 @@ namespace Legion {
       check_empty_field_requirements();
       if (Runtime::legion_spy_enabled)
       {
-        LegionSpy::log_index_task(parent_ctx->get_unique_task_id(),
+        LegionSpy::log_index_task(parent_ctx->get_unique_id(),
                                   unique_op_id, task_id,
-                                  variants->name);
+                                  get_task_name());
         for (unsigned idx = 0; idx < regions.size(); idx++)
         {
           TaskOp::log_requirement(unique_op_id, idx, regions[idx]);
@@ -8731,10 +8374,7 @@ namespace Legion {
       indexes = index_requirements;
       regions.resize(region_requirements.size());
       for (unsigned idx = 0; idx < regions.size(); idx++)
-      {
-        regions[idx].copy_without_mapping_info(region_requirements[idx]);
-        regions[idx].initialize_mapping_fields();
-      }
+        regions[idx] = region_requirements[idx];
       arglen = global_arg.get_size();
       if (arglen > 0)
       {
@@ -8764,9 +8404,9 @@ namespace Legion {
       check_empty_field_requirements();
       if (Runtime::legion_spy_enabled)
       {
-        LegionSpy::log_index_task(parent_ctx->get_unique_task_id(),
+        LegionSpy::log_index_task(parent_ctx->get_unique_id(),
                                   unique_op_id, task_id,
-                                  variants->name);
+                                  get_task_name());
         for (unsigned idx = 0; idx < regions.size(); idx++)
         {
           TaskOp::log_requirement(unique_op_id, idx, regions[idx]);
@@ -8796,10 +8436,7 @@ namespace Legion {
       indexes = index_requirements;
       regions.resize(region_requirements.size());
       for (unsigned idx = 0; idx < regions.size(); idx++)
-      {
-        regions[idx].copy_without_mapping_info(region_requirements[idx]);
-        regions[idx].initialize_mapping_fields();
-      }
+        regions[idx] = region_requirements[idx];
       arglen = global_arg.get_size();
       if (arglen > 0)
       {
@@ -8823,8 +8460,8 @@ namespace Legion {
       if (!reduction_op->is_foldable)
       {
         log_run.error("Reduction operation %d for index task launch %s "
-                            "(ID %lld) is not foldable.",
-                            redop, variants->name, get_unique_task_id());
+                      "(ID %lld) is not foldable.",
+                      redop, get_task_name(), get_unique_id());
 #ifdef DEBUG_HIGH_LEVEL
         assert(false);
 #endif
@@ -8843,9 +8480,9 @@ namespace Legion {
       check_empty_field_requirements();
       if (Runtime::legion_spy_enabled)
       {
-        LegionSpy::log_index_task(parent_ctx->get_unique_task_id(),
+        LegionSpy::log_index_task(parent_ctx->get_unique_id(),
                                   unique_op_id, task_id,
-                                  variants->name);
+                                  get_task_name());
         for (unsigned idx = 0; idx < regions.size(); idx++)
         {
           TaskOp::log_requirement(unique_op_id, idx, regions[idx]);
@@ -8866,40 +8503,46 @@ namespace Legion {
         predicate_false_size = pred_arg.get_size();
         if (predicate_false_size == 0)
         {
+          // TODO: Reenable this error if we want to track predicate defaults
+#if 0
           if (variants->return_size > 0)
           {
             log_run.error("Predicated index task launch for task %s "
-                                "in parent task %s (UID %lld) has non-void "
-                                "return type but no default value for its "
-                                "future if the task predicate evaluates to "
-                                "false.  Please set either the "
-                                "'predicate_false_result' or "
-                                "'predicate_false_future' fields of the "
-                                "IndexLauncher struct.",
-                                variants->name, parent_ctx->variants->name,
-                                parent_ctx->get_unique_task_id());
+                          "in parent task %s (UID %lld) has non-void "
+                          "return type but no default value for its "
+                          "future if the task predicate evaluates to "
+                          "false.  Please set either the "
+                          "'predicate_false_result' or "
+                          "'predicate_false_future' fields of the "
+                          "IndexLauncher struct.",
+                          get_task_name(), parent_ctx->get_task_name(),
+                          parent_ctx->get_unique_id());
 #ifdef DEBUG_HIGH_LEVEL
             assert(false);
 #endif
             exit(ERROR_MISSING_DEFAULT_PREDICATE_RESULT);
           }
+#endif
         }
         else
         {
+          // TODO: Reenable this error if we want to track predicate defaults
+#if 0
           if (predicate_false_size != variants->return_size)
           {
             log_run.error("Predicated index task launch for task %s "
-                                "in parent task %s (UID %lld) has predicated "
-                                "false return type of size %ld bytes, but the "
-                                "expected return size is %ld bytes.",
-                                variants->name, parent_ctx->variants->name,
-                                parent_ctx->get_unique_task_id(),
-                                predicate_false_size, variants->return_size);
+                          "in parent task %s (UID %lld) has predicated "
+                          "false return type of size %ld bytes, but the "
+                          "expected return size is %ld bytes.",
+                          get_task_name(), parent_ctx->get_task_name(),
+                          parent_ctx->get_unique_id(),
+                          predicate_false_size, variants->return_size);
 #ifdef DEBUG_HIGH_LEVEL
             assert(false);
 #endif
             exit(ERROR_PREDICATE_RESULT_SIZE_MISMATCH);
           }
+#endif
 #ifdef DEBUG_HIGH_LEVEL
           assert(predicate_false_result == NULL);
 #endif
@@ -8929,7 +8572,7 @@ namespace Legion {
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
         if (IS_WRITE(regions[idx]) && (regions[idx].handle_type == SINGULAR))
-          regions[idx].must_early_map = true;
+          regions[idx].flags |= MUST_PREMAP_FLAG;
       }
     }
 
@@ -8960,8 +8603,8 @@ namespace Legion {
 #ifdef LEGION_SPY
         if (it->impl->producer_op != NULL)
           LegionSpy::log_mapping_dependence(
-              parent_ctx->get_unique_task_id(), it->impl->producer_uid, 0,
-              get_unique_task_id(), 0, TRUE_DEPENDENCE);
+              parent_ctx->get_unique_id(), it->impl->producer_uid, 0,
+              get_unique_id(), 0, TRUE_DEPENDENCE);
 #endif
       }
       // Also have to register any dependences on our predicate
@@ -9032,8 +8675,9 @@ namespace Legion {
         for (unsigned idx = 0; idx < version_infos.size(); idx++)
         {
           const RegionRequirement &req = regions[idx];
-          if ((req.handle_type == SINGULAR) && 
-                (req.must_early_map || req.early_map))
+          // We need to request state for any early mapped regions, either
+          // because they are restricted or we actually need to early map them
+          if (req.is_restricted() || req.must_premap())
             version_infos[idx].make_local(preconditions, runtime->forest, 
                                           get_parent_context(idx).get_id());
         }
@@ -9052,9 +8696,9 @@ namespace Legion {
       log_run.error("Aliased region requirements for index tasks "
                           "are not permitted. Region requirements %d and %d "
                           "of task %s (UID %lld) in parent task %s (UID %lld) "
-                          "are interfering.", idx1, idx2, variants->name,
-                          get_unique_task_id(), parent_ctx->variants->name,
-                          parent_ctx->get_unique_task_id());
+                          "are interfering.", idx1, idx2, get_task_name(),
+                          get_unique_id(), parent_ctx->get_task_name(),
+                          parent_ctx->get_unique_id());
 #ifdef DEBUG_HIGH_LEVEL
       assert(false);
 #endif
@@ -9064,9 +8708,8 @@ namespace Legion {
                       "%s (UID %lld) in parent task %s (UID %lld) are "
                       "interfering.  This behavior is currently undefined. "
                       "You better really know what you are doing.",
-                      idx1, idx2, variants->name, get_unique_task_id(),
-                      parent_ctx->variants->name, 
-                      parent_ctx->get_unique_task_id());
+                      idx1, idx2, get_task_name(), get_unique_id(),
+                      parent_ctx->get_task_name(), parent_ctx->get_unique_id());
 #endif
     }
 
@@ -9149,8 +8792,8 @@ namespace Legion {
       {
         log_task.error("Index Space Task %s (ID %lld) violated the disjoint "
                        "projection region requirement assumption for region "
-                       "requirement %d!", variants->name, 
-                       get_unique_task_id(), idx);
+                       "requirement %d!", get_task_name(), 
+                       get_unique_id(), idx);
 #ifdef DEBUG_HIGH_LEVEL
         assert(false);
 #endif
@@ -9274,7 +8917,16 @@ namespace Legion {
     bool IndexTask::early_map_task(void)
     //--------------------------------------------------------------------------
     {
-      return early_map_regions(map_applied_conditions);
+      std::vector<unsigned> early_map_indexes;
+      for (unsigned idx = 0; idx < regions.size(); idx++)
+      {
+        const RegionRequirement &req = regions[idx];
+        if (req.is_restricted() || req.must_premap())
+          early_map_indexes.push_back(idx);
+      }
+      if (!early_map_indexes.empty())
+        return early_map_regions(map_applied_conditions, early_map_indexes);
+      return true;
     }
 
     //--------------------------------------------------------------------------
@@ -9293,20 +8945,20 @@ namespace Legion {
       }
       else
       {
-        if (!is_sliced() && (target_proc != current_proc))
+        if (!is_sliced() && next_proc.exists() && (next_proc != current_proc))
         {
 #ifdef DEBUG_HIGH_LEVEL
           assert(minimal_points_assigned == 0);
 #endif
           // Make a slice copy and send it away
-          SliceTask *clone = clone_as_slice_task(index_domain, target_proc,
+          SliceTask *clone = clone_as_slice_task(index_domain, next_proc,
                                                  true/*needs slice*/,
-                                                 spawn_task, 1LL);
+                                                 stealable, 1LL);
 #ifdef DEBUG_HIGH_LEVEL
           assert(minimal_points_assigned == minimal_points.size());
 #endif
           minimal_points.clear();
-          runtime->send_task(target_proc, clone);
+          runtime->send_task(clone);
           return false; // We have now been sent away
         }
         else
@@ -9464,8 +9116,8 @@ namespace Legion {
       if (must_parallelism)
       {
         log_task.error("Illegal attempt to inline must-parallelism "
-                             "task %s (ID %lld)",
-                             variants->name, get_unique_task_id());
+                       "task %s (ID %lld)",
+                       get_task_name(), get_unique_id());
 #ifdef DEBUG_HIGH_LEVEL
         assert(false);
 #endif
@@ -9503,7 +9155,7 @@ namespace Legion {
       // Make a copy of our region requirements
       std::vector<RegionRequirement> copy_requirements(regions.size());
       for (unsigned idx = 0; idx < regions.size(); idx++)
-        copy_requirements[idx].copy_without_mapping_info(regions[idx]);
+        copy_requirements[idx] = regions[idx];
       bool first = true;
       for (Domain::DomainPointIterator itr(index_domain); itr; itr++)
       {
@@ -9512,7 +9164,7 @@ namespace Legion {
         if (!first)
         {
           for (unsigned idx = 0; idx < regions.size(); idx++)
-            regions[idx].copy_without_mapping_info(copy_requirements[idx]);
+            regions[idx] = copy_requirements[idx];
         }
         else
           first = false;
@@ -9575,11 +9227,11 @@ namespace Legion {
       result->index_complete = this->completion_event;
       result->denominator = scale_denominator;
       result->index_owner = this;
-      result->remote_owner_uid = parent_ctx->get_unique_task_id();
+      result->remote_owner_uid = parent_ctx->get_unique_id();
       result->remote_parent_ctx = parent_ctx;
       if (Runtime::legion_spy_enabled)
-        LegionSpy::log_index_slice(get_unique_task_id(), 
-                                   result->get_unique_task_id());
+        LegionSpy::log_index_slice(get_unique_id(), 
+                                   result->get_unique_id());
       return result;
     }
 
@@ -9602,20 +9254,6 @@ namespace Legion {
         else
           must_epoch->set_future(point, result, result_size, owner);
       }
-    }
-
-    //--------------------------------------------------------------------------
-    InstanceRef IndexTask::find_restricted_instance(unsigned index)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(index < privilege_paths.size());
-      assert(index < parent_req_indexes.size());
-#endif
-      InstanceRef parent_ref = 
-        parent_ctx->get_local_reference(parent_req_indexes[index]);
-      // Now get the proper sub-view for our privilege path
-      return privilege_paths[index].translate_ref(parent_ref);
     }
 
     //--------------------------------------------------------------------------
@@ -9654,10 +9292,10 @@ namespace Legion {
               if (it->first.get_dim() > 3)
               {
                 log_task.error("Projection ID 0 is invalid for tasks whose "
-                                     "points are larger than three dimensional "
-                                     "unsigned integers.  Points for task %s "
-                                     "have elements of %d dimensions",
-                                  this->variants->name, it->first.get_dim());
+                               "points are larger than three dimensional "
+                               "unsigned integers.  Points for task %s "
+                               "have elements of %d dimensions",
+                               get_task_name(), it->first.get_dim());
 #ifdef DEBUG_HIGH_LEVEL
                 assert(false);
 #endif
@@ -10027,7 +9665,7 @@ namespace Legion {
       index_owner = NULL;
       remote_owner_uid = 0;
       remote_parent_ctx = NULL;
-      remote_unique_id = get_unique_task_id();
+      remote_unique_id = get_unique_id();
       locally_mapped = false;
     }
 
@@ -10108,37 +9746,29 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SliceTask::premap_slice(void)
+    void SliceTask::prewalk_slice(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(!premapped);
-#endif
       // Premap all regions that were not early mapped
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
-        // Check to see if we already premapped this region
-        // If not then we need to do it now
-        if (!regions[idx].premapped && 
-            (early_mapped_regions.find(idx) == early_mapped_regions.end()))
-        {
-          RegionTreePath privilege_path;
-          initialize_privilege_path(privilege_path, regions[idx]);
-          regions[idx].premapped = runtime->forest->premap_physical_region(
-                                       get_parent_context(idx),
-                                       privilege_path, regions[idx], 
-                                       version_infos[idx], this, parent_ctx,
-                                       parent_ctx->get_executing_processor()
+        // If we've already premapped it then we are done
+        if (early_mapped_regions.find(idx) != early_mapped_regions.end())
+          continue;
+        RegionTreePath privilege_path;
+        initialize_privilege_path(privilege_path, regions[idx]);
+        // Walk the path down to the upper bound region without getting
+        // any of the valid instances
+        InstanceSet empty_set;
+        runtime->forest->physical_traverse_path(get_parent_context(idx),
+                                        privilege_path, regions[idx],
+                                        version_infos[idx], this,
+                                        false/*find valid*/, empty_set
 #ifdef DEBUG_HIGH_LEVEL
-                                       , idx, get_logging_name(), unique_op_id
+                                        , idx, get_logging_name(), unique_op_id
 #endif
-                                       );
-#ifdef DEBUG_HIGH_LEVEL
-          assert(regions[idx].premapped);
-#endif
-        }
+                                        );
       }
-      premapped = true;
     }
 
     //--------------------------------------------------------------------------
@@ -10161,9 +9791,9 @@ namespace Legion {
       // Quick out in case this slice task is to be reclaimed
       if (reclaim)
         return true;
-      if (target_proc != current_proc)
+      if (next_proc.exists() && (next_proc != current_proc))
       {
-        runtime->send_task(target_proc,this);
+        runtime->send_task(this);
         // The runtime will deactivate this task
         // after it has been sent
         return false;
@@ -10172,13 +9802,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool SliceTask::perform_mapping(MustEpochOp *owner/*=NULL*/)
+    bool SliceTask::perform_mapping(MustEpochOp *epoch_owner/*=NULL*/)
     //--------------------------------------------------------------------------
     {
-      // Premap everything first
-      if (!premapped)
-        premap_slice();
-      bool map_success = true;
+      // Walk the path down to the upper bounds for all points first
+      prewalk_slice();
       // If slices are empty, this is a leaf slice so we can do the
       // normal mapping procedure
       if (slices.empty())
@@ -10190,52 +9818,39 @@ namespace Legion {
 
         for (unsigned idx = 0; idx < points.size(); idx++)
         {
-          bool point_success = points[idx]->perform_mapping(mapper_invoked);
-          if (!point_success)
-          {
-            // Failed to map, so unmap everything up to this point
-            for (unsigned i = 0; i < idx; i++)
-              points[i]->unmap_all_regions();
-            map_success = false;
-            // Reset the number of unmapped points
-            num_unmapped_points = points.size();
-            break;
-          }
+#ifdef DEBUG_HIGH_LEVEL
+          bool point_success = 
+#endif
+            points[idx]->perform_mapping(epoch_owner);
+#ifdef DEBUG_HIGH_LEVEL
+          assert(point_success);
+#endif
         }
-
-        // Check to see if we all mapped then we are ready to 
-        // trigger that all the operations have mapped
-        if (map_success)
-        {
-          // If we succeeded in mapping we are no longer stealable
-          spawn_task = false;
-        }
+        // If we succeeded in mapping we are no longer stealable
+        stealable = false;
       }
       else
       {
         // This case only occurs if this is an intermediate slice and
         // its sub-slices failed to map, so try to remap them.
         for (std::list<SliceTask*>::iterator it = slices.begin();
-              it != slices.end(); /*nothing*/)
+              it != slices.end(); it++)
         {
-          bool slice_success = (*it)->trigger_execution();
-          if (!slice_success)
-          {
-            map_success = false;
-            it++;
-          }
-          else
-          {
-            // Remote it from the list since it succeeded
-            it = slices.erase(it);
-          }
+#ifdef DEBUG_HIGH_LEVEL
+          bool slice_success = 
+#endif
+            (*it)->trigger_execution();
+#ifdef DEBUG_HIGH_LEVEL
+          assert(slice_success);
+#endif
+          
         }
+        slices.clear();
         // If we succeeded in mapping all our remaining
         // slices then mark that this task can be reclaimed
-        if (map_success)
-          reclaim = true;
+        reclaim = true;
       }
-      return map_success;
+      return true;
     }
 
     //--------------------------------------------------------------------------
@@ -10260,7 +9875,7 @@ namespace Legion {
     bool SliceTask::is_stealable(void) const
     //--------------------------------------------------------------------------
     {
-      return ((!map_locally) && spawn_task);
+      return ((!map_locally) && stealable);
     }
 
     //--------------------------------------------------------------------------
@@ -10285,13 +9900,11 @@ namespace Legion {
     bool SliceTask::map_and_launch(void)
     //--------------------------------------------------------------------------
     {
-      // Premap everything first
-      if (!premapped)
-        premap_slice();
-      bool map_success = true;
+      // Walk the path down to the upper bounds for all points first
+      prewalk_slice();
       // Mark that this task is no longer stealable.  Once we start
       // executing things onto a specific processor slices cannot move.
-      spawn_task = false;
+      stealable = false;
       // First enumerate all of our points if we haven't already done so
       if (points.empty())
         enumerate_points();
@@ -10310,23 +9923,21 @@ namespace Legion {
             it != local_points.end(); it++)
       {
         PointTask *next_point = *it;
-        bool point_success = next_point->perform_mapping();
-        if (!point_success)
-        {
-          map_success = false;    
-          break;
-        }
-        else
-        {
-          // Otherwise update the mapping index and then launch
-          // the point (it is imperative that these happen in this order!)
-          mapping_index++;
-          // Once we call this function on the last point it
-          // is possible that this slice task object can be recycled
-          next_point->launch_task();
-        }
+#ifdef DEBUG_HIGH_LEVEL
+        bool point_success = 
+#endif
+          next_point->perform_mapping();
+#ifdef DEBUG_HIGH_LEVEL
+        assert(point_success);
+#endif
+        // Update the mapping index and then launch
+        // the point (it is imperative that these happen in this order!)
+        mapping_index++;
+        // Once we call this function on the last point it
+        // is possible that this slice task object can be recycled
+        next_point->launch_task();
       }
-      return map_success;
+      return true;
     }
 
     //--------------------------------------------------------------------------
@@ -10433,7 +10044,7 @@ namespace Legion {
       else
         parent_ctx = remote_ctx;
       if (Runtime::legion_spy_enabled)
-        LegionSpy::log_slice_slice(remote_unique_id, get_unique_task_id());
+        LegionSpy::log_slice_slice(remote_unique_id, get_unique_id());
       num_unmapped_points = num_points;
       num_uncomplete_points = num_points;
       num_uncommitted_points = num_points;
@@ -10445,8 +10056,8 @@ namespace Legion {
         point->parent_ctx = parent_ctx;
         points.push_back(point);
         if (Runtime::legion_spy_enabled)
-          LegionSpy::log_slice_point(get_unique_task_id(), 
-                                     point->get_unique_task_id(),
+          LegionSpy::log_slice_point(get_unique_id(), 
+                                     point->get_unique_id(),
                                      point->index_point);
       }
       // Return true to add this to the ready queue
@@ -10479,8 +10090,8 @@ namespace Legion {
       result->remote_owner_uid = this->remote_owner_uid;
       result->remote_parent_ctx = this->remote_parent_ctx;
       if (Runtime::legion_spy_enabled)
-        LegionSpy::log_slice_slice(get_unique_task_id(), 
-                                   result->get_unique_task_id());
+        LegionSpy::log_slice_slice(get_unique_id(), 
+                                   result->get_unique_id());
       return result;
     }
 
@@ -10524,22 +10135,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    InstanceRef SliceTask::find_restricted_instance(unsigned index)
-    //--------------------------------------------------------------------------
-    {
-      if (is_remote())
-      {
-        // TODO: support remote mapping of restricted instances
-        assert(false);
-        return InstanceRef();
-      }
-      else
-      {
-        return index_owner->find_restricted_instance(index);
-      }
-    }
-
-    //--------------------------------------------------------------------------
     void SliceTask::register_must_epoch(void)
     //--------------------------------------------------------------------------
     {
@@ -10552,7 +10147,6 @@ namespace Legion {
       for (unsigned idx = 0; idx < points.size(); idx++)
       {
         PointTask *point = points[idx];
-        point->premap_task();
         must_epoch->register_single_task(point, must_epoch_index);
       }
     }
@@ -10566,7 +10160,7 @@ namespace Legion {
       result->initialize_base_task(parent_ctx,
                                    false/*track*/, Predicate::TRUE_PRED,
                                    this->task_id);
-      result->clone_task_op_from(this, this->target_proc, 
+      result->clone_task_op_from(this, this->next_proc, 
                                  false/*stealable*/, true/*duplicate*/);
       result->is_index_space = true;
       result->must_parallelism = this->must_parallelism;
@@ -10575,8 +10169,8 @@ namespace Legion {
       // Now figure out our local point information
       result->initialize_point(this, mp);
       if (Runtime::legion_spy_enabled)
-        LegionSpy::log_slice_point(get_unique_task_id(), 
-                                   result->get_unique_task_id(),
+        LegionSpy::log_slice_point(get_unique_id(), 
+                                   result->get_unique_id(),
                                    result->index_point);
       return result;
     }
@@ -10585,21 +10179,6 @@ namespace Legion {
     void SliceTask::enumerate_points(void)
     //--------------------------------------------------------------------------
     {
-      // Before we enumerate the points, ask the mapper to pick the
-      // task variant to be used for all of these points so when
-      // we clone each of the point tasks, they will get the right
-      // variant information to run on this processor
-      runtime->invoke_mapper_select_variant(current_proc, this);
-#ifdef DEBUG_HIGH_LEVEL
-      if (!variants->has_variant(selected_variant))
-      {
-        log_task.error("Invalid task variant %ld selected by mapper "
-                             "for task %s (ID %lld)", selected_variant,
-                             variants->name, get_unique_task_id());
-        assert(false);
-        exit(ERROR_INVALID_VARIANT_SELECTION);
-      }
-#endif
 #ifdef DEBUG_HIGH_LEVEL
       assert(index_domain.get_volume() > 0);
 #endif

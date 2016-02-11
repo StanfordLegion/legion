@@ -507,7 +507,7 @@ namespace Legion {
       }
 
       static legion_domain_split_t
-      wrap(Mapping::Mapper::DomainSlice domain_split) {
+      wrap(Mapping::Mapper::TaskSlice domain_split) {
         legion_domain_split_t domain_split_;
         domain_split_.domain = wrap(domain_split.domain);
         domain_split_.proc = wrap(domain_split.proc);
@@ -516,9 +516,9 @@ namespace Legion {
         return domain_split_;
       }
 
-      static Mapping::Mapper::DomainSlice
+      static Mapping::Mapper::TaskSlice
       unwrap(legion_domain_split_t domain_split_) {
-        Mapping::Mapper::DomainSlice domain_split;
+        Mapping::Mapper::TaskSlice domain_split;
             domain_split.domain = unwrap(domain_split_.domain);
             domain_split.proc = unwrap(domain_split_.proc);
             domain_split.recurse = domain_split_.recurse;

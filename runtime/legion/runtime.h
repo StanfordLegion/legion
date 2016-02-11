@@ -1565,7 +1565,8 @@ namespace Legion {
                                  bool ret, VariantID vid = AUTO_GENERATE_ID);
       TaskImpl* find_or_create_task_impl(TaskID task_id);
       TaskImpl* find_task_impl(TaskID task_id);
-      VariantImpl* find_variant_impl(TaskID task_id, VariantID variant_id);
+      VariantImpl* find_variant_impl(TaskID task_id, VariantID variant_id,
+                                     bool can_fail = false);
     public:
       // Memory manager functions
       MemoryManager* find_memory(Memory mem);
@@ -1577,7 +1578,7 @@ namespace Legion {
       MessageManager* find_messenger(AddressSpaceID sid);
       MessageManager* find_messenger(Processor target);
       AddressSpaceID find_address_space(Processor target) const;
-      void send_task(Processor target, TaskOp *task);
+      void send_task(TaskOp *task);
       void send_tasks(Processor target, const std::set<TaskOp*> &tasks);
       void send_steal_request(const std::multimap<Processor,MapperID> &targets,
                               Processor thief);
@@ -1847,7 +1848,7 @@ namespace Legion {
       void add_to_local_queue(Processor p, Operation *op, bool prev_fail);
     public:
       inline Processor find_utility_group(void) { return utility_group; }
-      Processor find_processor_group(const std::set<Processor> &procs);
+      Processor find_processor_group(const std::vector<Processor> &procs);
       Event issue_runtime_meta_task(const void *args, size_t arglen,
                                     HLRTaskID tid, Operation *op = NULL,
                                     Event precondition = Event::NO_EVENT, 

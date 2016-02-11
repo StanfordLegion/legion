@@ -822,7 +822,6 @@ namespace Legion {
   }; // Internal namespace
 
   // Typedefs that are needed everywhere
-  typedef unsigned int GeneratorID;
   typedef Realm::Runtime RealmRuntime;
   typedef Realm::Machine Machine;
   typedef Realm::Domain Domain;

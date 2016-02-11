@@ -11107,9 +11107,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_task(Processor target, TaskOp *task)
+    void Runtime::send_task(TaskOp *task)
     //--------------------------------------------------------------------------
     {
+      Processor target = task->next_proc;
       if (!target.exists())
       {
         log_run.error("Mapper requested invalid NO_PROC as target proc!");
@@ -11125,6 +11126,7 @@ namespace Legion {
       {
         // Update the current processor
         task->current_proc = target;
+        task->next_proc = Processor::NO_PROC;
         finder->second->add_to_ready_queue(task,false/*previous failure*/);
       }
       else
@@ -12971,14 +12973,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Processor Runtime::find_processor_group(const std::set<Processor> &procs)
+    Processor Runtime::find_processor_group(const std::vector<Processor> &procs)
     //--------------------------------------------------------------------------
     {
       // Compute a hash of all the processor ids to avoid testing all sets 
       // Only need to worry about local IDs since all processors are
       // in this address space.
       ProcessorMask local_mask;
-      for (std::set<Processor>::const_iterator it = procs.begin(); 
+      for (std::vector<Processor>::const_iterator it = procs.begin(); 
             it != procs.end(); it++)
       {
         uint64_t local_id = it->local_id();

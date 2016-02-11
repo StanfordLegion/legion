@@ -290,24 +290,24 @@ namespace Legion {
        * the 'verify_correctness' flag. Note that verification can be
        * expensive and should only be used in testing or rare cases.
        */
-      struct DomainSlice {
+      struct TaskSlice {
         Domain                                  domain;
         Processor                               proc;
         bool                                    recurse;
         bool                                    stealable;
       };
-      struct SliceDomainInput {
+      struct SliceTaskInput {
         Domain                                 domain;
       };
-      struct SliceDomainOutput {
-        std::vector<DomainSlice>               slices;
-        bool                                   veryify_correctness; // = false
+      struct SliceTaskOutput {
+        std::vector<TaskSlice>                 slices;
+        bool                                   verify_correctness; // = false
       };
       //------------------------------------------------------------------------
-      virtual void slice_domain(const MapperContext      ctx,
-                                const Task&              task, 
-                                const SliceDomainInput&  input,
-                                      SliceDomainOutput& output) = 0;
+      virtual void slice_task(const MapperContext      ctx,
+                              const Task&              task, 
+                              const SliceTaskInput&    input,
+                                    SliceTaskOutput&   output) = 0;
       //------------------------------------------------------------------------
 
       /**
@@ -368,7 +368,6 @@ namespace Legion {
         std::vector<std::vector<PhysicalInstance> >     chosen_instances; 
         std::vector<Processor>                          target_procs;
         VariantID                                       chosen_variant; // = 0 
-        GeneratorID                                     chosen_generator; // = 0
         ProfilingRequestSet                             task_prof_requests;
         std::vector<ProfilingRequestSet>                region_prof_requests;
         TaskPriority                                    task_priority;  // = 0
@@ -385,14 +384,11 @@ namespace Legion {
        * ----------------------------------------------------------------------
        *  Select Task Variant 
        * ----------------------------------------------------------------------
-       * This mapper call will only invoked in one of two cases. First, it 
-       * will be called if the mapper set 'defer_variant_selection' to true
-       * in the 'map_task' call and multiple candidate variants were found
-       * to be valid choices. If there is only one choice the runtime will
-       * not invoke this method. The other case is when a task is selected
-       * to be inlined by the 'select_task_options' mapper call. If this 
-       * occurs then the instances will already be selected, but a variant
-       * must still be chosen.
+       * This mapper call will only invoked if a task selected to be inlined.
+       * If there is only one choice for the task variant the runtime will 
+       * not invoke this method. However, if there are multiple valid variants
+       * for this task given the processor and parent task physical regions,
+       * then this call will be invoked to select the correct variant.
        */
       struct SelectVariantInput {
         std::vector<Processor>                          target_procs;
@@ -433,12 +429,11 @@ namespace Legion {
        * memories have been created.
        */
       struct PostMapInput {
-        std::vector<std::set<PhysicalInstance> >        mapped_regions;
-        std::vector<std::set<PhysicalInstance> >        valid_instances;
+        std::vector<std::vector<PhysicalInstance> >     mapped_regions;
+        std::vector<std::vector<PhysicalInstance> >     valid_instances;
       };
       struct PostMapOutput {
-        std::vector<unsigned>                           copy_count;
-        std::vector<std::set<PhysicalInstance> >        chosen_instances;
+        std::vector<std::vector<PhysicalInstance> >     chosen_instances;
       };
       //------------------------------------------------------------------------
       virtual void postmap_task(const MapperContext      ctx,
@@ -931,7 +926,7 @@ namespace Legion {
         unsigned                                hysteresis_percentage; // = 25
         unsigned                                max_outstanding_frames; // = 2
         unsigned                                min_tasks_to_schedule; // = 64
-        unsigned                                min_frames_to_schedule; // -1
+        unsigned                                min_frames_to_schedule; // = 0 
       };
       //------------------------------------------------------------------------
       virtual void configure_context(const MapperContext         ctx,

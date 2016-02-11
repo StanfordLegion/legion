@@ -273,10 +273,7 @@ namespace Legion {
       bool has_restrictions(LogicalRegion handle, const RestrictInfo &info,
                             const std::set<FieldID> &fields);
     public:
-      InstanceRef initialize_current_context(RegionTreeContext ctx,
-                    const RegionRequirement &req, PhysicalManager *manager,
-                    Event term_event, unsigned depth,
-                    std::map<PhysicalManager*,InstanceView*> &top_views);
+      
       void initialize_current_context(RegionTreeContext ctx,
                                       const RegionRequirement &req,
                                       CompositeView *composite_view);
@@ -285,6 +282,11 @@ namespace Legion {
                                       bool logical_users_only);
     public: // Physical analysis methods
 #if 1
+      void initialize_current_context(RegionTreeContext ctx,
+                    const RegionRequirement &req, const InstanceSet &source,
+                    Event term_event, unsigned depth,
+                    std::map<PhysicalManager*,InstanceView*> &top_views,
+                    InstanceSet &target);
       void physical_traverse_path(RegionTreeContext ctx,
                                   RegionTreePath &path,
                                   const RegionRequirement &req,
@@ -353,6 +355,10 @@ namespace Legion {
                                          , UniqueID uid
 #endif
                                          );
+      void register_virtual_region(RegionTreeContext ctx,
+                                   CompositeView *composite_view,
+                                   RegionRequirement &req,
+                                   VersionInfo &version_info);
       Event copy_across(RegionTreeContext src_ctx,
                         RegionTreeContext dst_ctx,
                         const RegionRequirement &src_req,
@@ -373,9 +379,16 @@ namespace Legion {
                                const std::vector<MappingInstance> &chosen,
                                const InstanceSet &valid, InstanceSet &result,
                                std::vector<FieldID> &missing_fields);
+      bool physical_convert_postmapping(const RegionRequirement &req,
+                               const std::vector<MappingInstance> &chosen,
+                               const InstanceSet &valid, InstanceSet &result);
       bool is_valid_mapping(const InstanceRef &ref, 
                             const RegionRequirement &req);
 #else
+      InstanceRef initialize_current_context(RegionTreeContext ctx,
+                    const RegionRequirement &req, PhysicalManager *manager,
+                    Event term_event, unsigned depth,
+                    std::map<PhysicalManager*,InstanceView*> &top_views);
       bool premap_physical_region(RegionTreeContext ctx,
                                   RegionTreePath &path,
                                   RegionRequirement &req,

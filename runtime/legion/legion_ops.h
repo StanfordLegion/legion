@@ -1016,8 +1016,7 @@ namespace Legion {
     public:
       PostCloseOp& operator=(const PostCloseOp &rhs);
     public:
-      void initialize(SingleTask *ctx, unsigned index, 
-                      const InstanceRef &reference);
+      void initialize(SingleTask *ctx, unsigned index); 
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -1034,7 +1033,6 @@ namespace Legion {
     protected:
       void report_profiling_results(void);
     protected:
-      InstanceRef reference;
       unsigned parent_idx;
     protected:
       MapperManager *mapper;
