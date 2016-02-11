@@ -14,11 +14,6 @@
 # limitations under the License.
 #------------------------------------------------------------------------------#
 
-<<<<<<< HEAD
-#SET(CMAKE_INSTALL_PREFIX "${CMAKE_CURRENT_BINARY_DIR}../install")
-
-=======
->>>>>>> remotes/origin/cmake
 project(legion)
 
 cmake_minimum_required(VERSION 2.8.12)
@@ -40,12 +35,9 @@ set(EXTRA_LDFLAGS)
 # GASNet configuration
 #------------------------------------------------------------------------------#
 
-<<<<<<< HEAD
 # set the default GASNet model to par, others are not supported
 set(GASNET_MODEL par CACHE STRING "Default GASNet model" FORCE)
 
-=======
->>>>>>> remotes/origin/cmake
 include(FindGASNet)
 
 option(ENABLE_GASNET "Enable GASNet support" OFF)
