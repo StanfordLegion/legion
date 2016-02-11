@@ -161,6 +161,9 @@ See default_mapper.cc for more details.
 
 Developing Programs
 ==================================================================================
+
+Using Makefile:
+
 To develop a new legion application, begin by creating a new directory in the
 applications directory.  Make a copy of the 'Makefile.template' file in the
 'apps' directory to use as the Makefile.  Fill in the appropriate fields
@@ -174,6 +177,26 @@ the 'legion.h' header file is currently in progress.
 
 To extend the default mapper, you will also need to include 'default_mapper.h'
 into whatever file has the declaration for your custom mapper.
+
+Using CMake:
+
+To develop an new legion application with CMake, begin by building legion:
+cd legion_src_dir
+mkdir build
+cd build
+ccmake ..
+
+modify CMAKE options like : CMAKE_INSTALL_PREFIX -  where you would like to install legion
+                            BUILD_EXMPLES - do you want to build legion with examples
+                             ENABLE _CUDA, ENABLE_GASNET etc.
+push "c" to configure, then "g" to create makefile
+
+make
+make install
+
+After you build legion, specify PATH to the legion install directory in your project's CMakeLists.txt and add legion libraries and include path to CMAKE_EXE_LINKER_FLAGS.
+
+
 
 Debugging Programs
 ==================================================================================
