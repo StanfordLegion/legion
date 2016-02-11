@@ -789,7 +789,7 @@ namespace Realm {
 
     const TaskTableEntry& tte = it->second;
 
-    log_taskreg.debug() << "task " << func_id << " executing on " << me << ": " << tte.fnptr;
+    log_taskreg.debug() << "task " << func_id << " executing on " << me << ": " << ((void *)(tte.fnptr));
 
     (tte.fnptr)(task_args.base(), task_args.size(),
 		tte.user_data.base(), tte.user_data.size(),
