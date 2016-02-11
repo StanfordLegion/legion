@@ -110,7 +110,8 @@ if(ENABLE_CUDA)
 
   CUDA_INCLUDE_DIRECTORIES( "${CMAKE_SOURCE_DIR}/runtime"
                          "${CMAKE_SOURCE_DIR}/runtime/legion"
-                         "${CMAKE_SOURCE_DIR}/runtime/mappers" )
+                         "${CMAKE_SOURCE_DIR}/runtime/mappers" 
+                         "${CMAKE_SOURCE_DIR}/runtime/realm")
 
   list(APPEND EXTRA_LIBS ${CUDA_CUDA_LIBRARY})
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_CUDA")

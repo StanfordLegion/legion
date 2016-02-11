@@ -15,7 +15,7 @@
 #------------------------------------------------------------------------------#
 
 if (ENABLE_CUDA)
-CUDA_INCLUDE_DIRECTORIES( "." )
+CUDA_INCLUDE_DIRECTORIES( ".") 
 CUDA_COMPILE( CUDA_OBJECT circuit_gpu.cu )
 endif (ENABLE_CUDA)
 
