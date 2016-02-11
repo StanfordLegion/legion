@@ -262,17 +262,18 @@ namespace LegionRuntime {
 				       dst_inst->metadata.block_size, dst_index);
 
 	// AOS merging doesn't work if we don't end up with the full element
-	if((src_bsize == 1) && 
-	   ((total_bytes < src_inst->metadata.elmt_size) || (total_bytes < dst_inst->metadata.elmt_size)) &&
-	   (elem_count > 1)) {
-	  log_dma.error() << "help: AOS tried to merge subset of fields with multiple elements - not contiguous!";
-	  assert(0);
-	}
-
-	span_copier->copy_span(src_start, dst_start, elem_count * total_bytes,
-			       src_fstride * src_bsize,
-			       dst_fstride * dst_bsize,
-			       total_lines);
+	if((src_bsize == 1) &&
+	   ((total_bytes < src_inst->metadata.elmt_size) || (total_bytes < dst_inst->metadata.elmt_size))) {
+          // AOS copy doesn't include all fields in source and/or dest, so we have to turn it into a
+          //  "2-D" copy in which each element is a "line"
+          span_copier->copy_span(src_start, dst_start, total_bytes,
+                                 src_fstride, dst_fstride, elem_count);
+        } else {
+	  span_copier->copy_span(src_start, dst_start, elem_count * total_bytes,
+	                        src_fstride * src_bsize,
+	                        dst_fstride * dst_bsize,
+			                    total_lines);
+        }
 
 	// continue with the first field we couldn't take for this pass
 	field_idx = field_idx2;
