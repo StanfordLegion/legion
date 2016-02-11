@@ -15,7 +15,8 @@
  */
 
 #include "channel.h"
-
+#include <sys/types.h>
+#define gettid() syscall(__NR_gettid)
 namespace LegionRuntime {
   namespace LowLevel {
     Logger::Category log_new_dma("new_dma");
@@ -1354,31 +1355,127 @@ namespace LegionRuntime {
       }
 #endif
 
+      /*static*/ void* MemcpyThread::start(void* arg)
+      {
+        MemcpyThread* worker = (MemcpyThread*) arg;
+        worker->thread_loop();
+        return NULL;
+      }
+
+      void MemcpyThread::thread_loop()
+      {
+        while (!channel->is_stopped) {
+          channel->get_request(thread_queue);
+          if (channel->is_stopped)
+            break;
+          std::deque<MemcpyRequest*>::const_iterator it;
+          for (it = thread_queue.begin(); it != thread_queue.end(); it++) {
+            MemcpyRequest* req = *it;
+            //double starttime = Realm::Clock::current_time_in_microseconds();
+            memcpy(req->dst_buf, req->src_buf, req->nbytes);
+            //double stoptime = Realm::Clock::current_time_in_microseconds();
+            //fprintf(stderr, "t = %.2lfus, tp = %.2lfMB/s\n", stoptime - starttime, (req->nbytes / (stoptime - starttime)));
+          }
+          channel->return_request(thread_queue);
+          thread_queue.clear();
+        }
+      }
+
+      void MemcpyThread::stop()
+      {
+        channel->stop();
+      }
+
       MemcpyChannel::MemcpyChannel(long max_nr)
       {
         kind = XferDes::XFER_MEM_CPY;
         capacity = max_nr;
+        is_stopped = false;
+        sleep_threads = false;
+        pthread_mutex_init(&pending_lock, NULL);
+        pthread_mutex_init(&finished_lock, NULL);
+        pthread_cond_init(&pending_cond, NULL);
         //cbs = (MemcpyRequest**) calloc(max_nr, sizeof(MemcpyRequest*));
       }
 
       MemcpyChannel::~MemcpyChannel()
       {
+        pthread_mutex_destroy(&pending_lock);
+        pthread_mutex_destroy(&finished_lock);
+        pthread_cond_destroy(&pending_cond);
         //free(cbs);
+      }
+
+      void MemcpyChannel::stop()
+      {
+        pthread_mutex_lock(&pending_lock);
+        if (!is_stopped)
+          pthread_cond_broadcast(&pending_cond);
+        is_stopped = true;
+        pthread_mutex_unlock(&pending_lock);
+      }
+
+      void MemcpyChannel::get_request(std::deque<MemcpyRequest*>& thread_queue)
+      {
+        pthread_mutex_lock(&pending_lock);
+        while (pending_queue.empty() && !is_stopped) {
+          sleep_threads = true;
+          pthread_cond_wait(&pending_cond, &pending_lock);
+        }
+        if (!is_stopped) {
+          // TODO: enable the following optimization
+          //thread_queue.insert(thread_queue.end(), pending_queue.begin(), pending_queue.end());
+          thread_queue.push_back(pending_queue.front());
+          pending_queue.pop_front();
+          //fprintf(stderr, "[%d] thread_queue.size = %lu\n", gettid(), thread_queue.size());
+          //pending_queue.clear();
+        }
+        pthread_mutex_unlock(&pending_lock);
+      }
+
+      void MemcpyChannel::return_request(std::deque<MemcpyRequest*>& thread_queue)
+      {
+        pthread_mutex_lock(&finished_lock);
+        finished_queue.insert(finished_queue.end(), thread_queue.begin(), thread_queue.end());
+        pthread_mutex_unlock(&finished_lock);
       }
 
       long MemcpyChannel::submit(Request** requests, long nr)
       {
         MemcpyRequest** mem_cpy_reqs = (MemcpyRequest**) requests;
+        pthread_mutex_lock(&pending_lock);
+        //if (nr > 0)
+          //printf("MemcpyChannel::submit[nr = %ld]\n", nr);
         for (int i = 0; i < nr; i++) {
+          pending_queue.push_back(mem_cpy_reqs[i]);
+        }
+        if (sleep_threads) {
+          pthread_cond_broadcast(&pending_cond);
+          sleep_threads = false;
+        }
+        pthread_mutex_unlock(&pending_lock);
+        return nr;
+        /*
+        for (int i = 0; i < nr; i++) {
+          push_request(mem_cpy_reqs[i]);
           memcpy(mem_cpy_reqs[i]->dst_buf, mem_cpy_reqs[i]->src_buf, mem_cpy_reqs[i]->nbytes);
           mem_cpy_reqs[i]->xd->notify_request_read_done(mem_cpy_reqs[i]);
           mem_cpy_reqs[i]->xd->notify_request_write_done(mem_cpy_reqs[i]);
         }
         return nr;
+        */
       }
 
       void MemcpyChannel::pull()
       {
+        pthread_mutex_lock(&finished_lock);
+        while (!finished_queue.empty()) {
+          MemcpyRequest* req = finished_queue.front();
+          finished_queue.pop_front();
+          req->xd->notify_request_read_done(req);
+          req->xd->notify_request_write_done(req);
+        }
+        pthread_mutex_unlock(&finished_lock);
         /*
         while (true) {
           long np = worker->pull(cbs, capacity);
@@ -1962,6 +2059,7 @@ namespace LegionRuntime {
         log_new_dma.info("XferDesQueue: start_workers");
         // TODO: count is currently ignored
         num_threads = 3;
+        num_memcpy_threads = 2;
 #ifdef USE_HDF
         // Need a dedicated thread for handling HDF requests
         num_threads ++;
@@ -2019,6 +2117,19 @@ namespace LegionRuntime {
   										                                 0 /* default scheduler*/);
           worker_threads.push_back(t);
         }
+
+        // Next we create memcpy threads
+        memcpy_threads =(MemcpyThread**) calloc(num_memcpy_threads, sizeof(MemcpyThread*));
+        for (int i = 0; i < num_memcpy_threads; i++) {
+          memcpy_threads[i] = new MemcpyThread(memcpy_channel);
+          Realm::Thread *t = Realm::Thread::create_kernel_thread<MemcpyThread,
+                                            &MemcpyThread::thread_loop>(memcpy_threads[i],
+                                                                        tlp,
+                                                                        core_rsrv,
+                                                                        0 /*default scheduler*/);
+          worker_threads.push_back(t);
+        }
+        assert(worker_threads.size() == (size_t)(num_threads + num_memcpy_threads));
       }
 
       void stop_channel_manager()
@@ -2029,8 +2140,10 @@ namespace LegionRuntime {
       }
 
       void XferDesQueue::stop_worker() {
-        for(int i = 0; i < num_threads; i++)
+        for (int i = 0; i < num_threads; i++)
           dma_threads[i]->stop();
+        for (int i = 0; i < num_memcpy_threads; i++)
+          memcpy_threads[i]->stop();
         // reap all the threads
         for(std::vector<Realm::Thread *>::iterator it = worker_threads.begin();
             it != worker_threads.end();
@@ -2039,7 +2152,12 @@ namespace LegionRuntime {
           delete (*it);
         }
         worker_threads.clear();
+        for (int i = 0; i < num_threads; i++)
+          delete dma_threads[i];
+        for (int i = 0; i < num_memcpy_threads; i++)
+          delete memcpy_threads[i];
         delete[] dma_threads;
+        delete[] memcpy_threads;
       }
 
 

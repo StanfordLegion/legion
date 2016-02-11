@@ -11,10 +11,10 @@
 
 #define DIM_X 128
 #define DIM_Y 128
-#define DIM_Z 32
+#define DIM_Z 64
 #define NUM_TEST 4
 #define PATH_LEN 10
-#define NUM_FIELDS 200
+#define NUM_FIELDS 25
 #define MEM_KIND_SIZE 20
 
 using namespace LegionRuntime::LowLevel;

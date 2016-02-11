@@ -877,17 +877,36 @@ namespace LegionRuntime{
       // std::deque<Copy_2D> copies_2D;
     };
 
-    class MemcpyThread;
+    class MemcpyChannel;
+
+    class MemcpyThread {
+    public:
+      MemcpyThread(MemcpyChannel* _channel) : channel(_channel) {}
+      void thread_loop();
+      static void* start(void* arg);
+      void stop();
+    private:
+      MemcpyChannel* channel;
+      std::deque<MemcpyRequest*> thread_queue;
+    };
 
     class MemcpyChannel : public Channel {
     public:
       MemcpyChannel(long max_nr);
       ~MemcpyChannel();
+      void stop();
+      void get_request(std::deque<MemcpyRequest*>& thread_queue);
+      void return_request(std::deque<MemcpyRequest*>& thread_queue);
       long submit(Request** requests, long nr);
       void pull();
       long available();
+      bool is_stopped;
     private:
+      std::deque<MemcpyRequest*> pending_queue, finished_queue;
+      pthread_mutex_t pending_lock, finished_lock;
+      pthread_cond_t pending_cond;
       long capacity;
+      bool sleep_threads;
       //std::vector<MemcpyRequest*> available_cb;
       //MemcpyRequest** cbs;
     };
@@ -1185,6 +1204,7 @@ namespace LegionRuntime{
         }
         free(requests);
         pthread_mutex_destroy(&enqueue_lock);
+        pthread_cond_destroy(&enqueue_cond);
       }
       void dma_thread_loop();
       // Thread start function that takes an input of DMAThread
@@ -1425,6 +1445,7 @@ namespace LegionRuntime{
         // reserve the first several guid
         next_to_assign_idx = 10;
         num_threads = 0;
+        num_memcpy_threads = 0;
         dma_threads = NULL;
       }
 
@@ -1602,8 +1623,9 @@ namespace LegionRuntime{
       pthread_rwlock_t guid_lock;
       XferDesID next_to_assign_idx;
       Realm::CoreReservation core_rsrv;
-      int num_threads;
+      int num_threads, num_memcpy_threads;
       DMAThread** dma_threads;
+      MemcpyThread** memcpy_threads;
       std::vector<Realm::Thread*> worker_threads;
     };
 
