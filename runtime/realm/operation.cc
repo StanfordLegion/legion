@@ -15,9 +15,18 @@
 
 #include "operation.h"
 
+#include "faults.h"
 #include "runtime_impl.h"
 
 namespace Realm {
+
+  Logger log_optable("optable");
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class Operation
+  //
 
   Operation::~Operation(void)
   {
@@ -29,19 +38,69 @@ namespace Realm {
     all_work_items.clear();
   }
 
-  void Operation::mark_ready(void)
+  bool Operation::mark_ready(void)
   {
-    timeline.record_ready_time();
+    // attempt to switch from WAITING -> READY
+    Status::Result prev = __sync_val_compare_and_swap(&status.result,
+						      Status::WAITING,
+						      Status::READY);
+    switch(prev) {
+    case Status::WAITING:
+      {
+	// normal behavior
+	timeline.record_ready_time();
+	return true;
+      }
+
+    case Status::CANCELLED:
+      {
+	// lost the race to a cancellation request
+	return false;
+      }
+
+    default:
+      {
+	assert(0 && "mark_ready called when not WAITING or CANCELLED");
+      }
+    }
+    return false;
   }
 
-  void Operation::mark_started(void)
+  bool Operation::mark_started(void)
   {
-    timeline.record_start_time();
+    // attempt to switch from READY -> RUNNING
+    Status::Result prev = __sync_val_compare_and_swap(&status.result,
+						      Status::READY,
+						      Status::RUNNING);
+    switch(prev) {
+    case Status::READY:
+      {
+	// normal behavior
+	timeline.record_start_time();
+	return true;
+      }
+
+    case Status::CANCELLED:
+      {
+	// lost the race to a cancellation request
+	return false;
+      }
+
+    default:
+      {
+	assert(0 && "mark_started called when not READY or CANCELLED");
+      }
+    }
+    return false;
   }
 
-  void Operation::mark_finished(void)
+  void Operation::mark_finished(bool successful)
   {
     timeline.record_end_time();
+
+    // update this count first
+    if(!successful)
+      __sync_fetch_and_add(&failed_work_items, 1);
 
     // do an atomic decrement of the work counter to see if we're also complete
     int remaining = __sync_sub_and_fetch(&pending_work_items, 1);
@@ -50,30 +109,100 @@ namespace Realm {
       mark_completed();    
   }
 
-  void Operation::mark_completed(void)
+  void Operation::mark_terminated(int error_code, const ByteArray& details)
   {
+    // attempt to switch from RUNNING -> TERMINATED_EARLY
+    Status::Result prev = __sync_val_compare_and_swap(&status.result,
+						      Status::RUNNING,
+						      Status::TERMINATED_EARLY);
+    assert(prev == Status::RUNNING);
+
+    status.error_code = error_code;
+    status.error_details = details;
+
     timeline.record_complete_time();
 
-    // once complete, we can send profiling responses
+    __sync_fetch_and_add(&failed_work_items, 1);
+
+    // if this operation has async work items, try to cancel them
+    if(!all_work_items.empty()) {
+      for(std::set<AsyncWorkItem *>::iterator it = all_work_items.begin();
+	  it != all_work_items.end();
+	  it++)
+	(*it)->request_cancellation();
+    }
+
+    // can't trigger the finish event immediately if async work items are pending
+    int remaining = __sync_sub_and_fetch(&pending_work_items, 1);
+
+    if(remaining == 0)
+      mark_completed();    
+  }
+
+  void Operation::mark_completed(void)
+  {
+    // don't overwrite a TERMINATED_EARLY or CANCELLED status
+    Status::Result newresult = ((failed_work_items == 0) ?
+  				  Status::COMPLETED_SUCCESSFULLY :
+				  Status::COMPLETED_WITH_ERRORS);
+    Status::Result prev = __sync_val_compare_and_swap(&status.result,
+						      Status::RUNNING,
+						      newresult);
+    assert((prev == Status::RUNNING) ||
+	   (prev == Status::TERMINATED_EARLY) ||
+	   (prev == Status::CANCELLED));
+
+    timeline.record_complete_time();
+
+    send_profiling_data();
+
+    // trigger the finish event last - the OperationTable will delete us shortly after we do
+    // poison if there were any failed work items
+    trigger_finish_event(failed_work_items != 0);
+  }
+
+  bool Operation::attempt_cancellation(int error_code,
+				       const void *reason_data, size_t reason_size)
+  {
+    // all we know how to do here is convert from WAITING or READY to CANCELLED
+    // there's no mutex, so we'll attempt to update the status with a sequence of 
+    //  compare_and_swap's, making sure to follow the normal progression of status updates
+    if(__sync_bool_compare_and_swap(&status.result, Status::WAITING, Status::CANCELLED) ||
+       __sync_bool_compare_and_swap(&status.result, Status::READY, Status::CANCELLED)) {
+      status.error_code = error_code;
+      status.error_details.set(reason_data, reason_size);
+
+      // we can't call mark_finished here, because we don't know if the caller owns the 
+      //  reference that will be released by that call, so let the caller do that (or
+      //  the owner can do it when they call mark_ready/started and get a failure code)
+
+      return true;
+    }
+
+    // otherwise we return false - a subclass might override and add additional ways to
+    //  cancel an already-running operation
+    return false;
+  }
+
+  void Operation::send_profiling_data(void)
+  {
     if(requests.request_count() > 0) {
+      if(measurements.wants_measurement<ProfilingMeasurements::OperationStatus>())
+	measurements.add_measurement(status);
+
       if(measurements.wants_measurement<ProfilingMeasurements::OperationTimeline>())
 	measurements.add_measurement(timeline);
 
       measurements.send_responses(requests);
     }
-
-    // trigger the finish event last
-    trigger_finish_event();
-
-    // we delete ourselves for now - eventually the OperationTable will do this
-    delete this;
   }
 
-  void Operation::trigger_finish_event(void)
+  void Operation::trigger_finish_event(bool poisoned)
   {
     if(finish_event.exists())
       get_runtime()->get_genevent_impl(finish_event)->trigger(finish_event.gen,
-                                                              gasnet_mynode());
+                                                              gasnet_mynode(),
+							      poisoned);
   }
 
   void Operation::clear_profiling(void)
@@ -87,5 +216,247 @@ namespace Realm {
     measurements.import_requests(requests);
     timeline.record_create_time();
   }
+
+  std::ostream& operator<<(std::ostream& os, const Operation *op)
+  {
+    op->print(os);
+    if(!op->all_work_items.empty()) {
+      os << " { ";
+      std::set<Operation::AsyncWorkItem *>::const_iterator it = op->all_work_items.begin();
+      (*it)->print(os);
+      while(++it != op->all_work_items.end()) {
+	os << ", ";
+	(*it)->print(os);
+      }
+      os << " }";
+    }
+    return os;
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class OperationTable::TableEntry
+  //
+
+#if 0
+  OperationTable::TableEntry::TableEntry(Event _finish_event)
+    : finish_event(_finish_event)
+    , local_op(0)
+    , remote_node(-1)
+    , pending_cancellation(false)
+  {}
+#endif
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class OperationTable::TableCleaner
+  //
+
+  OperationTable::TableCleaner::TableCleaner(OperationTable *_table)
+    : table(_table)
+  {}
+
+  bool OperationTable::TableCleaner::event_triggered(Event e, bool poisoned)
+  {
+    table->event_triggered(e);
+    return false;  // never delete us
+  }
+
+  void OperationTable::TableCleaner::print(std::ostream& os) const
+  {
+    os << "operation table cleaner (table=" << table << ")";
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class OperationTable
+  //
+
+  OperationTable::OperationTable(void)
+    : cleaner(this)
+  {}
+
+  OperationTable::~OperationTable(void)
+  {}
+
+  // Operations are 'owned' by the table - the table will free them once it
+  //  gets the completion event for it
+  void OperationTable::add_local_operation(Event finish_event, Operation *local_op)
+  {
+    // cast local_op to void * to avoid pretty-printing
+    log_optable.info() << "event " << finish_event << " added: local_op=" << (void *)local_op;
+
+    // "hash" the id to figure out which subtable to use
+    int subtable = finish_event.id % NUM_TABLES;
+    GASNetHSL& mutex = mutexes[subtable];
+    Table& table = tables[subtable];
+
+    bool cancel_immediately = false;
+    void *reason_data = 0;
+    size_t reason_size = 0;
+    {
+      AutoHSLLock al(mutex);
+
+      // see if we have any info for this event?
+      Table::iterator it = table.find(finish_event);
+      if(it == table.end()) {
+	// new entry - create one and it inherits the refcount
+	TableEntry& e = table[finish_event];
+	e.local_op = local_op;
+	e.remote_node = -1;
+	e.pending_cancellation = false;
+	e.reason_data = 0;
+	e.reason_size = 0;
+      } else {
+	// existing entry should only occur if there's a pending cancellation
+	TableEntry& e = it->second;
+	assert(e.local_op == 0);
+	assert(e.remote_node == -1);
+	assert(e.pending_cancellation);
+
+	// put the operation in the table in case anybody else comes along while we're trying to
+	//  cancel it - add a reference since we're keeping one
+	e.local_op = local_op;
+	local_op->add_reference();
+	cancel_immediately = true;
+	reason_data = e.reason_data;
+	reason_size = e.reason_size;
+      }
+    }
+
+    // either way there's an entry in the table for this now, so make sure our cleaner knows
+    //  to clean it up
+    EventImpl::add_waiter(finish_event, &cleaner);
+
+    // and finally, perform a delayed cancellation if requested
+    if(cancel_immediately) {
+      bool did_cancel = local_op->attempt_cancellation(Realm::Faults::ERROR_CANCELLED,
+						       reason_data, reason_size);
+      if(reason_data)
+	free(reason_data);
+      log_optable.info() << "event " << finish_event << " - operation " << (void *)local_op << " cancelled=" << did_cancel;
+      local_op->remove_reference();
+    }
+  }
+
+  void OperationTable::add_remote_operation(Event finish_event, int remote_node)
+  {
+    log_optable.info() << "event " << finish_event << " added: remote_node=" << remote_node;
+
+    // "hash" the id to figure out which subtable to use
+    int subtable = finish_event.id % NUM_TABLES;
+    GASNetHSL& mutex = mutexes[subtable];
+    Table& table = tables[subtable];
+
+    {
+      AutoHSLLock al(mutex);
+
+      // no duplicates allowed here - a local cancellation request cannot occur until we
+      //  return
+      assert(table.find(finish_event) == table.end());
+
+      TableEntry& e = table[finish_event];
+      e.local_op = 0;
+      e.remote_node = remote_node;
+      e.pending_cancellation = false;
+      e.reason_data = 0;
+      e.reason_size = 0;
+    }
+
+    // we can remove this entry once we know the operation is complete
+    EventImpl::add_waiter(finish_event, &cleaner);
+  }
+
+  void OperationTable::event_triggered(Event finish_event)
+  {
+    // "hash" the id to figure out which subtable to use
+    int subtable = finish_event.id % NUM_TABLES;
+    GASNetHSL& mutex = mutexes[subtable];
+    Table& table = tables[subtable];
+
+    Operation *local_op = 0;
+    {
+      AutoHSLLock al(mutex);
+
+      // get the entry - it must exist
+      Table::iterator it = table.find(finish_event);
+      assert(it != table.end());
+
+      // if there was a local op, remember it so we can remove the reference outside of this mutex
+      local_op = it->second.local_op;
+
+      table.erase(it);
+    }
+
+    log_optable.info() << "event " << finish_event << " cleaned: local_op=" << (void *)local_op;
+
+    if(local_op)
+      local_op->remove_reference();
+  }
+    
+  void OperationTable::request_cancellation(Event finish_event,
+					    const void *reason_data, size_t reason_size)
+  {
+    // "hash" the id to figure out which subtable to use
+    int subtable = finish_event.id % NUM_TABLES;
+    GASNetHSL& mutex = mutexes[subtable];
+    Table& table = tables[subtable];
+
+    bool found = false;
+    Operation *local_op = 0;
+    int remote_node = -1;
+    {
+      AutoHSLLock al(mutex);
+
+      Table::iterator it = table.find(finish_event);
+
+      if(it != table.end()) {
+	found = true;
+
+	// if there's a local op, we need to take a reference in case it completes successfully
+	//  before we get to it below
+	if(it->second.local_op) {
+	  local_op = it->second.local_op;
+	  local_op->add_reference();
+	}
+	remote_node = it->second.remote_node;
+	assert(!it->second.pending_cancellation);
+      }
+    }
+
+    if(!found) {
+      // not found - who owns this event?
+      int owner = ID(finish_event).node();
+
+      if(owner == gasnet_mynode()) {
+	// if we're the owner, it's probably for an event that already completed successfully,
+	//  so ignore the request
+	log_optable.info() << "event " << finish_event << " cancellation ignored - not in table";
+      } else {
+	// let the owner of the event deal with it
+	remote_node = owner;
+      }
+    }
+
+    if(remote_node != -1) {
+      // TODO: active message
+      assert(false);
+    }
+
+    if(local_op) {
+      bool did_cancel = local_op->attempt_cancellation(Realm::Faults::ERROR_CANCELLED,
+						       reason_data, reason_size);
+      log_optable.info() << "event " << finish_event << " - operation " << (void *)local_op << " cancelled=" << did_cancel;
+      local_op->remove_reference();
+    }
+  }
+    
+  /*static*/ int OperationTable::register_handlers(gasnet_handlerentry_t *handlers)
+  {
+    return 0;
+  }
+
 
 }; // namespace Realm

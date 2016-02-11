@@ -445,8 +445,9 @@ namespace LegionRuntime {
             !(task->is_index_space), task->is_index_space))
       {
         log_mapper.error("Mapper unable to find variant for "
-                               "task %s (ID %lld)",
+                               "task %s (Task ID %d, UID %lld)",
                                task->variants->name, 
+                               task->task_id,
                                task->get_unique_task_id());
         assert(false);
       }

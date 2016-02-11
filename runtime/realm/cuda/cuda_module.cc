@@ -213,7 +213,7 @@ namespace Realm {
 	}
 
 	if(fence)
-	  fence->mark_finished();
+	  fence->mark_finished(true /*successful*/);
 
 	if(notification)
 	  notification->request_completed();
@@ -822,6 +822,11 @@ namespace Realm {
       // ignored - no way to shoot down CUDA work
     }
 
+    void GPUWorkFence::print(std::ostream& os) const
+    {
+      os << "GPUWorkFence";
+    }
+
     void GPUWorkFence::enqueue_on_stream(GPUStream *stream)
     {
       if(stream->get_gpu()->module->cfg_fences_use_callbacks) {
@@ -836,7 +841,7 @@ namespace Realm {
       GPUWorkFence *me = (GPUWorkFence *)data;
 
       assert(res == CUDA_SUCCESS);
-      me->mark_finished();
+      me->mark_finished(true /*succesful*/);
     }
 
 
@@ -1394,6 +1399,51 @@ namespace Realm {
 
     ////////////////////////////////////////////////////////////////////////
     //
+    // class BlockingCompletionNotification
+
+    class BlockingCompletionNotification : public GPUCompletionNotification {
+    public:
+      BlockingCompletionNotification(void);
+      virtual ~BlockingCompletionNotification(void);
+
+      virtual void request_completed(void);
+
+      virtual void wait(void);
+
+    public:
+      GASNetHSL mutex;
+      GASNetCondVar cv;
+      bool completed;
+    };
+
+    BlockingCompletionNotification::BlockingCompletionNotification(void)
+      : cv(mutex)
+      , completed(false)
+    {}
+
+    BlockingCompletionNotification::~BlockingCompletionNotification(void)
+    {}
+
+    void BlockingCompletionNotification::request_completed(void)
+    {
+      AutoHSLLock a(mutex);
+
+      assert(!completed);
+      completed = true;
+      cv.broadcast();
+    }
+
+    void BlockingCompletionNotification::wait(void)
+    {
+      AutoHSLLock a(mutex);
+
+      while(!completed)
+	cv.wait();
+    }
+	
+
+    ////////////////////////////////////////////////////////////////////////
+    //
     // class GPU
 
     GPUFBMemory::GPUFBMemory(Memory _me, GPU *_gpu, CUdeviceptr _base, size_t _size)
@@ -1441,15 +1491,17 @@ namespace Realm {
     void GPUFBMemory::get_bytes(off_t offset, void *dst, size_t size)
     {
       // create an async copy and then wait for it to finish...
-      gpu->copy_from_fb(dst, offset, size);
-      CHECK_CU( cuStreamSynchronize(gpu->device_to_host_stream->get_stream()) );
+      BlockingCompletionNotification bcn;
+      gpu->copy_from_fb(dst, offset, size, &bcn);
+      bcn.wait();
     }
 
     void GPUFBMemory::put_bytes(off_t offset, const void *src, size_t size)
     {
       // create an async copy and then wait for it to finish...
-      gpu->copy_to_fb(offset, src, size);
-      CHECK_CU( cuStreamSynchronize(gpu->host_to_device_stream->get_stream()) );
+      BlockingCompletionNotification bcn;
+      gpu->copy_to_fb(offset, src, size, &bcn);
+      bcn.wait();
     }
 
     void *GPUFBMemory::get_direct_ptr(off_t offset, size_t size)

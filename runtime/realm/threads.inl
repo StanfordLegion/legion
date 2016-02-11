@@ -77,7 +77,9 @@ namespace Realm {
   // class Thread
 
   inline Thread::Thread(ThreadScheduler *_scheduler)
-    : state(STATE_CREATED), scheduler(_scheduler)
+    : state(STATE_CREATED)
+    , scheduler(_scheduler)
+    , exception_handler_count(0)
   {
   }
 
@@ -156,9 +158,10 @@ namespace Realm {
   class ThreadWaker : public CONDTYPE::Callback {
   public:
     ThreadWaker(Thread *_thread);
-    void operator()(void);
-  protected:
+    void operator()(bool _poisoned);
+
     Thread *thread;
+    bool poisoned;
   };
 
   template <typename CONDTYPE>
@@ -168,8 +171,12 @@ namespace Realm {
   }
 
   template <typename CONDTYPE>
-  void ThreadWaker<CONDTYPE>::operator()(void)
+  void ThreadWaker<CONDTYPE>::operator()(bool _poisoned)
   {
+    // just store the poison state here - the thread will have to check it
+    //  once it starts back up
+    poisoned = _poisoned;
+
     // mark the thread as ready and notify the thread's scheduler if it has already gone to sleep
     Thread::State old_state = thread->update_state(Thread::STATE_READY);
     switch(old_state) {
@@ -196,7 +203,7 @@ namespace Realm {
   }
 
   template <typename CONDTYPE>
-  /*static*/ void Thread::wait_for_condition(const CONDTYPE& cond)
+  /*static*/ void Thread::wait_for_condition(const CONDTYPE& cond, bool& poisoned)
   {
     Thread *thread = self();
     // first, indicate our intent to sleep
@@ -209,6 +216,31 @@ namespace Realm {
     //  (it will update our status if we succeed in blocking)
     assert(thread->scheduler != 0);
     thread->scheduler->thread_blocking(thread);
+
+    // poison propagates to caller
+    poisoned = cb.poisoned;
+  }
+
+  inline bool Thread::exceptions_permitted(void) const
+  {
+    return (exception_handler_count > 0);
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class Thread::ExceptionHandlerPresence
+
+  inline Thread::ExceptionHandlerPresence::ExceptionHandlerPresence(void)
+  {
+    // no need for locks - only called within the thread
+    Thread::self()->exception_handler_count++;
+  }
+
+  inline Thread::ExceptionHandlerPresence::~ExceptionHandlerPresence(void)
+  {
+    // no need for locks - only called within the thread
+    Thread::self()->exception_handler_count--;
   }
 
 

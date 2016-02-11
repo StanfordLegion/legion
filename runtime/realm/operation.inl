@@ -28,11 +28,27 @@ namespace Realm {
   inline Operation::Operation(Event _finish_event,
                               const ProfilingRequestSet &_requests)
     : finish_event(_finish_event)
+    , refcount(1)
     , requests(_requests)
     , pending_work_items(1 /* i.e. the main work item */)
+    , failed_work_items(0 /* hopefully it stays that way*/)
   {
+    status.result = ProfilingMeasurements::OperationStatus::WAITING;
+    status.error_code = 0;
     measurements.import_requests(requests); 
     timeline.record_create_time();
+  }
+
+  inline void Operation::add_reference(void)
+  {
+    __sync_fetch_and_add(&refcount, 1);
+  }
+
+  inline void Operation::remove_reference(void)
+  {
+    int left = __sync_add_and_fetch(&refcount, -1);
+    if(left == 0)
+      delete this;
   }
 
   // must only be called by thread performing operation (i.e. not thread safe)
@@ -46,8 +62,12 @@ namespace Realm {
   }
 
   // called by AsyncWorkItem::mark_finished
-  inline void Operation::work_item_finished(AsyncWorkItem *item)
+  inline void Operation::work_item_finished(AsyncWorkItem *item, bool successful)
   {
+    // update this count first
+    if(!successful)
+      __sync_fetch_and_add(&failed_work_items, 1);
+
     // no per-work-item data to record, so just decrement the count, and if it goes
     //  to zero, we're complete
     int remaining = __sync_sub_and_fetch(&pending_work_items, 1);
@@ -71,9 +91,9 @@ namespace Realm {
   {
   }
 
-  inline void Operation::AsyncWorkItem::mark_finished(void)
+  inline void Operation::AsyncWorkItem::mark_finished(bool successful)
   {
-    op->work_item_finished(this);
+    op->work_item_finished(this, successful);
   }
 
 

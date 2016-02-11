@@ -109,6 +109,13 @@ namespace Realm {
 					 const ProfilingRequestSet& prs,
 					 const void *user_data = 0, size_t user_data_len = 0);
 
+      // reports an execution fault in the currently running task
+      static void report_execution_fault(int reason,
+					 const void *reason_data, size_t reason_size);
+
+      // reports a problem with a processor in general (this is primarily for fault injection)
+      void report_processor_fault(int reason,
+				  const void *reason_data, size_t reason_size) const;
     };
 
     inline std::ostream& operator<<(std::ostream& os, Processor p) { return os << std::hex << p.id << std::dec; }

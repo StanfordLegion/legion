@@ -99,7 +99,11 @@ namespace Realm {
 
     protected:
       IDType value;
+
+      friend std::ostream& operator<<(std::ostream& os, ID id);
     };
+
+    inline std::ostream& operator<<(std::ostream& os, ID id) { return os << std::hex << id.value << std::dec; }
 	
 }; // namespace Realm
 

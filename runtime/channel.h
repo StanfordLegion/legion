@@ -290,6 +290,7 @@ namespace LegionRuntime{
       virtual void request_cancellation(void) {
     	// ignored for now
       }
+      virtual void print(std::ostream& os) const { os << "XferDesFence"; }
     };
 
     class XferDes {
@@ -1242,7 +1243,7 @@ namespace LegionRuntime{
 
       static void handle_request(RequestArgs args)
       {
-        args.fence->mark_finished();
+        args.fence->mark_finished(true/*successful*/);
       }
 
       typedef ActiveMessageShortNoReply<XFERDES_NOTIFY_COMPLETION_MSGID,

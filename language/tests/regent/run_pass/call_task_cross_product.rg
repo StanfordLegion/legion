@@ -22,14 +22,14 @@ task f(r : region(int),
        cp : cross_product(p0, p1, p2))
 where reads(r) do
 
-  var r000 = cp[0].product[0].partition[0]
-  var r001 = cp[0].product[0].partition[1]
-  var r010 = cp[0].product[1].partition[0]
-  var r011 = cp[0].product[1].partition[1]
-  var r100 = cp[1].product[0].partition[0]
-  var r101 = cp[1].product[0].partition[1]
-  var r110 = cp[1].product[1].partition[0]
-  var r111 = cp[1].product[1].partition[1]
+  var r000 = cp[0][0][0]
+  var r001 = cp[0][0][1]
+  var r010 = cp[0][1][0]
+  var r011 = cp[0][1][1]
+  var r100 = cp[1][0][0]
+  var r101 = cp[1][0][1]
+  var r110 = cp[1][1][0]
+  var r111 = cp[1][1][1]
 
   var s = 0
   for x in r000 do s += @x*1 end
@@ -40,25 +40,6 @@ where reads(r) do
   for x in r101 do s += @x*100000 end
   for x in r110 do s += @x*1000000 end
   for x in r111 do s += @x*10000000 end
-  return s
-end
-
-task g(t : region(int),
-       r : region(int),
-       p0 : partition(disjoint, r), p1 : partition(disjoint, t),
-       cp : cross_product(p0, p1))
-where reads(r) do
-
-  var r00 = cp[0].partition[0]
-  var r01 = cp[0].partition[0]
-  var r10 = cp[0].partition[1]
-  var r11 = cp[0].partition[1]
-
-  var s = 0
-  for x in r00 do s += @x*1 end
-  for x in r01 do s += @x*10 end
-  for x in r10 do s += @x*100 end
-  for x in r11 do s += @x*1000 end
   return s
 end
 
@@ -113,8 +94,5 @@ task main()
   for x in r do @x = 1 end
 
   regentlib.assert(f(r, part0, part1, part2, prod) == 11111111, "test failed")
-  regentlib.assert(
-    g(r, prod[0], prod[0].partition, part2, prod[0].product) == 1111,
-    "test failed")
 end
 regentlib.start(main)

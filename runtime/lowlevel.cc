@@ -74,9 +74,9 @@ namespace LegionRuntime {
     }
 #endif
 
-    void show_event_waiters(FILE *f = stdout)
+    void show_event_waiters(std::ostream& os)
     {
-      fprintf(f,"PRINTING ALL PENDING EVENTS:\n");
+      os << "PRINTING ALL PENDING EVENTS:\n";
       for(unsigned i = 0; i < gasnet_nodes(); i++) {
 	Node *n = &get_runtime()->nodes[i];
         // Iterate over all the events and get their implementations
@@ -87,18 +87,33 @@ namespace LegionRuntime {
 	  AutoHSLLock a2(e->mutex);
 
 	  // print anything with either local or remote waiters
-	  if(e->local_waiters.empty() && e->remote_waiters.empty())
+	  if(e->current_local_waiters.empty() &&
+	     e->future_local_waiters.empty() &&
+	     e->remote_waiters.empty())
 	    continue;
 
-          fprintf(f,"Event " IDFMT ": gen=%d subscr=%d local=%zd remote=%zd\n",
-		  e->me.id(), e->generation, e->gen_subscribed, 
-		  e->local_waiters.size(),
-                  e->remote_waiters.size());
-	  for(std::vector<EventWaiter *>::iterator it = e->local_waiters.begin();
-	      it != e->local_waiters.end();
+	  os << "Event " << e->me <<": gen=" << e->generation
+	     << " subscr=" << e->gen_subscribed
+	     << " local=" << e->current_local_waiters.size()
+	     << "+" << e->future_local_waiters.size()
+	     << " remote=" << e->remote_waiters.size() << "\n";
+	  for(std::vector<EventWaiter *>::const_iterator it = e->current_local_waiters.begin();
+	      it != e->current_local_waiters.end();
 	      it++) {
-	      fprintf(f, "  [%d] L:%p ", e->generation + 1, *it);
-	      (*it)->print_info(f);
+	    os << "  [" << (e->generation+1) << "] L:" << (*it) << " - ";
+	    (*it)->print(os);
+	    os << "\n";
+	  }
+	  for(std::map<Event::gen_t, std::vector<EventWaiter *> >::const_iterator it = e->future_local_waiters.begin();
+	      it != e->future_local_waiters.end();
+	      it++) {
+	    for(std::vector<EventWaiter *>::const_iterator it2 = it->second.begin();
+		it2 != it->second.end();
+		it2++) {
+	      os << "  [" << (it->first) << "] L:" << (*it2) << " - ";
+	      (*it2)->print(os);
+	      os << "\n";
+	    }
 	  }
 	  // for(std::map<Event::gen_t, NodeMask>::const_iterator it = e->remote_waiters.begin();
 	  //     it != e->remote_waiters.end();
@@ -119,17 +134,18 @@ namespace LegionRuntime {
           if (b->generations.empty())
             continue;
 
-          fprintf(f,"Barrier " IDFMT ": gen=%d subscr=%d\n",
-                  b->me.id(), b->generation, b->gen_subscribed);
+	  os << "Barrier " << b->me << ": gen=" << b->generation
+	     << " subscr=" << b->gen_subscribed << "\n";
           for (std::map<Event::gen_t, BarrierImpl::Generation*>::const_iterator git = 
                 b->generations.begin(); git != b->generations.end(); git++)
           {
             const std::vector<EventWaiter*> &waiters = git->second->local_waiters;
             for (std::vector<EventWaiter*>::const_iterator it = 
                   waiters.begin(); it != waiters.end(); it++)
-            {
-              fprintf(f, "  [%d] L:%p ", git->first, *it);
-              (*it)->print_info(f);
+            { 
+	      os << "  [" << (git->first) << "] L:" << (*it) << " - ";
+	      (*it)->print(os);
+	      os << "\n";
             }
           }
         }
@@ -178,8 +194,8 @@ namespace LegionRuntime {
       // }
 #endif
 
-      fprintf(f,"DONE\n");
-      fflush(f);
+      os << "DONE\n";
+      os.flush();
     }
 
 
@@ -1700,6 +1716,17 @@ namespace LegionRuntime {
     template void *AccessorType::Generic::Untyped::raw_dense_ptr<1>(const Rect<1>& r, Rect<1>& subrect, ByteOffset &elem_stride);
     template void *AccessorType::Generic::Untyped::raw_dense_ptr<2>(const Rect<2>& r, Rect<2>& subrect, ByteOffset &elem_stride);
     template void *AccessorType::Generic::Untyped::raw_dense_ptr<3>(const Rect<3>& r, Rect<3>& subrect, ByteOffset &elem_stride);
+
+    void AccessorType::Generic::Untyped::report_fault(ptr_t ptr, size_t bytes, off_t offset /*= 0*/) const
+    {
+      assert(0 && "fault injection not implemented yet");
+    }
+
+    void AccessorType::Generic::Untyped::report_fault(const Realm::DomainPoint& dp,
+                                                      size_t bytes, off_t offset /*= 0*/) const
+    {
+      assert(0 && "fault injection not implemented yet");
+    }
   };
 
   namespace Arrays {

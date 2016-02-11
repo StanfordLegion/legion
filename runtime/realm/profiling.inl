@@ -46,6 +46,18 @@ namespace Realm {
 
     ////////////////////////////////////////////////////////////////////////
     //
+    // struct OperationBacktrace
+    //
+
+    template <typename S>
+    bool serdez(S& serdez, const OperationBacktrace& b)
+    {
+      return (serdez & b.backtrace);
+    }
+
+
+    ////////////////////////////////////////////////////////////////////////
+    //
     // struct OperationTimeLine
     //
 

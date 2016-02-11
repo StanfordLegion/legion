@@ -93,6 +93,16 @@ namespace Realm {
       return ((MachineImpl *)impl)->get_mem_mem_affinity(result, restrict_mem1, restrict_mem2);
     }
 
+    void Machine::add_subscription(MachineUpdateSubscriber *subscriber)
+    {
+      ((MachineImpl *)impl)->add_subscription(subscriber);
+    }
+
+    void Machine::remove_subscription(MachineUpdateSubscriber *subscriber)
+    {
+      ((MachineImpl *)impl)->remove_subscription(subscriber);
+    }
+
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -349,6 +359,19 @@ namespace Realm {
       AutoHSLLock al(mutex);
       mem_mem_affinities.push_back(mma);
     }
+
+    void MachineImpl::add_subscription(Machine::MachineUpdateSubscriber *subscriber)
+    {
+      AutoHSLLock al(mutex);
+      subscribers.insert(subscriber);
+    }
+
+    void MachineImpl::remove_subscription(Machine::MachineUpdateSubscriber *subscriber)
+    {
+      AutoHSLLock al(mutex);
+      subscribers.erase(subscriber);
+    }
+
 
   ////////////////////////////////////////////////////////////////////////
   //

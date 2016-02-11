@@ -15,8 +15,7 @@
  */
 
 #include "channel.h"
-#include <sys/types.h>
-#define gettid() syscall(__NR_gettid)
+
 namespace LegionRuntime {
   namespace LowLevel {
     Logger::Category log_new_dma("new_dma");
@@ -65,7 +64,7 @@ namespace LegionRuntime {
         // notify owning DmaRequest upon completion of this XferDes
         //printf("complete XD = %lu\n", guid);
         if (launch_node == gasnet_mynode()) {
-          complete_fence->mark_finished();
+          complete_fence->mark_finished(true/*successful*/);
         } else {
           NotifyXferDesCompleteMessage::send_request(launch_node, complete_fence);
         }

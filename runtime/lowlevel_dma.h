@@ -26,79 +26,7 @@ namespace Realm {
 namespace LegionRuntime {
   namespace LowLevel {
 
-  class DmaRequestQueue;
-  typedef uint64_t XferDesID;
-  class DmaRequest : public Realm::Operation {
-  public:
-    DmaRequest(int _priority, Event _after_copy)
-	: Operation(_after_copy, Realm::ProfilingRequestSet()),
-	  state(STATE_INIT), priority(_priority) {
-      pthread_mutex_init(&request_lock, NULL);
-    }
 
-    DmaRequest(int _priority, Event _after_copy,
-               const Realm::ProfilingRequestSet &reqs)
-      : Realm::Operation(_after_copy, reqs), state(STATE_INIT),
-        priority(_priority) {
-      pthread_mutex_init(&request_lock, NULL);
-    }
-
-    virtual ~DmaRequest(void) {
-      pthread_mutex_destroy(&request_lock);
-    }
-
-    virtual bool check_readiness(bool just_check, DmaRequestQueue *rq) = 0;
-
-    virtual bool handler_safe(void) = 0;
-
-    virtual void perform_dma(void) = 0;
-
-    enum State {
-	STATE_INIT,
-	STATE_METADATA_FETCH,
-	STATE_BEFORE_EVENT,
-	STATE_INST_LOCK,
-	STATE_READY,
-	STATE_QUEUED,
-	STATE_DONE
-    };
-
-    State state;
-    int priority;
-
-    // <NEWDMA>
-    pthread_mutex_t request_lock;
-    std::vector<XferDesID> path;
-    std::set<XferDesID> complete_xd;
-
-    // Returns true if all xfer des of this DmaRequest
-    // have been marked completed
-    // This return val is a signal for delete this DmaRequest
-    bool notify_xfer_des_completion(XferDesID guid)
-    {
-      pthread_mutex_lock(&request_lock);
-      complete_xd.insert(guid);
-      bool all_completed = (complete_xd.size() == path.size());
-      pthread_mutex_unlock(&request_lock);
-      return all_completed;
-    }
-    // </NEWDMA>
-
-    class Waiter : public EventWaiter {
-    public:
-      Waiter(void) { }
-      virtual ~Waiter(void) { }
-    public:
-	Reservation current_lock;
-	DmaRequestQueue *queue;
-	DmaRequest *req;
-
-	void sleep_on_event(Event e, Reservation l = Reservation::NO_RESERVATION);
-
-	virtual bool event_triggered(void);
-	virtual void print_info(FILE *f);
-    };
-  };
 
     struct RemoteCopyArgs : public BaseMedium {
       ReductionOpID redop_id;
@@ -163,6 +91,74 @@ namespace LegionRuntime {
 
     void find_field_start(const std::vector<size_t>& field_sizes, off_t byte_offset,
 			  size_t size, off_t& field_start, int& field_size);
+    
+    class DmaRequestQueue;
+    typedef uint64_t XferDesID;
+    class DmaRequest : public Realm::Operation {
+    public:
+      DmaRequest(int _priority, Event _after_copy);
+
+      DmaRequest(int _priority, Event _after_copy,
+                 const Realm::ProfilingRequestSet &reqs);
+
+    protected:
+      // deletion performed when reference count goes to zero
+      virtual ~DmaRequest(void);
+
+    public:
+      virtual void print(std::ostream& os) const;
+
+      virtual bool check_readiness(bool just_check, DmaRequestQueue *rq) = 0;
+
+      virtual bool handler_safe(void) = 0;
+
+      virtual void perform_dma(void) = 0;
+
+      enum State {
+	STATE_INIT,
+	STATE_METADATA_FETCH,
+	STATE_BEFORE_EVENT,
+	STATE_INST_LOCK,
+	STATE_READY,
+	STATE_QUEUED,
+	STATE_DONE
+      };
+
+      State state;
+      int priority;
+      // <NEWDMA>
+      pthread_mutex_t request_lock;
+      std::vector<XferDesID> path;
+      std::set<XferDesID> complete_xd;
+
+      // Returns true if all xfer des of this DmaRequest
+      // have been marked completed
+      // This return val is a signal for delete this DmaRequest
+      bool notify_xfer_des_completion(XferDesID guid)
+      {
+        pthread_mutex_lock(&request_lock);
+        complete_xd.insert(guid);
+        bool all_completed = (complete_xd.size() == path.size());
+        pthread_mutex_unlock(&request_lock);
+        return all_completed;
+      }
+      // </NEWDMA>
+
+      class Waiter : public EventWaiter {
+      public:
+        Waiter(void);
+        virtual ~Waiter(void);
+      public:
+	Reservation current_lock;
+	DmaRequestQueue *queue;
+	DmaRequest *req;
+
+	void sleep_on_event(Event e, Reservation l = Reservation::NO_RESERVATION);
+
+	virtual bool event_triggered(Event e, bool poisoned);
+	virtual void print(std::ostream& os) const;
+      };
+    };
 
     struct OffsetsAndSize {
       off_t src_offset, dst_offset;

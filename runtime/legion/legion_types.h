@@ -441,6 +441,7 @@ namespace LegionRuntime {
     struct ReleaseLauncher;
     struct LayoutConstraintRegistrar;
     struct TaskVariantRegistrar;
+    struct TaskGeneratorArguments;
     class Future;
     class FutureMap;
     class Predicate;
@@ -487,6 +488,7 @@ namespace LegionRuntime {
     class TaskImpl;
     class VariantImpl;
     class LayoutConstraints;
+    class GeneratorImpl;
     class Internal;
 
     // legion_ops.h
@@ -679,7 +681,7 @@ namespace LegionRuntime {
             const Realm::ReductionOpUntyped *> ReductionOpTable;
     typedef void (*SerdezInitFnptr)(const ReductionOp*, void *&, size_t&);
     typedef void (*SerdezFoldFnptr)(const ReductionOp*, void *&, size_t&,
-                                    const void*, bool);
+                                    const void*);
     typedef std::map<Realm::ReductionOpID, SerdezRedopFns> SerdezRedopTable;
     typedef ::legion_address_space_t AddressSpace;
     typedef ::legion_task_priority_t TaskPriority;
@@ -700,6 +702,7 @@ namespace LegionRuntime {
     typedef ::legion_distributed_id_t DistributedID;
     typedef ::legion_address_space_id_t AddressSpaceID;
     typedef ::legion_tunable_id_t TunableID;
+    typedef ::legion_generator_id_t GeneratorID;
     typedef ::legion_mapping_tag_id_t MappingTagID;
     typedef ::legion_semantic_tag_t SemanticTag;
     typedef ::legion_variant_id_t VariantID;
@@ -708,6 +711,7 @@ namespace LegionRuntime {
     typedef ::legion_task_id_t TaskID;
     typedef ::legion_layout_constraint_id_t LayoutConstraintID;
     typedef SingleTask* Context;
+    typedef GeneratorImpl* GeneratorContext;
     typedef std::map<Color,ColoredPoints<ptr_t> > Coloring;
     typedef std::map<Color,Domain> DomainColoring;
     typedef std::map<Color,std::set<Domain> > MultiDomainColoring;
@@ -716,6 +720,8 @@ namespace LegionRuntime {
     typedef std::map<DomainPoint,std::set<Domain> > MultiDomainPointColoring;
     typedef void (*RegistrationCallbackFnptr)(Machine machine, 
         Runtime *rt, const std::set<Processor> &local_procs);
+    typedef void (*GeneratorFnptr)(GeneratorContext, 
+                                   const TaskGeneratorArguments&, Runtime*);
     typedef LogicalRegion (*RegionProjectionFnptr)(LogicalRegion parent, 
         const DomainPoint&, Runtime *rt);
     typedef LogicalRegion (*PartitionProjectionFnptr)(LogicalPartition parent, 

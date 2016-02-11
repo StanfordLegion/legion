@@ -603,6 +603,8 @@ namespace Realm {
       RemoteWriteFence(Operation *op);
 
       virtual void request_cancellation(void);
+
+      virtual void print(std::ostream& os) const;
     };
 
     struct RemoteWriteFenceMessage {

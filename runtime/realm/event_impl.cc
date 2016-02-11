@@ -24,6 +24,54 @@ namespace Realm {
 
   Logger log_event("event");
   Logger log_barrier("barrier");
+  Logger log_poison("poison");
+
+  // used in places that don't currently propagate poison but should
+  static const bool POISON_FIXME = false;
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class DeferredEventTrigger
+  //
+
+  class DeferredEventTrigger : public EventWaiter {
+  public:
+    DeferredEventTrigger(Event _after_event);
+
+    virtual ~DeferredEventTrigger(void);
+    
+    virtual bool event_triggered(Event e, bool poisoned);
+
+    virtual void print(std::ostream& os) const;
+
+  protected:
+    Event after_event;
+  };
+  
+  DeferredEventTrigger::DeferredEventTrigger(Event _after_event)
+    : after_event(_after_event)
+  {}
+
+  DeferredEventTrigger::~DeferredEventTrigger(void) { }
+
+  bool DeferredEventTrigger::event_triggered(Event e, bool poisoned)
+  {
+    if(poisoned) {
+      log_poison.info() << "poisoned deferred event: event=" << after_event;
+      GenEventImpl::trigger(after_event, true /*poisoned*/);
+      return true;
+    }
+    
+    log_event.info() << "deferred trigger occuring: " << after_event;
+    GenEventImpl::trigger(after_event, false /*!poisoned*/);
+    return true;
+  }
+
+  void DeferredEventTrigger::print(std::ostream& os) const
+  {
+    os << "deferred trigger: after=" << after_event;
+  }
+
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -40,14 +88,38 @@ namespace Realm {
     DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
     if(!id) return true; // special case: NO_EVENT has always triggered
     EventImpl *e = get_runtime()->get_event_impl(*this);
-    return e->has_triggered(gen);
+    bool poisoned = false;
+    if(e->has_triggered(gen, poisoned)) {
+      // a poisoned event causes an exception because the caller isn't prepared for it
+      if(poisoned) {
+#ifdef REALM_USE_EXCEPTIONS
+	if(Thread::self()->exceptions_permitted()) {
+	  throw PoisonedEventException(*this);
+	} else
+#endif
+	  {
+	    log_poison.fatal() << "FATAL: no handler for test of poisoned event " << *this;
+	    assert(0);
+	  }
+      }
+      return true;
+    } else
+      return false;
+  }
+
+  bool Event::has_triggered_faultaware(bool& poisoned) const
+  {
+    DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
+    if(!id) return true; // special case: NO_EVENT has always triggered
+    EventImpl *e = get_runtime()->get_event_impl(*this);
+    return e->has_triggered(gen, poisoned);
   }
 
   // creates an event that won't trigger until all input events have
   /*static*/ Event Event::merge_events(const std::set<Event>& wait_for)
   {
     DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
-    return GenEventImpl::merge_events(wait_for);
+    return GenEventImpl::merge_events(wait_for, false /*!ignore faults*/);
   }
 
   /*static*/ Event Event::merge_events(Event ev1, Event ev2,
@@ -58,6 +130,12 @@ namespace Realm {
     return GenEventImpl::merge_events(ev1, ev2, ev3, ev4, ev5, ev6);
   }
 
+  /*static*/ Event Event::merge_events_ignorefaults(const std::set<Event>& wait_for)
+  {
+    DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
+    return GenEventImpl::merge_events(wait_for, true /*ignore faults*/);
+  }
+
   class EventTriggeredCondition {
   public:
     EventTriggeredCondition(EventImpl* _event, Event::gen_t _gen);
@@ -65,9 +143,9 @@ namespace Realm {
     class Callback : public EventWaiter {
     public:
       virtual ~Callback(void);
-      virtual bool event_triggered(void);
-      virtual void print_info(FILE *f);
-      virtual void operator()(void) = 0;
+      virtual bool event_triggered(Event e, bool poisoned);
+      virtual void print(std::ostream& os) const;
+      virtual void operator()(bool poisoned) = 0;
     };
 
     void add_callback(Callback& cb) const;
@@ -90,27 +168,44 @@ namespace Realm {
   {
   }
   
-  bool EventTriggeredCondition::Callback::event_triggered(void)
+  bool EventTriggeredCondition::Callback::event_triggered(Event e, bool poisoned)
   {
-    // call through to the actual callback
-    (*this)();
+    (*this)(poisoned);
     // we don't manage the memory any more
     return false;
   }
 
-  void EventTriggeredCondition::Callback::print_info(FILE *f)
+  void EventTriggeredCondition::Callback::print(std::ostream& os) const
   {
-    fprintf(f, "EventTriggeredCondition (thread unknown)");
+    os << "EventTriggeredCondition (thread unknown)";
   }  
 
   void Event::wait(void) const
+  {
+    bool poisoned = false;
+    wait_faultaware(poisoned);
+    // a poisoned event causes an exception because the caller isn't prepared for it
+    if(poisoned) {
+#ifdef REALM_USE_EXCEPTIONS
+      if(Thread::self()->exceptions_permitted()) {
+	throw PoisonedEventException(*this);
+      } else
+#endif
+      {
+	log_poison.fatal() << "FATAL: no handler for test of poisoned event " << *this;
+	assert(0);
+      }
+    }
+  }
+
+  void Event::wait_faultaware(bool& poisoned) const
   {
     DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
     if(!id) return;  // special case: never wait for NO_EVENT
     EventImpl *e = get_runtime()->get_event_impl(*this);
 
     // early out case too
-    if(e->has_triggered(gen)) return;
+    if(e->has_triggered(gen, poisoned)) return;
 
     // waiting on an event does not count against the low level's time
     DetailedTimer::ScopedPush sp2(TIME_NONE);
@@ -119,8 +214,8 @@ namespace Realm {
     if(thread) {
       log_event.info() << "thread blocked: thread=" << thread << " event=" << *this;
       // describe the condition we want the thread to wait on
-      thread->wait_for_condition(EventTriggeredCondition(e, gen));
-      log_event.info() << "thread resumed: thread=" << thread << " event=" << *this;
+      thread->wait_for_condition(EventTriggeredCondition(e, gen), poisoned);
+      log_event.info() << "thread resumed: thread=" << thread << " event=" << *this << " poisoned=" << poisoned;
       return;
     }
 
@@ -131,19 +226,42 @@ namespace Realm {
 
   void Event::external_wait(void) const
   {
+    bool poisoned = false;
+    external_wait_faultaware(poisoned);
+    // a poisoned event causes an exception because the caller isn't prepared for it
+    if(poisoned) {
+#ifdef REALM_USE_EXCEPTIONS
+      if(Thread::self()->exceptions_permitted()) {
+	throw PoisonedEventException(*this);
+      } else
+#endif
+      {
+	log_poison.fatal() << "FATAL: no handler for test of poisoned event " << *this;
+	assert(0);
+      }
+    }
+  }
+
+  void Event::external_wait_faultaware(bool& poisoned) const
+  {
     DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
     if(!id) return;  // special case: never wait for NO_EVENT
     EventImpl *e = get_runtime()->get_event_impl(*this);
 
     // early out case too
-    if(e->has_triggered(gen)) return;
+    if(e->has_triggered(gen, poisoned)) return;
     
     // waiting on an event does not count against the low level's time
     DetailedTimer::ScopedPush sp2(TIME_NONE);
     
     log_event.info() << "external thread blocked: event=" << *this;
-    e->external_wait(gen);
+    e->external_wait(gen, poisoned);
     log_event.info() << "external thread resumed: event=" << *this;
+  }
+
+  void Event::cancel_operation(const void *reason_data, size_t reason_len) const
+  {
+    assert(0 && "TODO: faults");
   }
 
 
@@ -168,8 +286,6 @@ namespace Realm {
   {
     DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
 
-    log_event.info() << "user event trigger: event=" << *this << " wait_on=" << wait_on;
-    GenEventImpl *e = get_runtime()->get_genevent_impl(*this);
 #ifdef EVENT_GRAPH_TRACE
     Event enclosing = find_enclosing_termination_event();
     log_event_graph.info("Event Trigger: (" IDFMT ",%d) (" IDFMT 
@@ -177,7 +293,33 @@ namespace Realm {
 			 id, gen, wait_on.id, wait_on.gen,
 			 enclosing.id, enclosing.gen);
 #endif
-    e->trigger(gen, gasnet_mynode(), wait_on);
+
+    if(!wait_on.has_triggered()) {
+      // deferred trigger
+      log_event.info() << "deferring user event trigger: event=" << *this << " wait_on=" << wait_on;
+      EventImpl::add_waiter(wait_on, new DeferredEventTrigger(*this));
+      return;
+    }
+
+    log_event.info() << "user event trigger: event=" << *this << " wait_on=" << wait_on;
+    GenEventImpl::trigger(*this, false /*!poisoned*/);
+  }
+
+  void UserEvent::cancel(void) const
+  {
+    DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
+
+#ifdef EVENT_GRAPH_TRACE
+    // TODO: record cancellation?
+    Event enclosing = find_enclosing_termination_event();
+    log_event_graph.info("Event Trigger: (" IDFMT ",%d) (" IDFMT 
+			 ",%d) (" IDFMT ",%d)",
+			 id, gen, wait_on.id, wait_on.gen,
+			 enclosing.id, enclosing.gen);
+#endif
+
+    log_event.info() << "user event cancelled: event=" << *this;
+    GenEventImpl::trigger(*this, true /*poisoned*/);
   }
 
 
@@ -194,9 +336,7 @@ namespace Realm {
     DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
 
     BarrierImpl *impl = BarrierImpl::create_barrier(expected_arrivals, redop_id, initial_value, initial_value_size);
-    Barrier b = impl->me.convert<Barrier>();
-    b.gen = impl->generation + 1;
-    b.timestamp = 0;
+    Barrier b = impl->current_barrier();
 
 #ifdef EVENT_GRAPH_TRACE
     log_event_graph.info("Barrier Creation: " IDFMT " %d", b.id, expected_arrivals);
@@ -280,6 +420,9 @@ namespace Realm {
     generation = 0;
     gen_subscribed = 0;
     next_free = 0;
+    num_poisoned_generations = 0;
+    poisoned_generations = 0;
+    has_local_triggers = false;
   }
 
   void GenEventImpl::init(ID _me, unsigned _init_owner)
@@ -289,14 +432,20 @@ namespace Realm {
     generation = 0;
     gen_subscribed = 0;
     next_free = 0;
+    num_poisoned_generations = 0;
+    poisoned_generations = 0;
+    has_local_triggers = false;
   }
 
 
     // Perform our merging events in a lock free way
     class EventMerger : public EventWaiter {
     public:
-      EventMerger(GenEventImpl *_finish_event)
-	: count_needed(1), finish_event(_finish_event)
+      EventMerger(Event _finish_event, bool _ignore_faults)
+	: finish_event(_finish_event)
+	, ignore_faults(_ignore_faults)
+	, count_needed(1)
+	, faults_observed(0)
       {
       }
 
@@ -306,7 +455,20 @@ namespace Realm {
 
       void add_event(Event wait_for)
       {
-	if(wait_for.has_triggered()) return; // early out
+	bool poisoned = false;
+	if(wait_for.has_triggered_faultaware(poisoned)) {
+	  if(poisoned) {
+	    // always count faults, but don't necessarily propagate
+	    bool first_fault = (__sync_fetch_and_add(&faults_observed, 1) == 0);
+	    if(first_fault && !ignore_faults) {
+	      log_poison.info() << "event merger early poison: after=" << finish_event;
+	      GenEventImpl::trigger(finish_event, true /*poisoned*/);
+	    }
+	  }
+	  // either way we return to the caller without updating the count_needed
+	  return;
+	}
+
         // Increment the count and then add ourselves
         __sync_fetch_and_add(&count_needed, 1);
 	// step 2: enqueue ourselves on the input event
@@ -319,44 +481,53 @@ namespace Realm {
       //  means the caller should delete this EventMerger)
       bool arm(void)
       {
-	bool nuke = event_triggered();
+	bool nuke = event_triggered(Event::NO_EVENT, false /*!poisoned*/);
         return nuke;
       }
 
-      virtual bool event_triggered(void)
+      virtual bool event_triggered(Event triggered, bool poisoned)
       {
-	// save ID and generation because we can't reference finish_event after the
-	// decrement (unless last_trigger ends up being true)
-	Event e = finish_event->current_event();
+	// if the input is poisoned, we propagate that poison eagerly
+	if(poisoned) {
+	  bool first_fault = (__sync_fetch_and_add(&faults_observed, 1) == 0);
+	  if(first_fault && !ignore_faults) {
+	    log_poison.info() << "event merger poisoned: after=" << finish_event;
+	    GenEventImpl::trigger(finish_event, true /*poisoned*/);
+	  }
+	}
 
 	int count_left = __sync_fetch_and_add(&count_needed, -1);
 
         // Put the logging first to avoid segfaults
-        log_event.debug() << "received trigger merged event=" << e << " left=" << count_left;
+	log_event.debug() << "received trigger merged event=" << finish_event << " left=" << count_left << " poisoned=" << poisoned;
 
 	// count is the value before the decrement, so it was 1, it's now 0
 	bool last_trigger = (count_left == 1);
 
-	if(last_trigger) {
-	  finish_event->trigger_current();
+	// trigger on the last input event, unless we did an early poison propagation
+	if(last_trigger && (ignore_faults || (faults_observed == 0))) {
+	  GenEventImpl::trigger(finish_event, false /*!poisoned*/);
 	}
 
         // caller can delete us if this was the last trigger
         return last_trigger;
       }
 
-      virtual void print_info(FILE *f)
+      virtual void print(std::ostream& os) const
       {
-	fprintf(f,"event merger: " IDFMT "/%d\n", finish_event->me.id(), finish_event->generation+1);
+	os << "event merger: " << finish_event << " left=" << count_needed;
       }
 
     protected:
+      Event finish_event;
+      bool ignore_faults;
       int count_needed;
-      GenEventImpl *finish_event;
+      int faults_observed;
     };
 
     // creates an event that won't trigger until all input events have
-    /*static*/ Event GenEventImpl::merge_events(const std::set<Event>& wait_for)
+    /*static*/ Event GenEventImpl::merge_events(const std::set<Event>& wait_for,
+						bool ignore_faults)
     {
       if (wait_for.empty())
         return Event::NO_EVENT;
@@ -367,42 +538,52 @@ namespace Realm {
       Event first_wait;
       for(std::set<Event>::const_iterator it = wait_for.begin();
 	  (it != wait_for.end()) && (wait_count < 2);
-	  it++)
-	if(!(*it).has_triggered()) {
+	  it++) {
+	bool poisoned = false;
+	if((*it).has_triggered_faultaware(poisoned)) {
+          if(poisoned) {
+	    // if we're not ignoring faults, we need to propagate this fault, and can do
+	    //  so by just returning this poisoned event
+	    if(!ignore_faults) {
+	      log_poison.info() << "merging events - " << (*it) << " already poisoned";
+	      return *it;
+	    }
+          }
+	} else {
 	  if(!wait_count) first_wait = *it;
 	  wait_count++;
 	}
+      }
       log_event.debug() << "merging events - at least " << wait_count << " not triggered";
 
       // Avoid these optimizations if we are doing event graph tracing
+      // we also cannot return an input event directly in the (wait_count == 1) case
+      //  if we're ignoring faults
 #ifndef EVENT_GRAPH_TRACE
       // counts of 0 or 1 don't require any merging
       if(wait_count == 0) return Event::NO_EVENT;
-      if(wait_count == 1) return first_wait;
+      if((wait_count == 1) && !ignore_faults) return first_wait;
 #else
-      if (wait_for.size() == 1)
+      if((wait_for.size() == 1) && !ignore_faults)
         return *(wait_for.begin());
 #endif
       // counts of 2+ require building a new event and a merger to trigger it
-      GenEventImpl *finish_event = GenEventImpl::create_genevent();
-      EventMerger *m = new EventMerger(finish_event);
-
-      // get the Event for this GenEventImpl before any triggers can occur
-      Event e = finish_event->current_event();
+      Event finish_event = GenEventImpl::create_genevent()->current_event();
+      EventMerger *m = new EventMerger(finish_event, ignore_faults);
 
 #ifdef EVENT_GRAPH_TRACE
       log_event_graph.info("Event Merge: (" IDFMT ",%d) %ld", 
-			   e.id, e.gen, wait_for.size());
+			   finish_event.id, finish_event.gen, wait_for.size());
 #endif
 
       for(std::set<Event>::const_iterator it = wait_for.begin();
 	  it != wait_for.end();
 	  it++) {
-	log_event.info() << "event merging: event=" << e << " wait_on=" << *it;
+	log_event.info() << "event merging: event=" << finish_event << " wait_on=" << *it;
 	m->add_event(*it);
 #ifdef EVENT_GRAPH_TRACE
         log_event_graph.info("Event Precondition: (" IDFMT ",%d) (" IDFMT ",%d)",
-                             e.id, e.gen,
+                             finish_event.id, finish_event.gen,
                              it->id, it->gen);
 #endif
       }
@@ -411,7 +592,7 @@ namespace Realm {
       if(m->arm())
         delete m;
 
-      return e;
+      return finish_event;
     }
 
     /*static*/ Event GenEventImpl::merge_events(Event ev1, Event ev2,
@@ -421,14 +602,27 @@ namespace Realm {
       // scan through events to see how many exist/haven't fired - we're
       //  interested in counts of 0, 1, or 2+ - also remember the first
       //  event we saw for the count==1 case
+      // any poison on input events is immediately propagated (by simply returning
+      //  the poisoned input event)
       int wait_count = 0;
       Event first_wait;
-      if(!ev6.has_triggered()) { first_wait = ev6; wait_count++; }
-      if(!ev5.has_triggered()) { first_wait = ev5; wait_count++; }
-      if(!ev4.has_triggered()) { first_wait = ev4; wait_count++; }
-      if(!ev3.has_triggered()) { first_wait = ev3; wait_count++; }
-      if(!ev2.has_triggered()) { first_wait = ev2; wait_count++; }
-      if(!ev1.has_triggered()) { first_wait = ev1; wait_count++; }
+#define CHECK_EVENT(ev) \
+      do {		       \
+	bool poisoned = false; \
+	if((ev).has_triggered_faultaware(poisoned)) { \
+	  if(poisoned) \
+	    return(ev); \
+	} else { \
+	  first_wait = (ev); \
+	  wait_count++; \
+	} \
+      } while(0)
+      CHECK_EVENT(ev6);
+      CHECK_EVENT(ev5);
+      CHECK_EVENT(ev4);
+      CHECK_EVENT(ev3);
+      CHECK_EVENT(ev2);
+      CHECK_EVENT(ev1);
 
       log_event.debug() << "merging events - at least " << wait_count << " not triggered";
 
@@ -459,34 +653,31 @@ namespace Realm {
 #endif
 
       // counts of 2+ require building a new event and a merger to trigger it
-      GenEventImpl *finish_event = GenEventImpl::create_genevent();
-      EventMerger *m = new EventMerger(finish_event);
-
-      // get the Event for this GenEventImpl before any triggers can occur
-      Event e = finish_event->current_event();
+      Event finish_event = GenEventImpl::create_genevent()->current_event();
+      EventMerger *m = new EventMerger(finish_event, false /*!ignore faults*/);
 
       if(ev1.exists()) {
-	log_event.info() << "event merging: event=" << e << " wait_on=" << ev1;
+	log_event.info() << "event merging: event=" << finish_event << " wait_on=" << ev1;
 	m->add_event(ev1);
       }
       if(ev2.exists()) {
-	log_event.info() << "event merging: event=" << e << " wait_on=" << ev2;
+	log_event.info() << "event merging: event=" << finish_event << " wait_on=" << ev2;
 	m->add_event(ev2);
       }
       if(ev3.exists()) {
-	log_event.info() << "event merging: event=" << e << " wait_on=" << ev3;
+	log_event.info() << "event merging: event=" << finish_event << " wait_on=" << ev3;
 	m->add_event(ev3);
       }
       if(ev4.exists()) {
-	log_event.info() << "event merging: event=" << e << " wait_on=" << ev4;
+	log_event.info() << "event merging: event=" << finish_event << " wait_on=" << ev4;
 	m->add_event(ev4);
       }
       if(ev5.exists()) {
-	log_event.info() << "event merging: event=" << e << " wait_on=" << ev5;
+	log_event.info() << "event merging: event=" << finish_event << " wait_on=" << ev5;
 	m->add_event(ev5);
       }
       if(ev6.exists()) {
-	log_event.info() << "event merging: event=" << e << " wait_on=" << ev6;
+	log_event.info() << "event merging: event=" << finish_event << " wait_on=" << ev6;
 	m->add_event(ev6);
       }
 
@@ -517,7 +708,7 @@ namespace Realm {
       if(m->arm())
         delete m;
 
-      return e;
+      return finish_event;
     }
 
     /*static*/ GenEventImpl *GenEventImpl::create_genevent(void)
@@ -526,7 +717,7 @@ namespace Realm {
       assert(impl);
       assert(ID(impl->me).type() == ID::ID_EVENT);
 
-      log_event.info() << "event created: event=" << impl->current_event();
+      log_event.spew() << "event created: event=" << impl->current_event();
 
 #ifdef EVENT_TRACING
       {
@@ -537,34 +728,6 @@ namespace Realm {
       }
 #endif
       return impl;
-    }
-    
-    void GenEventImpl::check_for_catchup(Event::gen_t implied_trigger_gen)
-    {
-      // early out before we take a lock
-      if(implied_trigger_gen <= generation) return;
-
-      // now take a lock and see if we really need to catch up
-      std::vector<EventWaiter *> stale_waiters;
-      {
-	AutoHSLLock a(mutex);
-
-	if(implied_trigger_gen > generation) {
-	  assert(owner != gasnet_mynode());  // cannot be a local event
-
-	  log_event.info("event catchup: " IDFMT "/%d -> %d",
-			 me.id(), generation, implied_trigger_gen);
-	  generation = implied_trigger_gen;
-	  stale_waiters.swap(local_waiters);  // we'll actually notify them below
-	}
-      }
-
-      if(!stale_waiters.empty()) {
-	for(std::vector<EventWaiter *>::iterator it = stale_waiters.begin();
-	    it != stale_waiters.end();
-	    it++)
-	  (*it)->event_triggered();
-      }
     }
 
     bool GenEventImpl::add_waiter(Event::gen_t needed_gen, EventWaiter *waiter)
@@ -577,44 +740,64 @@ namespace Realm {
         item.action = EventTraceItem::ACT_WAIT;
       }
 #endif
+      // no early check here as the caller will generally have tried has_triggered()
+      //  before allocating its EventWaiter object
+
       bool trigger_now = false;
+      bool trigger_poisoned = false;
 
       int subscribe_owner = -1;
-      Event subscribe_event;
       Event::gen_t previous_subscribe_gen = 0;
       {
 	AutoHSLLock a(mutex);
 
-	if(needed_gen > generation) {
-	  log_event.debug("event not ready: event=" IDFMT "/%d owner=%d gen=%d subscr=%d",
-		    me.id(), needed_gen, owner, generation, gen_subscribed);
+	// three cases below
 
-	  // catchup code for remote events has been moved to get_genevent_impl, so
-	  //  we should never be asking for a stale version here
-	  assert(needed_gen == (generation + 1));
-
-	  // do we need to subscribe?
-	  if((owner != gasnet_mynode()) && (gen_subscribed < needed_gen)) {
-	    previous_subscribe_gen = gen_subscribed;
-	    gen_subscribed = needed_gen;
-	    subscribe_owner = owner;
-	    subscribe_event = me.convert<Event>();
-	    subscribe_event.gen = needed_gen;
-	  }
-
-	  // now we add to the local waiter list
-	  local_waiters.push_back(waiter);
-	} else {
-	  // event we are interested in has already triggered!
+	if(needed_gen <= generation) {
+	  // 1) the event has triggered and any poison information is in the poisoned generation list
 	  trigger_now = true; // actually do trigger outside of mutex
+	  trigger_poisoned = is_generation_poisoned(needed_gen);
+	} else {
+	  std::map<Event::gen_t, bool>::const_iterator it = local_triggers.find(needed_gen);
+	  if(it != local_triggers.end()) {
+	    // 2) we're not the owner node, but we've locally triggered this and have correct poison info
+	    assert(owner != gasnet_mynode());
+	    trigger_now = true;
+	    trigger_poisoned = it->second;
+	  } else {
+	    // 3) we don't know of a trigger of this event, so record the waiter and subscribe if needed
+
+	    log_event.debug("event not ready: event=" IDFMT "/%d owner=%d gen=%d subscr=%d",
+			    me.id(), needed_gen, owner, generation, gen_subscribed);
+
+	    // is this for the "current" next generation?
+	    if(needed_gen == (generation + 1)) {
+	      // yes, put in the current waiter list
+	      current_local_waiters.push_back(waiter);
+	    } else {
+	      // no, put it in an appropriate future waiter list - only allowed for non-owners
+	      assert(owner != gasnet_mynode());
+	      future_local_waiters[needed_gen].push_back(waiter);
+	    }
+
+	    // do we need to subscribe to this event?
+	    if((owner != gasnet_mynode()) && (gen_subscribed < needed_gen)) {
+	      previous_subscribe_gen = gen_subscribed;
+	      gen_subscribed = needed_gen;
+	      subscribe_owner = owner;
+	    }
+	  }
 	}
       }
 
       if((subscribe_owner != -1))
-	EventSubscribeMessage::send_request(owner, subscribe_event, previous_subscribe_gen);
+	EventSubscribeMessage::send_request(owner,
+					    make_event(needed_gen),
+					    previous_subscribe_gen);
 
       if(trigger_now) {
-	bool nuke = waiter->event_triggered();
+	bool nuke = waiter->event_triggered(make_event(needed_gen),
+					    trigger_poisoned);
         if(nuke)
           delete waiter;
       }
@@ -622,32 +805,83 @@ namespace Realm {
       return true;  // waiter is always either enqueued or triggered right now
     }
 
+    inline bool GenEventImpl::is_generation_poisoned(Event::gen_t gen) const
+    {
+      // common case: no poisoned generations
+      if(__builtin_expect((num_poisoned_generations == 0), 1))
+	return false;
+      
+      for(int i = 0; i < num_poisoned_generations; i++)
+	if(poisoned_generations[i] == gen)
+	  return true;
+      return false;
+    }
+
+
     ///////////////////////////////////////////////////
     // Events
 
 
-
-    void EventTriggerMessage::RequestArgs::apply(gasnet_node_t target)
+  template <typename T>
+  struct MediumBroadcastHelper : public T::RequestArgs {
+    inline void apply(gasnet_node_t target)
     {
-      EventTriggerMessage::send_request(target, event);
+      T::Message::request(target, *this, payload, payload_size, payload_mode);
     }
 
-  /*static*/ void EventTriggerMessage::send_request(gasnet_node_t target, Event event)
+    void broadcast(const NodeSet& targets,
+		   const void *_payload, size_t _payload_size,
+		   int _payload_mode)
+    {
+      payload = _payload;
+      payload_size = _payload_size;
+      payload_mode = _payload_mode;
+      assert((payload_mode != PAYLOAD_FREE) && "cannot use PAYLOAD_FREE with broadcast!");
+      targets.map(*this);
+    }
+
+    const void *payload;
+    size_t payload_size;
+    int payload_mode;
+  };
+  
+
+  /*static*/ void EventTriggerMessage::send_request(gasnet_node_t target, Event event,
+						    bool poisoned)
   {
     RequestArgs args;
 
     args.node = gasnet_mynode();
     args.event = event;
+    args.poisoned = poisoned;
+
     Message::request(target, args);
   }
 
-  /*static*/ void EventTriggerMessage::broadcast_request(const NodeSet& targets, Event event)
+  /*static*/ void EventUpdateMessage::send_request(gasnet_node_t target, Event event,
+						   int num_poisoned,
+						   const Event::gen_t *poisoned_generations)
   {
     RequestArgs args;
 
-    args.node = gasnet_mynode();
     args.event = event;
-    targets.map(args);
+
+    Message::request(target, args,
+		     poisoned_generations, num_poisoned * sizeof(Event::gen_t),
+		     PAYLOAD_KEEP);
+  }
+
+  /*static*/ void EventUpdateMessage::broadcast_request(const NodeSet& targets, Event event,
+							int num_poisoned,
+							const Event::gen_t *poisoned_generations)
+  {
+    MediumBroadcastHelper<EventUpdateMessage> args;
+
+    args.event = event;
+
+    args.broadcast(targets,
+		   poisoned_generations, num_poisoned * sizeof(Event::gen_t),
+		   PAYLOAD_KEEP);
   }
 
   /*static*/ void EventSubscribeMessage::send_request(gasnet_node_t target, Event event, Event::gen_t previous_gen)
@@ -677,40 +911,50 @@ namespace Realm {
       }
 #endif
 
+      // we may send a trigger message in response to the subscription
+      Event::gen_t trigger_gen = 0;
+      bool subscription_recorded = false;
+
       // early-out case: if we can see the generation needed has already
       //  triggered, signal without taking the mutex
-      unsigned stale_gen = impl->generation;
+      Event::gen_t stale_gen = impl->generation;
       if(stale_gen >= args.event.gen) {
-	log_event.debug("event subscription early-out: node=%d event=" IDFMT "/%d (<= %d)",
-		  args.node, args.event.id, args.event.gen, stale_gen);
-	Event triggered = args.event;
-	triggered.gen = stale_gen;
-	EventTriggerMessage::send_request(args.node, triggered);
-	return;
+	trigger_gen = stale_gen;
+      } else {
+	AutoHSLLock a(impl->mutex);
+
+	// look at the previously-subscribed generation from the requestor - we'll send
+	//  a trigger message if anything newer has triggered
+        if(impl->generation > args.previous_subscribe_gen)
+	  trigger_gen = impl->generation;
+
+	// are they subscribing to the current generation?
+	if(args.event.gen == (impl->generation + 1)) {
+	  impl->remote_waiters.add(args.node);
+	  subscription_recorded = true;
+	} else {
+	  // should never get subscriptions newer than our current
+	  assert(args.event.gen <= impl->generation);
+	}
       }
 
-      {
-	AutoHSLLock a(impl->mutex);
-        // first trigger any generations which are below our current generation
-        if(impl->generation > (args.previous_subscribe_gen)) {
-          log_event.debug("event subscription already done: node=%d event=" IDFMT "/%d (<= %d)",
-		    args.node, args.event.id, args.event.gen, impl->generation);
-	  Event triggered = args.event;
-	  triggered.gen = impl->generation;
-	  EventTriggerMessage::send_request(args.node, triggered);
-        }
+      if(subscription_recorded)
+	log_event.debug() << "event subscription recorded: node=" << args.node
+			  << " event=" << args.event << " (> " << impl->generation << ")";
 
-	// if the subscriber is asking about a generation that JUST triggered, the above trigger message
-	//  is all we needed to do
-	if(args.event.gen > impl->generation) {
-	  // barrier logic is now separated, so we should never hear about an event generate beyond the one
-	  //  that will trigger next
-	  assert(args.event.gen <= (impl->generation + 1));
-
-	  impl->remote_waiters.add(args.node);
-	  log_event.debug("event subscription recorded: node=%d event=" IDFMT "/%d (> %d)",
-		    args.node, args.event.id, args.event.gen, impl->generation);
-	}
+      if(trigger_gen > 0) {
+	log_event.debug() << "event subscription immediate trigger: node=" << args.node
+			  << " event=" << args.event << " (<= " << trigger_gen << ")";
+	Event triggered = args.event;
+	triggered.gen = trigger_gen;
+	// it is legal to use poisoned generation info like this because it is always
+	// updated before the generation - the barrier makes sure we read in the correct
+	// order
+	__sync_synchronize();
+	EventUpdateMessage::send_request(args.node,
+					 triggered,
+					 impl->num_poisoned_generations,
+					 impl->poisoned_generations);
       }
     } 
 
@@ -720,7 +964,147 @@ namespace Realm {
       log_event.debug("Remote trigger of event " IDFMT "/%d from node %d!",
 		args.event.id, args.event.gen, args.node);
       GenEventImpl *impl = get_runtime()->get_genevent_impl(args.event);
-      impl->trigger(args.event.gen, args.node);
+      impl->trigger(args.event.gen, args.node, args.poisoned);
+    }
+
+  template <typename T>
+  struct ArrayOstreamHelper {
+    ArrayOstreamHelper(const T *_base, size_t _count)
+      : base(_base), count(_count)
+    {}
+
+    const T *base;
+    size_t count;
+  };
+
+  template <typename T>
+  std::ostream& operator<<(std::ostream& os, const ArrayOstreamHelper<T>& h)
+  {
+    switch(h.count) {
+    case 0: return os << "0:{}";
+    case 1: return os << "1:{ " << h.base[0] << " }";
+    default:
+      os << h.count << ":{ " << h.base[0];
+      for(size_t i = 1; i < h.count; i++)
+	os << ", " << h.base[i];
+      os << " }";
+      return os;
+    }
+  }
+
+
+  void GenEventImpl::process_update(Event::gen_t current_gen,
+				    const Event::gen_t *new_poisoned_generations,
+				    int new_poisoned_count)
+  {
+    // this event had better not belong to us...
+    assert(owner != gasnet_mynode());
+
+    // the result of the update may trigger multiple generations worth of waiters - keep their
+    //  generation IDs straight (we'll look up the poison bits later)
+    std::map<Event::gen_t, std::vector<EventWaiter *> > to_wake;
+
+    {
+      AutoHSLLock a(mutex);
+
+#define CHECK_POISONED_GENS
+#ifdef CHECK_POISONED_GENS
+      if(new_poisoned_count > 0) {
+	// should be an incremental update
+	assert(num_poisoned_generations <= new_poisoned_count);
+	if(num_poisoned_generations > 0)
+	  assert(memcmp(poisoned_generations, new_poisoned_generations, 
+			new_poisoned_count * sizeof(Event::gen_t)) == 0);
+      } else {
+	// we shouldn't have any local ones either
+	assert(num_poisoned_generations == 0);
+      }
+#endif
+
+      // this might be old news if we had subscribed to an event and then triggered it ourselves
+      if(current_gen <= generation)
+	return;
+
+      // first thing - update the poisoned generation list
+      if(new_poisoned_count > 0) {
+	if(!poisoned_generations)
+	  poisoned_generations = new Event::gen_t[POISONED_GENERATION_LIMIT];
+	if(num_poisoned_generations < new_poisoned_count) {
+	  assert(new_poisoned_count <= POISONED_GENERATION_LIMIT);
+	  num_poisoned_generations = new_poisoned_count;
+	  memcpy(poisoned_generations, new_poisoned_generations,
+		 new_poisoned_count * sizeof(Event::gen_t));
+	}
+      }
+
+      // grab any/all waiters - start with current generation
+      if(!current_local_waiters.empty())
+	to_wake[generation + 1].swap(current_local_waiters);
+
+      // now any future waiters up to and including the triggered gen
+      if(!future_local_waiters.empty()) {
+	std::map<Event::gen_t, std::vector<EventWaiter *> >::iterator it = future_local_waiters.begin();
+	while((it != future_local_waiters.end()) && (it->first <= current_gen)) {
+	  to_wake[it->first].swap(it->second);
+	  future_local_waiters.erase(it);
+	  it = future_local_waiters.begin();
+	}
+
+	// and see if there's a future list that's now current
+	if((it != future_local_waiters.end()) && (it->first == (current_gen + 1))) {
+	  current_local_waiters.swap(it->second);
+	  future_local_waiters.erase(it);
+	}
+      }
+
+      // next, clear out any local triggers that have been ack'd
+      if(has_local_triggers) {
+	std::map<Event::gen_t, bool>::iterator it = local_triggers.begin();
+	while((it != local_triggers.end()) && (it->first <= current_gen)) {
+	  assert(it->second == is_generation_poisoned(it->first));
+	  local_triggers.erase(it);
+	  it = local_triggers.begin();
+	}
+	has_local_triggers = !local_triggers.empty();
+      }
+
+      // finally, update the generation count, representing that we have complete information to that point
+      __sync_synchronize();
+      generation = current_gen;
+    }
+
+    // now trigger anybody that needs to be triggered
+    if(!to_wake.empty()) {
+      for(std::map<Event::gen_t, std::vector<EventWaiter *> >::const_iterator it = to_wake.begin();
+	  it != to_wake.end();
+	  it++) {
+	Event e = make_event(it->first);
+	bool poisoned = is_generation_poisoned(it->first);
+	for(std::vector<EventWaiter *>::const_iterator it2 = it->second.begin();
+	    it2 != it->second.end();
+	    it2++) {
+	  bool nuke = (*it2)->event_triggered(e, poisoned);
+	  if(nuke) {
+	    //printf("deleting: "); (*it)->print_info(); fflush(stdout);
+	    delete (*it2);
+	  }
+	}
+      }
+    }
+  }
+
+    /*static*/ void EventUpdateMessage::handle_request(EventUpdateMessage::RequestArgs args,
+						       const void *data, size_t datalen)
+    {
+      const Event::gen_t *new_poisoned_gens = (const Event::gen_t *)data;
+      int new_poisoned_count = datalen / sizeof(Event::gen_t);
+      assert((new_poisoned_count * sizeof(Event::gen_t)) == datalen);  // no remainders or overflow please
+
+      log_event.debug() << "event update: event=" << args.event
+			<< " poisoned=" << ArrayOstreamHelper<Event::gen_t>(new_poisoned_gens, new_poisoned_count);
+
+      GenEventImpl *impl = get_runtime()->get_genevent_impl(args.event);
+      impl->process_update(args.event.gen, new_poisoned_gens, new_poisoned_count);
     }
 
 
@@ -728,12 +1112,7 @@ namespace Realm {
 
 
 
-    /*static*/ bool EventImpl::add_waiter(Event needed, EventWaiter *waiter)
-    {
-      return get_runtime()->get_event_impl(needed)->add_waiter(needed.gen, waiter);
-    }
-
-    bool GenEventImpl::has_triggered(Event::gen_t needed_gen)
+    bool GenEventImpl::has_triggered(Event::gen_t needed_gen, bool& poisoned)
     {
 #ifdef EVENT_TRACING
       {
@@ -743,34 +1122,72 @@ namespace Realm {
         item.action = EventTraceItem::ACT_QUERY;
       }
 #endif
-      return (needed_gen <= generation);
+      // lock-free check
+      if(needed_gen <= generation) {
+	// it is safe to call is_generation_poisoned after just a memory barrier - no lock
+	__sync_synchronize();
+	poisoned = is_generation_poisoned(needed_gen);
+	return true;
+      }
+
+      // if the above check fails, we have to see if we have performed any local triggers -
+      // if not, we can internally-consistently say that the event hasn't triggered from our
+      // perspective yet
+      if(!has_local_triggers) {
+	poisoned = false;
+	return false;
+      }
+
+      // both easy cases failed, so take the lock that lets us see which local triggers exist
+      // this prevents us from ever answering "no" on the current node if the trigger occurred here
+      bool locally_triggered = false;
+      poisoned = false;
+      {
+	AutoHSLLock a(mutex);
+
+	std::map<Event::gen_t, bool>::const_iterator it = local_triggers.find(needed_gen);
+	if(it != local_triggers.end()) {
+	  locally_triggered = true;
+	  poisoned = it->second;
+	}
+      }
+      return locally_triggered;
     }
 
     class PthreadCondWaiter : public EventWaiter {
     public:
       PthreadCondWaiter(GASNetCondVar &_cv)
         : cv(_cv)
+	, poisoned(false)
       {
       }
       virtual ~PthreadCondWaiter(void) 
       {
       }
 
-      virtual bool event_triggered(void)
+      virtual bool event_triggered(Event e, bool _poisoned)
       {
+	// record whether event was poisoned - owner will inspect once awake
+	poisoned = _poisoned;
+
         // Need to hold the lock to avoid the race
         AutoHSLLock(cv.mutex);
 	cv.signal();
         // we're allocated on caller's stack, so deleting would be bad
         return false;
       }
-      virtual void print_info(FILE *f) { fprintf(f,"external waiter\n"); }
+
+      virtual void print(std::ostream& os) const
+      {
+	os << "external waiter";
+      }
 
     public:
       GASNetCondVar &cv;
+      bool poisoned;
     };
 
-    void GenEventImpl::external_wait(Event::gen_t gen_needed)
+    void GenEventImpl::external_wait(Event::gen_t gen_needed, bool& poisoned)
     {
       GASNetCondVar cv(mutex);
       PthreadCondWaiter w(cv);
@@ -784,54 +1201,15 @@ namespace Realm {
 	  cv.wait();
 	}
       }
+      poisoned = w.poisoned;
     }
 
-    class DeferredEventTrigger : public EventWaiter {
-    public:
-      DeferredEventTrigger(GenEventImpl *_after_event)
-	: after_event(_after_event)
-      {}
-
-      virtual ~DeferredEventTrigger(void) { }
-
-      virtual bool event_triggered(void)
-      {
-	log_event.info("deferred trigger occuring: " IDFMT "/%d", after_event->me.id(), after_event->generation+1);
-	after_event->trigger_current();
-        return true;
-      }
-
-      virtual void print_info(FILE *f)
-      {
-	fprintf(f,"deferred trigger: after=" IDFMT "/%d\n",
-		after_event->me.id(), after_event->generation+1);
-      }
-
-    protected:
-      GenEventImpl *after_event;
-    };
-
-    void GenEventImpl::trigger_current(void)
+    void GenEventImpl::trigger(Event::gen_t gen_triggered, int trigger_node, bool poisoned)
     {
-      // wrapper triggers the next generation on the current node
-      trigger(generation + 1, gasnet_mynode());
-    }
+      Event e = make_event(gen_triggered);
+      log_event.debug() << "event triggered: event=" << e << " by node " << trigger_node
+			<< " (poisoned=" << poisoned << ")";
 
-    void GenEventImpl::trigger(Event::gen_t gen_triggered, int trigger_node, Event wait_on)
-    {
-      if(!wait_on.has_triggered()) {
-	// deferred trigger
-	// TODO: forward the deferred trigger to the owning node if it's remote
-	Event t;
-	t.id = me.id();
-	t.gen = gen_triggered;
-	log_event.info() << "deferring event trigger: event=" << t << " wait_on=" << wait_on;
-	EventImpl::add_waiter(wait_on, new DeferredEventTrigger(this));
-	return;
-      }
-
-      log_event.spew("event triggered: event=" IDFMT "/%d by node %d", 
-		me.id(), gen_triggered, trigger_node);
 #ifdef EVENT_TRACING
       {
         EventTraceItem &item = Tracer<EventTraceItem>::trace_item();
@@ -842,65 +1220,125 @@ namespace Realm {
 #endif
 
       std::vector<EventWaiter *> to_wake;
-      {
-	AutoHSLLock a(mutex);
 
-        // SJT: there is at least one unavoidable case where we'll receive
-	//  duplicate trigger notifications, so if we see a triggering of
-	//  an older generation, just ignore it
-	if(gen_triggered <= generation) return;
+      if(gasnet_mynode() == owner) {
+	// we own this event
 
-	// in preparation for switching everybody over to trigger_current(), complain
-	//  LOUDLY if this wouldn't actually be a triggering of the current generation
-	if(gen_triggered != (generation + 1))
-	  log_event.error("HELP!  non-current event generation being triggered: " IDFMT "/%d vs %d",
-			  me.id(), gen_triggered, generation + 1);
+	NodeSet to_update;
+	bool free_event = false;
 
-        generation = gen_triggered;
+	{
+	  AutoHSLLock a(mutex);
 
-	// grab whole list of local waiters - we'll trigger them once we let go of the lock
-	//printf("[%d] LOCAL WAITERS: %zd\n", gasnet_mynode(), local_waiters.size());
-	to_wake.swap(local_waiters);
+	  // must always be the next generation
+	  assert(gen_triggered == (generation + 1));
 
-	// notify remote waiters and/or event's actual owner
-	if(owner == gasnet_mynode()) {
-	  // send notifications to every other node that has subscribed
-	  //  (except the one that triggered)
-          if (!remote_waiters.empty())
-          {
-	    Event triggered = me.convert<Event>();
-	    triggered.gen = gen_triggered;
-	    
-            NodeSet send_mask;
-            send_mask.swap(remote_waiters);
-	    EventTriggerMessage::broadcast_request(send_mask, triggered);
-          }
-	} else {
-	  if(((unsigned)trigger_node) == gasnet_mynode()) {
-	    // if we're not the owner, we just send to the owner and let him
-	    //  do the broadcast (assuming the trigger was local)
-	    //assert(remote_waiters == 0);
+	  to_wake.swap(current_local_waiters);
+	  assert(future_local_waiters.empty()); // no future waiters here
 
-	    Event triggered = me.convert<Event>();
-	    triggered.gen = gen_triggered;
-	    EventTriggerMessage::send_request(owner, triggered);
+	  to_update.swap(remote_waiters);
+
+	  // update poisoned generation list
+	  if(poisoned) {
+	    if(!poisoned_generations)
+	      poisoned_generations = new Event::gen_t[POISONED_GENERATION_LIMIT];
+	    assert(num_poisoned_generations < POISONED_GENERATION_LIMIT);
+	    poisoned_generations[num_poisoned_generations++] = gen_triggered;
 	  }
+
+	  // update generation last, with a synchronization to make sure poisoned generation
+	  // list is valid to any observer of this update
+	  __sync_synchronize();
+	  generation = gen_triggered;
+
+	  // we'll free the event unless it's maxed out on poisoned generations
+	  free_event = (num_poisoned_generations < POISONED_GENERATION_LIMIT);
+	}
+
+	// any remote nodes to notify?
+	if(!to_update.empty())
+	  EventUpdateMessage::broadcast_request(to_update, 
+						make_event(gen_triggered),
+						num_poisoned_generations,
+						poisoned_generations);
+
+	// free event?
+	if(free_event)
+	  get_runtime()->local_event_free_list->free_entry(this);
+      } else {
+	// we're triggering somebody else's event, so the first thing to do is tell them
+	assert(trigger_node == gasnet_mynode());
+	EventTriggerMessage::send_request(owner, make_event(gen_triggered), poisoned);
+
+	// we might need to subscribe to intermediate generations
+	bool subscribe_needed = false;
+	Event::gen_t previous_subscribe_gen = 0;
+
+	// now update our version of the data structure
+	{
+	  AutoHSLLock a(mutex);
+
+	  // is this the "next" version?
+	  if(gen_triggered == (generation + 1)) {
+	    // yes, so we have complete information and can update the state directly
+	    to_wake.swap(current_local_waiters);
+	    // any future waiters?
+	    if(!future_local_waiters.empty()) {
+	      std::map<Event::gen_t, std::vector<EventWaiter *> >::iterator it = future_local_waiters.begin();
+	      log_event.debug() << "future waiters non-empty: first=" << it->first << " (= " << (generation + 1) << "?)";
+	      if(it->first == (generation + 1)) {
+		current_local_waiters.swap(it->second);
+		future_local_waiters.erase(it);
+	      }
+	    }
+	    // if this event was poisoned, record it in the local triggers since we only
+	    //  update the official poison list on owner update messages
+	    if(poisoned) {
+	      local_triggers[gen_triggered] = true;
+	      has_local_triggers = true;
+	    }
+
+	    // update generation last, with a synchronization to make sure poisoned generation
+	    // list is valid to any observer of this update
+	    generation = gen_triggered;
+	    __sync_synchronize();
+	  } else {
+	    // we can't update the main state because there are generations that we know
+	    //  have triggered, but we do not know if they are poisoned, so look in the
+	    //  future waiter list to see who we can wake, and update the local trigger
+	    //  list
+
+	    // should be in the future, not the past
+	    assert(gen_triggered > (generation + 1));
+
+	    std::map<Event::gen_t, std::vector<EventWaiter *> >::iterator it = future_local_waiters.find(gen_triggered);
+	    if(it != future_local_waiters.end()) {
+	      to_wake.swap(it->second);
+	      future_local_waiters.erase(it);
+	    }
+
+	    local_triggers[gen_triggered] = poisoned;
+	    has_local_triggers = true;
+
+	    subscribe_needed = true;
+	    previous_subscribe_gen = gen_subscribed;
+	    gen_subscribed = gen_triggered;
+	  }
+
+	  if(subscribe_needed)
+	    EventSubscribeMessage::send_request(owner,
+						make_event(gen_triggered),
+						previous_subscribe_gen);
 	}
       }
 
-      // if this is one of our events, put ourselves on the free
-      //  list (we don't need our lock for this)
-      if(owner == gasnet_mynode()) {
-	get_runtime()->local_event_free_list->free_entry(this);
-      }
-
-      // now that we've let go of the lock, notify all the waiters who wanted
-      //  this event generation (or an older one)
-      {
+      // finally, trigger any local waiters
+      if(!to_wake.empty()) {
+	Event e = make_event(gen_triggered);
 	for(std::vector<EventWaiter *>::iterator it = to_wake.begin();
 	    it != to_wake.end();
 	    it++) {
-	  bool nuke = (*it)->event_triggered();
+	  bool nuke = (*it)->event_triggered(e, poisoned);
           if(nuke) {
             //printf("deleting: "); (*it)->print_info(); fflush(stdout);
             delete (*it);
@@ -1062,8 +1500,10 @@ static void *bytedup(const void *data, size_t datalen)
 	  free(data);
       }
 
-      virtual bool event_triggered(void)
+      virtual bool event_triggered(Event e, bool poisoned)
       {
+	// TODO: handle poison
+	assert(poisoned == POISON_FIXME);
 	log_barrier.info("deferred barrier arrival: " IDFMT "/%d (%llx), delta=%d",
 			 barrier.id, barrier.gen, barrier.timestamp, delta);
 	BarrierImpl *impl = get_runtime()->get_barrier_impl(barrier);
@@ -1071,10 +1511,10 @@ static void *bytedup(const void *data, size_t datalen)
         return true;
       }
 
-      virtual void print_info(FILE *f)
+      virtual void print(std::ostream& os) const
       {
-	fprintf(f,"deferred arrival: barrier=" IDFMT "/%d (%llx), delta=%d datalen=%zd\n",
-		barrier.id, barrier.gen, barrier.timestamp, delta, datalen);
+	os << "deferred arrival: barrier=" << barrier << " (" << barrier.timestamp << ")"
+	   << ", delta=" << delta << " datalen=" << datalen;
       }
 
     protected:
@@ -1149,9 +1589,7 @@ static void *bytedup(const void *data, size_t datalen)
     {
       if(!wait_on.has_triggered()) {
 	// deferred arrival
-	Barrier b = me.convert<Barrier>();
-	b.gen = barrier_gen;
-	b.timestamp = timestamp;
+	Barrier b = make_barrier(barrier_gen, timestamp);
 #ifndef DEFER_ARRIVALS_LOCALLY
         if(owner != gasnet_mynode()) {
 	  // let deferral happen on owner node (saves latency if wait_on event
@@ -1186,9 +1624,7 @@ static void *bytedup(const void *data, size_t datalen)
 
       if(owner != gasnet_mynode()) {
 	// all adjustments handled by owner node
-	Barrier b = me.convert<Barrier>();
-	b.gen = barrier_gen;
-	b.timestamp = timestamp;
+	Barrier b = make_barrier(barrier_gen, timestamp);
 	BarrierAdjustMessage::send_request(owner, b, delta, Event::NO_EVENT, reduce_value, reduce_value_size);
 	return;
       }
@@ -1314,10 +1750,11 @@ static void *bytedup(const void *data, size_t datalen)
 			 me.id(), trigger_gen);
 
 	// notify local waiters first
+	Barrier b = make_barrier(trigger_gen);
 	for(std::vector<EventWaiter *>::const_iterator it = local_notifications.begin();
 	    it != local_notifications.end();
 	    it++) {
-	  bool nuke = (*it)->event_triggered();
+	  bool nuke = (*it)->event_triggered(b, POISON_FIXME);
 	  if(nuke)
 	    delete (*it);
 	}
@@ -1344,8 +1781,10 @@ static void *bytedup(const void *data, size_t datalen)
 	free(final_values_copy);
     }
 
-    bool BarrierImpl::has_triggered(Event::gen_t needed_gen)
+    bool BarrierImpl::has_triggered(Event::gen_t needed_gen, bool& poisoned)
     {
+      poisoned = POISON_FIXME;
+
       // no need to take lock to check current generation
       if(needed_gen <= generation) return true;
 
@@ -1370,8 +1809,9 @@ static void *bytedup(const void *data, size_t datalen)
       return false;
     }
 
-    void BarrierImpl::external_wait(Event::gen_t needed_gen)
+    void BarrierImpl::external_wait(Event::gen_t needed_gen, bool& poisoned)
     {
+      poisoned = POISON_FIXME;
       assert(0);
     }
 
@@ -1403,7 +1843,8 @@ static void *bytedup(const void *data, size_t datalen)
       }
 
       if(trigger_now) {
-	bool nuke = waiter->event_triggered();
+	Barrier b = make_barrier(needed_gen);
+	bool nuke = waiter->event_triggered(b, POISON_FIXME);
 	if(nuke)
 	  delete waiter;
       }
@@ -1566,7 +2007,7 @@ static void *bytedup(const void *data, size_t datalen)
       for(std::vector<EventWaiter *>::const_iterator it = local_notifications.begin();
 	  it != local_notifications.end();
 	  it++) {
-	bool nuke = (*it)->event_triggered();
+	bool nuke = (*it)->event_triggered(b, POISON_FIXME);
 	if(nuke)
 	  delete (*it);
       }

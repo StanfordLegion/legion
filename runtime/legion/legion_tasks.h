@@ -105,6 +105,7 @@ namespace LegionRuntime {
       virtual bool unpack_task(Deserializer &derez, Processor current) = 0;
       virtual void perform_inlining(SingleTask *ctx, VariantImpl *variant) = 0;
     public:
+      virtual bool is_inline_task(void) const;
       virtual const std::vector<PhysicalRegion>& begin_inline_task(void);
       virtual void end_inline_task(const void *result, 
                                    size_t result_size, bool owned);
@@ -773,6 +774,7 @@ namespace LegionRuntime {
       virtual void find_enclosing_local_fields(
           LegionDeque<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::tracked &infos);
       virtual void perform_inlining(SingleTask *ctx, VariantImpl *variant);
+      virtual bool is_inline_task(void) const;
       virtual const std::vector<PhysicalRegion>& begin_inline_task(void);
       virtual void end_inline_task(const void *result, 
                                    size_t result_size, bool owned);
@@ -813,6 +815,8 @@ namespace LegionRuntime {
       friend class Internal;
       // Special field for the top level task
       bool top_level_task;
+      // Special field for inline tasks
+      bool is_inline;
     protected:
       // For detecting when we have remote subtasks
       bool has_remote_subtasks;
@@ -854,6 +858,7 @@ namespace LegionRuntime {
                                            const CompositeRef &ref);
       virtual VersionInfo& get_version_info(unsigned idx);
       virtual void recapture_version_info(unsigned idx);
+      virtual bool is_inline_task(void) const;
     public:
       virtual Event get_task_completion(void) const;
       virtual TaskKind get_task_kind(void) const;
@@ -1143,6 +1148,7 @@ namespace LegionRuntime {
       virtual bool pack_task(Serializer &rez, Processor target);
       virtual bool unpack_task(Deserializer &derez, Processor current);
       virtual void perform_inlining(SingleTask *ctx, VariantImpl *variant);
+      virtual bool is_inline_task(void) const;
       virtual const std::vector<PhysicalRegion>& begin_inline_task(void);
       virtual void end_inline_task(const void *result, 
                                    size_t result_size, bool owned);
