@@ -21,4 +21,5 @@ target_link_libraries(full_ghost ${EXTRA_LIBS} legion realm legion_mappers)
 target_include_directories(full_ghost
     PUBLIC "${CMAKE_SOURCE_DIR}/runtime"
    "${CMAKE_SOURCE_DIR}/runtime/legion"
-    "${CMAKE_SOURCE_DIR}/runtime/mappers")
+    "${CMAKE_SOURCE_DIR}/runtime/mappers"
+    "${CMAKE_SOURCE_DIR}/runtime/realm")

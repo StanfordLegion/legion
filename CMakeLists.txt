@@ -153,26 +153,6 @@ add_subdirectory(examples)
 option(BUILD_EXAMPLES "Build Legion examples" OFF)
 
 #------------------------------------------------------------------------------#
-# add the main library
-#------------------------------------------------------------------------------#
-#add_library(MathFunc ${CMAKE_CURRENT_BINARY_DIR}/Table.h)
- 
-#------------------------------------------------------------------------------#
-# Install
-#------------------------------------------------------------------------------#
-
-set ( PACKAGE_LIB_DESTINATION "${CMAKE_INSTALL_PREFIX}/lib")
-set ( PACKAGE_BIN_DESTINATION "${CMAKE_INSTALL_PREFIX}/bin")
-set ( PACKAGE_INCLUDE_DESTINATION "${CMAKE_INSTALL_PREFIX}/include")
-
-
-#install(TARGETS legion
-#  ARCHIVE DESTINATION ${PACKAGE_LIB_DESTINATION}
-#  LIBRARY DESTINATION ${PACKAGE_LIB_DESTINATION}
-#  RUNTIME DESTINATION ${PACKAGE_BIN_DESTINATION}
-#)
-
-#------------------------------------------------------------------------------#
 # vim: set tabstop=2 shiftwidth=2 expandtab :
 #------------------------------------------------------------------------------#
 

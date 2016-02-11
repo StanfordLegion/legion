@@ -18,4 +18,5 @@ add_executable(02_index_tasks index_tasks.cc)
 target_link_libraries(02_index_tasks ${EXTRA_LIBS} legion realm legion_mappers)
 target_include_directories(02_index_tasks PUBLIC
                            "${CMAKE_SOURCE_DIR}/runtime"
+                           "${CMAKE_SOURCE_DIR}/runtime/realm"
                            "${CMAKE_SOURCE_DIR}/runtime/legion")

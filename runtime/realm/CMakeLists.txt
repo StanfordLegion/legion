@@ -97,7 +97,8 @@ add_library(realm ${realm_cuda_SOURCES} ${realm_SOURCES})
 target_include_directories(realm
   PRIVATE
     ${CMAKE_SOURCE_DIR}/runtime
-    ${CMAKE_SOURCE_DIR}/runtime/legion)
+    ${CMAKE_SOURCE_DIR}/runtime/legion
+    ${CMAKE_SOURCE_DIR}/runtime/realm)
 
 set ( PACKAGE_LIB_DESTINATION "${CMAKE_INSTALL_PREFIX}/lib")
 set ( PACKAGE_BIN_DESTINATION "${CMAKE_INSTALL_PREFIX}/bin")

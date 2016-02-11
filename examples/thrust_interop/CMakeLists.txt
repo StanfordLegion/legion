@@ -25,4 +25,5 @@ target_link_libraries(thrust_interop ${EXTRA_LIBS} legion realm legion_mappers)
 target_include_directories(thrust_interop
     PUBLIC "${CMAKE_SOURCE_DIR}/runtime"
    "${CMAKE_SOURCE_DIR}/runtime/legion"
-    "${CMAKE_SOURCE_DIR}/runtime/mappers" )
+    "${CMAKE_SOURCE_DIR}/runtime/mappers" 
+    "${CMAKE_SOURCE_DIR}/runtime/realm")

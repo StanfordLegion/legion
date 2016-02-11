@@ -18,4 +18,5 @@ add_executable(07_partitioning partitioning.cc)
 target_link_libraries(07_partitioning ${EXTRA_LIBS} legion realm legion_mappers)
 target_include_directories(07_partitioning
     PUBLIC "${CMAKE_SOURCE_DIR}/runtime"
-   "${CMAKE_SOURCE_DIR}/runtime/legion")
+   "${CMAKE_SOURCE_DIR}/runtime/legion"
+    "${CMAKE_SOURCE_DIR}/runtime/realm")

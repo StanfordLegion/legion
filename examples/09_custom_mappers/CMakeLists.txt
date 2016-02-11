@@ -19,4 +19,5 @@ target_link_libraries(09_custom_mappers ${EXTRA_LIBS} legion realm legion_mapper
 target_include_directories(09_custom_mappers
     PUBLIC "${CMAKE_SOURCE_DIR}/runtime"
    "${CMAKE_SOURCE_DIR}/runtime/legion"
-    "${CMAKE_SOURCE_DIR}/runtime/mappers")
+    "${CMAKE_SOURCE_DIR}/runtime/mappers"
+    "${CMAKE_SOURCE_DIR}/runtime/realm")

@@ -18,4 +18,5 @@ add_executable(06_privileges privileges.cc)
 target_link_libraries(06_privileges ${EXTRA_LIBS} legion realm legion_mappers)
 target_include_directories(06_privileges
     PUBLIC "${CMAKE_SOURCE_DIR}/runtime"
-   "${CMAKE_SOURCE_DIR}/runtime/legion")
+   "${CMAKE_SOURCE_DIR}/runtime/legion"
+    "${CMAKE_SOURCE_DIR}/runtime/realm")

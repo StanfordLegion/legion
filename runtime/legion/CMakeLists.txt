@@ -13,7 +13,6 @@ set(legion_HEADERS
   legion_c_util.h
   legion_config.h
   legion_instances.h
-  legion_logging.h
   legion_ops.h
   legion_profiling.h
   legion_spy.h
@@ -39,6 +38,7 @@ set(legion_SOURCES
   legion_tasks.cc
   legion_trace.cc
   legion_views.cc
+  legion_constraint.cc
   region_tree.cc
   runtime.cc
 )
@@ -48,7 +48,8 @@ target_include_directories(legion
   PRIVATE
     ${CMAKE_SOURCE_DIR}/runtime
     ${CMAKE_SOURCE_DIR}/runtime/legion
-    ${CMAKE_SOURCE_DIR}/runtime/mappers)
+    ${CMAKE_SOURCE_DIR}/runtime/mappers
+    ${CMAKE_SOURCE_DIR}/runtime/realm)
 
 
 set ( PACKAGE_LIB_DESTINATION "${CMAKE_INSTALL_PREFIX}/lib")

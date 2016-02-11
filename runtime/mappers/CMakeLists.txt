@@ -17,7 +17,8 @@ add_library(legion_mappers ${mappers_SOURCES})
 target_include_directories(legion_mappers
   PRIVATE
     ${CMAKE_SOURCE_DIR}/runtime
-    ${CMAKE_SOURCE_DIR}/runtime/legion)
+    ${CMAKE_SOURCE_DIR}/runtime/legion
+    ${CMAKE_SOURCE_DIR}/runtime/realm)
 
 set ( PACKAGE_LIB_DESTINATION "${CMAKE_INSTALL_PREFIX}/lib")
 set ( PACKAGE_BIN_DESTINATION "${CMAKE_INSTALL_PREFIX}/bin")
