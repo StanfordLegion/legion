@@ -29,6 +29,7 @@
 // ******************** IMPORTANT **************************
 
 #include "legion_config.h"
+#include "lowlevel_config.h"
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -1518,6 +1519,12 @@ extern "C" {
   legion_future_get_result_uint64(legion_future_t handle);
 
   /**
+   * @see LegionRuntime::HighLevel::Future::get_untyped_pointer()
+   */
+  void
+  legion_future_get_result_bytes(legion_future_t handle_, void *buffer, size_t size);
+
+  /**
    * @see LegionRuntime::HighLevel::Future::is_empty()
    */
   bool
@@ -2593,6 +2600,33 @@ extern "C" {
     legion_task_config_options_t options,
     const char *task_name /* = NULL*/,
     legion_task_pointer_uint64_t task_pointer);
+
+  /**
+   * @see LegionRuntime::HighLevel::Runtime::preregister_task_variant()
+   */
+  legion_task_id_t
+  legion_runtime_register_task_variant_fnptr(
+    legion_runtime_t runtime,
+    legion_task_id_t id,
+    legion_processor_kind_t proc_kind,
+    legion_task_config_options_t options,
+    const char *task_name,
+    const void *userdata,
+    size_t userlen,
+    legion_task_pointer_wrapped_t wrapped_task_pointer);
+
+  /**
+   * @see LegionRuntime::HighLevel::Runtime::preregister_task_variant()
+   */
+  legion_task_id_t
+  legion_runtime_preregister_task_variant_fnptr(
+    legion_task_id_t id,
+    legion_processor_kind_t proc_kind,
+    legion_task_config_options_t options,
+    const char *task_name,
+    const void *userdata,
+    size_t userlen,
+    legion_task_pointer_wrapped_t wrapped_task_pointer);
 
   /**
    * @see LegionRuntime::LegionTaskWrapper::legion_task_preamble()
