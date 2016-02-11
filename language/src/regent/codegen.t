@@ -3015,17 +3015,27 @@ function codegen.expr_region(cx, node)
        end)]
     [fs_naming_actions];
     var [lr] = c.legion_logical_region_create([cx.runtime], [cx.context], [is], [fs])
-    var il = c.legion_inline_launcher_create_logical_region(
-      [lr], c.READ_WRITE, c.EXCLUSIVE, [lr], 0, false, 0, 0);
-    [field_ids:map(
-       function(field_id)
-         return `(c.legion_inline_launcher_add_field(il, [field_id], true))
-       end)]
-    var [pr] = c.legion_inline_launcher_execute([cx.runtime], [cx.context], il)
-    c.legion_inline_launcher_destroy(il)
-    c.legion_physical_region_wait_until_valid([pr])
-    [pr_actions]
     var [r] = [region_type]{ impl = [lr] }
+  end
+  if not cx.task_meta:get_config_options().inner then
+    actions = quote
+      [actions];
+      var il = c.legion_inline_launcher_create_logical_region(
+        [lr], c.READ_WRITE, c.EXCLUSIVE, [lr], 0, false, 0, 0);
+      [field_ids:map(
+         function(field_id)
+           return `(c.legion_inline_launcher_add_field(il, [field_id], true))
+         end)]
+      var [pr] = c.legion_inline_launcher_execute([cx.runtime], [cx.context], il)
+      c.legion_inline_launcher_destroy(il)
+      c.legion_physical_region_wait_until_valid([pr])
+      [pr_actions]
+    end
+  else -- make sure all regions are unmapped in inner tasks
+    actions = quote
+      [actions];
+      c.legion_runtime_unmap_all_regions([cx.runtime], [cx.context])
+    end
   end
 
   return values.value(expr.just(actions, r), region_type)

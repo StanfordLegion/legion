@@ -81,6 +81,8 @@ local function analyze_inner_node(cx)
       node:is(ast.typed.expr.Deref)
     then
       return not std.is_bounded_type(std.as_read(node.value.expr_type))
+    elseif node:is(ast.typed.expr.IndexAccess) then
+      return not std.is_region(std.as_read(node.value.expr_type))
     elseif node:is(ast.typed.expr.RawPhysical) or
       node:is(ast.typed.stat.MapRegions)
     then
