@@ -1411,27 +1411,42 @@ namespace LegionRuntime {
     /**
      * \struct TaskGeneratorRegistrar
      * The TaskGeneratorRegistrar records the arguments for registering
-     * a new task generator function with the runtime. The application
-     * must specify a unique generator ID to associate with the generator
-     * function pointer. The application must also explicitly state the
-     * application TaskIDs for which this generator is available in the
-     * 'valid_tasks' vector. This vector cannot be empty.  All other 
-     * arguments are optional and can be filled in at the application's
-     * discretion.
+     * a new task generator function for a specific task_id with the runtime. 
+     * The application must specify a unique generator ID to associate with 
+     * the generator function pointer for the particular task ID, but the
+     * same generator function pointer can be registered for multiple
+     * task IDs as long as the generator IDs are all different. The 
+     * application can also provide optional constraints on the kinds of
+     * task variants the generator can emit. All other arguments are optional 
+     * and can be filled in at the application's discretion.
      */
     struct TaskGeneratorRegistrar {
     public:
       TaskGeneratorRegistrar(void);
-      TaskGeneratorRegistrar(GeneratorID id, GeneratorFnptr fn,
+      TaskGeneratorRegistrar(GeneratorID id, TaskID task_id, GeneratorFnptr fn,
                              const void *udata = NULL, size_t udata_size = 0,
                              const char *name = NULL);
-    public:
-      TaskGeneratorRegistrar& add_valid_task(TaskID task_id);
+    public: // Add execution constraints
+      inline TaskGeneratorRegistrar& 
+        add_constraint(const ISAConstraint &constraint);
+      inline TaskGeneratorRegistrar&
+        add_constraint(const ProcessorConstraint &constraint);
+      inline TaskGeneratorRegistrar& 
+        add_constraint(const ResourceConstraint &constraint);
+      inline TaskGeneratorRegistrar&
+        add_constraint(const LaunchConstraint &constraint);
+      inline TaskGeneratorRegistrar&
+        add_constraint(const ColocationConstraint &constraint);
+    public: // Add layout constraint sets
+      inline TaskGeneratorRegistrar&
+        add_layout_constraint_set(unsigned index, LayoutConstraintID desc);
     public:
       GeneratorID                       generator_id;
+      TaskID                            task_id;
       GeneratorFnptr                    generator;
-    public:
-      std::vector<TaskID>               valid_tasks;
+    public: // constraints
+      ExecutionConstraintSet            execution_constraints;
+      TaskLayoutConstraintSet           layout_constraints;
     public:
       const void*                       user_data;
       size_t                            user_data_size;
