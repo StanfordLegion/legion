@@ -468,7 +468,7 @@ namespace Legion {
       increment_total_outstanding_requests();
       ProfilingInfo info(LEGION_PROF_TASK); 
       info.id = tid;
-      info.op_id = task->get_unique_task_id();
+      info.op_id = task->get_unique_id();
       Realm::ProfilingRequest &req = requests.add_request((target_proc.exists())
                         ? target_proc : Processor::get_executing_processor(),
                         HLR_LEGION_PROFILING_ID, &info, sizeof(info));

@@ -53,7 +53,10 @@ namespace Legion {
       bool is_remote(void) const;
       inline bool is_stolen(void) const { return (steal_count > 0); }
       inline bool is_locally_mapped(void) const { return map_locally; }
+    public:
+      void set_current_proc(Processor current);
       inline void set_locally_mapped(bool local) { map_locally = local; }
+      inline void set_target_proc(Processor next) { target_proc = next; }
     protected:
       void activate_task(void);
       void deactivate_task(void);
@@ -67,6 +70,8 @@ namespace Legion {
                                 Processor::TaskFuncID tid);
       void check_empty_field_requirements(void);
       size_t check_future_size(FutureImpl *impl);
+    public:
+      bool select_task_options(void);
     public:
       virtual void activate(void) = 0;
       virtual void deactivate(void) = 0;
@@ -215,7 +220,6 @@ namespace Legion {
     protected:
       AllocManager *arg_manager;
     protected:
-      Processor     next_proc;
       MapperManager *mapper;
     public:
       // Static methods

@@ -1077,8 +1077,8 @@ namespace Legion {
         trigger_on_unmap = false;
         termination_event.trigger();
       }
-      if (reference.has_ref())
-        reference.remove_valid_reference(PHYSICAL_REGION_REF);
+      if (!references.empty())
+        references.remove_valid_references(PHYSICAL_REGION_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -1104,17 +1104,20 @@ namespace Legion {
       if (!ready_event.has_triggered())
         ready_event.wait();
       // Now wait for the reference to be ready
-      Event ref_ready = reference.get_ready_event();
+      
+      std::set<Event> wait_on;
+      references.update_wait_on_events(wait_on);
+      Event ref_ready = Runtime::merge_events(wait_on);
       if (!ref_ready.has_triggered())
       {
         // If we need a lock for this instance taken it
         // once the reference event is ready, we can also issue
         // the unlock operations contingent upon the termination 
         // event having triggered
-        if (reference.has_required_locks())
+        if (references.has_required_locks())
         {
           std::map<Reservation,bool> required_locks;
-          reference.update_atomic_locks(required_locks, true/*exclusive*/);
+          references.update_atomic_locks(required_locks, true/*exclusive*/);
           Event locked_event = ref_ready;
           for (std::map<Reservation,bool>::const_iterator it = 
                 required_locks.begin(); it != required_locks.end(); it++)
@@ -1136,8 +1139,14 @@ namespace Legion {
     {
       if (valid)
         return true;
-      return (mapped && ready_event.has_triggered() && 
-              reference.get_ready_event().has_triggered());
+      if (mapped && ready_event.has_triggered())
+      {
+        std::set<Event> wait_on;
+        references.update_wait_on_events(wait_on);
+        Event ref_ready = Runtime::merge_events(wait_on);
+        return ref_ready.has_triggered();
+      }
+      return false;
     }
 
     //--------------------------------------------------------------------------
@@ -1173,10 +1182,24 @@ namespace Legion {
       }
       // Wait until we are valid before returning the accessor
       wait_until_valid();
+      // You can only legally invoke this method when you have one instance
+      if (references.size() > 1)
+      {
+        log_run.error("Illegal invocation of deprecated 'get_accessor' method "
+                      "in task %s (ID %lld) on a PhysicalRegion containing "
+                      "multiple internal instances. Use of this deprecated "
+                      "method is only supported if the PhysicalRegion contains "
+                      "a single physical instance.", context->get_task_name(),
+                      context->get_unique_id());
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_DEPRECATED_METHOD_USE);
+      }
 #if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS)
       LegionRuntime::Accessor::RegionAccessor<
         LegionRuntime::Accessor::AccessorType::Generic>
-          result = reference.get_accessor();
+          result = references[0].get_accessor();
       result.set_region_untyped(this);
 #ifdef PRIVILEGE_CHECKS
       result.set_privileges_untyped(
@@ -1184,7 +1207,7 @@ namespace Legion {
 #endif
       return result;
 #else // privilege or bounds checks
-      return reference.get_accessor();
+      return references[0].get_accessor();
 #endif
     }
 
@@ -1219,7 +1242,7 @@ namespace Legion {
 #if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS)
       LegionRuntime::Accessor::RegionAccessor<
         LegionRuntime::Accessor::AccessorType::Generic>
-          result = reference.get_field_accessor(fid);
+          result = references.get_field_accessor(runtime->forest, fid);
       result.set_region_untyped(this);
 #ifdef PRIVILEGE_CHECKS
       result.set_privileges_untyped(
@@ -1227,7 +1250,7 @@ namespace Legion {
 #endif
       return result;
 #else // privilege or bounds checks
-      return reference.get_field_accessor(fid);
+      return references.get_field_accessor(runtime->forest, fid);
 #endif
     } 
 
@@ -1241,8 +1264,10 @@ namespace Legion {
       {
         trigger_on_unmap = false;
         // Can only do the trigger when we have actually ready
-        Event ref_ready = reference.get_ready_event();
-        termination_event.trigger(Event::merge_events(ready_event,ref_ready));
+        std::set<Event> wait_on;
+        references.update_wait_on_events(wait_on);
+        wait_on.insert(ready_event);
+        termination_event.trigger(Runtime::merge_events(wait_on));
       }
       valid = false;
       mapped = false;
@@ -1271,26 +1296,25 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
-      assert(!reference.has_ref());
+      assert(ref.has_ref());
 #endif
-      reference = ref;
-      if (reference.has_ref())
-        reference.add_valid_reference(PHYSICAL_REGION_REF);
+      references.add_instance(ref);
+      ref.add_valid_reference(PHYSICAL_REGION_REF);
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalRegionImpl::reset_reference(const InstanceRef &ref,
+    void PhysicalRegionImpl::reset_references(const InstanceSet &refs,
                                                UserEvent term_event)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
       assert(mapped);
 #endif
-      if (reference.has_ref())
-        reference.remove_valid_reference(PHYSICAL_REGION_REF);
-      reference = ref;
-      if (reference.has_ref())
-        reference.add_valid_reference(PHYSICAL_REGION_REF);
+      if (!references.empty())
+        references.remove_valid_references(PHYSICAL_REGION_REF);
+      references = refs;
+      if (!references.empty())
+        references.add_valid_references(PHYSICAL_REGION_REF);
       termination_event = term_event;
       trigger_on_unmap = true;
     }
@@ -1303,32 +1327,27 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const InstanceRef& PhysicalRegionImpl::get_reference(void) const
+    void PhysicalRegionImpl::get_references(InstanceSet &instances) const
     //--------------------------------------------------------------------------
     {
-      return reference;
+      instances = references;
     }
 
     //--------------------------------------------------------------------------
     void PhysicalRegionImpl::get_memories(std::set<Memory>& memories) const
     //--------------------------------------------------------------------------
     {
-      memories.insert(reference.get_memory());
+      for (unsigned idx = 0; idx < references.size(); idx++)
+        memories.insert(references[idx].get_memory());
     }
 
     //--------------------------------------------------------------------------
     void PhysicalRegionImpl::get_fields(std::vector<FieldID>& fields) const
     //--------------------------------------------------------------------------
     {
-      const PhysicalManager* manager = reference.get_manager();
-      if (manager->is_reduction_manager())
-        // if the instance is a reduction instance,
-        // just extract the list of fields from the region requirement
-        fields.insert(fields.end(), req.instance_fields.begin(),
-            req.instance_fields.end());
-      else
-        // otherwise, read the list from the layout description
-        manager->as_instance_manager()->layout->get_fields(fields);
+      // Just get these from the region requirement
+      fields.insert(fields.end(), req.privilege_fields.begin(),
+                    req.privilege_fields.end());
     }
 
 
@@ -1337,7 +1356,7 @@ namespace Legion {
     const char* PhysicalRegionImpl::get_task_name(void) const
     //--------------------------------------------------------------------------
     {
-      return context->variants->name;
+      return context->get_task_name();
     }
 #endif
 
@@ -1708,7 +1727,7 @@ namespace Legion {
     {
       // This call is frequently called from application tasks that are
       // launching sub-tasks and therefore can never block on an acquire
-      Event precondtion = Event::NO_EVENT;
+      Event precondition = Event::NO_EVENT;
       if (need_lock)
         precondition = mapper_lock.acquire(1,false/*exclusive*/);
       if (precondition.has_triggered())
@@ -1860,10 +1879,10 @@ namespace Legion {
               mapper_tasks.push_back(*it);
           }
         }
-        Mapper::StealRequest output;
+        Mapper::StealRequestOutput output;
         // Ask the mapper what it wants to allow be stolen
         if (!mapper_tasks.empty())
-          mapper->invoke_permit_task_steal(&input, &output);
+          mapper->invoke_permit_steal_request(&input, &output);
         std::deque<TaskOp*> temp_stolen;
         const std::set<const Task*> &to_steal = output.stolen_tasks;
         if (!to_steal.empty())
@@ -1911,7 +1930,7 @@ namespace Legion {
           if (temp_stolen[idx]->prepare_steal())
           {
             // Mark this as stolen and update the target processor
-            temp_stolen[idx]->mark_stolen(thief);
+            temp_stolen[idx]->mark_stolen();
             stolen.insert(temp_stolen[idx]);
             successful_steal = true;
             temp_stolen[idx]->deactivate_outstanding_task();
@@ -1920,7 +1939,6 @@ namespace Legion {
           {
             // Always set this before putting anything on
             // the ready queue
-            temp_stolen[idx]->schedule = false;
             ContextID ctx_id = temp_stolen[idx]->get_parent()->get_context_id();
             AutoLock q_lock(queue_lock);
             ContextState &state = context_states[ctx_id];
@@ -1944,9 +1962,8 @@ namespace Legion {
               it != stolen.end(); it++)
         {
           log_task.debug("task %s (ID %lld) stolen from processor " IDFMT
-                               " by processor " IDFMT "", (*it)->variants->name,
-                               (*it)->get_unique_task_id(), local_proc.id,
-                               thief.id);
+                         " by processor " IDFMT "", (*it)->get_task_name(), 
+                         (*it)->get_unique_id(), local_proc.id, thief.id);
         }
 #endif
         runtime->send_tasks(thief, stolen);
@@ -1983,8 +2000,6 @@ namespace Legion {
 #ifdef DEBUG_HIGH_LEVEL
       assert(task != NULL);
 #endif
-      // always set this before putting something on the ready queue
-      task->schedule = false; 
       // have to do this when we are not holding the lock
       task->activate_outstanding_task();
       // We can do this without holding the lock because the
@@ -2168,7 +2183,6 @@ namespace Legion {
           gen_it = visible_generations.begin();
           AutoLock q_lock(queue_lock);
           std::list<TaskOp*> &rqueue = ready_queues[map_id];
-          unsigned gen_idx = 0;
           for (std::list<const Task*>::iterator vis_it = visible_tasks.begin(); 
                 vis_it != visible_tasks.end(); gen_it++)
           {
@@ -2218,13 +2232,14 @@ namespace Legion {
         for (std::list<const Task*>::iterator vis_it = visible_tasks.begin();
               vis_it != visible_tasks.end(); vis_it++)
         {
-          Task *task = static_cast<TaskOp*>(const_cast<Task*>(*vis_it));
+          TaskOp *task = static_cast<TaskOp*>(const_cast<Task*>(*vis_it));
           // Update the target processor for this task if necessary
           std::map<const Task*,Processor>::const_iterator finder = 
             output.relocate_tasks.find(*vis_it);
           Event wait_on = Event::NO_EVENT;
-          if (finder != output.relocate_tasks.end())
-            task->target_proc = finder->second;
+          const bool send_remotely = (finder != output.relocate_tasks.end());
+          if (send_remotely)
+            task->set_target_proc(finder->second);
           else // if we're not sending it somewhere, invoke the state analysis
             wait_on = task->invoke_state_analysis();
           task->deactivate_outstanding_task();
@@ -2234,10 +2249,10 @@ namespace Legion {
           // how far they get ahead.  We give a slight edge in priority
           // to tasks being sent remotely to get them in flight.
           // Give priority to things which are getting sent remotely
-          args.op = *vis_it;
-          int priority = ((*vis_it)->target_proc != local_proc) ? 2 : 1;
+          args.op = task;
+          int priority = (send_remotely ? 2 : 1);
           runtime->issue_runtime_meta_task(&args, sizeof(args),
-                                           HLR_TRIGGER_TASK_ID, *vis_it,
+                                           HLR_TRIGGER_TASK_ID, task,
                                            wait_on, priority);
         }
       }
@@ -3743,7 +3758,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    VariantImpl* TaskImpl::find_variant_impl(VariantID variant_id)
+    VariantImpl* TaskImpl::find_variant_impl(VariantID variant_id,bool can_fail)
     //--------------------------------------------------------------------------
     {
       // See if we already have the variant
@@ -3759,6 +3774,8 @@ namespace Legion {
         VariantImpl::get_owner_space(variant_id, runtime); 
       if (owner_space == runtime->address_space)
       {
+        if (can_fail)
+          return NULL;
         log_run.error("Unable to find variant %ld of task %s!",
                       variant_id, get_name(false));
 #ifdef DEBUG_HIGH_LEVEL
@@ -3774,6 +3791,7 @@ namespace Legion {
         rez.serialize(task_id);
         rez.serialize(variant_id);
         rez.serialize(wait_on);
+        rez.serialize(can_fail);
         runtime->send_variant_request(owner_space, rez);
       }
       // Wait for the results
@@ -3782,6 +3800,8 @@ namespace Legion {
       AutoLock t_lock(task_lock,1,false/*exclusive*/);
       std::map<VariantID,VariantImpl*>::const_iterator finder = 
         variants.find(variant_id);
+      if (can_fail && (finder == variants.end()))
+        return NULL;
 #ifdef DEBUG_HIGH_LEVEL
       assert(finder != variants.end());
 #endif
@@ -4104,9 +4124,15 @@ namespace Legion {
       derez.deserialize(variant_id);
       UserEvent done_event;
       derez.deserialize(done_event);
+      bool can_fail;
+      derez.deserialize(can_fail);
       TaskImpl *task_impl = runtime->find_task_impl(task_id);
-      VariantImpl *var_impl = task_impl->find_variant_impl(variant_id);
-      var_impl->send_variant_response(source, done_event);
+      VariantImpl *var_impl = task_impl->find_variant_impl(variant_id,can_fail);
+      // If we can fail and there is no variant, just trigger the event
+      if (can_fail && (var_impl == NULL))
+        done_event.trigger();
+      else
+        var_impl->send_variant_response(source, done_event);
     }
 
     /////////////////////////////////////////////////////////////
@@ -4681,7 +4707,7 @@ namespace Legion {
 				    all_procs.size()-1);
         proc_managers[*it] = manager;
         Mapper *mapper = new Mapping::DefaultMapper(machine, external, *it);
-        MapperManager *wrapper = wrap_mapper(mapper);
+        MapperManager *wrapper = wrap_mapper(this, mapper);
         manager->add_mapper(0, wrapper, false/*check*/, true/*owns*/); 
       }
       // Initialize the message manager array so that we can construct
@@ -5253,19 +5279,16 @@ namespace Legion {
       // Set up the input arguments
       top_task->arglen = sizeof(InputArgs);
       top_task->args = malloc(top_task->arglen);
-      top_task->depth = 0;
       memcpy(top_task->args,&Runtime::get_input_args(),top_task->arglen);
-#ifdef DEBUG_HIGH_LEVEL
-      assert(proc_managers.find(target) != proc_managers.end());
-#endif
-      proc_managers[target]->invoke_mapper_set_task_options(top_task);
-      invoke_mapper_configure_context(target, top_task);
+      // Set this to be the current processor
+      top_task->set_current_proc(target);
+      top_task->select_task_options();
       if (legion_spy_enabled)
       {
         Runtime::log_machine(machine);
         LegionSpy::log_top_level_task(Runtime::legion_main_id,
-                                      top_task->get_unique_task_id(),
-                                      top_task->variants->name);
+                                      top_task->get_unique_id(),
+                                      top_task->get_task_name());
       }
       increment_outstanding_top_level_tasks();
       // Put the task in the ready queue
@@ -5287,12 +5310,8 @@ namespace Legion {
       TaskLauncher launcher(tid, arg, Predicate::TRUE_PRED, map_id);
       Future f = mapper_task->initialize_task(map_context, launcher, 
                                    false/*check priv*/, false/*track parent*/);
-      mapper_task->depth = 0;
-#ifdef DEBUG_HIGH_LEVEL
-      assert(proc_managers.find(proc) != proc_managers.end());
-#endif
-      proc_managers[proc]->invoke_mapper_set_task_options(mapper_task);
-      invoke_mapper_configure_context(proc, mapper_task);
+      mapper_task->set_current_proc(proc);
+      mapper_task->select_task_options();
       // Create a temporary event to name the result since we 
       // have to pack it in the task that runs, but it also depends
       // on the task being reported back to the mapper
@@ -5320,6 +5339,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::process_mapper_task_result(const MapperTaskArgs *args)
+    //--------------------------------------------------------------------------
+    {
+      MapperManager *mapper = find_mapper(args->proc, args->map_id);
+      Mapper::MapperTaskResult result;
+      result.mapper_event = args->event;
+      result.result = args->future->get_untyped_result();
+      result.result_size = args->future->get_untyped_size();
+      mapper->invoke_handle_task_result(&result);
+    }
+
+    //--------------------------------------------------------------------------
     IndexSpace Runtime::create_index_space(Context ctx, size_t max_num_elmts)
     //--------------------------------------------------------------------------
     {
@@ -5333,13 +5364,13 @@ namespace Legion {
       }
       log_index.debug("Creating index space %x in task %s "
                             "(ID %lld) with %ld maximum elements", handle.id, 
-                            ctx->variants->name, ctx->get_unique_task_id(), 
+                            ctx->get_task_name(), ctx->get_unique_id(), 
                             max_num_elmts); 
       if (ctx->is_leaf())
       {
         log_task.error("Illegal index space creation performed in "
                              "leaf task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
+                             ctx->get_task_name(), ctx->get_unique_id());
         assert(false);
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
@@ -5372,13 +5403,13 @@ namespace Legion {
       }
       log_index.debug("Creating dummy index space %x in task %s "
                             "(ID %lld) for domain", 
-                            handle.id, ctx->variants->name,
-                            ctx->get_unique_task_id());
+                            handle.id, ctx->get_task_name(),
+                            ctx->get_unique_id());
       if (ctx->is_leaf())
       {
         log_task.error("Illegal index space creation performed in "
                              "leaf task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
+                             ctx->get_task_name(), ctx->get_unique_id());
         assert(false);
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
@@ -5411,7 +5442,7 @@ namespace Legion {
       {
         log_task.error("Illegal index space creation performed in "
                              "leaf task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
+                             ctx->get_task_name(), ctx->get_unique_id());
         assert(false);
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
@@ -5420,7 +5451,7 @@ namespace Legion {
         log_index.error("Create index space with multiple domains "
                               "must be created with domains for non-zero "
                               "dimension in task %s (ID %lld)",
-                              ctx->variants->name, ctx->get_unique_task_id());
+                              ctx->get_task_name(), ctx->get_unique_id());
         assert(false);
         exit(ERROR_DOMAIN_DIM_MISMATCH);
       }
@@ -5433,7 +5464,7 @@ namespace Legion {
           log_index.error("A set of domains passed to create_index_space "
                                 "must all have the same dimensions in task "
                                 "%s (ID %lld)",
-                                ctx->variants->name, ctx->get_unique_task_id());
+                                ctx->get_task_name(), ctx->get_unique_id());
           assert(false);
           exit(ERROR_DOMAIN_DIM_MISMATCH);
         }
@@ -5483,8 +5514,8 @@ namespace Legion {
 #ifdef DEBUG_HIGH_LEVEL
       log_index.debug("Creating dummy index space %x in task %s "
                             "(ID %lld) for domain", 
-                            handle.id, ctx->variants->name,
-                            ctx->get_unique_task_id());
+                            handle.id, ctx->get_task_name(),
+                            ctx->get_unique_id());
 #endif
       if (legion_spy_enabled)
         LegionSpy::log_top_index_space(handle.id);
@@ -5510,13 +5541,13 @@ namespace Legion {
       }
       log_index.debug("Destroying index space %x in task %s "
                              "(ID %lld)", 
-                      handle.id, ctx->variants->name, 
-                      ctx->get_unique_task_id());
+                      handle.id, ctx->get_task_name(), 
+                      ctx->get_unique_id());
       if (ctx->is_leaf())
       {
         log_task.error("Illegal index space deletion performed in leaf "
                              "task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
+                             ctx->get_task_name(), ctx->get_unique_id());
         assert(false);
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
@@ -5562,12 +5593,12 @@ namespace Legion {
       log_index.debug("Creating index partition %d with parent index "
                             "space %x in task %s (ID %lld)", 
                             pid.id, parent.id,
-                            ctx->variants->name, ctx->get_unique_task_id());
+                            ctx->get_task_name(), ctx->get_unique_id());
       if (ctx->is_leaf())
       {
         log_task.error("Illegal index partition creation performed in "
                              "leaf task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
+                             ctx->get_task_name(), ctx->get_unique_id());
         assert(false);
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
@@ -5629,12 +5660,12 @@ namespace Legion {
       log_index.debug("Creating index partition %d with parent index "
                             "space %x in task %s (ID %lld)", 
                             pid.id, parent.id,
-                            ctx->variants->name, ctx->get_unique_task_id());
+                            ctx->get_task_name(), ctx->get_unique_id());
       if (ctx->is_leaf())
       {
         log_task.error("Illegal index partition creation performed in "
                              "leaf task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
+                             ctx->get_task_name(), ctx->get_unique_id());
         assert(false);
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
@@ -5644,7 +5675,7 @@ namespace Legion {
         log_run.error("Attempt to create index partition with no "
                             "colors in task %s (ID %lld). Index partitions "
                             "must have at least one color.",
-                            ctx->variants->name, ctx->get_unique_task_id());
+                            ctx->get_task_name(), ctx->get_unique_id());
 #ifdef DEBUG_HIGH_LEVEL
         assert(false);
 #endif
@@ -5769,12 +5800,12 @@ namespace Legion {
       log_index.debug("Creating index partition %d with parent index "
                             "space %x in task %s (ID %lld)", 
                             pid.id, parent.id,
-                            ctx->variants->name, ctx->get_unique_task_id());
+                            ctx->get_task_name(), ctx->get_unique_id());
       if (ctx->is_leaf())
       {
         log_task.error("Illegal index partition creation performed in "
                              "leaf task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
+                             ctx->get_task_name(), ctx->get_unique_id());
         assert(false);
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
@@ -5810,12 +5841,12 @@ namespace Legion {
       log_index.debug("Creating index partition %d with parent index "
                             "space %x in task %s (ID %lld)", 
                             pid.id, parent.id,
-                            ctx->variants->name, ctx->get_unique_task_id());
+                            ctx->get_task_name(), ctx->get_unique_id());
       if (ctx->is_leaf())
       {
         log_task.error("Illegal index partition creation performed in "
                              "leaf task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
+                             ctx->get_task_name(), ctx->get_unique_id());
         assert(false);
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
@@ -5825,7 +5856,7 @@ namespace Legion {
         log_run.error("Attempt to create index partition with no "
                             "colors in task %s (ID %lld). Index partitions "
                             "must have at least one color.",
-                            ctx->variants->name, ctx->get_unique_task_id());
+                            ctx->get_task_name(), ctx->get_unique_id());
 #ifdef DEBUG_HIGH_LEVEL
         assert(false);
 #endif
@@ -5871,12 +5902,12 @@ namespace Legion {
       log_index.debug("Creating index partition %d with parent index "
                             "space %x in task %s (ID %lld)", 
                             pid.id, parent.id,
-                            ctx->variants->name, ctx->get_unique_task_id());
+                            ctx->get_task_name(), ctx->get_unique_id());
       if (ctx->is_leaf())
       {
         log_task.error("Illegal index partition creation performed in "
                              "leaf task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
+                             ctx->get_task_name(), ctx->get_unique_id());
         assert(false);
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
@@ -5922,12 +5953,12 @@ namespace Legion {
       log_index.debug("Creating index partition %d with parent index "
                             "space %x in task %s (ID %lld)", 
                             pid.id, parent.id,
-                            ctx->variants->name, ctx->get_unique_task_id());
+                            ctx->get_task_name(), ctx->get_unique_id());
       if (ctx->is_leaf())
       {
         log_task.error("Illegal index partition creation performed in "
                              "leaf task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
+                             ctx->get_task_name(), ctx->get_unique_id());
         assert(false);
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
@@ -5937,7 +5968,7 @@ namespace Legion {
         log_run.error("Attempt to create index partition with no "
                             "colors in task %s (ID %lld). Index partitions "
                             "must have at least one color.",
-                            ctx->variants->name, ctx->get_unique_task_id());
+                            ctx->get_task_name(), ctx->get_unique_id());
 #ifdef DEBUG_HIGH_LEVEL
         assert(false);
 #endif
@@ -5988,12 +6019,12 @@ namespace Legion {
       log_index.debug("Creating index partition %d with parent index "
                             "space %x in task %s (ID %lld)", 
                             pid.id, parent.id,
-                            ctx->variants->name, ctx->get_unique_task_id());
+                            ctx->get_task_name(), ctx->get_unique_id());
       if (ctx->is_leaf())
       {
         log_task.error("Illegal index partition creation performed in "
                              "leaf task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
+                             ctx->get_task_name(), ctx->get_unique_id());
         assert(false);
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
@@ -6099,12 +6130,12 @@ namespace Legion {
       }
       log_index.debug("Destroying index partition %x in task %s "
                              "(ID %lld)", 
-                    handle.id, ctx->variants->name, ctx->get_unique_task_id());
+                    handle.id, ctx->get_task_name(), ctx->get_unique_id());
       if (ctx->is_leaf())
       {
         log_task.error("Illegal index partition deletion performed in "
                              "leaf task %s (ID %lld)",
-                              ctx->variants->name, ctx->get_unique_task_id());
+                              ctx->get_task_name(), ctx->get_unique_id());
         assert(false);
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
@@ -6407,12 +6438,12 @@ namespace Legion {
       log_index.debug("Creating equal partition %d with parent index "
                             "space %x in task %s (ID %lld)", 
                             pid.id, parent.id,
-                            ctx->variants->name, ctx->get_unique_task_id());
+                            ctx->get_task_name(), ctx->get_unique_id());
       if (ctx->is_leaf())
       {
         log_task.error("Illegal equal partition creation performed in "
                              "leaf task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
+                             ctx->get_task_name(), ctx->get_unique_id());
         assert(false);
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
@@ -6458,12 +6489,12 @@ namespace Legion {
       log_index.debug("Creating weighted partition %d with parent index "
                             "space %x in task %s (ID %lld)", 
                             pid.id, parent.id,
-                            ctx->variants->name, ctx->get_unique_task_id());
+                            ctx->get_task_name(), ctx->get_unique_id());
       if (ctx->is_leaf())
       {
         log_task.error("Illegal weighted partition creation performed in "
                              "leaf task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
+                             ctx->get_task_name(), ctx->get_unique_id());
         assert(false);
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
@@ -6509,12 +6540,12 @@ namespace Legion {
       log_index.debug("Creating union partition %d with parent index "
                             "space %x in task %s (ID %lld)", 
                             pid.id, parent.id,
-                            ctx->variants->name, ctx->get_unique_task_id());
+                            ctx->get_task_name(), ctx->get_unique_id());
       if (ctx->is_leaf())
       {
         log_task.error("Illegal union partition creation performed in "
                              "leaf task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
+                             ctx->get_task_name(), ctx->get_unique_id());
         assert(false);
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
@@ -6582,12 +6613,12 @@ namespace Legion {
       log_index.debug("Creating intersection partition %d with parent "
                             "index space %x in task %s (ID %lld)", 
                             pid.id, parent.id,
-                            ctx->variants->name, ctx->get_unique_task_id());
+                            ctx->get_task_name(), ctx->get_unique_id());
       if (ctx->is_leaf())
       {
         log_task.error("Illegal intersection partition creation "
                              "performed in leaf task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
+                             ctx->get_task_name(), ctx->get_unique_id());
         assert(false);
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
@@ -6655,12 +6686,12 @@ namespace Legion {
       log_index.debug("Creating difference partition %d with parent "
                             "index space %x in task %s (ID %lld)", 
                             pid.id, parent.id,
-                            ctx->variants->name, ctx->get_unique_task_id());
+                            ctx->get_task_name(), ctx->get_unique_id());
       if (ctx->is_leaf())
       {
         log_task.error("Illegal difference partition creation "
                              "performed in leaf task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
+                             ctx->get_task_name(), ctx->get_unique_id());
         assert(false);
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
@@ -6726,12 +6757,12 @@ namespace Legion {
       }
       log_index.debug("Creating cross product partitions "
                             "in task %s (ID %lld)", 
-                            ctx->variants->name, ctx->get_unique_task_id());
+                            ctx->get_task_name(), ctx->get_unique_id());
       if (ctx->is_leaf())
       {
         log_task.error("Illegal create cross product partitions "
                              "performed in leaf task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
+                             ctx->get_task_name(), ctx->get_unique_id());
         assert(false);
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
@@ -6787,12 +6818,12 @@ namespace Legion {
       }
       log_index.debug("Creating partition by field "
                             "in task %s (ID %lld)", 
-                            ctx->variants->name, ctx->get_unique_task_id());
+                            ctx->get_task_name(), ctx->get_unique_id());
       if (ctx->is_leaf())
       {
         log_task.error("Illegal partition by field "
                              "performed in leaf task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
+                             ctx->get_task_name(), ctx->get_unique_id());
         assert(false);
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
@@ -6867,12 +6898,12 @@ namespace Legion {
       }
       log_index.debug("Creating partition by image "
                             "in task %s (ID %lld)", 
-                            ctx->variants->name, ctx->get_unique_task_id());
+                            ctx->get_task_name(), ctx->get_unique_id());
       if (ctx->is_leaf())
       {
         log_task.error("Illegal partition by image "
                              "performed in leaf task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
+                             ctx->get_task_name(), ctx->get_unique_id());
         assert(false);
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
@@ -6948,12 +6979,12 @@ namespace Legion {
       }
       log_index.debug("Creating partition by preimage "
                             "in task %s (ID %lld)", 
-                            ctx->variants->name, ctx->get_unique_task_id());
+                            ctx->get_task_name(), ctx->get_unique_id());
       if (ctx->is_leaf())
       {
         log_task.error("Illegal partition by preimage "
                              "performed in leaf task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
+                             ctx->get_task_name(), ctx->get_unique_id());
         assert(false);
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
@@ -7024,12 +7055,12 @@ namespace Legion {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       log_index.debug("Creating pending partition in task %s (ID %lld)", 
-                            ctx->variants->name, ctx->get_unique_task_id());
+                            ctx->get_task_name(), ctx->get_unique_id());
       if (ctx->is_leaf())
       {
         log_task.error("Illegal create pending partition "
                              "performed in leaf task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
+                             ctx->get_task_name(), ctx->get_unique_id());
         assert(false);
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
@@ -7058,12 +7089,12 @@ namespace Legion {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       log_index.debug("Creating index space union in task %s (ID %lld)", 
-                            ctx->variants->name, ctx->get_unique_task_id());
+                            ctx->get_task_name(), ctx->get_unique_id());
       if (ctx->is_leaf())
       {
         log_task.error("Illegal create index space union "
                              "performed in leaf task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
+                             ctx->get_task_name(), ctx->get_unique_id());
         assert(false);
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
@@ -7110,12 +7141,12 @@ namespace Legion {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       log_index.debug("Creating index space union in task %s (ID %lld)", 
-                            ctx->variants->name, ctx->get_unique_task_id());
+                            ctx->get_task_name(), ctx->get_unique_id());
       if (ctx->is_leaf())
       {
         log_task.error("Illegal create index space union "
                              "performed in leaf task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
+                             ctx->get_task_name(), ctx->get_unique_id());
         assert(false);
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
@@ -7164,12 +7195,12 @@ namespace Legion {
       }
       log_index.debug("Creating index space intersection in task %s "
                             "(ID %lld)", 
-                            ctx->variants->name, ctx->get_unique_task_id());
+                            ctx->get_task_name(), ctx->get_unique_id());
       if (ctx->is_leaf())
       {
         log_task.error("Illegal create index space intersection"
                              "performed in leaf task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
+                             ctx->get_task_name(), ctx->get_unique_id());
         assert(false);
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
@@ -7218,12 +7249,12 @@ namespace Legion {
       }
       log_index.debug("Creating index space intersection in task %s "
                             "(ID %lld)", 
-                            ctx->variants->name, ctx->get_unique_task_id());
+                            ctx->get_task_name(), ctx->get_unique_id());
       if (ctx->is_leaf())
       {
         log_task.error("Illegal create index space intersection "
                              "performed in leaf task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
+                             ctx->get_task_name(), ctx->get_unique_id());
         assert(false);
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
@@ -7273,12 +7304,12 @@ namespace Legion {
       }
       log_index.debug("Creating index space difference in task %s "
                             "(ID %lld)", 
-                            ctx->variants->name, ctx->get_unique_task_id());
+                            ctx->get_task_name(), ctx->get_unique_id());
       if (ctx->is_leaf())
       {
         log_task.error("Illegal create index space difference "
                              "performed in leaf task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
+                             ctx->get_task_name(), ctx->get_unique_id());
         assert(false);
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
@@ -7712,12 +7743,12 @@ namespace Legion {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       log_field.debug("Creating field space %x in task %s (ID %lld)", 
-                      space.id, ctx->variants->name,ctx->get_unique_task_id());
+                      space.id, ctx->get_task_name(),ctx->get_unique_id());
       if (ctx->is_leaf())
       {
         log_task.error("Illegal create field space performed in leaf "
                              "task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
+                             ctx->get_task_name(), ctx->get_unique_id());
         assert(false);
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
@@ -7742,12 +7773,12 @@ namespace Legion {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       log_field.debug("Destroying field space %x in task %s (ID %lld)", 
-                    handle.id, ctx->variants->name, ctx->get_unique_task_id());
+                    handle.id, ctx->get_task_name(), ctx->get_unique_id());
       if (ctx->is_leaf())
       {
         log_task.error("Illegal destroy field space performed in leaf "
                              "task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
+                             ctx->get_task_name(), ctx->get_unique_id());
         assert(false);
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
@@ -7834,13 +7865,13 @@ namespace Legion {
       log_region.debug("Creating logical region in task %s (ID %lld) "
                               "with index space %x and field space %x "
                               "in new tree %d",
-                              ctx->variants->name,ctx->get_unique_task_id(), 
+                              ctx->get_task_name(),ctx->get_unique_id(), 
                               index_space.id, field_space.id, tid);
       if (ctx->is_leaf())
       {
         log_task.error("Illegal region creation performed in leaf task "
                              "%s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
+                             ctx->get_task_name(), ctx->get_unique_id());
         assert(false);
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
@@ -7869,12 +7900,12 @@ namespace Legion {
       log_region.debug("Deleting logical region (%x,%x) in "
                               "task %s (ID %lld)",
                               handle.index_space.id, handle.field_space.id, 
-                              ctx->variants->name,ctx->get_unique_task_id());
+                              ctx->get_task_name(),ctx->get_unique_id());
       if (ctx->is_leaf())
       {
         log_task.error("Illegal region destruction performed in leaf "
                              "task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
+                             ctx->get_task_name(), ctx->get_unique_id());
         assert(false);
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
@@ -7907,12 +7938,12 @@ namespace Legion {
       log_region.debug("Deleting logical partition (%x,%x) in task %s "
                               "(ID %lld)",
                               handle.index_partition.id, handle.field_space.id,
-                              ctx->variants->name, ctx->get_unique_task_id());
+                              ctx->get_task_name(), ctx->get_unique_id());
       if (ctx->is_leaf())
       {
         log_task.error("Illegal partition destruction performed in "
                              "leaf task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
+                             ctx->get_task_name(), ctx->get_unique_id());
         assert(false);
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
@@ -8169,7 +8200,7 @@ namespace Legion {
       {
         log_task.error("Illegal create index allocation requested in "
                              "leaf task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
+                             ctx->get_task_name(), ctx->get_unique_id());
         assert(false);
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
@@ -8193,7 +8224,7 @@ namespace Legion {
       {
         log_task.error("Illegal create field allocation requested in "
                              "leaf task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
+                             ctx->get_task_name(), ctx->get_unique_id());
         assert(false);
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
@@ -8258,7 +8289,7 @@ namespace Legion {
                           "'predicate_false_future' fields of the "
                           "TaskLauncher struct.",
                           impl->get_name(), ctx->get_task_name(),
-                          ctx->get_unique_task_id());
+                          ctx->get_unique_id());
 #ifdef DEBUG_HIGH_LEVEL
             assert(false);
 #endif
@@ -8275,7 +8306,7 @@ namespace Legion {
       {
         log_task.error("Illegal execute task call performed in leaf "
                              "task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
+                             ctx->get_task_name(), ctx->get_unique_id());
         assert(false);
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
@@ -8284,8 +8315,8 @@ namespace Legion {
       log_task.debug("Registering new single task with unique id %lld "
                       "and task %s (ID %lld) with high level runtime in "
                       "addresss space %d",
-                      task->get_unique_task_id(), task->variants->name, 
-                      task->get_unique_task_id(), address_space);
+                      task->get_unique_id(), task->get_task_name(), 
+                      task->get_unique_id(), address_space);
 #else
       Future result = task->initialize_task(ctx, launcher,
                                             false/*check privileges*/);
@@ -8381,7 +8412,7 @@ namespace Legion {
                           "'predicate_false_future' fields of the "
                           "IndexLauncher struct.",
                           impl->get_name(), ctx->get_task_name(),
-                          ctx->get_unique_task_id());
+                          ctx->get_unique_id());
 #ifdef DEBUG_HIGH_LEVEL
             assert(false);
 #endif
@@ -8412,7 +8443,7 @@ namespace Legion {
       {
         log_task.error("Illegal execute index space call performed in "
                              "leaf task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
+                             ctx->get_task_name(), ctx->get_unique_id());
         assert(false);
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
@@ -8420,8 +8451,8 @@ namespace Legion {
       log_task.debug("Registering new index space task with unique id "
                   "%lld and task %s (ID %lld) with high level runtime in "
                   "address space %d",
-                  task->get_unique_task_id(), task->variants->name, 
-                  task->get_unique_task_id(), address_space);
+                  task->get_unique_id(), task->get_task_name(), 
+                  task->get_unique_id(), address_space);
 #else
       FutureMap result = task->initialize_task(ctx, launcher,
                                           false/*check privileges*/);
@@ -8477,7 +8508,7 @@ namespace Legion {
                                 "'predicate_false_future' fields of the "
                                 "IndexLauncher struct.",
                                 impl->get_name(), ctx->get_task_name(),
-                                ctx->get_unique_task_id());
+                                ctx->get_unique_id());
 #ifdef DEBUG_HIGH_LEVEL
             assert(false);
 #endif
@@ -8494,7 +8525,7 @@ namespace Legion {
       {
         log_task.error("Illegal execute index space call performed in "
                              "leaf task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
+                             ctx->get_task_name(), ctx->get_unique_id());
         assert(false);
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
@@ -8503,8 +8534,8 @@ namespace Legion {
       log_task.debug("Registering new index space task with unique id "
                   "%lld and task %s (ID %lld) with high level runtime in "
                   "address space %d",
-                  task->get_unique_task_id(), task->variants->name, 
-                  task->get_unique_task_id(), address_space);
+                  task->get_unique_id(), task->get_task_name(), 
+                  task->get_unique_id(), address_space);
 #else
       Future result = task->initialize_task(ctx, launcher, redop, 
                                   false/*check privileges*/);
@@ -8547,7 +8578,7 @@ namespace Legion {
       {
         log_task.error("Illegal execute task call performed in "
                              "leaf task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
+                             ctx->get_task_name(), ctx->get_unique_id());
         assert(false);
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
@@ -8556,8 +8587,8 @@ namespace Legion {
       log_task.debug("Registering new single task with unique id %lld "
                       "and task %s (ID %lld) with high level runtime in "
                       "address space %d",
-                      task->get_unique_task_id(), task->variants->name, 
-                      task->get_unique_task_id(), address_space);
+                      task->get_unique_id(), task->get_task_name(), 
+                      task->get_unique_id(), address_space);
 #else
       Future result = task->initialize_task(ctx, task_id, indexes, 
                 regions, arg, predicate, id, tag, false/*check privileges*/);
@@ -8602,7 +8633,7 @@ namespace Legion {
       {
         log_task.error("Illegal execute index space call performed in "
                              "leaf task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
+                             ctx->get_task_name(), ctx->get_unique_id());
         assert(false);
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
@@ -8612,8 +8643,8 @@ namespace Legion {
       log_task.debug("Registering new index space task with unique id "
                   "%lld and task %s (ID %lld) with high level runtime in "
                   "address space %d",
-                  task->get_unique_task_id(), task->variants->name, 
-                  task->get_unique_task_id(), address_space);
+                  task->get_unique_id(), task->get_task_name(), 
+                  task->get_unique_id(), address_space);
 #else
       FutureMap result = task->initialize_task(ctx, task_id, domain, 
                           indexes, regions, global_arg, arg_map, predicate,
@@ -8663,7 +8694,7 @@ namespace Legion {
       {
         log_task.error("Illegal execute index space call performed in "
                              "leaf task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
+                             ctx->get_task_name(), ctx->get_unique_id());
         assert(false);
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
@@ -8674,8 +8705,8 @@ namespace Legion {
       log_task.debug("Registering new index space task with unique id "
                   "%lld and task %s (ID %lld) with high level runtime in "
                   "address space %d",
-                  task->get_unique_task_id(), task->variants->name, 
-                  task->get_unique_task_id(), address_space);
+                  task->get_unique_id(), task->get_task_name(), 
+                  task->get_unique_id(), address_space);
 #else
       Future result = task->initialize_task(ctx, task_id, domain, 
                             indexes, regions, global_arg, arg_map, reduction, 
@@ -8706,7 +8737,7 @@ namespace Legion {
                            launcher.requirement.region.index_space.id, 
                            launcher.requirement.region.field_space.id, 
                            launcher.requirement.region.tree_id, 
-                           ctx->variants->name, ctx->get_unique_task_id());
+                           ctx->get_task_name(), ctx->get_unique_id());
 #else
       PhysicalRegion result = map_op->initialize(ctx, launcher, 
                                                  false/*check privileges*/);
@@ -8728,8 +8759,8 @@ namespace Legion {
                             ctx->regions[index].region.index_space.id,
                             ctx->regions[index].region.field_space.id,
                             ctx->regions[index].region.tree_id,
-                            index, ctx->variants->name, 
-                            ctx->get_unique_task_id());
+                            index, ctx->get_task_name(), 
+                            ctx->get_unique_id());
 #ifdef DEBUG_HIGH_LEVEL
         assert(false);
 #endif
@@ -8746,8 +8777,8 @@ namespace Legion {
                             launcher.requirement.region.index_space.id,
                             launcher.requirement.region.field_space.id,
                             launcher.requirement.region.tree_id,
-                            ctx->variants->name, 
-                            ctx->get_unique_task_id());
+                            ctx->get_task_name(), 
+                            ctx->get_unique_id());
 #ifdef DEBUG_HIGH_LEVEL
         assert(false);
 #endif
@@ -8777,8 +8808,8 @@ namespace Legion {
                            "(%x,%x,%x) "
                            "in task %s (ID %lld)",
                            req.region.index_space.id, req.region.field_space.id,
-                           req.region.tree_id, ctx->variants->name, 
-                           ctx->get_unique_task_id());
+                           req.region.tree_id, ctx->get_task_name(), 
+                           ctx->get_unique_id());
 #else
       PhysicalRegion result = map_op->initialize(ctx, req, id, tag, 
                                                  false/*check privileges*/);
@@ -8801,8 +8832,8 @@ namespace Legion {
                             ctx->regions[index].region.index_space.id,
                             ctx->regions[index].region.field_space.id,
                             ctx->regions[index].region.tree_id,
-                            index, ctx->variants->name, 
-                            ctx->get_unique_task_id());
+                            index, ctx->get_task_name(), 
+                            ctx->get_unique_id());
 #ifdef DEBUG_HIGH_LEVEL
         assert(false);
 #endif
@@ -8819,8 +8850,8 @@ namespace Legion {
                             req.region.index_space.id,
                             req.region.field_space.id,
                             req.region.tree_id,
-                            ctx->variants->name, 
-                            ctx->get_unique_task_id());
+                            ctx->get_task_name(), 
+                            ctx->get_unique_id());
 #ifdef DEBUG_HIGH_LEVEL
         assert(false);
 #endif
@@ -8868,7 +8899,7 @@ namespace Legion {
       {
         log_task.error("Illegal remap operation performed in "
                              "leaf task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
+                             ctx->get_task_name(), ctx->get_unique_id());
         assert(false);
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
@@ -8900,7 +8931,7 @@ namespace Legion {
       {
         log_task.error("Illegal unmap operation performed in "
                              "leaf task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
+                             ctx->get_task_name(), ctx->get_unique_id());
         assert(false);
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
@@ -8936,7 +8967,7 @@ namespace Legion {
       {
         log_task.error("Illegal fill operation call performed in "
                              "leaf task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
+                             ctx->get_task_name(), ctx->get_unique_id());
         assert(false);
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
@@ -8944,7 +8975,7 @@ namespace Legion {
                           value, value_size, pred, check_privileges);
       log_run.debug("Registering a fill operation in task %s "
                            "(ID %lld)",
-                           ctx->variants->name, ctx->get_unique_task_id());
+                           ctx->get_task_name(), ctx->get_unique_id());
 #else
       fill_op->initialize(ctx, handle, parent, fid,
                           value, value_size, pred, false/*check privileges*/);
@@ -9008,7 +9039,7 @@ namespace Legion {
       {
         log_task.error("Illegal fill operation call performed in "
                              "leaf task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
+                             ctx->get_task_name(), ctx->get_unique_id());
         assert(false);
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
@@ -9016,7 +9047,7 @@ namespace Legion {
                           pred, check_privileges);
       log_run.debug("Registering a fill operation in task %s "
                            "(ID %lld)",
-                           ctx->variants->name, ctx->get_unique_task_id());
+                           ctx->get_task_name(), ctx->get_unique_id());
 #else
       fill_op->initialize(ctx, handle, parent, fid, f,
                           pred, false/*check privileges*/);
@@ -9082,7 +9113,7 @@ namespace Legion {
       {
         log_task.error("Illegal fill operation call performed in "
                              "leaf task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
+                             ctx->get_task_name(), ctx->get_unique_id());
         assert(false);
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
@@ -9090,7 +9121,7 @@ namespace Legion {
                           value, value_size, pred, check_privileges);
       log_run.debug("Registering a fill operation in task %s "
                            "(ID %lld)",
-                           ctx->variants->name, ctx->get_unique_task_id());
+                           ctx->get_task_name(), ctx->get_unique_id());
 #else
       fill_op->initialize(ctx, handle, parent, fields,
                           value, value_size, pred, false/*check privileges*/);
@@ -9155,7 +9186,7 @@ namespace Legion {
       {
         log_task.error("Illegal fill operation call performed in "
                              "leaf task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
+                             ctx->get_task_name(), ctx->get_unique_id());
         assert(false);
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
@@ -9163,7 +9194,7 @@ namespace Legion {
                           pred, check_privileges);
       log_run.debug("Registering a fill operation in task %s "
                            "(ID %lld)",
-                           ctx->variants->name, ctx->get_unique_task_id());
+                           ctx->get_task_name(), ctx->get_unique_id());
 #else
       fill_op->initialize(ctx, handle, parent, fields, f,
                           pred, false/*check privileges*/);
@@ -9230,7 +9261,7 @@ namespace Legion {
       {
         log_task.error("Illegal attach hdf5 file operation performed in "
                        "leaf task %s (ID %lld)",
-                       ctx->variants->name, ctx->get_unique_task_id());
+                       ctx->get_task_name(), ctx->get_unique_id());
         assert(false);
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
@@ -9255,7 +9286,7 @@ namespace Legion {
                       handle.tree_id, ctx->regions[index].region.index_space.id,
                       ctx->regions[index].region.field_space.id,
                       ctx->regions[index].region.tree_id, index, 
-                      ctx->variants->name, ctx->get_unique_task_id(), 
+                      ctx->get_task_name(), ctx->get_unique_id(), 
                       file_name);
 #ifdef DEBUG_HIGH_LEVEL
         assert(false);
@@ -9271,8 +9302,8 @@ namespace Legion {
                       "receive this error message. Try unmapping the region "
                       "before invoking attach_hdf5 on file %s",
                       handle.index_space.id, handle.field_space.id, 
-                      handle.tree_id, ctx->variants->name, 
-                      ctx->get_unique_task_id(), file_name);
+                      handle.tree_id, ctx->get_task_name(), 
+                      ctx->get_unique_id(), file_name);
 #ifdef DEBUG_HIGH_LEVEL
         assert(false);
 #endif
@@ -9301,7 +9332,7 @@ namespace Legion {
       {
         log_task.error("Illegal detach hdf5 file operation performed in "
                        "leaf task %s (ID %lld)",
-                       ctx->variants->name, ctx->get_unique_task_id());
+                       ctx->get_task_name(), ctx->get_unique_id());
         assert(false);
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
@@ -9348,7 +9379,7 @@ namespace Legion {
       {
         log_task.error("Illegal attach normal file operation performed in "
                        "leaf task %s (ID %lld)",
-                       ctx->variants->name, ctx->get_unique_task_id());
+                       ctx->get_task_name(), ctx->get_unique_id());
         assert(false);
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
@@ -9373,7 +9404,7 @@ namespace Legion {
                       handle.tree_id, ctx->regions[index].region.index_space.id,
                       ctx->regions[index].region.field_space.id,
                       ctx->regions[index].region.tree_id, index,
-                      ctx->variants->name, ctx->get_unique_task_id(),
+                      ctx->get_task_name(), ctx->get_unique_id(),
                       file_name);
 #ifdef DEBUG_HIGH_LEVEL
         assert(false);
@@ -9389,8 +9420,8 @@ namespace Legion {
                       "receive this error message. Try unmapping the region "
                       "before invoking attach_file on file %s",
                       handle.index_space.id, handle.field_space.id,
-                      handle.tree_id, ctx->variants->name,
-                      ctx->get_unique_task_id(), file_name);
+                      handle.tree_id, ctx->get_task_name(),
+                      ctx->get_unique_id(), file_name);
 #ifdef DEBUG_HIGH_LEVEL
         assert(false);
 #endif
@@ -9419,7 +9450,7 @@ namespace Legion {
       {
         log_task.error("Illegal detach normal file operation performed in "
                        "leaf task %s (ID %lld)",
-                       ctx->variants->name, ctx->get_unique_task_id());
+                       ctx->get_task_name(), ctx->get_unique_id());
         assert(false);
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
@@ -9464,14 +9495,14 @@ namespace Legion {
       {
         log_task.error("Illegal copy operation call performed in "
                              "leaf task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
+                             ctx->get_task_name(), ctx->get_unique_id());
         assert(false);
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
       copy_op->initialize(ctx, launcher, check_privileges);
       log_run.debug("Registering a copy operation in task %s "
                            "(ID %lld)",
-                           ctx->variants->name, ctx->get_unique_task_id());
+                           ctx->get_task_name(), ctx->get_unique_id());
 #else
       copy_op->initialize(ctx, launcher, false/*check privileges*/);
 #endif
@@ -9532,7 +9563,7 @@ namespace Legion {
       {
         log_run.error("Illegal predicate creation performed on "
                             "empty future inside of task %s (ID %lld).",
-                            ctx->variants->name, ctx->get_unique_task_id());
+                            ctx->get_task_name(), ctx->get_unique_id());
 #ifdef DEBUG_HIGH_LEVEL
         assert(false);
 #endif
@@ -9546,7 +9577,7 @@ namespace Legion {
       {
         log_task.error("Illegal predicate creation performed in "
                              "leaf task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
+                             ctx->get_task_name(), ctx->get_unique_id());
         assert(false);
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
@@ -9586,7 +9617,7 @@ namespace Legion {
       {
         log_task.error("Illegal NOT predicate creation in "
                              "leaf task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
+                             ctx->get_task_name(), ctx->get_unique_id());
         assert(false);
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
@@ -9627,7 +9658,7 @@ namespace Legion {
       {
         log_task.error("Illegal AND predicate creation in "
                              "leaf task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
+                             ctx->get_task_name(), ctx->get_unique_id());
         assert(false);
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
@@ -9668,7 +9699,7 @@ namespace Legion {
       {
         log_task.error("Illegal OR predicate creation in "
                              "leaf task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
+                             ctx->get_task_name(), ctx->get_unique_id());
         assert(false);
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
@@ -9741,7 +9772,7 @@ namespace Legion {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       log_run.debug("Creating phase barrier in task %s (ID %lld)",
-                          ctx->variants->name, ctx->get_unique_task_id());
+                          ctx->get_task_name(), ctx->get_unique_id());
 #endif
       Barrier result = Barrier::create_barrier(arrivals);
 #ifdef LEGION_SPY
@@ -9762,7 +9793,7 @@ namespace Legion {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       log_run.debug("Destroying phase barrier in task %s (ID %lld)",
-                          ctx->variants->name, ctx->get_unique_task_id());
+                          ctx->get_task_name(), ctx->get_unique_id());
 #endif
       ctx->destroy_user_barrier(pb.phase_barrier);
     }
@@ -9779,7 +9810,7 @@ namespace Legion {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       log_run.debug("Advancing phase barrier in task %s (ID %lld)",
-                          ctx->variants->name, ctx->get_unique_task_id());
+                          ctx->get_task_name(), ctx->get_unique_id());
 #endif
       Barrier bar = pb.phase_barrier;
       Barrier new_bar = bar.advance_barrier();
@@ -9805,7 +9836,7 @@ namespace Legion {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       log_run.debug("Creating dynamic collective in task %s (ID %lld)",
-                          ctx->variants->name, ctx->get_unique_task_id());
+                          ctx->get_task_name(), ctx->get_unique_id());
 #endif
       Barrier result = Barrier::create_barrier(arrivals, redop, 
                                                init_value, init_size);
@@ -9828,7 +9859,7 @@ namespace Legion {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       log_run.debug("Destroying dynamic collective in task %s (ID %lld)",
-                          ctx->variants->name, ctx->get_unique_task_id());
+                          ctx->get_task_name(), ctx->get_unique_id());
 #endif
       ctx->destroy_user_barrier(dc.phase_barrier);
     }
@@ -9847,7 +9878,7 @@ namespace Legion {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       log_run.debug("Arrive dynamic collective in task %s (ID %lld)",
-                          ctx->variants->name, ctx->get_unique_task_id());
+                          ctx->get_task_name(), ctx->get_unique_id());
 #endif
       dc.phase_barrier.arrive(count, Event::NO_EVENT, buffer, size);
     }
@@ -9868,7 +9899,7 @@ namespace Legion {
       }
       log_run.debug("Defer dynamic collective arrival in "
                           "task %s (ID %lld)",
-                          ctx->variants->name, ctx->get_unique_task_id());
+                          ctx->get_task_name(), ctx->get_unique_id());
 #endif
       f.impl->contribute_to_collective(dc.phase_barrier, count);
     }
@@ -9887,7 +9918,7 @@ namespace Legion {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       log_run.debug("Get dynamic collective result in task %s (ID %lld)",
-                          ctx->variants->name, ctx->get_unique_task_id());
+                          ctx->get_task_name(), ctx->get_unique_id());
 #endif
       DynamicCollectiveOp *collective = 
         get_available_dynamic_collective_op(true);
@@ -9918,7 +9949,7 @@ namespace Legion {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       log_run.debug("Advancing dynamic collective in task %s (ID %lld)",
-                          ctx->variants->name, ctx->get_unique_task_id());
+                          ctx->get_task_name(), ctx->get_unique_id());
 #endif
       Barrier bar = dc.phase_barrier;
       Barrier new_bar = bar.advance_barrier();
@@ -9941,12 +9972,12 @@ namespace Legion {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       log_run.debug("Issuing an acquire operation in task %s (ID %lld)",
-                          ctx->variants->name, ctx->get_unique_task_id());
+                          ctx->get_task_name(), ctx->get_unique_id());
       if (ctx->is_leaf())
       {
         log_task.error("Illegal acquire operation performed in leaf task"
                               "%s (ID %lld)",
-                              ctx->variants->name, ctx->get_unique_task_id());
+                              ctx->get_task_name(), ctx->get_unique_id());
         assert(false);
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
@@ -10007,12 +10038,12 @@ namespace Legion {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       log_run.debug("Issuing a release operation in task %s (ID %lld)",
-                          ctx->variants->name, ctx->get_unique_task_id());
+                          ctx->get_task_name(), ctx->get_unique_id());
       if (ctx->is_leaf())
       {
         log_task.error("Illegal release operation performed in leaf task"
                              "%s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
+                             ctx->get_task_name(), ctx->get_unique_id());
         assert(false);
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
@@ -10073,12 +10104,12 @@ namespace Legion {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       log_run.debug("Issuing a mapping fence in task %s (ID %lld)",
-                          ctx->variants->name, ctx->get_unique_task_id());
+                          ctx->get_task_name(), ctx->get_unique_id());
       if (ctx->is_leaf())
       {
         log_task.error("Illegal legion mapping fence call in leaf task "
                              "%s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
+                             ctx->get_task_name(), ctx->get_unique_id());
         assert(false);
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
@@ -10107,12 +10138,12 @@ namespace Legion {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       log_run.debug("Issuing an execution fence in task %s (ID %lld)",
-                          ctx->variants->name, ctx->get_unique_task_id());
+                          ctx->get_task_name(), ctx->get_unique_id());
       if (ctx->is_leaf())
       {
         log_task.error("Illegal Legion execution fence call in leaf "
                              "task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
+                             ctx->get_task_name(), ctx->get_unique_id());
         assert(false);
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
@@ -10140,12 +10171,12 @@ namespace Legion {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       log_run.debug("Beginning a trace in task %s (ID %lld)",
-                          ctx->variants->name, ctx->get_unique_task_id());
+                          ctx->get_task_name(), ctx->get_unique_id());
       if (ctx->is_leaf())
       {
         log_task.error("Illegal Legion begin trace call in leaf "
                              "task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
+                             ctx->get_task_name(), ctx->get_unique_id());
         assert(false);
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
@@ -10166,12 +10197,12 @@ namespace Legion {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       log_run.debug("Ending a trace in task %s (ID %lld)",
-                          ctx->variants->name, ctx->get_unique_task_id());
+                          ctx->get_task_name(), ctx->get_unique_id());
       if (ctx->is_leaf())
       {
         log_task.error("Illegal Legion end trace call in leaf "
                              "task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
+                             ctx->get_task_name(), ctx->get_unique_id());
         assert(false);
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
@@ -10193,12 +10224,12 @@ namespace Legion {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       log_run.debug("Issuing a frame in task %s (ID %lld)",
-                          ctx->variants->name, ctx->get_unique_task_id());
+                          ctx->get_task_name(), ctx->get_unique_id());
       if (ctx->is_leaf())
       {
         log_task.error("Illegal Legion complete frame call in leaf "
                              "task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
+                             ctx->get_task_name(), ctx->get_unique_id());
         assert(false);
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
@@ -10228,12 +10259,12 @@ namespace Legion {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       log_run.debug("Executing a must epoch in task %s (ID %lld)",
-                          ctx->variants->name, ctx->get_unique_task_id());
+                          ctx->get_task_name(), ctx->get_unique_id());
       if (ctx->is_leaf())
       {
         log_task.error("Illegal Legion execute must epoch call in leaf "
                              "task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
+                             ctx->get_task_name(), ctx->get_unique_id());
         assert(false);
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
@@ -10248,7 +10279,6 @@ namespace Legion {
 #ifdef DEBUG_HIGH_LEVEL
       assert(proc_managers.find(proc) != proc_managers.end());
 #endif
-      ProcessorManager *manager = proc_managers[proc];
       // Now find all the parent task regions we need to invalidate
       std::vector<PhysicalRegion> unmapped_regions;
       if (!unsafe_launch)
@@ -10288,21 +10318,58 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    int Runtime::get_tunable_value(Context ctx, TunableID tid,
-                                   MapperID mid, MappingTagID tag)
+    Future Runtime::select_tunable_value(Context ctx, TunableID tid,
+                                         MapperID mid, MappingTagID tag)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
       log_run.debug("Getting a value for tunable variable %d in "
-                          "task %s (ID %lld)", tid, ctx->variants->name,
-                          ctx->get_unique_task_id());
+                    "task %s (ID %lld)", tid, ctx->get_task_name(),
+                    ctx->get_unique_id());
 #endif
-      Processor proc = ctx->get_executing_processor();
-#ifdef DEBUG_HIGH_LEVEL
-      assert(proc_managers.find(proc) != proc_managers.end());
-#endif
-      ProcessorManager *manager = proc_managers[proc];
-      return manager->invoke_mapper_get_tunable_value(ctx, tid, mid, tag);
+      FutureImpl *result = legion_new<FutureImpl>(this, true/*register*/,
+                              get_available_distributed_id(true),
+                              address_space, address_space, ctx);
+      result->add_base_gc_ref(FUTURE_HANDLE_REF);
+      SelectTunableArgs args;
+      args.hlr_id = HLR_SELECT_TUNABLE_TASK_ID;
+      args.mapper_id = mid;
+      args.tag = tag;
+      args.tunable_id = tid;
+      args.task = ctx;
+      args.result = result;
+      issue_runtime_meta_task(&args, sizeof(args),
+                              HLR_SELECT_TUNABLE_TASK_ID, ctx);
+      return Future(result);
+    }
+
+    //--------------------------------------------------------------------------
+    int Runtime::get_tunable_value(Context ctx, TunableID tid,
+                                   MapperID mid, MappingTagID tag)
+    //--------------------------------------------------------------------------
+    {
+      Future f = select_tunable_value(ctx, tid, mid, tag);
+      return f.get_result<int>();
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::perform_tunable_selection(const SelectTunableArgs *args)
+    //--------------------------------------------------------------------------
+    {
+      // Get the mapper first
+      MapperManager *mapper = find_mapper(args->task->get_executing_processor(),
+                                          args->mapper_id);
+      Mapper::SelectTunableInput input;
+      Mapper::SelectTunableOutput output;
+      input.tunable_id = args->tunable_id;
+      input.mapping_tag = args->tag;
+      output.value = NULL;
+      output.size = 0;
+      mapper->invoke_select_tunable_value(args->task, &input, &output);
+      // Set and complete the future
+      if ((output.value != NULL) && (output.size > 0))
+        args->result->set_result(output.value, output.size, true/*own*/);
+      args->result->complete_future();
     }
 
     //--------------------------------------------------------------------------
@@ -10318,7 +10385,7 @@ namespace Legion {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       log_run.debug("Getting current time in task %s (ID %lld)",
-                          ctx->variants->name, ctx->get_unique_task_id());
+                          ctx->get_task_name(), ctx->get_unique_id());
 #endif
       Future result = timing_op->initialize(ctx, precondition);
 #ifdef INORDER_EXECUTION
@@ -10347,7 +10414,7 @@ namespace Legion {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       log_run.debug("Getting current time in microseconds in task %s (ID %lld)",
-                          ctx->variants->name, ctx->get_unique_task_id());
+                          ctx->get_task_name(), ctx->get_unique_id());
 #endif
       Future result = timing_op->initialize_microseconds(ctx, pre);
 #ifdef INORDER_EXECUTION
@@ -10375,7 +10442,7 @@ namespace Legion {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       log_run.debug("Getting current time in nanoseconds in task %s (ID %lld)",
-                          ctx->variants->name, ctx->get_unique_task_id());
+                          ctx->get_task_name(), ctx->get_unique_id());
 #endif
       Future result = timing_op->initialize_nanoseconds(ctx, pre);
 #ifdef INORDER_EXECUTION
@@ -10473,7 +10540,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // First, wrap this mapper in a mapper manager
-      MapperManager *manager = wrap_mapper(mapper);
+      MapperManager *manager = wrap_mapper(this, mapper);
       if (!proc.exists())
       {
         bool own = true;
@@ -10500,7 +10567,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // First, wrap this mapper in a mapper manager
-      MapperManager *manager = wrap_mapper(mapper); 
+      MapperManager *manager = wrap_mapper(this, mapper); 
       if (!proc.exists())
       {
         bool own = true;
@@ -10522,7 +10589,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ MapperManager* Runtime::wrap_mapper(Mapper *mapper)
+    /*static*/ MapperManager* Runtime::wrap_mapper(Runtime *rt, Mapper *mapper)
     //--------------------------------------------------------------------------
     {
       MapperManager *manager = NULL;
@@ -10530,17 +10597,17 @@ namespace Legion {
       {
         case Mapper::CONCURRENT_MAPPER_MODEL:
           {
-            manager = new ConcurrentManager(this, mapper);
+            manager = new ConcurrentManager(rt, mapper);
             break;
           }
         case Mapper::SERIALIZED_REENTRANT_MAPPER_MODEL:
           {
-            manager = new SerializingManager(this, mapper, true/*reentrant*/);
+            manager = new SerializingManager(rt, mapper, true/*reentrant*/);
             break;
           }
         case Mapper::SERIALIZED_NON_REENTRANT_MAPPER_MODEL:
           {
-            manager = new SerializingManager(this, mapper, false/*reentrant*/);
+            manager = new SerializingManager(rt, mapper, false/*reentrant*/);
             break;
           }
         default:
@@ -10773,7 +10840,7 @@ namespace Legion {
       {
         log_task.error("Illegal non-local field allocation performed "
                              "in leaf task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
+                             ctx->get_task_name(), ctx->get_unique_id());
         assert(false);
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
@@ -10809,7 +10876,7 @@ namespace Legion {
       {
         log_task.error("Illegal field destruction performed in "
                              "leaf task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
+                             ctx->get_task_name(), ctx->get_unique_id());
         assert(false);
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
@@ -10845,7 +10912,7 @@ namespace Legion {
       {
         log_task.error("Illegal non-local field allocation performed "
                              "in leaf task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
+                             ctx->get_task_name(), ctx->get_unique_id());
         assert(false);
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
@@ -10885,7 +10952,7 @@ namespace Legion {
       {
         log_task.error("Illegal field destruction performed in "
                              "leaf task %s (ID %lld)",
-                             ctx->variants->name, ctx->get_unique_task_id());
+                             ctx->get_task_name(), ctx->get_unique_id());
         assert(false);
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
@@ -10995,11 +11062,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     VariantImpl* Runtime::find_variant_impl(TaskID task_id, 
-                                             VariantID variant_id)
+                                             VariantID variant_id,bool can_fail)
     //--------------------------------------------------------------------------
     {
       TaskImpl *owner = find_or_create_task_impl(task_id);
-      return owner->find_variant_impl(variant_id);
+      return owner->find_variant_impl(variant_id, can_fail);
     }
 
     //--------------------------------------------------------------------------
@@ -11110,7 +11177,7 @@ namespace Legion {
     void Runtime::send_task(TaskOp *task)
     //--------------------------------------------------------------------------
     {
-      Processor target = task->next_proc;
+      Processor target = task->target_proc;
       if (!target.exists())
       {
         log_run.error("Mapper requested invalid NO_PROC as target proc!");
@@ -11125,8 +11192,7 @@ namespace Legion {
       if (finder != proc_managers.end())
       {
         // Update the current processor
-        task->current_proc = target;
-        task->next_proc = Processor::NO_PROC;
+        task->set_current_proc(target);
         finder->second->add_to_ready_queue(task,false/*previous failure*/);
       }
       else
@@ -12890,12 +12956,11 @@ namespace Legion {
 #ifdef DEBUG_HIGH_LEVEL
       assert(proc_managers.find(proc) != proc_managers.end());
 #endif
-      ProcessorManager *manager = proc_managers[proc];
       // First ask the mapper to set the options for the task
-      manager->invoke_mapper_set_task_options(task);
+      bool inline_task = task->select_task_options();
       // Now check to see if we're inling the task or just performing
       // a normal asynchronous task launch
-      if (task->inline_task)
+      if (inline_task)
       {
         ctx->inline_child_task(task);
         // After we're done we can deactivate it since we
@@ -13080,8 +13145,8 @@ namespace Legion {
                             "possible to reduce context usage by annotating "
                             "task variants as leaf tasks since leaf tasks do "
                             "not require context allocation.",
-                            MAX_CONTEXTS, task->variants->name,
-                            task->get_unique_task_id());
+                            MAX_CONTEXTS, task->get_task_name(),
+                            task->get_unique_id());
 #ifdef DEBUG_HIGH_LEVEL
         assert(false);
 #endif
@@ -15039,14 +15104,14 @@ namespace Legion {
             out_individual_tasks.begin(); it !=
             out_individual_tasks.end(); it++)
       {
-        out_tasks[(*it)->get_unique_task_id()] = *it;
+        out_tasks[(*it)->get_unique_id()] = *it;
       }
       for (std::map<UniqueID,IndividualTask*>::const_iterator it = 
             out_tasks.begin(); (it != out_tasks.end()); it++)
       {
         Event completion = it->second->get_completion_event();
         fprintf(f,"Outstanding Individual Task %lld: %p %s (" IDFMT ",%d)\n",
-                it->first, it->second, it->second->variants->name,
+                it->first, it->second, it->second->get_task_name(),
                 completion.id, completion.gen); 
         if (cnt > 0)
           cnt--;
@@ -15069,14 +15134,14 @@ namespace Legion {
             out_index_tasks.begin(); it !=
             out_index_tasks.end(); it++)
       {
-        out_tasks[(*it)->get_unique_task_id()] = *it;
+        out_tasks[(*it)->get_unique_id()] = *it;
       }
       for (std::map<UniqueID,IndexTask*>::const_iterator it = 
             out_tasks.begin(); (it != out_tasks.end()); it++)
       {
         Event completion = it->second->get_completion_event();
         fprintf(f,"Outstanding Index Task %lld: %p %s (" IDFMT ",%d)\n",
-                it->first, it->second, it->second->variants->name,
+                it->first, it->second, it->second->get_task_name(),
                 completion.id, completion.gen); 
         if (cnt > 0)
           cnt--;
@@ -15099,14 +15164,14 @@ namespace Legion {
             out_slice_tasks.begin(); it !=
             out_slice_tasks.end(); it++)
       {
-        out_tasks[(*it)->get_unique_task_id()] = *it;
+        out_tasks[(*it)->get_unique_id()] = *it;
       }
       for (std::map<UniqueID,SliceTask*>::const_iterator it = 
             out_tasks.begin(); (it != out_tasks.end()); it++)
       {
         Event completion = it->second->get_completion_event();
         fprintf(f,"Outstanding Slice Task %lld: %p %s (" IDFMT ",%d)\n",
-                it->first, it->second, it->second->variants->name,
+                it->first, it->second, it->second->get_task_name(),
                 completion.id, completion.gen); 
         if (cnt > 0)
           cnt--;
@@ -15129,14 +15194,14 @@ namespace Legion {
             out_point_tasks.begin(); it !=
             out_point_tasks.end(); it++)
       {
-        out_tasks[(*it)->get_unique_task_id()] = *it;
+        out_tasks[(*it)->get_unique_id()] = *it;
       }
       for (std::map<UniqueID,PointTask*>::const_iterator it = 
             out_tasks.begin(); (it != out_tasks.end()); it++)
       {
         Event completion = it->second->get_completion_event();
         fprintf(f,"Outstanding Point Task %lld: %p %s (" IDFMT ",%d)\n",
-                it->first, it->second, it->second->variants->name,
+                it->first, it->second, it->second->get_task_name(),
                 completion.id, completion.gen); 
         if (cnt > 0)
           cnt--;
@@ -15155,25 +15220,25 @@ namespace Legion {
             out_individual_tasks.begin(); it !=
             out_individual_tasks.end(); it++)
       {
-        out_tasks[(*it)->get_unique_task_id()] = *it;
+        out_tasks[(*it)->get_unique_id()] = *it;
       }
       for (std::set<IndexTask*>::const_iterator it = 
             out_index_tasks.begin(); it !=
             out_index_tasks.end(); it++)
       {
-        out_tasks[(*it)->get_unique_task_id()] = *it;
+        out_tasks[(*it)->get_unique_id()] = *it;
       }
       for (std::set<SliceTask*>::const_iterator it = 
             out_slice_tasks.begin(); it !=
             out_slice_tasks.end(); it++)
       {
-        out_tasks[(*it)->get_unique_task_id()] = *it;
+        out_tasks[(*it)->get_unique_id()] = *it;
       }
       for (std::set<PointTask*>::const_iterator it = 
             out_point_tasks.begin(); it !=
             out_point_tasks.end(); it++)
       {
-        out_tasks[(*it)->get_unique_task_id()] = *it;
+        out_tasks[(*it)->get_unique_id()] = *it;
       }
       for (std::map<UniqueID,TaskOp*>::const_iterator it = 
             out_tasks.begin(); it != out_tasks.end(); it++)
@@ -15185,7 +15250,7 @@ namespace Legion {
             {
               fprintf(f,"Outstanding Individual Task %lld: %p %s (" 
                         IDFMT ",%d)\n",
-                it->first, it->second, it->second->variants->name,
+                it->first, it->second, it->second->get_task_name(),
                 completion.id, completion.gen);
               break;
             }
@@ -15193,7 +15258,7 @@ namespace Legion {
             {
               fprintf(f,"Outstanding Point Task %lld: %p %s (" 
                         IDFMT ",%d)\n",
-                it->first, it->second, it->second->variants->name,
+                it->first, it->second, it->second->get_task_name(),
                 completion.id, completion.gen);
               break;
             }
@@ -15201,7 +15266,7 @@ namespace Legion {
             {
               fprintf(f,"Outstanding Index Task %lld: %p %s (" 
                         IDFMT ",%d)\n",
-                it->first, it->second, it->second->variants->name,
+                it->first, it->second, it->second->get_task_name(),
                 completion.id, completion.gen);
               break;
             }
@@ -15209,7 +15274,7 @@ namespace Legion {
             {
               fprintf(f,"Outstanding Slice Task %lld: %p %s (" 
                         IDFMT ",%d)\n",
-                it->first, it->second, it->second->variants->name,
+                it->first, it->second, it->second->get_task_name(),
                 completion.id, completion.gen);
               break;
             }
@@ -16690,19 +16755,15 @@ namespace Legion {
         case HLR_MAPPER_TASK_ID:
           {
             MapperTaskArgs *margs = (MapperTaskArgs*)args;
-            // Tell the mapper about the result
-            Runtime *rt = Runtime::get_runtime(p);       
-            size_t result_size = margs->future->get_untyped_size();
-            const void *result = margs->future->get_untyped_result();
-            rt->invoke_mapper_task_result(margs->map_id, margs->proc,
-                                          margs->event, result, result_size);
+            Runtime *runtime = Runtime::get_runtime(p);
+            runtime->process_mapper_task_result(margs);
             // Now indicate that we are done with the future
             if (margs->future->remove_base_gc_ref(FUTURE_HANDLE_REF))
               delete margs->future;
-            // Finally tell the runtime we have one less top level task
-            rt->decrement_outstanding_top_level_tasks();
             // We can also deactivate the enclosing context 
             margs->context->deactivate();
+            // Finally tell the runtime we have one less top level task
+            runtime->decrement_outstanding_top_level_tasks();
             break;
           }
         case HLR_DISJOINTNESS_TASK_ID:
@@ -16840,6 +16901,16 @@ namespace Legion {
               (PartitionNode::SemanticRequestArgs*)args;
             req_args->proxy_this->process_semantic_request(
                           req_args->tag, req_args->source);
+            break;
+          }
+        case HLR_SELECT_TUNABLE_TASK_ID:
+          {
+            const SelectTunableArgs *tunable_args = 
+              (const SelectTunableArgs*)args;
+            Runtime::get_runtime(p)->perform_tunable_selection(tunable_args);
+            // Remove the reference that we added
+            if (tunable_args->result->remove_base_gc_ref(FUTURE_HANDLE_REF))
+              legion_delete(tunable_args->result);
             break;
           }
         case HLR_SHUTDOWN_ATTEMPT_TASK_ID:

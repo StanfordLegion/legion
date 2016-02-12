@@ -1570,6 +1570,7 @@ namespace Legion {
                                       local_proc, valid_reductions, op);
     }
 
+#if 0
     /////////////////////////////////////////////////////////////
     // PremapTraverser 
     /////////////////////////////////////////////////////////////
@@ -2145,6 +2146,7 @@ namespace Legion {
         result = MappingRef(chosen_inst,FieldMask());
       return (chosen_inst != NULL);
     }
+#endif
 
     /////////////////////////////////////////////////////////////
     // CurrentState 
@@ -6691,7 +6693,7 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
     // InstanceRef 
     /////////////////////////////////////////////////////////////
-
+#if 0
     //--------------------------------------------------------------------------
     InstanceRef::InstanceRef(void)
       : ready_event(Event::NO_EVENT), view(NULL), manager(NULL)
@@ -6869,6 +6871,7 @@ namespace Legion {
       for (unsigned idx = 0; idx < num_locks; idx++)
         derez.deserialize(needed_locks[idx]); 
     } 
+#endif
 
     /////////////////////////////////////////////////////////////
     // CompositeRef 

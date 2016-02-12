@@ -327,7 +327,7 @@ namespace Legion {
       // Event for when the instance ref is ready
       Event ready_event;
       // Instance ref
-      InstanceRef reference;
+      InstanceSet references;
       RegionRequirement req;
       bool mapped; // whether it is currently mapped
       bool valid; // whether it is currently valid
@@ -873,7 +873,7 @@ namespace Legion {
       inline bool returns_value(void) const { return has_return_type; }
     public:
       void add_variant(VariantImpl *impl);
-      VariantImpl* find_variant_impl(VariantID variant_id);
+      VariantImpl* find_variant_impl(VariantID variant_id, bool can_fail);
     public:
       const char* get_name(bool needs_lock = true) const;
       void attach_semantic_information(SemanticTag tag, AddressSpaceID source,
@@ -1072,6 +1072,14 @@ namespace Legion {
         Event event;
         RemoteTask *context;
       }; 
+      struct SelectTunableArgs {
+        HLRTaskID hlr_id;
+        MapperID mapper_id;
+        MappingTagID tag;
+        TunableID tunable_id;
+        SingleTask *task;
+        FutureImpl *result;
+      };
     public:
       struct ProcessorGroupInfo {
       public:
@@ -1099,6 +1107,7 @@ namespace Legion {
       Event launch_mapper_task(Mapper *mapper, Processor proc, 
                                Processor::TaskFuncID tid,
                                const TaskArgument &arg, MapperID map_id);
+      void process_mapper_task_result(const MapperTaskArgs *args);
     public:
       IndexSpace create_index_space(Context ctx, size_t max_num_elmts);
       IndexSpace create_index_space(Context ctx, Domain domain);
@@ -1485,8 +1494,12 @@ namespace Legion {
       void complete_frame(Context ctx);
       FutureMap execute_must_epoch(Context ctx, 
                                    const MustEpochLauncher &launcher);
+    public:
+      Future select_tunable_value(Context ctx, TunableID tid,
+                                  MapperID mid, MappingTagID tag);
       int get_tunable_value(Context ctx, TunableID tid, 
                             MapperID mid, MappingTagID tag);
+      void perform_tunable_selection(const SelectTunableArgs *args);
     public:
       Future get_current_time(Context ctx, const Future &precondition);
       Future get_current_time_in_microseconds(Context ctx, const Future &pre);
@@ -1503,7 +1516,7 @@ namespace Legion {
       void add_mapper(MapperID map_id, Mapper *mapper, Processor proc);
       void replace_default_mapper(Mapper *mapper, Processor proc);
       MapperManager* find_mapper(Processor target, MapperID map_id);
-      static MapperManager* wrap_mapper(Mapper *mapper);
+      static MapperManager* wrap_mapper(Runtime *runtime, Mapper *mapper);
     public:
       void register_projection_functor(ProjectionID pid,
                                        ProjectionFunctor *func);
@@ -2456,7 +2469,7 @@ namespace Legion {
      */
     class FindMapperContinuation : public LegionContinuation {
     public:
-      FindMapperContinuation(ProcessorManager *man, MapperID mid)
+      FindMapperContinuation(const ProcessorManager *man, MapperID mid)
         : manager(man), map_id(mid), result(NULL) {  }
     public:
       virtual void execute(void)
@@ -2466,7 +2479,7 @@ namespace Legion {
     public:
       inline MapperManager* get_result(void) const { return result; }
     protected:
-      ProcessorManager *const manager;
+      const ProcessorManager *const manager;
       const MapperID map_id;
       MapperManager *result;
     };

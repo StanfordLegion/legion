@@ -1203,8 +1203,8 @@ namespace Legion {
     public:
       // These methods are used by PhysicalRegion::Impl to hold
       // valid references to avoid premature collection
-      void add_valid_reference(ReferenceSource source);
-      void remove_valid_reference(ReferenceSource source);
+      void add_valid_reference(ReferenceSource source) const;
+      void remove_valid_reference(ReferenceSource source) const;
     public:
       MaterializedView* get_materialized_view(void) const;
       ReductionView* get_reduction_view(void) const;
@@ -1263,6 +1263,7 @@ namespace Legion {
     public:
       bool empty(void) const;
       size_t size(void) const;
+      void clear(void);
       void reserve(size_t size);
       void add_instance(const InstanceRef &ref);
     public:
@@ -1272,9 +1273,16 @@ namespace Legion {
       void pack_references(Serializer &rez, AddressSpaceID target) const;
       void unpack_references(Runtime *runtime, Deserializer &derez);
     public:
-      void update_wait_on_events(std::set<Event> &wait_on_events);
+      void add_valid_references(ReferenceSource source);
+      void remove_valid_references(ReferenceSource source);
+    public:
+      void update_wait_on_events(std::set<Event> &wait_on_events) const;
       bool has_required_locks(void) const;
-      void update_atomic_locks(std::map<Reservation,bool> &locks, bool excl);
+      void update_atomic_locks(std::map<Reservation,bool> &lks,bool excl) const;
+    public:
+      LegionRuntime::Accessor::RegionAccessor<
+        LegionRuntime::Accessor::AccessorType::Generic>
+          get_field_accessor(RegionTreeForest *forest, FieldID fid) const;
     };
 
     /**

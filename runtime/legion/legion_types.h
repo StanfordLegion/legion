@@ -78,6 +78,8 @@ namespace Legion {
 
   // Forward declarations for user level objects
   // legion.h
+  class IndexSpace;
+  class IndexPartition;
   class FieldSpace;
   class LogicalRegion;
   class LogicalPartition;
@@ -261,6 +263,7 @@ namespace Legion {
       HLR_FIELD_SEMANTIC_INFO_REQ_TASK_ID,
       HLR_REGION_SEMANTIC_INFO_REQ_TASK_ID,
       HLR_PARTITION_SEMANTIC_INFO_REQ_TASK_ID,
+      HLR_SELECT_TUNABLE_TASK_ID,
       HLR_MESSAGE_ID, // These four must be last (see issue_runtime_meta_task)
       HLR_SHUTDOWN_ATTEMPT_TASK_ID,
       HLR_SHUTDOWN_NOTIFICATION_TASK_ID,
@@ -319,6 +322,7 @@ namespace Legion {
         "Field Semantic Request",                                 \
         "Region Semantic Request",                                \
         "Partition Semantic Request",                             \
+        "Select Tunable",                                         \
         "Remote Message",                                         \
         "Shutdown Attempt",                                       \
         "Shutdown Notification",                                  \

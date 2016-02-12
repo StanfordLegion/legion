@@ -13,6 +13,9 @@
  * limitations under the License.
  */
 
+#include "legion.h"
+#include "legion_ops.h"
+#include "legion_tasks.h"
 #include "mapper_manager.h"
 
 namespace Legion {
@@ -36,6 +39,7 @@ namespace Legion {
       // We can now delete our mapper
       delete mapper;
       mapper_lock.destroy_reservation();
+      mapper_lock = Reservation::NO_RESERVATION;
     }
 
     //--------------------------------------------------------------------------
@@ -56,7 +60,7 @@ namespace Legion {
       if (info != NULL)
       {
         mapper->select_task_options(info, *task, *options);
-        end_mapper_call(info);
+        finish_mapper_call(info);
         return;
       }
 #ifdef DEBUG_HIGH_LEVEL
@@ -82,7 +86,7 @@ namespace Legion {
       if (info != NULL)
       {
         mapper->premap_task(info, *task, *input, *output);
-        end_mapper_call(info);
+        finish_mapper_call(info);
         return;
       }
 #ifdef DEBUG_HIGH_LEVEL
@@ -107,7 +111,7 @@ namespace Legion {
       if (info != NULL)
       {
         mapper->slice_task(info, *task, *input, *output);
-        end_mapper_call(info);
+        finish_mapper_call(info);
         return;
       }
 #ifdef DEBUG_HIGH_LEVEL
@@ -132,7 +136,7 @@ namespace Legion {
       if (info != NULL)
       {
         mapper->map_task(info, *task, *input, *output);
-        end_mapper_call(info);
+        finish_mapper_call(info);
         return;
       }
 #ifdef DEBUG_HIGH_LEVEL
@@ -157,7 +161,7 @@ namespace Legion {
       if (info != NULL)
       {
         mapper->select_task_variant(info, *task, *input, *output);
-        end_mapper_call(info);
+        finish_mapper_call(info);
         return;
       }
 #ifdef DEBUG_HIGH_LEVEL
@@ -182,7 +186,7 @@ namespace Legion {
       if (info != NULL)
       {
         mapper->postmap_task(info, *task, *input, *output);
-        end_mapper_call(info);
+        finish_mapper_call(info);
         return;
       }
 #ifdef DEBUG_HIGH_LEVEL
@@ -202,12 +206,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       Event continuation_precondition = Event::NO_EVENT;
-      MappingCallInfo *info = begin_mapper_call(TASK_RANK_COPY_SOURCES_CALL,
+      MappingCallInfo *info = begin_mapper_call(TASK_SELECT_SOURCES_CALL,
                                 first_invocation, continuation_precondition);
       if (info != NULL)
       {
         mapper->select_task_sources(info, *task, *input, *output);
-        end_mapper_call(info);
+        finish_mapper_call(info);
         return;
       }
 #ifdef DEBUG_HIGH_LEVEL
@@ -220,9 +224,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MapperManager::invoke_speculation(TaskOp *task, 
-                                           Mapper::SpeculativeOutput *output,
-                                           bool first_invocation)
+    void MapperManager::invoke_task_speculate(TaskOp *task,
+                                              Mapper::SpeculativeOutput *output,
+                                              bool first_invocation)
     //--------------------------------------------------------------------------
     {
       Event continuation_precondition = Event::NO_EVENT;
@@ -231,14 +235,14 @@ namespace Legion {
       if (info != NULL)
       {
         mapper->speculate(info, *task, *output);
-        end_mapper_call(info);
+        finish_mapper_call(info);
         return;
       }
 #ifdef DEBUG_HIGH_LEVEL
       assert(first_invocation);
 #endif
       MapperContinuation2<TaskOp, Mapper::SpeculativeOutput,
-                          &MapperManager::invoke_task_speculation>
+                          &MapperManager::invoke_task_speculate>
                             continuation(this, task, output);
       continuation.defer(runtime, continuation_precondition, task);
     }
@@ -255,7 +259,7 @@ namespace Legion {
       if (info != NULL)
       {
         mapper->report_profiling(info, *task, *input);
-        end_mapper_call(info);
+        finish_mapper_call(info);
         return;
       }
 #ifdef DEBUG_HIGH_LEVEL
@@ -268,8 +272,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MapperManager::invoke_map_inline(MapOp *op, Mapper::InlineInput *input,
-                                          Mapper::InlineOutput *output, 
+    void MapperManager::invoke_map_inline(MapOp *op, 
+                                          Mapper::MapInlineInput *input,
+                                          Mapper::MapInlineOutput *output, 
                                           bool first_invocation)
     //--------------------------------------------------------------------------
     {
@@ -279,13 +284,13 @@ namespace Legion {
       if (info != NULL)
       {
         mapper->map_inline(info, *op, *input, *output);
-        end_mapper_call(info);
+        finish_mapper_call(info);
         return;
       }
 #ifdef DEBUG_HIGH_LEVEL
       assert(first_invocation);
 #endif
-      MapperContinuation3<MapOp, Mapper::InlineInput, Mapper::InlineOutput,
+      MapperContinuation3<MapOp, Mapper::MapInlineInput,Mapper::MapInlineOutput,
                           &MapperManager::invoke_map_inline>
                             continuation(this, op, input, output);
       continuation.defer(runtime, continuation_precondition, op);
@@ -304,7 +309,7 @@ namespace Legion {
       if (info != NULL)
       {
         mapper->select_inline_sources(info, *op, *input, *output);
-        end_mapper_call(info);
+        finish_mapper_call(info);
         return;
       }
 #ifdef DEBUG_HIGH_LEVEL
@@ -312,7 +317,7 @@ namespace Legion {
 #endif
       MapperContinuation3<MapOp, Mapper::SelectInlineSrcInput,
                           Mapper::SelectInlineSrcOutput, 
-                          &MapperManager:invoke_select_inline_sources>
+                          &MapperManager::invoke_select_inline_sources>
                             continuation(this, op, input, output);
       continuation.defer(runtime, continuation_precondition, op);
     }
@@ -329,7 +334,7 @@ namespace Legion {
       if (info != NULL)
       {
         mapper->report_profiling(info, *op, *input);
-        end_mapper_call(info);
+        finish_mapper_call(info);
         return;
       }
 #ifdef DEBUG_HIGH_LEVEL
@@ -337,7 +342,7 @@ namespace Legion {
 #endif
       MapperContinuation2<MapOp, Mapper::InlineProfilingInfo,
                           &MapperManager::invoke_inline_report_profiling>
-                            continuation(this, op, input, output);
+                            continuation(this, op, input);
       continuation.defer(runtime, continuation_precondition, op);
     }
 
@@ -354,7 +359,7 @@ namespace Legion {
       if (info != NULL)
       {
         mapper->map_copy(info, *op, *input, *output);
-        end_mapper_call(info);
+        finish_mapper_call(info);
         return;
       }
 #ifdef DEBUG_HIGH_LEVEL
@@ -379,7 +384,7 @@ namespace Legion {
       if (info != NULL)
       {
         mapper->select_copy_sources(info, *op, *input, *output);
-        end_mapper_call(info);
+        finish_mapper_call(info);
         return;
       }
 #ifdef DEBUG_HIGH_LEVEL
@@ -403,7 +408,7 @@ namespace Legion {
       if (info != NULL)
       {
         mapper->speculate(info, *op, *output);
-        end_mapper_call(info);
+        finish_mapper_call(info);
         return;
       }
 #ifdef DEBUG_HIGH_LEVEL
@@ -427,7 +432,7 @@ namespace Legion {
       if (info != NULL)
       {
         mapper->report_profiling(info, *op, *input);
-        end_mapper_call(info);
+        finish_mapper_call(info);
         return;
       }
 #ifdef DEBUG_HIGH_LEVEL
@@ -452,7 +457,7 @@ namespace Legion {
       if (info != NULL)
       {
         mapper->map_close(info, *op, *input, *output);
-        end_mapper_call(info);
+        finish_mapper_call(info);
         return;
       }
 #ifdef DEBUG_HIGH_LEVEL
@@ -477,7 +482,7 @@ namespace Legion {
       if (info != NULL)
       {
         mapper->select_close_sources(info, *op, *input, *output);
-        end_mapper_call(info);
+        finish_mapper_call(info);
         return;
       }
 #ifdef DEBUG_HIGH_LEVEL
@@ -502,7 +507,7 @@ namespace Legion {
       if (info != NULL)
       {
         mapper->report_profiling(info, *op, *input);
-        end_mapper_call(info);
+        finish_mapper_call(info);
         return;
       }
 #ifdef DEBUG_HIGH_LEVEL
@@ -527,7 +532,7 @@ namespace Legion {
       if (info != NULL)
       {
         mapper->map_acquire(info, *op, *input, *output);
-        end_mapper_call(info);
+        finish_mapper_call(info);
         return;
       }
 #ifdef DEBUG_HIGH_LEVEL
@@ -551,7 +556,7 @@ namespace Legion {
       if (info != NULL)
       {
         mapper->speculate(info, *op, *output);
-        end_mapper_call(info);
+        finish_mapper_call(info);
         return;
       }
 #ifdef DEBUG_HIGH_LEVEL
@@ -575,7 +580,7 @@ namespace Legion {
       if (info != NULL)
       {
         mapper->report_profiling(info, *op, *input);
-        end_mapper_call(info);
+        finish_mapper_call(info);
         return;
       }
 #ifdef DEBUG_HIGH_LEVEL
@@ -600,7 +605,7 @@ namespace Legion {
       if (info != NULL)
       {
         mapper->map_release(info, *op, *input, *output);
-        end_mapper_call(info);
+        finish_mapper_call(info);
         return;
       }
 #ifdef DEBUG_HIGH_LEVEL
@@ -625,7 +630,7 @@ namespace Legion {
       if (info != NULL)
       {
         mapper->select_release_sources(info, *op, *input, *output);
-        end_mapper_call(info);
+        finish_mapper_call(info);
         return;
       }
 #ifdef DEBUG_HIGH_LEVEL
@@ -650,7 +655,7 @@ namespace Legion {
       if (info != NULL)
       {
         mapper->speculate(info, *op, *output);
-        end_mapper_call(info);
+        finish_mapper_call(info);
         return;
       }
 #ifdef DEBUG_HIGH_LEVEL
@@ -674,7 +679,7 @@ namespace Legion {
       if (info != NULL)
       {
         mapper->report_profiling(info, *op, *input);
-        end_mapper_call(info);
+        finish_mapper_call(info);
         return;
       }
 #ifdef DEBUG_HIGH_LEVEL
@@ -698,7 +703,7 @@ namespace Legion {
       if (info != NULL)
       {
         mapper->configure_context(info, *task, *output);
-        end_mapper_call(info);
+        finish_mapper_call(info);
         return;
       }
 #ifdef DEBUG_HIGH_LEVEL
@@ -723,7 +728,7 @@ namespace Legion {
       if (info != NULL)
       {
         mapper->select_tunable_value(info, *task, *input, *output);
-        end_mapper_call(info);
+        finish_mapper_call(info);
         return;
       }
 #ifdef DEBUG_HIGH_LEVEL
@@ -749,7 +754,7 @@ namespace Legion {
       if (info != NULL)
       {
         mapper->map_must_epoch(info, *input, *output);
-        end_mapper_call(info);
+        finish_mapper_call(info);
         return;
       }
 #ifdef DEBUG_HIGH_LEVEL
@@ -775,13 +780,13 @@ namespace Legion {
       if (info != NULL)
       {
         mapper->map_dataflow_graph(info, *input, *output);
-        end_mapper_call(info);
+        finish_mapper_call(info);
         return;
       }
 #ifdef DEBUG_HIGH_LEVEL
       assert(first_invocation);
 #endif
-      MapperContinuation3<Mapper::MapDataflowGraphInput, 
+      MapperContinuation2<Mapper::MapDataflowGraphInput, 
                           Mapper::MapDataflowGraphOutput,
                           &MapperManager::invoke_map_dataflow_graph>
                             continuation(this, input, output);
@@ -791,7 +796,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void MapperManager::invoke_select_tasks_to_map(
                                     Mapper::SelectMappingInput *input,
-                                    Mapper::selectMappingOutput *output,
+                                    Mapper::SelectMappingOutput *output,
                                     bool first_invocation)
     //--------------------------------------------------------------------------
     {
@@ -801,7 +806,7 @@ namespace Legion {
       if (info != NULL)
       {
         mapper->select_tasks_to_map(info, *input, *output);
-        end_mapper_call(info);
+        finish_mapper_call(info);
         return;
       }
 #ifdef DEBUG_HIGH_LEVEL
@@ -827,7 +832,7 @@ namespace Legion {
       if (info != NULL)
       {
         mapper->select_steal_targets(info, *input, *output);
-        end_mapper_call(info);
+        finish_mapper_call(info);
         return;
       }
 #ifdef DEBUG_HIGH_LEVEL
@@ -853,7 +858,7 @@ namespace Legion {
       if (info != NULL)
       {
         mapper->permit_steal_request(info, *input, *output);
-        end_mapper_call(info);
+        finish_mapper_call(info);
         return;
       }
 #ifdef DEBUG_HIGH_LEVEL
@@ -877,7 +882,7 @@ namespace Legion {
       if (info != NULL)
       {
         mapper->handle_message(info, *message);
-        end_mapper_call(info);
+        finish_mapper_call(info);
         return;
       }
 #ifdef DEBUG_HIGH_LEVEL
@@ -901,7 +906,7 @@ namespace Legion {
       if (info != NULL)
       {
         mapper->handle_task_result(info, *result);
-        end_mapper_call(info);
+        finish_mapper_call(info);
         return;
       }
 #ifdef DEBUG_HIGH_LEVEL
@@ -915,14 +920,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexPartition MapperManager::get_index_partition(IndexSpace parent, 
-                                               Color color) const
+                                                      Color color)
     //--------------------------------------------------------------------------
     {
       return runtime->get_index_partition(parent, color);
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace MapperManager::get_index_subspace(IndexPartition p,Color c) const
+    IndexSpace MapperManager::get_index_subspace(IndexPartition p, Color c)
     //--------------------------------------------------------------------------
     {
       return runtime->get_index_subspace(p, c);
@@ -930,21 +935,21 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexSpace MapperManager::get_index_subspace(IndexPartition p, 
-                                                 const DomainPoint &color) const
+                                                 const DomainPoint &color)
     //--------------------------------------------------------------------------
     {
       return runtime->get_index_subspace(p, color);
     }
 
     //--------------------------------------------------------------------------
-    bool MapperManager::has_multiple_domains(IndexSpace handle) const
+    bool MapperManager::has_multiple_domains(IndexSpace handle)
     //--------------------------------------------------------------------------
     {
       return runtime->has_multiple_domains(handle);
     }
 
     //--------------------------------------------------------------------------
-    Domain MapperManager::get_index_space_domain(IndexSpace handle) const
+    Domain MapperManager::get_index_space_domain(IndexSpace handle)
     //--------------------------------------------------------------------------
     {
       return runtime->get_index_space_domain(handle);
@@ -952,14 +957,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void MapperManager::get_index_space_domains(IndexSpace handle,
-                                         std::vector<Domain> &domains) const
+                                                std::vector<Domain> &domains)
     //--------------------------------------------------------------------------
     {
       return runtime->get_index_space_domains(handle, domains);
     }
 
     //--------------------------------------------------------------------------
-    Domain MapperManager::get_index_partition_color_space(IndexPartition p)const
+    Domain MapperManager::get_index_partition_color_space(IndexPartition p)
     //--------------------------------------------------------------------------
     {
       return runtime->get_index_partition_color_space(p);
@@ -967,57 +972,56 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void MapperManager::get_index_space_partition_colors(
-                               IndexSpace handle, std::set<Color> &colors) const
+                                     IndexSpace handle, std::set<Color> &colors)
     //--------------------------------------------------------------------------
     {
       runtime->get_index_space_partition_colors(handle, colors);
     }
 
     //--------------------------------------------------------------------------
-    bool MapperManager::is_index_partition_disjoint(IndexPartition p) const
+    bool MapperManager::is_index_partition_disjoint(IndexPartition p)
     //--------------------------------------------------------------------------
     {
       return runtime->is_index_partition_disjoint(p);
     }
 
     //--------------------------------------------------------------------------
-    Color MapperManager::get_index_space_color(IndexSpace handle) const
+    Color MapperManager::get_index_space_color(IndexSpace handle)
     //--------------------------------------------------------------------------
     {
       return runtime->get_index_space_color(handle);
     }
 
     //--------------------------------------------------------------------------
-    Color MapperManager::get_index_partition_color(IndexPartition handle) const
+    Color MapperManager::get_index_partition_color(IndexPartition handle)
     //--------------------------------------------------------------------------
     {
       return runtime->get_index_partition_color(handle);
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace MapperManager::get_parent_index_space(IndexPartition handle)const
+    IndexSpace MapperManager::get_parent_index_space(IndexPartition handle)
     //--------------------------------------------------------------------------
     {
       return runtime->get_parent_index_space(handle);
     }
 
     //--------------------------------------------------------------------------
-    bool MapperManager::has_parent_index_partition(IndexSpace handle) const
+    bool MapperManager::has_parent_index_partition(IndexSpace handle)
     //--------------------------------------------------------------------------
     {
       return runtime->has_parent_index_partition(handle);
     }
 
     //--------------------------------------------------------------------------
-    IndexPartition MapperManager::get_parent_index_partition(
-                                                        IndexSpace handle) const
+    IndexPartition MapperManager::get_parent_index_partition(IndexSpace handle)
     //--------------------------------------------------------------------------
     {
       return runtime->get_parent_index_partition(handle);
     }
 
     //--------------------------------------------------------------------------
-    size_t MapperManager::get_field_size(FieldSpace handle, FieldID fid) const
+    size_t MapperManager::get_field_size(FieldSpace handle, FieldID fid)
     //--------------------------------------------------------------------------
     {
       return runtime->get_field_size(handle, fid);
@@ -1033,7 +1037,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     LogicalPartition MapperManager::get_logical_partition(LogicalRegion parent,
-                                                   IndexPartition handle) const
+                                                          IndexPartition handle)
     //--------------------------------------------------------------------------
     {
       return runtime->get_logical_partition(parent, handle);
@@ -1041,7 +1045,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     LogicalPartition MapperManager::get_logical_partition_by_color(
-                                           LogicalRegion par, Color color) const
+                                           LogicalRegion par, Color color)
     //--------------------------------------------------------------------------
     {
       return runtime->get_logical_partition_by_color(par, color);
@@ -1051,7 +1055,7 @@ namespace Legion {
     LogicalPartition MapperManager::get_logical_partition_by_tree(
                                                         IndexPartition part,
                                                         FieldSpace fspace, 
-                                                        RegionTreeID tid) const
+                                                        RegionTreeID tid)
     //--------------------------------------------------------------------------
     {
       return runtime->get_logical_partition_by_tree(part, fspace, tid);
@@ -1059,7 +1063,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     LogicalRegion MapperManager::get_logical_subregion(LogicalPartition parent,
-                                                       IndexSpace handle) const
+                                                       IndexSpace handle)
     //--------------------------------------------------------------------------
     {
       return runtime->get_logical_subregion(parent, handle);
@@ -1067,7 +1071,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     LogicalRegion MapperManager::get_logical_subregion_by_color(
-                                        LogicalPartition par, Color color) const
+                                        LogicalPartition par, Color color)
     //--------------------------------------------------------------------------
     {
       return runtime->get_logical_subregion_by_color(par, color);
@@ -1075,37 +1079,35 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     LogicalRegion MapperManager::get_logical_subregion_by_tree(
-                   IndexSpace handle, FieldSpace fspace, RegionTreeID tid) const
+                   IndexSpace handle, FieldSpace fspace, RegionTreeID tid)
     //--------------------------------------------------------------------------
     {
       return runtime->get_logical_subregion_by_tree(handle, fspace, tid);
     }
 
     //--------------------------------------------------------------------------
-    Color MapperManager::get_logical_region_color(LogicalRegion handle) const
+    Color MapperManager::get_logical_region_color(LogicalRegion handle)
     //--------------------------------------------------------------------------
     {
       return runtime->get_logical_region_color(handle);
     }
 
     //--------------------------------------------------------------------------
-    Color MapperManager::get_logical_partition_color(
-                                                  LogicalPartition handle) const
+    Color MapperManager::get_logical_partition_color(LogicalPartition handle)
     //--------------------------------------------------------------------------
     {
       return runtime->get_logical_partition_color(handle);
     }
 
     //--------------------------------------------------------------------------
-    LogicalRegion MapperManager::get_parent_logical_region(
-                                                    LogicalPartition part) const
+    LogicalRegion MapperManager::get_parent_logical_region(LogicalPartition part)
     //--------------------------------------------------------------------------
     {
       return runtime->get_parent_logical_region(part);
     }
     
     //--------------------------------------------------------------------------
-    bool MapperManager::has_parent_logical_partition(LogicalRegion handle) const
+    bool MapperManager::has_parent_logical_partition(LogicalRegion handle)
     //--------------------------------------------------------------------------
     {
       return runtime->has_parent_logical_partition(handle);
@@ -1113,7 +1115,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     LogicalPartition MapperManager::get_parent_logical_partition(
-                                                          LogicalRegion r) const
+                                                                LogicalRegion r)
     //--------------------------------------------------------------------------
     {
       return runtime->get_parent_logical_partition(r);
@@ -1213,7 +1215,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SerializingManager::is_reentrant(MappingCallInfo *info)
+    bool SerializingManager::is_reentrant(MappingCallInfo *info)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -1251,7 +1253,7 @@ namespace Legion {
 #ifdef DEBUG_HIGH_LEVEL
           assert(!info->resume.exists());
 #endif
-          UserEvent *ready_event = UserEvent::create_user_event();
+          UserEvent ready_event = UserEvent::create_user_event();
           info->resume = ready_event;
           non_reentrant_calls.push_back(info);
           ready_event.wait();
@@ -1286,9 +1288,9 @@ namespace Legion {
             ((paused_calls > 0) || !ready_calls.empty())))
       {
         // Put this on the list of pending calls
-        info->resume = UserEvent::create_user_event();
-        wait_on = info->resume;
-        pending_calls.push_back(info);
+        result->resume = UserEvent::create_user_event();
+        wait_on = result->resume;
+        pending_calls.push_back(result);
       }
       else
         executing_call = result;
@@ -1411,7 +1413,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ConcurrentManager::ConcurrentManager(Runtime *rt, Mapping::Mapper *mp)
-      : MapperManager(rt, mp), lock_state(UNLOCKED_STATE), current_holders(0)
+      : MapperManager(rt, mp), lock_state(UNLOCKED_STATE)
     //--------------------------------------------------------------------------
     {
     }
@@ -1635,7 +1637,7 @@ namespace Legion {
               to_trigger.resize(read_only_waiters.size());
               for (unsigned idx = 0; idx < read_only_waiters.size(); idx++)
                 to_trigger[idx] = read_only_waiters[idx]->resume;
-              ready_only_waiters.clear();
+              read_only_waiters.clear();
               lock_state = READ_ONLY_STATE;
             }
             else

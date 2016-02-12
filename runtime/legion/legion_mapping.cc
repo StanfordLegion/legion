@@ -13,6 +13,7 @@
  * limitations under the License.
  */
 
+#include "legion.h"
 #include "legion_mapping.h"
 #include "mapper_manager.h"
 
@@ -36,7 +37,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexPartition Mapper::get_index_partition(MapperManager ctx,
+    IndexPartition Mapper::get_index_partition(MapperContext ctx,
                                            IndexSpace parent, Color color) const
     //--------------------------------------------------------------------------
     {
@@ -44,7 +45,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace Mapper::get_index_subspace(MapperManager ctx, 
+    IndexSpace Mapper::get_index_subspace(MapperContext ctx, 
                                           IndexPartition p, Color c) const
     //--------------------------------------------------------------------------
     {
@@ -52,7 +53,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace Mapper::get_index_subspace(MapperManager ctx, IndexPartition p, 
+    IndexSpace Mapper::get_index_subspace(MapperContext ctx, IndexPartition p, 
                                           const DomainPoint &color) const
     //--------------------------------------------------------------------------
     {
@@ -60,14 +61,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool Mapper::has_multiple_domains(MapperManager ctx,IndexSpace handle) const
+    bool Mapper::has_multiple_domains(MapperContext ctx,IndexSpace handle) const
     //--------------------------------------------------------------------------
     {
       return ctx->manager->has_multiple_domains(handle);
     }
 
     //--------------------------------------------------------------------------
-    Domain Mapper::get_index_space_domain(MapperManager ctx, 
+    Domain Mapper::get_index_space_domain(MapperContext ctx, 
                                           IndexSpace handle) const
     //--------------------------------------------------------------------------
     {
@@ -75,7 +76,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Mapper::get_index_space_domains(MapperManager ctx, IndexSpace handle,
+    void Mapper::get_index_space_domains(MapperContext ctx, IndexSpace handle,
                                          std::vector<Domain> &domains) const
     //--------------------------------------------------------------------------
     {
@@ -83,7 +84,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Domain Mapper::get_index_partition_color_space(MapperManager ctx,
+    Domain Mapper::get_index_partition_color_space(MapperContext ctx,
                                                    IndexPartition p) const
     //--------------------------------------------------------------------------
     {
@@ -91,7 +92,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Mapper::get_index_space_partition_colors(MapperManager ctx,
+    void Mapper::get_index_space_partition_colors(MapperContext ctx,
                               IndexSpace handle, std::set<Color> &colors) const
     //--------------------------------------------------------------------------
     {
@@ -99,7 +100,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool Mapper::is_index_partition_disjoint(MapperManager ctx,
+    bool Mapper::is_index_partition_disjoint(MapperContext ctx,
                                              IndexPartition p) const
     //--------------------------------------------------------------------------
     {
@@ -107,7 +108,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Color Mapper::get_index_space_color(MapperManager ctx, 
+    Color Mapper::get_index_space_color(MapperContext ctx, 
                                         IndexSpace handle) const
     //--------------------------------------------------------------------------
     {
@@ -115,7 +116,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Color Mapper::get_index_partition_color(MapperManager ctx,
+    Color Mapper::get_index_partition_color(MapperContext ctx,
                                             IndexPartition handle) const
     //--------------------------------------------------------------------------
     {
@@ -123,7 +124,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace Mapper::get_parent_index_space(MapperManager ctx,
+    IndexSpace Mapper::get_parent_index_space(MapperContext ctx,
                                               IndexPartition handle) const
     //--------------------------------------------------------------------------
     {
@@ -131,7 +132,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool Mapper::has_parent_index_partition(MapperManager ctx,
+    bool Mapper::has_parent_index_partition(MapperContext ctx,
                                             IndexSpace handle) const
     //--------------------------------------------------------------------------
     {
@@ -139,7 +140,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexPartition Mapper::get_parent_index_partition(MapperManager ctx,
+    IndexPartition Mapper::get_parent_index_partition(MapperContext ctx,
                                                       IndexSpace handle) const
     //--------------------------------------------------------------------------
     {
@@ -147,7 +148,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    size_t Mapper::get_field_size(MapperManager ctx,
+    size_t Mapper::get_field_size(MapperContext ctx,
                                   FieldSpace handle, FieldID fid) const
     //--------------------------------------------------------------------------
     {
@@ -156,7 +157,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void Mapper::get_field_space_fields(MapperContext ctx, FieldSpace handle, 
-                                        std::set<FieldID> &fields)
+                                        std::set<FieldID> &fields) const
     //--------------------------------------------------------------------------
     {
       ctx->manager->get_field_space_fields(handle, fields);

@@ -18,6 +18,7 @@
 #define __DEFAULT_MAPPER_H__
 
 #include "legion.h"
+#include "legion_mapping.h"
 #include "mapping_utilities.h"
 
 #include <cstdlib>
@@ -45,54 +46,138 @@ namespace Legion {
     public:
       DefaultMapper& operator=(const DefaultMapper &rhs);
     public:
-      virtual void select_task_options(Task *task);
-      virtual void select_tasks_to_schedule(
-                      const std::list<Task*> &ready_tasks);
-      virtual void target_task_steal(
-                            const std::set<Processor> &blacklist,
-                            std::set<Processor> &targets);
-      virtual void permit_task_steal(Processor thief, 
-                                const std::vector<const Task*> &tasks,
-                                std::set<const Task*> &to_steal);
-      virtual void slice_domain(const Task *task, const Domain &domain,
-                                std::vector<DomainSplit> &slices);
-      virtual bool pre_map_task(Task *task);
-      virtual void select_task_variant(Task *task);
-      virtual bool map_task(Task *task);
-      virtual void post_map_task(Task *task);
-      virtual bool map_copy(Copy *copy);
-      virtual bool map_inline(Inline *inline_operation);
-      virtual bool map_must_epoch(const std::vector<Task*> &tasks,
-                            const std::vector<MappingConstraint> &constraints,
-                            MappingTagID tag);
-      virtual void notify_mapping_result(const Mappable *mappable);
-      virtual void notify_mapping_failed(const Mappable *mappable);
-      virtual bool rank_copy_targets(const Mappable *mappable,
-                                     LogicalRegion rebuild_region,
-                                     const std::set<Memory> &current_instances,
-                                     bool complete,
-                                     size_t max_blocking_factor,
-                                     std::set<Memory> &to_reuse,
-                                     std::vector<Memory> &to_create,
-                                     bool &create_one,
-                                     size_t &blocking_factor);
-      virtual void rank_copy_sources(const Mappable *mappable,
-                      const std::set<Memory> &current_instances,
-                      Memory dst_mem, 
-                      std::vector<Memory> &chosen_order);
-      virtual void notify_profiling_info(const Task *task);
-      virtual bool speculate_on_predicate(const Mappable *mappable,
-                                          bool &spec_value);
-      virtual void configure_context(Task *task);
-      virtual int get_tunable_value(const Task *task, 
-                                    TunableID tid,
-                                    MappingTagID tag);
-      virtual void handle_message(Processor source,
-                                  const void *message,
-                                  size_t length);
-      virtual void handle_mapper_task_result(MapperEvent event,
-                                             const void *result,
-                                             size_t result_size);
+      virtual const char* get_mapper_name(void) const;
+      virtual MapperSyncModel get_mapper_sync_model(void) const;
+    public: // Task mapping calls
+      virtual void select_task_options(const MapperContext    ctx,
+                                       const Task&            task,
+                                             TaskOptions&     output);
+      virtual void premap_task(const MapperContext      ctx,
+                               const Task&              task, 
+                               const PremapTaskInput&   input,
+                               PremapTaskOutput&        output);
+      virtual void slice_task(const MapperContext      ctx,
+                              const Task&              task, 
+                              const SliceTaskInput&    input,
+                                    SliceTaskOutput&   output);
+      virtual void map_task(const MapperContext      ctx,
+                            const Task&              task,
+                            const MapTaskInput&      input,
+                                  MapTaskOutput&     output);
+      virtual void select_task_variant(const MapperContext          ctx,
+                                       const Task&                  task,
+                                       const SelectVariantInput&    input,
+                                             SelectVariantOutput&   output);
+      virtual void postmap_task(const MapperContext      ctx,
+                                const Task&              task,
+                                const PostMapInput&      input,
+                                      PostMapOutput&     output);
+      virtual void select_task_sources(const MapperContext        ctx,
+                                       const Task&                task,
+                                       const SelectTaskSrcInput&  input,
+                                             SelectTaskSrcOutput& output);
+      virtual void speculate(const MapperContext      ctx,
+                             const Task&              task,
+                                   SpeculativeOutput& output);
+      virtual void report_profiling(const MapperContext      ctx,
+                                    const Task&              task,
+                                    const TaskProfilingInfo& input);
+    public: // Inline mapping calls
+      virtual void map_inline(const MapperContext        ctx,
+                              const InlineMapping&       inline_op,
+                              const MapInlineInput&      input,
+                                    MapInlineOutput&     output);
+      virtual void select_inline_sources(const MapperContext        ctx,
+                                       const InlineMapping&         inline_op,
+                                       const SelectInlineSrcInput&  input,
+                                             SelectInlineSrcOutput& output);
+      virtual void report_profiling(const MapperContext         ctx,
+                                    const InlineMapping&        inline_op,
+                                    const InlineProfilingInfo&  input);
+    public: // Copy mapping calls
+      virtual void map_copy(const MapperContext      ctx,
+                            const Copy&              copy,
+                            const MapCopyInput&      input,
+                                  MapCopyOutput&     output);
+      virtual void select_copy_sources(const MapperContext          ctx,
+                                       const Copy&                  copy,
+                                       const SelectCopySrcInput&    input,
+                                             SelectCopySrcOutput&   output);
+      virtual void speculate(const MapperContext      ctx,
+                             const Copy& copy,
+                                   SpeculativeOutput& output);
+      virtual void report_profiling(const MapperContext      ctx,
+                                    const Copy&              copy,
+                                    const CopyProfilingInfo& input);
+    public: // Close mapping calls
+      virtual void map_close(const MapperContext       ctx,
+                             const Close&              close,
+                             const MapCloseInput&      input,
+                                   MapCloseOutput&     output);
+      virtual void select_close_sources(const MapperContext        ctx,
+                                        const Close&               close,
+                                        const SelectCloseSrcInput&  input,
+                                              SelectCloseSrcOutput& output);
+      virtual void report_profiling(const MapperContext       ctx,
+                                    const Close&              close,
+                                    const CloseProfilingInfo& input);
+    public: // Acquire mapping calls
+      virtual void map_acquire(const MapperContext         ctx,
+                               const Acquire&              acquire,
+                               const MapAcquireInput&      input,
+                                     MapAcquireOutput&     output);
+      virtual void speculate(const MapperContext         ctx,
+                             const Acquire&              acquire,
+                                   SpeculativeOutput&    output);
+      virtual void report_profiling(const MapperContext         ctx,
+                                    const Acquire&              acquire,
+                                    const AcquireProfilingInfo& input);
+    public: // Release mapping calls
+      virtual void map_release(const MapperContext         ctx,
+                               const Release&              release,
+                               const MapReleaseInput&      input,
+                                     MapReleaseOutput&     output);
+      virtual void select_release_sources(const MapperContext       ctx,
+                                     const Release&                 release,
+                                     const SelectReleaseSrcInput&   input,
+                                           SelectReleaseSrcOutput&  output);
+      virtual void speculate(const MapperContext         ctx,
+                             const Release&              release,
+                                   SpeculativeOutput&    output);
+      virtual void report_profiling(const MapperContext         ctx,
+                                    const Release&              release,
+                                    const ReleaseProfilingInfo& input);
+    public: // Task execution mapping calls
+      virtual void configure_context(const MapperContext         ctx,
+                                     const Task&                 task,
+                                           ContextConfigOutput&  output);
+      virtual void select_tunable_value(const MapperContext         ctx,
+                                        const Task&                 task,
+                                        const SelectTunableInput&   input,
+                                              SelectTunableOutput&  output);
+    public: // Must epoch mapping
+      virtual void map_must_epoch(const MapperContext           ctx,
+                                  const MapMustEpochInput&      input,
+                                        MapMustEpochOutput&     output);
+    public: // Dataflow graph mapping
+      virtual void map_dataflow_graph(const MapperContext           ctx,
+                                      const MapDataflowGraphInput&  input,
+                                            MapDataflowGraphOutput& output);
+    public: // Mapping control and stealing
+      virtual void select_tasks_to_map(const MapperContext          ctx,
+                                       const SelectMappingInput&    input,
+                                             SelectMappingOutput&   output);
+      virtual void select_steal_targets(const MapperContext         ctx,
+                                        const SelectStealingInput&  input,
+                                              SelectStealingOutput& output);
+      virtual void permit_steal_request(const MapperContext         ctx,
+                                        const StealRequestInput&    intput,
+                                              StealRequestOutput&   output);
+    public: // handling
+      virtual void handle_message(const MapperContext           ctx,
+                                  const MapperMessage&          message);
+      virtual void handle_task_result(const MapperContext           ctx,
+                                      const MapperTaskResult&       result);
     public:
       // Helper methods for building other kinds of mappers, made static 
       // so they can be used in non-derived classes
@@ -104,7 +189,7 @@ namespace Legion {
       static void decompose_index_space(const Domain &domain, 
                               const std::vector<Processor> &targets,
                               unsigned splitting_factor, 
-                              std::vector<Mapper::DomainSplit> &slice);
+                              std::vector<Mapper::TaskSlice> &slice);
     protected:
       const Processor local_proc;
       const Processor::Kind local_kind;

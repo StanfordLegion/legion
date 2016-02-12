@@ -217,7 +217,7 @@ namespace Legion {
       struct TaskOptions {
         Processor                              initial_proc; // = current
         bool                                   inline_task;  // = false
-        bool                                   spawn_task;   // = false
+        bool                                   stealable;   // = false
         bool                                   map_locally;  // = false
       };
       //------------------------------------------------------------------------
@@ -941,8 +941,12 @@ namespace Legion {
        * The select_tunable_value mapper call allows mappers to control
        * decisions about tunable values for a given task execution. The
        * mapper is told of the tunable ID and presented with the mapping
-       * tag for the operation. It then must select a value for the tunable
-       * variable and set it in 'int_value.'
+       * tag for the operation. It then must then allocate a buffer and 
+       * put the result in the buffer. The runtime will take ownership
+       * of the resulting buffer. If the resulting future expects the 
+       * future to be packed, it is the responsibility of the mapper 
+       * to pack it. The utility method 'pack_tunable' will allocate
+       * the buffer and do any necessary packing for an arbitrary type.
        */
       struct SelectTunableInput {
         TunableID                               tunable_id;
@@ -950,6 +954,7 @@ namespace Legion {
       };
       struct SelectTunableOutput {
         void*                                   value;
+        size_t                                  size;
       };
       //------------------------------------------------------------------------
       virtual void select_tunable_value(const MapperContext         ctx,
@@ -1012,7 +1017,7 @@ namespace Legion {
                                       const MapDataflowGraphInput&  input,
                                             MapDataflowGraphOutput& output) = 0;
       //------------------------------------------------------------------------
-    public: // Scheduling 
+    public: // Mapping control 
       /**
        * ----------------------------------------------------------------------
        *  Select Tasks to Map 
@@ -1225,11 +1230,7 @@ namespace Legion {
 
       template<unsigned DIM>
       IndexSpace get_index_subspace(MapperContext ctx, IndexPartition p, 
-                          LegionRuntime::Arrays::Point<DIM> &color_point) const
-      {
-        DomainPoint dom_point = DomainPoint::from_point<DIM>(color_point);
-        return get_index_subspace(ctx, p, dom_point);
-      }
+                          LegionRuntime::Arrays::Point<DIM> &color_point) const;
 
       Color get_index_space_color(MapperContext ctx, IndexSpace handle) const;
 
@@ -1290,6 +1291,12 @@ namespace Legion {
 
       LogicalPartition get_parent_logical_partition(MapperContext ctx,
                                                     LogicalRegion handle) const;
+    protected:
+      //------------------------------------------------------------------------
+      // Support for packing tunable values
+      //------------------------------------------------------------------------
+      template<typename T>
+      void pack_tunable(const T &result, SelectTunableOutput &output);
     };
 
   }; // namespace Mapping

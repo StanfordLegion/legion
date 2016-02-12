@@ -151,8 +151,7 @@ namespace Legion {
             log_run.error("Trace violation! Recorded %ld operations in trace "
                           "%d in task %s (UID %lld) but %d operations have "
                           "now been issued!", dependences.size(), tid,
-                          ctx->variants->name, 
-                          ctx->get_unique_task_id(), index+1);
+                          ctx->get_task_name(), ctx->get_unique_id(), index+1);
 #ifdef DEBUG_HIGH_LEVEL
             assert(false);
 #endif
@@ -166,8 +165,7 @@ namespace Legion {
             log_run.error("Trace violation! Operation at index %d of trace %d "
                           "in task %s (UID %lld) was recorded as having type "
                           "%s but instead has type %s in replay.",
-                          index, tid, ctx->variants->name, 
-                          ctx->get_unique_task_id(), 
+                          index, tid, ctx->get_task_name(),ctx->get_unique_id(),
                           Operation::get_string_rep(info.kind),
                           Operation::get_string_rep(op->get_operation_kind()));
 #ifdef DEBUG_HIGH_LEVEL
@@ -181,8 +179,8 @@ namespace Legion {
             log_run.error("Trace violation! Operation at index %d of trace %d "
                           "in task %s (UID %lld) was recorded as having %d "
                           "regions, but instead has %ld regions in replay.",
-                          index, tid, ctx->variants->name,
-                          ctx->get_unique_task_id(), info.count,
+                          index, tid, ctx->get_task_name(),
+                          ctx->get_unique_id(), info.count,
                           op->get_region_count());
 #ifdef DEBUG_HIGH_LEVEL
             assert(false);

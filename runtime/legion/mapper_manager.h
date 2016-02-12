@@ -35,7 +35,7 @@ namespace Legion {
       TASK_REPORT_PROFILING_CALL,
       MAP_INLINE_CALL,
       INLINE_SELECT_SOURCES_CALL,
-      INLINT_REPORT_PROFILING_CALL,
+      INLINE_REPORT_PROFILING_CALL,
       MAP_COPY_CALL,
       COPY_SELECT_SOURCES_CALL,
       COPY_SPECULATE_CALL,
@@ -260,6 +260,24 @@ namespace Legion {
       size_t get_field_size(FieldSpace handle, FieldID fid);
       void get_field_space_fields(FieldSpace handle, 
                                   std::set<FieldID> &fields);
+    public:
+      LogicalPartition get_logical_partition(LogicalRegion parent, 
+                                             IndexPartition handle);
+      LogicalPartition get_logical_partition_by_color(LogicalRegion parent, 
+                                                      Color color);
+      LogicalPartition get_logical_partition_by_tree(IndexPartition handle, 
+                                           FieldSpace fspace, RegionTreeID tid);
+      LogicalRegion get_logical_subregion(LogicalPartition parent, 
+                                          IndexSpace handle);
+      LogicalRegion get_logical_subregion_by_color(LogicalPartition parent, 
+                                                   Color color);
+      LogicalRegion get_logical_subregion_by_tree(IndexSpace handle, 
+                                          FieldSpace fspace, RegionTreeID tid);
+      Color get_logical_region_color(LogicalRegion handle);
+      Color get_logical_partition_color(LogicalPartition handle);
+      LogicalRegion get_parent_logical_region(LogicalPartition handle);
+      bool has_parent_logical_partition(LogicalRegion handle);
+      LogicalPartition get_parent_logical_partition(LogicalRegion handle);
     protected:
       // Both these must be called while holding the lock
       MappingCallInfo* allocate_call_info(MappingCallKind kind, bool need_lock);
@@ -268,7 +286,7 @@ namespace Legion {
       Runtime *const runtime;
       Mapping::Mapper *const mapper;
     protected:
-      const Reservation mapper_lock;
+      Reservation mapper_lock;
     protected:
       std::vector<MappingCallInfo*> available_infos;
     };

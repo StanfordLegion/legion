@@ -87,6 +87,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void TaskOp::set_current_proc(Processor current)
+    //--------------------------------------------------------------------------
+    {
+      // Always clear target_proc and the mapper when setting a new current proc
+      target_proc = Processor::NO_PROC;
+      mapper = NULL;
+      current_proc = current;
+    }
+
+    //--------------------------------------------------------------------------
     void TaskOp::activate_task(void)
     //--------------------------------------------------------------------------
     {
@@ -101,7 +111,7 @@ namespace Legion {
       map_locally = false;
       local_cached = false;
       arg_manager = NULL;
-      next_proc = Processor::NO_PROC;
+      target_proc = Processor::NO_PROC;
       mapper = NULL;
       orig_proc = Processor::NO_PROC; // for is_remote
     }
@@ -392,6 +402,24 @@ namespace Legion {
       }
 #endif
       return result_size;
+    }
+
+    //--------------------------------------------------------------------------
+    bool TaskOp::select_task_options(void)
+    //--------------------------------------------------------------------------
+    {
+      if (mapper == NULL)
+        mapper = runtime->find_mapper(current_proc, map_id);
+      Mapper::TaskOptions options;
+      options.initial_proc = current_proc;
+      options.inline_task = false;
+      options.stealable = false;
+      options.map_locally = false;
+      mapper->invoke_select_task_options(this, &options);
+      target_proc = options.initial_proc;
+      stealable = options.stealable;
+      map_locally = options.map_locally;
+      return options.inline_task;
     }
 
     //--------------------------------------------------------------------------
@@ -1473,7 +1501,7 @@ namespace Legion {
       // From TaskOp
       this->early_mapped_regions = rhs->early_mapped_regions;
       this->parent_req_indexes = rhs->parent_req_indexes;
-      this->next_proc = p;
+      this->target_proc = p;
     }
 
     //--------------------------------------------------------------------------
@@ -4275,8 +4303,8 @@ namespace Legion {
             // remotely in which case we need to do the
             // mapping now, otherwise we can defer it
             // until the task ends up on the target processor
-            if (is_locally_mapped() && next_proc.exists() &&
-                !runtime->is_local(next_proc))
+            if (is_locally_mapped() && target_proc.exists() &&
+                !runtime->is_local(target_proc))
             {
               if (perform_mapping())
               {
@@ -5772,7 +5800,7 @@ namespace Legion {
                 // the mapping now.  Otherwise we
                 // can defer the mapping until we get
                 // on the target processor.
-                if (next_proc.exists() && !runtime->is_local(next_proc))
+                if (target_proc.exists() && !runtime->is_local(target_proc))
                 {
                   if (perform_mapping())
                   {
@@ -6510,7 +6538,7 @@ namespace Legion {
     bool IndividualTask::distribute_task(void)
     //--------------------------------------------------------------------------
     {
-      if (next_proc.exists() && (next_proc != current_proc))
+      if (target_proc.exists() && (target_proc != current_proc))
       {
         runtime->send_task(this);
         return false;
@@ -8945,13 +8973,14 @@ namespace Legion {
       }
       else
       {
-        if (!is_sliced() && next_proc.exists() && (next_proc != current_proc))
+        if (!is_sliced() && target_proc.exists() && 
+            (target_proc != current_proc))
         {
 #ifdef DEBUG_HIGH_LEVEL
           assert(minimal_points_assigned == 0);
 #endif
           // Make a slice copy and send it away
-          SliceTask *clone = clone_as_slice_task(index_domain, next_proc,
+          SliceTask *clone = clone_as_slice_task(index_domain, target_proc,
                                                  true/*needs slice*/,
                                                  stealable, 1LL);
 #ifdef DEBUG_HIGH_LEVEL
@@ -9791,7 +9820,7 @@ namespace Legion {
       // Quick out in case this slice task is to be reclaimed
       if (reclaim)
         return true;
-      if (next_proc.exists() && (next_proc != current_proc))
+      if (target_proc.exists() && (target_proc != current_proc))
       {
         runtime->send_task(this);
         // The runtime will deactivate this task
@@ -10160,7 +10189,7 @@ namespace Legion {
       result->initialize_base_task(parent_ctx,
                                    false/*track*/, Predicate::TRUE_PRED,
                                    this->task_id);
-      result->clone_task_op_from(this, this->next_proc, 
+      result->clone_task_op_from(this, this->target_proc, 
                                  false/*stealable*/, true/*duplicate*/);
       result->is_index_space = true;
       result->must_parallelism = this->must_parallelism;

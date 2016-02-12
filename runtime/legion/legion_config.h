@@ -303,6 +303,7 @@ typedef enum legion_error_t {
   ERROR_DUPLICATE_CONSTRAINT_ID = 144,
   ERROR_INVALID_CONSTRAINT_ID = 145,
   ERROR_ILLEGAL_WAIT_FOR_SHUTDOWN = 146,
+  ERROR_DEPRECATED_METHOD_USE = 147,
 }  legion_error_t;
 
 // enum and namepsaces don't really get along well

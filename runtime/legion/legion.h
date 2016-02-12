@@ -1393,7 +1393,10 @@ namespace Legion {
        */
       LogicalRegion get_logical_region(void) const;
       /**
+       * @deprecated
        * Return a generic accessor for the entire physical region.
+       * This method is now deprecated. Please use the 'get_field_accessor'
+       * method instead.
        */
       LegionRuntime::Accessor::RegionAccessor<
         LegionRuntime::Accessor::AccessorType::Generic> 
@@ -1669,6 +1672,7 @@ namespace Legion {
       // Meta data information from the runtime
       Processor                           orig_proc;
       Processor                           current_proc;
+      Processor                           target_proc;
       unsigned                            steal_count;
       bool                                stealable;
       bool                                speculated;
@@ -3652,15 +3656,28 @@ namespace Legion {
       //------------------------------------------------------------------------
       // Tunable Variables 
       //------------------------------------------------------------------------
+
       /**
        * Similar to Legion's ancestral predecessor Sequoia, Legion supports
        * tunable variables which are integers supplied by the mapper for 
        * individual task contexts.  The idea is that there are some parameters
        * which should be considered parameters determined by the underlying
        * hardware.  To make these parameters explicit, we express them as
-       * tunables which are filled in at runtime by mapper objects.  Right
-       * now all tunables are integers, however, if users develop compelling
-       * cases for other types we would be interested in knowing about them.
+       * tunables which are filled in at runtime by mapper objects. This
+       * method will return asynchronously with a future that will be set
+       * once the mapper fills in the value for the future. It is the 
+       * responsibility of the application to maintain consistency on the
+       * expected types for a given tunable between the application and
+       * the mapper.
+       */
+      Future select_tunable_value(Context ctx, TunableID tid,
+                                  MapperID mapper = 0, MappingTagID tag = 0);
+
+      /**
+       * @deprecated
+       * This is the old method for asking the mapper to specify a 
+       * tunable value. It will assume that the resulting tunable 
+       * future can be interpreted as an integer.
        */
       int get_tunable_value(Context ctx, TunableID tid, 
                             MapperID mapper = 0, MappingTagID tag = 0);
