@@ -44,11 +44,54 @@
 #include "llvm/Support/FormattedStream.h"
 #include "llvm/PassManager.h"
 
+#ifdef DEBUG_MEMORY_MANAGEMENT
+#include "llvm/ExecutionEngine/SectionMemoryManager.h"
+#include <iostream>
+#endif
+
 namespace Realm {
 
   extern Logger log_llvmjit;  // defined in llvmjit_module.cc
 
   namespace LLVMJit {
+
+#ifdef DEBUG_MEMORY_MANAGEMENT
+    class MemoryManagerWrap : public llvm::SectionMemoryManager {
+    public:
+      virtual uint8_t *allocateCodeSection(uintptr_t Size, unsigned Alignment, unsigned SectionID, llvm::StringRef SectionName) override
+      {
+	std::cout << "allocateCodeSection(" << Size << ", " << Alignment << ", " << SectionID << ", " << SectionName.str() << ")";
+	std::cout.flush();
+	uint8_t *ret = llvm::SectionMemoryManager::allocateCodeSection(Size, Alignment, SectionID, SectionName);
+	std::cout << " -> " << ((void *)ret) << "\n";
+	return ret;
+      }
+
+      virtual uint8_t *allocateDataSection(uintptr_t Size, unsigned Alignment, unsigned SectionID, llvm::StringRef SectionName, bool isReadOnly) override
+      {
+	std::cout << "allocateDataSection(" << Size << ", " << Alignment << ", " << SectionID << ", " << SectionName.str() << ", " << isReadOnly << ")";
+	std::cout.flush();
+	uint8_t *ret = llvm::SectionMemoryManager::allocateDataSection(Size, Alignment, SectionID, SectionName, isReadOnly);
+	std::cout << " -> " << ((void *)ret) << "\n";
+	return ret;
+      }
+
+      bool finalizeMemory (std::string *ErrMsg=nullptr) override
+      {
+	std::cout << "finalizeMemory()";
+	std::cout.flush();
+	bool ret = llvm::SectionMemoryManager::finalizeMemory(ErrMsg);
+	std::cout << " -> " << ret << "\n";
+	return ret;
+      }
+
+      void invalidateInstructionCache() override
+      {
+	std::cout << "invalidateInstructionCache()\n";
+	llvm::SectionMemoryManager::invalidateInstructionCache();
+      }
+    };
+#endif
 
     ////////////////////////////////////////////////////////////////////////
     //
@@ -103,6 +146,9 @@ namespace Realm {
 	    .setEngineKind(llvm::EngineKind::JIT)
 	    .setAllocateGVsWithCode(false)
 	    .setUseMCJIT(true);
+#ifdef DEBUG_MEMORY_MANAGEMENT
+	  eb.setMCJITMemoryManager(new MemoryManagerWrap);
+#endif
 	  
 	  host_exec_engine = eb.create(host_cpu_machine);
 
@@ -121,7 +167,7 @@ namespace Realm {
       delete host_exec_engine;
       delete context;
     }
-    
+
     void *LLVMJitInternal::llvmir_to_fnptr(const ByteArray& ir,
 					   const std::string& entry_symbol)
     {
@@ -150,8 +196,12 @@ namespace Realm {
 
       host_exec_engine->addModule(m);
 
+      // this actually triggers the JIT, allocating space for code and data
       void *fnptr = host_exec_engine->getPointerToFunction(func);
       assert(fnptr != 0);
+
+      // and this call actually marks that memory executable
+      host_exec_engine->finalizeObject();
 
       return fnptr;
     }
