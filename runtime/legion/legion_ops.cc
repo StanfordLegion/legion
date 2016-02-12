@@ -1733,8 +1733,6 @@ namespace Legion {
                                                    version_info,
                                                    restrict_info,
                                                    privilege_path);
-      if (restrict_info.has_restrictions())
-        requirement.flags |= RESTRICTED_FLAG;
       end_dependence_analysis();
     }
 
@@ -2592,8 +2590,6 @@ namespace Legion {
                                                      src_versions[idx],
                                                      restrict_info,
                                                      src_privilege_paths[idx]);
-        if (restrict_info.has_restrictions())
-          src_requirements[idx].flags |= RESTRICTED_FLAG;
       }
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
       {
@@ -2604,8 +2600,6 @@ namespace Legion {
                                                      dst_versions[idx],
                                                      restrict_info,
                                                      dst_privilege_paths[idx]);
-        if (restrict_info.has_restrictions())
-          dst_requirements[idx].flags |= RESTRICTED_FLAG;
       }
       end_dependence_analysis();
     }
@@ -4239,7 +4233,6 @@ namespace Legion {
       }
       else
       {
-        requirement.flags |= RESTRICTED_FLAG;
         parent_ctx->get_local_references(parent_req_index, chosen_instances);
       }
       // Now we can perform our close operation
@@ -4782,8 +4775,6 @@ namespace Legion {
                                                    version_info,
                                                    restrict_info,
                                                    privilege_path);
-      if (restrict_info.has_restrictions())
-        requirement.flags |= RESTRICTED_FLAG;
       end_dependence_analysis();
     }
 

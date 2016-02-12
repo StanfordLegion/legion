@@ -6957,6 +6957,31 @@ namespace Legion {
       local = false;
     }
 
+    /////////////////////////////////////////////////////////////
+    // InstanceSet 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    InstanceSet::InstanceSet(size_t init_size /*=0*/)
+      : size(init_size), shared(false)
+    //--------------------------------------------------------------------------
+    {
+      if (size == 0)
+        refs.single = NULL;
+      else if (size == 1)
+        refs.single = new InstanceRef();
+      else
+        refs.multi = new LegionVector<InstanceRef>::aligned(size);
+    }
+
+    //--------------------------------------------------------------------------
+    InstanceSet::InstanceSet(InstanceSet &rhs)
+      : size(rhs.size), shared(true)
+    //--------------------------------------------------------------------------
+    {
+       
+    }
+
   }; // namespace Internal 
 }; // namespace Legion
 

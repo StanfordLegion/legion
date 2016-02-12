@@ -1250,11 +1250,17 @@ namespace Legion {
 
     class InstanceSet {
     public:
+      class InternalSet : public Collectable {
+      public:
+        InternalSet(
+
+      };
+    public:
       InstanceSet(size_t init_size = 0);
-      InstanceSet(const InstanceSet &rhs);
+      InstanceSet(InstanceSet &rhs);
       ~InstanceSet(void);
     public:
-      InstanceSet& operator=(const InstanceSet &rhs);
+      InstanceSet& operator=(InstanceSet &rhs);
       bool operator==(const InstanceSet &rhs) const;
       bool operator!=(const InstanceSet &rhs) const;
     public:
@@ -1283,6 +1289,13 @@ namespace Legion {
       LegionRuntime::Accessor::RegionAccessor<
         LegionRuntime::Accessor::AccessorType::Generic>
           get_field_accessor(RegionTreeForest *forest, FieldID fid) const;
+    protected:
+      union {
+        InstanceRef*                        single;
+        LegionVector<InstanceRef>::aligned*  multi;
+      } refs;
+      size_t size;
+      bool shared;
     };
 
     /**

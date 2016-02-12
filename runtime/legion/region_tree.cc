@@ -1449,7 +1449,7 @@ namespace Legion {
       op->clear_logical_records();
       // If we have a restriction, then record it on the region requirement
       if (restrict_info.has_restrictions())
-        req.restricted = true;
+        req.flags |= RESTRICTED_FLAG;
 #ifdef DEBUG_HIGH_LEVEL
       TreeStateLogger::capture_state(runtime, &req, idx, op->get_logging_name(),
                                      op->get_unique_op_id(), parent_node,
@@ -1696,6 +1696,7 @@ namespace Legion {
       return info.has_restrictions(handle, node, fields);
     }
 
+#if 0
     //--------------------------------------------------------------------------
     bool RegionTreeForest::premap_physical_region(RegionTreeContext ctx,
                                                   RegionTreePath &path,
@@ -2657,6 +2658,7 @@ namespace Legion {
 #endif
       return result;
     }
+#endif
 
     //--------------------------------------------------------------------------
     void RegionTreeForest::fill_fields(RegionTreeContext ctx,
@@ -5723,29 +5725,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (!handle_ready.has_triggered())
-      {
-        if (app_query)
-        {
-          Processor current_proc = Processor::get_executing_processor();
-          context->runtime->pre_wait(current_proc);
-          handle_ready.wait();
-          context->runtime->post_wait(current_proc);
-        }
-        else
-          handle_ready.wait();
-      }
+        handle_ready.wait();
       if (!domain_ready.has_triggered())
-      {
-        if (app_query)
-        {
-          Processor current_proc = Processor::get_executing_processor();
-          context->runtime->pre_wait(current_proc);
-          domain_ready.wait();
-          context->runtime->post_wait(current_proc);
-        }
-        else
-          domain_ready.wait();
-      }
+        domain_ready.wait();
       if (domain.get_dim() == 0)
       {
         const Realm::ElementMask &mask = 
@@ -6988,17 +6970,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (!disjoint_ready.has_triggered())
-      {
-        if (app_query)
-        {
-          Processor current_proc = Processor::get_executing_processor();
-          context->runtime->pre_wait(current_proc);
-          disjoint_ready.wait();
-          context->runtime->post_wait(current_proc);
-        }
-        else
-          disjoint_ready.wait();
-      }
+        disjoint_ready.wait();
       return disjoint;
     }
 
@@ -12291,13 +12263,13 @@ namespace Legion {
           if (valid_memories.find(*it) == valid_memories.end())
           {
             log_region.warning("WARNING: memory " IDFMT " was specified "
-                                     "to be reused in rank_copy_targets "
-                                     "when closing mappable operation ID %lld, "
-                                     "but no instance exists in that memory."
-                                     "Memory " IDFMT " is being added to the "
-                                     "set of create memories.", it->id,
-                       closer.info.op->get_mappable()->get_unique_mappable_id(),
-                                     it->id);
+                               "to be reused in rank_copy_targets "
+                               "when closing mappable operation ID %lld, "
+                               "but no instance exists in that memory."
+                               "Memory " IDFMT " is being added to the "
+                               "set of create memories.", it->id,
+                 closer.info.op->get_mappable()->get_unique_mappable_id(),
+                               it->id);
             // Add it to the list of memories to try creating
             to_create.push_back(*it);
             to_delete.push_back(*it);
