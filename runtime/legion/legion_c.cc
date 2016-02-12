@@ -18,6 +18,9 @@
 #include "legion_c_util.h"
 #include "utilities.h"
 #include "default_mapper.h"
+#ifdef REALM_USE_LLVM
+#include "realm/llvmjit/llvmjit.h"
+#endif
 
 #ifndef USE_LEGION_PARTAPI_SHIM
 #ifdef SHARED_LOWLEVEL
@@ -3912,6 +3915,74 @@ legion_runtime_preregister_task_variant_fnptr(
 							task_name);
   return id;
 }
+
+#ifdef REALM_USE_LLVM
+legion_task_id_t
+legion_runtime_register_task_variant_llvmir(
+  legion_runtime_t runtime_,
+  legion_task_id_t id,
+  legion_processor_kind_t proc_kind_,
+  bool global,
+  legion_task_config_options_t options,
+  const char *task_name /* = NULL*/,
+  const void *userdata,
+  size_t userlen,
+  const char *llvmir,
+  const char *entry_symbol)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Processor::Kind proc_kind = CObjectWrapper::unwrap(proc_kind_);
+
+  if(id == AUTO_GENERATE_ID)
+    id = Runtime::generate_static_task_id();
+  TaskVariantRegistrar registrar(id, global,
+				 task_name);
+  registrar.set_leaf(options.leaf);
+  registrar.set_inner(options.inner);
+  registrar.set_idempotent(options.idempotent);
+  registrar.add_constraint(ProcessorConstraint(proc_kind));
+  CodeDescriptor code_desc(Realm::Type::from_cpp_type<Processor::TaskFuncPtr>());
+  code_desc.add_implementation(new Realm::LLVMIRImplementation(llvmir, strlen(llvmir), entry_symbol));
+  /*VariantID vid =*/ runtime->register_task_variant(registrar,
+						     code_desc,
+						     userdata,
+						     userlen);
+  if(task_name)
+    runtime->attach_name(id, task_name);
+  return id;
+}
+
+legion_task_id_t
+legion_runtime_preregister_task_variant_llvmir(
+  legion_task_id_t id,
+  legion_processor_kind_t proc_kind_,
+  legion_task_config_options_t options,
+  const char *task_name /* = NULL*/,
+  const void *userdata,
+  size_t userlen,
+  const char *llvmir,
+  const char *entry_symbol)
+{
+  Processor::Kind proc_kind = CObjectWrapper::unwrap(proc_kind_);
+
+  if(id == AUTO_GENERATE_ID)
+    id = Runtime::generate_static_task_id();
+  TaskVariantRegistrar registrar(id, false /*!global*/,
+				 task_name);
+  registrar.set_leaf(options.leaf);
+  registrar.set_inner(options.inner);
+  registrar.set_idempotent(options.idempotent);
+  registrar.add_constraint(ProcessorConstraint(proc_kind));
+  CodeDescriptor code_desc(Realm::Type::from_cpp_type<Processor::TaskFuncPtr>());
+  code_desc.add_implementation(new Realm::LLVMIRImplementation(llvmir, strlen(llvmir), entry_symbol));
+  /*VariantID vid =*/ Runtime::preregister_task_variant(registrar,
+							code_desc,
+							userdata,
+							userlen,
+							task_name);
+  return id;
+}
+#endif
 
 void
 legion_task_preamble(

@@ -2602,7 +2602,7 @@ extern "C" {
     legion_task_pointer_uint64_t task_pointer);
 
   /**
-   * @see LegionRuntime::HighLevel::Runtime::preregister_task_variant()
+   * @see LegionRuntime::HighLevel::Runtime::register_task_variant()
    */
   legion_task_id_t
   legion_runtime_register_task_variant_fnptr(
@@ -2614,6 +2614,19 @@ extern "C" {
     const void *userdata,
     size_t userlen,
     legion_task_pointer_wrapped_t wrapped_task_pointer);
+
+  legion_task_id_t
+  legion_runtime_register_task_variant_llvmir(
+    legion_runtime_t runtime,
+    legion_task_id_t id,
+    legion_processor_kind_t proc_kind,
+    bool global,
+    legion_task_config_options_t options,
+    const char *task_name,
+    const void *userdata,
+    size_t userlen,
+    const char *llvmir,
+    const char *entry_symbol);
 
   /**
    * @see LegionRuntime::HighLevel::Runtime::preregister_task_variant()
@@ -2627,6 +2640,17 @@ extern "C" {
     const void *userdata,
     size_t userlen,
     legion_task_pointer_wrapped_t wrapped_task_pointer);
+
+  legion_task_id_t
+  legion_runtime_preregister_task_variant_llvmir(
+    legion_task_id_t id,
+    legion_processor_kind_t proc_kind,
+    legion_task_config_options_t options,
+    const char *task_name,
+    const void *userdata,
+    size_t userlen,
+    const char *llvmir,
+    const char *entry_symbol);
 
   /**
    * @see LegionRuntime::LegionTaskWrapper::legion_task_preamble()
