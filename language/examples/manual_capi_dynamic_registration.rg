@@ -28,17 +28,17 @@ FID_2 = 2
 TID_TOP_LEVEL_TASK = 100
 TID_SUB_TASK = 101
 
-terra sub_task(task : c.legion_task_t,
-               regions : &c.legion_physical_region_t,
-               num_regions : uint32,
-               ctx : c.legion_context_t,
-               runtime : c.legion_runtime_t) : uint32
-  var arglen = c.legion_task_get_arglen(task)
-  c.printf("in sub_task (%u arglen, %u regions)...\n",
-                arglen, num_regions)
-  var y = @[&uint32](c.legion_task_get_args(task))
-  return y + 1
+---------------------------------------------------------------------
+--
+-- this is task registration code that could/should be in a library
+--
+---------------------------------------------------------------------
+
+local dlfcn = terralib.includec("dlfcn.h")
+terra legion_has_llvm_support() : bool
+  return (dlfcn.dlsym([&opaque](0), "legion_runtime_register_task_variant_llvmir") ~= [&opaque](0))
 end
+use_llvm = legion_has_llvm_support()
 
 function legion_task_wrapper(body)
   -- look at the return type of the task we're wrapping to emit the right postamble code
@@ -71,6 +71,101 @@ function legion_task_wrapper(body)
   return wrapper
 end
 
+function preregister_task(terrafunc)
+  -- either way, we wrap the body with legion preamble and postamble first
+  local wrapped = legion_task_wrapper(terrafunc)
+  if use_llvm then
+    -- if we can register llvmir, ask Terra to generate that
+    local ir = terralib.saveobj(nil, "llvmir", { entry=wrapped } )
+    local rfunc = terra(id : c.legion_task_id_t,
+			proc_kind : c.legion_processor_kind_t,
+			options: c.legion_task_config_options_t,
+			task_name : &int8,
+			userdata : &opaque,
+			userlen : c.size_t)
+      return c.legion_runtime_preregister_task_variant_llvmir(id, proc_kind, options, task_name, userdata, userlen, ir, "entry")
+    end
+    return rfunc
+  else
+    -- use the terra function directly, which ffi will convert to a (non-portable) function pointer
+    local rfunc = terra(id : c.legion_task_id_t,
+			proc_kind : c.legion_processor_kind_t,
+			options: c.legion_task_config_options_t,
+			task_name : &int8,
+			userdata : &opaque,
+			userlen : c.size_t)
+      return c.legion_runtime_preregister_task_variant_fnptr(id, proc_kind, options, task_name, userdata, userlen, wrapped)
+    end
+    return rfunc
+  end
+end
+
+function register_task(terrafunc)
+  -- either way, we wrap the body with legion preamble and postamble first
+  local wrapped = legion_task_wrapper(terrafunc)
+  if use_llvm then
+    -- if we can register llvmir, ask Terra to generate that
+    local ir = terralib.saveobj(nil, "llvmir", { entry=wrapped } )
+    local rfunc = terra(runtime : c.legion_runtime_t,
+			id : c.legion_task_id_t,
+			proc_kind : c.legion_processor_kind_t,
+			options: c.legion_task_config_options_t,
+			task_name : &int8,
+			userdata : &opaque,
+			userlen : c.size_t)
+      return c.legion_runtime_register_task_variant_llvmir(runtime,
+							   id,
+							   proc_kind,
+							   true, -- global registration possible with llvmir
+							   options,
+							   task_name,
+							   userdata,
+							   userlen,
+							   ir,
+							   "entry")
+    end
+    return rfunc
+  else
+    -- use the terra function directly, which ffi will convert to a (non-portable) function pointer
+    local rfunc = terra(runtime : c.legion_runtime_t,
+			id : c.legion_task_id_t,
+			proc_kind : c.legion_processor_kind_t,
+			options: c.legion_task_config_options_t,
+			task_name : &int8,
+			userdata : &opaque,
+			userlen : c.size_t)
+      return c.legion_runtime_register_task_variant_fnptr(runtime,
+							  id,
+							  proc_kind,
+							  options,
+							  task_name,
+							  userdata,
+							  userlen,
+							  wrapped)
+    end
+    return rfunc
+  end
+end
+
+---------------------------------------------------------------------
+--
+-- actual application tasks start here
+--
+---------------------------------------------------------------------
+
+
+terra sub_task(task : c.legion_task_t,
+               regions : &c.legion_physical_region_t,
+               num_regions : uint32,
+               ctx : c.legion_context_t,
+               runtime : c.legion_runtime_t) : uint32
+  var arglen = c.legion_task_get_arglen(task)
+  c.printf("in sub_task (%u arglen, %u regions)...\n",
+                arglen, num_regions)
+  var y = @[&uint32](c.legion_task_get_args(task))
+  return y + 1
+end
+
 terra top_level_task(task : c.legion_task_t,
                      regions : &c.legion_physical_region_t,
                      num_regions : uint32,
@@ -78,15 +173,17 @@ terra top_level_task(task : c.legion_task_t,
                      runtime : c.legion_runtime_t)
   c.printf("in top_level_task...\n")
 
-  c.legion_runtime_register_task_variant_fnptr(
-    runtime,
-    TID_SUB_TASK,
-    c.LOC_PROC,
-    c.legion_task_config_options_t {
-      leaf = false, inner = false, idempotent = false},
-    "sub_task",
-    [&opaque](0), 0, 
-    [ legion_task_wrapper(sub_task) ])
+  -- sub task is dynamically registered in the top level task
+  -- the Lua escape here constructs the right registration function, picking between a non-portable function
+  --  pointer and LLVMIR during the compilation of this task, but the actual registration happens when the
+  --  top_level_task is executed
+  [ register_task(sub_task) ](runtime,
+			      TID_SUB_TASK,
+			      c.LOC_PROC,
+			      c.legion_task_config_options_t {
+				 leaf = false, inner = false, idempotent = false},
+			      "sub_task",
+			      [&opaque](0), 0)
 
   var x : uint32 = 42
   var sub_args = c.legion_task_argument_t {
@@ -105,15 +202,22 @@ end
 
 terra main()
   c.printf("in main...\n")
-  c.legion_runtime_preregister_task_variant_fnptr(
-    TID_TOP_LEVEL_TASK,
-    c.LOC_PROC,
-    c.legion_task_config_options_t {
-      leaf = false, inner = false, idempotent = false},
-    "top_level_task",
-    [&opaque](0), 0, 
-    [ legion_task_wrapper(top_level_task) ])
+
+  -- top level task must be "preregistered" (i.e. before we start the runtime)
+  [ preregister_task(top_level_task) ](TID_TOP_LEVEL_TASK,
+				       c.LOC_PROC,
+				       c.legion_task_config_options_t {
+					  leaf = false, inner = false, idempotent = false},
+				       "top_level_task",
+				       [&opaque](0), 0)
+
   c.legion_runtime_set_top_level_task_id(TID_TOP_LEVEL_TASK)
   c.legion_runtime_start(0, [&rawstring](0), false)
+end
+
+if use_llvm then
+  print("LLVM support detected...  tasks will be registered as LLVM IR")
+else
+  print("LLVM support NOT detected...  tasks will be registered as function pointers")
 end
 main()
