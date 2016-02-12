@@ -50,6 +50,8 @@ namespace Realm {
 
       virtual void print(std::ostream& os) const;
 
+      virtual bool attempt_cancellation(int error_code, const void *reason_data, size_t reason_size);
+      
       void execute_on_processor(Processor p);
 
       Processor proc;
@@ -60,6 +62,8 @@ namespace Realm {
 
     protected:
       virtual void mark_completed(void);
+
+      Thread *executing_thread;
     };
 
     // a task scheduler in which one or more worker threads execute tasks from one
