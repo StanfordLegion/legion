@@ -821,7 +821,6 @@ namespace Legion {
       FILTER_CLOSE_CALL,
       REGISTER_LOGICAL_DEPS_CALL,
       CLOSE_PHYSICAL_NODE_CALL,
-      SELECT_CLOSE_TARGETS_CALL,
       SIPHON_PHYSICAL_CHILDREN_CALL,
       CLOSE_PHYSICAL_CHILD_CALL,
       FIND_VALID_INSTANCE_VIEWS_CALL,
@@ -1643,24 +1642,17 @@ namespace Legion {
       // Entry
       void close_physical_node(PhysicalCloser &closer,
                                const FieldMask &closing_mask);
-      bool select_close_targets(PhysicalCloser &closer,
-                                PhysicalState *state,
-                                const FieldMask &closing_mask,
-                 const LegionMap<LogicalView*,FieldMask>::aligned &valid_views,
-                  LegionMap<MaterializedView*,FieldMask>::aligned &update_views,
-                                bool &create_composite);
-      bool siphon_physical_children(PhysicalCloser &closer,
+      void siphon_physical_children(PhysicalCloser &closer,
                                     PhysicalState *state,
                                     const FieldMask &closing_mask,
-                                    const std::set<ColorPoint> &next_children,
-                                    bool &create_composite); 
-      bool close_physical_child(PhysicalCloser &closer,
+                                    const std::set<ColorPoint> &next_children);
+      void close_physical_child(PhysicalCloser &closer,
                                 PhysicalState *state,
                                 const FieldMask &closing_mask,
                                 const ColorPoint &target_child,
                                 FieldMask &child_mask,
                                 const std::set<ColorPoint> &next_children,
-                                bool &create_composite, bool &changed);
+                                bool &changed);
       // Analogous methods to those above except for closing to a composite view
       CompositeRef create_composite_instance(ContextID ctx_id,
                        const LegionMap<ColorPoint,FieldMask>::aligned &targets,
@@ -1713,7 +1705,7 @@ namespace Legion {
       void pull_valid_instance_views(ContextID ctx, PhysicalState *state,
                                      const FieldMask &mask, bool needs_space,
                                      VersionInfo &version_info);
-      void find_copy_across_instances(const MappableInfo &info,
+      void find_copy_across_instances(const TraversalInfo &info,
                                       MaterializedView *target,
                  LegionMap<MaterializedView*,FieldMask>::aligned &src_instances,
                LegionMap<DeferredView*,FieldMask>::aligned &deferred_instances);
@@ -1721,20 +1713,20 @@ namespace Legion {
       // to hold the physical state lock when doing them. NOTE IT IS UNSOUND
       // TO CALL THIS METHOD WITH A SET OF VALID INSTANCES ACQUIRED BY PASSING
       // 'TRUE' TO THE find_valid_instance_views METHOD!!!!!!!!
-      void issue_update_copies(const MappableInfo &info,
+      void issue_update_copies(const TraversalInfo &info,
                                MaterializedView *target, 
                                FieldMask copy_mask,
             const LegionMap<LogicalView*,FieldMask>::aligned &valid_instances,
                                CopyTracker *tracker = NULL);
-      void sort_copy_instances(const MappableInfo &info,
+      void sort_copy_instances(const TraversalInfo &info,
                                MaterializedView *target,
                                FieldMask &copy_mask,
-                     LegionMap<LogicalView*,FieldMask>::aligned &copy_instances,
+               const LegionMap<LogicalView*,FieldMask>::aligned &copy_instances,
                  LegionMap<MaterializedView*,FieldMask>::aligned &src_instances,
                LegionMap<DeferredView*,FieldMask>::aligned &deferred_instances);
       // Issue copies for fields with the same event preconditions
       static void issue_grouped_copies(RegionTreeForest *context,
-                                       const MappableInfo &info,
+                                       const TraversalInfo &info,
                                        MaterializedView *dst,
                              LegionMap<Event,FieldMask>::aligned &preconditions,
                                        const FieldMask &update_mask,
@@ -1754,7 +1746,6 @@ namespace Legion {
       void issue_update_reductions(LogicalView *target,
                                    const FieldMask &update_mask,
                                    const VersionInfo &version_info,
-                                   Processor local_proc,
           const LegionMap<ReductionView*,FieldMask>::aligned &valid_reductions,
                                    Operation *op,
                                    CopyTracker *tracker = NULL);
@@ -1777,7 +1768,15 @@ namespace Legion {
                                   const FieldMask &valid_mask,
                                   ReductionView *new_view);
       void flush_reductions(const FieldMask &flush_mask, ReductionOpID redop, 
-                            const MappableInfo &info,CopyTracker *tracker=NULL);
+                            const TraversalInfo &info,
+                            CopyTracker *tracker = NULL);
+      LogicalView* convert_reference(const InstanceRef &ref, ContextID ctx);
+    public: // Help for physical closes
+      void find_complete_fields(const FieldMask &scope_fields,
+          const LegionMap<ColorPoint,FieldMask>::aligned &children,
+          FieldMask &complete_fields);
+      void convert_target_views(const InstanceSet &targets, ContextID ctx,
+                                std::vector<MaterializedView*> &target_views);
     public:
       void add_persistent_view(ContextID ctx, MaterializedView *persist_view);
       void remove_persistent_view(ContextID ctx,MaterializedView *persist_view);
@@ -1835,14 +1834,12 @@ namespace Legion {
                                             const FieldMask &closing_mask,
                         const LegionMap<ColorPoint,FieldMask>::aligned &targets,
                                             const TraceInfo &trace_info) = 0;
-      virtual bool perform_close_operation(const MappableInfo &info,
-                                           const FieldMask &closing_mask,
-                       const LegionMap<ColorPoint,FieldMask>::aligned &targets,
-                                           const MappingRef &target_region,
-                                           VersionInfo &version_info,
-                                     const std::set<ColorPoint> &next_children,
-                                           Event &closed,
-                                           bool &create_composite) = 0;
+      virtual Event perform_close_operation(const TraversalInfo &info,
+                                            const FieldMask &closing_mask,
+                const LegionMap<ColorPoint,FieldMask>::aligned &target_children,
+                                            const InstanceSet &targets, 
+                                            VersionInfo &version_info,
+                                 const std::set<ColorPoint> &next_children) = 0;
       virtual MaterializedView * create_instance(Memory target_mem,
                                                 const std::set<FieldID> &fields,
                                                 size_t blocking_factor,
@@ -1978,14 +1975,12 @@ namespace Legion {
                                             const FieldMask &closing_mask,
                         const LegionMap<ColorPoint,FieldMask>::aligned &targets,
                                             const TraceInfo &trace_info);
-      virtual bool perform_close_operation(const MappableInfo &info,
-                                           const FieldMask &closing_mask,
-                       const LegionMap<ColorPoint,FieldMask>::aligned &targets,
-                                           const MappingRef &target_region,
-                                           VersionInfo &version_info,
-                                     const std::set<ColorPoint> &next_children,
-                                           Event &closed,
-                                           bool &create_composite);
+      virtual Event perform_close_operation(const TraversalInfo &info,
+                                            const FieldMask &closing_mask,
+                const LegionMap<ColorPoint,FieldMask>::aligned &target_children,
+                                            const InstanceSet &targets,
+                                            VersionInfo &version_info,
+                                     const std::set<ColorPoint> &next_children);
       virtual MaterializedView* create_instance(Memory target_mem,
                                                 const std::set<FieldID> &fields,
                                                 size_t blocking_factor,
@@ -2043,7 +2038,7 @@ namespace Legion {
       CompositeRef map_virtual_region(ContextID ctx, 
                                       const FieldMask &virtual_mask,
                                       VersionInfo &version_info);
-      InstanceRef register_region(const MappableInfo &info, Event term_event,
+      InstanceRef register_region(const TraversalInfo &info, Event term_event,
                                   const RegionUsage &usage, 
                                   const FieldMask &user_mask,
                                   LogicalView *view,
@@ -2055,7 +2050,7 @@ namespace Legion {
                              const RegionUsage &usage,
                              const FieldMask &user_mask,
                              LogicalView *new_view);
-      Event close_state(const MappableInfo &info, Event term_event,
+      Event close_state(const TraversalInfo &info, Event term_event,
                         RegionUsage &usage, const FieldMask &user_mask,
                         const InstanceRef &target);
       void find_field_descriptors(ContextID ctx, Event term_event,
@@ -2155,14 +2150,12 @@ namespace Legion {
                                             const FieldMask &closing_mask,
                         const LegionMap<ColorPoint,FieldMask>::aligned &targets,
                                             const TraceInfo &trace_info);
-      virtual bool perform_close_operation(const MappableInfo &info,
-                                           const FieldMask &closing_mask,
-                       const LegionMap<ColorPoint,FieldMask>::aligned &targets,
-                                           const MappingRef &target_region,
-                                           VersionInfo &version_info,
-                                     const std::set<ColorPoint> &next_children,
-                                           Event &closed,
-                                           bool &create_composite);
+      virtual Event perform_close_operation(const TraversalInfo &info,
+                                            const FieldMask &closing_mask,
+                const LegionMap<ColorPoint,FieldMask>::aligned &target_children,
+                                            const InstanceSet &targets,
+                                            VersionInfo &version_info,
+                                     const std::set<ColorPoint> &next_children);
       virtual MaterializedView* create_instance(Memory target_mem,
                                                 const std::set<FieldID> &fields,
                                                 size_t blocking_factor,

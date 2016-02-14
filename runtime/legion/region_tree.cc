@@ -1696,6 +1696,129 @@ namespace Legion {
       return info.has_restrictions(handle, node, fields);
     }
 
+    //--------------------------------------------------------------------------
+    void RegionTreeForest::physical_traverse_path(RegionTreeContext ctx,
+                                                  RegionTreePath &path,
+                                                  const RegionRequirement &req,
+                                                  VersionInfo &version_info,
+                                                  Operation *op,bool find_valid,
+                                                  InstanceSet &valid_instances
+#ifdef DEBUG_HIGH_LEVEL
+                                                  , unsigned index
+                                                  , const char *log_name
+                                                  , UniqueID uid
+#endif
+                                                  )
+    //--------------------------------------------------------------------------
+    {
+      // If we are a NO_ACCESS, then we are already done 
+      if (IS_NO_ACCESS(req))
+        return;
+#ifdef DEBUG_HIGH_LEVEL
+      assert(ctx.exists());
+#endif
+      // Get the parent node and field mask
+      RegionNode *parent_node = get_node(req.parent);
+      FieldMask user_mask = 
+        parent_node->column_source->get_field_mask(req.privilege_fields);
+      TraversalInfo info(ctx.get_id(), op, req, version_info, user_mask);
+      // Build path traverser object
+      PhysicalTraverser traverser(path, &info, &valid_instances);
+      // Get the start node
+      RegionTreeNode *start_node;
+      if (req.handle_type == PART_PROJECTION)
+        start_node = get_node(req.partition);
+      else
+        start_node = get_node(req.region);
+      for (unsigned idx = 0; idx < (path.get_path_length()-1); idx++)
+        start_node = start_node->get_parent();
+#ifdef DEBUG_HIGH_LEVEL
+      // Little sanity checking
+      assert(start_node->get_depth() >= parent_node->get_depth());
+#endif
+
+#ifdef DEBUG_HIGH_LEVEL
+      TreeStateLogger::capture_state(runtime, &req, index, log_name, uid,
+                                     parent_node, ctx.get_id(), 
+                                     true/*before*/, true/*premap*/, 
+                                     false/*closing*/, false/*logical*/,
+                                     FieldMask(FIELD_ALL_ONES), user_mask);
+#endif
+      traverser.traverse(start_node);
+#ifdef DEBUG_HIGH_LEVEL
+      TreeStateLogger::capture_state(runtime, &req, index, log_name, uid,
+                                     parent_node, ctx.get_id(), 
+                                     false/*before*/, true/*premap*/, 
+                                     false/*closing*/, false/*logical*/,
+                                     FieldMask(FIELD_ALL_ONES), user_mask);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    Event RegionTreeForest::physical_perform_close(RegionTreeContext ctx,
+                      const RegionRequirement &req, VersionInfo &version_info,
+                      Operation *op, int composite_index,
+                      const LegionMap<ColorPoint,FieldMask>::aligned &to_close,
+                      const std::set<ColorPoint> &next_children,
+                      const InstanceSet &targets
+#ifdef DEBUG_HIGH_LEVEL
+                      , unsigned index
+                      , const char *log_name
+                      , UniqueID uid
+#endif
+                      )
+    //--------------------------------------------------------------------------
+    {
+      RegionNode *top_node = get_node(req.parent);
+      FieldMask closing_mask = 
+        top_node->column_source->get_field_mask(req.privilege_fields);
+      TraversalInfo info(ctx.get_id(), op, req, version_info, closing_mask);
+      RegionTreeNode *close_node = (req.handle_type == PART_PROJECTION) ?
+                  static_cast<RegionTreeNode*>(get_node(req.partition)) : 
+                  static_cast<RegionTreeNode*>(get_node(req.region));
+#ifdef DEBUG_HIGH_LEVEL
+      TreeStateLogger::capture_state(runtime, &req, index, log_name, uid,
+                                     top_node, ctx.get_id(), 
+                                     true/*before*/, false/*premap*/,
+                                     true/*closing*/, false/*logical*/,
+                                     FieldMask(FIELD_ALL_ONES), closing_mask);
+#endif
+      Event closed = Event::NO_EVENT;
+      if (composite_index >= 0)
+      {
+#ifdef DEBUG_HIGH_LEVEL
+        assert(composite_index < targets.size());    
+#endif
+        const InstanceRef &comp_ref = targets[composite_index];
+        const FieldMask &comp_mask = comp_ref.get_valid_fields();
+        // perform the composite close first
+        close_node->create_composite_instance(info.ctx, to_close,
+                                              next_children, comp_mask,
+                                              version_info, true/*register*/);
+        // Now we can remove those fields from the closing mask
+        closing_mask -= comp_mask;
+      }
+      // Now see if we still have fields to close
+      if (!!closing_mask)
+      {
+#ifdef DEBUG_HIGH_LEVEL
+        assert(!targets.empty());
+#endif
+        closed = close_node->perform_close_operation(info, closing_mask,
+                                                     to_close, targets,
+                                                     version_info,
+                                                     next_children);
+      }
+#ifdef DEBUG_HIGH_LEVEL
+      TreeStateLogger::capture_state(runtime, &req, index, log_name, uid,
+                                     top_node, ctx.get_id(), 
+                                     false/*before*/, false/*premap*/,
+                                     true/*closing*/, false/*logical*/,
+                                     FieldMask(FIELD_ALL_ONES), closing_mask);
+#endif
+      return closed;
+    }
+
 #if 0
     //--------------------------------------------------------------------------
     bool RegionTreeForest::premap_physical_region(RegionTreeContext ctx,
@@ -1728,7 +1851,7 @@ namespace Legion {
       // Construct a premap traversal object
       FieldMask user_mask = 
         parent_node->column_source->get_field_mask(req.privilege_fields);
-      MappableInfo info(ctx.get_id(), op, local_proc, 
+      TraversalInfo info(ctx.get_id(), op, local_proc, 
                         req, version_info, user_mask); 
       // Get the start node
       RegionTreeNode *start_node;
@@ -1795,7 +1918,7 @@ namespace Legion {
       FieldMask user_mask = 
         child_node->column_source->get_field_mask(req.privilege_fields);
       // Construct the mappable info
-      MappableInfo info(ctx.get_id(), op, local_proc, 
+      TraversalInfo info(ctx.get_id(), op, local_proc, 
                         req, version_info, user_mask);
       // Get the start node
       RegionTreeNode *start_node = child_node;
@@ -1895,7 +2018,7 @@ namespace Legion {
       RegionTreePath single_path;
       single_path.initialize(child_node->get_depth(), child_node->get_depth());
       // Construct a dummy mappable info
-      MappableInfo info(ctx.get_id(), NULL, Processor::NO_PROC, 
+      TraversalInfo info(ctx.get_id(), NULL, Processor::NO_PROC, 
                         req, version_info, user_mask);
       MappingTraverser traverser(single_path, info, RegionUsage(req), 
                              user_mask, target_proc, index, 
@@ -1977,7 +2100,7 @@ namespace Legion {
       FieldMask user_mask = 
         child_node->column_source->get_field_mask(req.privilege_fields);
       // Construct the mappable info
-      MappableInfo info(ctx.get_id(), op, local_proc, 
+      TraversalInfo info(ctx.get_id(), op, local_proc, 
                         req, version_info, user_mask);
       // Construct the user
       RegionUsage usage(req);
@@ -2157,78 +2280,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool RegionTreeForest::perform_close_operation(RegionTreeContext ctx,
-                                                   RegionRequirement &req,
-                                                   SingleTask *parent_ctx,
-                                                   Processor local_proc,
-                const LegionMap<ColorPoint,FieldMask>::aligned &target_children,
-                                      const std::set<ColorPoint> &next_children,
-                                                   Event &closed,
-                                                   const MappingRef &target,
-                                                   VersionInfo &version_info,
-                                                   bool force_composite
-#ifdef DEBUG_HIGH_LEVEL
-                                                   , unsigned index
-                                                   , const char *log_name
-                                                   , UniqueID uid
-#endif
-                                                   )
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_PERF
-      begin_perf_trace(PERFORM_CLOSE_OPERATIONS_ANALYSIS);
-#endif
-      RegionNode *top_node = get_node(req.parent);
-      FieldMask closing_mask = 
-        top_node->column_source->get_field_mask(req.privilege_fields);
-      MappableInfo info(ctx.get_id(), parent_ctx, 
-                        local_proc, req, version_info, closing_mask);
-#ifdef DEBUG_HIGH_LEVEL
-      TreeStateLogger::capture_state(runtime, &req, index, log_name, uid,
-                                     top_node, ctx.get_id(), 
-                                     true/*before*/, false/*premap*/,
-                                     true/*closing*/, false/*logical*/,
-                                     FieldMask(FIELD_ALL_ONES), closing_mask);
-#endif
-      RegionTreeNode *close_node = (req.handle_type == PART_PROJECTION) ?
-                  static_cast<RegionTreeNode*>(get_node(req.partition)) : 
-                  static_cast<RegionTreeNode*>(get_node(req.region));
-      bool create_composite = false;
-      bool result = false; 
-      if (!force_composite)
-        result = close_node->perform_close_operation(info, closing_mask,
-                                                     target_children,
-                                                     target,
-                                                     version_info,
-                                                     next_children,
-                                                     closed,
-                                                     create_composite);
-      else
-        create_composite = true;
-      // If we failed or they asked for a composite make it
-      if (!result && create_composite)
-      {
-        close_node->create_composite_instance(info.ctx, target_children,
-                                              next_children, closing_mask, 
-                                  version_info, true/*register instance*/);
-        // Making a composite always succeeds
-        result = true;
-        closed = Event::NO_EVENT;
-      }
-#ifdef DEBUG_HIGH_LEVEL
-      TreeStateLogger::capture_state(runtime, &req, index, log_name, uid,
-                                     top_node, ctx.get_id(), 
-                                     false/*before*/, false/*premap*/,
-                                     true/*closing*/, false/*logical*/,
-                                     FieldMask(FIELD_ALL_ONES), closing_mask);
-#endif
-#ifdef DEBUG_PERF
-      end_perf_trace(Runtime::perf_trace_tolerance);
-#endif
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
     Event RegionTreeForest::close_physical_context(RegionTreeContext ctx,
                                                   RegionRequirement &req,
                                                   VersionInfo &version_info,
@@ -2250,7 +2301,7 @@ namespace Legion {
       FieldMask user_mask = 
         top_node->column_source->get_field_mask(req.privilege_fields);
       RegionUsage usage(req);
-      MappableInfo info(ctx.get_id(), op, local_proc, 
+      TraversalInfo info(ctx.get_id(), op, local_proc, 
                         req, version_info, user_mask);
 #ifdef DEBUG_HIGH_LEVEL
       TreeStateLogger::capture_state(runtime, &req, index, log_name, uid,
@@ -2304,7 +2355,7 @@ namespace Legion {
       FieldMask dst_mask = 
         dst_node->column_source->get_field_mask(dst_req.privilege_fields);
       // Very important we pass the source version info here!
-      MappableInfo info(src_ctx.get_id(), op, 
+      TraversalInfo info(src_ctx.get_id(), op, 
                         local_proc, src_req, src_version_info, src_mask);
       src_node->find_copy_across_instances(info, dst_view,
                                            src_instances, deferred_instances);
@@ -4497,11 +4548,6 @@ namespace Legion {
           case CLOSE_PHYSICAL_NODE_CALL:
             {
               fprintf(stdout,"  Close Physical Node Call:\n");
-              break;
-            }
-          case SELECT_CLOSE_TARGETS_CALL:
-            {
-              fprintf(stdout,"  Select Close Targets Call:\n");
               break;
             }
           case SIPHON_PHYSICAL_CHILDREN_CALL:
@@ -12103,7 +12149,7 @@ namespace Legion {
         {
           // Pull down instance views so we don't issue unnecessary copies
           pull_valid_instance_views(ctx, state, closing_mask, 
-                                false/*need space*/, closer.info.version_info);
+              false/*needs space*/, closer.info.version_info);
 #ifdef DEBUG_HIGH_LEVEL
           assert(!state->valid_views.empty());
 #endif
@@ -12149,23 +12195,10 @@ namespace Legion {
         }
       }
       // Now we need to issue close operations for all our children
-#ifdef DEBUG_HIGH_LEVEL
-      assert(!closer.needs_targets());
-#endif
       PhysicalCloser next_closer(closer);
-      bool create_composite = false;
       std::set<ColorPoint> empty_next_children;
-#ifdef DEBUG_HIGH_LEVEL
-#ifndef NDEBUG
-      bool result = 
-#endif
-#endif
-      siphon_physical_children(next_closer, state, closing_mask,
-                               empty_next_children, create_composite);
-#ifdef DEBUG_HIGH_LEVEL
-      assert(result); // should always succeed since targets already exist
-      assert(!create_composite);
-#endif
+      siphon_physical_children(next_closer, state, 
+                               closing_mask, empty_next_children);
       // Update the closer's dirty mask
       const FieldMask &dirty_below = next_closer.get_dirty_mask();
       closer.update_dirty_mask(dirty_fields | reduc_fields | dirty_below);
@@ -12181,7 +12214,6 @@ namespace Legion {
               targets.begin(); it != targets.end(); it++)
         {
           issue_update_reductions(*it, reduc_fields, closer.info.version_info,
-                                  closer.info.local_proc, 
                                   valid_reductions, closer.info.op, &closer);
         }
       }
@@ -12208,176 +12240,10 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    bool RegionTreeNode::select_close_targets(PhysicalCloser &closer,
-                                              PhysicalState *state,
-                                              const FieldMask &closing_mask,
-                  const LegionMap<LogicalView*,FieldMask>::aligned &valid_views,
-                  LegionMap<MaterializedView*,FieldMask>::aligned &update_views,
-                                              bool &create_composite)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(context, SELECT_CLOSE_TARGETS_CALL);
-#endif
-      // First get the list of valid instances
-      // Get the set of memories for which we have valid instances
-      std::set<Memory> valid_memories;
-      for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
-            valid_views.begin(); it != valid_views.end(); it++)
-      {
-        if (it->first->is_deferred_view())
-          continue;
-#ifdef DEBUG_HIGH_LEVEL
-        assert(it->first->as_instance_view()->is_materialized_view());
-#endif
-        MaterializedView *view = 
-          it->first->as_instance_view()->as_materialized_view();
-        valid_memories.insert(view->get_location());
-      }
-      // Now ask the mapper what it wants to do
-      bool create_one;
-      std::set<Memory> to_reuse;
-      std::vector<Memory> to_create;
-      size_t blocking_factor = 1;
-      size_t max_blocking_factor = 
-        context->get_domain_volume(closer.handle.index_space); 
-      create_composite = context->runtime->invoke_mapper_rank_copy_targets(
-                                               closer.info.local_proc, 
-                                               closer.info.op->get_mappable(),
-                                               closer.handle,
-                                               valid_memories,
-                                               true/*complete*/,
-                                               max_blocking_factor,
-                                               to_reuse,
-                                               to_create,
-                                               create_one,
-                                               blocking_factor);
-      // Filter out any re-use memories which are not in the list of
-      // valid memories
-      if (!to_reuse.empty())
-      {
-        std::vector<Memory> to_delete;
-        for (std::set<Memory>::const_iterator it = to_reuse.begin();
-              it != to_reuse.end(); it++)
-        {
-          if (valid_memories.find(*it) == valid_memories.end())
-          {
-            log_region.warning("WARNING: memory " IDFMT " was specified "
-                               "to be reused in rank_copy_targets "
-                               "when closing mappable operation ID %lld, "
-                               "but no instance exists in that memory."
-                               "Memory " IDFMT " is being added to the "
-                               "set of create memories.", it->id,
-                 closer.info.op->get_mappable()->get_unique_mappable_id(),
-                               it->id);
-            // Add it to the list of memories to try creating
-            to_create.push_back(*it);
-            to_delete.push_back(*it);
-          }
-        }
-        if (!to_delete.empty())
-        {
-          for (std::vector<Memory>::const_iterator it = to_delete.begin();
-                it != to_delete.end(); it++)
-          {
-            to_reuse.erase(*it);
-          }
-        }
-      }
-      // See if the mapper gave us reasonable output
-      if (!create_composite && to_reuse.empty() && to_create.empty())
-      {
-        log_region.error("Invalid mapper output for rank_copy_targets "
-                               "when closing mappable operation ID %lld. "
-                               "Must specify at least one target memory in "
-                               "'to_reuse' or 'to_create'.",
-                     closer.info.op->get_mappable()->get_unique_mappable_id());
-#ifdef DEBUG_HIGH_LEVEL
-        assert(false);
-#endif
-        exit(ERROR_INVALID_MAPPER_OUTPUT);
-      }
-      if (create_composite)
-      {
-        // Return out early marking that we didn't make any instances
-        return false;
-      }
-      else
-      {
-        // Now process the results
-        // First see if we should re-use any instances
-        for (std::set<Memory>::const_iterator mit = to_reuse.begin();
-              mit != to_reuse.end(); mit++)
-        {
-          // Make sure it is a valid choice
-          if (valid_memories.find(*mit) == valid_memories.end())
-            continue;
-          MaterializedView *best = NULL;
-          FieldMask best_mask;
-          int num_valid_fields = -1;
-          for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it =
-                valid_views.begin(); it != valid_views.end(); it++)
-          {
-            if (it->first->is_deferred_view())
-              continue;
-#ifdef DEBUG_HIGH_LEVEL
-            assert(it->first->as_instance_view()->is_materialized_view());
-#endif
-            MaterializedView *current = 
-              it->first->as_instance_view()->as_materialized_view();
-            if (current->get_location() != (*mit))
-              continue;
-            int valid_fields = FieldMask::pop_count(it->second);
-            if (valid_fields > num_valid_fields)
-            {
-              num_valid_fields = valid_fields;
-              best = current;
-              best_mask = it->second;
-            }
-          }
-          if (best != NULL)
-          {
-            FieldMask need_update = closing_mask - best_mask;
-            if (!!need_update)
-              update_views[best] = need_update;
-            // Add it to the list of close targets
-            closer.add_target(best);
-          }
-        }
-        // Now see if want to try to create any new instances
-        for (unsigned idx = 0; idx < to_create.size(); idx++)
-        {
-          // Try making an instance in memory
-          bool remote_creation;
-          MaterializedView *new_view = 
-            create_instance(to_create[idx], 
-                            closer.info.req.privilege_fields, 
-                            blocking_factor,
-                            closer.info.op->get_mappable()->get_depth(),
-                            closer.info.op, remote_creation);
-          if (new_view != NULL)
-          {
-            // Update all the fields
-            update_views[new_view] = closing_mask;
-            closer.add_target(new_view);
-            // Make sure to tell our state we created a new instance
-            state->record_created_instance(new_view, remote_creation);
-            // If we only needed to make one, then we are done
-            if (create_one)
-              break;
-          }
-        }
-      }
-      // Check to see if have targets
-      return (!closer.needs_targets());
-    }
-
-    //--------------------------------------------------------------------------
-    bool RegionTreeNode::siphon_physical_children(PhysicalCloser &closer,
-                                              PhysicalState *state,
-                                              const FieldMask &closing_mask,
-                                      const std::set<ColorPoint> &next_children,
-                                              bool &create_composite)
+    void RegionTreeNode::siphon_physical_children(PhysicalCloser &closer,
+                                                  PhysicalState *state,
+                                                  const FieldMask &closing_mask,
+                                      const std::set<ColorPoint> &next_children)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_PERF
@@ -12388,7 +12254,7 @@ namespace Legion {
 #endif
       // First check, if all the fields are disjoint, then we're done
       if (state->children.valid_fields * closing_mask)
-        return true;
+        return;
       // Otherwise go through all of the children and 
       // see which ones we need to clean up
       bool changed = false;
@@ -12397,9 +12263,8 @@ namespace Legion {
             it = state->children.open_children.begin(); 
             it != state->children.open_children.end(); it++)
       {
-        if (!close_physical_child(closer, state, closing_mask, it->first,
-                   it->second, next_children, create_composite, changed))
-          return false;
+        close_physical_child(closer, state, closing_mask, it->first,
+                             it->second, next_children, changed);
         if (!it->second)
           to_delete.push_back(it->first);
       }
@@ -12424,17 +12289,16 @@ namespace Legion {
         }
         state->children.valid_fields = next_valid;
       }
-      return true;
     }
 
     //--------------------------------------------------------------------------
-    bool RegionTreeNode::close_physical_child(PhysicalCloser &closer,
+    void RegionTreeNode::close_physical_child(PhysicalCloser &closer,
                                               PhysicalState *state,
                                               const FieldMask &closing_mask,
                                               const ColorPoint &target_child,
                                               FieldMask &child_mask,
                                       const std::set<ColorPoint> &next_children,
-                                          bool &create_composite, bool &changed)
+                                              bool &changed)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_PERF
@@ -12446,7 +12310,7 @@ namespace Legion {
       FieldMask close_mask = child_mask & closing_mask;
       // Check field disjointness
       if (!close_mask)
-        return true;
+        return;
       // Check for child disjointness
       if (!next_children.empty())
       {
@@ -12461,64 +12325,15 @@ namespace Legion {
           }
         }
         if (all_disjoint)
-          return true;
-      }
-      // First check to see if the closer needs to make physical
-      // instance targets in order to perform the close operation
-      LegionMap<LogicalView*,FieldMask>::aligned space_views;
-      LegionMap<LogicalView*,FieldMask>::aligned valid_views;
-      LegionMap<MaterializedView*,FieldMask>::aligned update_views;
-      if (closer.needs_targets())
-      {
-        // Have the closer make targets and return false indicating
-        // we could not successfully perform the close operation
-        // if he fails to make them. When making close targets pick
-        // them for the full traversal mask so that other close
-        // operations can reuse the same physical instances.
-        find_valid_instance_views(closer.info.ctx, state, 
-                                  closer.info.traversal_mask, 
-                                  closer.info.traversal_mask,
-                                  closer.info.version_info,
-                                  true/*needs space*/, space_views);
-        // This doesn't matter so always mark it false for now
-        if (!select_close_targets(closer, state, closer.info.traversal_mask, 
-                          space_views, update_views, create_composite))
-        {
-          // We failed to close, time to return
-          return false;
-        }
-        else
-        {
-          // We succeeded, so get the set of valid views
-          // for issuing update copies
-          find_valid_instance_views(closer.info.ctx, state, 
-                                    closer.info.traversal_mask,
-                                    closer.info.traversal_mask,
-                                    closer.info.version_info,
-                                    false/*needs space*/, valid_views);
-        }
+          return;
       }
       // Need to get this value before the iterator is invalidated
       RegionTreeNode *child_node = get_tree_child(target_child);
-      if (!update_views.empty())
-      {
-        // Issue any update copies, and then release any
-        // valid view references that we are holding
-        for (LegionMap<MaterializedView*,FieldMask>::aligned::const_iterator 
-              it = update_views.begin(); it != update_views.end(); it++)
-        {
-          issue_update_copies(closer.info, it->first, 
-                              it->second, valid_views, &closer);
-        }
-        update_views.clear();
-      }
       // Now we're ready to perform the close operation
       closer.close_tree_node(child_node, close_mask);
       // Update the child field mask and mark that we changed something
       child_mask -= close_mask;
       changed = true;
-      // Reacquire our lock on the state upon returning
-      return true;
     }
 
     //--------------------------------------------------------------------------
@@ -12972,7 +12787,7 @@ namespace Legion {
     }
     
     //--------------------------------------------------------------------------
-    void RegionTreeNode::find_copy_across_instances(const MappableInfo &info,
+    void RegionTreeNode::find_copy_across_instances(const TraversalInfo &info,
                                                     MaterializedView *target,
                  LegionMap<MaterializedView*,FieldMask>::aligned &src_instances,
                 LegionMap<DeferredView*,FieldMask>::aligned &deferred_instances)
@@ -12994,7 +12809,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeNode::issue_update_copies(const MappableInfo &info,
+    void RegionTreeNode::issue_update_copies(const TraversalInfo &info,
                                              MaterializedView *dst,
                                              FieldMask copy_mask,
              const LegionMap<LogicalView*,FieldMask>::aligned &valid_instances,
@@ -13099,10 +12914,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeNode::sort_copy_instances(const MappableInfo &info,
+    void RegionTreeNode::sort_copy_instances(const TraversalInfo &info,
                                              MaterializedView *dst,
                                              FieldMask &copy_mask,
-                     LegionMap<LogicalView*,FieldMask>::aligned &copy_instances,
+               const LegionMap<LogicalView*,FieldMask>::aligned &copy_instances,
                  LegionMap<MaterializedView*,FieldMask>::aligned &src_instances,
                 LegionMap<DeferredView*,FieldMask>::aligned &deferred_instances)
     //--------------------------------------------------------------------------
@@ -13147,9 +12962,18 @@ namespace Legion {
       {
         bool copy_ready = false;
         // Ask the mapper to put everything in order
-        std::set<Memory> available_memories;
+        // Make the source instance set
+        InstanceSet src_refs;
+        std::vector<MaterializedView*> src_views;
+        src_views.reserve(copy_instances.size());
         LegionMap<DeferredView*,FieldMask>::aligned available_deferred;
-        for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it =
+        // Keep track of the observed fields to see if we have 
+        // multiple valid copies of the data, if we do we'll have
+        // to invoke the mapper, otherwise, we know we can just do
+        // them in any order.
+        FieldMask observed_inst_fields;
+        bool duplicate_inst_fields = false;
+        for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
               copy_instances.begin(); it != copy_instances.end(); it++)
         {
           if (it->first->is_deferred_view())
@@ -13164,40 +12988,56 @@ namespace Legion {
           }
           else
           {
-            available_memories.insert(
-                it->first->as_instance_view()->get_location());
+#ifdef DEBUG_HIGH_LEVEL
+            assert(it->first->is_instance_view());
+            assert(it->first->as_instance_view()->is_materialized_view());
+#endif
+            MaterializedView *src_view = 
+              it->first->as_instance_view()->as_materialized_view();
+            src_refs.add_instance(
+                InstanceRef(src_view->get_manager(), it->second));
+            src_views.push_back(src_view);
+            // If we have duplicate inst fields, record it,
+            // otherwise we can just record our observed fields
+            if (!duplicate_inst_fields && !(observed_inst_fields * it->second))
+              duplicate_inst_fields = true;
+            else
+              observed_inst_fields |= it->second;
           }
         }
-        if (available_memories.size() > 0)
+
+        if (!src_refs.empty())
         {
-          std::vector<Memory> chosen_order;
-          context->runtime->invoke_mapper_rank_copy_sources(info.local_proc,
-                                                        info.op->get_mappable(),
-                                                        available_memories,
-                                                        dst->get_location(),
-                                                        chosen_order);
-          for (std::vector<Memory>::const_iterator mit = chosen_order.begin();
-                !copy_ready && (mit != chosen_order.end()); mit++)
+          std::vector<unsigned> ranking;
+          // See if we have any duplicate fields in which case we
+          // will need to ask the mapper to pick an order for us
+          if (duplicate_inst_fields)
           {
-            available_memories.erase(*mit);
-            std::vector<LogicalView*> to_erase;
+            // Now we have to invoke the mapper to pick the order
+            ranking.reserve(src_refs.size());
+            InstanceRef target(dst->get_manager(), copy_mask);
+            // Ask the mapper to pick the ranking
+            info.op->select_sources(target, src_refs, ranking);
             // Go through all the valid instances and issue copies
-            // from instances in the given memory
-            for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it =
-                  copy_instances.begin(); it != copy_instances.end(); it++)
+            // starting first in the order that the mapper requested
+            // and then through the remaining instances until all
+            // the copy fields are made valid
+            for (unsigned i = 0; i < ranking.size(); i++)
             {
-              if (it->first->is_deferred_view())
-                continue;
+              unsigned idx = ranking[i]; 
 #ifdef DEBUG_HIGH_LEVEL
-              assert(it->first->is_instance_view());
-              assert(it->first->as_instance_view()->as_materialized_view());
+              assert(idx < src_views.size());
 #endif
-              MaterializedView *current_view = 
-                it->first->as_instance_view()->as_materialized_view();
-              if ((*mit) != current_view->get_location())
-                continue;
+              MaterializedView *current_view = src_views[idx];
+              // Mark this one NULL so we won't do it again
+              src_views[idx] = NULL;
+              LegionMap<LogicalView*,FieldMask>::aligned::const_iterator
+                mask_finder = copy_instances.find(current_view);
+#ifdef DEBUG_HIGH_LEVEL
+              assert(mask_finder != copy_instances.end());
+#endif
+              FieldMask op_mask = copy_mask & mask_finder->second;
               // Check to see if there are any valid fields in the copy mask
-              FieldMask op_mask = copy_mask & it->second;
               if (!!op_mask)
               {
                 // No need to do anything if they are the same instance
@@ -13219,38 +13059,30 @@ namespace Legion {
                   break;
                 }
               }
-              to_erase.push_back(it->first);
             }
-            // Erase any instances we considered and used
-            for (unsigned idx = 0; idx < to_erase.size(); idx++)
-              copy_instances.erase(to_erase[idx]);
           }
-          // Now do any remaining memories not put in order by the mapper
-          for (std::set<Memory>::const_iterator mit = 
-                available_memories.begin(); !copy_ready && (mit != 
-                available_memories.end()); mit++)
+          // If we still have missing fields and we didn't cover all
+          // the instances, then do the rest of them
+          if (!copy_ready && (ranking.size() < src_refs.size()))
           {
-            std::vector<LogicalView*> to_erase;
-            for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it =
-                  copy_instances.begin(); it != copy_instances.end(); it++)
+            for (unsigned idx = 0; idx < src_views.size(); idx++)
             {
-              if (it->first->is_deferred_view())
+              MaterializedView *current_view = src_views[idx];
+              // See if we already considered this instance
+              if (current_view == NULL)
                 continue;
+              LegionMap<LogicalView*,FieldMask>::aligned::const_iterator
+                mask_finder = copy_instances.find(current_view);
 #ifdef DEBUG_HIGH_LEVEL
-              assert(it->first->is_instance_view());
-              assert(it->first->as_instance_view()->is_materialized_view());
+              assert(mask_finder != copy_instances.end());
 #endif
-              MaterializedView *current_view = 
-                it->first->as_instance_view()->as_materialized_view();
-              if ((*mit) != current_view->get_location())
-                continue;
+              FieldMask op_mask = copy_mask & mask_finder->second;
               // Check to see if there are any valid fields in the copy mask
-              FieldMask op_mask = copy_mask & it->second;
               if (!!op_mask)
               {
                 // No need to do anything if they are the same instance
-                if ((dst != current_view) || (dst->manager->get_instance() != 
-                                       current_view->manager->get_instance()))
+                if ((dst != current_view) || (dst->manager->get_instance() !=
+                                      current_view->manager->get_instance()))
                 {
                   LegionMap<MaterializedView*,FieldMask>::aligned::iterator 
                     finder = src_instances.find(current_view);
@@ -13267,30 +13099,27 @@ namespace Legion {
                   break;
                 }
               }
-              to_erase.push_back(it->first);
             }
-            // Erase any instances we've checked
-            for (unsigned idx = 0; idx < to_erase.size(); idx++)
-              copy_instances.erase(to_erase[idx]);
           }
         }
+        
         // Lastly, if we are still not done, see if we have
-        // any composite instances to issue copies from
-        for (LegionMap<DeferredView*,FieldMask>::aligned::const_iterator cit =
-              available_deferred.begin(); !copy_ready && (cit !=
-              available_deferred.end()); cit++)
+        // any deferred instances to issue copies from
+        if (!copy_ready)
         {
-          FieldMask op_mask = copy_mask & cit->second;
-          if (!!op_mask)
+          for (LegionMap<DeferredView*,FieldMask>::aligned::const_iterator cit =
+                available_deferred.begin(); cit != 
+                available_deferred.end(); cit++)
           {
-            // No need to look for duplicates, we know this is
-            // the first time this data structure can be touched
-            deferred_instances[cit->first] = op_mask;
-            copy_mask -= op_mask;
-            if (!copy_mask)
+            FieldMask op_mask = copy_mask & cit->second;
+            if (!!op_mask)
             {
-              copy_ready = true;
-              break;
+              // No need to look for duplicates, we know this is
+              // the first time this data structure can be touched
+              deferred_instances[cit->first] = op_mask;
+              copy_mask -= op_mask;
+              if (!copy_mask)
+                break;
             }
           }
         }
@@ -13302,7 +13131,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     /*static*/ void RegionTreeNode::issue_grouped_copies(
                                                       RegionTreeForest *context,
-                                                      const MappableInfo &info,
+                                                      const TraversalInfo &info,
                                                          MaterializedView *dst,
                              LegionMap<Event,FieldMask>::aligned &preconditions,
                                        const FieldMask &update_mask,
@@ -13539,7 +13368,6 @@ namespace Legion {
     void RegionTreeNode::issue_update_reductions(LogicalView *target,
                                                  const FieldMask &mask,
                                                 const VersionInfo &version_info,
-                                                 Processor local_proc,
            const LegionMap<ReductionView*,FieldMask>::aligned &valid_reductions,
                                                  Operation *op,
                                                  CopyTracker *tracker/*= NULL*/)
@@ -13584,8 +13412,8 @@ namespace Legion {
           assert(!(it->second - copy_mask));
 #endif
           // Then we have a reduction to perform
-          it->first->perform_reduction(inst_target, copy_mask, version_info,
-                                       local_proc, op, tracker);
+          it->first->perform_reduction(inst_target, copy_mask, 
+                                       version_info, op, tracker);
         }
       }
     }
@@ -13807,7 +13635,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void RegionTreeNode::flush_reductions(const FieldMask &valid_mask,
                                           ReductionOpID redop,
-                                          const MappableInfo &info,
+                                          const TraversalInfo &info,
                                           CopyTracker *tracker /*= NULL*/)
     //--------------------------------------------------------------------------
     {
@@ -13852,7 +13680,7 @@ namespace Legion {
         {
           FieldMask overlap = flush_mask & it->second; 
           issue_update_reductions(it->first, overlap, info.version_info,
-                    info.local_proc, reduction_views, info.op, tracker);
+                                  reduction_views, info.op, tracker);
           // Save the overlap fields
           it->second = overlap;
 #ifdef DEBUG_HIGH_LEVEL
@@ -13881,6 +13709,66 @@ namespace Legion {
         // Then invalidate all the reduction views that we flushed
         invalidate_reduction_views(state, flush_mask);
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeNode::find_complete_fields(const FieldMask &scope_fields,
+                       const LegionMap<ColorPoint,FieldMask>::aligned &children,
+                       FieldMask &complete_fields)
+    //--------------------------------------------------------------------------
+    {
+      for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it = 
+            children.begin(); it != children.end(); it++)
+      {
+        FieldMask test_fields = it->second - complete_fields;
+        // No fields to test so we are done
+        if (!test_fields)
+          continue;
+        RegionTreeNode *child = get_tree_child(it->first);
+        if (child->is_complete())
+        {
+          complete_fields |= test_fields;
+          // If we proved that they are all complete, we are done
+          if (scope_fields == complete_fields)
+            break;
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeNode::convert_target_views(const InstanceSet &targets,
+                    ContextID ctx, std::vector<MaterializedView*> &target_views)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(targets.size() == target_views.size());
+#endif
+      unsigned skip_count = 0;
+      for (unsigned idx = 0; idx < targets.size(); idx++)
+      {
+        const InstanceRef &ref = targets[idx];
+        // Ignore any composite references
+        if (ref.is_composite_ref())
+        {
+          skip_count++;
+          continue;
+        }
+        LogicalView *view = convert_reference(ref, ctx);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(!view->is_deferred_view());
+        assert(view->is_instance_view());
+#endif
+        InstanceView *inst_view = view->as_instance_view();
+#ifdef DEBUG_HIGH_LEVEL
+        assert(inst_view->is_materialized_view());
+#endif
+        target_views[idx-skip_count] = inst_view->as_materialized_view();
+      }
+      if (skip_count > 0)
+        target_views.resize(targets.size() - skip_count);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(!target_views.empty());
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -14822,38 +14710,29 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool RegionNode::perform_close_operation(const MappableInfo &info,
-                                             const FieldMask &closing_mask,
-                       const LegionMap<ColorPoint,FieldMask>::aligned &targets,
-                                             const MappingRef &target_region,
-                                             VersionInfo &version_info,
-                                      const std::set<ColorPoint> &next_children,
-                                             Event &closed,
-                                             bool &create_composite)
+    Event RegionNode::perform_close_operation(const TraversalInfo &info,
+                                              const FieldMask &closing_mask,
+                const LegionMap<ColorPoint,FieldMask>::aligned &target_children,
+                                              const InstanceSet &targets,
+                                              VersionInfo &version_info,
+                                      const std::set<ColorPoint> &next_children)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(!create_composite); // should always start off like this
-#endif
+      // Firgure out which, if any, of our fields are going to
+      // be completely closed
+      FieldMask complete_fields;
+      find_complete_fields(closing_mask, target_children, complete_fields);
       PhysicalCloser closer(info, handle);
-      if (target_region.has_ref())
-      {
-        LogicalView *view = target_region.get_view();
-#ifdef DEBUG_HIGH_LEVEL
-        assert(!view->is_deferred_view());
-        assert(view->is_instance_view());
-#endif
-        InstanceView *inst_view = view->as_instance_view();
-#ifdef DEBUG_HIGH_LEVEL
-        assert(inst_view->is_materialized_view());
-#endif
-        closer.add_target(inst_view->as_materialized_view());
-      }
-      bool success = true;
-      bool changed = false;
       PhysicalState *state = get_physical_state(info.ctx, version_info);
+      // Iterate over all the targets and assign set the right views
+      // In the process, issue any copies necessary to bring these 
+      std::vector<MaterializedView*> target_views(targets.size());
+      convert_target_views(targets, info.ctx, target_views);
+      closer.initialize_targets(this, state, target_views,
+                                closing_mask, complete_fields);
+      bool changed = false;
       for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it = 
-            targets.begin(); it != targets.end(); it++)
+            target_children.begin(); it != target_children.end(); it++)
       {
         LegionMap<ColorPoint,FieldMask>::aligned::iterator finder = 
           state->children.open_children.find(it->first);
@@ -14861,15 +14740,9 @@ namespace Legion {
           continue;
         // If we're going to do the close, set the leave open fields
         closer.set_leave_open_mask(it->second);
-        bool result = close_physical_child(closer, state, closing_mask,
-                                           it->first, finder->second,
-                                           next_children, 
-                                           create_composite, changed);
-        if (!result || create_composite)
-        {
-          success = false;
-          break;
-        }
+        close_physical_child(closer, state, closing_mask,
+                             it->first, finder->second,
+                             next_children, changed);
         if (!finder->second)
           state->children.open_children.erase(finder);
       }
@@ -14885,21 +14758,15 @@ namespace Legion {
         }
         state->children.valid_fields = next_valid;
       }
-      if (success)
+      closer.update_node_views(this, state);
+      // Now flush any reductions which need to be closed
+      if (!!state->reduction_mask)
       {
-        // Only need to do the updates if we actually selected targets
-        if (!closer.needs_targets())
-          closer.update_node_views(this, state);
-        // Now flush any reductions which need to be closed
-        if (!!state->reduction_mask)
-        {
-          FieldMask flush_reduction_mask = state->reduction_mask & closing_mask;
-          if (!!flush_reduction_mask)
-            flush_reductions(flush_reduction_mask, 0/*redop*/, info, &closer);
-        }
-        closed = closer.get_termination_event();
+        FieldMask flush_reduction_mask = state->reduction_mask & closing_mask;
+        if (!!flush_reduction_mask)
+          flush_reductions(flush_reduction_mask, 0/*redop*/, info, &closer);
       }
-      return success;
+      return closer.get_termination_event();
     }
 
     //--------------------------------------------------------------------------
@@ -15138,7 +15005,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    InstanceRef RegionNode::register_region(const MappableInfo &info,
+    InstanceRef RegionNode::register_region(const TraversalInfo &info,
                                             Event term_event,
                                             const RegionUsage &usage,
                                             const FieldMask &user_mask,
@@ -15189,20 +15056,9 @@ namespace Legion {
             // Mark the dirty mask with our bits since we're 
             closer.update_dirty_mask(user_mask);
             // writing and the closer will 
-            bool create_composite = false;
             std::set<ColorPoint> empty_next_children;
-#ifdef DEBUG_HIGH_LEVEL
-#ifndef NDEBUG
-            bool result = 
-#endif
-#endif
             siphon_physical_children(closer, state, user_mask,
-                                     empty_next_children, 
-                                     create_composite);
-#ifdef DEBUG_HIGH_LEVEL
-            assert(result); // should always succeed
-            assert(!create_composite);
-#endif
+                                     empty_next_children); 
             // Now update the valid views and the dirty mask
             closer.update_node_views(this, state);
             // flush any reductions that we need to do
@@ -15278,7 +15134,7 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    Event RegionNode::close_state(const MappableInfo &info, 
+    Event RegionNode::close_state(const TraversalInfo &info, 
                                   Event term_event, RegionUsage &usage, 
                                   const FieldMask &user_mask,
                                   const InstanceRef &target)
@@ -15295,7 +15151,7 @@ namespace Legion {
         // from farther down in the tree
         PhysicalState *state = get_physical_state(info.ctx, info.version_info);
         ReductionCloser closer(info.ctx, target_view, user_mask, 
-                               info.version_info, info.local_proc, info.op);
+                               info.version_info, info.op);
         closer.issue_close_reductions(this, state);
         siphon_physical_children(closer, state);
         // Important trick: switch the user to read-only so it picks
@@ -16386,42 +16242,26 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool PartitionNode::perform_close_operation(const MappableInfo &info,
-                                                const FieldMask &closing_mask,
-                        const LegionMap<ColorPoint,FieldMask>::aligned &targets,
-                                                const MappingRef &target_reg,
-                                                VersionInfo &version_info,
-                                      const std::set<ColorPoint> &next_children,
-                                                Event &closed,
-                                                bool &create_composite)
+    Event PartitionNode::perform_close_operation(const TraversalInfo &info,
+                                                 const FieldMask &closing_mask,
+                const LegionMap<ColorPoint,FieldMask>::aligned &target_children,
+                                                 const InstanceSet &targets,
+                                                 VersionInfo &version_info,
+                                      const std::set<ColorPoint> &next_children)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(!create_composite); // should always start off this way
-#endif
-      MaterializedView *target_view = NULL;
-      if (target_reg.has_ref())
-      {
-        LogicalView *view = target_reg.get_view();
-#ifdef DEBUG_HIGH_LEVEL
-        assert(view->is_instance_view());
-#endif
-        InstanceView *inst_view = view->as_instance_view();
-#ifdef DEBUG_HIGH_LEVEL
-        assert(inst_view->is_materialized_view());
-#endif
-        target_view = inst_view->as_materialized_view();
-      }
+      // Find the target views
+      std::vector<MaterializedView*> target_views(targets.size());
+      convert_target_views(targets, info.ctx, target_views);
       // Handle a special case here: if the node we're closing is a partition
       // and we're permitted to leave the partition open, then don't actually
       // close the partition. Instead close to the individual target child
       // that we are trying to close to. This handles the case of leaving 
       // many children in a read-only partition open. Only safe to do
       // this if all the children are disjoint.
-      bool success = true;
       FieldMask leave_open_all = closing_mask;
       for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it = 
-            targets.begin(); it != targets.end(); it++)
+            target_children.begin(); it != target_children.end(); it++)
       {
         leave_open_all &= it->second;
         if (!leave_open_all)
@@ -16430,106 +16270,87 @@ namespace Legion {
       if (!!leave_open_all && !targets.empty() && row_source->is_disjoint())
       {
         std::set<Event> closed_event_set;
+        FieldMask complete_fields;
         for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it = 
-              targets.begin(); it != targets.end(); it++)
+              target_children.begin(); it != target_children.end(); it++)
         {
           RegionNode *child_node = get_child(it->first); 
           PhysicalCloser child_closer(info, child_node->handle);
           child_closer.set_leave_open_mask(leave_open_all);
-          if (target_view != NULL)
-            child_closer.add_target(
-                target_view->get_materialized_subview(it->first));
+          std::vector<MaterializedView*> child_views(target_views.size());
+          for (unsigned idx = 0; idx < target_views.size(); idx++)
+            child_views[idx] = 
+                target_views[idx]->get_materialized_subview(it->first);
           PhysicalState *child_state = 
             child_node->get_physical_state(info.ctx, version_info);
+          // Complete fields is empty because we don't know which
+          // children we will be closing during the siphon call
+          child_closer.initialize_targets(child_node, child_state, child_views,
+                                          leave_open_all, complete_fields);
           std::set<ColorPoint> empty_next_children;
-          bool result = child_node->siphon_physical_children(child_closer,
-                                             child_state, closing_mask,
-                                             empty_next_children,
-                                             create_composite);
-          // If we succeeded, then update the views
-          if (!result || create_composite)
-          {
-            success = false;
-            break;
-          }
-          else
-          {
-            child_closer.update_node_views(child_node, child_state);
-            closed_event_set.insert(child_closer.get_termination_event());
-          }
+          child_node->siphon_physical_children(child_closer,
+                                               child_state, leave_open_all,
+                                               empty_next_children);
+          child_closer.update_node_views(child_node, child_state);
+          closed_event_set.insert(child_closer.get_termination_event());
         }
-        if (success)
+        // See if we have any fields we haven't closed yet
+        FieldMask unclosed = closing_mask - leave_open_all; 
+        if (!!unclosed)
         {
-          // See if we have any fields we haven't closed yet
-          FieldMask unclosed = closing_mask - leave_open_all; 
-          if (!!unclosed)
+          // Closed up this whole partition for the remaining fields
+          PhysicalCloser closer(info, parent->handle);
+          PhysicalState *state = get_physical_state(info.ctx, version_info); 
+          find_complete_fields(unclosed, target_children, complete_fields);
+          closer.initialize_targets(this, state, target_views,
+                                    unclosed, complete_fields);
+          bool changed = false;
+          for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it = 
+                target_children.begin(); it != target_children.end(); it++)
           {
-            // Closed up this whole partition for the remaining fields
-            PhysicalCloser closer(info, parent->handle);
-            if (target_view != NULL)
-              closer.add_target(target_view);
-            bool changed = false;
-            PhysicalState *state = get_physical_state(info.ctx, version_info); 
+            LegionMap<ColorPoint,FieldMask>::aligned::iterator finder = 
+              state->children.open_children.find(it->first);
+            if (finder == state->children.open_children.end())
+              continue;
+            // If we're actually doing the close, record the leave open fields
+            closer.set_leave_open_mask(it->second & unclosed);
+            close_physical_child(closer, state, unclosed,
+                                 it->first, finder->second, 
+                                 next_children, changed);
+            if (!finder->second)
+              state->children.open_children.erase(finder);
+          }
+          // If anything changed, rebuild the field mask
+          if (changed)
+          {
+            FieldMask next_valid;
             for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it = 
-                  targets.begin(); it != targets.end(); it++)
+                  state->children.open_children.begin(); it !=
+                  state->children.open_children.end(); it++)
             {
-              LegionMap<ColorPoint,FieldMask>::aligned::iterator finder = 
-                state->children.open_children.find(it->first);
-              if (finder == state->children.open_children.end())
-                continue;
-              // If we're actually doing the close, record the leave open fields
-              closer.set_leave_open_mask(it->second & unclosed);
-              bool result = close_physical_child(closer, state, unclosed,
-                                                 it->first, finder->second, 
-                                                 next_children,
-                                                 create_composite, changed);
-              if (!result || create_composite)
-              {
-                success = false;
-                break;
-              }
-              if (!finder->second)
-                state->children.open_children.erase(finder);
+              next_valid |= it->second;
             }
-            // If anything changed, rebuild the field mask
-            if (changed)
-            {
-              FieldMask next_valid;
-              for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it = 
-                    state->children.open_children.begin(); it !=
-                    state->children.open_children.end(); it++)
-              {
-                next_valid |= it->second;
-              }
-              state->children.valid_fields = next_valid;
-            }   
-            if (success)
-            {
-              closer.update_node_views(this, state);
-              closed_event_set.insert(closer.get_termination_event());
-            }
-          }
-          if (success)
-          {
-            // Finally merge our closed events
-            closed = Event::merge_events(closed_event_set);
-#ifdef LEGION_SPY
-            LegionSpy::log_event_dependences(closed_event_set, closed);
-#endif
-          }
+            state->children.valid_fields = next_valid;
+          }   
+          closer.update_node_views(this, state);
+          closed_event_set.insert(closer.get_termination_event());
         }
+        // Finally merge our closed events
+        return Runtime::merge_events(closed_event_set);
       }
       else
       {
         // Otherwise we are trying to close up this whole partition
         // Close it up to our parent region
         PhysicalCloser closer(info, parent->handle);
-        if (target_view != NULL)
-          closer.add_target(target_view);
-        bool changed = false;
+        FieldMask complete_fields;
+        find_complete_fields(closing_mask, target_children, complete_fields);
         PhysicalState *state = get_physical_state(info.ctx, version_info); 
+        closer.initialize_targets(this, state, target_views,
+                                  closing_mask, complete_fields);
+        bool changed = false;
         for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it = 
-              targets.begin(); it != targets.end(); it++)
+              target_children.begin(); it != target_children.end(); it++)
         {
           LegionMap<ColorPoint,FieldMask>::aligned::iterator finder = 
             state->children.open_children.find(it->first);
@@ -16537,15 +16358,8 @@ namespace Legion {
             continue;
           // If we're actually doing the close, record the leave open fields
           closer.set_leave_open_mask(it->second);
-          bool result = close_physical_child(closer, state, closing_mask,
-                                             it->first, finder->second, 
-                                             next_children,
-                                             create_composite, changed);
-          if (!result || create_composite)
-          {
-            success = false;
-            break;
-          }
+          close_physical_child(closer, state, closing_mask, it->first, 
+                               finder->second, next_children, changed);
           if (!finder->second)
             state->children.open_children.erase(finder);
         }
@@ -16561,16 +16375,12 @@ namespace Legion {
           }
           state->children.valid_fields = next_valid;
         }
-        // If we succeed, update the physical instance views
-        if (success)
-        {
-          closer.update_node_views(this, state);
-          // No need to check for flushed reductions, nobody can be
-          // reducing directly to a partition object anyway
-          closed = closer.get_termination_event();
-        }
+        // Update the physical instance views
+        closer.update_node_views(this, state);
+        // No need to check for flushed reductions, nobody can be
+        // reducing directly to a partition object anyway
+        return closer.get_termination_event();
       }
-      return success;
     }
 
     //--------------------------------------------------------------------------

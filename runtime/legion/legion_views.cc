@@ -796,10 +796,7 @@ namespace Legion {
       }
       LegionSpy::log_event_dependences(wait_on_events, ready_event);
 #endif
-      InstanceRef result(ready_event, this);
-      if (IS_ATOMIC(usage))
-        find_atomic_reservations(result, user_mask);
-      return result;
+      return InstanceRef(manager, user_mask, ready_event);
     }
 
     //--------------------------------------------------------------------------
@@ -2518,6 +2515,7 @@ namespace Legion {
 #endif
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void MaterializedView::find_atomic_reservations(InstanceRef &target,
                                                     const FieldMask &mask)
@@ -2558,6 +2556,7 @@ namespace Legion {
       else
         parent->find_atomic_reservations(target, mask);
     }
+#endif
 
     //--------------------------------------------------------------------------
     void MaterializedView::set_descriptor(FieldDataDescriptor &desc,
@@ -2947,7 +2946,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DeferredView::flush_reductions(const MappableInfo &info,
+    void DeferredView::flush_reductions(const TraversalInfo &info,
                                         MaterializedView *dst,
                                         const FieldMask &reduce_mask,
                                 LegionMap<Event,FieldMask>::aligned &conditions)
@@ -3003,7 +3002,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DeferredView::flush_reductions_across(const MappableInfo &info,
+    void DeferredView::flush_reductions_across(const TraversalInfo &info,
                                                MaterializedView *dst,
                                                FieldID src_field, 
                                                FieldID dst_field,
@@ -3924,7 +3923,7 @@ namespace Legion {
     }
     
     //--------------------------------------------------------------------------
-    void CompositeView::issue_deferred_copies(const MappableInfo &info,
+    void CompositeView::issue_deferred_copies(const TraversalInfo &info,
                                               MaterializedView *dst,
                                               const FieldMask &copy_mask,
                                               CopyTracker *tracker /* = NULL*/)
@@ -3987,7 +3986,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CompositeView::issue_deferred_copies(const MappableInfo &info,
+    void CompositeView::issue_deferred_copies(const TraversalInfo &info,
                                               MaterializedView *dst,
                                               const FieldMask &copy_mask,
                      const LegionMap<Event,FieldMask>::aligned &preconditions,
@@ -4022,7 +4021,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CompositeView::issue_deferred_copies_across(const MappableInfo &info,
+    void CompositeView::issue_deferred_copies_across(const TraversalInfo &info,
                                                      MaterializedView *dst,
                                                      FieldID src_field,
                                                      FieldID dst_field,
@@ -4391,7 +4390,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CompositeNode::issue_update_copies(const MappableInfo &info,
+    void CompositeNode::issue_update_copies(const TraversalInfo &info,
                                             MaterializedView *dst,
                                             FieldMask traversal_mask,
                                             const FieldMask &copy_mask,
@@ -4556,7 +4555,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CompositeNode::issue_across_copies(const MappableInfo &info,
+    void CompositeNode::issue_across_copies(const TraversalInfo &info,
                                             MaterializedView *dst,
                                             unsigned src_index,
                                             FieldID  src_field,
@@ -5399,7 +5398,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FillView::issue_deferred_copies(const MappableInfo &info,
+    void FillView::issue_deferred_copies(const TraversalInfo &info,
                                          MaterializedView *dst,
                                          const FieldMask &copy_mask,
                                          CopyTracker *tracker)
@@ -5510,7 +5509,7 @@ namespace Legion {
     }
     
     //--------------------------------------------------------------------------
-    void FillView::issue_deferred_copies(const MappableInfo &info,
+    void FillView::issue_deferred_copies(const TraversalInfo &info,
                                          MaterializedView *dst,
                                          const FieldMask &copy_mask,
              const LegionMap<Event,FieldMask>::aligned &preconditions,
@@ -5588,7 +5587,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FillView::issue_deferred_copies_across(const MappableInfo &info,
+    void FillView::issue_deferred_copies_across(const TraversalInfo &info,
                                                 MaterializedView *dst,
                                                 FieldID src_field,
                                                 FieldID dst_field,
@@ -5733,7 +5732,6 @@ namespace Legion {
     void ReductionView::perform_reduction(InstanceView *target,
                                           const FieldMask &reduce_mask,
                                           const VersionInfo &version_info,
-                                          Processor local_proc,
                                           Operation *op,
                                           CopyTracker *tracker /*= NULL*/)
     //--------------------------------------------------------------------------
@@ -6327,7 +6325,7 @@ namespace Legion {
       }
       LegionSpy::log_event_dependences(wait_on, result);
 #endif
-      return InstanceRef(result, this);
+      return InstanceRef(manager, user_mask, result);
     }
 
     //--------------------------------------------------------------------------

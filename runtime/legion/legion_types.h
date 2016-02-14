@@ -615,6 +615,7 @@ namespace Legion {
     class FatTreePath;
     class PathTraverser;
     class NodeTraverser;
+    class PhysicalTraverser;
     class PremapTraverser;
     class MappingTraverser;
     class RestrictInfo;

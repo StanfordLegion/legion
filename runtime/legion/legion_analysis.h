@@ -288,19 +288,16 @@ namespace Legion {
     }; 
 
     /**
-     * \struct MappableInfo
+     * \struct TraversalInfo
      */
-    struct MappableInfo {
+    struct TraversalInfo {
     public:
-      MappableInfo(ContextID ctx, Operation *op,
-                   Processor local_proc, RegionRequirement &req,
-                   VersionInfo &version_info,
-                   const FieldMask &traversal_mask);
+      TraversalInfo(ContextID ctx, Operation *op, const RegionRequirement &req,
+                    VersionInfo &version_info, const FieldMask &traversal_mask);
     public:
       const ContextID ctx;
       Operation *const op;
-      const Processor local_proc;
-      RegionRequirement &req;
+      const RegionRequirement &req;
       VersionInfo &version_info;
       const FieldMask traversal_mask;
     };
@@ -597,15 +594,18 @@ namespace Legion {
      */
     class PhysicalCloser : public CopyTracker {
     public:
-      PhysicalCloser(const MappableInfo &info,
+      PhysicalCloser(const TraversalInfo &info,
                      LogicalRegion closing_handle);
       PhysicalCloser(const PhysicalCloser &rhs);
       ~PhysicalCloser(void);
     public:
       PhysicalCloser& operator=(const PhysicalCloser &rhs);
     public:
-      bool needs_targets(void) const;
-      void add_target(MaterializedView *target);
+      void initialize_targets(RegionTreeNode *origin, PhysicalState *state, 
+                              const std::vector<MaterializedView*> &targets,
+                              const FieldMask &closing_mask,
+                              const FieldMask &complete_fields);
+    public:
       void close_tree_node(RegionTreeNode *node, 
                            const FieldMask &closing_mask);
       const std::vector<MaterializedView*>& get_upper_targets(void) const;
@@ -620,12 +620,11 @@ namespace Legion {
       inline const FieldMask& get_leave_open_mask(void) const 
         { return leave_open_mask; }
     public:
-      const MappableInfo &info;
+      const TraversalInfo &info;
       const LogicalRegion handle;
     protected:
       FieldMask leave_open_mask;
     protected:
-      bool targets_selected;
       FieldMask dirty_mask;
       std::vector<MaterializedView*> upper_targets;
       std::vector<MaterializedView*> lower_targets;
@@ -939,8 +938,6 @@ namespace Legion {
       bool has_child(unsigned depth) const;
       const ColorPoint& get_child(unsigned depth) const;
       unsigned get_path_length(void) const;
-    public:
-      InstanceRef translate_ref(const InstanceRef &ref) const;
     protected:
       std::vector<ColorPoint> path;
       unsigned min_depth;
@@ -1131,8 +1128,7 @@ namespace Legion {
     public:
       ReductionCloser(ContextID ctx, ReductionView *target,
                       const FieldMask &reduc_mask, 
-                      VersionInfo &version_info,
-                      Processor local_proc, Operation *op);
+                      VersionInfo &version_info, Operation *op);
       ReductionCloser(const ReductionCloser &rhs);
       ~ReductionCloser(void);
     public:
@@ -1143,36 +1139,9 @@ namespace Legion {
       ReductionView *const target;
       const FieldMask close_mask;
       VersionInfo &version_info;
-      const Processor local_proc;
       Operation *const op;
     protected:
       std::set<ReductionView*> issued_reductions;
-    };
-
-    /**
-     * \class MappingRef
-     * This class keeps a valid reference to a physical instance that has
-     * been allocated and is ready to have dependence analysis performed.
-     * Once all the allocations have been performed, then an operation
-     * can pass all of the mapping references to the RegionTreeForest
-     * to actually perform the operations necessary to make the 
-     * region valid and return an InstanceRef.
-     */
-    class MappingRef {
-    public:
-      MappingRef(void);
-      MappingRef(LogicalView *view, const FieldMask &needed_mask);
-      MappingRef(const MappingRef &rhs);
-      ~MappingRef(void);
-    public:
-      MappingRef& operator=(const MappingRef &rhs);
-    public:
-      inline bool has_ref(void) const { return (view != NULL); }
-      inline LogicalView* get_view(void) const { return view; } 
-      inline const FieldMask& get_mask(void) const { return needed_fields; }
-    private:
-      LogicalView *view;
-      FieldMask needed_fields;
     };
 
     /**
@@ -1182,21 +1151,24 @@ namespace Legion {
     class InstanceRef {
     public:
       InstanceRef(void);
-      InstanceRef(Event ready, InstanceView *view);
-      InstanceRef(Event ready, InstanceView *view,
-                  const std::vector<Reservation> &locks);
+      InstanceRef(PhysicalManager *manager, const FieldMask &valid_fields,
+                  Event ready_event = Event::NO_EVENT);
+      //InstanceRef(Event ready, InstanceView *view);
+      //InstanceRef(Event ready, InstanceView *view,
+      //            const std::vector<Reservation> &locks);
     public:
       bool operator==(const InstanceRef &rhs) const;
       bool operator!=(const InstanceRef &rhs) const;
     public:
       inline bool has_ref(void) const { return (manager != NULL); }
-      inline bool has_required_locks(void) const 
-                                      { return !needed_locks.empty(); }
+      //inline bool has_required_locks(void) const 
+      //                                { return !needed_locks.empty(); }
       inline Event get_ready_event(void) const { return ready_event; }
-      inline void add_reservation(Reservation handle) 
-                                  { needed_locks.push_back(handle); }
-      inline InstanceManager* get_manager(void) const { return manager; }
-      inline InstanceView* get_instance_view(void) const { return view; }
+      //inline void add_reservation(Reservation handle) 
+      //                            { needed_locks.push_back(handle); }
+      inline PhysicalManager* get_manager(void) const { return manager; }
+      inline const FieldMask& get_valid_fields(void) const 
+        { return valid_fields; }
     public:
       bool is_composite_ref(void) const;
       MappingInstance get_mapping_instance(void) const;
@@ -1206,12 +1178,14 @@ namespace Legion {
       void add_valid_reference(ReferenceSource source) const;
       void remove_valid_reference(ReferenceSource source) const;
     public:
-      MaterializedView* get_materialized_view(void) const;
-      ReductionView* get_reduction_view(void) const;
+      //MaterializedView* get_materialized_view(void) const;
+      //ReductionView* get_reduction_view(void) const;
     public:
       void update_atomic_locks(std::map<Reservation,bool> &atomic_locks,
                                bool exclusive);
       Memory get_memory(void) const;
+    public:
+      bool is_field_set(unsigned index) const;
       LegionRuntime::Accessor::RegionAccessor<
           LegionRuntime::Accessor::AccessorType::Generic>
             get_accessor(void) const;
@@ -1222,10 +1196,9 @@ namespace Legion {
       void pack_reference(Serializer &rez, AddressSpaceID target);
       void unpack_reference(Runtime *rt, Deserializer &derez);
     private:
+      FieldMask valid_fields; 
       Event ready_event;
-      InstanceView *view; // only valid on creation node
-      InstanceManager *manager;
-      std::vector<Reservation> needed_locks;
+      PhysicalManager *manager;
     };
 
     class CompositeRef {
@@ -1248,19 +1221,40 @@ namespace Legion {
       bool local;
     };
 
+    /**
+     * \class InstanceSet
+     * This class is an abstraction for representing one or more
+     * instance references. It is designed to be light-weight and
+     * easy to copy by value. It maintains an internal copy-on-write
+     * data structure to avoid unnecessary premature copies.
+     */
     class InstanceSet {
     public:
-      class InternalSet : public Collectable {
+      struct CollectableRef : public Collectable, public InstanceRef {
       public:
-        InternalSet(
-
+        CollectableRef(void)
+          : Collectable(), InstanceRef() { }
+        CollectableRef(const InstanceRef &ref)
+          : Collectable(), InstanceRef(ref) { }
+      };
+      struct InternalSet : public Collectable {
+      public:
+        InternalSet(size_t size = 0)
+          { vector.reserve(size); }
+        InternalSet(const InternalSet &rhs) : vector(rhs.vector) { }
+        ~InternalSet(void) { }
+      public:
+        InternalSet& operator=(const InternalSet &rhs)
+          { assert(false); return *this; }
+      public:
+        LegionVector<InstanceRef>::aligned vector; 
       };
     public:
       InstanceSet(size_t init_size = 0);
-      InstanceSet(InstanceSet &rhs);
+      InstanceSet(const InstanceSet &rhs);
       ~InstanceSet(void);
     public:
-      InstanceSet& operator=(InstanceSet &rhs);
+      InstanceSet& operator=(const InstanceSet &rhs);
       bool operator==(const InstanceSet &rhs) const;
       bool operator!=(const InstanceSet &rhs) const;
     public:
@@ -1270,7 +1264,6 @@ namespace Legion {
       bool empty(void) const;
       size_t size(void) const;
       void clear(void);
-      void reserve(size_t size);
       void add_instance(const InstanceRef &ref);
     public:
       bool has_composite_ref(void) const;
@@ -1279,80 +1272,47 @@ namespace Legion {
       void pack_references(Serializer &rez, AddressSpaceID target) const;
       void unpack_references(Runtime *runtime, Deserializer &derez);
     public:
-      void add_valid_references(ReferenceSource source);
-      void remove_valid_references(ReferenceSource source);
+      void add_valid_references(ReferenceSource source) const;
+      void remove_valid_references(ReferenceSource source) const;
     public:
       void update_wait_on_events(std::set<Event> &wait_on_events) const;
-      bool has_required_locks(void) const;
       void update_atomic_locks(std::map<Reservation,bool> &lks,bool excl) const;
     public:
       LegionRuntime::Accessor::RegionAccessor<
         LegionRuntime::Accessor::AccessorType::Generic>
           get_field_accessor(RegionTreeForest *forest, FieldID fid) const;
     protected:
+      void make_copy(void);
+    protected:
       union {
-        InstanceRef*                        single;
-        LegionVector<InstanceRef>::aligned*  multi;
+        CollectableRef* single;
+        InternalSet*     multi;
       } refs;
-      size_t size;
-      bool shared;
+      bool single;
+      mutable bool shared;
     };
 
     /**
-     * \class PremapTraverser
-     * A traverser of the physical region tree for
-     * performing the premap operation.
-     * Keep track of the last node we visited
+     * \class PhysicalTraverser
+     * A class for traversing the physical region tree to open up
+     * sub-trees and find valid instances for a given region requirement
      */
-    class PremapTraverser : public PathTraverser {
+    class PhysicalTraverser : public PathTraverser {
     public:
-      PremapTraverser(RegionTreePath &path, const MappableInfo &info);  
-      PremapTraverser(const PremapTraverser &rhs); 
-      ~PremapTraverser(void);
+      PhysicalTraverser(RegionTreePath &path, TraversalInfo *info, 
+                        InstanceSet *targets);
+      PhysicalTraverser(const PhysicalTraverser &rhs);
+      ~PhysicalTraverser(void);
     public:
-      PremapTraverser& operator=(const PremapTraverser &rhs);
+      PhysicalTraverser& operator=(const PhysicalTraverser &rhs);
     public:
       virtual bool visit_region(RegionNode *node);
       virtual bool visit_partition(PartitionNode *node);
     protected:
-      bool premap_node(RegionTreeNode *node, LogicalRegion closing_handle);
+      bool traverse_node(RegionTreeNode *node);
     protected:
-      const MappableInfo &info;
-    };
-
-    /**
-     * \class MappingTraverser
-     * A traverser of the physical region tree for
-     * performing the mapping operation.
-     */
-    class MappingTraverser : public PathTraverser {
-    public:
-      MappingTraverser(RegionTreePath &path, const MappableInfo &info,
-                       const RegionUsage &u, const FieldMask &m,
-                       Processor proc, unsigned idx, 
-                       InstanceView *target = NULL/*for restricted*/);
-      MappingTraverser(const MappingTraverser &rhs);
-      ~MappingTraverser(void);
-    public:
-      MappingTraverser& operator=(const MappingTraverser &rhs);
-    public:
-      virtual bool visit_region(RegionNode *node);
-      virtual bool visit_partition(PartitionNode *node);
-    public:
-      const MappingRef& get_instance_ref(void) const;
-    protected:
-      void traverse_node(RegionTreeNode *node);
-      bool map_physical_region(RegionNode *node);
-      bool map_reduction_region(RegionNode *node);
-    public:
-      const MappableInfo &info;
-      const RegionUsage usage;
-      const FieldMask user_mask;
-      const Processor target_proc;
-      const unsigned index;
-    protected:
-      MappingRef result;
-      LogicalView *target;
+      TraversalInfo *const info;
+      InstanceSet *const targets;
     };
 
   }; // namespace Internal 

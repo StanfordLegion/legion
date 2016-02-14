@@ -4889,8 +4889,8 @@ namespace Legion {
           // task optimization
           if (!variant->is_inner())
             instances.update_wait_on_events(wait_on_events);
-          // See if we need a lock for this region
-          if (instances.has_required_locks())
+          // See if we need a locks for this region requirement
+          if (IS_ATOMIC(regions[idx]))
           {
             // Check to see if it is needed exclusively or not
             bool exclusive = !IS_READ_ONLY(regions[idx]);

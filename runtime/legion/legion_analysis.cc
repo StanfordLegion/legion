@@ -206,11 +206,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    MappableInfo::MappableInfo(ContextID c, Operation *o, Processor p,
-                               RegionRequirement &r, VersionInfo &info,
-                               const FieldMask &k)
-      : ctx(c), op(o), local_proc(p), req(r), 
-        version_info(info), traversal_mask(k)
+    TraversalInfo::TraversalInfo(ContextID c, Operation *o,
+                                 const RegionRequirement &r, VersionInfo &info,
+                                 const FieldMask &k)
+      : ctx(c), op(o), req(r), version_info(info), traversal_mask(k)
     //--------------------------------------------------------------------------
     {
     }
@@ -1511,9 +1510,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ReductionCloser::ReductionCloser(ContextID c, ReductionView *t,
                                      const FieldMask &m, VersionInfo &info, 
-                                     Processor local, Operation *o)
-      : ctx(c), target(t), close_mask(m), version_info(info), 
-        local_proc(local), op(o)
+                                     Operation *o)
+      : ctx(c), target(t), close_mask(m), version_info(info), op(o)
     //--------------------------------------------------------------------------
     {
     }
@@ -1521,7 +1519,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ReductionCloser::ReductionCloser(const ReductionCloser &rhs)
       : ctx(0), target(NULL), close_mask(FieldMask()), 
-        version_info(rhs.version_info), local_proc(Processor::NO_PROC), op(NULL)
+        version_info(rhs.version_info), op(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -1567,7 +1565,123 @@ namespace Legion {
       }
       if (!valid_reductions.empty())
         node->issue_update_reductions(target, close_mask, version_info,
-                                      local_proc, valid_reductions, op);
+                                      valid_reductions, op);
+    }
+
+    /////////////////////////////////////////////////////////////
+    // PhysicalTraverser 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    PhysicalTraverser::PhysicalTraverser(RegionTreePath &p, 
+                                         TraversalInfo *in, InstanceSet *t)
+      : PathTraverser(p), info(in), targets(t)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalTraverser::PhysicalTraverser(const PhysicalTraverser &rhs)
+      : PathTraverser(rhs.path), info(NULL), targets(NULL)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalTraverser::~PhysicalTraverser(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalTraverser& PhysicalTraverser::operator=(const PhysicalTraverser &rs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    bool PhysicalTraverser::visit_region(RegionNode *node)
+    //--------------------------------------------------------------------------
+    {
+      return traverse_node(node);
+    }
+
+    //--------------------------------------------------------------------------
+    bool PhysicalTraverser::visit_partition(PartitionNode *node)
+    //--------------------------------------------------------------------------
+    {
+      return traverse_node(node);
+    }
+
+    //--------------------------------------------------------------------------
+    bool PhysicalTraverser::traverse_node(RegionTreeNode *node)
+    //--------------------------------------------------------------------------
+    {
+      PhysicalState *state = node->get_physical_state(info->ctx, 
+                                                      info->version_info); 
+      // If we are traversing an intermediary node, we just have to 
+      // update the open children
+      if (has_child)
+      {
+        state->children.valid_fields |= info->traversal_mask;
+        LegionMap<ColorPoint,FieldMask>::aligned::iterator finder = 
+                            state->children.open_children.find(next_child);
+        if (finder == state->children.open_children.end())
+          state->children.open_children[next_child] = info->traversal_mask;
+        else
+          finder->second |= info->traversal_mask;
+      }
+      else if (!IS_REDUCE(info->req))
+      {
+        // We're at the child node, see if we need to find the valid 
+        // instances or not, if not then we are done
+        if (targets != NULL)
+        {
+          node->pull_valid_instance_views(info->ctx, state, 
+              info->traversal_mask, true/*needs space*/, info->version_info);
+          // Record the instances and the fields for which they are valid 
+          for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it =
+                state->valid_views.begin(); it != state->valid_views.end();it++)
+          {
+            // Skip any deferred views, they don't actually count here
+            if (it->first->is_deferred_view())
+              continue;
+#ifdef DEBUG_HIGH_LEVEL
+            assert(it->first->as_instance_view()->is_materialized_view());
+#endif
+            MaterializedView *cur_view = 
+              it->first->as_instance_view()->as_materialized_view();
+            // Check to see if it has space for any fields, if not we can skip it
+            FieldMask containing_fields = 
+             cur_view->manager->layout->allocated_fields & info->traversal_mask;
+            if (!containing_fields)
+              continue;
+            // Now see if it has any valid fields already
+            FieldMask valid_fields = it->second & info->traversal_mask;
+            // Save the reference
+            targets->add_instance(InstanceRef(cur_view->manager, valid_fields));
+          }
+        }
+      }
+      else
+      {
+        // See if there are any reduction instances that match locally
+        for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it =
+              state->reduction_views.begin(); it != 
+              state->reduction_views.end(); it++)
+        {
+          FieldMask overlap = it->second & info->traversal_mask;
+          if (!overlap)
+            continue;
+          targets->add_instance(InstanceRef(it->first->manager, overlap));
+        }
+      }
+      return true;
     }
 
 #if 0
@@ -3629,9 +3743,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalCloser::PhysicalCloser(const MappableInfo &in, 
-                                   LogicalRegion h)
-      : info(in), handle(h), targets_selected(false)
+    PhysicalCloser::PhysicalCloser(const TraversalInfo &in, LogicalRegion h)
+      : info(in), handle(h)
     //--------------------------------------------------------------------------
     {
     }
@@ -3643,7 +3756,6 @@ namespace Legion {
         upper_targets(rhs.get_lower_targets())
     //--------------------------------------------------------------------------
     {
-      targets_selected = !upper_targets.empty(); 
     }
 
     //--------------------------------------------------------------------------
@@ -3662,21 +3774,51 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool PhysicalCloser::needs_targets(void) const
-    //--------------------------------------------------------------------------
-    {
-      return !targets_selected;
-    }
-
-    //--------------------------------------------------------------------------
-    void PhysicalCloser::add_target(MaterializedView *target)
+    void PhysicalCloser::initialize_targets(RegionTreeNode *origin,
+                                  PhysicalState *state,
+                                  const std::vector<MaterializedView*> &targets,
+                                  const FieldMask &closing_mask,
+                                  const FieldMask &complete_mask)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
-      assert(target != NULL);
+      assert(upper_targets.empty());
 #endif
-      upper_targets.push_back(target);
-      targets_selected = true;
+      // We only need to issue updates for the incomplete fields
+      FieldMask incomplete_mask = closing_mask - complete_mask;
+      if (!!incomplete_mask)
+      {
+        // Figure out which instances need updates before we can close to them
+        LegionMap<LogicalView*,FieldMask>::aligned valid_views;
+        origin->find_valid_instance_views(info.ctx, state, incomplete_mask,
+                                          incomplete_mask, info.version_info,
+                                          false/*needs space*/, valid_views);
+        // Now figure out which fields need updating for each instance
+        for (std::vector<MaterializedView*>::const_iterator it = 
+              targets.begin(); it != targets.end(); it++)
+        {
+          // The set of fields we must update
+          FieldMask space_mask = (*it)->get_space_mask() & incomplete_mask;
+          // If we don't have any incomplete fields, keep going
+          if (!space_mask)
+            continue;
+          LegionMap<LogicalView*,FieldMask>::aligned::const_iterator finder = 
+            valid_views.find(*it);
+          if (finder != valid_views.end())
+          {
+            // We can skip fields for which we are already valid
+            FieldMask invalid_mask = space_mask - finder->second;
+            if (!!invalid_mask)
+              origin->issue_update_copies(info, *it, invalid_mask,
+                                          valid_views, this);
+          }
+          else // update all the incomplete fields we have
+            origin->issue_update_copies(info, *it, space_mask,
+                                        valid_views, this);
+        }
+      }
+      // Then we can record the targets
+      upper_targets = targets;
     }
 
     //--------------------------------------------------------------------------
@@ -6537,23 +6679,6 @@ namespace Legion {
       return ((max_depth-min_depth)+1); 
     }
 
-    //--------------------------------------------------------------------------
-    InstanceRef RegionTreePath::translate_ref(const InstanceRef &ref) const
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(ref.has_ref());
-#endif
-      LogicalView *view = ref.get_instance_view();
-      // Note we don't need to do the last depth
-      for (unsigned idx = min_depth; idx < max_depth; idx++)
-        view = view->get_subview(path[idx]);
-#ifdef DEBUG_HIGH_LEVEL
-      assert(view->is_instance_view());
-#endif
-      return InstanceRef(ref.get_ready_event(), view->as_instance_view());
-    }
-
     /////////////////////////////////////////////////////////////
     // FatTreePath 
     /////////////////////////////////////////////////////////////
@@ -6647,47 +6772,6 @@ namespace Legion {
       }
       children[child_color] = child;
       return overlap;
-    }
-
-    /////////////////////////////////////////////////////////////
-    // MappingRef 
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    MappingRef::MappingRef(void)
-      : view(NULL), needed_fields(FieldMask())
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    MappingRef::MappingRef(LogicalView *v, const FieldMask &needed)
-      : view(v), needed_fields(needed)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    MappingRef::MappingRef(const MappingRef &rhs)
-      : view(rhs.view), needed_fields(rhs.needed_fields)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    MappingRef::~MappingRef(void)
-    //--------------------------------------------------------------------------
-    {
-      view = NULL;
-    }
-
-    //--------------------------------------------------------------------------
-    MappingRef& MappingRef::operator=(const MappingRef &rhs)
-    //--------------------------------------------------------------------------
-    {
-      view = rhs.view;
-      needed_fields = rhs.needed_fields;
-      return *this;
     }
 
     /////////////////////////////////////////////////////////////
@@ -6963,23 +7047,511 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     InstanceSet::InstanceSet(size_t init_size /*=0*/)
-      : size(init_size), shared(false)
+      : single((init_size <= 1)), shared(false)
     //--------------------------------------------------------------------------
     {
-      if (size == 0)
+      if (init_size == 0)
         refs.single = NULL;
-      else if (size == 1)
-        refs.single = new InstanceRef();
+      else if (init_size == 1)
+      {
+        refs.single = new CollectableRef();
+        refs.single->add_reference();
+      }
       else
-        refs.multi = new LegionVector<InstanceRef>::aligned(size);
+      {
+        refs.multi = new InternalSet(init_size);
+        refs.multi->add_reference();
+      }
     }
 
     //--------------------------------------------------------------------------
-    InstanceSet::InstanceSet(InstanceSet &rhs)
-      : size(rhs.size), shared(true)
+    InstanceSet::InstanceSet(const InstanceSet &rhs)
+      : single(rhs.single)
     //--------------------------------------------------------------------------
     {
-       
+      // Mark that the other one is sharing too
+      if (single)
+      {
+        refs.single = rhs.refs.single;
+        if (refs.single == NULL)
+        {
+          shared = false;
+          return;
+        }
+        shared = true;
+        rhs.shared = true;
+        refs.single->add_reference();
+      }
+      else
+      {
+        refs.multi = rhs.refs.multi;
+        shared = true;
+        rhs.shared = true;
+        refs.multi->add_reference();
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    InstanceSet::~InstanceSet(void)
+    //--------------------------------------------------------------------------
+    {
+      if (single)
+      {
+        if ((refs.single != NULL) && refs.single->remove_reference())
+          delete refs.single;
+      }
+      else
+      {
+        if (refs.multi->remove_reference())
+          delete refs.multi;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    InstanceSet& InstanceSet::operator=(const InstanceSet &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // See if we need to delete our current one
+      if (single)
+      {
+        if ((refs.single != NULL) && refs.single->remove_reference())
+          delete refs.single;
+      }
+      else
+      {
+        if (refs.multi->remove_reference())
+          delete refs.multi;
+      }
+      // Now copy over the other one
+      single = rhs.single; 
+      if (single)
+      {
+        refs.single = rhs.refs.single;
+        if (refs.single != NULL)
+        {
+          shared = true;
+          rhs.shared = true;
+          refs.single->add_reference();
+        }
+        else
+          shared = false;
+      }
+      else
+      {
+        refs.multi = rhs.refs.multi;
+        shared = true;
+        rhs.shared = true;
+        refs.multi->add_reference();
+      }
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void InstanceSet::make_copy(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(!shared);
+#endif
+      if (single)
+      {
+        if (refs.single != NULL)
+        {
+          CollectableRef *next = new CollectableRef(*refs.single);
+          next->add_reference();
+          if (refs.single->remove_reference())
+            delete refs.single;
+          refs.single = next;
+        }
+      }
+      else
+      {
+        InternalSet *next = new InternalSet(*refs.multi);
+        next->add_reference();
+        if (refs.multi->remove_reference())
+          delete refs.multi;
+        refs.multi = next;
+      }
+      shared = false;
+    }
+
+    //--------------------------------------------------------------------------
+    bool InstanceSet::operator==(const InstanceSet &rhs) const
+    //--------------------------------------------------------------------------
+    {
+      if (single != rhs.single)
+        return false;
+      if (single)
+      {
+        if (refs.single == rhs.refs.single)
+          return true;
+        if (((refs.single == NULL) && (rhs.refs.single != NULL)) ||
+            ((refs.single != NULL) && (rhs.refs.single == NULL)))
+          return false;
+        return ((*refs.single) == (*rhs.refs.single));
+      }
+      else
+      {
+        if (refs.multi->vector.size() != rhs.refs.multi->vector.size())
+          return false;
+        for (unsigned idx = 0; idx < refs.multi->vector.size(); idx++)
+        {
+          if (refs.multi->vector[idx] != rhs.refs.multi->vector[idx])
+            return false;
+        }
+        return true;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    bool InstanceSet::operator!=(const InstanceSet &rhs) const
+    //--------------------------------------------------------------------------
+    {
+      return !((*this) == rhs);
+    }
+
+    //--------------------------------------------------------------------------
+    InstanceRef& InstanceSet::operator[](unsigned idx)
+    //--------------------------------------------------------------------------
+    {
+      if (shared)
+        make_copy();
+      if (single)
+      {
+#ifdef DEBUG_HIGH_LEVEL
+        assert(idx == 0);
+        assert(refs.single != NULL);
+#endif
+        return *(refs.single);
+      }
+#ifdef DEBUG_HIGH_LEVEL
+      assert(idx < refs.multi->vector.size());
+#endif
+      return refs.multi->vector[idx];
+    }
+
+    //--------------------------------------------------------------------------
+    const InstanceRef& InstanceSet::operator[](unsigned idx) const
+    //--------------------------------------------------------------------------
+    {
+      // No need to make a copy if shared here since this is read-only
+      if (single)
+      {
+#ifdef DEBUG_HIGH_LEVEL
+        assert(idx == 0);
+        assert(refs.single != NULL);
+#endif
+        return *(refs.single);
+      }
+#ifdef DEBUG_HIGH_LEVEL
+      assert(idx < refs.multi->vector.size());
+#endif
+      return refs.multi->vector[idx];
+    }
+
+    //--------------------------------------------------------------------------
+    bool InstanceSet::empty(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (single && (refs.single == NULL))
+        return true;
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    size_t InstanceSet::size(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (single)
+      {
+        if (refs.single == NULL)
+          return 0;
+        return 1;
+      }
+      return refs.multi->vector.size();
+    }
+
+    //--------------------------------------------------------------------------
+    void InstanceSet::clear(void)
+    //--------------------------------------------------------------------------
+    {
+      // No need to copy since we are removing our references and not mutating
+      if (single)
+      {
+        if ((refs.single != NULL) && refs.single->remove_reference())
+          delete refs.single;
+        refs.single = NULL;
+      }
+      else
+      {
+        if (shared)
+        {
+          // Small optimization here, if we're told to delete it, we know
+          // that means we were the last user so we can re-use it
+          if (refs.multi->remove_reference())
+          {
+            // Put a reference back on it since we're reusing it
+            refs.multi->add_reference();
+            refs.multi->vector.clear();
+          }
+          else
+          {
+            // Go back to single
+            refs.multi = NULL;
+            single = true;
+          }
+        }
+        else
+          refs.multi->vector.clear();
+      }
+      shared = false;
+    }
+
+    //--------------------------------------------------------------------------
+    void InstanceSet::add_instance(const InstanceRef &ref)
+    //--------------------------------------------------------------------------
+    {
+      if (single)
+      {
+        // No need to check for shared, we're going to make new things anyway
+        if (refs.single != NULL)
+        {
+          // Make the new multi version
+          InternalSet *next = new InternalSet(2);
+          next->vector[0] = *(refs.single);
+          next->vector[1] = ref;
+          if (refs.single->remove_reference())
+            delete refs.single;
+          next->add_reference();
+          refs.multi = next;
+          single = false;
+          shared = false;
+        }
+        else
+        {
+          refs.single = new CollectableRef(ref);
+          refs.single->add_reference();
+        }
+      }
+      else
+      {
+        if (shared)
+          make_copy();
+        refs.multi->vector.push_back(ref);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    bool InstanceSet::has_composite_ref(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (single)
+      {
+        if (refs.single == NULL)
+          return false;
+        return refs.single->is_composite_ref();
+      }
+      else
+      {
+        for (unsigned idx = 0; idx < refs.multi->vector.size(); idx++)
+        {
+          if (refs.multi->vector[idx].is_composite_ref())
+            return true;
+        }
+        return false;
+      }
+    }
+
+#if 0
+    //--------------------------------------------------------------------------
+    const CompositeRef& InstanceSet::get_composite_ref(void) const
+    //--------------------------------------------------------------------------
+    {
+    }
+#endif
+
+    //--------------------------------------------------------------------------
+    void InstanceSet::pack_references(Serializer &rez,
+                                      AddressSpaceID target) const
+    //--------------------------------------------------------------------------
+    {
+      if (single)
+      {
+        if (refs.single == NULL)
+        {
+          rez.serialize<size_t>(0);
+          return;
+        }
+        rez.serialize<size_t>(1);
+        refs.single->pack_reference(rez, target);
+      }
+      else
+      {
+        rez.serialize<size_t>(refs.multi->vector.size());
+        for (unsigned idx = 0; idx < refs.multi->vector.size(); idx++)
+          refs.multi->vector[idx].pack_reference(rez, target);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void InstanceSet::unpack_references(Runtime *runtime, Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      size_t num_refs;
+      derez.deserialize(num_refs);
+      if (num_refs == 0)
+      {
+        // No matter what, we can just clear out any references we have
+        if (single)
+        {
+          if ((refs.single != NULL) && refs.single->remove_reference())
+            delete refs.single;
+          refs.single = NULL;
+        }
+        else
+        {
+          if (refs.multi->remove_reference())
+            delete refs.multi;
+          single = true;
+        }
+      }
+      else if (num_refs == 1)
+      {
+        // If we're in multi, go back to single
+        if (!single)
+        {
+          if (refs.multi->remove_reference())
+            delete refs.multi;
+          refs.multi = NULL;
+          single = true;
+        }
+        // Now we can unpack our reference, see if we need to make one
+        if (refs.single == NULL)
+        {
+          refs.single = new CollectableRef();
+          refs.single->add_reference();
+        }
+        refs.single->unpack_reference(runtime, derez);
+      }
+      else
+      {
+        // If we're in single, go to multi
+        // otherwise resize our multi for the appropriate number of references
+        if (single)
+        {
+          if ((refs.single != NULL) && refs.single->remove_reference())
+            delete refs.single;
+          refs.multi = new InternalSet(num_refs);
+          refs.multi->add_reference();
+          single = false;
+        }
+        else
+          refs.multi->vector.resize(num_refs);
+        // Now do the unpacking
+        for (unsigned idx = 0; idx < num_refs; idx++)
+          refs.multi->vector[idx].unpack_reference(runtime, derez);
+      }
+      // We are always not shared when we are done
+      shared = false;
+    }
+
+    //--------------------------------------------------------------------------
+    void InstanceSet::add_valid_references(ReferenceSource source) const
+    //--------------------------------------------------------------------------
+    {
+      if (single)
+      {
+        if (refs.single != NULL)
+          refs.single->add_valid_reference(source);
+      }
+      else
+      {
+        for (unsigned idx = 0; idx < refs.multi->vector.size(); idx++)
+          refs.multi->vector[idx].add_valid_reference(source);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void InstanceSet::remove_valid_references(ReferenceSource source) const
+    //--------------------------------------------------------------------------
+    {
+      if (single)
+      {
+        if (refs.single != NULL)
+          refs.single->remove_valid_reference(source);
+      }
+      else
+      {
+        for (unsigned idx = 0; idx < refs.multi->vector.size(); idx++)
+          refs.multi->vector[idx].remove_valid_reference(source);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void InstanceSet::update_wait_on_events(std::set<Event> &wait_on) const 
+    //--------------------------------------------------------------------------
+    {
+      if (single)
+      {
+        if (refs.single != NULL)
+        {
+          Event ready = refs.single->get_ready_event();
+          if (ready.exists())
+            wait_on.insert(ready);
+        }
+      }
+      else
+      {
+        for (unsigned idx = 0; idx < refs.multi->vector.size(); idx++)
+        {
+          Event ready = refs.multi->vector[idx].get_ready_event();
+          if (ready.exists())
+            wait_on.insert(ready);
+        }
+      }
+    }
+    
+    //--------------------------------------------------------------------------
+    void InstanceSet::update_atomic_locks(std::map<Reservation,bool> &locks,
+                                          bool exclusive) const
+    //--------------------------------------------------------------------------
+    {
+      if (single)
+      {
+        if (refs.single != NULL)
+          refs.single->update_atomic_locks(locks, exclusive);
+      }
+      else
+      {
+        for (unsigned idx = 0; idx < refs.multi->vector.size(); idx++)
+          refs.multi->vector[idx].update_atomic_locks(locks, exclusive);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    LegionRuntime::Accessor::RegionAccessor<
+      LegionRuntime::Accessor::AccessorType::Generic> InstanceSet::
+                get_field_accessor(RegionTreeForest *forest, FieldID fid) const
+    //--------------------------------------------------------------------------
+    {
+      if (single)
+      {
+#ifdef DEBUG_HIGH_LEVEL
+        assert(refs.single != NULL);
+#endif
+        return refs.single->get_field_accessor(fid);
+      }
+      else
+      {
+        for (unsigned idx = 0; idx < refs.multi->vector.size(); idx++)
+        {
+          const InstanceRef &ref = refs.multi->vector[idx];
+          if (ref.is_field_set(fid))
+            return ref.get_field_accessor(fid);
+        }
+        assert(false);
+        return refs.multi->vector[0].get_field_accessor(fid);
+      }
     }
 
   }; // namespace Internal 

@@ -208,6 +208,9 @@ namespace Legion {
     public:
       MaterializedView& operator=(const MaterializedView &rhs);
     public:
+      inline const FieldMask& get_space_mask(void) const 
+        { return manager->layout->allocated_fields; }
+    public:
       size_t get_blocking_factor(void) const;
       const FieldMask& get_physical_mask(void) const;
     public:
@@ -453,8 +456,7 @@ namespace Legion {
     public:
       void perform_reduction(InstanceView *target, const FieldMask &copy_mask, 
                              const VersionInfo &version_info,
-                             Processor local_proc, Operation *op,
-                             CopyTracker *tracker = NULL);
+                             Operation *op, CopyTracker *tracker = NULL);
       Event perform_deferred_reduction(MaterializedView *target,
                                         const FieldMask &copy_mask,
                                         const VersionInfo &version_info,
@@ -620,11 +622,11 @@ namespace Legion {
       virtual void update_child_reduction_views(ReductionView *view,
                                                 const FieldMask &valid_mask,
                                                 DeferredView *skip = NULL) = 0;
-      void flush_reductions(const MappableInfo &info,
+      void flush_reductions(const TraversalInfo &info,
                             MaterializedView *dst,
                             const FieldMask &reduce_mask,
                             LegionMap<Event,FieldMask>::aligned &conditions);
-      void flush_reductions_across(const MappableInfo &info,
+      void flush_reductions_across(const TraversalInfo &info,
                                    MaterializedView *dst,
                                    FieldID src_field, FieldID dst_field,
                                    Event dst_precondition,
@@ -638,18 +640,18 @@ namespace Legion {
       void validate_deferred(void);
       void invalidate_deferred(void);
     public:
-      virtual void issue_deferred_copies(const MappableInfo &info,
+      virtual void issue_deferred_copies(const TraversalInfo &info,
                                          MaterializedView *dst,
                                          const FieldMask &copy_mask,
                                          CopyTracker *tracker = NULL) = 0;
-      virtual void issue_deferred_copies(const MappableInfo &info,
+      virtual void issue_deferred_copies(const TraversalInfo &info,
                                          MaterializedView *dst,
                                          const FieldMask &copy_mask,
              const LegionMap<Event,FieldMask>::aligned &preconditions,
                    LegionMap<Event,FieldMask>::aligned &postconditions,
                                          CopyTracker *tracker = NULL) = 0;
     public:
-      virtual void issue_deferred_copies_across(const MappableInfo &info,
+      virtual void issue_deferred_copies_across(const TraversalInfo &info,
                                                 MaterializedView *dst,
                                                 FieldID src_field,
                                                 FieldID dst_field,
@@ -762,11 +764,11 @@ namespace Legion {
                                                 const FieldMask &valid_mask,
                                                 DeferredView *skip = NULL);
     public:
-      virtual void issue_deferred_copies(const MappableInfo &info,
+      virtual void issue_deferred_copies(const TraversalInfo &info,
                                          MaterializedView *dst,
                                          const FieldMask &copy_mask,
                                          CopyTracker *tracker = NULL);
-      virtual void issue_deferred_copies(const MappableInfo &info,
+      virtual void issue_deferred_copies(const TraversalInfo &info,
                                          MaterializedView *dst,
                                          const FieldMask &copy_mask,
              const LegionMap<Event,FieldMask>::aligned &preconditions,
@@ -774,7 +776,7 @@ namespace Legion {
                                          CopyTracker *tracker = NULL);
     public:
       // Note that copy-across only works for a single field at a time
-      virtual void issue_deferred_copies_across(const MappableInfo &info,
+      virtual void issue_deferred_copies_across(const TraversalInfo &info,
                                                 MaterializedView *dst,
                                                 FieldID src_field,
                                                 FieldID dst_field,
@@ -863,14 +865,14 @@ namespace Legion {
       void update_instance_views(LogicalView *view,
                                  const FieldMask &valid_mask);
     public:
-      void issue_update_copies(const MappableInfo &info,
+      void issue_update_copies(const TraversalInfo &info,
                                MaterializedView *dst,
                                FieldMask traversal_mask,
                                const FieldMask &copy_mask,
                        const LegionMap<Event,FieldMask>::aligned &preconditions,
                            LegionMap<Event,FieldMask>::aligned &postconditions,
                                CopyTracker *tracker = NULL);
-      void issue_across_copies(const MappableInfo &info,
+      void issue_across_copies(const TraversalInfo &info,
                                MaterializedView *dst,
                                unsigned src_index,
                                FieldID  src_field,
@@ -980,18 +982,18 @@ namespace Legion {
                                                 const FieldMask &valid_mask,
                                                 DeferredView *skip = NULL);
     public:
-      virtual void issue_deferred_copies(const MappableInfo &info,
+      virtual void issue_deferred_copies(const TraversalInfo &info,
                                          MaterializedView *dst,
                                          const FieldMask &copy_mask,
                                          CopyTracker *tracker = NULL);
-      virtual void issue_deferred_copies(const MappableInfo &info,
+      virtual void issue_deferred_copies(const TraversalInfo &info,
                                          MaterializedView *dst,
                                          const FieldMask &copy_mask,
              const LegionMap<Event,FieldMask>::aligned &preconditions,
                    LegionMap<Event,FieldMask>::aligned &postconditions,
                                          CopyTracker *tracker = NULL);
     public:
-      virtual void issue_deferred_copies_across(const MappableInfo &info,
+      virtual void issue_deferred_copies_across(const TraversalInfo &info,
                                                 MaterializedView *dst,
                                                 FieldID src_field,
                                                 FieldID dst_field,
