@@ -2038,11 +2038,10 @@ namespace Legion {
       CompositeRef map_virtual_region(ContextID ctx, 
                                       const FieldMask &virtual_mask,
                                       VersionInfo &version_info);
-      InstanceRef register_region(const TraversalInfo &info, Event term_event,
-                                  const RegionUsage &usage, 
-                                  const FieldMask &user_mask,
-                                  LogicalView *view,
-                                  const FieldMask &needed_fields);
+      void register_region(const TraversalInfo &info, Event term_event,
+                           const RegionUsage &usage, 
+                           const FieldMask &user_mask,
+                           InstanceSet &targets);
       void register_virtual(ContextID ctx, CompositeView *view,
                             VersionInfo &version_info,
                             const FieldMask &composite_mask);
@@ -2051,8 +2050,7 @@ namespace Legion {
                              const FieldMask &user_mask,
                              LogicalView *new_view);
       Event close_state(const TraversalInfo &info, Event term_event,
-                        RegionUsage &usage, const FieldMask &user_mask,
-                        const InstanceRef &target);
+                        RegionUsage &usage, const InstanceSet &targets);
       void find_field_descriptors(ContextID ctx, Event term_event,
                                   const RegionUsage &usage,
                                   const FieldMask &user_mask,

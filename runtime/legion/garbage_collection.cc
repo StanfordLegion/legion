@@ -62,7 +62,7 @@ namespace Legion {
       assert(resource_references == 0);
       assert(current_state == DELETED_STATE);
 #endif
-      destruction_event.trigger(Event::merge_events(recycle_events));
+      destruction_event.trigger(Runtime::merge_events<true>(recycle_events));
       if (registered_with_runtime)
       {
         runtime->unregister_distributed_collectable(did);

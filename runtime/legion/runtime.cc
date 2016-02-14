@@ -1107,7 +1107,7 @@ namespace Legion {
       
       std::set<Event> wait_on;
       references.update_wait_on_events(wait_on);
-      Event ref_ready = Runtime::merge_events(wait_on);
+      Event ref_ready = Runtime::merge_events<false>(wait_on);
       if (!ref_ready.has_triggered())
       {
         // If we need a lock for this instance taken it
@@ -1143,7 +1143,7 @@ namespace Legion {
       {
         std::set<Event> wait_on;
         references.update_wait_on_events(wait_on);
-        Event ref_ready = Runtime::merge_events(wait_on);
+        Event ref_ready = Runtime::merge_events<false>(wait_on);
         return ref_ready.has_triggered();
       }
       return false;
@@ -1267,7 +1267,7 @@ namespace Legion {
         std::set<Event> wait_on;
         references.update_wait_on_events(wait_on);
         wait_on.insert(ready_event);
-        termination_event.trigger(Runtime::merge_events(wait_on));
+        termination_event.trigger(Runtime::merge_events<false>(wait_on));
       }
       valid = false;
       mapped = false;
@@ -1454,7 +1454,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock g_lock(grant_lock);
-      Event deferred_release = Event::merge_events(completion_events);
+      Event deferred_release = Runtime::merge_events<false>(completion_events);
       for (std::vector<ReservationRequest>::const_iterator it = 
             requests.begin(); it != requests.end(); it++)
       {
@@ -3241,7 +3241,7 @@ namespace Legion {
       {
         wait_events.insert(channels[idx].notify_pending_shutdown());
       }
-      return Event::merge_events(wait_events);
+      return Runtime::merge_events<true>(wait_events);
     }
 
     //--------------------------------------------------------------------------
@@ -3533,7 +3533,7 @@ namespace Legion {
             collections.begin(); it != collections.end(); /*nothing*/)
       {
         args.view = it->first;
-        Event precondition = Event::merge_events(it->second);
+        Event precondition = Runtime::merge_events<true>(it->second);
         // Avoid the deletion race by testing the condition 
         // before launching the task
         it++;
@@ -3545,7 +3545,7 @@ namespace Legion {
         if (done)
           break;
       }
-      return Event::merge_events(events);
+      return Runtime::merge_events<true>(events);
     }
 
     //--------------------------------------------------------------------------
@@ -4251,7 +4251,7 @@ namespace Legion {
       // If our ready event hasn't triggered, include it in the precondition
       if (!ready_event.has_triggered())
         return target.spawn(vid, &task, sizeof(task), requests,
-                  Event::merge_events(precondition, ready_event), priority);
+             Runtime::merge_events<false>(precondition, ready_event), priority);
       return target.spawn(vid, &task, sizeof(task), requests, 
                           precondition, priority);
     }
@@ -6866,7 +6866,7 @@ namespace Legion {
           add_to_dependence_queue(proc, op);
         }
         // Wait for all the re-mapping operations to complete
-        Event mapped_event = Event::merge_events(mapped_events);
+        Event mapped_event = Runtime::merge_events<false>(mapped_events);
         if (!mapped_event.has_triggered())
           mapped_event.wait();
       }
@@ -6946,7 +6946,7 @@ namespace Legion {
           add_to_dependence_queue(proc, op);
         }
         // Wait for all the re-mapping operations to complete
-        Event mapped_event = Event::merge_events(mapped_events);
+        Event mapped_event = Runtime::merge_events<false>(mapped_events);
         if (!mapped_event.has_triggered())
           mapped_event.wait();
       }
@@ -7027,7 +7027,7 @@ namespace Legion {
           add_to_dependence_queue(proc, op);
         }
         // Wait for all the re-mapping operations to complete
-        Event mapped_event = Event::merge_events(mapped_events);
+        Event mapped_event = Runtime::merge_events<false>(mapped_events);
         if (!mapped_event.has_triggered())
           mapped_event.wait();
       }
@@ -9015,7 +9015,7 @@ namespace Legion {
           add_to_dependence_queue(proc, op);
         }
         // Wait for all the re-mapping operations to complete
-        Event mapped_event = Event::merge_events(mapped_events);
+        Event mapped_event = Runtime::merge_events<false>(mapped_events);
         if (!mapped_event.has_triggered())
           mapped_event.wait();
       }
@@ -9087,7 +9087,7 @@ namespace Legion {
           add_to_dependence_queue(proc, op);
         }
         // Wait for all the re-mapping operations to complete
-        Event mapped_event = Event::merge_events(mapped_events);
+        Event mapped_event = Runtime::merge_events<false>(mapped_events);
         if (!mapped_event.has_triggered())
           mapped_event.wait();
       }
@@ -9161,7 +9161,7 @@ namespace Legion {
           add_to_dependence_queue(proc, op);
         }
         // Wait for all the re-mapping operations to complete
-        Event mapped_event = Event::merge_events(mapped_events);
+        Event mapped_event = Runtime::merge_events<false>(mapped_events);
         if (!mapped_event.has_triggered())
           mapped_event.wait();
       }
@@ -9234,7 +9234,7 @@ namespace Legion {
           add_to_dependence_queue(proc, op);
         }
         // Wait for all the re-mapping operations to complete
-        Event mapped_event = Event::merge_events(mapped_events);
+        Event mapped_event = Runtime::merge_events<false>(mapped_events);
         if (!mapped_event.has_triggered())
           mapped_event.wait();
       }
@@ -9541,7 +9541,7 @@ namespace Legion {
           add_to_dependence_queue(proc, op);
         }
         // Wait for all the re-mapping operations to complete
-        Event mapped_event = Event::merge_events(mapped_events);
+        Event mapped_event = Runtime::merge_events<false>(mapped_events);
         if (!mapped_event.has_triggered())
           mapped_event.wait();
       }
@@ -10015,7 +10015,7 @@ namespace Legion {
           add_to_dependence_queue(proc, op);
         }
         // Wait for all the re-mapping operations to complete
-        Event mapped_event = Event::merge_events(mapped_events);
+        Event mapped_event = Runtime::merge_events<false>(mapped_events);
         if (!mapped_event.has_triggered())
           mapped_event.wait();
       }
@@ -10081,7 +10081,7 @@ namespace Legion {
           add_to_dependence_queue(proc, op);
         }
         // Wait for all the re-mapping operations to complete
-        Event mapped_event = Event::merge_events(mapped_events);
+        Event mapped_event = Runtime::merge_events<false>(mapped_events);
         if (!mapped_event.has_triggered())
           mapped_event.wait();
       }
@@ -10304,7 +10304,7 @@ namespace Legion {
           add_to_dependence_queue(proc, op);
         }
         // Wait for all the re-mapping operations to complete
-        Event mapped_event = Event::merge_events(mapped_events);
+        Event mapped_event = Runtime::merge_events<false>(mapped_events);
         if (!mapped_event.has_triggered())
           mapped_event.wait();
       }
@@ -12995,7 +12995,7 @@ namespace Legion {
             add_to_dependence_queue(proc, op);
           }
           // Wait for all the re-mapping operations to complete
-          Event mapped_event = Event::merge_events(mapped_events);
+          Event mapped_event = Runtime::merge_events<false>(mapped_events);
           if (!mapped_event.has_triggered())
             mapped_event.wait();
         }
@@ -13596,7 +13596,8 @@ namespace Legion {
         }
       }
       // Then tell Realm to shutdown when they are all done
-      Event shutdown_precondition = Event::merge_events(shutdown_events);
+      Event shutdown_precondition = 
+        Runtime::merge_events<true>(shutdown_events);
       RealmRuntime realm = RealmRuntime::get_runtime();
       realm.shutdown(shutdown_precondition);
     }
@@ -16342,7 +16343,7 @@ namespace Legion {
         log_run.print("Legion launch top-level task has Realm ID %d",
                       HLR_LAUNCH_TOP_LEVEL_ID);
       }
-      return Event::merge_events(registered_events);
+      return Runtime::merge_events<true>(registered_events);
     }
 
     //--------------------------------------------------------------------------

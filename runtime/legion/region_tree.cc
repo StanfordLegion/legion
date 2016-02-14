@@ -369,7 +369,7 @@ namespace Legion {
                                         Realm::IndexSpace::ISO_INTERSECT);
         ready_events.insert(ready);
       }
-      return Event::merge_events(ready_events);
+      return Runtime::merge_events<false>(ready_events);
     }
 
     //--------------------------------------------------------------------------
@@ -615,7 +615,7 @@ namespace Legion {
         subspaces[itr.p] = Realm::IndexSpace::NO_SPACE;
       }
       // Merge preconditions for all the field data descriptors
-      Event precondition = Event::merge_events(preconditions);
+      Event precondition = Runtime::merge_events<false>(preconditions);
       // Ask the parent node to make all the subspaces
       Event result = parent_node->create_subspaces_by_field(field_data,
                 subspaces, ((pending_node->mode & MUTABLE) != 0), precondition);
@@ -679,7 +679,7 @@ namespace Legion {
         subspaces[child_dom.get_index_space()] = Realm::IndexSpace::NO_SPACE;
       }
       // Merge the preconditions for all the field descriptors
-      Event precondition = Event::merge_events(preconditions);
+      Event precondition = Runtime::merge_events<false>(preconditions);
       // Ask the parent node to make all the subspaces
       Event result = parent_node->create_subspaces_by_image(field_data,
                 subspaces, ((pending_node->mode & MUTABLE) != 0), precondition);
@@ -745,7 +745,7 @@ namespace Legion {
         subspaces[child_dom.get_index_space()] = Realm::IndexSpace::NO_SPACE;
       }
       // Merge the preconditions for all the field descriptors
-      Event precondition = Event::merge_events(preconditions);
+      Event precondition = Runtime::merge_events<false>(preconditions);
       // Ask the parent node to make all the subspaces
       Event result = parent_node->create_subspaces_by_preimage(field_data,
                 subspaces, ((pending_node->mode & MUTABLE) != 0), precondition);
@@ -823,7 +823,7 @@ namespace Legion {
       if (parent_precondition.exists())
         preconditions.insert(parent_precondition);
       // Now we can compute the low-level index space
-      Event precondition = Event::merge_events(preconditions);
+      Event precondition = Runtime::merge_events<false>(preconditions);
       Realm::IndexSpace result;
       Event ready = Realm::IndexSpace::reduce_index_spaces(
           is_union ? Realm::IndexSpace::ISO_UNION : 
@@ -868,7 +868,7 @@ namespace Legion {
       if (parent_precondition.exists())
         preconditions.insert(parent_precondition);
       // Now we can compute the low-level index space
-      Event precondition = Event::merge_events(preconditions);
+      Event precondition = Runtime::merge_events<false>(preconditions);
       Realm::IndexSpace result;
       Event ready = Realm::IndexSpace::reduce_index_spaces(
           is_union ? Realm::IndexSpace::ISO_UNION : 
@@ -916,7 +916,7 @@ namespace Legion {
       if (parent_precondition.exists())
         preconditions.insert(parent_precondition);
       // Now we can compute the low-level index space
-      Event precondition = Event::merge_events(preconditions);
+      Event precondition = Runtime::merge_events<false>(preconditions);
       Realm::IndexSpace result;
       Event ready = Realm::IndexSpace::reduce_index_spaces(
                              Realm::IndexSpace::ISO_SUBTRACT, spaces, result,
@@ -2366,7 +2366,7 @@ namespace Legion {
       std::vector<Domain::CopySrcDstField> src_fields;
       std::vector<Domain::CopySrcDstField> dst_fields;
       Event dst_pre = dst_ref.get_ready_event(); 
-      Event precondition = Event::merge_events(pre, dst_pre);
+      Event precondition = Runtime::merge_events<false>(pre, dst_pre);
       // Also compute all of the source preconditions for each instance
       std::map<MaterializedView*,
         LegionMap<Event,FieldMask>::aligned > src_preconditions;
@@ -2410,7 +2410,7 @@ namespace Legion {
             }
             // Now we've got all the preconditions so we can actually
             // issue the copy operation
-            Event copy_pre = Event::merge_events(preconditions);
+            Event copy_pre = Runtime::merge_events<false>(preconditions);
             Event copy_post = dst_node->perform_copy_operation(op,
                                   copy_pre, src_fields, dst_fields);
 #ifdef LEGION_SPY
@@ -2474,22 +2474,13 @@ namespace Legion {
         // Now register a result user if necessary
         if (!local_results.empty())
         {
-          Event result = Event::merge_events(local_results);
+          Event result = Runtime::merge_events<false>(local_results);
           if (result.exists())
             // Add the event to the result events
             result_events.insert(result);
         }
       }
-      Event result = Event::merge_events(result_events);
-#ifdef LEGION_SPY
-      if (!result.exists())
-      {
-        UserEvent new_result = UserEvent::create_user_event();
-        new_result.trigger();
-        result = new_result;
-        LegionSpy::log_event_dependences(result_events, result);
-      }
-#endif
+      Event result = Runtime::merge_events<false>(result_events);
 #ifdef DEBUG_PERF
       end_perf_trace(Runtime::perf_trace_tolerance);
 #endif
@@ -2535,9 +2526,9 @@ namespace Legion {
       else
         dst_domains.insert(dst_node->get_domain(dom_precondition));
 
-      Event copy_pre = Event::merge_events(src_ref.get_ready_event(),
-                                           dst_ref.get_ready_event(),
-                                           precondition, dom_precondition);
+      Event copy_pre = Runtime::merge_events<false>(src_ref.get_ready_event(),
+                                                    dst_ref.get_ready_event(),
+                                              precondition, dom_precondition);
       std::set<Event> result_events;
       for (std::set<Domain>::const_iterator it = dst_domains.begin();
             it != dst_domains.end(); it++)
@@ -2571,16 +2562,7 @@ namespace Legion {
             dst_view->get_manager()->get_instance().id);
 #endif
       }
-      Event result = Event::merge_events(result_events);
-#ifdef LEGION_SPY
-      if (!result.exists())
-      {
-        UserEvent new_result = UserEvent::create_user_event();
-        new_result.trigger();
-        result = new_result;
-        LegionSpy::log_event_dependences(result_events, result);
-      }
-#endif
+      Event result = Runtime::merge_events<false>(result_events);
       // Note we don't need to add the copy users because
       // we already mapped these regions as part of the CopyOp.
 #ifdef DEBUG_PERF
@@ -2661,9 +2643,9 @@ namespace Legion {
       else
         dst_domains.insert(dst_node->get_domain(dom_precondition));
 
-      Event copy_pre = Event::merge_events(src_ref.get_ready_event(),
-                                           dst_ref.get_ready_event(),
-                                           precondition, dom_precondition);
+      Event copy_pre = Runtime::merge_events<false>(src_ref.get_ready_event(),
+                                                    dst_ref.get_ready_event(),
+                                              precondition, dom_precondition);
       std::set<Event> result_events;
       for (std::set<Domain>::const_iterator it = dst_domains.begin();
             it != dst_domains.end(); it++)
@@ -2697,16 +2679,7 @@ namespace Legion {
             dst_inst->get_manager()->get_instance().id);
 #endif
       }
-      Event result = Event::merge_events(result_events);
-#ifdef LEGION_SPY
-      if (!result.exists())
-      {
-        UserEvent new_result = UserEvent::create_user_event();
-        new_result.trigger();
-        result = new_result;
-        LegionSpy::log_event_dependences(result_events, result);
-      }
-#endif
+      Event result = Runtime::merge_events<false>(result_events);
       return result;
     }
 #endif
@@ -5840,7 +5813,7 @@ namespace Legion {
           args.left = left;
           args.right = right;
           // Get the preconditions for domains 
-          Event pre = Event::merge_events(preconditions);
+          Event pre = Runtime::merge_events<true>(preconditions);
           ready = context->runtime->issue_runtime_meta_task(&args, sizeof(args),
                                       HLR_PART_INDEPENDENCE_TASK_ID, NULL, pre);
           pending_tests[key] = ready;
@@ -6311,8 +6284,8 @@ namespace Legion {
       const Domain &dom = get_domain(dom_precondition);
       return dom.get_index_space().create_subspaces_by_field(field_data,
                                      subspaces, mutable_results, 
-                                     Event::merge_events(precondition,
-                                                     dom_precondition));
+                                     Runtime::merge_events<false>(precondition,
+                                                             dom_precondition));
     }
 
     //--------------------------------------------------------------------------
@@ -6326,8 +6299,8 @@ namespace Legion {
       const Domain &dom = get_domain(dom_precondition);
       return dom.get_index_space().create_subspaces_by_image(field_data,
                                      subspaces, mutable_results, 
-                                     Event::merge_events(precondition,
-                                                     dom_precondition));
+                                     Runtime::merge_events<false>(precondition,
+                                                            dom_precondition));
     }
 
     //--------------------------------------------------------------------------
@@ -6341,8 +6314,8 @@ namespace Legion {
       const Domain &dom = get_domain(dom_precondition);
       return dom.get_index_space().create_subspaces_by_preimage(field_data,
                                      subspaces, mutable_results, 
-                                     Event::merge_events(precondition,
-                                                     dom_precondition));
+                                     Runtime::merge_events<false>(precondition,
+                                                             dom_precondition));
     }
 
     //--------------------------------------------------------------------------
@@ -7074,7 +7047,7 @@ namespace Legion {
           args.parent = this;
           args.left = left;
           args.right = right;
-          Event pre = Event::merge_events(left_pre, right_pre);
+          Event pre = Runtime::merge_events<true>(left_pre, right_pre);
           ready_event = context->runtime->issue_runtime_meta_task(&args, 
                     sizeof(args), HLR_SPACE_INDEPENDENCE_TASK_ID, NULL, pre);
           pending_tests[key] = ready_event;
@@ -7414,7 +7387,7 @@ namespace Legion {
           operations[idx].right_operand = right_dom.get_index_space();
         }
         // Merge all the preconditions and issue to the low-level runtime
-        Event precondition = Event::merge_events(preconditions);
+        Event precondition = Runtime::merge_events<false>(preconditions);
         Event result = Realm::IndexSpace::compute_index_spaces(operations,
                                                             (mode & ALLOCABLE),
                                                             precondition);
@@ -7477,7 +7450,7 @@ namespace Legion {
           operations[idx].right_operand = child_dom.get_index_space();
         }
         // Merge all the preconditions and issue to the low-level runimte
-        Event precondition = Event::merge_events(preconditions);
+        Event precondition = Runtime::merge_events<false>(preconditions);
         Event result = Realm::IndexSpace::compute_index_spaces(operations,
                                                             (mode & ALLOCABLE),
                                                             precondition);
@@ -9499,7 +9472,7 @@ namespace Legion {
           std::set<Event> preconditions;
           UpgradeFunctor functor(to_send, preconditions);
           creation_set.map(functor);
-          distributed_allocation = Event::merge_events(preconditions);
+          distributed_allocation = Runtime::merge_events<true>(preconditions);
         }
       }
       // Send the messages
@@ -13181,16 +13154,7 @@ namespace Legion {
           pre_set.preconditions.insert(copy_domains_precondition);
         // Now that we've got our offsets ready, we
         // can now issue the copy to the low-level runtime
-        Event copy_pre = Event::merge_events(pre_set.preconditions);
-#ifdef LEGION_SPY
-        if (!copy_pre.exists())
-        {
-          UserEvent new_copy_pre = UserEvent::create_user_event();
-          new_copy_pre.trigger();
-          copy_pre = new_copy_pre;
-        }
-        LegionSpy::log_event_dependences(pre_set.preconditions, copy_pre);
-#endif
+        Event copy_pre = Runtime::merge_events<false>(pre_set.preconditions);
         std::set<Event> post_events;
         for (std::set<Domain>::const_iterator it = copy_domains.begin();
               it != copy_domains.end(); it++)
@@ -13198,15 +13162,7 @@ namespace Legion {
           post_events.insert(context->issue_copy(*it, info.op, src_fields,
                                                  dst_fields, copy_pre));
         }
-        Event copy_post = Event::merge_events(post_events);
-#ifdef LEGION_SPY
-        if (!copy_post.exists())
-        {
-          UserEvent new_copy_post = UserEvent::create_user_event();
-          new_copy_post.trigger();
-          copy_post = new_copy_post;
-        }
-#endif
+        Event copy_post = Runtime::merge_events<false>(post_events);
         // Save the copy post in the post conditions
         if (copy_post.exists())
         {
@@ -13345,20 +13301,20 @@ namespace Legion {
         const std::set<Domain> &component_domains = 
                                   get_component_domains(domain_pre);
         if (domain_pre.exists())
-          precondition = Event::merge_events(precondition, domain_pre);
+          precondition = Runtime::merge_events<false>(precondition, domain_pre);
         std::set<Event> result_events;
         for (std::set<Domain>::const_iterator it = component_domains.begin();
               it != component_domains.end(); it++)
           result_events.insert(context->issue_copy(*it, op, src_fields, 
                                                    dst_fields, precondition));
-        return Event::merge_events(result_events);
+        return Runtime::merge_events<false>(result_events);
       }
       else
       {
         Event domain_pre;
         Domain copy_domain = get_domain(domain_pre);
         if (domain_pre.exists())
-          precondition = Event::merge_events(precondition, domain_pre);
+          precondition = Runtime::merge_events<false>(precondition, domain_pre);
         return context->issue_copy(copy_domain, op, src_fields, 
                                    dst_fields, precondition);
       }
@@ -15005,12 +14961,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    InstanceRef RegionNode::register_region(const TraversalInfo &info,
-                                            Event term_event,
-                                            const RegionUsage &usage,
-                                            const FieldMask &user_mask,
-                                            LogicalView *view,
-                                            const FieldMask &needed_fields)
+    void RegionNode::register_region(const TraversalInfo &info,
+                                     Event term_event,
+                                     const RegionUsage &usage,
+                                     const FieldMask &user_mask,
+                                     InstanceSet &targets)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_PERF
@@ -15136,55 +15091,67 @@ namespace Legion {
     //--------------------------------------------------------------------------
     Event RegionNode::close_state(const TraversalInfo &info, 
                                   Event term_event, RegionUsage &usage, 
-                                  const FieldMask &user_mask,
-                                  const InstanceRef &target)
+                                  const InstanceSet &targets)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_PERF
       PerfTracer tracer(context, CLOSE_PHYSICAL_STATE_CALL);
 #endif
-      InstanceView *inst_view = target.get_instance_view();
-      if (inst_view->is_reduction_view())
+      std::set<Event> ready_events;
+      for (unsigned idx = 0; idx < targets.size(); idx++)
       {
-        ReductionView *target_view = inst_view->as_reduction_view();
-        // Flush any reductions from this level, and then flush any
-        // from farther down in the tree
-        PhysicalState *state = get_physical_state(info.ctx, info.version_info);
-        ReductionCloser closer(info.ctx, target_view, user_mask, 
-                               info.version_info, info.op);
-        closer.issue_close_reductions(this, state);
-        siphon_physical_children(closer, state);
-        // Important trick: switch the user to read-only so it picks
-        // up dependences on all the reductions applied ot this instance
-        usage.privilege = READ_ONLY;
-        InstanceRef result = target_view->add_user(usage, term_event,
+        const InstanceRef &ref = targets[idx];
+        LogicalView *view = convert_reference(ref, info.ctx);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(view->is_instance_view());
+#endif
+        InstanceView *inst_view = view->as_instance_view();
+        const FieldMask &user_mask = ref.get_valid_fields();
+        if (inst_view->is_reduction_view())
+        {
+          ReductionView *target_view = inst_view->as_reduction_view();
+          // Flush any reductions from this level, and then flush any
+          // from farther down in the tree
+          PhysicalState *state = get_physical_state(info.ctx,info.version_info);
+          ReductionCloser closer(info.ctx, target_view, user_mask, 
+                                 info.version_info, info.op);
+          closer.issue_close_reductions(this, state);
+          siphon_physical_children(closer, state);
+          // Important trick: switch the user to read-only so it picks
+          // up dependences on all the reductions applied ot this instance
+          usage.privilege = READ_ONLY;
+          InstanceRef result = target_view->add_user(usage, term_event,
                                                   user_mask, info.version_info);
 #ifdef DEBUG_HIGH_LEVEL
-        assert(result.has_ref());
+          assert(result.has_ref());
 #endif
-        return result.get_ready_event();
-      }
-      else
-      {
-        MaterializedView *target_view = inst_view->as_materialized_view();
-        PhysicalState *state = get_physical_state(info.ctx, info.version_info);
-        // Figure out what fields we need to update
-        FieldMask update_mask = user_mask;
-        LegionMap<LogicalView*,FieldMask>::aligned::const_iterator finder = 
-          state->valid_views.find(target_view);
-        if (finder != state->valid_views.end())
-          update_mask -= finder->second;
-        // All we should actually have to do here is just register
-        // our region because any actualy close operations that would
-        // need to be done would have been issued as part of the 
-        // logical analysis.
-        InstanceRef result = register_region(info, term_event, usage, user_mask,
-                                             target_view, update_mask);
+          ready_events.insert(result.get_ready_event());
+        }
+        else
+        {
+          MaterializedView *target_view = inst_view->as_materialized_view();
+          PhysicalState *state = get_physical_state(info.ctx,info.version_info);
+          // Figure out what fields we need to update
+          FieldMask update_mask = user_mask;
+          LegionMap<LogicalView*,FieldMask>::aligned::const_iterator finder = 
+            state->valid_views.find(target_view);
+          if (finder != state->valid_views.end())
+            update_mask -= finder->second;
+          // All we should actually have to do here is just register
+          // our region because any actualy close operations that would
+          // need to be done would have been issued as part of the 
+          // logical analysis.
+          InstanceRef result = register_region(info, term_event, usage, 
+                                          user_mask, target_view, update_mask);
 #ifdef DEBUG_HIGH_LEVEL
-        assert(result.has_ref());
+          assert(result.has_ref());
 #endif
-        return result.get_ready_event(); 
+          ready_events.insert(result.get_ready_event());
+        }
       }
+      if (ready_events.size() == 1)
+        return *(ready_events.begin());
+      return Runtime::merge_events<false>(ready_events);
     }
 
     //--------------------------------------------------------------------------
@@ -15309,7 +15276,7 @@ namespace Legion {
       // we are now making this the only valid copy of the data
       update_valid_views(state, attach_mask, true/*dirty*/, view);
       // Return the resulting instance
-      return InstanceRef(ready_event, view);
+      return InstanceRef(manager, attach_mask, ready_event);
     }
 
     //--------------------------------------------------------------------------
@@ -15318,7 +15285,13 @@ namespace Legion {
                                   const InstanceRef &ref)
     //--------------------------------------------------------------------------
     {
-      MaterializedView *detach_view = ref.get_materialized_view();
+      LogicalView *view = convert_reference(ref, ctx);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(view->is_instance_view());
+      assert(view->as_instance_view()->is_materialized_view());
+#endif
+      MaterializedView *detach_view = 
+        view->as_instance_view()->as_materialized_view();;
       // First remove this view from the set of valid views
       PhysicalState *state = get_physical_state(ctx, version_info);
       filter_valid_views(state, detach_view);
@@ -16336,7 +16309,7 @@ namespace Legion {
           closed_event_set.insert(closer.get_termination_event());
         }
         // Finally merge our closed events
-        return Runtime::merge_events(closed_event_set);
+        return Runtime::merge_events<false>(closed_event_set);
       }
       else
       {

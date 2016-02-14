@@ -2455,7 +2455,7 @@ namespace Legion {
       }
       if (!wait_events.empty())
       {
-        Event wait_on = Event::merge_events(wait_events);
+        Event wait_on = Runtime::merge_events<true>(wait_events);
         if (!wait_on.has_triggered())
           wait_on.wait();
       }
@@ -4967,10 +4967,7 @@ namespace Legion {
             // actually ready to be used
             std::set<Event> ready_events;
             physical_instances[idx].update_wait_on_events(ready_events);
-            Event precondition = Runtime::merge_events(ready_events);
-#ifdef LEGION_SPY
-            LegionSpy::log_event_dependence(precondition, unmap_events[idx]);
-#endif
+            Event precondition = Runtime::merge_events<false>(ready_events);
             unmap_events[idx].trigger(precondition);
           }
           else
@@ -5073,7 +5070,7 @@ namespace Legion {
         }
       }
       // Merge together all the events for the start condition 
-      Event start_condition = Runtime::merge_events(wait_on_events);
+      Event start_condition = Runtime::merge_events<false>(wait_on_events);
       // Take all the locks in order in the proper way
       if (!atomic_locks.empty())
       {
@@ -5113,7 +5110,7 @@ namespace Legion {
           if (!virtual_mapped[idx])
             unmap_set.insert(unmap_events[idx]);
         }
-        Event all_unmap_event = Runtime::merge_events(unmap_set);
+        Event all_unmap_event = Runtime::merge_events<false>(unmap_set);
         // Log an implicit dependence on the parent's start event
         LegionSpy::log_implicit_dependence(parent_ctx->get_start_event(),
                                            start_condition);
@@ -5408,7 +5405,7 @@ namespace Legion {
           }
         }
         if (!preconditions.empty())
-          handle_post_mapped(Event::merge_events(preconditions));
+          handle_post_mapped(Runtime::merge_events<true>(preconditions));
         else
           handle_post_mapped();
       }
@@ -5443,7 +5440,7 @@ namespace Legion {
       if (!pending_done.has_triggered() || !profiling_done.has_triggered())
       {
         Event exec_precondition = 
-          Event::merge_events(pending_done, profiling_done);
+          Runtime::merge_events<true>(pending_done, profiling_done);
         complete_execution(exec_precondition);
       }
       else
@@ -6434,7 +6431,7 @@ namespace Legion {
       if (preconditions.empty())
         ready_event.trigger();
       else
-        ready_event.trigger(Event::merge_events(preconditions));
+        ready_event.trigger(Runtime::merge_events<true>(preconditions));
     }
 
     //--------------------------------------------------------------------------
@@ -6582,7 +6579,8 @@ namespace Legion {
           Event applied_condition = Event::NO_EVENT;
           if (!map_applied_conditions.empty())
           {
-            applied_condition = Event::merge_events(map_applied_conditions);
+            applied_condition = 
+              Runtime::merge_events<true>(map_applied_conditions);
             map_applied_conditions.clear();
           }
           if (is_remote())
@@ -6897,7 +6895,7 @@ namespace Legion {
         if (!map_applied_conditions.empty())
         {
           map_applied_conditions.insert(mapped_precondition);
-          complete_mapping(Event::merge_events(map_applied_conditions));
+          complete_mapping(Runtime::merge_events<true>(map_applied_conditions));
         }
         else 
           complete_mapping(mapped_precondition);
@@ -6905,7 +6903,7 @@ namespace Legion {
       }
       Event applied_condition = Event::NO_EVENT;
       if (!map_applied_conditions.empty())
-        applied_condition = Event::merge_events(map_applied_conditions);
+        applied_condition = Runtime::merge_events<true>(map_applied_conditions);
       // Send back the message saying that we finished mapping
       Serializer rez;
       // Only need to send back the pointer to the task instance
@@ -7033,7 +7031,7 @@ namespace Legion {
         wait_on_events.insert(e);
       }
       // Merge together all the events for the start condition 
-      Event start_condition = Event::merge_events(wait_on_events); 
+      Event start_condition = Runtime::merge_events<true>(wait_on_events); 
 
       // See if we need to wait for anything
       if (start_condition.exists() && !start_condition.has_triggered())
@@ -7075,7 +7073,7 @@ namespace Legion {
       if (applied.exists())
         map_applied_conditions.insert(applied);
       if (!map_applied_conditions.empty())
-        complete_mapping(Event::merge_events(map_applied_conditions));
+        complete_mapping(Runtime::merge_events<true>(map_applied_conditions));
       else
         complete_mapping();
     } 
@@ -8713,7 +8711,7 @@ namespace Legion {
       if (preconditions.empty())
         ready_event.trigger();
       else
-        ready_event.trigger(Event::merge_events(preconditions));
+        ready_event.trigger(Runtime::merge_events<true>(preconditions));
     }
 
     //--------------------------------------------------------------------------
@@ -9170,7 +9168,7 @@ namespace Legion {
         wait_on_events.insert(e);
       }
       // Merge together all the events for the start condition 
-      Event start_condition = Event::merge_events(wait_on_events); 
+      Event start_condition = Runtime::merge_events<true>(wait_on_events); 
 
       // See if we need to wait for anything
       if (start_condition.exists() && !start_condition.has_triggered())
@@ -9470,7 +9468,8 @@ namespace Legion {
         // all the responses so no one else will be mutating it.
         if (!map_applied_conditions.empty())
         {
-          Event map_condition = Event::merge_events(map_applied_conditions);
+          Event map_condition = 
+            Runtime::merge_events<true>(map_applied_conditions);
           complete_mapping(map_condition);
         }
         else
@@ -9755,7 +9754,7 @@ namespace Legion {
       if (preconditions.empty())
         ready_event.trigger();
       else
-        ready_event.trigger(Event::merge_events(preconditions));
+        ready_event.trigger(Runtime::merge_events<true>(preconditions));
     }
 
     //--------------------------------------------------------------------------
@@ -10353,7 +10352,7 @@ namespace Legion {
                                            owner_space, applied_conditions);
         }
         if (!applied_conditions.empty())
-          applied_condition = Event::merge_events(applied_conditions);
+          applied_condition = Runtime::merge_events<true>(applied_conditions);
       }
       if (is_remote())
       {
@@ -10598,7 +10597,7 @@ namespace Legion {
       // perform other operations
       if (!wait_events.empty())
       {
-        Event sliced_event = Event::merge_events(wait_events);
+        Event sliced_event = Runtime::merge_events<true>(wait_events);
         sliced_event.wait();
       }
 

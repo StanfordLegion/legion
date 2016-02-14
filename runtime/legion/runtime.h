@@ -2398,6 +2398,11 @@ namespace Legion {
     public:
       static unsigned num_profiling_nodes;
     public:
+      template<bool META>
+      static inline Event merge_events(Event e1, Event e2);
+      template<bool META>
+      static inline Event merge_events(Event e1, Event e2, Event e3);
+      template<bool META>
       static inline Event merge_events(const std::set<Event> &events);
     };
 
@@ -2519,18 +2524,67 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    template<bool META>
+    /*static*/ inline Event Runtime::merge_events(Event e1, Event e2)
+    //--------------------------------------------------------------------------
+    {
+      Event result = Event::merge_events(e1, e2);
+#ifdef LEGION_SPY
+      if (!META)
+      {
+        if (!result.exists())
+        {
+          UserEvent rename = UserEvent::create_user_event();
+          rename.trigger();
+          result = rename;
+        }
+        LegionSpy::log_event_dependence(e1, result);
+        LegionSpy::log_event_dependence(e2, result);
+      }
+#endif
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    template<bool META>
+    /*static*/ inline Event Runtime::merge_events(Event e1, Event e2, Event e3)
+    //--------------------------------------------------------------------------
+    {
+      Event result = Event::merge_events(e1, e2, e3);
+#ifdef LEGION_SPY
+      if (!META)
+      {
+        if (!result.exists())
+        {
+          UserEvent rename = UserEvent::create_user_event();
+          rename.trigger();
+          result = rename;
+        }
+        LegionSpy::log_event_dependence(e1, result);
+        LegionSpy::log_event_dependence(e2, result);
+        LegionSpy::log_event_dependence(e3, result);
+      }
+#endif
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    template<bool META>
     /*static*/ inline Event Runtime::merge_events(const std::set<Event> &events)
     //--------------------------------------------------------------------------
     {
       Event result = Event::merge_events(events);
 #ifdef LEGION_SPY
-      if (!result.exists())
+      if (!META)
       {
-        UserEvent rename = UserEvent::create_user_event();
-        rename.trigger();
-        result = rename;
+        if (!result.exists())
+        {
+          UserEvent rename = UserEvent::create_user_event();
+          rename.trigger();
+          result = rename;
+        }
+        LegionSpy::log_event_dependences(events, result);
       }
-      LegionSpy::log_event_dependences(events, result);
 #endif
       return result;
     }

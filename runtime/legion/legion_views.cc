@@ -525,7 +525,7 @@ namespace Legion {
                                      upper_bound_node->as_region_node()->handle,
                                      did, parent_idx, done_events);
           map_over_remote_instances(functor);
-          to_trigger.trigger(Event::merge_events(done_events));
+          to_trigger.trigger(Runtime::merge_events<true>(done_events));
         }
         else if (source != owner_space)
         {
@@ -603,7 +603,7 @@ namespace Legion {
                                      LogicalRegion::NO_REGION,
                                      did, parent_idx, done_events);
           map_over_remote_instances(functor);
-          to_trigger.trigger(Event::merge_events(done_events));
+          to_trigger.trigger(Runtime::merge_events<true>(done_events));
         }
         else if (source != owner_space)
         {
@@ -786,16 +786,7 @@ namespace Legion {
         assert(wait_on_events.find(term_event) == wait_on_events.end());
 #endif
       // Make the instance ref
-      Event ready_event = Event::merge_events(wait_on_events);
-#ifdef LEGION_SPY
-      if (!ready_event.exists())
-      {
-        UserEvent new_ready_event = UserEvent::create_user_event();
-        new_ready_event.trigger();
-        ready_event = new_ready_event;
-      }
-      LegionSpy::log_event_dependences(wait_on_events, ready_event);
-#endif
+      Event ready_event = Runtime::merge_events<false>(wait_on_events);
       return InstanceRef(manager, user_mask, ready_event);
     }
 
@@ -2995,7 +2986,7 @@ namespace Legion {
           }
         }
         // Merge the post-conditions together and add them to results
-        Event result = Event::merge_events(postconditions);
+        Event result = Runtime::merge_events<false>(postconditions);
         if (result.exists())
           conditions[result] = epoch.valid_fields;
       }
@@ -3050,7 +3041,7 @@ namespace Legion {
             }
           }
           // Merge the postconditions
-          Event result = Event::merge_events(postconditions);
+          Event result = Runtime::merge_events<false>(postconditions);
           if (result.exists())
           {
             conditions.insert(result);
@@ -3974,7 +3965,8 @@ namespace Legion {
         if (post_set.preconditions.empty())
           continue;
         // Compute the merge event
-        Event postcondition = Event::merge_events(post_set.preconditions);
+        Event postcondition = 
+          Runtime::merge_events<false>(post_set.preconditions);
         if (postcondition.exists())
         {
           dst->add_copy_user(0/*redop*/, postcondition, info.version_info,
@@ -4052,7 +4044,8 @@ namespace Legion {
       if (!reduction_epochs.empty() && reduction_mask.is_set(src_index))
       {
         // Merge our local postconditions to generate a new precondition
-        Event local_postcondition = Event::merge_events(local_postconditions);
+        Event local_postcondition = 
+          Runtime::merge_events<false>(local_postconditions);
         flush_reductions_across(info, dst, src_field, dst_field,
                                 local_postcondition, postconditions);
       }
@@ -4600,7 +4593,7 @@ namespace Legion {
             {
               preconditions.insert(it->first);
             }
-            Event copy_pre = Event::merge_events(preconditions);
+            Event copy_pre = Runtime::merge_events<false>(preconditions);
             std::set<Event> result_events;
             std::vector<Domain::CopySrcDstField> src_fields, dst_fields;
             src->copy_field(src_field, src_fields);
@@ -4613,7 +4606,7 @@ namespace Legion {
               result_events.insert(context->issue_copy(*it, info.op, src_fields,
                                                        dst_fields, copy_pre));
             }
-            Event copy_post = Event::merge_events(result_events);
+            Event copy_post = Runtime::merge_events<false>(result_events);
             if (copy_post.exists())
             {
               // Only need to record the source user as the destination
@@ -4639,7 +4632,7 @@ namespace Legion {
 #endif
             DeferredView *src = (deferred_instances.begin())->first; 
             std::set<Event> postconds;
-            Event pre = Event::merge_events(preconditions);
+            Event pre = Runtime::merge_events<false>(preconditions);
             src->issue_deferred_copies_across(info, dst, src_field,
                                               dst_field, pre, postconds);
             if (!postconds.empty())
@@ -4794,7 +4787,7 @@ namespace Legion {
             ops[0].parent = local_domain.get_index_space();
             ops[0].left_operand = target;
             ops[0].right_operand = child_domain.get_index_space();
-            Event pre = Event::merge_events(target_precondition, 
+            Event pre = Runtime::merge_events<true>(target_precondition, 
                                       child_precondition, domain_precondition);
             Event child_ready = Realm::IndexSpace::compute_index_spaces(ops,
                                                         false/*mutable*/, pre);
@@ -4848,7 +4841,7 @@ namespace Legion {
         if (parent_precondition.exists())
           handled_preconditions.insert(parent_precondition);
         // Compute the union of all our handled index spaces
-        Event handled_pre = Event::merge_events(handled_preconditions);
+        Event handled_pre = Runtime::merge_events<true>(handled_preconditions);
         local_precondition = Realm::IndexSpace::reduce_index_spaces( 
                               Realm::IndexSpace::ISO_UNION,
                               handled_index_spaces, local_handled,
@@ -4868,7 +4861,7 @@ namespace Legion {
         ops[0].parent = local_domain.get_index_space();
         ops[0].left_operand = target;
         ops[0].right_operand = local_handled;
-        Event pre = Event::merge_events(target_precondition,
+        Event pre = Runtime::merge_events<true>(target_precondition,
                                         local_precondition,domain_precondition);
         remaining_precondition = Realm::IndexSpace::compute_index_spaces(ops,
                                                         false/*mutable*/, pre);
@@ -4901,8 +4894,8 @@ namespace Legion {
             // Register ourselves as a user of this instance
             InstanceRef ref = view->add_user(usage, term_event, user_mask,
                                         version_info->get_version_info());
-            Event ready_event = Event::merge_events(ref.get_ready_event(),
-                                                    remaining_precondition);
+            Event ready_event = Runtime::merge_events<true>(
+                            ref.get_ready_event(), remaining_precondition);
             if (ready_event.exists())
               preconditions.insert(ready_event);
             // Record that we handled the remaining space
@@ -5420,7 +5413,7 @@ namespace Legion {
         // Build the src and dst fields vectors
         std::vector<Domain::CopySrcDstField> dst_fields;
         dst->copy_to(pre_set.set_mask, dst_fields);
-        Event fill_pre = Event::merge_events(pre_set.preconditions);
+        Event fill_pre = Runtime::merge_events<false>(pre_set.preconditions);
 #ifdef LEGION_SPY
         if (!fill_pre.exists())
         {
@@ -5439,7 +5432,7 @@ namespace Legion {
           const std::set<Domain> &fill_domains = 
             dst->logical_node->get_component_domains(dom_pre);
           if (dom_pre.exists())
-            fill_pre = Event::merge_events(fill_pre, dom_pre);
+            fill_pre = Runtime::merge_events<false>(fill_pre, dom_pre);
           UniqueID op_id = (info.op == NULL) ? 0 : info.op->get_unique_op_id();
           for (std::set<Domain>::const_iterator it = fill_domains.begin();
                 it != fill_domains.end(); it++)
@@ -5448,14 +5441,14 @@ namespace Legion {
                                                    dst_fields, value->value,
                                                    value->value_size,fill_pre));
           }
-          fill_post = Event::merge_events(post_events);
+          fill_post = Runtime::merge_events<false>(post_events);
         }
         else
         {
           Event dom_pre;
           const Domain &dom = dst->logical_node->get_domain(dom_pre);
           if (dom_pre.exists())
-            fill_pre = Event::merge_events(fill_pre, dom_pre);
+            fill_pre = Runtime::merge_events<false>(fill_pre, dom_pre);
           UniqueID op_id = (info.op == NULL) ? 0 : info.op->get_unique_op_id();
           fill_post = context->issue_fill(dom, op_id, dst_fields,
                                           value->value, value->value_size, 
@@ -5488,7 +5481,7 @@ namespace Legion {
                postcondition_sets.begin(); it !=
                postcondition_sets.end(); it++)
           {
-            Event reduce_post = Event::merge_events(it->preconditions);
+            Event reduce_post = Runtime::merge_events<false>(it->preconditions);
             if (reduce_post.exists())
             {
               if (tracker != NULL)
@@ -5531,7 +5524,7 @@ namespace Legion {
         // Build the src and dst fields vectors
         std::vector<Domain::CopySrcDstField> dst_fields;
         dst->copy_to(pre_set.set_mask, dst_fields);
-        Event fill_pre = Event::merge_events(pre_set.preconditions);
+        Event fill_pre = Runtime::merge_events<false>(pre_set.preconditions);
 #ifdef LEGION_SPY
         if (!fill_pre.exists())
         {
@@ -5550,7 +5543,7 @@ namespace Legion {
           const std::set<Domain> &fill_domains = 
             dst->logical_node->get_component_domains(dom_pre);
           if (dom_pre.exists())
-            fill_pre = Event::merge_events(fill_pre, dom_pre);
+            fill_pre = Runtime::merge_events<false>(fill_pre, dom_pre);
           UniqueID op_id = (info.op == NULL) ? 0 : info.op->get_unique_op_id();
           for (std::set<Domain>::const_iterator it = fill_domains.begin();
                 it != fill_domains.end(); it++)
@@ -5559,14 +5552,14 @@ namespace Legion {
                                                    value->value, 
                                                    value->value_size,fill_pre));
           }
-          fill_post = Event::merge_events(post_events);
+          fill_post = Runtime::merge_events<false>(post_events);
         }
         else
         {
           Event dom_pre;
           const Domain &dom = dst->logical_node->get_domain(dom_pre);
           if (dom_pre.exists())
-            fill_pre = Event::merge_events(fill_pre, dom_pre);
+            fill_pre = Runtime::merge_events<false>(fill_pre, dom_pre);
           UniqueID op_id = (info.op == NULL) ? 0 : info.op->get_unique_op_id();
           fill_post = context->issue_fill(dom, op_id, dst_fields,
                                           value->value, value->value_size, 
@@ -5609,7 +5602,7 @@ namespace Legion {
                                               value->value, value->value_size, 
                                               precondition));
       }
-      Event post_event = Event::merge_events(post_events); 
+      Event post_event = Runtime::merge_events<false>(post_events); 
       // If we're going to issue a reduction then we can just flush reductions
       // and the precondition will translate naturally
       if (!!reduction_mask)
@@ -5755,16 +5748,9 @@ namespace Legion {
       {
         event_preconds.insert(it->first);
       }
-      Event reduce_pre = Event::merge_events(event_preconds); 
+      Event reduce_pre = Runtime::merge_events<false>(event_preconds); 
 #ifdef LEGION_SPY
-      if (!reduce_pre.exists())
-      {
-        UserEvent new_reduce_pre = UserEvent::create_user_event();
-        new_reduce_pre.trigger();
-        reduce_pre = new_reduce_pre;
-      }
       IndexSpace reduce_index_space;
-      LegionSpy::log_event_dependences(event_preconds, reduce_pre);
 #endif
       Event reduce_post; 
       if (logical_node->has_component_domains())
@@ -5774,16 +5760,7 @@ namespace Legion {
         const std::set<Domain> &component_domains = 
           logical_node->get_component_domains(dom_pre);
         if (dom_pre.exists())
-        {
-#ifdef LEGION_SPY
-          Event new_reduce_pre = Event::merge_events(reduce_pre, dom_pre);
-          LegionSpy::log_event_dependence(reduce_pre, new_reduce_pre);
-          LegionSpy::log_event_dependence(dom_pre, new_reduce_pre);
-          reduce_pre = new_reduce_pre;
-#else
-          reduce_pre = Event::merge_events(reduce_pre, dom_pre);
-#endif
-        }
+          reduce_pre = Runtime::merge_events<false>(reduce_pre, dom_pre);
         for (std::set<Domain>::const_iterator it = 
               component_domains.begin(); it != component_domains.end(); it++)
         {
@@ -5792,7 +5769,7 @@ namespace Legion {
                                                 true/*precise*/);
           post_events.insert(post);
         }
-        reduce_post = Event::merge_events(post_events);
+        reduce_post = Runtime::merge_events<false>(post_events);
 #ifdef LEGION_SPY
         reduce_index_space = logical_node->as_region_node()->row_source->handle;
 #endif
@@ -5802,16 +5779,7 @@ namespace Legion {
         Event dom_pre;
         Domain domain = logical_node->get_domain(dom_pre);
         if (dom_pre.exists())
-        {
-#ifdef LEGION_SPY
-          Event new_reduce_pre = Event::merge_events(reduce_pre, dom_pre);
-          LegionSpy::log_event_dependence(reduce_pre, new_reduce_pre);
-          LegionSpy::log_event_dependence(dom_pre, new_reduce_pre);
-          reduce_pre = new_reduce_pre;
-#else
-          reduce_pre = Event::merge_events(reduce_pre, dom_pre);
-#endif
-        }
+          reduce_pre = Runtime::merge_events<false>(reduce_pre, dom_pre);
         reduce_post = manager->issue_reduction(op, src_fields, dst_fields,
                                                domain, reduce_pre, fold,
                                                true/*precise*/);
@@ -5879,16 +5847,7 @@ namespace Legion {
       {
         preconditions.insert(it->first);
       }
-      Event reduce_pre = Event::merge_events(preconditions); 
-#ifdef LEGION_SPY
-      if (!reduce_pre.exists())
-      {
-        UserEvent new_reduce_pre = UserEvent::create_user_event();
-        new_reduce_pre.trigger();
-        reduce_pre = new_reduce_pre;
-      }
-      LegionSpy::log_event_dependences(preconditions, reduce_pre);
-#endif
+      Event reduce_pre = Runtime::merge_events<false>(preconditions); 
       std::set<Event> post_events;
       for (std::set<Domain>::const_iterator it = reduce_domains.begin();
             it != reduce_domains.end(); it++)
@@ -5898,16 +5857,7 @@ namespace Legion {
                                               false/*precise*/);
         post_events.insert(post);
       }
-      Event reduce_post = Event::merge_events(post_events);
-#ifdef LEGION_SPY
-      if (!reduce_post.exists())
-      {
-        UserEvent new_reduce_post = UserEvent::create_user_event();
-        new_reduce_post.trigger();
-        reduce_post = new_reduce_post;
-        LegionSpy::log_event_dependences(post_events, reduce_post);
-      }
-#endif
+      Event reduce_post = Runtime::merge_events<false>(post_events);
       // No need to add the user to the destination as that will
       // be handled by the caller using the reduce post event we return
       add_copy_user(manager->redop, reduce_post, version_info,
@@ -5962,16 +5912,7 @@ namespace Legion {
       {
         preconditions.insert(it->first);
       }
-      Event reduce_pre = Event::merge_events(preconditions); 
-#ifdef LEGION_SPY
-      if (!reduce_pre.exists())
-      {
-        UserEvent new_reduce_pre = UserEvent::create_user_event();
-        new_reduce_pre.trigger();
-        reduce_pre = new_reduce_pre;
-      }
-      LegionSpy::log_event_dependences(preconditions, reduce_pre);
-#endif
+      Event reduce_pre = Runtime::merge_events<false>(preconditions); 
       std::set<Event> post_events;
       for (std::set<Domain>::const_iterator it = reduce_domains.begin();
             it != reduce_domains.end(); it++)
@@ -5981,16 +5922,7 @@ namespace Legion {
                                               false/*precise*/);
         post_events.insert(post);
       }
-      Event reduce_post = Event::merge_events(post_events);
-#ifdef LEGION_SPY
-      if (!reduce_post.exists())
-      {
-        UserEvent new_reduce_post = UserEvent::create_user_event();
-        new_reduce_post.trigger();
-        reduce_post = new_reduce_post;
-        LegionSpy::log_event_dependences(post_events, reduce_post);
-      }
-#endif
+      Event reduce_post = Runtime::merge_events<false>(post_events);
       // No need to add the user to the destination as that will
       // be handled by the caller using the reduce post event we return
       add_copy_user(manager->redop, reduce_post, version_info,
@@ -6315,16 +6247,7 @@ namespace Legion {
       if (issue_collect)
         defer_collect_user(term_event);
       // Return our result
-      Event result = Event::merge_events(wait_on);
-#ifdef LEGION_SPY
-      if (!result.exists())
-      {
-        UserEvent new_result = UserEvent::create_user_event();
-        new_result.trigger();
-        result = new_result;
-      }
-      LegionSpy::log_event_dependences(wait_on, result);
-#endif
+      Event result = Runtime::merge_events<false>(wait_on);
       return InstanceRef(manager, user_mask, result);
     }
 

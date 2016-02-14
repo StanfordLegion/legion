@@ -3312,7 +3312,7 @@ namespace Legion {
     Event CopyTracker::get_termination_event(void) const
     //--------------------------------------------------------------------------
     {
-      return Event::merge_events(copy_events);
+      return Runtime::merge_events<false>(copy_events);
     }
 
     //--------------------------------------------------------------------------
@@ -5812,7 +5812,7 @@ namespace Legion {
       }
       if (!!requested_mask)
       {
-        Event precondition = Event::merge_events(merge_preconditions);
+        Event precondition = Runtime::merge_events<true>(merge_preconditions);
         if (precondition.exists())
         {
           preconditions.insert(precondition);
@@ -6101,7 +6101,7 @@ namespace Legion {
 #endif
         if (!launch_preconditions.empty())
         {
-          Event pre = Event::merge_events(launch_preconditions);
+          Event pre = Runtime::merge_events<true>(launch_preconditions);
           launch_send_version_state(source, to_trigger, request_kind, 
                                     request_mask, pre);
         }
@@ -6211,7 +6211,7 @@ namespace Legion {
           UserEvent local_trigger = UserEvent::create_user_event();
           if (!local_preconditions.empty())
           {
-            Event pre = Event::merge_events(local_preconditions);
+            Event pre = Runtime::merge_events<true>(local_preconditions);
             launch_send_version_state(source, local_trigger, request_kind,
                                       local_fields, pre); 
           }
@@ -6245,7 +6245,7 @@ namespace Legion {
           }
           if (!local_preconditions.empty())
           {
-            Event pre = Event::merge_events(local_preconditions);
+            Event pre = Runtime::merge_events<true>(local_preconditions);
             launch_send_version_state(source, info.to_trigger, info.kind, 
                                       info.request_mask, pre);
           }
@@ -6257,7 +6257,7 @@ namespace Legion {
         // Now if we have any done conditions we trigger the proper 
         // precondition event, otherwise we can do it immediately
         if (!done_conditions.empty())
-          to_trigger.trigger(Event::merge_events(done_conditions));
+          to_trigger.trigger(Runtime::merge_events<true>(done_conditions));
         else
           to_trigger.trigger();
       }
@@ -6497,7 +6497,7 @@ namespace Legion {
           (*it)->make_local(preconditions); 
         }
         if (!preconditions.empty())
-          to_trigger.trigger(Event::merge_events(preconditions));
+          to_trigger.trigger(Runtime::merge_events<true>(preconditions));
         else
           to_trigger.trigger();
       }
