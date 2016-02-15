@@ -2043,7 +2043,8 @@ namespace Legion {
       void seed_state(ContextID ctx, Event term_event,
                              const RegionUsage &usage,
                              const FieldMask &user_mask,
-                             LogicalView *new_view);
+                             const InstanceSet &targets,
+                             const std::vector<LogicalView*> &corresponding);
       void close_state(const TraversalInfo &info,
                        RegionUsage &usage, InstanceSet &targets);
       void find_field_descriptors(ContextID ctx, Event term_event,

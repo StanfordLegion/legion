@@ -392,9 +392,11 @@ namespace Legion {
       void reset(void);
       void sanity_check(void);
     public:
-      void initialize_state(LogicalView *view, Event term_event,
+      void initialize_state(Event term_event,
                             const RegionUsage &usage,
-                            const FieldMask &user_mask);
+                            const FieldMask &user_mask,
+                            const InstanceSet &targets,
+                            const std::vector<LogicalView*> &corresponding);
       void record_version_numbers(const FieldMask &mask,
                                   const LogicalUser &user,
                                   VersionInfo &version_info,
@@ -715,9 +717,9 @@ namespace Legion {
       void operator delete(void *ptr);
       void operator delete[](void *ptr);
     public:
-      void initialize(LogicalView *view, Event term_event,
-                      const RegionUsage &usage,
-                      const FieldMask &user_mask);
+      void initialize(Event term_event, const RegionUsage &usage,
+                      const FieldMask &user_mask, const InstanceSet &targets,
+                      const std::vector<LogicalView*> &corresponding);
       void update_close_top_state(PhysicalState *state,
                                   const FieldMask &update_mask) const;
       void update_open_children_state(PhysicalState *state,
@@ -1169,6 +1171,7 @@ namespace Legion {
     public:
       bool empty(void) const;
       size_t size(void) const;
+      void resize(size_t new_size);
       void clear(void);
       void add_instance(const InstanceRef &ref);
     public:

@@ -40,7 +40,8 @@ namespace Legion {
      */
     class DefaultMapper : public Mapper {
     public:
-      DefaultMapper(Machine machine, HighLevelRuntime *rt, Processor local);
+      DefaultMapper(Machine machine, HighLevelRuntime *rt, 
+                    Processor local, const char *maper_name = NULL);
       DefaultMapper(const DefaultMapper &rhs);
       virtual ~DefaultMapper(void);
     public:
@@ -190,10 +191,12 @@ namespace Legion {
                               const std::vector<Processor> &targets,
                               unsigned splitting_factor, 
                               std::vector<Mapper::TaskSlice> &slice);
+      static const char* create_default_name(Processor p);
     protected:
       const Processor local_proc;
       const Processor::Kind local_kind;
       const Machine machine;
+      const char *const mapper_name;
       // The maximum number of tasks a mapper will allow to be stolen at a time
       // Controlled by -dm:thefts
       unsigned max_steals_per_theft;

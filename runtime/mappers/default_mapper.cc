@@ -40,7 +40,7 @@ namespace Legion {
 
     LegionRuntime::Logger::Category log_mapper("default_mapper");
 
-    enum MapperMeesageType
+    enum MapperMessageType
     {
       INVALID_MESSAGE = 0,
       PROFILING_SAMPLE = 1,
@@ -54,7 +54,7 @@ namespace Legion {
         return magic == 0xABCD && type != INVALID_MESSAGE;
       }
       uint32_t magic;
-      MapperMeesageType type;
+      MapperMessageType type;
     };
 
     struct ProfilingSampleMsg : public MapperMsgHdr
@@ -66,9 +66,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     DefaultMapper::DefaultMapper(Machine m, HighLevelRuntime *rt, 
-                                 Processor local) 
+                                 Processor local, const char *name) 
       : Mapper(rt), local_proc(local), 
         local_kind(local.kind()), machine(m),
+        mapper_name((name == NULL) ? create_default_name(local) : strdup(name)),
         max_steals_per_theft(STATIC_MAX_PERMITTED_STEALS),
         max_steal_count(STATIC_MAX_STEAL_COUNT),
         splitting_factor(STATIC_SPLIT_FACTOR),
@@ -135,6 +136,7 @@ namespace Legion {
     {
       log_mapper.spew("Deleting default mapper for processor " IDFMT "",
                   local_proc.id);
+      free(mapper_name);
     }
 
     //--------------------------------------------------------------------------
@@ -144,6 +146,398 @@ namespace Legion {
       // should never be called
       assert(false);
       return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    const char* DefaultMapper::get_mapper_name(void) const
+    //--------------------------------------------------------------------------
+    {
+      return mapper_name;
+    }
+
+    //--------------------------------------------------------------------------
+    Mapper::MapperSyncModel Mapper::get_mapper_sync_model(void) const
+    //--------------------------------------------------------------------------
+    {
+      // Default mapper operates with the serialized re-entrant sync model
+      return SERIALIZED_REENTRANT_MAPPER_MODEL;
+    }
+
+    //--------------------------------------------------------------------------
+    void DefaultMapper::select_task_options(const MapperContext    ctx,
+                                            const Task&            task,
+                                                  TaskOptions&     output)
+    //--------------------------------------------------------------------------
+    {
+      log_mapper.spew("Default select_task_options in %s", get_mapper_name());
+      output.initial_proc = local_proc;
+      output.inline_task = false;
+      output.stealable = stealing_enabled; 
+      output.map_locally = true;
+    }
+
+    //--------------------------------------------------------------------------
+    void DefaultMapper::premap_task(const MapperContext      ctx,
+                                    const Task&              task, 
+                                    const PremapTaskInput&   input,
+                                          PremapTaskOutput&  output)
+    //--------------------------------------------------------------------------
+    {
+      log_mapper.spew("Default premap_task in %s", get_mapper_name());
+
+    }
+
+    //--------------------------------------------------------------------------
+    void DefaultMapper::slice_task(const MapperContext      ctx,
+                                   const Task&              task, 
+                                   const SliceTaskInput&    input,
+                                         SliceTaskOutput&   output)
+    //--------------------------------------------------------------------------
+    {
+      log_mapper.spew("Default slice_task in %s", get_mapper_name());
+
+    }
+
+    //--------------------------------------------------------------------------
+    void DefaultMapper::map_task(const MapperContext      ctx,
+                                 const Task&              task,
+                                 const MapTaskInput&      input,
+                                       MapTaskOutput&     output)
+    //--------------------------------------------------------------------------
+    {
+      log_mapper.spew("Default map_task in %s", get_mapper_name());
+
+    }
+
+    //--------------------------------------------------------------------------
+    void DefaultMapper::select_task_variant(const MapperContext          ctx,
+                                            const Task&                  task,
+                                            const SelectVariantInput&    input,
+                                                  SelectVariantOutput&   output)
+    //--------------------------------------------------------------------------
+    {
+      log_mapper.spew("Default select_task_variant in %s", get_mapper_name());
+
+    }
+
+    //--------------------------------------------------------------------------
+    void DefaultMapper::postmap_task(const MapperContext      ctx,
+                                     const Task&              task,
+                                     const PostMapInput&      input,
+                                           PostMapOutput&     output)
+    //--------------------------------------------------------------------------
+    {
+      log_mapper.spew("Default postmap_task in %s", get_mapper_name());
+
+    }
+
+    //--------------------------------------------------------------------------
+    void DefaultMapper::select_task_sources(const MapperContext        ctx,
+                                            const Task&                task,
+                                            const SelectTaskSrcInput&  input,
+                                                  SelectTaskSrcOutput& output)
+    //--------------------------------------------------------------------------
+    {
+      log_mapper.spew("Default select_task_sources in %s", get_mapper_name());
+
+    }
+
+    //--------------------------------------------------------------------------
+    void DefaultMapper::speculate(const MapperContext      ctx,
+                                  const Task&              task,
+                                        SpeculativeOutput& output)
+    //--------------------------------------------------------------------------
+    {
+      log_mapper.spew("Default speculate for Task in %s", get_mapper_name());
+      // Default mapper doesn't speculate
+      output.speculate = false;
+    }
+
+    //--------------------------------------------------------------------------
+    void DefaultMapper::report_profiling(const MapperContext      ctx,
+                                         const Task&              task,
+                                         const TaskProfilingInfo& input)
+    //--------------------------------------------------------------------------
+    {
+      log_mapper.spew("Default report_profiling for Task in %s", 
+                      get_mapper_name());
+
+    }
+
+    //--------------------------------------------------------------------------
+    void DefaultMapper::map_inline(const MapperContext        ctx,
+                                   const InlineMapping&       inline_op,
+                                   const MapInlineInput&      input,
+                                         MapInlineOutput&     output)
+    //--------------------------------------------------------------------------
+    {
+      log_mapper.spew("Default map_inline in %s", get_mapper_name());
+
+    }
+
+    //--------------------------------------------------------------------------
+    void DefaultMapper::select_inline_sources(const MapperContext     ctx,
+                                         const InlineMapping&         inline_op,
+                                         const SelectInlineSrcInput&  input,
+                                               SelectInlineSrcOutput& output)
+    //--------------------------------------------------------------------------
+    {
+      log_mapper.spew("Default select_inline_sources in %s", get_mapper_name());
+
+    }
+
+    //--------------------------------------------------------------------------
+    void DefaultMapper::report_profiling(const MapperContext         ctx,
+                                         const InlineMapping&        inline_op,
+                                         const InlineProfilingInfo&  input)
+    //--------------------------------------------------------------------------
+    {
+      log_mapper.spew("Default report_profiling for Inline in %s", 
+                      get_mapper_name());
+
+    }
+
+    //--------------------------------------------------------------------------
+    void DefaultMapper::map_copy(const MapperContext      ctx,
+                                 const Copy&              copy,
+                                 const MapCopyInput&      input,
+                                       MapCopyOutput&     output)
+    //--------------------------------------------------------------------------
+    {
+      log_mapper.spew("Default map_copy in %s", get_mapper_name());
+
+    }
+
+    //--------------------------------------------------------------------------
+    void DefaultMapper::select_copy_sources(const MapperContext          ctx,
+                                            const Copy&                  copy,
+                                            const SelectCopySrcInput&    input,
+                                                  SelectCopySrcOutput&   output)
+    //--------------------------------------------------------------------------
+    {
+      log_mapper.spew("Default select_copy_sources in %s", get_mapper_name());
+
+    }
+
+    //--------------------------------------------------------------------------
+    void DefaultMapper::speculate(const MapperContext      ctx,
+                                  const Copy& copy,
+                                        SpeculativeOutput& output)
+    //--------------------------------------------------------------------------
+    {
+      log_mapper.spew("Default speculate for Copy in %s", get_mapper_name());
+      // Default mapper doesn't speculate
+      output.speculate = false;
+    }
+
+    //--------------------------------------------------------------------------
+    void DefaultMapper::report_profiling(const MapperContext      ctx,
+                                         const Copy&              copy,
+                                         const CopyProfilingInfo& input)
+    //--------------------------------------------------------------------------
+    {
+      log_mapper.spew("Default report_profiling for Copy in %s", 
+                      get_mapper_name());
+
+    }
+
+    //--------------------------------------------------------------------------
+    void DefaultMapper::map_close(const MapperContext       ctx,
+                                  const Close&              close,
+                                  const MapCloseInput&      input,
+                                        MapCloseOutput&     output)
+    //--------------------------------------------------------------------------
+    {
+      log_mapper.spew("Default map_close in %s", get_mapper_name());
+
+    }
+
+    //--------------------------------------------------------------------------
+    void DefaultMapper::select_close_sources(const MapperContext        ctx,
+                                             const Close&               close,
+                                             const SelectCloseSrcInput&  input,
+                                                   SelectCloseSrcOutput& output)
+    //--------------------------------------------------------------------------
+    {
+      log_mapper.spew("Default select_close_sources in %s", get_mapper_name());
+
+    }
+
+    //--------------------------------------------------------------------------
+    void DefaultMapper::report_profiling(const MapperContext       ctx,
+                                         const Close&              close,
+                                         const CloseProfilingInfo& input)
+    //--------------------------------------------------------------------------
+    {
+      log_mapper.spew("Default report_profiling for Close in %s", 
+                      get_mapper_name());
+
+    }
+
+    //--------------------------------------------------------------------------
+    void DefaultMapper::map_acquire(const MapperContext         ctx,
+                                    const Acquire&              acquire,
+                                    const MapAcquireInput&      input,
+                                          MapAcquireOutput&     output)
+    //--------------------------------------------------------------------------
+    {
+      log_mapper.spew("Default map_acquire in %s", get_mapper_name());
+
+    }
+
+    //--------------------------------------------------------------------------
+    void DefaultMapper::speculate(const MapperContext         ctx,
+                                  const Acquire&              acquire,
+                                        SpeculativeOutput&    output)
+    //--------------------------------------------------------------------------
+    {
+      log_mapper.spew("Default speculate for Acquire in %s", get_mapper_name());
+      // Default mapper doesn't speculate
+      output.speculate = false;
+    }
+
+    //--------------------------------------------------------------------------
+    void DefaultMapper::report_profiling(const MapperContext         ctx,
+                                         const Acquire&              acquire,
+                                         const AcquireProfilingInfo& input)
+    //--------------------------------------------------------------------------
+    {
+      log_mapper.spew("Default report_profiling for Acquire in %s", 
+                      get_mapper_name());
+
+    }
+
+    //--------------------------------------------------------------------------
+    void DefaultMapper::map_release(const MapperContext         ctx,
+                                    const Release&              release,
+                                    const MapReleaseInput&      input,
+                                          MapReleaseOutput&     output)
+    //--------------------------------------------------------------------------
+    {
+      log_mapper.spew("Default map_release in %s", get_mapper_name());
+
+    }
+
+    //--------------------------------------------------------------------------
+    void DefaultMapper::select_release_sources(const MapperContext      ctx,
+                                         const Release&                 release,
+                                         const SelectReleaseSrcInput&   input,
+                                               SelectReleaseSrcOutput&  output)
+    //--------------------------------------------------------------------------
+    {
+      log_mapper.spew("Default select_release_sources in %s",get_mapper_name());
+
+    }
+
+    //--------------------------------------------------------------------------
+    void DefaultMapper::speculate(const MapperContext         ctx,
+                                  const Release&              release,
+                                        SpeculativeOutput&    output)
+    //--------------------------------------------------------------------------
+    {
+      log_mapper.spew("Default speculate for Release in %s", get_mapper_name());
+      // Default mapper doesn't speculate
+      output.speculate = false;
+    }
+
+    //--------------------------------------------------------------------------
+    void DefaultMapper::report_profiling(const MapperContext         ctx,
+                                         const Release&              release,
+                                         const ReleaseProfilingInfo& input)
+    //--------------------------------------------------------------------------
+    {
+      log_mapper.spew("Default report_profiling for Release in %s", 
+                      get_mapper_name());
+
+    }
+
+    //--------------------------------------------------------------------------
+    void DefaultMapper::configure_context(const MapperContext         ctx,
+                                          const Task&                 task,
+                                                ContextConfigOutput&  output)
+    //--------------------------------------------------------------------------
+    {
+      log_mapper.spew("Default configure_context in %s", get_mapper_name());
+
+    }
+
+    //--------------------------------------------------------------------------
+    void DefaultMapper::select_tunable_value(const MapperContext         ctx,
+                                             const Task&                 task,
+                                             const SelectTunableInput&   input,
+                                                   SelectTunableOutput&  output)
+    //--------------------------------------------------------------------------
+    {
+      log_mapper.spew("Default select_tunable_value in %s", get_mapper_name());
+
+    }
+
+    //--------------------------------------------------------------------------
+    void DefaultMapper::map_must_epoch(const MapperContext           ctx,
+                                       const MapMustEpochInput&      input,
+                                             MapMustEpochOutput&     output)
+    //--------------------------------------------------------------------------
+    {
+      log_mapper.spew("Default map_must_epoch in %s", get_mapper_name());
+
+    }
+
+    //--------------------------------------------------------------------------
+    void DefaultMapper::map_dataflow_graph(const MapperContext           ctx,
+                                           const MapDataflowGraphInput&  input,
+                                                 MapDataflowGraphOutput& output)
+    //--------------------------------------------------------------------------
+    {
+      log_mapper.spew("Default map_dataflow_graph in %s", get_mapper_name());
+
+    }
+
+    //--------------------------------------------------------------------------
+    void DefaultMapper::select_tasks_to_map(const MapperContext          ctx,
+                                            const SelectMappingInput&    input,
+                                                  SelectMappingOutput&   output)
+    //--------------------------------------------------------------------------
+    {
+      log_mapper.spew("Default select_tasks_to_map in %s", get_mapper_name());
+
+    }
+
+    //--------------------------------------------------------------------------
+    void DefaultMapper::select_steal_targets(const MapperContext         ctx,
+                                             const SelectStealingInput&  input,
+                                                   SelectStealingOutput& output)
+    //--------------------------------------------------------------------------
+    {
+      log_mapper.spew("Default select_steal_targets in %s", get_mapper_name());
+
+    }
+
+    //--------------------------------------------------------------------------
+    void DefaultMapper::permit_steal_requests(const MapperContext        ctx,
+                                             const StealRequestInput&    intput,
+                                                   StealRequestOutput&   output)
+    //--------------------------------------------------------------------------
+    {
+      log_mapper.spew("Default permit_steal_requests in %s", get_mapper_name());
+
+    }
+
+    //--------------------------------------------------------------------------
+    void DefaultMapper::handle_message(const MapperContext           ctx,
+                                       const MapperMessage&          message)
+    //--------------------------------------------------------------------------
+    {
+      log_mapper.spew("Default handle_message in %s", get_mapper_name());
+
+    }
+
+    //--------------------------------------------------------------------------
+    void DefaultMapper::handle_task_result(const MapperContext           ctx,
+                                           const MapperTaskResult&       result)
+    //--------------------------------------------------------------------------
+    {
+      log_mapper.spew("Default handle task result in %s", get_mapper_name());
+
     }
 
     //--------------------------------------------------------------------------
@@ -1098,6 +1492,17 @@ namespace Legion {
                 Domain::from_rect<1>(chunk), targets[proc_idx], false, false));
         }
       }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ const char* DefaultMapper::create_default_name(Processor p)
+    //--------------------------------------------------------------------------
+    {
+      const size_t buffer_size = 64;
+      char *result = malloc(buffer_size*sizeof(char));
+      snprintf(result, buffer_size-1,
+                "Default Mapper on Processor " IDFMT "", p.id);
+      return result;
     }
 
   }; // namespace Mapping

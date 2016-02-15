@@ -2487,9 +2487,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CurrentState::initialize_state(LogicalView *view, Event term_event,
+    void CurrentState::initialize_state(Event term_event,
                                         const RegionUsage &usage,
-                                        const FieldMask &user_mask)
+                                        const FieldMask &user_mask,
+                                        const InstanceSet &targets,
+                                 const std::vector<LogicalView*> &corresponding)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -2502,7 +2504,8 @@ namespace Legion {
       {
         VersionState *init_state = create_new_version_state(init_version);
         init_state->add_base_valid_ref(VERSION_MANAGER_REF);
-        init_state->initialize(view, term_event, usage, user_mask);
+        init_state->initialize(term_event, usage, user_mask, 
+                               targets, corresponding);
         current_version_infos[init_version].valid_fields = user_mask;
         current_version_infos[init_version].states[init_state] = user_mask;
       }
@@ -2519,7 +2522,8 @@ namespace Legion {
 #endif
         LegionMap<VersionState*,FieldMask>::aligned::iterator it = 
           finder->second.states.begin();
-        it->first->initialize(view, term_event, usage, user_mask);
+        it->first->initialize(term_event, usage, user_mask,
+                              targets, corresponding);
         it->second |= user_mask;
       }
 #ifdef DEBUG_HIGH_LEVEL
@@ -4947,59 +4951,65 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void VersionState::initialize(LogicalView *new_view, Event term_event,
-                                  const RegionUsage &usage,
-                                  const FieldMask &user_mask)
+    void VersionState::initialize(Event term_event, const RegionUsage &usage,
+                                  const FieldMask &user_mask,
+                                  const InstanceSet &targets,
+                                 const std::vector<LogicalView*> &corresponding)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
       assert(is_owner());
 #endif
-      new_view->add_nested_gc_ref(did);
-      new_view->add_nested_valid_ref(did);
-      if (new_view->is_instance_view())
+      for (unsigned idx = 0; idx < targets.size(); idx++)
       {
-        InstanceView *inst_view = new_view->as_instance_view();
-        if (inst_view->is_reduction_view())
+        LogicalView *new_view = corresponding[idx];
+        const FieldMask &view_mask = targets[idx].get_valid_fields();
+        new_view->add_nested_gc_ref(did);
+        new_view->add_nested_valid_ref(did);
+        if (new_view->is_instance_view())
         {
-          ReductionView *view = inst_view->as_reduction_view();
-          LegionMap<ReductionView*,FieldMask,VALID_REDUCTION_ALLOC>::
-            track_aligned::iterator finder = reduction_views.find(view); 
-          if (finder == reduction_views.end())
-            reduction_views[view] = user_mask;
+          InstanceView *inst_view = new_view->as_instance_view();
+          if (inst_view->is_reduction_view())
+          {
+            ReductionView *view = inst_view->as_reduction_view();
+            LegionMap<ReductionView*,FieldMask,VALID_REDUCTION_ALLOC>::
+              track_aligned::iterator finder = reduction_views.find(view); 
+            if (finder == reduction_views.end())
+              reduction_views[view] = view_mask;
+            else
+              finder->second |= view_mask;
+            reduction_mask |= view_mask;
+            inst_view->add_initial_user(term_event, usage, view_mask);
+          }
           else
-            finder->second |= user_mask;
-          reduction_mask |= user_mask;
-          inst_view->add_initial_user(term_event, usage, user_mask);
+          {
+            LegionMap<LogicalView*,FieldMask,VALID_VIEW_ALLOC>::
+              track_aligned::iterator finder = valid_views.find(new_view);
+            if (finder == valid_views.end())
+              valid_views[new_view] = view_mask;
+            else
+              finder->second |= view_mask;
+            if (HAS_WRITE(usage))
+              dirty_mask |= view_mask;
+            inst_view->add_initial_user(term_event, usage, view_mask);
+          }
         }
         else
         {
-          LegionMap<LogicalView*,FieldMask,VALID_VIEW_ALLOC>::
-            track_aligned::iterator finder = valid_views.find(new_view);
-          if (finder == valid_views.end())
-            valid_views[new_view] = user_mask;
-          else
-            finder->second |= user_mask;
-          if (HAS_WRITE(usage))
-            dirty_mask |= user_mask;
-          inst_view->add_initial_user(term_event, usage, user_mask);
-        }
-      }
-      else
-      {
 #ifdef DEBUG_HIGH_LEVEL
-        assert(!term_event.exists());
+          assert(!term_event.exists());
 #endif
-        LegionMap<LogicalView*,FieldMask,VALID_VIEW_ALLOC>::
-            track_aligned::iterator finder = valid_views.find(new_view);
-        if (finder == valid_views.end())
-          valid_views[new_view] = user_mask;
-        else
-          finder->second |= user_mask;
-        if (HAS_WRITE(usage))
-          dirty_mask |= user_mask;
-        // Don't add a user since this is a deferred view and
-        // we can't access it anyway
+          LegionMap<LogicalView*,FieldMask,VALID_VIEW_ALLOC>::
+              track_aligned::iterator finder = valid_views.find(new_view);
+          if (finder == valid_views.end())
+            valid_views[new_view] = view_mask;
+          else
+            finder->second |= view_mask;
+          if (HAS_WRITE(usage))
+            dirty_mask |= view_mask;
+          // Don't add a user since this is a deferred view and
+          // we can't access it anyway
+        }
       }
       // Update our field information, we know we are the owner
       initial_nodes[local_space] |= user_mask;
@@ -7310,6 +7320,86 @@ namespace Legion {
         return 1;
       }
       return refs.multi->vector.size();
+    }
+
+    //--------------------------------------------------------------------------
+    void InstanceSet::resize(size_t new_size)
+    //--------------------------------------------------------------------------
+    {
+      if (single)
+      {
+        if (new_size == 0)
+        {
+          if ((refs.single != NULL) && refs.single->remove_reference())
+            delete refs.single;
+          refs.single = NULL;
+          shared = false;
+        }
+        else if (new_size > 1)
+        {
+          // Switch to multi
+          InternalSet *next = new InternalSet(new_size);
+          if (refs.single != NULL)
+          {
+            next->vector[0] = *(refs.single);
+            if (refs.single->remove_reference())
+              delete refs.single;
+          }
+          next->add_reference();
+          refs.multi = next;
+          single = false;
+          shared = false;
+        }
+        // Otherwise new size is 1 so we don't need to do anything
+      }
+      else
+      {
+        if (new_size == 0)
+        {
+          if (refs.multi->remove_reference())
+            delete refs.multi;
+          refs.single = NULL;
+          single = true;
+          shared = false;
+        }
+        else if (new_size == 1)
+        {
+          CollectableRef *next = new CollectableRef(refs.multi->vector[0]);
+          if (refs.multi->remove_reference())
+            delete refs.multi;
+          next->add_reference();
+          refs.single = next;
+          single = true;
+          shared = false;
+        }
+        else
+        {
+          size_t current_size = refs.multi->vector.size();
+          if (current_size != new_size)
+          {
+            if (shared)
+            {
+              // Make a copy
+              InternalSet *next = new InternalSet(new_size);
+              // Copy over the elements
+              for (unsigned idx = 0; idx < 
+                   ((current_size < new_size) ? current_size : new_size); idx++)
+                next->vector[idx] = refs.multi->vector[idx];
+              if (refs.multi->remove_reference())
+                delete refs.multi;
+              next->add_reference();
+              refs.multi = next;
+              shared = false;
+            }
+            else
+            {
+              // Resize our existing vector
+              refs.multi->vector.resize(new_size);
+            }
+          }
+          // Size is the same so there is no need to do anything
+        }
+      }
     }
 
     //--------------------------------------------------------------------------

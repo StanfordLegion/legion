@@ -1697,6 +1697,37 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void RegionTreeForest::initialize_current_context(RegionTreeContext ctx,
+                    const RegionRequirement &req, const InstanceSet &sources,
+                    Event term_event, unsigned depth,
+                    std::map<PhysicalManager*,InstanceView*> &top_views,
+                    InstanceSet &targets)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(req.handle_type == SINGULAR);
+#endif
+      RegionNode *top_node = get_node(req.region);
+      RegionUsage usage(req);
+      FieldMask user_mask = 
+        top_node->column_source->get_field_mask(req.privilege_fields);
+      targets.resize(sources.size());
+      std::vector<LogicalView*> corresponding(targets.size());
+      // Build our set of corresponding views
+      if (IS_REDUCE(req))
+      {
+         
+      }
+      else
+      {
+
+      }
+      // Now we can register all these instances
+      top_node->seed_state(ctx.get_id(), term_event, usage, 
+                           user_mask, targets, corresponding); 
+    }
+
+    //--------------------------------------------------------------------------
     void RegionTreeForest::physical_traverse_path(RegionTreeContext ctx,
                                                   RegionTreePath &path,
                                                   const RegionRequirement &req,
@@ -15158,11 +15189,12 @@ namespace Legion {
     void RegionNode::seed_state(ContextID ctx, Event term_event,
                                 const RegionUsage &usage,
                                 const FieldMask &user_mask,
-                                LogicalView *new_view)
+                                const InstanceSet &targets,
+                                const std::vector<LogicalView*> &corresponding)
     //--------------------------------------------------------------------------
     {
-      get_current_state(ctx).initialize_state(new_view, term_event, 
-                                              usage, user_mask);
+      get_current_state(ctx).initialize_state(term_event, usage, user_mask, 
+                                              targets, corresponding);
     } 
 
     //--------------------------------------------------------------------------
