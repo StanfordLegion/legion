@@ -304,7 +304,7 @@ namespace Legion {
                                  const RegionRequirement &req,
                                  VersionInfo &version_info,
                                  Operation *op, Event term_event, 
-                                 const InstanceSet &targets
+                                 InstanceSet &targets
 #ifdef DEBUG_HIGH_LEVEL
                                  , unsigned index
                                  , const char *log_name
@@ -315,7 +315,7 @@ namespace Legion {
                                   const RegionRequirement &req,
                                   VersionInfo &version_info,
                                   Operation *op, Event term_event,
-                                  const InstanceSet &targets
+                                  InstanceSet &targets
 #ifdef DEBUG_HIGH_LEVEL
                                  , unsigned index
                                  , const char *log_name
@@ -339,7 +339,7 @@ namespace Legion {
                                    const RegionRequirement &req,
                                    VersionInfo &version_info,
                                    Operation *op,
-                                   const InstanceSet &targets
+                                   InstanceSet &targets
 #ifdef DEBUG_HIGH_LEVEL
                                    , unsigned index
                                    , const char *log_name
@@ -375,6 +375,7 @@ namespace Legion {
                           const InstanceSet &dst_targets,
                           VersionInfo &src_version_info, int src_composite,
                           Operation *op, Event precondition);
+    public:
       int physical_convert_mapping(const RegionRequirement &req,
                                const std::vector<MappingInstance> &chosen,
                                const InstanceSet &valid, InstanceSet &result,
@@ -1757,13 +1758,9 @@ namespace Legion {
       void filter_valid_views(PhysicalState *state, LogicalView *to_filter);
       void update_valid_views(PhysicalState *state, const FieldMask &valid_mask,
                               bool dirty, LogicalView *new_view);
-      void update_valid_views(PhysicalState *state, const FieldMask &valid_mask,
-                              const FieldMask &dirty_mask, 
-                              const std::vector<LogicalView*> &new_views);
-      // I hate the container problem, somebody solve it please
-      void update_valid_views(PhysicalState *state, const FieldMask &valid_mask,
-                              const FieldMask &dirty,
-                              const std::vector<MaterializedView*> &new_views);
+      void update_valid_views(PhysicalState *state, const FieldMask &dirty_mask,
+                              const std::vector<MaterializedView*> &new_views,
+                              const InstanceSet &corresponding_references);
       void update_reduction_views(PhysicalState *state, 
                                   const FieldMask &valid_mask,
                                   ReductionView *new_view);
@@ -2039,9 +2036,7 @@ namespace Legion {
                                       const FieldMask &virtual_mask,
                                       VersionInfo &version_info);
       void register_region(const TraversalInfo &info, Event term_event,
-                           const RegionUsage &usage, 
-                           const FieldMask &user_mask,
-                           InstanceSet &targets);
+                           const RegionUsage &usage, InstanceSet &targets);
       void register_virtual(ContextID ctx, CompositeView *view,
                             VersionInfo &version_info,
                             const FieldMask &composite_mask);
@@ -2049,8 +2044,8 @@ namespace Legion {
                              const RegionUsage &usage,
                              const FieldMask &user_mask,
                              LogicalView *new_view);
-      Event close_state(const TraversalInfo &info, Event term_event,
-                        RegionUsage &usage, const InstanceSet &targets);
+      void close_state(const TraversalInfo &info,
+                       RegionUsage &usage, InstanceSet &targets);
       void find_field_descriptors(ContextID ctx, Event term_event,
                                   const RegionUsage &usage,
                                   const FieldMask &user_mask,

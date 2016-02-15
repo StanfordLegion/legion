@@ -119,9 +119,9 @@ namespace Legion {
       virtual void add_copy_user(ReductionOpID redop, Event copy_term,
                                  const VersionInfo &version_info,
                                  const FieldMask &mask, bool reading) = 0;
-      virtual InstanceRef add_user(const RegionUsage &user, Event term_event,
-                                   const FieldMask &user_mask,
-                                   const VersionInfo &version_info) = 0;
+      virtual Event add_user(const RegionUsage &user, Event term_event,
+                             const FieldMask &user_mask,
+                             const VersionInfo &version_info) = 0;
       virtual void add_initial_user(Event term_event,
                                     const RegionUsage &usage,
                                     const FieldMask &user_mask) = 0;
@@ -259,9 +259,9 @@ namespace Legion {
       virtual void add_copy_user(ReductionOpID redop, Event copy_term,
                                  const VersionInfo &version_info,
                                  const FieldMask &mask, bool reading);
-      virtual InstanceRef add_user(const RegionUsage &user, Event term_event,
-                                   const FieldMask &user_mask,
-                                   const VersionInfo &version_info);
+      virtual Event add_user(const RegionUsage &user, Event term_event,
+                             const FieldMask &user_mask,
+                             const VersionInfo &version_info);
       virtual void add_initial_user(Event term_event,
                                     const RegionUsage &usage,
                                     const FieldMask &user_mask);
@@ -495,9 +495,9 @@ namespace Legion {
       virtual void add_copy_user(ReductionOpID redop, Event copy_term,
                                  const VersionInfo &version_info,
                                  const FieldMask &mask, bool reading);
-      virtual InstanceRef add_user(const RegionUsage &user, Event term_event,
-                                   const FieldMask &user_mask,
-                                   const VersionInfo &version_info);
+      virtual Event add_user(const RegionUsage &user, Event term_event,
+                             const FieldMask &user_mask,
+                             const VersionInfo &version_info);
       virtual void add_initial_user(Event term_event,
                                     const RegionUsage &usage,
                                     const FieldMask &user_mask);

@@ -578,101 +578,6 @@ namespace Legion {
       FieldMask flush_only_fields;
     }; 
 
-    struct CopyTracker {
-    public:
-      CopyTracker(void);
-    public:
-      inline void add_copy_event(Event e) { copy_events.insert(e); } 
-      Event get_termination_event(void) const;
-    protected:
-      std::set<Event> copy_events;
-    };
-
-    /**
-     * \struct PhysicalCloser
-     * Class for helping with the closing of physical region trees
-     */
-    class PhysicalCloser : public CopyTracker {
-    public:
-      PhysicalCloser(const TraversalInfo &info,
-                     LogicalRegion closing_handle);
-      PhysicalCloser(const PhysicalCloser &rhs);
-      ~PhysicalCloser(void);
-    public:
-      PhysicalCloser& operator=(const PhysicalCloser &rhs);
-    public:
-      void initialize_targets(RegionTreeNode *origin, PhysicalState *state, 
-                              const std::vector<MaterializedView*> &targets,
-                              const FieldMask &closing_mask,
-                              const FieldMask &complete_fields);
-    public:
-      void close_tree_node(RegionTreeNode *node, 
-                           const FieldMask &closing_mask);
-      const std::vector<MaterializedView*>& get_upper_targets(void) const;
-      const std::vector<MaterializedView*>& get_lower_targets(void) const;
-    public:
-      void update_dirty_mask(const FieldMask &mask);
-      const FieldMask& get_dirty_mask(void) const;
-      void update_node_views(RegionTreeNode *node, PhysicalState *state);
-    public:
-      inline void set_leave_open_mask(const FieldMask &leave_open)
-        { leave_open_mask = leave_open; }
-      inline const FieldMask& get_leave_open_mask(void) const 
-        { return leave_open_mask; }
-    public:
-      const TraversalInfo &info;
-      const LogicalRegion handle;
-    protected:
-      FieldMask leave_open_mask;
-    protected:
-      FieldMask dirty_mask;
-      std::vector<MaterializedView*> upper_targets;
-      std::vector<MaterializedView*> lower_targets;
-      std::set<Event> close_events;
-    }; 
-
-    /**
-     * \struct CompositeCloser
-     * Class for helping with closing of physical trees to composite instances
-     */
-    class CompositeCloser {
-    public:
-      CompositeCloser(ContextID ctx, VersionInfo &version_info);
-      CompositeCloser(const CompositeCloser &rhs);
-      ~CompositeCloser(void);
-    public:
-      CompositeCloser& operator=(const CompositeCloser &rhs);
-    public:
-      CompositeNode* get_composite_node(RegionTreeNode *tree_node,
-                                        CompositeNode *parent);
-      CompositeRef create_valid_view(PhysicalState *state,
-                                     CompositeNode *root,
-                                     const FieldMask &closed_mask,
-                                     bool register_view);
-      void capture_physical_state(CompositeNode *target,
-                                  RegionTreeNode *node,
-                                  PhysicalState *state,
-                                  const FieldMask &capture_mask,
-                                  FieldMask &dirty_mask);
-      void update_capture_mask(RegionTreeNode *node,
-                               const FieldMask &capture_mask);
-      bool filter_capture_mask(RegionTreeNode *node,
-                               FieldMask &capture_mask);
-    public:
-      inline void set_leave_open_mask(const FieldMask &leave_open)
-        { leave_open_mask = leave_open; }
-    public:
-      const ContextID ctx;
-      VersionInfo &version_info;
-    public:
-      FieldMask leave_open_mask;
-    public:
-      CompositeVersionInfo *composite_version_info;
-      std::map<RegionTreeNode*,CompositeNode*> constructed_nodes;
-      LegionMap<RegionTreeNode*,FieldMask>::aligned capture_fields;
-      LegionMap<ReductionView*,FieldMask>::aligned reduction_views;
-    }; 
-
     /**
      * \struct EventSet 
      * A helper class for building sets of fields with 
@@ -1164,6 +1069,7 @@ namespace Legion {
       //inline bool has_required_locks(void) const 
       //                                { return !needed_locks.empty(); }
       inline Event get_ready_event(void) const { return ready_event; }
+      inline void set_ready_event(Event ready) { ready_event = ready; }
       //inline void add_reservation(Reservation handle) 
       //                            { needed_locks.push_back(handle); }
       inline PhysicalManager* get_manager(void) const { return manager; }
@@ -1313,6 +1219,107 @@ namespace Legion {
     protected:
       TraversalInfo *const info;
       InstanceSet *const targets;
+    };
+
+    struct CopyTracker {
+    public:
+      CopyTracker(void);
+    public:
+      inline void add_copy_event(Event e) { copy_events.insert(e); } 
+      Event get_termination_event(void) const;
+    protected:
+      std::set<Event> copy_events;
+    };
+
+    /**
+     * \struct PhysicalCloser
+     * Class for helping with the closing of physical region trees
+     */
+    class PhysicalCloser : public CopyTracker {
+    public:
+      PhysicalCloser(const TraversalInfo &info,
+                     LogicalRegion closing_handle);
+      PhysicalCloser(const PhysicalCloser &rhs);
+      ~PhysicalCloser(void);
+    public:
+      PhysicalCloser& operator=(const PhysicalCloser &rhs);
+    public:
+      void initialize_targets(RegionTreeNode *origin, PhysicalState *state, 
+                              const std::vector<MaterializedView*> &targets,
+                              const FieldMask &closing_mask,
+                              const FieldMask &complete_fields,
+                              const InstanceSet &close_targets);
+    public:
+      void close_tree_node(RegionTreeNode *node, 
+                           const FieldMask &closing_mask);
+      void issue_dirty_updates(RegionTreeNode *node, 
+                               const FieldMask &dirty_fields,
+              const LegionMap<LogicalView*,FieldMask>::aligned &valid_intances);
+      void issue_reduction_updates(RegionTreeNode *node,
+                                   const FieldMask &reduc_fields,
+          const LegionMap<ReductionView*,FieldMask>::aligned &valid_reductions);
+    public:
+      void update_dirty_mask(const FieldMask &mask);
+      const FieldMask& get_dirty_mask(void) const;
+      void update_node_views(RegionTreeNode *node, PhysicalState *state);
+    public:
+      inline void set_leave_open_mask(const FieldMask &leave_open)
+        { leave_open_mask = leave_open; }
+      inline const FieldMask& get_leave_open_mask(void) const 
+        { return leave_open_mask; }
+    public:
+      const TraversalInfo &info;
+      const LogicalRegion handle;
+    protected:
+      FieldMask                    leave_open_mask;
+    protected:
+      FieldMask                         dirty_mask;
+      std::vector<MaterializedView*> upper_targets;
+      std::vector<MaterializedView*> lower_targets;
+      InstanceSet                    close_targets;
+      std::set<Event>                 close_events;
+    }; 
+
+    /**
+     * \struct CompositeCloser
+     * Class for helping with closing of physical trees to composite instances
+     */
+    class CompositeCloser {
+    public:
+      CompositeCloser(ContextID ctx, VersionInfo &version_info);
+      CompositeCloser(const CompositeCloser &rhs);
+      ~CompositeCloser(void);
+    public:
+      CompositeCloser& operator=(const CompositeCloser &rhs);
+    public:
+      CompositeNode* get_composite_node(RegionTreeNode *tree_node,
+                                        CompositeNode *parent);
+      CompositeRef create_valid_view(PhysicalState *state,
+                                     CompositeNode *root,
+                                     const FieldMask &closed_mask,
+                                     bool register_view);
+      void capture_physical_state(CompositeNode *target,
+                                  RegionTreeNode *node,
+                                  PhysicalState *state,
+                                  const FieldMask &capture_mask,
+                                  FieldMask &dirty_mask);
+      void update_capture_mask(RegionTreeNode *node,
+                               const FieldMask &capture_mask);
+      bool filter_capture_mask(RegionTreeNode *node,
+                               FieldMask &capture_mask);
+    public:
+      inline void set_leave_open_mask(const FieldMask &leave_open)
+        { leave_open_mask = leave_open; }
+    public:
+      const ContextID ctx;
+      VersionInfo &version_info;
+    public:
+      FieldMask leave_open_mask;
+    public:
+      CompositeVersionInfo *composite_version_info;
+      std::map<RegionTreeNode*,CompositeNode*> constructed_nodes;
+      LegionMap<RegionTreeNode*,FieldMask>::aligned capture_fields;
+      LegionMap<ReductionView*,FieldMask>::aligned reduction_views;
     };
 
   }; // namespace Internal 

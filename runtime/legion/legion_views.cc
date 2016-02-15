@@ -755,10 +755,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    InstanceRef MaterializedView::add_user(const RegionUsage &usage, 
-                                           Event term_event,
-                                           const FieldMask &user_mask,
-                                           const VersionInfo &version_info) 
+    Event MaterializedView::add_user(const RegionUsage &usage, Event term_event,
+                                     const FieldMask &user_mask,
+                                     const VersionInfo &version_info)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_PERF
@@ -785,9 +784,8 @@ namespace Legion {
       if (term_event.exists())
         assert(wait_on_events.find(term_event) == wait_on_events.end());
 #endif
-      // Make the instance ref
-      Event ready_event = Runtime::merge_events<false>(wait_on_events);
-      return InstanceRef(manager, user_mask, ready_event);
+      // Return the merge of the events
+      return Runtime::merge_events<false>(wait_on_events);
     }
 
     //--------------------------------------------------------------------------
@@ -4892,10 +4890,10 @@ namespace Legion {
               
             field_data.back().index_space = remaining_space;
             // Register ourselves as a user of this instance
-            InstanceRef ref = view->add_user(usage, term_event, user_mask,
+            Event ref_ready = view->add_user(usage, term_event, user_mask,
                                         version_info->get_version_info());
             Event ready_event = Runtime::merge_events<true>(
-                            ref.get_ready_event(), remaining_precondition);
+                                        ref_ready, remaining_precondition);
             if (ready_event.exists())
               preconditions.insert(ready_event);
             // Record that we handled the remaining space
@@ -6136,10 +6134,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    InstanceRef ReductionView::add_user(const RegionUsage &usage, 
-                                        Event term_event,
-                                        const FieldMask &user_mask,
-                                        const VersionInfo &version_info)
+    Event ReductionView::add_user(const RegionUsage &usage, Event term_event,
+                                  const FieldMask &user_mask,
+                                  const VersionInfo &version_info)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_PERF
@@ -6247,8 +6244,7 @@ namespace Legion {
       if (issue_collect)
         defer_collect_user(term_event);
       // Return our result
-      Event result = Runtime::merge_events<false>(wait_on);
-      return InstanceRef(manager, user_mask, result);
+      return Runtime::merge_events<false>(wait_on);
     }
 
     //--------------------------------------------------------------------------

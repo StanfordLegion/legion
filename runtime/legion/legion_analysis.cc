@@ -3753,7 +3753,8 @@ namespace Legion {
     PhysicalCloser::PhysicalCloser(const PhysicalCloser &rhs)
       : info(rhs.info), handle(rhs.handle), 
         leave_open_mask(rhs.leave_open_mask),
-        upper_targets(rhs.get_lower_targets())
+        upper_targets(rhs.lower_targets),
+        close_targets(rhs.close_targets)
     //--------------------------------------------------------------------------
     {
     }
@@ -3778,7 +3779,8 @@ namespace Legion {
                                   PhysicalState *state,
                                   const std::vector<MaterializedView*> &targets,
                                   const FieldMask &closing_mask,
-                                  const FieldMask &complete_mask)
+                                  const FieldMask &complete_mask,
+                                  const InstanceSet &target_set)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -3819,6 +3821,7 @@ namespace Legion {
       }
       // Then we can record the targets
       upper_targets = targets;
+      close_targets = target_set;
     }
 
     //--------------------------------------------------------------------------
@@ -3840,19 +3843,58 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::vector<MaterializedView*>& PhysicalCloser::
-                                                  get_upper_targets(void) const
+    void PhysicalCloser::issue_dirty_updates(RegionTreeNode *node,
+                                             const FieldMask &dirty_fields,
+              const LegionMap<LogicalView*,FieldMask>::aligned &valid_instances)
     //--------------------------------------------------------------------------
     {
-      return upper_targets;
+#ifdef DEBUG_HIGH_LEVEL
+      assert(lower_targets.size() == close_targets.size());
+#endif
+      // Iterate through all our instances and issue updates where necessary
+      for (unsigned idx = 0; idx < lower_targets.size(); idx++)
+      {
+        // Figure out which of the dirty fields we have to issue udpates for
+        FieldMask needed_fields = 
+          close_targets[idx].get_valid_fields() & dirty_fields;
+        // If we don't have any dirty fields, keep going
+        if (!needed_fields)
+          continue;
+        MaterializedView *target = lower_targets[idx];
+        // See if any of these fields are already valid
+        LegionMap<LogicalView*,FieldMask>::aligned::const_iterator finder = 
+          valid_instances.find(target);
+        if (finder != valid_instances.end())
+        {
+          needed_fields -= finder->second;
+          // If we're already valid, we're good to go
+          if (!needed_fields)
+            continue;
+        }
+        // Now we need to issue update copies for the valid fields
+        node->issue_update_copies(info, target, needed_fields,
+                                  valid_instances, this);
+      }
     }
 
     //--------------------------------------------------------------------------
-    const std::vector<MaterializedView*>& PhysicalCloser::
-                                                  get_lower_targets(void) const
+    void PhysicalCloser::issue_reduction_updates(RegionTreeNode *node,
+                                                 const FieldMask &reduc_fields,
+           const LegionMap<ReductionView*,FieldMask>::aligned &valid_reductions)
     //--------------------------------------------------------------------------
     {
-      return lower_targets;
+#ifdef DEBUG_HIGH_LEVEL
+      assert(lower_targets.size() == close_targets.size());
+#endif
+      for (unsigned idx = 0; idx < lower_targets.size(); idx++)
+      {
+        FieldMask needed_fields = 
+          close_targets[idx].get_valid_fields() & reduc_fields;
+        if (!needed_fields)
+          continue;
+        node->issue_update_reductions(lower_targets[idx], needed_fields,
+                          info.version_info, valid_reductions, info.op, this);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -3876,8 +3918,7 @@ namespace Legion {
     {
       // Note that permit leave open means that we don't update
       // the dirty bits when we update the state
-      node->update_valid_views(state, info.traversal_mask,
-                               dirty_mask, upper_targets);
+      node->update_valid_views(state, dirty_mask, upper_targets, close_targets);
     } 
 
     //--------------------------------------------------------------------------

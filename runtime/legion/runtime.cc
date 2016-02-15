@@ -1114,7 +1114,7 @@ namespace Legion {
         // once the reference event is ready, we can also issue
         // the unlock operations contingent upon the termination 
         // event having triggered
-        if (IS_ATOMIC(requirement))
+        if (IS_ATOMIC(req))
         {
           std::map<Reservation,bool> required_locks;
           references.update_atomic_locks(required_locks, true/*exclusive*/);
