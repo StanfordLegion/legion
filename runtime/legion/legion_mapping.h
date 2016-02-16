@@ -458,7 +458,7 @@ namespace Legion {
        */
       struct SelectTaskSrcInput {
         PhysicalInstance                        target;
-        std::set<PhysicalInstance>              source_instances;
+        std::vector<PhysicalInstance>           source_instances;
         unsigned                                region_req_index;
       };
       struct SelectTaskSrcOutput {

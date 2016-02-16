@@ -126,21 +126,21 @@ namespace Legion {
                                            Event handle_ready,
                                            Event domain_ready);
       Event create_partition_by_field(RegionTreeContext ctx,
-                                      Processor local_proc,
+                                      Operation *op,
                                       const RegionRequirement &req,
                                       IndexPartition pending,
                                       const Domain &color_space,
                                       Event term_event,
                                       VersionInfo &version_info);
       Event create_partition_by_image(RegionTreeContext ctx,
-                                      Processor local_proc,
+                                      Operation *op,
                                       const RegionRequirement &req,
                                       IndexPartition pending,
                                       const Domain &color_space,
                                       Event term_event,
                                       VersionInfo &version_info);
       Event create_partition_by_preimage(RegionTreeContext ctx,
-                                      Processor local_proc,
+                                      Operation *op,
                                       const RegionRequirement &req,
                                       IndexPartition projection,
                                       IndexPartition pending,
@@ -281,7 +281,6 @@ namespace Legion {
                                       LogicalRegion handle,
                                       bool logical_users_only);
     public: // Physical analysis methods
-#if 1
       void initialize_current_context(RegionTreeContext ctx,
                     const RegionRequirement &req, const InstanceSet &source,
                     Event term_event, unsigned depth,
@@ -311,6 +310,16 @@ namespace Legion {
                                  , UniqueID uid
 #endif
                                  );
+      void map_virtual_region(RegionTreeContext ctx,
+                              const RegionRequirement &req,
+                              InstanceRef &composite_ref,
+                              VersionInfo &version_info
+#ifdef DEBUG_HIGH_LEVEL
+                              , unsigned index
+                              , const char *log_name
+                              , UniqueID uid
+#endif
+                              );
       void physical_register_only(RegionTreeContext ctx,
                                   const RegionRequirement &req,
                                   VersionInfo &version_info,
@@ -346,19 +355,6 @@ namespace Legion {
                                    , UniqueID uid
 #endif
                                    );
-      CompositeRef virtual_close_context(RegionTreeContext ctx,
-                                         const RegionRequirement &req,
-                                         VersionInfo &version_info
-#ifdef DEBUG_HIGH_LEVEL
-                                         , unsigned index
-                                         , const char *log_name
-                                         , UniqueID uid
-#endif
-                                         );
-      void register_virtual_region(RegionTreeContext ctx,
-                                   CompositeView *composite_view,
-                                   RegionRequirement &req,
-                                   VersionInfo &version_info);
       Event copy_across(RegionTreeContext src_ctx,
                         RegionTreeContext dst_ctx,
                         const RegionRequirement &src_req,
@@ -385,155 +381,7 @@ namespace Legion {
                                const InstanceSet &valid, InstanceSet &result);
       bool is_valid_mapping(const InstanceRef &ref, 
                             const RegionRequirement &req);
-#else
-      InstanceRef initialize_current_context(RegionTreeContext ctx,
-                    const RegionRequirement &req, PhysicalManager *manager,
-                    Event term_event, unsigned depth,
-                    std::map<PhysicalManager*,InstanceView*> &top_views);
-      bool premap_physical_region(RegionTreeContext ctx,
-                                  RegionTreePath &path,
-                                  RegionRequirement &req,
-                                  VersionInfo &version_info,
-                                  Operation *op,
-                                  SingleTask *parent_ctx,
-                                  Processor local_proc
-#ifdef DEBUG_HIGH_LEVEL
-                                  , unsigned index
-                                  , const char *log_name
-                                  , UniqueID uid
-#endif
-                                  );
-      MappingRef map_physical_region(RegionTreeContext ctx,
-                                     RegionRequirement &req,
-                                     unsigned idx,
-                                     VersionInfo &version_info,
-                                     Operation *op,
-                                     Processor local_proc,
-                                     Processor target_proc
-#ifdef DEBUG_HIGH_LEVEL
-                                     , const char *log_name
-                                     , UniqueID uid
-#endif
-                                     );
-      // Note this works without a path which assumes
-      // we are remapping exactly the logical region
-      // specified by the region requirement
-      MappingRef remap_physical_region(RegionTreeContext ctx,
-                                       RegionRequirement &req,
-                                       unsigned index,
-                                       VersionInfo &version_info,
-                                       const InstanceRef &ref
-#ifdef DEBUG_HIGH_LEVEL
-                                       , const char *log_name
-                                       , UniqueID uid
-#endif
-                                       );
-      // This call will not actually perform a traversal
-      // but will instead compute the proper view on which
-      // to perform the mapping based on a target instance
-      MappingRef map_restricted_region(RegionTreeContext ctx,
-                                       RegionRequirement &req,
-                                       unsigned index,
-                                       VersionInfo &version_info,
-                                       Processor target_proc,
-                                       const InstanceRef &result
-#ifdef DEBUG_HIGH_LEVEL
-                                       , const char *log_name
-                                       , UniqueID uid
-#endif
-                                       );
-      // Map a virtual region to a composite instance 
-      CompositeRef map_virtual_region(RegionTreeContext ctx,
-                                      RegionRequirement &req,
-                                      unsigned index,
-                                      VersionInfo &version_info
-#ifdef DEBUG_HIGH_LEVEL
-                                      , const char *log_name
-                                      , UniqueID uid
-#endif
-                                      );
-      InstanceRef register_physical_region(RegionTreeContext ctx,
-                                           const MappingRef &ref,
-                                           RegionRequirement &req,
-                                           unsigned index,
-                                           VersionInfo &version_info,
-                                           Operation *op,
-                                           Processor local_proc,
-                                           Event term_event
-#ifdef DEBUG_HIGH_LEVEL
-                                           , const char *log_name
-                                           , UniqueID uid
-#endif
-                                           );
-      void register_virtual_region(RegionTreeContext ctx,
-                                   CompositeView *composite_view,
-                                   RegionRequirement &req,
-                                   VersionInfo &version_info);
-      bool perform_close_operation(RegionTreeContext ctx,
-                                   RegionRequirement &req,
-                                   SingleTask *parent_ctx,
-                                   Processor local_proc,
-                     const LegionMap<ColorPoint,FieldMask>::aligned &targets,
-                                   const std::set<ColorPoint> &next_children,
-                                   Event &closed,
-                                   const MappingRef &target,
-                                   VersionInfo &version_info,
-                                   bool force_composite
-#ifdef DEBUG_HIGH_LEVEL
-                                   , unsigned index
-                                   , const char *log_name
-                                   , UniqueID uid
-#endif
-                                   );
-
-
-      Event close_physical_context(RegionTreeContext ctx,
-                                   RegionRequirement &req,
-                                   VersionInfo &version_info,
-                                   Operation *op,
-                                   Processor local_proc,
-                                   const InstanceRef &ref
-#ifdef DEBUG_HIGH_LEVEL
-                                   , unsigned index
-                                   , const char *log_name
-                                   , UniqueID uid
-#endif
-                                   );
-      Event copy_across(Operation *op,
-                        Processor local_proc,
-                        RegionTreeContext src_ctx,
-                        RegionTreeContext dst_ctx,
-                        RegionRequirement &src_req,
-                        VersionInfo &src_version_info,
-                        const RegionRequirement &dst_req,
-                        const InstanceRef &dst_ref,
-                        Event precondition);
-      Event copy_across(Operation *op,
-                        RegionTreeContext src_ctx, 
-                        RegionTreeContext dst_ctx,
-                        const RegionRequirement &src_req,
-                        const RegionRequirement &dst_req,
-                        const InstanceRef &src_ref,
-                        const InstanceRef &dst_ref,
-                        Event precondition);
-      Event reduce_across(Operation *op,
-                        Processor local_proc,
-                        RegionTreeContext src_ctx,
-                        RegionTreeContext dst_ctx,
-                        RegionRequirement &src_req,
-                        VersionInfo &version_info,
-                        const RegionRequirement &dst_req,
-                        const InstanceRef &dst_ref,
-                        Event precondition);
-      Event reduce_across(Operation *op,
-                        RegionTreeContext src_ctx, 
-                        RegionTreeContext dst_ctx,
-                        const RegionRequirement &src_req,
-                        const RegionRequirement &dst_req,
-                        const InstanceRef &src_ref,
-                        const InstanceRef &dst_ref,
-                        Event precondition);
-#endif
+    public:
       // This takes ownership of the value buffer
       void fill_fields(RegionTreeContext ctx,
                        const RegionRequirement &req,
@@ -1402,8 +1250,8 @@ namespace Legion {
       void transform_field_mask(FieldMask &mask, AddressSpaceID source);
       FieldMask get_field_mask(const std::set<FieldID> &fields) const;
       unsigned get_field_index(FieldID fid) const;
-      void get_field_indexes(const std::set<FieldID> &fields,
-                             std::map<unsigned,FieldID> &indexes) const;
+      void get_field_indexes(const std::vector<FieldID> &fields,
+                             std::vector<unsigned> &indexes) const;
     protected:
       void compute_create_offsets(const std::set<FieldID> &create_fields,
                                   std::vector<size_t> &field_sizes,
@@ -1655,7 +1503,7 @@ namespace Legion {
                                 const std::set<ColorPoint> &next_children,
                                 bool &changed);
       // Analogous methods to those above except for closing to a composite view
-      CompositeRef create_composite_instance(ContextID ctx_id,
+      CompositeView* create_composite_instance(ContextID ctx_id,
                        const LegionMap<ColorPoint,FieldMask>::aligned &targets,
                                      const std::set<ColorPoint> &next_children,
                                      const FieldMask &closing_mask,
@@ -1759,6 +1607,10 @@ namespace Legion {
       void update_valid_views(PhysicalState *state, const FieldMask &valid_mask,
                               bool dirty, LogicalView *new_view);
       void update_valid_views(PhysicalState *state, const FieldMask &dirty_mask,
+                              const std::vector<LogicalView*> &new_views,
+                              const InstanceSet &corresponding_references);
+      // I hate the container problem, same as above except MaterializedView
+      void update_valid_views(PhysicalState *state, const FieldMask &dirty_mask,
                               const std::vector<MaterializedView*> &new_views,
                               const InstanceSet &corresponding_references);
       void update_reduction_views(PhysicalState *state, 
@@ -1772,6 +1624,9 @@ namespace Legion {
       void find_complete_fields(const FieldMask &scope_fields,
           const LegionMap<ColorPoint,FieldMask>::aligned &children,
           FieldMask &complete_fields);
+      void convert_target_views(const InstanceSet &targets, ContextID ctx,
+                                std::vector<LogicalView*> &target_views);
+      // I hate the container problem, same as above except MaterializedView
       void convert_target_views(const InstanceSet &targets, ContextID ctx,
                                 std::vector<MaterializedView*> &target_views);
     public:
@@ -2029,12 +1884,9 @@ namespace Legion {
                                          const FieldMask &mask);
 #endif
     public:
-      void remap_region(ContextID ctx, MaterializedView *view, 
-                        const FieldMask &user_mask, 
-                        VersionInfo &version_info, FieldMask &needed_mask);
-      CompositeRef map_virtual_region(ContextID ctx, 
-                                      const FieldMask &virtual_mask,
-                                      VersionInfo &version_info);
+      CompositeView *map_virtual_region(ContextID ctx, 
+                                       const FieldMask &virtual_mask,
+                                       VersionInfo &version_info);
       void register_region(const TraversalInfo &info, Event term_event,
                            const RegionUsage &usage, InstanceSet &targets);
       void register_virtual(ContextID ctx, CompositeView *view,
@@ -2050,7 +1902,7 @@ namespace Legion {
       void find_field_descriptors(ContextID ctx, Event term_event,
                                   const RegionUsage &usage,
                                   const FieldMask &user_mask,
-                                  unsigned fid_idx, Processor proc, 
+                                  unsigned fid_idx, Operation *op, 
                                   std::vector<FieldDataDescriptor> &field_data,
                                   std::set<Event> &preconditions,
                                   VersionInfo &version_info);

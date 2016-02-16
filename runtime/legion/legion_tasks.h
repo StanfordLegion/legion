@@ -86,6 +86,10 @@ namespace Legion {
       virtual void resolve_true(void);
       virtual void resolve_false(void) = 0;
       virtual bool speculate(bool &value);
+      virtual void select_sources(const InstanceRef &target,
+                                  const InstanceSet &sources,
+                                  std::vector<unsigned> &ranking);
+      virtual void update_atomic_locks(Reservation lock, bool exclusive);
       virtual unsigned find_parent_index(unsigned idx);
       virtual VersionInfo& get_version_info(unsigned idx);
       virtual RegionTreePath& get_privilege_path(unsigned idx);
@@ -194,6 +198,8 @@ namespace Legion {
     protected:
       // Early mapped regions
       std::map<unsigned/*idx*/,InstanceSet>     early_mapped_regions;
+      // A map of any locks that we need to take for this task
+      std::map<Reservation,bool/*exclusive*/>   atomic_locks;
     protected:
       std::vector<unsigned>                     parent_req_indexes;
     protected:
@@ -221,6 +227,11 @@ namespace Legion {
       AllocManager *arg_manager;
     protected:
       MapperManager *mapper;
+    private:
+      unsigned current_mapping_index;
+    public:
+      inline void set_current_mapping_index(unsigned index) 
+        { current_mapping_index = index; }
     public:
       // Static methods
       static void process_unpack_task(Runtime *rt,
@@ -516,7 +527,7 @@ namespace Legion {
       virtual bool has_restrictions(unsigned idx, LogicalRegion handle) = 0;
       virtual bool can_early_complete(UserEvent &chain_event) = 0;
       virtual void return_virtual_instance(unsigned index, 
-                                           const CompositeRef &ref) = 0;
+                                           InstanceSet &refs) = 0;
     public:
       virtual Event get_task_completion(void) const = 0;
       virtual TaskKind get_task_kind(void) const = 0;
@@ -530,7 +541,7 @@ namespace Legion {
       RegionTreeContext find_enclosing_context(unsigned idx);
     public:
       // Override these methods from operation class
-      virtual bool trigger_execution(void);
+      virtual bool trigger_execution(void); 
     protected:
       virtual void trigger_task_complete(void) = 0;
       virtual void trigger_task_commit(void) = 0;
@@ -567,7 +578,7 @@ namespace Legion {
       // Keep track of inline mapping regions for this task
       // so we can see when there are conflicts
       LegionList<PhysicalRegion,TASK_INLINE_REGION_ALLOC>::tracked
-                                                   inline_regions;
+                                                   inline_regions; 
       // Context for this task
       RegionTreeContext context; 
       unsigned initial_region_count;
@@ -768,8 +779,7 @@ namespace Legion {
       virtual bool is_stealable(void) const;
       virtual bool has_restrictions(unsigned idx, LogicalRegion handle);
       virtual bool can_early_complete(UserEvent &chain_event);
-      virtual void return_virtual_instance(unsigned index,
-                                           const CompositeRef &ref);
+      virtual void return_virtual_instance(unsigned index, InstanceSet &refs);
       virtual VersionInfo& get_version_info(unsigned idx);
       virtual RegionTreePath& get_privilege_path(unsigned idx);
       virtual void recapture_version_info(unsigned idx);
@@ -873,8 +883,7 @@ namespace Legion {
       virtual bool is_stealable(void) const;
       virtual bool has_restrictions(unsigned idx, LogicalRegion handle);
       virtual bool can_early_complete(UserEvent &chain_event);
-      virtual void return_virtual_instance(unsigned index,
-                                           const CompositeRef &ref);
+      virtual void return_virtual_instance(unsigned index, InstanceSet &refs);
       virtual VersionInfo& get_version_info(unsigned idx);
       virtual void recapture_version_info(unsigned idx);
     public:
@@ -942,8 +951,7 @@ namespace Legion {
       virtual bool is_stealable(void) const;
       virtual bool has_restrictions(unsigned idx, LogicalRegion handle);
       virtual bool can_early_complete(UserEvent &chain_event);
-      virtual void return_virtual_instance(unsigned index,
-                                           const CompositeRef &ref);
+      virtual void return_virtual_instance(unsigned index, InstanceSet &refs);
       virtual RemoteTask* find_outermost_context(void) = 0;
     public:
       virtual bool has_remote_state(void) const = 0;
@@ -1280,7 +1288,7 @@ namespace Legion {
       virtual void trigger_task_commit(void);
     public:
       void return_privileges(PointTask *point);
-      void return_virtual_instance(unsigned index, const CompositeRef &ref);
+      void return_virtual_instance(unsigned index, InstanceSet &refs);
       void record_child_mapped(void);
       void record_child_complete(void);
       void record_child_committed(void);
@@ -1317,7 +1325,7 @@ namespace Legion {
     protected:
       // Temporary storage for future results
       std::map<DomainPoint,std::pair<void*,size_t> > temporary_futures;
-      std::deque<CompositeRef> temporary_virtual_refs;
+      std::deque<InstanceRef> temporary_virtual_refs;
     };
 
     /**

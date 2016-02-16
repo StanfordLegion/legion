@@ -577,7 +577,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Event RegionTreeForest::create_partition_by_field(RegionTreeContext ctx,
-                                                  Processor proc,
+                                                  Operation *op,    
                                                   const RegionRequirement &req,
                                                   IndexPartition pending,
                                                   const Domain &color_space,
@@ -604,7 +604,7 @@ namespace Legion {
         user_mask.set_bit(fid_idx);
         RegionUsage usage(req);
         top_node->find_field_descriptors(ctx.get_id(), term_event, usage,
-                                       user_mask, fid_idx, proc,
+                                       user_mask, fid_idx, op,
                                        field_data, preconditions, version_info);
       }
       // Enumerate the color space so we can get back a different index
@@ -633,7 +633,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Event RegionTreeForest::create_partition_by_image(RegionTreeContext ctx,
-                                                  Processor proc,
+                                                  Operation *op,
                                                   const RegionRequirement &req,
                                                   IndexPartition pending,
                                                   const Domain &color_space,
@@ -669,7 +669,7 @@ namespace Legion {
         // Get the field data on this child node
         RegionUsage usage(req);
         child_node->find_field_descriptors(ctx.get_id(), term_event, usage,
-                                            user_mask, fid_idx, proc,
+                                            user_mask, fid_idx, op,
                                        field_data, preconditions, version_info);
         Event child_pre;
         const Domain &child_dom = 
@@ -700,7 +700,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Event RegionTreeForest::create_partition_by_preimage(RegionTreeContext ctx,
-                                                  Processor proc,
+                                                  Operation *op,
                                                   const RegionRequirement &req,
                                                   IndexPartition projection,
                                                   IndexPartition pending,
@@ -729,7 +729,7 @@ namespace Legion {
         user_mask.set_bit(fid_idx);
         RegionUsage usage(req);
         top_node->find_field_descriptors(ctx.get_id(), term_event, usage,
-                                         user_mask, fid_idx, proc,
+                                         user_mask, fid_idx, op,
                                        field_data, preconditions, version_info);
       }
       // Get all the index spaces from the color space in the projection
@@ -1817,6 +1817,30 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void RegionTreeForest::map_virtual_region(RegionTreeContext ctx,
+                                              const RegionRequirement &req,
+                                              InstanceRef &composite_ref,
+                                              VersionInfo &version_info
+#ifdef DEBUG_HIGH_LEVEL
+                                              , unsigned index
+                                              , const char *log_name
+                                              , UniqueID uid
+#endif
+                                              )
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(composite_ref.is_composite_ref());
+      assert(req.handle_type == SINGULAR);
+#endif
+      RegionNode *child_node = get_node(req.region);
+      const FieldMask &composite_mask = composite_ref.get_valid_fields();
+      CompositeView *view = child_node->map_virtual_region(ctx.get_id(), 
+                                                composite_mask, version_info);
+      composite_ref.set_composite_view(view);
+    }
+
+    //--------------------------------------------------------------------------
     void RegionTreeForest::physical_register_only(RegionTreeContext ctx,
                                                   const RegionRequirement &req,
                                                   VersionInfo &version_info,
@@ -1972,870 +1996,359 @@ namespace Legion {
       return Runtime::merge_events<false>(closed_events);
     }
 
-#if 0
-    //--------------------------------------------------------------------------
-    bool RegionTreeForest::premap_physical_region(RegionTreeContext ctx,
-                                                  RegionTreePath &path,
-                                                  RegionRequirement &req,
-                                                  VersionInfo &version_info,
-                                                  Operation *op,
-                                                  SingleTask *parent_ctx,
-                                                  Processor local_proc
-#ifdef DEBUG_HIGH_LEVEL
-                                                  , unsigned index
-                                                  , const char *log_name
-                                                  , UniqueID uid
-#endif
-                                                  )
-    //--------------------------------------------------------------------------
-    {
-      // If we are a NO_ACCESS then we are already done
-      if (IS_NO_ACCESS(req))
-        return true;
-#ifdef DEBUG_PERF
-      begin_perf_trace(PREMAP_PHYSICAL_REGION_ANALYSIS);
-#endif
-#ifdef DEBUG_HIGH_LEVEL
-      assert(ctx.exists());
-#endif
-      RegionNode *parent_node = get_node(req.parent);
-      // Don't need to initialize the path since that was done
-      // in the logical traversal.
-      // Construct a premap traversal object
-      FieldMask user_mask = 
-        parent_node->column_source->get_field_mask(req.privilege_fields);
-      TraversalInfo info(ctx.get_id(), op, local_proc, 
-                        req, version_info, user_mask); 
-      // Get the start node
-      RegionTreeNode *start_node;
-      if (req.handle_type == PART_PROJECTION)
-        start_node = get_node(req.partition);
-      else
-        start_node = get_node(req.region);
-      for (unsigned idx = 0; idx < (path.get_path_length()-1); idx++)
-        start_node = start_node->get_parent();
-#ifdef DEBUG_HIGH_LEVEL
-      // Little sanity checking
-      assert(start_node->get_depth() >= parent_node->get_depth());
-#endif
-      PremapTraverser traverser(path, info);
-#ifdef DEBUG_HIGH_LEVEL
-      TreeStateLogger::capture_state(runtime, &req, index, log_name, uid,
-                                     parent_node, ctx.get_id(), 
-                                     true/*before*/, true/*premap*/, 
-                                     false/*closing*/, false/*logical*/,
-                                     FieldMask(FIELD_ALL_ONES), user_mask);
-#endif
-      const bool result = traverser.traverse(start_node);
-#ifdef DEBUG_HIGH_LEVEL
-      if (result)
-      {
-        TreeStateLogger::capture_state(runtime, &req, index, log_name, uid,
-                                       parent_node, ctx.get_id(), 
-                                       false/*before*/, true/*premap*/, 
-                                       false/*closing*/, false/*logical*/,
-                                       FieldMask(FIELD_ALL_ONES), user_mask);
-      }
-#endif
-#ifdef DEBUG_PERF
-      end_perf_trace(Runtime::perf_trace_tolerance);
-#endif
-      return result;
-    }
 
     //--------------------------------------------------------------------------
-    MappingRef RegionTreeForest::map_physical_region(RegionTreeContext ctx,
-                                                     RegionRequirement &req,
-                                                     unsigned index,
-                                                     VersionInfo &version_info,
-                                                     Operation *op,
-                                                     Processor local_proc,
-                                                     Processor target_proc
-#ifdef DEBUG_HIGH_LEVEL
-                                                     , const char *log_name
-                                                     , UniqueID uid
-#endif
-                                                     )
-    //--------------------------------------------------------------------------
-    {
-      if (IS_NO_ACCESS(req))
-        return MappingRef();
-#ifdef DEBUG_PERF
-      begin_perf_trace(MAP_PHYSICAL_REGION_ANALYSIS);
-#endif
-#ifdef DEBUG_HIGH_LEVEL
-      assert(ctx.exists());
-      assert(req.handle_type == SINGULAR);
-#endif
-      RegionNode *child_node = get_node(req.region);
-      FieldMask user_mask = 
-        child_node->column_source->get_field_mask(req.privilege_fields);
-      // Construct the mappable info
-      TraversalInfo info(ctx.get_id(), op, local_proc, 
-                        req, version_info, user_mask);
-      // Get the start node
-      RegionTreeNode *start_node = child_node;
-      // Construct the traverser
-      RegionTreePath single_path;
-      single_path.initialize(child_node->get_depth(), child_node->get_depth());
-      MappingTraverser traverser(single_path, info, RegionUsage(req), user_mask,
-                                 target_proc, index);
-#ifdef DEBUG_HIGH_LEVEL
-      TreeStateLogger::capture_state(runtime, &req, index, log_name, uid,
-                                     start_node, ctx.get_id(), 
-                                     true/*before*/, false/*premap*/, 
-                                     false/*closing*/, false/*logical*/,
-                                     FieldMask(FIELD_ALL_ONES), user_mask);
-#endif
-      bool result = traverser.traverse(start_node);
-#ifdef DEBUG_PERF
-      end_perf_trace(Runtime::perf_trace_tolerance);
-#endif
-      if (result)
-        return traverser.get_instance_ref();
-      else
-        return MappingRef();
-    }
-
-    //--------------------------------------------------------------------------
-    MappingRef RegionTreeForest::remap_physical_region(RegionTreeContext ctx,
-                                                      RegionRequirement &req,
-                                                      unsigned index,
-                                                      VersionInfo &version_info,
-                                                      const InstanceRef &ref
-#ifdef DEBUG_HIGH_LEVEL
-                                                      , const char *log_name
-                                                      , UniqueID uid
-#endif
-                                                      )
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(ctx.exists());
-      assert(req.handle_type == SINGULAR);
-#endif
-      // Reductions don't need any update fields
-      if (IS_REDUCE(req))
-      {
-        return MappingRef(ref.get_instance_view(), FieldMask());
-      }
-#ifdef DEBUG_PERF
-      begin_perf_trace(REMAP_PHYSICAL_REGION_ANALYSIS);
-#endif
-      RegionNode *target_node = get_node(req.region);
-      FieldMask user_mask = 
-        target_node->column_source->get_field_mask(req.privilege_fields);
-#ifdef DEBUG_HIGH_LEVEL
-      TreeStateLogger::capture_state(runtime, &req, index, log_name, uid,
-                                     target_node, ctx.get_id(), 
-                                     true/*before*/, false/*premap*/, 
-                                     false/*closing*/, false/*logical*/,
-                                     FieldMask(FIELD_ALL_ONES), user_mask);
-#endif
-      MaterializedView *view = ref.get_materialized_view();
-      FieldMask needed_mask;
-      target_node->remap_region(ctx.get_id(), view, user_mask, 
-                                version_info, needed_mask);
-#ifdef DEBUG_PERF
-      end_perf_trace(Runtime::perf_trace_tolerance);
-#endif
-      return MappingRef(view, needed_mask);
-    }
-
-    //--------------------------------------------------------------------------
-    MappingRef RegionTreeForest::map_restricted_region(RegionTreeContext ctx,
-                                                      RegionRequirement &req,
-                                                      unsigned index,
-                                                      VersionInfo &version_info,
-                                                      Processor target_proc,
-                                                      const InstanceRef &target
-#ifdef DEBUG_HIGH_LEVEL
-                                                      , const char *log_name
-                                                      , UniqueID uid
-#endif
-                                                      )
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(ctx.exists());
-      assert(req.handle_type == SINGULAR);
-      assert(target.has_ref());
-#endif
-#ifdef DEBUG_PERF
-      begin_perf_trace(MAP_PHYSICAL_REGION_ANALYSIS);
-#endif
-      RegionNode *child_node = get_node(req.region);
-      FieldMask user_mask = 
-        child_node->column_source->get_field_mask(req.privilege_fields);
-      // Make an empty path 
-      RegionTreePath single_path;
-      single_path.initialize(child_node->get_depth(), child_node->get_depth());
-      // Construct a dummy mappable info
-      TraversalInfo info(ctx.get_id(), NULL, Processor::NO_PROC, 
-                        req, version_info, user_mask);
-      MappingTraverser traverser(single_path, info, RegionUsage(req), 
-                             user_mask, target_proc, index, 
-                             target.get_instance_view());
-#ifdef DEBUG_HIGH_LEVEL
-      TreeStateLogger::capture_state(runtime, &req, index, log_name, uid,
-                                     child_node, ctx.get_id(), 
-                                     true/*before*/, false/*premap*/, 
-                                     false/*closing*/, false/*logical*/,
-                                     FieldMask(FIELD_ALL_ONES), user_mask);
-#endif
-      bool result = traverser.traverse(child_node);
-#ifdef DEBUG_HIGH_LEVEL
-      assert(result);
-      TreeStateLogger::capture_state(runtime, &req, index, log_name, uid,
-                                     child_node, ctx.get_id(), 
-                                     false/*before*/, false/*premap*/, 
-                                     false/*closing*/, false/*logical*/,
-                                     FieldMask(FIELD_ALL_ONES), user_mask);
-#endif
-#ifdef DEBUG_PERF
-      end_perf_trace(Runtime::perf_trace_tolerance);
-#endif
-      if (result)
-        return traverser.get_instance_ref();
-      else
-        return MappingRef();
-    }
-
-    //--------------------------------------------------------------------------
-    CompositeRef RegionTreeForest::map_virtual_region(RegionTreeContext ctx,
-                                                      RegionRequirement &req,
-                                                      unsigned index,
-                                                      VersionInfo &version_info
-#ifdef DEBUG_HIGH_LEVEL
-                                                      , const char *log_name
-                                                      , UniqueID uid
-#endif
-                                                      )
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(ctx.exists());
-      assert(req.handle_type == SINGULAR);
-#endif
-      RegionNode *child_node = get_node(req.region);
-      FieldMask user_mask = 
-        child_node->column_source->get_field_mask(req.privilege_fields);
-      return child_node->map_virtual_region(ctx.get_id(), user_mask, 
-                                            version_info);
-    }
-
-    //--------------------------------------------------------------------------
-    InstanceRef RegionTreeForest::register_physical_region(
-                                                      RegionTreeContext ctx,
-                                                      const MappingRef &ref,
-                                                      RegionRequirement &req,
-                                                      unsigned index,
-                                                      VersionInfo &version_info,
-                                                      Operation *op,
-                                                      Processor local_proc,
-                                                      Event term_event
-#ifdef DEBUG_HIGH_LEVEL
-                                                      , const char *log_name
-                                                      , UniqueID uid
-#endif
-                                                      ) 
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_PERF
-      begin_perf_trace(REGISTER_PHYSICAL_REGION_ANALYSIS);
-#endif
-#ifdef DEBUG_HIGH_LEVEL
-      assert(ctx.exists());
-      assert(req.handle_type == SINGULAR);
-      assert(ref.has_ref());
-#endif
-      RegionNode *child_node = get_node(req.region);
-      FieldMask user_mask = 
-        child_node->column_source->get_field_mask(req.privilege_fields);
-      // Construct the mappable info
-      TraversalInfo info(ctx.get_id(), op, local_proc, 
-                        req, version_info, user_mask);
-      // Construct the user
-      RegionUsage usage(req);
-      LogicalView *view = ref.get_view();
-      InstanceRef result = child_node->register_region(info, term_event,
-                                                       usage, user_mask,
-                                                       view, ref.get_mask());
-      // If the user requested that this view become persistent make it so
-      if (req.make_persistent)
-      {
-        if (view->is_instance_view() && 
-            view->as_instance_view()->is_materialized_view())
-        {
-          MaterializedView *mat_view = 
-            view->as_instance_view()->as_materialized_view();
-          if (!mat_view->is_persistent())
-          {
-            unsigned parent_index = op->find_parent_index(index);
-            UserEvent wait_on = UserEvent::create_user_event();
-            mat_view->make_persistent(op->get_parent(), parent_index,
-                                      runtime->address_space, wait_on,
-                                      version_info.get_upper_bound_node());
-            // Have to wait for the persistence to be confirmed
-            wait_on.wait();
-          }
-        }
-        else
-        {
-          log_run.warning("Ignoring mapper request to make a non-materialized "
-                          "view persistent");
-        }
-      }
-#ifdef DEBUG_HIGH_LEVEL 
-      RegionTreeNode *start_node = child_node;
-      TreeStateLogger::capture_state(runtime, &req, index, log_name, uid,
-                                     start_node, ctx.get_id(), 
-                                     false/*before*/, false/*premap*/, 
-                                     false/*closing*/, false/*logical*/,
-                                     FieldMask(FIELD_ALL_ONES), user_mask);
-#endif
-#ifdef DEBUG_PERF
-      end_perf_trace(Runtime::perf_trace_tolerance);
-#endif
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    void RegionTreeForest::register_virtual_region(RegionTreeContext ctx,
-                                                  CompositeView *composite_view,
-                                                   RegionRequirement &req,
-                                                   VersionInfo &version_info)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(ctx.exists());
-      assert(composite_view->get_parent() == NULL);
-      assert(composite_view->logical_node->is_region());
-#endif
-      RegionNode *child_node = composite_view->logical_node->as_region_node();
-      FieldMask user_mask = 
-        child_node->column_source->get_field_mask(req.privilege_fields);
-      child_node->register_virtual(ctx.get_id(), composite_view,
-                                   version_info, user_mask);
-    }
-    
-    //--------------------------------------------------------------------------
-    InstanceRef RegionTreeForest::initialize_current_context(
-                                                RegionTreeContext ctx,
-                                                const RegionRequirement &req,
-                                                PhysicalManager *manager,
-                                                Event term_event,
-                                                unsigned depth,
-                            std::map<PhysicalManager*,InstanceView*> &top_views)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(req.handle_type == SINGULAR);
-#endif
-      RegionNode *top_node = get_node(req.region);
-      RegionUsage usage(req);
-      FieldMask user_mask = 
-        top_node->column_source->get_field_mask(req.privilege_fields);
-      InstanceView *new_view = NULL;
-      if (manager->is_reduction_manager())
-      {
-        std::map<PhysicalManager*,InstanceView*>::const_iterator finder = 
-          top_views.find(manager);
-        if (finder == top_views.end())
-        {
-          new_view = manager->as_reduction_manager()->create_view();
-          top_views[manager] = new_view;
-        }
-        else
-          new_view = finder->second;
-      }
-      else
-      {
-        InstanceManager *inst_manager = manager->as_instance_manager();
-#ifdef DEBUG_HIGH_LEVEL
-        assert(inst_manager != NULL);
-#endif
-        std::map<PhysicalManager*,InstanceView*>::const_iterator finder = 
-          top_views.find(manager);
-        MaterializedView *top_view = NULL;
-        if (finder == top_views.end())
-        {
-          top_view = inst_manager->create_top_view(depth);
-          top_views[manager] = top_view;
-        }
-        else
-          top_view = finder->second->as_materialized_view();
-#ifdef DEBUG_HIGH_LEVEL
-        assert(top_view != NULL);
-#endif
-        // Now walk from the top view down to the where the 
-        // node is that we're initializing
-        // First compute the path
-        std::vector<ColorPoint> path;
-#ifdef DEBUG_HIGH_LEVEL
-#ifndef NDEBUG
-        bool result = 
-#endif
-#endif
-        compute_index_path(inst_manager->region_node->row_source->handle,
-                           top_node->row_source->handle, path);
-#ifdef DEBUG_HIGH_LEVEL
-        assert(result);
-        assert(!path.empty());
-#endif
-        // Note we don't need to traverse the last element
-        for (int idx = int(path.size())-2; idx >= 0; idx--)
-          top_view = top_view->get_materialized_subview(path[idx]);
-        // Once we've made it down to the child we are done
-#ifdef DEBUG_HIGH_LEVEL
-        assert(top_view->logical_node == top_node);
-#endif
-        new_view = top_view;
-      }
-#ifdef DEBUG_HIGH_LEVEL
-      assert(new_view != NULL);
-#endif
-      // It's actually incorrect to do full initialization of the
-      // region tree here in case we have multiple region requirements
-      // that overlap with each other.
-      // Now seed the top node
-      top_node->seed_state(ctx.get_id(), term_event, usage,
-                           user_mask, new_view);
-      return InstanceRef(Event::NO_EVENT, new_view);
-    }
-
-    //--------------------------------------------------------------------------
-    void RegionTreeForest::initialize_current_context(RegionTreeContext ctx,
-                                                  const RegionRequirement &req,
-                                                  CompositeView *composite_view)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(req.handle_type == SINGULAR);
-#endif
-      RegionNode *top_node = get_node(req.region);
-      RegionUsage usage(req);
-      FieldMask user_mask = 
-        top_node->column_source->get_field_mask(req.privilege_fields);
-      top_node->seed_state(ctx.get_id(), Event::NO_EVENT, usage,
-                           user_mask, composite_view);
-    }
-    
-    //--------------------------------------------------------------------------
-    void RegionTreeForest::invalidate_current_context(RegionTreeContext ctx,
-                                                      LogicalRegion handle,
-                                                      bool logical_users_only)
-    //--------------------------------------------------------------------------
-    {
-      RegionNode *top_node = get_node(handle);
-      CurrentInvalidator invalidator(ctx.get_id(), logical_users_only);
-      top_node->visit_node(&invalidator);
-    }
-
-    //--------------------------------------------------------------------------
-    Event RegionTreeForest::close_physical_context(RegionTreeContext ctx,
-                                                  RegionRequirement &req,
-                                                  VersionInfo &version_info,
-                                                  Operation *op,
-                                                  Processor local_proc,
-                                                  const InstanceRef &ref 
-#ifdef DEBUG_HIGH_LEVEL
-                                                  , unsigned index
-                                                  , const char *log_name
-                                                  , UniqueID uid
-#endif
-                                                  )
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(req.handle_type == SINGULAR);
-#endif
-      RegionNode *top_node = get_node(req.region);
-      FieldMask user_mask = 
-        top_node->column_source->get_field_mask(req.privilege_fields);
-      RegionUsage usage(req);
-      TraversalInfo info(ctx.get_id(), op, local_proc, 
-                        req, version_info, user_mask);
-#ifdef DEBUG_HIGH_LEVEL
-      TreeStateLogger::capture_state(runtime, &req, index, log_name, uid,
-                                     top_node, ctx.get_id(), 
-                                     true/*before*/, false/*premap*/, 
-                                     true/*closing*/, false/*logical*/,
-                                     FieldMask(FIELD_ALL_ONES), user_mask);
-#endif
-      Event result = top_node->close_state(info, Event::NO_EVENT, usage,
-                                           user_mask, ref);
-#ifdef DEBUG_HIGH_LEVEL
-      TreeStateLogger::capture_state(runtime, &req, index, log_name, uid,
-                                     top_node, ctx.get_id(), 
-                                     false/*before*/, false/*premap*/, 
-                                     true/*closing*/, false/*logical*/,
-                                     FieldMask(FIELD_ALL_ONES), user_mask);
-#endif
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    Event RegionTreeForest::copy_across(Operation *op,
-                                        Processor local_proc,
-                                        RegionTreeContext src_ctx,
-                                        RegionTreeContext dst_ctx,
-                                        RegionRequirement &src_req,
-                                        VersionInfo &src_version_info,
-                                        const RegionRequirement &dst_req,
-                                        const InstanceRef &dst_ref,
-                                        Event pre)
-    //--------------------------------------------------------------------------
-    {
- #ifdef DEBUG_PERF
-      begin_perf_trace(COPY_ACROSS_ANALYSIS);
-#endif
-#ifdef DEBUG_HIGH_LEVEL
-      assert(src_req.handle_type == SINGULAR);
-      assert(dst_req.handle_type == SINGULAR);
-      assert(dst_ref.has_ref());
-      assert(src_req.instance_fields.size() == dst_req.instance_fields.size());
-#endif     
-      MaterializedView *dst_view = dst_ref.get_materialized_view();
-      // Find the valid instance views for the source and then sort them
-      LegionMap<MaterializedView*,FieldMask>::aligned src_instances;
-      LegionMap<DeferredView*,FieldMask>::aligned deferred_instances;
-      RegionNode *src_node = get_node(src_req.region);
-      FieldMask src_mask = 
-        src_node->column_source->get_field_mask(src_req.privilege_fields);
-
-      RegionNode *dst_node = get_node(dst_req.region);
-      FieldMask dst_mask = 
-        dst_node->column_source->get_field_mask(dst_req.privilege_fields);
-      // Very important we pass the source version info here!
-      TraversalInfo info(src_ctx.get_id(), op, 
-                        local_proc, src_req, src_version_info, src_mask);
-      src_node->find_copy_across_instances(info, dst_view,
-                                           src_instances, deferred_instances);
-      // Now is where things get tricky, since we don't have any correspondence
-      // between fields in the two different requirements we can't use our 
-      // normal copy routines. Instead we'll issue copies one field at a time
-      std::set<Event> result_events;
-      std::vector<Domain::CopySrcDstField> src_fields;
-      std::vector<Domain::CopySrcDstField> dst_fields;
-      Event dst_pre = dst_ref.get_ready_event(); 
-      Event precondition = Runtime::merge_events<false>(pre, dst_pre);
-      // Also compute all of the source preconditions for each instance
-      std::map<MaterializedView*,
-        LegionMap<Event,FieldMask>::aligned > src_preconditions;
-      for (LegionMap<MaterializedView*,FieldMask>::aligned::const_iterator it =
-            src_instances.begin(); it != src_instances.end(); it++)
-      {
-        LegionMap<Event,FieldMask>::aligned &preconditions = 
-                                          src_preconditions[it->first];
-        it->first->find_copy_preconditions(0/*redop*/, true/*reading*/,
-                                           it->second, src_version_info,
-                                           preconditions);
-      }
-      for (unsigned idx = 0; idx < src_req.instance_fields.size(); idx++)
-      {
-        src_fields.clear();
-        dst_fields.clear();
-        unsigned src_index = src_node->column_source->get_field_index(
-                                            src_req.instance_fields[idx]);
-        bool found = false;
-        // Iterate through the instances and see if we can find
-        // a materialized views for the source field
-        std::set<Event> local_results;
-        for (LegionMap<MaterializedView*,FieldMask>::aligned::const_iterator 
-              sit = src_instances.begin(); sit != src_instances.end(); sit++)
-        {
-          if (sit->second.is_set(src_index))
-          {
-            // Compute the src_dst fields  
-            sit->first->copy_field(src_req.instance_fields[idx], src_fields);
-            dst_view->copy_field(dst_req.instance_fields[idx], dst_fields);
-            // Compute the event preconditions
-            std::set<Event> preconditions;
-            preconditions.insert(precondition);
-            // Find the source and destination preconditions
-            for (LegionMap<Event,FieldMask>::aligned::const_iterator it = 
-                  src_preconditions[sit->first].begin(); it !=
-                  src_preconditions[sit->first].end(); it++)
-            {
-              if (it->second.is_set(src_index))
-                preconditions.insert(it->first);
-            }
-            // Now we've got all the preconditions so we can actually
-            // issue the copy operation
-            Event copy_pre = Runtime::merge_events<false>(preconditions);
-            Event copy_post = dst_node->perform_copy_operation(op,
-                                  copy_pre, src_fields, dst_fields);
-#ifdef LEGION_SPY
-            {
-              if (!copy_pre.exists())
-              {
-                UserEvent new_copy_pre = UserEvent::create_user_event();
-                new_copy_pre.trigger();
-                copy_pre = new_copy_pre;
-                LegionSpy::log_event_dependences(preconditions, copy_pre);
-              }
-              if (!copy_post.exists())
-              {
-                UserEvent new_copy_post = UserEvent::create_user_event();
-                new_copy_post.trigger();
-                copy_post = new_copy_post;
-              }
-              std::vector<FieldID> src_fields, dst_fields;
-              src_fields.push_back(src_req.instance_fields[idx]);
-              dst_fields.push_back(dst_req.instance_fields[idx]);
-              LegionSpy::log_copy_across_events(op->get_unique_op_id(),
-                  copy_pre, copy_post,
-                  src_req, dst_req,
-                  src_fields, dst_fields,
-                  sit->first->get_manager()->get_instance().id,
-                  dst_view->get_manager()->get_instance().id);
-            }
-#endif
-            // Register the users of the post condition
-            FieldMask local_src; local_src.set_bit(src_index);
-            sit->first->add_copy_user(0/*redop*/, copy_post,
-                                      src_version_info,
-                                      local_src, true/*reading*/);
-            // No need to register a user for the destination because
-            // we've already mapped it.
-            local_results.insert(copy_post);
-            found = true;
-            break;
-          }
-        }
-        if (!found)
-        {
-          // Check the composite instances
-          for (LegionMap<DeferredView*,FieldMask>::aligned::const_iterator 
-                it = deferred_instances.begin(); it != 
-                deferred_instances.end(); it++)
-          {
-            if (it->second.is_set(src_index))
-            {
-              it->first->issue_deferred_copies_across(info, dst_view,
-                                          src_req.instance_fields[idx],
-                                          dst_req.instance_fields[idx],
-                                          precondition, local_results);
-              found = true;
-              break;
-            }
-          }
-        }
-        // If we still didn't find it then there are no valid
-        // instances for the data yet so we're done anyway
-        // Now register a result user if necessary
-        if (!local_results.empty())
-        {
-          Event result = Runtime::merge_events<false>(local_results);
-          if (result.exists())
-            // Add the event to the result events
-            result_events.insert(result);
-        }
-      }
-      Event result = Runtime::merge_events<false>(result_events);
-#ifdef DEBUG_PERF
-      end_perf_trace(Runtime::perf_trace_tolerance);
-#endif
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    Event RegionTreeForest::copy_across(Operation *op,
-                                        RegionTreeContext src_ctx, 
+    Event RegionTreeForest::copy_across(RegionTreeContext src_ctx,
                                         RegionTreeContext dst_ctx,
                                         const RegionRequirement &src_req,
                                         const RegionRequirement &dst_req,
-                                        const InstanceRef &src_ref,
-                                        const InstanceRef &dst_ref,
-                                        Event precondition)
+                                        const InstanceSet &src_targets, 
+                                        const InstanceSet &dst_targets,
+                                        VersionInfo &src_version_info, 
+                                        int src_composite_index,
+                                        Operation *op, Event precondition)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_PERF
-      begin_perf_trace(COPY_ACROSS_ANALYSIS);
-#endif
 #ifdef DEBUG_HIGH_LEVEL
       assert(src_req.handle_type == SINGULAR);
       assert(dst_req.handle_type == SINGULAR);
-      assert(src_ref.has_ref());
-      assert(dst_ref.has_ref());
+      assert(src_req.instance_fields.size() == dst_req.instance_fields.size());
 #endif
-      // We already have the events for using the physical instances
-      // All we need to do is get the offsets for performing the copies
+      std::set<Event> result_events;
+      std::set<Event> copy_preconditions; 
+      copy_preconditions.insert(precondition);
+      std::vector<unsigned> src_indexes(src_req.instance_fields.size());
+      std::vector<unsigned> dst_indexes(dst_req.instance_fields.size());
+      // Get the field indexes for all the fields
+      RegionNode *src_node = get_node(src_req.region);
+      RegionNode *dst_node = get_node(dst_req.region);
+      src_node->column_source->get_field_indexes(src_req.instance_fields, 
+                                                 src_indexes);   
+      dst_node->column_source->get_field_indexes(dst_req.instance_fields,
+                                                 dst_indexes);
+      // Next figure out which src_targets satisfy each field
+      std::vector<unsigned> src_target_indexes(src_indexes.size());
+      for (unsigned idx1 = 0; idx1 < src_targets.size(); idx1++)
+      {
+        const FieldMask valid_mask = src_targets[idx1].get_valid_fields();
+        for (unsigned idx2 = 0; idx2 < src_indexes.size(); idx2++)
+        {
+          if (valid_mask.is_set(src_indexes[idx2]))
+            src_target_indexes[idx2] = idx1;
+        }
+      }
+      // Let's handle all the actual instances first
       std::vector<Domain::CopySrcDstField> src_fields;
       std::vector<Domain::CopySrcDstField> dst_fields;
-      MaterializedView *src_view = src_ref.get_materialized_view();
-      MaterializedView *dst_view = dst_ref.get_materialized_view();
-      src_view->manager->compute_copy_offsets(src_req.instance_fields, 
-                                              src_fields);
-      dst_view->manager->compute_copy_offsets(dst_req.instance_fields, 
-                                              dst_fields);
-
+      std::vector<std::pair<unsigned,unsigned> > dst_composite_indexes;
+      for (unsigned idx1 = 0; idx1 < dst_targets.size(); idx1++)
+      {
+        const InstanceRef &dst_ref = dst_targets[idx1];
+#ifdef DEBUG_HIGH_LEVEL
+        assert(!dst_ref.is_composite_ref());
+        assert(!dst_ref.get_manager()->is_instance_manager());
+#endif
+        InstanceManager *dst_manager = 
+          dst_ref.get_manager()->as_instance_manager();
+        FieldMask dst_valid = dst_ref.get_valid_fields();
+        // Iterate over all the fields and find the ones for this target
+        for (unsigned idx2 = 0; idx2 < src_indexes.size(); idx2++)
+        {
+          if (dst_valid.is_set(dst_indexes[idx2]))
+          {
+            // Find the index of the source
+            unsigned src_index = src_target_indexes[idx2];
+            // See if this is the composite reference
+            if (int(src_index) == src_composite_index)
+            {
+              // Pulling from the composite, do that later
+              dst_composite_indexes.push_back(
+                  std::pair<unsigned,unsigned>(idx1,idx2));
+            }
+            else
+            {
+              // Otherwise, this is a normal copy, fill in offsets
+              const InstanceRef &src_ref = src_targets[src_index];
+#ifdef DEBUG_HIGH_LEVEL
+              assert(!src_ref.is_composite_ref());
+              assert(src_ref.get_manager()->is_instance_manager());
+#endif
+              InstanceManager *src_manager = 
+                src_ref.get_manager()->as_instance_manager();
+              src_manager->compute_copy_offsets(
+                  src_req.instance_fields[idx2], src_fields);
+              dst_manager->compute_copy_offsets(
+                  dst_req.instance_fields[idx2], dst_fields);
+            }
+            // Unset the bit and see if we are done with this instance
+            dst_valid.unset_bit(dst_indexes[idx2]);
+            if (!dst_valid)
+              break;
+          }
+        }
+        // Save the copy precondition for the dst
+        copy_preconditions.insert(dst_ref.get_ready_event());
+      }
+      // Also record the src preconditions
+      for (unsigned idx = 0; idx < src_targets.size(); idx++)
+      {
+        if (int(idx) == src_composite_index)
+          continue;
+        copy_preconditions.insert(src_targets[idx].get_ready_event());
+      }
+      // Find the domains for the copy
       std::set<Domain> dst_domains;
-      RegionNode *dst_node = get_node(dst_req.region);
-      Event dom_precondition = Event::NO_EVENT;
-      if (dst_node->has_component_domains())
-        dst_domains = dst_node->get_component_domains(dom_precondition);
-      else
-        dst_domains.insert(dst_node->get_domain(dom_precondition));
-
-      Event copy_pre = Runtime::merge_events<false>(src_ref.get_ready_event(),
-                                                    dst_ref.get_ready_event(),
-                                              precondition, dom_precondition);
-      std::set<Event> result_events;
+      { 
+        Event dom_precondition = Event::NO_EVENT;
+        if (dst_node->has_component_domains())
+          dst_domains = dst_node->get_component_domains(dom_precondition);
+        else
+          dst_domains.insert(dst_node->get_domain(dom_precondition));
+        copy_preconditions.insert(dom_precondition);
+      }
+      Event copy_pre = Runtime::merge_events<false>(copy_preconditions);
+      // Now we can issue all the copies
       for (std::set<Domain>::const_iterator it = dst_domains.begin();
             it != dst_domains.end(); it++)
       {
-        Event copy_result = issue_copy(*it, op, src_fields, 
-                                       dst_fields, copy_pre);
+        Event copy_result = issue_copy(*it, op, src_fields,dst_fields,copy_pre);
+#ifdef LEGION_SPY
+        // TODO: Update this to log correctly for many instances
+        if ((src_targets.size() > 1) || (dst_targets.size() > 1) || 
+            (src_composite_index >= 0))
+          assert(false);
+        LegionSpy::log_copy_across(op->get_unique_op_id(), 
+            copy_pre, copy_result, src_req, dst_req,
+            src_req.instance_fields, dst_req.instance_fields,
+            src_targets[0].get_manager()->get_instance().id,
+            dst_targets[0].get_manager()->get_instance().id);
+#endif
         if (copy_result.exists())
           result_events.insert(copy_result);
-#ifdef LEGION_SPY
-        if (!copy_pre.exists())
-        {
-          UserEvent new_copy_pre = UserEvent::create_user_event();
-          new_copy_pre.trigger();
-          copy_pre = new_copy_pre;
-          LegionSpy::log_event_dependence(src_ref.get_ready_event(), copy_pre);
-          LegionSpy::log_event_dependence(dst_ref.get_ready_event(), copy_pre);
-          LegionSpy::log_event_dependence(precondition, copy_pre);
-          LegionSpy::log_event_dependence(dom_precondition, copy_pre);
-        }
-        if (!copy_result.exists())
-        {
-          UserEvent new_copy_result = UserEvent::create_user_event();
-          new_copy_result.trigger();
-          copy_result = new_copy_result;
-        }
-        LegionSpy::log_copy_across_events(op->get_unique_op_id(),
-            copy_pre, copy_result,
-            src_req, dst_req,
-            src_req.instance_fields, dst_req.instance_fields,
-            src_view->get_manager()->get_instance().id,
-            dst_view->get_manager()->get_instance().id);
-#endif
       }
-      Event result = Runtime::merge_events<false>(result_events);
-      // Note we don't need to add the copy users because
-      // we already mapped these regions as part of the CopyOp.
-#ifdef DEBUG_PERF
-      end_perf_trace(Runtime::perf_trace_tolerance);
+      // Now if we have a composite source, handle that now
+      if (src_composite_index >= 0)
+      {
+        const InstanceRef &composite_ref = src_targets[src_composite_index];
+#ifdef DEBUG_HIGH_LEVEL
+        assert(!dst_composite_indexes.empty());
+        assert(composite_ref.is_composite_ref());
 #endif
-      // No need to add copy users since we added them when we
-      // mapped this copy operation
-      return result;
+        CompositeView *src_view = composite_ref.get_composite_view();
+        TraversalInfo info(src_ctx.get_id(), op, src_req, 
+                           src_version_info, composite_ref.get_valid_fields());
+        for (std::vector<std::pair<unsigned,unsigned> >::const_iterator it = 
+              dst_composite_indexes.begin(); it != 
+              dst_composite_indexes.end(); it++)
+        {
+          const InstanceRef &dst_ref = dst_targets[it->first];
+          LogicalView *view = 
+            dst_node->convert_reference(dst_ref, dst_ctx.get_id());
+#ifdef DEBUG_HIGH_LEVEL
+          assert(view->is_instance_view());
+          assert(view->as_instance_view()->is_materialized_view());
+#endif
+          MaterializedView *dst_view = 
+            view->as_instance_view()->as_materialized_view();
+          // Only have to wait for the destination to be ready as the
+          // precondition on the copy across operations as well
+          // as the original precondition
+          src_view->issue_deferred_copies_across(info, dst_view,
+              src_req.instance_fields[it->second],
+              dst_req.instance_fields[it->second],
+              Runtime::merge_events<false>(dst_ref.get_ready_event(), 
+                precondition), result_events);
+        }
+      }
+      // Return the merge of all the result events
+      return Runtime::merge_events<false>(result_events);
     }
-
+    
     //--------------------------------------------------------------------------
-    Event RegionTreeForest::reduce_across(Operation *op,
-                                          Processor local_proc,
-                                          RegionTreeContext src_ctx,
-                                          RegionTreeContext dst_ctx,
-                                          RegionRequirement &src_req,
-                                          VersionInfo &src_version_info,
-                                          const RegionRequirement &dst_req,
-                                          const InstanceRef &dst_ref,
-                                          Event pre)
-    //--------------------------------------------------------------------------
-    {
-      // TODO: Implement this
-      assert(false);
-      return Event::NO_EVENT;
-    }
-
-    //--------------------------------------------------------------------------
-    Event RegionTreeForest::reduce_across(Operation *op,
-                                          RegionTreeContext src_ctx, 
+    Event RegionTreeForest::reduce_across(RegionTreeContext src_ctx,
                                           RegionTreeContext dst_ctx,
                                           const RegionRequirement &src_req,
                                           const RegionRequirement &dst_req,
-                                          const InstanceRef &src_ref,
-                                          const InstanceRef &dst_ref,
-                                          Event precondition)
+                                          const InstanceSet &src_targets,
+                                          const InstanceSet &dst_targets,
+                                          VersionInfo &src_version_info, 
+                                          int src_composite_index,
+                                          Operation *op, Event precondition)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_PERF
-      begin_perf_trace(COPY_ACROSS_ANALYSIS);
-#endif
 #ifdef DEBUG_HIGH_LEVEL
       assert(src_req.handle_type == SINGULAR);
       assert(dst_req.handle_type == SINGULAR);
-      assert(src_ref.has_ref());
-      assert(dst_ref.has_ref());
+      assert(src_req.instance_fields.size() == dst_req.instance_fields.size());
       assert(dst_req.privilege == REDUCE);
 #endif
-      // We already have the events for using the physical instances
-      // All we need to do is get the offsets for performing the copies
-      std::vector<Domain::CopySrcDstField> src_fields;
-      std::vector<Domain::CopySrcDstField> dst_fields;
-      InstanceView *src_inst = src_ref.get_instance_view();
-      InstanceView *dst_inst = dst_ref.get_instance_view();
-      if (src_inst->is_reduction_view())
-      {
-        FieldMask src_mask = src_inst->logical_node->column_source->
-                                get_field_mask(src_req.privilege_fields);
-        src_inst->as_reduction_view()->reduce_from(dst_req.redop, 
-                                                   src_mask, src_fields);
-      }
-      else
-      {
-        MaterializedView *src_mat_view = src_inst->as_materialized_view();
-        src_mat_view->manager->compute_copy_offsets(src_req.instance_fields,
-                                                    src_fields);
-      }
-      FieldMask dst_mask = dst_inst->logical_node->column_source->
-                            get_field_mask(dst_req.privilege_fields);
-      dst_inst->reduce_to(dst_req.redop, dst_mask, dst_fields); 
-      const bool fold = dst_inst->is_reduction_view();
-
-      std::set<Domain> dst_domains;
-      RegionNode *dst_node = get_node(dst_req.region);
-      Event dom_precondition = Event::NO_EVENT;
-      if (dst_node->has_component_domains())
-        dst_domains = dst_node->get_component_domains(dom_precondition);
-      else
-        dst_domains.insert(dst_node->get_domain(dom_precondition));
-
-      Event copy_pre = Runtime::merge_events<false>(src_ref.get_ready_event(),
-                                                    dst_ref.get_ready_event(),
-                                              precondition, dom_precondition);
       std::set<Event> result_events;
-      for (std::set<Domain>::const_iterator it = dst_domains.begin();
-            it != dst_domains.end(); it++)
+      std::set<Event> fold_copy_preconditions, list_copy_preconditions; 
+      fold_copy_preconditions.insert(precondition);
+      list_copy_preconditions.insert(precondition);
+      std::vector<unsigned> src_indexes(src_req.instance_fields.size());
+      std::vector<unsigned> dst_indexes(dst_req.instance_fields.size());
+      // Get the field indexes for all the fields
+      RegionNode *src_node = get_node(src_req.region);
+      RegionNode *dst_node = get_node(dst_req.region);
+      src_node->column_source->get_field_indexes(src_req.instance_fields, 
+                                                 src_indexes);   
+      dst_node->column_source->get_field_indexes(dst_req.instance_fields,
+                                                 dst_indexes);
+      // Next figure out which src_targets satisfy each field
+      std::vector<unsigned> src_target_indexes(src_indexes.size());
+      for (unsigned idx1 = 0; idx1 < src_targets.size(); idx1++)
       {
-        Event copy_result = issue_reduction_copy(*it, op, dst_req.redop, fold,
-                                            src_fields, dst_fields, copy_pre);
-        if (copy_result.exists())
-          result_events.insert(copy_result);
-#ifdef LEGION_SPY
-        if (!copy_pre.exists())
+        const FieldMask valid_mask = src_targets[idx1].get_valid_fields();
+        for (unsigned idx2 = 0; idx2 < src_indexes.size(); idx2++)
         {
-          UserEvent new_copy_pre = UserEvent::create_user_event();
-          new_copy_pre.trigger();
-          copy_pre = new_copy_pre;
-          LegionSpy::log_event_dependence(src_ref.get_ready_event(), copy_pre);
-          LegionSpy::log_event_dependence(dst_ref.get_ready_event(), copy_pre);
-          LegionSpy::log_event_dependence(precondition, copy_pre);
-          LegionSpy::log_event_dependence(dom_precondition, copy_pre);
+          if (valid_mask.is_set(src_indexes[idx2]))
+            src_target_indexes[idx2] = idx1;
         }
-        if (!copy_result.exists())
-        {
-          UserEvent new_copy_result = UserEvent::create_user_event();
-          new_copy_result.trigger();
-          copy_result = new_copy_result;
-        }
-        LegionSpy::log_copy_across_events(op->get_unique_op_id(),
-            copy_pre, copy_result,
-            src_req, dst_req,
-            src_req.instance_fields, dst_req.instance_fields,
-            src_inst->get_manager()->get_instance().id,
-            dst_inst->get_manager()->get_instance().id);
-#endif
       }
-      Event result = Runtime::merge_events<false>(result_events);
-      return result;
-    }
+      // Let's handle all the actual instances first
+      std::vector<Domain::CopySrcDstField> src_fields_fold;
+      std::vector<Domain::CopySrcDstField> dst_fields_fold;
+      std::vector<Domain::CopySrcDstField> src_fields_list;
+      std::vector<Domain::CopySrcDstField> dst_fields_list;
+      std::vector<std::pair<unsigned,unsigned> > dst_composite_indexes;
+      for (unsigned idx1 = 0; idx1 < dst_targets.size(); idx1++)
+      {
+        const InstanceRef &dst_ref = dst_targets[idx1];
+#ifdef DEBUG_HIGH_LEVEL
+        assert(!dst_ref.is_composite_ref());
 #endif
+        PhysicalManager *dst_manager = dst_ref.get_manager();
+        FieldMask dst_valid = dst_ref.get_valid_fields();
+        const bool fold = dst_manager->is_reduction_manager();
+        // Iterate over all the fields and find the ones for this target
+        for (unsigned idx2 = 0; idx2 < src_indexes.size(); idx2++)
+        {
+          if (dst_valid.is_set(dst_indexes[idx2]))
+          {
+            // Find the index of the source
+            unsigned src_index = src_target_indexes[idx2];
+            // See if this is the composite reference
+            if (int(src_index) == src_composite_index)
+            {
+              // Pulling from the composite, do that later
+              dst_composite_indexes.push_back(
+                  std::pair<unsigned,unsigned>(idx1,idx2));
+            }
+            else
+            {
+              // Otherwise, this is a normal copy, fill in offsets
+              const InstanceRef &src_ref = src_targets[src_index];
+#ifdef DEBUG_HIGH_LEVEL
+              assert(!src_ref.is_composite_ref());
+#endif
+              PhysicalManager *src_manager = src_ref.get_manager();
+              if (src_manager->is_reduction_manager())
+              {
+                FieldMask src_mask;
+                src_mask.set_bit(src_indexes[idx2]);
+                src_manager->as_reduction_manager()->find_field_offsets(
+                    src_mask, fold ? src_fields_fold : src_fields_list);
+              }
+              else
+                src_manager->as_instance_manager()->compute_copy_offsets(
+                    src_req.instance_fields[idx2], 
+                    fold ? src_fields_fold : src_fields_list);
+              if (fold)
+              {
+                FieldMask dst_mask;
+                dst_mask.set_bit(dst_indexes[idx2]);
+                dst_manager->as_reduction_manager()->find_field_offsets(
+                    dst_mask, dst_fields_fold);
+                fold_copy_preconditions.insert(src_ref.get_ready_event());
+              }
+              else
+              {
+                dst_manager->as_instance_manager()->compute_copy_offsets(
+                    dst_req.instance_fields[idx2], dst_fields_list);
+                list_copy_preconditions.insert(src_ref.get_ready_event());
+              }
+            }
+            // Unset the bit and see if we are done with this instance
+            dst_valid.unset_bit(dst_indexes[idx2]);
+            if (!dst_valid)
+              break;
+          }
+        }
+        // Save the copy precondition for the dst
+        if (fold)
+          fold_copy_preconditions.insert(dst_ref.get_ready_event());
+        else
+          list_copy_preconditions.insert(dst_ref.get_ready_event());
+      }
+      // Find the domains for the copy
+      std::set<Domain> dst_domains;
+      { 
+        Event dom_precondition = Event::NO_EVENT;
+        if (dst_node->has_component_domains())
+          dst_domains = dst_node->get_component_domains(dom_precondition);
+        else
+          dst_domains.insert(dst_node->get_domain(dom_precondition));
+        fold_copy_preconditions.insert(dom_precondition);
+        list_copy_preconditions.insert(dom_precondition);
+      }
+      // See if we have any fold copies
+      if (!dst_fields_fold.empty())
+      {
+        Event copy_pre = Runtime::merge_events<false>(fold_copy_preconditions);
+        // Now we can issue all the copies
+        for (std::set<Domain>::const_iterator it = dst_domains.begin();
+              it != dst_domains.end(); it++)
+        {
+          Event copy_result = issue_reduction_copy(*it, op, dst_req.redop, 
+                    true/*fold*/, src_fields_fold, dst_fields_fold, copy_pre);
+#ifdef LEGION_SPY
+          // TODO: Update this to log correctly for many instances
+          if ((src_targets.size() > 1) || (dst_targets.size() > 1) || 
+              (src_composite_index >= 0))
+            assert(false);
+          LegionSpy::log_copy_across(op->get_unique_op_id(), 
+              copy_pre, copy_result, src_req, dst_req,
+              src_req.instance_fields, dst_req.instance_fields,
+              src_targets[0].get_manager()->get_instance().id,
+              dst_targets[0].get_manager()->get_instance().id);
+#endif
+          if (copy_result.exists())
+            result_events.insert(copy_result);
+        }
+      }
+      // See if we have any reduction copies
+      if (!dst_fields_list.empty())
+      {
+        Event copy_pre = Runtime::merge_events<false>(list_copy_preconditions);
+        // Now we can issue all the copies
+        for (std::set<Domain>::const_iterator it = dst_domains.begin();
+              it != dst_domains.end(); it++)
+        {
+          Event copy_result = issue_reduction_copy(*it, op, dst_req.redop, 
+                    false/*fold*/, src_fields_list, dst_fields_list, copy_pre);
+#ifdef LEGION_SPY
+          // TODO: Update this to log correctly for many instances
+          if ((src_targets.size() > 1) || (dst_targets.size() > 1) || 
+              (src_composite_index >= 0))
+            assert(false);
+          LegionSpy::log_copy_across(op->get_unique_op_id(), 
+              copy_pre, copy_result, src_req, dst_req,
+              src_req.instance_fields, dst_req.instance_fields,
+              src_targets[0].get_manager()->get_instance().id,
+              dst_targets[0].get_manager()->get_instance().id);
+#endif
+          if (copy_result.exists())
+            result_events.insert(copy_result);
+        }
+      }
+      if (src_composite_index >= 0)
+      {
+        // TODO: add support for reduce across from composite instances
+        assert(false);
+      }
+      return Runtime::merge_events<false>(result_events);
+    }
 
     //--------------------------------------------------------------------------
     void RegionTreeForest::fill_fields(RegionTreeContext ctx,
@@ -4031,14 +3544,24 @@ namespace Legion {
                                        Event precondition)
     //--------------------------------------------------------------------------
     {
+      Event result;
       if (runtime->profiler != NULL)
       {
         Realm::ProfilingRequestSet requests;
         runtime->profiler->add_copy_request(requests, op); 
-        return dom.copy(src_fields, dst_fields, requests, precondition);
+        result = dom.copy(src_fields, dst_fields, requests, precondition);
       }
       else
-        return dom.copy(src_fields, dst_fields, precondition);
+        result = dom.copy(src_fields, dst_fields, precondition);
+#ifdef LEGION_SPY
+      if (!result.exists())
+      {
+        UserEvent new_result = UserEvent::create_user_event();
+        new_result.trigger();
+        result = new_result;
+      }
+#endif
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -4048,15 +3571,25 @@ namespace Legion {
                                        Event precondition)
     //--------------------------------------------------------------------------
     {
+      Event result;
       if (runtime->profiler != NULL)
       {
         Realm::ProfilingRequestSet requests;
         runtime->profiler->add_fill_request(requests, uid);
-        return dom.fill(dst_fields, requests, 
-                        fill_value, fill_size, precondition);
+        result = dom.fill(dst_fields, requests, 
+                          fill_value, fill_size, precondition);
       }
       else
-        return dom.fill(dst_fields, fill_value, fill_size, precondition);
+        result = dom.fill(dst_fields, fill_value, fill_size, precondition);
+#ifdef LEGION_SPY
+      if (!result.exists())
+      {
+        UserEvent new_result = UserEvent::create_user_event();
+        new_result.trigger();
+        result = new_result;
+      }
+#endif
+      return result;
     }
     
     //--------------------------------------------------------------------------
@@ -4067,16 +3600,26 @@ namespace Legion {
                                        Event precondition)
     //--------------------------------------------------------------------------
     {
+      Event result;
       if (runtime->profiler != NULL)
       {
         Realm::ProfilingRequestSet requests;
         runtime->profiler->add_copy_request(requests, op); 
-        return dom.copy(src_fields, dst_fields, requests, 
-                        precondition, redop, reduction_fold);
+        result = dom.copy(src_fields, dst_fields, requests, 
+                          precondition, redop, reduction_fold);
       }
       else
-        return dom.copy(src_fields, dst_fields,
-                        precondition, redop, reduction_fold);
+        result = dom.copy(src_fields, dst_fields,
+                          precondition, redop, reduction_fold);
+#ifdef LEGION_SPY
+      if (!result.exists())
+      {
+        UserEvent new_result = UserEvent::create_user_event();
+        new_result.trigger();
+        result = new_result;
+      }
+#endif
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -4089,8 +3632,17 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // TODO: teach the low-level runtime to profile indirect copies
-      return dom.copy_indirect(idx, src_fields, dst_fields, 
-                               precondition, redop, reduction_fold);
+      Event result = dom.copy_indirect(idx, src_fields, dst_fields, 
+                                       precondition, redop, reduction_fold);
+#ifdef LEGION_SPY
+      if (!result.exists())
+      {
+        UserEvent new_result = UserEvent::create_user_event();
+        new_result.trigger();
+        result = new_result;
+      }
+#endif
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -9038,19 +8590,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FieldSpaceNode::get_field_indexes(const std::set<FieldID> &needed,
-                                     std::map<unsigned,FieldID> &indexes) const
+    void FieldSpaceNode::get_field_indexes(const std::vector<FieldID> &needed,
+                                          std::vector<unsigned> &indexes) const
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(needed.size() == indexes.size());
+#endif
       AutoLock n_lock(node_lock,1,false/*exclusive*/);
-      for (std::set<FieldID>::const_iterator it = needed.begin();
-            it != needed.end(); it++)
+      for (unsigned idx = 0; idx < needed.size(); idx++)
       {
-        std::map<FieldID,FieldInfo>::const_iterator finder = fields.find(*it);
+      std::map<FieldID,FieldInfo>::const_iterator finder = 
+        fields.find(needed[idx]);
 #ifdef DEBUG_HIGH_LEVEL
         assert(finder != fields.end());
 #endif
-        indexes[finder->second.idx] = *it;
+        indexes[idx] = finder->second.idx;
       }
     }
 
@@ -12430,7 +11985,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    CompositeRef RegionTreeNode::create_composite_instance(ContextID ctx_id,
+    CompositeView* RegionTreeNode::create_composite_instance(ContextID ctx_id,
                         const LegionMap<ColorPoint,FieldMask>::aligned &targets,
                                       const std::set<ColorPoint> &next_children,
                                                const FieldMask &closing_mask,
@@ -13602,6 +13157,51 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void RegionTreeNode::update_valid_views(PhysicalState *state, 
                                             const FieldMask &dirty_mask,
+                                const std::vector<LogicalView*> &new_views,
+                                const InstanceSet &corresponding_references)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_PERF
+      PerfTracer tracer(context, UPDATE_VALID_VIEWS_CALL);
+#endif
+#ifdef DEBUG_HIGH_LEVEL
+      assert(state->node == this);
+      assert(new_views.size() == corresponding_references.size());
+#endif
+      if (!!dirty_mask)
+      {
+        invalidate_instance_views(state, dirty_mask); 
+        state->dirty_mask |= dirty_mask;
+      }
+      for (unsigned idx = 0; idx < new_views.size(); idx++)
+      {
+        LogicalView *new_view = new_views[idx];
+        const FieldMask &valid_mask = 
+          corresponding_references[idx].get_valid_fields();
+        LegionMap<LogicalView*,FieldMask>::aligned::iterator finder = 
+          state->valid_views.find(new_view);
+        // If it is a new view, we can just add the fields
+        if (finder == state->valid_views.end())
+          state->valid_views[new_view] = valid_mask;
+        else // it already exists, so update the mask
+          finder->second |= valid_mask;
+#ifdef DEBUG_HIGH_LEVEL
+        if (!new_view->is_deferred_view())
+        {
+          assert(new_view->as_instance_view()->is_materialized_view());
+          MaterializedView *mat_view = 
+            new_view->as_instance_view()->as_materialized_view();
+          finder = state->valid_views.find(new_view);
+          assert(!(finder->second - 
+                          mat_view->manager->layout->allocated_fields));
+        }
+#endif
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeNode::update_valid_views(PhysicalState *state, 
+                                            const FieldMask &dirty_mask,
                                 const std::vector<MaterializedView*> &new_views,
                                 const InstanceSet &corresponding_references)
     //--------------------------------------------------------------------------
@@ -13767,22 +13367,33 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionTreeNode::convert_target_views(const InstanceSet &targets,
+                         ContextID ctx, std::vector<LogicalView*> &target_views)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(targets.size() == target_views.size());
+#endif
+      for (unsigned idx = 0; idx < targets.size(); idx++)
+      {
+        const InstanceRef &ref = targets[idx];
+        target_views[idx] = convert_reference(ref, ctx);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeNode::convert_target_views(const InstanceSet &targets,
                     ContextID ctx, std::vector<MaterializedView*> &target_views)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
       assert(targets.size() == target_views.size());
 #endif
-      unsigned skip_count = 0;
       for (unsigned idx = 0; idx < targets.size(); idx++)
       {
         const InstanceRef &ref = targets[idx];
-        // Ignore any composite references
-        if (ref.is_composite_ref())
-        {
-          skip_count++;
-          continue;
-        }
+#ifdef DEBUG_HIGH_LEVEL
+        assert(!ref.is_composite_ref());
+#endif
         LogicalView *view = convert_reference(ref, ctx);
 #ifdef DEBUG_HIGH_LEVEL
         assert(!view->is_deferred_view());
@@ -13792,13 +13403,8 @@ namespace Legion {
 #ifdef DEBUG_HIGH_LEVEL
         assert(inst_view->is_materialized_view());
 #endif
-        target_views[idx-skip_count] = inst_view->as_materialized_view();
+        target_views[idx] = inst_view->as_materialized_view();
       }
-      if (skip_count > 0)
-        target_views.resize(targets.size() - skip_count);
-#ifdef DEBUG_HIGH_LEVEL
-      assert(!target_views.empty());
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -14977,35 +14583,9 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    void RegionNode::remap_region(ContextID ctx, MaterializedView *view,
-                                  const FieldMask &user_mask, 
-                                  VersionInfo &version_info, 
-                                  FieldMask &needed_mask)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(context, REMAP_REGION_CALL);
-#endif
-#ifdef DEBUG_HIGH_LEVEL
-      assert(view != NULL);
-#endif
-      PhysicalState *state = get_physical_state(ctx, version_info); 
-      // We've already pre-mapped so we've pulled down
-      // all the valid instance views.  Check to see if we
-      // the target views is already there with the right
-      // set of valid fields.
-      LegionMap<LogicalView*,FieldMask>::aligned::const_iterator finder = 
-        state->valid_views.find(view);
-      if (finder == state->valid_views.end())
-        needed_mask = user_mask;
-      else
-        needed_mask = user_mask - finder->second;
-    }
-
-    //--------------------------------------------------------------------------
-    CompositeRef RegionNode::map_virtual_region(ContextID ctx_id,
-                                                const FieldMask &virtual_mask,
-                                                VersionInfo &version_info)
+    CompositeView* RegionNode::map_virtual_region(ContextID ctx_id,
+                                                 const FieldMask &virtual_mask,
+                                                 VersionInfo &version_info)
     //--------------------------------------------------------------------------
     {
 #ifdef LEGION_SPY
@@ -15050,6 +14630,9 @@ namespace Legion {
         for (unsigned idx = 0; idx < targets.size(); idx++)
         {
           InstanceRef &ref = targets[idx];
+#ifdef DEBUG_HIGH_LEVEL
+          assert(!ref.is_composite_ref());
+#endif
           LogicalView *view = convert_reference(ref, info.ctx);
 #ifdef DEBUG_HIGH_LEVEL
           assert(view->is_instance_view());
@@ -15059,15 +14642,15 @@ namespace Legion {
             view->as_instance_view()->as_reduction_view();
           const FieldMask &user_mask = ref.get_valid_fields(); 
           update_reduction_views(state, user_mask, new_view);
-          Event ready = new_view->add_user(usage, term_event, 
-                                           user_mask, info.version_info);
+          Event ready = new_view->add_user(usage, term_event, user_mask, 
+                                           info.op, info.version_info);
           ref.set_ready_event(ready);
         }
       }
       else
       {
         // Normal instances
-        std::vector<MaterializedView*> new_views(targets.size());
+        std::vector<LogicalView*> new_views(targets.size());
         convert_target_views(targets, info.ctx, new_views);
         if (IS_READ_ONLY(info.req))
         {
@@ -15083,8 +14666,20 @@ namespace Legion {
           bool has_valid_views = false;
           for (unsigned idx = 0; idx < targets.size(); idx++)
           {
-            const FieldMask &valid_fields = targets[idx].get_valid_fields();
-            MaterializedView *view = new_views[idx];
+            const InstanceRef &ref = targets[idx];
+            // Skip any composite references
+            if (ref.is_composite_ref())
+              continue;
+            const FieldMask &valid_fields = ref.get_valid_fields();
+#ifdef DEBUG_HIGH_LEVEL
+            assert(new_views[idx]->is_instance_view());
+            assert(new_views[idx]->as_instance_view()->is_materialized_view());
+            MaterializedView *view = 
+              new_views[idx]->as_instance_view()->as_materialized_view();
+#else
+            MaterializedView *view = 
+              static_cast<MaterializedView>(new_views[idx]);
+#endif
             // See if this instance is valid already 
             LegionMap<LogicalView*,FieldMask>::aligned::const_iterator
               finder = state->valid_views.find(view);
@@ -15146,18 +14741,84 @@ namespace Legion {
           // these instances up to date, then issue any close operation
           // to close up any dirty data to these instances, then 
           // we can register the instances as being valid.
-          PhysicalCloser closer(info, handle);
-          // Initialize the close targets for this operation
-          FieldMask empty_complete_fields;
-          closer.initialize_targets(this, state, new_views,
+          // Figure out our closing mask and the set of closing fields
+          if (targets.has_composite_ref())
+          {
+            // Close only to the materialized views and register the
+            // composite views separately
+            FieldMask closing_mask = info.traversal_mask;
+            std::vector<MaterializedView*> closing_views;
+            InstanceSet closing_targets;
+            for (unsigned idx = 0; idx < targets.size(); idx++)
+            {
+              const InstanceRef &ref = targets[idx];
+              if (ref.is_composite_ref())
+              {
+                const FieldMask &composite_fields = ref.get_valid_fields();
+                // Remove the fields from those being close
+                closing_mask -= composite_fields;
+                // if this is a composite reference, we can just register
+                // the view now as a valid view
+                update_valid_views(state, composite_fields, 
+                                   true/*dirty*/, new_views[idx]);
+                continue;
+              }
+#ifdef DEBUG_HIGH_LEVEL
+              assert(new_views[idx]->is_instance_view());
+              assert(
+                  new_views[idx]->as_instance_view()->is_materialized_view());
+#endif
+#ifdef DEBUG_HIGH_LEVEL
+              closing_views.push_back(
+                new_views[idx]->as_instance_view()->as_materialized_view()); 
+#else
+              closing_views.push_back(
+                  static_cast<MaterializedView*>(new_views[idx]));
+#endif
+              closing_targets.add_instance(ref);
+            }
+            if (!!closing_mask)
+            {
+              PhysicalCloser closer(info, handle);
+              FieldMask empty_complete_fields;
+              closer.initialize_targets(this, state, closing_views,
+                          closing_mask, empty_complete_fields, closing_targets);
+              closer.update_dirty_mask(closing_mask);
+              std::set<ColorPoint> empty_next_children;
+              siphon_physical_children(closer, state, closing_mask,
+                                       empty_next_children);
+              closer.update_node_views(this, state);
+            }
+          }
+          else
+          {
+            // No special composite instances
+            std::vector<MaterializedView*> closing_views(new_views.size());
+            for (unsigned idx = 0; idx < new_views.size(); idx++)
+            {
+#ifdef DEBUG_HIGH_LEVEL
+              assert(new_views[idx]->is_instance_view());
+              assert(
+                  new_views[idx]->as_instance_view()->is_materialized_view());
+#endif
+              closing_views[idx] = 
+#ifdef DEBUG_HIGH_LEVEL
+                new_views[idx]->as_instance_view()->as_materialized_view(); 
+#else
+                static_cast<MaterializedView*>(new_views[idx]);
+#endif
+            }
+            PhysicalCloser closer(info, handle);
+            FieldMask empty_complete_fields;
+            closer.initialize_targets(this, state, closing_views,
                         info.traversal_mask, empty_complete_fields, targets);
-          // Mark the dirty mask with our bits since we're
-          closer.update_dirty_mask(info.traversal_mask);
-          std::set<ColorPoint> empty_next_children;
-          siphon_physical_children(closer, state, info.traversal_mask,
-                                   empty_next_children); 
-          // Now update the valid views and the dirty mask
-          closer.update_node_views(this, state);
+            // Mark the dirty mask with our bits since we're
+            closer.update_dirty_mask(info.traversal_mask);
+            std::set<ColorPoint> empty_next_children;
+            siphon_physical_children(closer, state, info.traversal_mask,
+                                     empty_next_children);
+            closer.update_node_views(this, state);
+          }
           // flush any reductions that we need to do
           FieldMask reduction_overlap = info.traversal_mask &
                                         state->reduction_mask;
@@ -15169,8 +14830,15 @@ namespace Legion {
         for (unsigned idx = 0; idx < targets.size(); idx++)
         {
           InstanceRef &ref = targets[idx];
-          Event ready = new_views[idx]->add_user(usage, term_event,
-                                 ref.get_valid_fields(), info.version_info);       
+          // Skip any composite references
+          if (ref.is_composite_ref())
+            continue;
+#ifdef DEBUG_HIGH_LEVEL
+          assert(new_views[idx]->is_instance_view());
+#endif
+          Event ready = 
+            new_views[idx]->as_instance_view()->add_user(usage, term_event,
+                         ref.get_valid_fields(), info.op, info.version_info);       
           ref.set_ready_event(ready);
         }
       }
@@ -15230,7 +14898,7 @@ namespace Legion {
           siphon_physical_children(closer, state);
           
           Event ready = target_view->add_user(usage, Event::NO_EVENT,
-                                              user_mask, info.version_info);
+                                user_mask, info.op, info.version_info);
           ref.set_ready_event(ready);
         }
       }
@@ -15248,7 +14916,7 @@ namespace Legion {
     void RegionNode::find_field_descriptors(ContextID ctx, Event term_event,
                                             const RegionUsage &usage,
                                             const FieldMask &user_mask,
-                                            unsigned fid_idx, Processor proc,
+                                            unsigned fid_idx, Operation *op,
                                   std::vector<FieldDataDescriptor> &field_data,
                                             std::set<Event> &preconditions,
                                             VersionInfo &version_info)
@@ -15281,7 +14949,7 @@ namespace Legion {
             view->set_descriptor(field_data.back(), fid_idx);
             // Register ourselves as user of this instance
             Event ready_event = view->add_user(usage, term_event,
-                                               user_mask, version_info);  
+                                               user_mask, op, version_info);
             if (ready_event.exists())
               preconditions.insert(ready_event);
             // We found an actual instance so we are done
@@ -15307,7 +14975,7 @@ namespace Legion {
         if (!deferred_view->is_composite_view())
           assert(false); // TODO: implement this
         deferred_view->find_field_descriptors(term_event, usage, 
-                                              user_mask, fid_idx, proc, 
+                                              user_mask, fid_idx, op, 
                                               field_data, preconditions);
       }
     }

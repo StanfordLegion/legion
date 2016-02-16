@@ -120,7 +120,7 @@ namespace Legion {
                                  const VersionInfo &version_info,
                                  const FieldMask &mask, bool reading) = 0;
       virtual Event add_user(const RegionUsage &user, Event term_event,
-                             const FieldMask &user_mask,
+                             const FieldMask &user_mask, Operation *op,
                              const VersionInfo &version_info) = 0;
       virtual void add_initial_user(Event term_event,
                                     const RegionUsage &usage,
@@ -260,7 +260,7 @@ namespace Legion {
                                  const VersionInfo &version_info,
                                  const FieldMask &mask, bool reading);
       virtual Event add_user(const RegionUsage &user, Event term_event,
-                             const FieldMask &user_mask,
+                             const FieldMask &user_mask, Operation *op,
                              const VersionInfo &version_info);
       virtual void add_initial_user(Event term_event,
                                     const RegionUsage &usage,
@@ -363,7 +363,8 @@ namespace Legion {
                                     const ColorPoint &local_color);
     public:
       //void update_versions(const FieldMask &update_mask);
-      void find_atomic_reservations(InstanceRef &target, const FieldMask &mask);
+      void find_atomic_reservations(const FieldMask &mask, 
+                                    Operation *op, bool exclusive);
     public:
       void set_descriptor(FieldDataDescriptor &desc, unsigned fid_idx) const;
     public:
@@ -496,7 +497,7 @@ namespace Legion {
                                  const VersionInfo &version_info,
                                  const FieldMask &mask, bool reading);
       virtual Event add_user(const RegionUsage &user, Event term_event,
-                             const FieldMask &user_mask,
+                             const FieldMask &user_mask, Operation *op,
                              const VersionInfo &version_info);
       virtual void add_initial_user(Event term_event,
                                     const RegionUsage &usage,
@@ -661,15 +662,13 @@ namespace Legion {
       virtual void find_field_descriptors(Event term_event,
                                           const RegionUsage &usage,
                                           const FieldMask &user_mask,
-                                          unsigned fid_idx,
-                                          Processor local_proc,
+                                          unsigned fid_idx, Operation *op,
                                   std::vector<FieldDataDescriptor> &field_data,
                                           std::set<Event> &preconditions) = 0;
       virtual bool find_field_descriptors(Event term_event,
                                           const RegionUsage &usage,
                                           const FieldMask &user_mask,
-                                          unsigned fid_idx,
-                                          Processor local_proc,
+                                          unsigned fid_idx, Operation *op,
                                           Realm::IndexSpace target,
                                           Event target_precondition,
                                   std::vector<FieldDataDescriptor> &field_data,
@@ -743,15 +742,13 @@ namespace Legion {
       virtual void find_field_descriptors(Event term_event,
                                           const RegionUsage &usage,
                                           const FieldMask &user_mask,
-                                          unsigned fid_idx,
-                                          Processor local_proc,
+                                          unsigned fid_idx, Operation *op,
                                   std::vector<FieldDataDescriptor> &field_data,
                                           std::set<Event> &preconditions);
       virtual bool find_field_descriptors(Event term_event,
                                           const RegionUsage &usage,
                                           const FieldMask &user_mask,
-                                          unsigned fid_idx,
-                                          Processor local_proc,
+                                          unsigned fid_idx, Operation *op,
                                           Realm::IndexSpace target,
                                           Event target_precondition,
                                   std::vector<FieldDataDescriptor> &field_data,
@@ -889,7 +886,7 @@ namespace Legion {
     public:
       bool find_field_descriptors(Event term_event, const RegionUsage &usage,
                                   const FieldMask &user_mask,
-                                  unsigned fid_idx, Processor local_proc, 
+                                  unsigned fid_idx, Operation *op, 
                                   Realm::IndexSpace target, Event target_pre,
                                   std::vector<FieldDataDescriptor> &field_data,
                                   std::set<Event> &preconditions,
@@ -1003,15 +1000,13 @@ namespace Legion {
       virtual void find_field_descriptors(Event term_event, 
                                           const RegionUsage &usage,
                                           const FieldMask &user_mask,
-                                          unsigned fid_idx,
-                                          Processor local_proc,
+                                          unsigned fid_idx, Operation *op,
                                   std::vector<FieldDataDescriptor> &field_data,
                                           std::set<Event> &preconditions);
       virtual bool find_field_descriptors(Event term_event,
                                           const RegionUsage &usage,
                                           const FieldMask &user_mask,
-                                          unsigned fid_idx,
-                                          Processor local_proc,
+                                          unsigned fid_idx, Operation *op,
                                           Realm::IndexSpace target,
                                           Event target_precondition,
                                   std::vector<FieldDataDescriptor> &field_data,

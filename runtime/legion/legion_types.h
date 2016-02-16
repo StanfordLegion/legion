@@ -641,7 +641,6 @@ namespace Legion {
     class FillView;
     class MappingRef;
     class InstanceRef;
-    class CompositeRef;
     class InstanceSet;
     class InnerTaskView;
     class ReductionManager;

@@ -276,6 +276,8 @@ namespace Legion {
       virtual void select_sources(const InstanceRef &target,
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking);
+      // Update the set of atomic locks for this operation
+      virtual void update_atomic_locks(Reservation lock, bool exclusive);
     public:
       // The following are sets of calls that we can use to 
       // indicate mapping, execution, resolution, completion, and commit
@@ -601,6 +603,7 @@ namespace Legion {
       virtual void select_sources(const InstanceRef &target,
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking);
+      virtual void update_atomic_locks(Reservation lock, bool exclusive);
     public:
       virtual UniqueID get_unique_id(void) const;
       virtual int get_depth(void) const;
@@ -617,6 +620,7 @@ namespace Legion {
       RegionTreePath privilege_path;
       unsigned parent_req_index;
       VersionInfo version_info;
+      std::map<Reservation,bool> atomic_locks;
     protected:
       MapperManager *mapper;
     protected:
@@ -665,6 +669,7 @@ namespace Legion {
       virtual void select_sources(const InstanceRef &target,
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking);
+      virtual void update_atomic_locks(Reservation lock, bool exclusive);
     public:
       virtual UniqueID get_unique_id(void) const;
       virtual int get_depth(void) const;
@@ -686,6 +691,7 @@ namespace Legion {
       std::vector<unsigned>       dst_parent_indexes;
       std::vector<VersionInfo>    src_versions;
       std::vector<VersionInfo>    dst_versions;
+      std::map<Reservation,bool>  atomic_locks;
     protected: // for support with mapping
       MapperManager*              mapper;
       unsigned                    current_index;

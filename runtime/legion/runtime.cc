@@ -1109,27 +1109,7 @@ namespace Legion {
       references.update_wait_on_events(wait_on);
       Event ref_ready = Runtime::merge_events<false>(wait_on);
       if (!ref_ready.has_triggered())
-      {
-        // If we need a lock for this instance taken it
-        // once the reference event is ready, we can also issue
-        // the unlock operations contingent upon the termination 
-        // event having triggered
-        if (IS_ATOMIC(req))
-        {
-          std::map<Reservation,bool> required_locks;
-          references.update_atomic_locks(required_locks, true/*exclusive*/);
-          Event locked_event = ref_ready;
-          for (std::map<Reservation,bool>::const_iterator it = 
-                required_locks.begin(); it != required_locks.end(); it++)
-          {
-            locked_event = it->first.acquire(0, it->second, locked_event);
-            it->first.release(termination_event);
-          }
-          locked_event.wait();
-        }
-        else
-          ref_ready.wait();
-      }
+        ref_ready.wait();
       valid = true;
     }
 
@@ -1250,7 +1230,7 @@ namespace Legion {
 #endif
       return result;
 #else // privilege or bounds checks
-      return references.get_field_accessor(runtime->forest, fid);
+      return references.get_field_accessor(fid);
 #endif
     } 
 

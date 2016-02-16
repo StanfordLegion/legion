@@ -171,6 +171,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void LayoutDescription::compute_copy_offsets(FieldID fid, 
+        PhysicalInstance instance, std::vector<Domain::CopySrcDstField> &fields)
+    //--------------------------------------------------------------------------
+    {
+      std::map<FieldID,Domain::CopySrcDstField>::const_iterator
+        finder = field_infos.find(fid);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(finder != field_infos.end());
+#endif
+      fields.push_back(finder->second);
+      // Since instances are annonymous in layout descriptions we
+      // have to fill them in when we add the field info
+      fields.back().inst = instance;
+    }
+
+    //--------------------------------------------------------------------------
     void LayoutDescription::compute_copy_offsets(
                                    const std::vector<FieldID> &copy_fields, 
                                    PhysicalInstance instance,
@@ -640,6 +656,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool InstanceManager::is_instance_manager(void) const
+    //--------------------------------------------------------------------------
+    {
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
     InstanceManager* InstanceManager::as_instance_manager(void) const
     //--------------------------------------------------------------------------
     {
@@ -748,6 +771,18 @@ namespace Legion {
 #endif
       // Pass in our physical instance so the layout knows how to specialize
       layout->compute_copy_offsets(copy_mask, instance, fields);
+    }
+
+    //--------------------------------------------------------------------------
+    void InstanceManager::compute_copy_offsets(FieldID fid,
+                                  std::vector<Domain::CopySrcDstField> &fields)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(layout != NULL);
+#endif
+      // Pass in our physical instance so the layout knows how to specialize
+      layout->compute_copy_offsets(fid, instance, fields);
     }
 
     //--------------------------------------------------------------------------
@@ -912,6 +947,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return true;
+    }
+
+    //--------------------------------------------------------------------------
+    bool ReductionManager::is_instance_manager(void) const
+    //--------------------------------------------------------------------------
+    {
+      return false;
     }
 
     //--------------------------------------------------------------------------

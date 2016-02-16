@@ -62,6 +62,8 @@ namespace Legion {
       void compute_copy_offsets(const FieldMask &copy_mask, 
                                 PhysicalInstance inst,
                                 std::vector<Domain::CopySrcDstField> &fields);
+      void compute_copy_offsets(FieldID copy_field, PhysicalInstance inst,
+                                std::vector<Domain::CopySrcDstField> &fields);
       void compute_copy_offsets(const std::vector<FieldID> &copy_fields,
                                 PhysicalInstance inst,
                                 std::vector<Domain::CopySrcDstField> &fields);
@@ -132,6 +134,7 @@ namespace Legion {
         LegionRuntime::Accessor::AccessorType::Generic>
           get_field_accessor(FieldID fid) const = 0;
       virtual bool is_reduction_manager(void) const = 0;
+      virtual bool is_instance_manager(void) const = 0;
       virtual InstanceManager* as_instance_manager(void) const = 0;
       virtual ReductionManager* as_reduction_manager(void) const = 0;
       virtual size_t get_instance_size(void) const = 0;
@@ -187,6 +190,7 @@ namespace Legion {
         LegionRuntime::Accessor::AccessorType::Generic>
           get_field_accessor(FieldID fid) const;
       virtual bool is_reduction_manager(void) const;
+      virtual bool is_instance_manager(void) const;
       virtual InstanceManager* as_instance_manager(void) const;
       virtual ReductionManager* as_reduction_manager(void) const;
       virtual size_t get_instance_size(void) const;
@@ -200,6 +204,8 @@ namespace Legion {
     public:
       MaterializedView* create_top_view(unsigned depth);
       void compute_copy_offsets(const FieldMask &copy_mask,
+                                std::vector<Domain::CopySrcDstField> &fields);
+      void compute_copy_offsets(FieldID fid, 
                                 std::vector<Domain::CopySrcDstField> &fields);
       void compute_copy_offsets(const std::vector<FieldID> &copy_fields,
                                 std::vector<Domain::CopySrcDstField> &fields);
@@ -251,6 +257,7 @@ namespace Legion {
         LegionRuntime::Accessor::AccessorType::Generic>
           get_field_accessor(FieldID fid) const = 0;
       virtual bool is_reduction_manager(void) const;
+      virtual bool is_instance_manager(void) const;
       virtual InstanceManager* as_instance_manager(void) const;
       virtual ReductionManager* as_reduction_manager(void) const;
       virtual size_t get_instance_size(void) const = 0;

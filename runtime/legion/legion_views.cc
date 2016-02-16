@@ -756,7 +756,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Event MaterializedView::add_user(const RegionUsage &usage, Event term_event,
-                                     const FieldMask &user_mask,
+                                     const FieldMask &user_mask, Operation *op,
                                      const VersionInfo &version_info)
     //--------------------------------------------------------------------------
     {
@@ -784,6 +784,8 @@ namespace Legion {
       if (term_event.exists())
         assert(wait_on_events.find(term_event) == wait_on_events.end());
 #endif
+      if (IS_ATOMIC(usage))
+        find_atomic_reservations(user_mask, op, IS_WRITE(usage));
       // Return the merge of the events
       return Runtime::merge_events<false>(wait_on_events);
     }
@@ -2504,10 +2506,9 @@ namespace Legion {
 #endif
     }
 
-#if 0
     //--------------------------------------------------------------------------
-    void MaterializedView::find_atomic_reservations(InstanceRef &target,
-                                                    const FieldMask &mask)
+    void MaterializedView::find_atomic_reservations(const FieldMask &mask,
+                                                    Operation *op, bool excl)
     //--------------------------------------------------------------------------
     {
       // Keep going up the tree until we get to the root
@@ -2530,22 +2531,21 @@ namespace Legion {
               // Make a new reservation and add it to the set
               Reservation handle = Reservation::create_reservation();
               atomic_reservations[*it] = handle;
-              target.add_reservation(handle);
+              op->update_atomic_locks(handle, excl);
               if (!is_owner())
                 to_send_back.push_back(
                         std::pair<FieldID,Reservation>(*it, handle));
             }
             else
-              target.add_reservation(finder->second);
+              op->update_atomic_locks(finder->second, excl);
           }
         }
         if (!to_send_back.empty())
           send_back_atomic_reservations(to_send_back);
       }
       else
-        parent->find_atomic_reservations(target, mask);
+        parent->find_atomic_reservations(mask, op, excl);
     }
-#endif
 
     //--------------------------------------------------------------------------
     void MaterializedView::set_descriptor(FieldDataDescriptor &desc,
@@ -3848,8 +3848,7 @@ namespace Legion {
     void CompositeView::find_field_descriptors(Event term_event, 
                                                const RegionUsage &usage, 
                                                const FieldMask &user_mask,
-                                               unsigned fid_idx,
-                                               Processor local_proc,
+                                               unsigned fid_idx, Operation *op,
                                    std::vector<FieldDataDescriptor> &field_data,
                                    std::set<Event> &preconditions)
     //--------------------------------------------------------------------------
@@ -3866,7 +3865,7 @@ namespace Legion {
           std::vector<Realm::IndexSpace> already_handled;
           std::set<Event> already_preconditions;
           it->first->find_field_descriptors(term_event, usage,
-                                            user_mask, fid_idx, local_proc, 
+                                            user_mask, fid_idx, op, 
                                             target.get_index_space(),
                                             target_pre, field_data, 
                                             preconditions, already_handled,
@@ -3882,8 +3881,7 @@ namespace Legion {
     bool CompositeView::find_field_descriptors(Event term_event,
                                                const RegionUsage &usage,
                                                const FieldMask &user_mask,
-                                               unsigned fid_idx,
-                                               Processor local_proc,
+                                               unsigned fid_idx, Operation *op,
                                                Realm::IndexSpace target,
                                                Event target_precondition,
                                    std::vector<FieldDataDescriptor> &field_data,
@@ -3899,7 +3897,7 @@ namespace Legion {
         if (it->second.is_set(fid_idx))
         {
           return it->first->find_field_descriptors(term_event, usage, user_mask,
-                                                   fid_idx, local_proc,
+                                                   fid_idx, op,
                                                    target, target_precondition,
                                                    field_data, preconditions,
                                                    already_handled, 
@@ -4743,8 +4741,7 @@ namespace Legion {
     bool CompositeNode::find_field_descriptors(Event term_event,
                                                const RegionUsage &usage, 
                                                const FieldMask &user_mask,
-                                               unsigned fid_idx,
-                                               Processor local_proc,
+                                               unsigned fid_idx, Operation *op,
                                                Realm::IndexSpace target,
                                                Event target_precondition,
                                    std::vector<FieldDataDescriptor> &field_data,
@@ -4790,7 +4787,7 @@ namespace Legion {
             Event child_ready = Realm::IndexSpace::compute_index_spaces(ops,
                                                         false/*mutable*/, pre);
             done = it->first->find_field_descriptors(term_event, usage,
-                                                   user_mask,fid_idx,local_proc,
+                                                   user_mask,fid_idx, op,
                                                    ops[0].result, child_ready,
                                                    field_data, preconditions,
                                                    handled_index_spaces,
@@ -4800,7 +4797,7 @@ namespace Legion {
           }
           else
             done = it->first->find_field_descriptors(term_event, usage,
-                                                user_mask, fid_idx, local_proc,
+                                                user_mask, fid_idx, op,
                                                 child_domain.get_index_space(), 
                                                 child_precondition,
                                                 field_data, preconditions,
@@ -4890,8 +4887,8 @@ namespace Legion {
               
             field_data.back().index_space = remaining_space;
             // Register ourselves as a user of this instance
-            Event ref_ready = view->add_user(usage, term_event, user_mask,
-                                        version_info->get_version_info());
+            Event ref_ready = view->add_user(usage, term_event, user_mask, op,
+                                            version_info->get_version_info());
             Event ready_event = Runtime::merge_events<true>(
                                         ref_ready, remaining_precondition);
             if (ready_event.exists())
@@ -4925,8 +4922,7 @@ namespace Legion {
       // If we still have a composite view, then register that
       if (deferred_view != NULL)
         return deferred_view->find_field_descriptors(term_event, usage, 
-                                                     user_mask, fid_idx, 
-                                                     local_proc,
+                                                     user_mask, fid_idx, op, 
                                                      remaining_space, 
                                                      remaining_precondition,
                                                      field_data, preconditions,
@@ -5614,8 +5610,7 @@ namespace Legion {
     void FillView::find_field_descriptors(Event term_event, 
                                           const RegionUsage &usage,
                                           const FieldMask &user_mask,
-                                          unsigned fid_idx,
-                                          Processor local_proc,
+                                          unsigned fid_idx, Operation *op,
                                   std::vector<FieldDataDescriptor> &field_data,
                                           std::set<Event> &preconditions)
     //--------------------------------------------------------------------------
@@ -5628,8 +5623,7 @@ namespace Legion {
     bool FillView::find_field_descriptors(Event term_event,
                                           const RegionUsage &usage,
                                           const FieldMask &user_mask,
-                                          unsigned fid_idx,
-                                          Processor local_proc,
+                                          unsigned fid_idx, Operation *op,
                                           Realm::IndexSpace target,
                                           Event target_precondition,
                                   std::vector<FieldDataDescriptor> &field_data,
@@ -6135,7 +6129,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Event ReductionView::add_user(const RegionUsage &usage, Event term_event,
-                                  const FieldMask &user_mask,
+                                  const FieldMask &user_mask, Operation *op,
                                   const VersionInfo &version_info)
     //--------------------------------------------------------------------------
     {

@@ -386,6 +386,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Operation::update_atomic_locks(Reservation lock, bool exclusive)
+    //--------------------------------------------------------------------------
+    {
+      // Should only be called for inherited types
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
     void Operation::complete_mapping(Event wait_on /*= Event::NO_EVENT*/)
     //--------------------------------------------------------------------------
     {
@@ -1689,6 +1697,7 @@ namespace Legion {
       region = PhysicalRegion();
       privilege_path.clear();
       version_info.clear();
+      atomic_locks.clear();
       profiling_results = Mapper::InlineProfilingInfo();
       // Now return this operation to the queue
       runtime->free_map_op(this);
@@ -1835,6 +1844,34 @@ namespace Legion {
       }
       else
         map_complete_event = mapped_instances[0].get_ready_event();
+      // See if we have any reservations to take as part of this map
+      if (!atomic_locks.empty())
+      {
+        // They've already been sorted in order 
+        for (std::map<Reservation,bool>::const_iterator it = 
+              atomic_locks.begin(); it != atomic_locks.end(); it++)
+        {
+          Event next = Event::NO_EVENT;
+          if (it->second)
+            next = it->first.acquire(0, true/*exclusive*/,
+                                         map_complete_event);
+          else
+            next = it->first.acquire(1, false/*exclusive*/,
+                                         map_complete_event);
+#if LEGION_SPY
+          if (!next.exists())
+          {
+            UserEvent new_next = UserEvent::create_user_event();
+            new_next.trigger();
+            next = new_next;
+          }
+          LegionSpy::log_event_dependence(map_complete_event, next);
+#endif
+          map_complete_event = next;
+          // We can also issue the release condition on our termination
+          it->first.release(termination_event);
+        }
+      }
 #ifdef LEGION_SPY
       // Log an implicit dependence on the parent's start event
       LegionSpy::log_implicit_dependence(parent_ctx->get_start_event(),
@@ -1938,6 +1975,20 @@ namespace Legion {
       mapper->invoke_select_inline_sources(this, &input, &output);
       compute_ranking(output.chosen_ranking, sources, ranking);
     } 
+
+    //--------------------------------------------------------------------------
+    void MapOp::update_atomic_locks(Reservation lock, bool exclusive)
+    //--------------------------------------------------------------------------
+    {
+      std::map<Reservation,bool>::iterator finder = atomic_locks.find(lock);
+      if (finder != atomic_locks.end())
+      {
+        if (!finder->second && exclusive)
+          finder->second = true;
+      }
+      else
+        atomic_locks[lock] = exclusive;
+    }
 
     //--------------------------------------------------------------------------
     UniqueID MapOp::get_unique_id(void) const
@@ -2542,6 +2593,7 @@ namespace Legion {
       dst_parent_indexes.clear();
       src_versions.clear();
       dst_versions.clear();
+      atomic_locks.clear();
       profiling_results = Mapper::CopyProfilingInfo();
       // Return this operation to the runtime
       runtime->free_copy_op(this);
@@ -2772,6 +2824,18 @@ namespace Legion {
                                             output.src_instances[idx],
                                             valid_src_instances[idx],
                                             src_targets);
+          // If we have a compsite reference, we need to map it
+          // as a virtual region
+          if (src_composite >= 0)
+            runtime->forest->map_virtual_region(src_contexts[idx],
+                                                src_requirements[idx],
+                                                src_targets[src_composite],
+                                                src_versions[idx]
+#ifdef DEBUG_HIGH_LEVEL
+                                                , idx, get_logging_name()
+                                                , unique_op_id
+#endif
+                                                );
           // Now do the registration
           set_mapping_state(idx, true/*src*/);
           runtime->forest->physical_register_only(src_contexts[idx],
@@ -2976,6 +3040,20 @@ namespace Legion {
       mapper->invoke_select_copy_sources(this, &input, &output);
       // Fill in the ranking based on the output
       compute_ranking(output.chosen_ranking, sources, ranking);
+    }
+
+    //--------------------------------------------------------------------------
+    void CopyOp::update_atomic_locks(Reservation lock, bool exclusive)
+    //--------------------------------------------------------------------------
+    {
+      std::map<Reservation,bool>::iterator finder = atomic_locks.find(lock);
+      if (finder != atomic_locks.end())
+      {
+        if (!finder->second && exclusive)
+          finder->second = true;
+      }
+      else
+        atomic_locks[lock] = exclusive;
     }
 
     //--------------------------------------------------------------------------
@@ -4787,16 +4865,25 @@ namespace Legion {
     {
       RegionTreeContext physical_ctx = 
         parent_ctx->find_enclosing_context(parent_idx);
-      CompositeRef virtual_ref = 
-        runtime->forest->virtual_close_context(physical_ctx, requirement, 
-                                               version_info
+      // We already know the instances that we are going to need
+      InstanceSet chosen_instances;
+      parent_ctx->get_local_references(parent_idx, chosen_instances);
+      // This should have exactly one instance and it should be 
+      // composite reference
 #ifdef DEBUG_HIGH_LEVEL
-                                               , 0/*idx*/, get_logging_name()
-                                               , unique_op_id
+      assert(chosen_instances.size() == 1);
+      assert(chosen_instances[0].is_composite_ref());
 #endif
-                                               );
+      runtime->forest->physical_close_context(physical_ctx, requirement,
+                                              version_info, this,
+                                              chosen_instances
+#ifdef DEBUG_HIGH_LEVEL
+                                              , 0/*idx*/, get_logging_name()
+                                              , unique_op_id
+#endif
+                                              );
       // Pass the reference back to the parent task
-      parent_ctx->return_virtual_instance(parent_idx, virtual_ref);
+      parent_ctx->return_virtual_instance(parent_idx, chosen_instances); 
       // Then we can mark that we are mapped and executed
       complete_mapping();
       complete_execution();
@@ -8340,7 +8427,6 @@ namespace Legion {
     {
       RegionTreeContext physical_ctx = 
         parent_ctx->find_enclosing_context(parent_req_index);
-      Processor local_proc = parent_ctx->get_executing_processor();
       // We still have to do the traversal to flush any reductions
       InstanceSet empty_instances;
       runtime->forest->physical_traverse_path(physical_ctx, privilege_path,
@@ -8358,8 +8444,7 @@ namespace Legion {
         case BY_FIELD:
           {
             ready_event = 
-              runtime->forest->create_partition_by_field(physical_ctx,
-                                                         local_proc,
+              runtime->forest->create_partition_by_field(physical_ctx, this,
                                                          requirement,
                                                          partition_handle,
                                                          color_space,
@@ -8370,8 +8455,7 @@ namespace Legion {
         case BY_IMAGE:
           {
             ready_event = 
-              runtime->forest->create_partition_by_image(physical_ctx,
-                                                         local_proc,
+              runtime->forest->create_partition_by_image(physical_ctx, this,
                                                          requirement,
                                                          partition_handle,
                                                          color_space,
@@ -8382,8 +8466,7 @@ namespace Legion {
         case BY_PREIMAGE:
           {
             ready_event = 
-              runtime->forest->create_partition_by_preimage(physical_ctx,
-                                                            local_proc,
+              runtime->forest->create_partition_by_preimage(physical_ctx, this,
                                                             requirement,
                                                             projection,
                                                             partition_handle,

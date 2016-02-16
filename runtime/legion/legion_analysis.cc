@@ -3976,10 +3976,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    CompositeRef CompositeCloser::create_valid_view(PhysicalState *state,
-                                                    CompositeNode *root,
+    CompositeView*CompositeCloser::create_valid_view(PhysicalState *state,
+                                                     CompositeNode *root,
                                                    const FieldMask &closed_mask,
-                                                    bool register_view)
+                                                     bool register_view)
     //--------------------------------------------------------------------------
     {
       RegionTreeNode *node = root->logical_node;
@@ -4007,13 +4007,9 @@ namespace Legion {
       // Note that if we are permitted to leave the subregions
       // open then we don't make the view dirty
       if (register_view)
-      {
         node->update_valid_views(state, closed_mask,
                                  true/*dirty*/, composite_view);
-        // return an empty composite ref since it won't be used
-        return CompositeRef(); 
-      }
-      return CompositeRef(composite_view);
+      return composite_view;
     }
 
     //--------------------------------------------------------------------------
@@ -6828,124 +6824,201 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
     // InstanceRef 
     /////////////////////////////////////////////////////////////
-#if 0
+
     //--------------------------------------------------------------------------
-    InstanceRef::InstanceRef(void)
-      : ready_event(Event::NO_EVENT), view(NULL), manager(NULL)
+    InstanceRef::InstanceRef(bool comp)
+      : ready_event(Event::NO_EVENT), composite(comp), local(true)
     //--------------------------------------------------------------------------
     {
+      ptr.manager = NULL;
     }
 
     //--------------------------------------------------------------------------
-    InstanceRef::InstanceRef(Event ready, InstanceView *v)
-      : ready_event(ready), view(v), 
-        manager((v == NULL) ? NULL : v->get_manager()) 
+    InstanceRef::InstanceRef(const InstanceRef &rhs)
+      : valid_fields(rhs.valid_fields), ready_event(rhs.ready_event),
+        composite(rhs.composite), local(rhs.local)
     //--------------------------------------------------------------------------
     {
-    }
-
-    //--------------------------------------------------------------------------
-    InstanceRef::InstanceRef(Event ready, InstanceView *v,
-                             const std::vector<Reservation> &ls)
-      : ready_event(ready), view(v), 
-        manager((v == NULL) ? NULL : v->get_manager()), needed_locks(ls)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    void InstanceRef::add_valid_reference(ReferenceSource source)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_HIGH_LEVEL
-      assert((view != NULL) || (manager != NULL));
-#endif
-      // If we have a view, put the reference on the view
-      // otherwise we put it on the instance itself. The later
-      // case happens when instances are locally mapped and moved
-      // to remote nodes.
-      if (view != NULL)
-        view->add_base_valid_ref(source);
-      else
-        manager->add_base_valid_ref(source);
-    }
-
-    //--------------------------------------------------------------------------
-    void InstanceRef::remove_valid_reference(ReferenceSource source)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_HIGH_LEVEL
-      assert((view != NULL) || (manager != NULL));
-#endif
-      if (view != NULL)
+      if (composite)
       {
-        if (view->remove_base_valid_ref(source))
-          LogicalView::delete_logical_view(view);
+        ptr.view = rhs.ptr.view;
+        if (ptr.view != NULL)
+          ptr.view->add_base_valid_ref(COMPOSITE_HANDLE_REF);
+      }
+      else
+        ptr.manager = rhs.ptr.manager;
+    }
+
+    //--------------------------------------------------------------------------
+    InstanceRef::InstanceRef(PhysicalManager *man, const FieldMask &m, Event r)
+      : valid_fields(m), ready_event(r), composite(false)
+    //--------------------------------------------------------------------------
+    {
+      ptr.manager = man;
+    }
+
+    //--------------------------------------------------------------------------
+    InstanceRef::~InstanceRef(void)
+    //--------------------------------------------------------------------------
+    {
+      if (composite && (ptr.view != NULL) && 
+          ptr.view->remove_base_valid_ref(COMPOSITE_HANDLE_REF))
+        legion_delete(ptr.view);
+    }
+
+    //--------------------------------------------------------------------------
+    InstanceRef& InstanceRef::operator=(const InstanceRef &rhs)
+    //--------------------------------------------------------------------------
+    {
+      if (composite && (ptr.view != NULL) && 
+          ptr.view->remove_base_valid_ref(COMPOSITE_HANDLE_REF))
+        legion_delete(ptr.view);
+      valid_fields = rhs.valid_fields;
+      ready_event = rhs.ready_event;
+      composite = rhs.composite;
+      local = rhs.local;
+      if (composite)
+      {
+        ptr.view = rhs.ptr.view;
+        if (ptr.view != NULL)
+          ptr.view->add_base_valid_ref(COMPOSITE_HANDLE_REF);
+      }
+      else
+        ptr.manager = rhs.ptr.manager;
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    bool InstanceRef::operator==(const InstanceRef &rhs) const
+    //--------------------------------------------------------------------------
+    {
+      if (composite != rhs.composite)
+        return false;
+      if (valid_fields != rhs.valid_fields)
+        return false;
+      if (ready_event != rhs.ready_event)
+        return false;
+      if (composite)
+      {
+        if (ptr.manager != rhs.ptr.manager)
+          return false;
       }
       else
       {
-        if (manager->remove_base_valid_ref(source))
+        if (ptr.view != rhs.ptr.view)
+          return false;
+      }
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    bool InstanceRef::operator!=(const InstanceRef &rhs) const
+    //--------------------------------------------------------------------------
+    {
+      return !(*this == rhs);
+    }
+
+    //--------------------------------------------------------------------------
+    void InstanceRef::set_composite_view(CompositeView *view)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(composite);
+#endif
+      if ((ptr.view != NULL) && 
+          ptr.view->remove_base_valid_ref(COMPOSITE_HANDLE_REF))
+        legion_delete(ptr.view);
+      ptr.view = view;
+      if (ptr.view != NULL)
+        ptr.view->add_base_valid_ref(COMPOSITE_HANDLE_REF);
+    }
+
+    //--------------------------------------------------------------------------
+    CompositeView* InstanceRef::get_composite_view(void) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(composite);
+      assert(ptr.view != NULL);
+#endif     
+      return ptr.view;
+    }
+
+    //--------------------------------------------------------------------------
+    void InstanceRef::add_valid_reference(ReferenceSource source) const
+    //--------------------------------------------------------------------------
+    {
+      if (composite)
+      {
+#ifdef DEBUG_HIGH_LEVEL
+        assert(ptr.view != NULL);
+#endif
+        ptr.view->add_base_valid_ref(source);
+      }
+      else
+      {
+#ifdef DEBUG_HIGH_LEVEL
+        assert(ptr.manager != NULL);
+#endif
+        ptr.manager->add_base_valid_ref(source);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void InstanceRef::remove_valid_reference(ReferenceSource source) const
+    //--------------------------------------------------------------------------
+    {
+      if (composite)
+      {
+#ifdef DEBUG_HIGH_LEVEL
+        assert(ptr.view != NULL);
+#endif
+        if (ptr.view->remove_base_valid_ref(source))
+          legion_delete(ptr.view);
+      }
+      else
+      {
+#ifdef DEBUG_HIGH_LEVEL
+        assert(ptr.manager != NULL);
+#endif
+        if (ptr.manager->remove_base_valid_ref(source))
         {
-          if (manager->is_reduction_manager())
+          if (ptr.manager->is_reduction_manager())
           {
-            ReductionManager *reduc_manager = manager->as_reduction_manager();
+            ReductionManager *reduc_manager = ptr.manager->as_reduction_manager();
             if (reduc_manager->is_list_manager())
               legion_delete(reduc_manager->as_list_manager());
             else
               legion_delete(reduc_manager->as_fold_manager());
           }
           else
-            legion_delete(manager->as_instance_manager());
+            legion_delete(ptr.manager->as_instance_manager());
         }
       }
-    }
-
-    //--------------------------------------------------------------------------
-    MaterializedView* InstanceRef::get_materialized_view(void) const
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(view != NULL);
-      assert(view->is_materialized_view());
-#endif
-      return view->as_materialized_view();
-    }
-
-    //--------------------------------------------------------------------------
-    ReductionView* InstanceRef::get_reduction_view(void) const
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(view != NULL);
-      assert(view->is_reduction_view());
-#endif
-      return view->as_reduction_view();
-    }
-
-    //--------------------------------------------------------------------------
-    void InstanceRef::update_atomic_locks(
-                 std::map<Reservation,bool> &atomic_locks, bool exclusive)
-    //--------------------------------------------------------------------------
-    {
-      for (std::vector<Reservation>::const_iterator it = needed_locks.begin();
-            it != needed_locks.end(); it++)
-      {
-        std::map<Reservation,bool>::iterator finder = 
-          atomic_locks.find(*it);
-        if (finder == atomic_locks.end())
-          atomic_locks[*it] = exclusive;
-        else
-          finder->second = finder->second || exclusive;
-      }
-      // Once someone has asked for our locks we can let them go
-      needed_locks.clear();
     }
 
     //--------------------------------------------------------------------------
     Memory InstanceRef::get_memory(void) const
     //--------------------------------------------------------------------------
     {
-      return manager->memory;
+#ifdef DEBUG_HIGH_LEVEL
+      assert(!composite);
+      assert(ptr.manager != NULL);
+#endif
+      return ptr.manager->memory;
+    }
+
+    //--------------------------------------------------------------------------
+    bool InstanceRef::is_field_set(FieldID fid) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(!composite);
+      assert(ptr.manager != NULL);
+#endif
+      FieldSpaceNode *field_node = ptr.manager->region_node->column_source; 
+      unsigned index = field_node->get_field_index(fid);
+      return valid_fields.is_set(index);
     }
 
     //--------------------------------------------------------------------------
@@ -6954,7 +7027,11 @@ namespace Legion {
         InstanceRef::get_accessor(void) const
     //--------------------------------------------------------------------------
     {
-      return manager->get_accessor();
+#ifdef DEBUG_HIGH_LEVEL
+      assert(!composite);
+      assert(ptr.manager != NULL);
+#endif
+      return ptr.manager->get_accessor();
     }
 
     //--------------------------------------------------------------------------
@@ -6963,134 +7040,75 @@ namespace Legion {
         InstanceRef::get_field_accessor(FieldID fid) const
     //--------------------------------------------------------------------------
     {
-      return manager->get_field_accessor(fid);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(!composite);
+      assert(ptr.manager != NULL);
+#endif
+      return ptr.manager->get_field_accessor(fid);
     }
 
     //--------------------------------------------------------------------------
     void InstanceRef::pack_reference(Serializer &rez, AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
-      if (manager != NULL)
+      rez.serialize(valid_fields);
+      rez.serialize(ready_event);
+      rez.serialize(composite);
+      if (composite)
       {
-        DistributedID did = manager->send_manager(target);
-        rez.serialize(did);
-        rez.serialize(ready_event);
-        rez.serialize<size_t>(needed_locks.size());
-        for (std::vector<Reservation>::const_iterator it = 
-              needed_locks.begin(); it != needed_locks.end(); it++)
-          rez.serialize(*it);
+        if (ptr.view != NULL)
+        {
+          DistributedID did = ptr.view->send_view(target, valid_fields);
+          rez.serialize(did);
+        }
+        else
+          rez.serialize<DistributedID>(0);
       }
       else
-        rez.serialize<DistributedID>(0);
+      {
+        if (ptr.manager != NULL)
+        {
+          DistributedID did = ptr.manager->send_manager(target);
+          rez.serialize(did);
+        }
+        else
+          rez.serialize<DistributedID>(0);
+      }
     }
 
     //--------------------------------------------------------------------------
     void InstanceRef::unpack_reference(Runtime *runtime, Deserializer &derez)
     //--------------------------------------------------------------------------
     {
+      derez.deserialize(valid_fields);
+      derez.deserialize(ready_event);
+      derez.deserialize(composite);
       DistributedID did;
       derez.deserialize(did);
       if (did == 0)
         return;
       DistributedCollectable *dc = runtime->find_distributed_collectable(did);
-#ifdef DEBUG_HIGH_LEVEL
-      manager = dynamic_cast<PhysicalManager*>(dc);
-      assert(manager != NULL);
-#else
-      manager = static_cast<PhysicalManager*>(dc);
-#endif
-      derez.deserialize(ready_event);
-      size_t num_locks;
-      derez.deserialize(num_locks);
-      needed_locks.resize(num_locks);
-      for (unsigned idx = 0; idx < num_locks; idx++)
-        derez.deserialize(needed_locks[idx]); 
-    } 
-#endif
-
-    /////////////////////////////////////////////////////////////
-    // CompositeRef 
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    CompositeRef::CompositeRef(void)
-      : view(NULL), local(true)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    CompositeRef::CompositeRef(CompositeView *v)
-      : view(v), local(true)
-    //--------------------------------------------------------------------------
-    {
-      if (view != NULL)
-        view->add_base_valid_ref(COMPOSITE_HANDLE_REF);
-    }
-
-    //--------------------------------------------------------------------------
-    CompositeRef::CompositeRef(const CompositeRef &rhs)
-      : view(rhs.view), local(rhs.local)
-    //--------------------------------------------------------------------------
-    {
-      if (view != NULL)
-        view->add_base_valid_ref(COMPOSITE_HANDLE_REF);
-    }
-
-    //--------------------------------------------------------------------------
-    CompositeRef::~CompositeRef(void)
-    //--------------------------------------------------------------------------
-    {
-      if ((view != NULL) && view->remove_base_valid_ref(COMPOSITE_HANDLE_REF))
-        legion_delete(view);
-    }
-
-    //--------------------------------------------------------------------------
-    CompositeRef& CompositeRef::operator=(const CompositeRef &rhs)
-    //--------------------------------------------------------------------------
-    {
-      if ((view != NULL) && view->remove_base_valid_ref(COMPOSITE_HANDLE_REF))
-        legion_delete(view);
-      view = rhs.view;
-      local = rhs.local;
-      if (view != NULL)
-        view->add_base_valid_ref(COMPOSITE_HANDLE_REF);
-      return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    void CompositeRef::pack_reference(Serializer &rez, AddressSpaceID target)
-    //--------------------------------------------------------------------------
-    {
-      if (view != NULL)
+      if (composite)
       {
-        DistributedID did = view->send_view_base(target);
-        rez.serialize(did);
+#ifdef DEBUG_HIGH_LEVEL
+        ptr.view = dynamic_cast<CompositeView*>(dc);
+        assert(ptr.view != NULL);
+#else
+        ptr.view = static_cast<CompositeView*>(dc);
+#endif
+        ptr.view->add_base_valid_ref(COMPOSITE_HANDLE_REF);
       }
       else
-        rez.serialize<DistributedID>(0);
-    }
-
-    //--------------------------------------------------------------------------
-    void CompositeRef::unpack_reference(Runtime *runtime, Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
+      {
 #ifdef DEBUG_HIGH_LEVEL
-      assert(view == NULL);
-#endif
-      DistributedID did;
-      derez.deserialize(did);
-      if (did == 0)
-        return;
-      DistributedCollectable *dc = runtime->find_distributed_collectable(did);
-#ifdef DEBUG_HIGH_LEVEL
-      view = dynamic_cast<CompositeView*>(dc);
-      assert(view != NULL);
+        ptr.manager = dynamic_cast<PhysicalManager*>(dc);
+        assert(ptr.manager != NULL);
 #else
-      view = static_cast<CompositeView*>(dc);
+        ptr.manager = static_cast<PhysicalManager*>(dc);
 #endif
+      }
       local = false;
-    }
+    } 
 
     /////////////////////////////////////////////////////////////
     // InstanceSet 
@@ -7493,13 +7511,29 @@ namespace Legion {
       }
     }
 
-#if 0
     //--------------------------------------------------------------------------
-    const CompositeRef& InstanceSet::get_composite_ref(void) const
+    const InstanceRef& InstanceSet::get_composite_ref(void) const
     //--------------------------------------------------------------------------
     {
-    }
+      if (single)
+      {
+#ifdef DEBUG_HIGH_LEVEL
+        assert(refs.single != NULL);
+        assert(refs.single->is_composite_ref());
 #endif
+        return (*refs.single);
+      }
+      else
+      {
+        for (unsigned idx = 0; idx < refs.multi->vector.size(); idx++)
+        {
+          if (refs.multi->vector[idx].is_composite_ref())
+            return refs.multi->vector[idx];
+        }
+        assert(false);
+        return refs.multi->vector[0];
+      }
+    }
 
     //--------------------------------------------------------------------------
     void InstanceSet::pack_references(Serializer &rez,
@@ -7643,26 +7677,9 @@ namespace Legion {
     }
     
     //--------------------------------------------------------------------------
-    void InstanceSet::update_atomic_locks(std::map<Reservation,bool> &locks,
-                                          bool exclusive) const
-    //--------------------------------------------------------------------------
-    {
-      if (single)
-      {
-        if (refs.single != NULL)
-          refs.single->update_atomic_locks(locks, exclusive);
-      }
-      else
-      {
-        for (unsigned idx = 0; idx < refs.multi->vector.size(); idx++)
-          refs.multi->vector[idx].update_atomic_locks(locks, exclusive);
-      }
-    }
-
-    //--------------------------------------------------------------------------
     LegionRuntime::Accessor::RegionAccessor<
       LegionRuntime::Accessor::AccessorType::Generic> InstanceSet::
-                get_field_accessor(RegionTreeForest *forest, FieldID fid) const
+                                           get_field_accessor(FieldID fid) const
     //--------------------------------------------------------------------------
     {
       if (single)

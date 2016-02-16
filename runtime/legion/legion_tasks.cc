@@ -149,6 +149,7 @@ namespace Legion {
         local_arglen = 0;
       }
       early_mapped_regions.clear();
+      atomic_locks.clear();
       created_regions.clear();
       created_fields.clear();
       created_field_spaces.clear();
@@ -204,6 +205,16 @@ namespace Legion {
       // No need to pack remote, it will get set
       rez.serialize(speculated);
       rez.serialize(map_locally);
+      if (map_locally)
+      {
+        rez.serialize<size_t>(atomic_locks.size());
+        for (std::map<Reservation,bool>::const_iterator it = 
+              atomic_locks.begin(); it != atomic_locks.end(); it++)
+        {
+          rez.serialize(it->first);
+          rez.serialize(it->second);
+        }
+      }
       // Can't be sending inline tasks remotely
       rez.serialize(early_mapped_regions.size());
       for (std::map<unsigned,InstanceSet>::iterator it = 
@@ -289,6 +300,17 @@ namespace Legion {
       derez.deserialize(steal_count);
       derez.deserialize(speculated);
       derez.deserialize(map_locally);
+      if (map_locally)
+      {
+        size_t num_atomic;
+        derez.deserialize(num_atomic);
+        for (unsigned idx = 0; idx < num_atomic; idx++)
+        {
+          Reservation lock;
+          derez.deserialize(lock);
+          derez.deserialize(atomic_locks[lock]);
+        }
+      }
       size_t num_early;
       derez.deserialize(num_early);
       for (unsigned idx = 0; idx < num_early; idx++)
@@ -508,6 +530,38 @@ namespace Legion {
       if (output.speculate)
         value = output.speculative_value;
       return output.speculate;
+    }
+
+    //--------------------------------------------------------------------------
+    void TaskOp::select_sources(const InstanceRef &target,
+                                const InstanceSet &sources,
+                                std::vector<unsigned> &ranking)
+    //--------------------------------------------------------------------------
+    {
+      Mapper::SelectTaskSrcInput input;
+      Mapper::SelectTaskSrcOutput output;
+      prepare_for_mapping(target, input.target);
+      prepare_for_mapping(sources, input.source_instances);
+      input.region_req_index = current_mapping_index;
+      if (mapper == NULL)
+        mapper = runtime->find_mapper(current_proc, map_id);
+      mapper->invoke_select_task_sources(this, &input, &output);
+    }
+
+    //--------------------------------------------------------------------------
+    void TaskOp::update_atomic_locks(Reservation lock, bool exclusive)
+    //--------------------------------------------------------------------------
+    {
+      // Only one region should be in the process of being analyzed
+      // at a time so there is no need to hold the operation lock
+      std::map<Reservation,bool>::iterator finder = atomic_locks.find(lock);
+      if (finder != atomic_locks.end())
+      {
+        if (!finder->second && exclusive)
+          finder->second = true;
+      }
+      else
+        atomic_locks[lock] = exclusive;
     }
 
     //--------------------------------------------------------------------------
@@ -1499,6 +1553,7 @@ namespace Legion {
       // Premapping should never get cloned
       this->map_locally = rhs->map_locally;
       // From TaskOp
+      this->atomic_locks = rhs->atomic_locks;
       this->early_mapped_regions = rhs->early_mapped_regions;
       this->parent_req_indexes = rhs->parent_req_indexes;
       this->target_proc = p;
@@ -1775,6 +1830,9 @@ namespace Legion {
             }
           }
         }
+        // Set the current mapping index before doing anything that
+        // could result in the generation of a copy
+        set_current_mapping_index(must_premap[idx]);
         // Passed all the error checking tests so register it
         runtime->forest->physical_register_only(req_ctx, 
                               regions[must_premap[idx]], version_info, 
@@ -4647,6 +4705,26 @@ namespace Legion {
       {
         if (early_mapped_regions.find(idx) != early_mapped_regions.end())
           continue;
+        // See if we have to do any virtual mapping before registering
+        if (virtual_mapped[idx])
+        {
+#ifdef DEBUG_HIGH_LEVEL
+          assert(physical_instances[idx].size() == 1);
+          assert(physical_instances[idx][0].is_composite_ref());
+#endif
+          runtime->forest->map_virtual_region(enclosing_contexts[idx],
+                                              regions[idx],
+                                              physical_instances[idx][0],
+                                              get_version_info(idx)
+#ifdef DEBUG_HIGH_LEVEL
+                                              , idx, get_logging_name()
+                                              , unique_op_id
+#endif
+                                              );
+        }
+        // Set the current mapping index before doing anything
+        // that sould result in a copy
+        set_current_mapping_index(idx);
         // apply the results of the mapping to the tree
         runtime->forest->physical_register_only(enclosing_contexts[idx],
                                     regions[idx], get_version_info(idx), 
@@ -4811,8 +4889,8 @@ namespace Legion {
 #ifdef DEBUG_HIGH_LEVEL
           assert(physical_instances[idx].has_composite_ref());
 #endif
-          const CompositeRef &ref = physical_instances[idx].get_composite_ref();
-          CompositeView *composite_view = ref.get_view();
+          const InstanceRef &ref = physical_instances[idx].get_composite_ref();
+          CompositeView *composite_view = ref.get_composite_view();
           // First get any events necessary to make this view local
           if (!ref.is_local())
             composite_view->make_local(preconditions);
@@ -4870,14 +4948,6 @@ namespace Legion {
         runtime->find_variant_impl(task_id, selected_variant);
       // STEP 1: Compute the precondition for the task launch
       std::set<Event> wait_on_events;
-      // Get the set of locks that we need and sort them
-      // by the order in which they get sorted by STL set
-      // which should guarantee no deadlocks since all tasks
-      // will take the locks in the same order.  We put all
-      // the locks into the required locks.  We also track which
-      // locks are reservation locks and which are future
-      // locks since they have to be taken differently.
-      std::map<Reservation,bool/*exlusive*/> atomic_locks;
       // If we're debugging do one last check to make sure
       // that all the memories are visible on this processor
       for (unsigned idx = 0; idx < regions.size(); idx++)
@@ -4889,13 +4959,6 @@ namespace Legion {
           // task optimization
           if (!variant->is_inner())
             instances.update_wait_on_events(wait_on_events);
-          // See if we need a locks for this region requirement
-          if (IS_ATOMIC(regions[idx]))
-          {
-            // Check to see if it is needed exclusively or not
-            bool exclusive = !IS_READ_ONLY(regions[idx]);
-            instances.update_atomic_locks(atomic_locks, exclusive);
-          }
         }
       }
       // Now add get all the other preconditions for the launch
@@ -6633,22 +6696,28 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void IndividualTask::return_virtual_instance(unsigned index,
-                                                 const CompositeRef &ref)
+                                                 InstanceSet &refs)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
-      assert(ref.has_ref());
+      assert(refs.size() == 1);
+      assert(refs[0].is_composite_ref());
 #endif
-      CompositeView *composite_view = ref.get_view();
       RegionTreeContext virtual_ctx = get_parent_context(index);
+      // Put this in an instance set and then register it
       // Have to control access to the version info data structure
       AutoLock o_lock(op_lock);
 #ifdef DEBUG_HIGH_LEVEL
       assert(virtual_mapped[index]);
 #endif
-      runtime->forest->register_virtual_region(virtual_ctx,
-                                          composite_view, regions[index],
-                                          version_infos[index]);
+      runtime->forest->physical_register_only(virtual_ctx, regions[index],
+                                              version_infos[index], this,
+                                              Event::NO_EVENT, refs
+#ifdef DEBUG_HIGH_LEVEL
+                                              , index, get_logging_name()
+                                              , unique_op_id
+#endif
+                                              );
     }
 
     //--------------------------------------------------------------------------
@@ -7335,11 +7404,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PointTask::return_virtual_instance(unsigned index,
-                                            const CompositeRef &ref)
+    void PointTask::return_virtual_instance(unsigned index, InstanceSet &refs)
     //--------------------------------------------------------------------------
     {
-      slice_owner->return_virtual_instance(index, ref);
+      slice_owner->return_virtual_instance(index, refs);
     }
 
     //--------------------------------------------------------------------------
@@ -7649,8 +7717,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void WrapperTask::return_virtual_instance(unsigned index,
-                                              const CompositeRef &ref)
+    void WrapperTask::return_virtual_instance(unsigned index, InstanceSet &refs)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -10257,23 +10324,27 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SliceTask::return_virtual_instance(unsigned index, 
-                                            const CompositeRef &ref)
+    void SliceTask::return_virtual_instance(unsigned index, InstanceSet &refs)
     //--------------------------------------------------------------------------
     {
       // Add it to our state
 #ifdef DEBUG_HIGH_LEVEL
-      assert(ref.has_ref());
+      assert(refs.size() == 1);
+      assert(refs[0].is_composite_ref());
 #endif
-      CompositeView *composite_view = ref.get_view();
       RegionTreeContext virtual_ctx = get_parent_context(index);
       // Have to control access to the version info data structure
       AutoLock o_lock(op_lock);
       // Hold a reference so it doesn't get deleted
-      temporary_virtual_refs.push_back(ref);
-      runtime->forest->register_virtual_region(virtual_ctx,
-                                          composite_view, regions[index],
-                                          version_infos[index]);
+      temporary_virtual_refs.push_back(refs[0]);
+      runtime->forest->physical_register_only(virtual_ctx, regions[index],
+                                              version_infos[index], this,
+                                              Event::NO_EVENT, refs
+#ifdef DEBUG_HIGH_LEVEL
+                                              , index, get_logging_name()
+                                              , unique_op_id
+#endif
+                                              );
     }
 
     //--------------------------------------------------------------------------

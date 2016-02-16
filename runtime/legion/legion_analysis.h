@@ -1057,28 +1057,40 @@ namespace Legion {
      */
     class InstanceRef {
     public:
-      InstanceRef(void);
+      InstanceRef(bool composite = false);
+      InstanceRef(const InstanceRef &rhs);
       InstanceRef(PhysicalManager *manager, const FieldMask &valid_fields,
                   Event ready_event = Event::NO_EVENT);
-      //InstanceRef(Event ready, InstanceView *view);
-      //InstanceRef(Event ready, InstanceView *view,
-      //            const std::vector<Reservation> &locks);
+      ~InstanceRef(void);
+    public:
+      InstanceRef& operator=(const InstanceRef &rhs);
     public:
       bool operator==(const InstanceRef &rhs) const;
       bool operator!=(const InstanceRef &rhs) const;
     public:
-      inline bool has_ref(void) const { return (manager != NULL); }
-      //inline bool has_required_locks(void) const 
-      //                                { return !needed_locks.empty(); }
+      inline bool has_ref(void) const 
+      {
+#ifdef DEBUG_HIGH_LEVEL
+        assert(!composite);
+#endif
+        return (ptr.manager != NULL);
+      }
       inline Event get_ready_event(void) const { return ready_event; }
       inline void set_ready_event(Event ready) { ready_event = ready; }
-      //inline void add_reservation(Reservation handle) 
-      //                            { needed_locks.push_back(handle); }
-      inline PhysicalManager* get_manager(void) const { return manager; }
+      inline PhysicalManager* get_manager(void) const 
+      { 
+#ifdef DEBUG_HIGH_LEVEL
+        assert(!composite);
+#endif
+        return ptr.manager; 
+      }
       inline const FieldMask& get_valid_fields(void) const 
         { return valid_fields; }
     public:
-      bool is_composite_ref(void) const;
+      inline bool is_composite_ref(void) const { return composite; }
+      inline bool is_local(void) const { return local; }
+      void set_composite_view(CompositeView *view);
+      CompositeView* get_composite_view(void) const;
       MappingInstance get_mapping_instance(void) const;
     public:
       // These methods are used by PhysicalRegion::Impl to hold
@@ -1086,14 +1098,9 @@ namespace Legion {
       void add_valid_reference(ReferenceSource source) const;
       void remove_valid_reference(ReferenceSource source) const;
     public:
-      //MaterializedView* get_materialized_view(void) const;
-      //ReductionView* get_reduction_view(void) const;
-    public:
-      void update_atomic_locks(std::map<Reservation,bool> &atomic_locks,
-                               bool exclusive);
       Memory get_memory(void) const;
     public:
-      bool is_field_set(unsigned index) const;
+      bool is_field_set(FieldID fid) const;
       LegionRuntime::Accessor::RegionAccessor<
           LegionRuntime::Accessor::AccessorType::Generic>
             get_accessor(void) const;
@@ -1106,26 +1113,11 @@ namespace Legion {
     private:
       FieldMask valid_fields; 
       Event ready_event;
-      PhysicalManager *manager;
-    };
-
-    class CompositeRef {
-    public:
-      CompositeRef(void);
-      CompositeRef(CompositeView *view);
-      CompositeRef(const CompositeRef &rhs);
-      ~CompositeRef(void);
-    public:
-      CompositeRef& operator=(const CompositeRef &rhs);
-    public:
-      inline bool has_ref(void) const { return (view != NULL); }
-      inline bool is_local(void) const { return local; }
-      CompositeView* get_view(void) const { return view; }
-    public:
-      void pack_reference(Serializer &rez, AddressSpaceID target);
-      void unpack_reference(Runtime *rt, Deserializer &derez);
-    private:
-      CompositeView *view;
+      union {
+        PhysicalManager *manager;
+        CompositeView *view;
+      } ptr;
+      bool composite;
       bool local;
     };
 
@@ -1176,7 +1168,7 @@ namespace Legion {
       void add_instance(const InstanceRef &ref);
     public:
       bool has_composite_ref(void) const;
-      const CompositeRef& get_composite_ref(void) const;
+      const InstanceRef& get_composite_ref(void) const;
     public:
       void pack_references(Serializer &rez, AddressSpaceID target) const;
       void unpack_references(Runtime *runtime, Deserializer &derez);
@@ -1185,11 +1177,10 @@ namespace Legion {
       void remove_valid_references(ReferenceSource source) const;
     public:
       void update_wait_on_events(std::set<Event> &wait_on_events) const;
-      void update_atomic_locks(std::map<Reservation,bool> &lks,bool excl) const;
     public:
       LegionRuntime::Accessor::RegionAccessor<
         LegionRuntime::Accessor::AccessorType::Generic>
-          get_field_accessor(RegionTreeForest *forest, FieldID fid) const;
+          get_field_accessor(FieldID fid) const;
     protected:
       void make_copy(void);
     protected:
@@ -1297,10 +1288,10 @@ namespace Legion {
     public:
       CompositeNode* get_composite_node(RegionTreeNode *tree_node,
                                         CompositeNode *parent);
-      CompositeRef create_valid_view(PhysicalState *state,
-                                     CompositeNode *root,
-                                     const FieldMask &closed_mask,
-                                     bool register_view);
+      CompositeView* create_valid_view(PhysicalState *state,
+                                      CompositeNode *root,
+                                      const FieldMask &closed_mask,
+                                      bool register_view);
       void capture_physical_state(CompositeNode *target,
                                   RegionTreeNode *node,
                                   PhysicalState *state,
