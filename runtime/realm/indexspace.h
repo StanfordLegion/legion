@@ -695,6 +695,44 @@ namespace Realm {
         return IndexSpace::NO_SPACE;
       }
 
+      bool is_valid(void) const
+      {
+        switch (dim)
+        {
+          case -1:
+            return false;
+          case 0:
+            {
+              if (is_id)
+              {
+                IndexSpace is;
+                is.id = static_cast<IDType>(is_id);
+                return is.exists();
+              }
+              return false;
+            }
+          case 3:
+            {
+              if (rect_data[4] > rect_data[5])
+                return false;
+            }
+          case 2:
+            {
+              if (rect_data[2] > rect_data[3])
+                return false;
+            }
+          case 1:
+            {
+              if (rect_data[0] > rect_data[1])
+                return false;
+              break;
+            }
+          default:
+            assert(false);
+        }
+        return true;
+      }
+
       bool contains(DomainPoint point) const
       {
         bool result = false;

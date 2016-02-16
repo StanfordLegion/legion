@@ -1268,6 +1268,12 @@ namespace Realm {
       } else {
 	// we're triggering somebody else's event, so the first thing to do is tell them
 	assert(trigger_node == gasnet_mynode());
+	// once we send this message, it's possible we get an update from the owner before
+	//  we take the lock a few lines below here (assuming somebody on this node had 
+	//  already subscribed), so check here that we're triggering a new generation
+	// (the alternative is to not send the message until after we update local state, but
+	// that adds latency for everybody else)
+	assert(gen_triggered > generation);
 	EventTriggerMessage::send_request(owner, make_event(gen_triggered), poisoned);
 
 	// we might need to subscribe to intermediate generations
@@ -1296,40 +1302,39 @@ namespace Realm {
 	    if(poisoned) {
 	      local_triggers[gen_triggered] = true;
 	      has_local_triggers = true;
+              subscribe_needed = true; // make sure we get that update
 	    }
 
 	    // update generation last, with a synchronization to make sure poisoned generation
 	    // list is valid to any observer of this update
 	    generation = gen_triggered;
 	    __sync_synchronize();
-	  } else {
-	    // we can't update the main state because there are generations that we know
-	    //  have triggered, but we do not know if they are poisoned, so look in the
-	    //  future waiter list to see who we can wake, and update the local trigger
-	    //  list
+	  } else 
+	    if(gen_triggered > (generation + 1)) {
+	      // we can't update the main state because there are generations that we know
+	      //  have triggered, but we do not know if they are poisoned, so look in the
+	      //  future waiter list to see who we can wake, and update the local trigger
+	      //  list
 
-	    // should be in the future, not the past
-	    assert(gen_triggered > (generation + 1));
+	      std::map<Event::gen_t, std::vector<EventWaiter *> >::iterator it = future_local_waiters.find(gen_triggered);
+	      if(it != future_local_waiters.end()) {
+		to_wake.swap(it->second);
+		future_local_waiters.erase(it);
+	      }
 
-	    std::map<Event::gen_t, std::vector<EventWaiter *> >::iterator it = future_local_waiters.find(gen_triggered);
-	    if(it != future_local_waiters.end()) {
-	      to_wake.swap(it->second);
-	      future_local_waiters.erase(it);
+	      local_triggers[gen_triggered] = poisoned;
+	      has_local_triggers = true;
+
+	      subscribe_needed = true;
+	      previous_subscribe_gen = gen_subscribed;
+	      gen_subscribed = gen_triggered;
 	    }
-
-	    local_triggers[gen_triggered] = poisoned;
-	    has_local_triggers = true;
-
-	    subscribe_needed = true;
-	    previous_subscribe_gen = gen_subscribed;
-	    gen_subscribed = gen_triggered;
-	  }
-
-	  if(subscribe_needed)
-	    EventSubscribeMessage::send_request(owner,
-						make_event(gen_triggered),
-						previous_subscribe_gen);
 	}
+
+	if(subscribe_needed)
+	  EventSubscribeMessage::send_request(owner,
+					      make_event(gen_triggered),
+					      previous_subscribe_gen);
       }
 
       // finally, trigger any local waiters
