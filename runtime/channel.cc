@@ -2023,8 +2023,8 @@ namespace LegionRuntime {
               it->second->erase(xd);
               // We flush all changes into destination before mark this XferDes as completed
               xd->flush();
-              xd->mark_completed();
               log_new_dma.info("Finish XferDes : id(%lx)", xd->guid);
+              xd->mark_completed();
               /*bool need_to_delete_dma_request = xd->mark_completed();
               if (need_to_delete_dma_request) {
                 DmaRequest* dma_request = xd->dma_request;
