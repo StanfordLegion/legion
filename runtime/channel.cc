@@ -1371,9 +1371,7 @@ namespace LegionRuntime {
           for (it = thread_queue.begin(); it != thread_queue.end(); it++) {
             MemcpyRequest* req = *it;
             //double starttime = Realm::Clock::current_time_in_microseconds();
-            fprintf(stderr, "src = %lld, dst = %lld, size = %lu\n", (long long) req->src_buf, (long long) req->dst_buf, req->nbytes);
             memcpy(req->dst_buf, req->src_buf, req->nbytes);
-            fprintf(stderr, "src = %lld, memcpy succeed.\n", (long long) req->src_buf);
             //double stoptime = Realm::Clock::current_time_in_microseconds();
             //fprintf(stderr, "t = %.2lfus, tp = %.2lfMB/s\n", stoptime - starttime, (req->nbytes / (stoptime - starttime)));
           }

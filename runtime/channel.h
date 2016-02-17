@@ -59,7 +59,7 @@ namespace LegionRuntime{
       };
 
       enum {
-        MAX_SERIALIZATION_LEN = 5 + RegionInstanceImpl::MAX_LINEARIZATION_LEN
+        MAX_SERIALIZATION_LEN = 5 * sizeof(int64_t) / sizeof(int) + RegionInstanceImpl::MAX_LINEARIZATION_LEN
       };
 
       Buffer(void)
@@ -100,23 +100,24 @@ namespace LegionRuntime{
       // User has to manually set memory after deserialize
       void serialize(int* data) const
       {
-        *data = alloc_offset; data++;
-        *data = is_ib; data++;
-        *data = block_size; data++;
-        *data = elmt_size; data++;
-        *data = buf_size; data++;
-        linearization.serialize(data);
+        int64_t* data64 = (int64_t*) data;
+        *data64 = alloc_offset; data64++;
+        *data64 = is_ib; data64++;
+        *data64 = block_size; data64++;
+        *data64 = elmt_size; data64++;
+        *data64 = buf_size; data64++;
+        linearization.serialize((int*)data64);
       }
 
       void deserialize(const int* data)
       {
-        int* cur = (int*) data;
+        int64_t* cur = (int64_t*) data;
         alloc_offset = *cur; cur++;
         is_ib = *cur; cur++;
         block_size = *cur; cur++;
         elmt_size = *cur; cur++;
         buf_size = *cur; cur++;
-        linearization.deserialize(cur);
+        linearization.deserialize((int*)cur);
       }
 
       enum DimensionKind {
