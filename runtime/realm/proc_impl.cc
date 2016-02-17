@@ -553,13 +553,17 @@ namespace Realm {
     r_args.priority = priority;
     r_args.user_arglen = arglen;
     
-    if(!prs) {
+    if(!prs || prs->empty()) {
       // no profiling, so task args are the only payload
       Message::request(target, r_args, args, arglen, PAYLOAD_COPY);
     } else {
       // need to serialize both the task args and the profiling request
       //  into a single payload
-      Serialization::DynamicBufferSerializer dbs(arglen + 4096);  // assume profiling requests are < 4K
+      // allocate a little extra initial space for the profiling requests, but not too
+      //  much in case the copy sits around outside the srcdatapool for a long time
+      // (if we need more than this, we'll pay for a realloc during serialization, but it
+      //  will still work correctly)
+      Serialization::DynamicBufferSerializer dbs(arglen + 512);
 
       dbs.append_bytes(args, arglen);
       dbs << *prs;
