@@ -353,13 +353,13 @@ namespace Legion {
       RegionTreeContext release_context(void);
       virtual RegionTreeContext get_context(void) const;
       virtual ContextID get_context_id(void) const; 
+      virtual UniqueID get_context_uid(void) const;
     public:
       void destroy_user_lock(Reservation r);
       void destroy_user_barrier(Barrier b);
     public:
       PhysicalRegion get_physical_region(unsigned idx);
       void get_physical_references(unsigned idx, InstanceSet &refs);
-      void get_local_references(unsigned idx, InstanceSet &refs); 
       void add_inline_task(InlineTask *inline_task);
     public:
       // The following set of operations correspond directly
@@ -570,9 +570,6 @@ namespace Legion {
       // Hold the result of the mapping 
       LegionDeque<InstanceSet,TASK_INSTANCE_REGION_ALLOC>::tracked 
                                                              physical_instances;
-      // Hold the local instances mapped regions in our context
-      // which we will need to close when the task completes
-      LegionDeque<InstanceSet,TASK_LOCAL_REGION_ALLOC>::tracked local_instances;
       // Hold the physical regions for the task's execution
       std::vector<PhysicalRegion> physical_regions;
       // Keep track of inline mapping regions for this task
@@ -1012,6 +1009,7 @@ namespace Legion {
       virtual void deactivate(void);
     public:
       virtual RemoteTask* find_outermost_context(void);
+      virtual UniqueID get_context_uid(void) const;
     public:
       virtual bool has_remote_state(void) const;
       virtual void record_remote_state(void);

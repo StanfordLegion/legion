@@ -273,19 +273,18 @@ namespace Legion {
       bool has_restrictions(LogicalRegion handle, const RestrictInfo &info,
                             const std::set<FieldID> &fields);
     public:
-      
+      void initialize_current_context(RegionTreeContext ctx,
+                    const RegionRequirement &req, const InstanceSet &source,
+                    Event term_event, unsigned depth, UniqueID context_uid,
+                    std::map<PhysicalManager*,InstanceView*> &top_views);
       void initialize_current_context(RegionTreeContext ctx,
                                       const RegionRequirement &req,
+                                      const InstanceSet &sources,
                                       CompositeView *composite_view);
       void invalidate_current_context(RegionTreeContext ctx,
                                       LogicalRegion handle,
                                       bool logical_users_only);
     public: // Physical analysis methods
-      void initialize_current_context(RegionTreeContext ctx,
-                    const RegionRequirement &req, const InstanceSet &source,
-                    Event term_event, unsigned depth,
-                    std::map<PhysicalManager*,InstanceView*> &top_views,
-                    InstanceSet &target);
       void physical_traverse_path(RegionTreeContext ctx,
                                   RegionTreePath &path,
                                   const RegionRequirement &req,
@@ -1609,7 +1608,7 @@ namespace Legion {
       void update_valid_views(PhysicalState *state, const FieldMask &dirty_mask,
                               const std::vector<LogicalView*> &new_views,
                               const InstanceSet &corresponding_references);
-      // I hate the container problem, same as above except MaterializedView
+      // I hate the container problem, same as previous except MaterializedView
       void update_valid_views(PhysicalState *state, const FieldMask &dirty_mask,
                               const std::vector<MaterializedView*> &new_views,
                               const InstanceSet &corresponding_references);
@@ -1619,19 +1618,17 @@ namespace Legion {
       void flush_reductions(const FieldMask &flush_mask, ReductionOpID redop, 
                             const TraversalInfo &info,
                             CopyTracker *tracker = NULL);
-      LogicalView* convert_reference(const InstanceRef &ref, ContextID ctx);
-    public: // Help for physical closes
+    public: // Help for physical analysis
+      LogicalView* convert_reference(const InstanceRef &ref, 
+                                     UniqueID ctx_uid) const;
       void find_complete_fields(const FieldMask &scope_fields,
           const LegionMap<ColorPoint,FieldMask>::aligned &children,
           FieldMask &complete_fields);
-      void convert_target_views(const InstanceSet &targets, ContextID ctx,
+      void convert_target_views(const InstanceSet &targets, UniqueID ctx_uid,
                                 std::vector<LogicalView*> &target_views);
-      // I hate the container problem, same as above except MaterializedView
-      void convert_target_views(const InstanceSet &targets, ContextID ctx,
+      // I hate the container problem, same as previous except MaterializedView
+      void convert_target_views(const InstanceSet &targets, UniqueID ctx_uid,
                                 std::vector<MaterializedView*> &target_views);
-    public:
-      void add_persistent_view(ContextID ctx, MaterializedView *persist_view);
-      void remove_persistent_view(ContextID ctx,MaterializedView *persist_view);
     public:
       bool register_logical_view(LogicalView *view);
       void unregister_logical_view(LogicalView *view);
@@ -1696,12 +1693,14 @@ namespace Legion {
                                                 const std::set<FieldID> &fields,
                                                 size_t blocking_factor,
                                                 unsigned depth, Operation *op,
+                                                UniqueID context_uid,
                                                 bool &remote_creation) = 0;
       virtual ReductionView* create_reduction(Memory target_mem,
                                               FieldID fid,
                                               bool reduction_list,
                                               ReductionOpID redop,
                                               Operation *op,
+                                              UniqueID context_uid,
                                               bool &remote_creation) = 0;
       virtual void send_node(AddressSpaceID target) = 0;
       virtual void print_logical_context(ContextID ctx, 
@@ -1837,12 +1836,14 @@ namespace Legion {
                                                 const std::set<FieldID> &fields,
                                                 size_t blocking_factor,
                                                 unsigned depth, Operation *op,
+                                                UniqueID context_uid,
                                                 bool &remote);
       virtual ReductionView* create_reduction(Memory target_mem,
                                               FieldID fid,
                                               bool reduction_list,
                                               ReductionOpID redop,
                                               Operation *op,
+                                              UniqueID context_uid,
                                               bool &remote_creation);
       virtual void send_node(AddressSpaceID target);
       static void handle_node_creation(RegionTreeForest *context,
@@ -1914,6 +1915,8 @@ namespace Legion {
                              VersionInfo &version_info);
       Event detach_file(ContextID ctx, DetachOp *detach_op, 
                         VersionInfo &version_info, const InstanceRef &ref);
+      LogicalView* convert_reference_region(PhysicalManager *manager, 
+                                            UniqueID ctx_uid) const;
     public:
       const LogicalRegion handle;
       PartitionNode *const parent;
@@ -2006,14 +2009,19 @@ namespace Legion {
                                                 const std::set<FieldID> &fields,
                                                 size_t blocking_factor,
                                                 unsigned depth, Operation *op,
+                                                UniqueID context_uid,
                                                 bool &remote);
       virtual ReductionView* create_reduction(Memory target_mem,
                                               FieldID fid,
                                               bool reduction_list,
                                               ReductionOpID redop,
                                               Operation *op,
+                                              UniqueID context_uid,
                                               bool &remote_creation);
       virtual void send_node(AddressSpaceID target);
+    public:
+      LogicalView* convert_reference_partition(PhysicalManager *manager,
+                                               UniqueID ctx_uid) const;
     public:
       virtual void send_semantic_request(AddressSpaceID target, 
                                          SemanticTag tag);

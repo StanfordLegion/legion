@@ -404,7 +404,7 @@ namespace Legion {
         mapped = true;
       }
 #endif
-      mapped_event.trigger(wait_on);
+      Runtime::trigger_event<true>(mapped_event, wait_on);
     }
 
     //--------------------------------------------------------------------------
@@ -461,7 +461,7 @@ namespace Legion {
         resolved = true;
       }
 #endif
-      resolved_event.trigger(wait_on);
+      Runtime::trigger_event<true>(resolved_event, wait_on);
     }
 
     //--------------------------------------------------------------------------
@@ -1759,7 +1759,8 @@ namespace Legion {
       if (preconditions.empty())
         ready_event.trigger();
       else
-        ready_event.trigger(Runtime::merge_events<true>(preconditions));
+        Runtime::trigger_event<true>(ready_event,
+            Runtime::merge_events<true>(preconditions));
     }
 
     //--------------------------------------------------------------------------
@@ -1772,7 +1773,7 @@ namespace Legion {
       // If we are restricted we know the answer
       if (requirement.is_restricted())
       {
-        parent_ctx->get_local_references(parent_req_index, mapped_instances);
+        parent_ctx->get_physical_references(parent_req_index, mapped_instances);
         runtime->forest->traverse_and_register(physical_ctx, privilege_path,
                                                requirement, version_info,
                                                this, termination_event, 
@@ -1851,25 +1852,11 @@ namespace Legion {
         for (std::map<Reservation,bool>::const_iterator it = 
               atomic_locks.begin(); it != atomic_locks.end(); it++)
         {
-          Event next = Event::NO_EVENT;
-          if (it->second)
-            next = it->first.acquire(0, true/*exclusive*/,
-                                         map_complete_event);
-          else
-            next = it->first.acquire(1, false/*exclusive*/,
-                                         map_complete_event);
-#if LEGION_SPY
-          if (!next.exists())
-          {
-            UserEvent new_next = UserEvent::create_user_event();
-            new_next.trigger();
-            next = new_next;
-          }
-          LegionSpy::log_event_dependence(map_complete_event, next);
-#endif
-          map_complete_event = next;
+          map_complete_event = 
+            Runtime::acquire_reservation<false>(it->first, it->second,
+                                                map_complete_event);
           // We can also issue the release condition on our termination
-          it->first.release(termination_event);
+          Runtime::release_reservation<false>(it->first, termination_event);
         }
       }
 #ifdef LEGION_SPY
@@ -1903,7 +1890,7 @@ namespace Legion {
         // Issue a deferred trigger on our completion event
         // and mark that we are no longer responsible for 
         // triggering our completion event
-        completion_event.trigger(map_complete_event);
+        Runtime::trigger_event<false>(completion_event, map_complete_event);
         need_completion_trigger = false;
         DeferredExecuteArgs deferred_execute_args;
         deferred_execute_args.hlr_id = HLR_DEFERRED_EXECUTION_TRIGGER_ID;
@@ -2352,11 +2339,11 @@ namespace Legion {
         if (launcher.src_requirements[idx].privilege_fields.empty())
         {
           log_task.warning("WARNING: SOURCE REGION REQUIREMENT %d OF "
-                                 "COPY (ID %lld) IN TASK %s (ID %lld) HAS NO "
-                                 "PRIVILEGE FIELDS! DID YOU FORGET THEM?!?",
-                                 idx, get_unique_op_id(),
-                                 parent_ctx->get_task_name(), 
-                                 parent_ctx->get_unique_id());
+                           "COPY (ID %lld) IN TASK %s (ID %lld) HAS NO "
+                           "PRIVILEGE FIELDS! DID YOU FORGET THEM?!?",
+                           idx, get_unique_op_id(),
+                           parent_ctx->get_task_name(), 
+                           parent_ctx->get_unique_id());
         }
         src_requirements[idx] = launcher.src_requirements[idx];
         src_requirements[idx].flags |= NO_ACCESS_FLAG;
@@ -2366,11 +2353,11 @@ namespace Legion {
         if (launcher.src_requirements[idx].privilege_fields.empty())
         {
           log_task.warning("WARNING: DESTINATION REGION REQUIREMENT %d OF"
-                                 " COPY (ID %lld) IN TASK %s (ID %lld) HAS NO "
-                                 "PRIVILEGE FIELDS! DID YOU FORGET THEM?!?",
-                                 idx, get_unique_op_id(),
-                                 parent_ctx->get_task_name(), 
-                                 parent_ctx->get_unique_id());
+                           " COPY (ID %lld) IN TASK %s (ID %lld) HAS NO "
+                           "PRIVILEGE FIELDS! DID YOU FORGET THEM?!?",
+                           idx, get_unique_op_id(),
+                           parent_ctx->get_task_name(), 
+                           parent_ctx->get_unique_id());
         }
         dst_requirements[idx] = launcher.dst_requirements[idx];
         dst_requirements[idx].flags |= NO_ACCESS_FLAG;
@@ -2397,12 +2384,12 @@ namespace Legion {
         if (src_requirements.size() != dst_requirements.size())
         {
           log_run.error("Number of source requirements (%ld) does not "
-                              "match number of destination requirements (%ld) "
-                              "for copy operation (ID %lld) with parent "
-                              "task %s (ID %lld)",
-                              src_requirements.size(), dst_requirements.size(),
-                              get_unique_id(), parent_ctx->get_task_name(),
-                              parent_ctx->get_unique_id());
+                        "match number of destination requirements (%ld) "
+                        "for copy operation (ID %lld) with parent "
+                        "task %s (ID %lld)",
+                        src_requirements.size(), dst_requirements.size(),
+                        get_unique_id(), parent_ctx->get_task_name(),
+                        parent_ctx->get_unique_id());
 #ifdef DEBUG_HIGH_LEVEL
           assert(false);
 #endif
@@ -2414,15 +2401,15 @@ namespace Legion {
               src_requirements[idx].instance_fields.size())
           {
             log_run.error("Copy source requirement %d for copy operation "
-                                "(ID %lld) in parent task %s (ID %lld) has %ld "
-                                "privilege fields and %ld instance fields.  "
-                                "Copy requirements must have exactly the same "
-                                "number of privilege and instance fields.",
-                                idx, get_unique_id(), 
-                                parent_ctx->get_task_name(),
-                                parent_ctx->get_unique_id(),
-                                src_requirements[idx].privilege_fields.size(),
-                                src_requirements[idx].instance_fields.size());
+                          "(ID %lld) in parent task %s (ID %lld) has %ld "
+                          "privilege fields and %ld instance fields.  "
+                          "Copy requirements must have exactly the same "
+                          "number of privilege and instance fields.",
+                          idx, get_unique_id(), 
+                          parent_ctx->get_task_name(),
+                          parent_ctx->get_unique_id(),
+                          src_requirements[idx].privilege_fields.size(),
+                          src_requirements[idx].instance_fields.size());
 #ifdef DEBUG_HIGH_LEVEL
             assert(false);
 #endif
@@ -2431,11 +2418,11 @@ namespace Legion {
           if (!IS_READ_ONLY(src_requirements[idx]))
           {
             log_run.error("Copy source requirement %d for copy operation "
-                                "(ID %lld) in parent task %s (ID %lld) must "
-                                "be requested with a read-only privilege.",
-                                idx, get_unique_id(),
-                                parent_ctx->get_task_name(),
-                                parent_ctx->get_unique_id());
+                          "(ID %lld) in parent task %s (ID %lld) must "
+                          "be requested with a read-only privilege.",
+                          idx, get_unique_id(),
+                          parent_ctx->get_task_name(),
+                          parent_ctx->get_unique_id());
 #ifdef DEBUG_HIGH_LEVEL
             assert(false);
 #endif
@@ -2449,16 +2436,16 @@ namespace Legion {
               dst_requirements[idx].instance_fields.size())
           {
             log_run.error("Copy destination requirement %d for copy "
-                                "operation (ID %lld) in parent task %s "
-                                "(ID %lld) has %ld privilege fields and %ld "
-                                "instance fields.  Copy requirements must "
-                                "have exactly the same number of privilege "
-                                "and instance fields.", idx, 
-                                get_unique_id(), 
-                                parent_ctx->get_task_name(),
-                                parent_ctx->get_unique_id(),
-                                dst_requirements[idx].privilege_fields.size(),
-                                dst_requirements[idx].instance_fields.size());
+                          "operation (ID %lld) in parent task %s "
+                          "(ID %lld) has %ld privilege fields and %ld "
+                          "instance fields.  Copy requirements must "
+                          "have exactly the same number of privilege "
+                          "and instance fields.", idx, 
+                          get_unique_id(), 
+                          parent_ctx->get_task_name(),
+                          parent_ctx->get_unique_id(),
+                          dst_requirements[idx].privilege_fields.size(),
+                          dst_requirements[idx].instance_fields.size());
 #ifdef DEBUG_HIGH_LEVEL
             assert(false);
 #endif
@@ -2467,12 +2454,12 @@ namespace Legion {
           if (!HAS_WRITE(dst_requirements[idx]))
           {
             log_run.error("Copy destination requirement %d for copy "
-                                "operation (ID %lld) in parent task %s "
-                                "(ID %lld) must be requested with a "
-                                "read-write or write-discard privilege.",
-                                idx, get_unique_id(),
-                                parent_ctx->get_task_name(),
-                                parent_ctx->get_unique_id());
+                          "operation (ID %lld) in parent task %s "
+                          "(ID %lld) must be requested with a "
+                          "read-write or write-discard privilege.",
+                          idx, get_unique_id(),
+                          parent_ctx->get_task_name(),
+                          parent_ctx->get_unique_id());
 #ifdef DEBUG_HIGH_LEVEL
             assert(false);
 #endif
@@ -2487,16 +2474,16 @@ namespace Legion {
           if (!runtime->forest->are_compatible(src_space, dst_space))
           {
             log_run.error("Copy launcher index space mismatch at index "
-                                "%d of cross-region copy (ID %lld) in task %s "
-                                "(ID %lld). Source requirement with index "
-                                "space %x and destination requirement "
-                                "with index space %x do not have the "
-                                "same number of dimensions or the same number "
-                                "of elements in their element masks.",
-                                idx, get_unique_id(),
-                                parent_ctx->get_task_name(), 
-                                parent_ctx->get_unique_id(),
-                                src_space.id, dst_space.id);
+                          "%d of cross-region copy (ID %lld) in task %s "
+                          "(ID %lld). Source requirement with index "
+                          "space %x and destination requirement "
+                          "with index space %x do not have the "
+                          "same number of dimensions or the same number "
+                          "of elements in their element masks.",
+                          idx, get_unique_id(),
+                          parent_ctx->get_task_name(), 
+                          parent_ctx->get_unique_id(),
+                          src_space.id, dst_space.id);
 #ifdef DEBUG_HIGH_LEVEL
             assert(false);
 #endif
@@ -2505,13 +2492,13 @@ namespace Legion {
           else if (!runtime->forest->is_dominated(src_space, dst_space))
           {
             log_run.error("Destination index space %x for "
-                                "requirement %d of cross-region copy "
-                                "(ID %lld) in task %s (ID %lld) is not "
-                                "a sub-region of the source index space %x.", 
-                                dst_space.id, idx, get_unique_id(),
-                                parent_ctx->get_task_name(),
-                                parent_ctx->get_unique_id(),
-                                src_space.id);
+                          "requirement %d of cross-region copy "
+                          "(ID %lld) in task %s (ID %lld) is not "
+                          "a sub-region of the source index space %x.", 
+                          dst_space.id, idx, get_unique_id(),
+                          parent_ctx->get_task_name(),
+                          parent_ctx->get_unique_id(),
+                          src_space.id);
 #ifdef DEBUG_HIGH_LEVEL
             assert(false);
 #endif
@@ -2680,7 +2667,8 @@ namespace Legion {
       if (preconditions.empty())
         ready_event.trigger();
       else
-        ready_event.trigger(Runtime::merge_events<true>(preconditions));
+        Runtime::trigger_event<true>(ready_event,
+            Runtime::merge_events<true>(preconditions));
     }
 
     //--------------------------------------------------------------------------
@@ -2816,6 +2804,10 @@ namespace Legion {
         InstanceSet src_targets, dst_targets;
         // The common case 
         int src_composite = -1;
+        // Make a user event for when this copy across is done
+        // and add it to the set of copy complete events
+        UserEvent local_completion = UserEvent::create_user_event();
+        copy_complete_events.insert(local_completion);
         if (!src_requirements[idx].is_restricted())
         {
           // Do the conversion and check for errors
@@ -2841,7 +2833,7 @@ namespace Legion {
           runtime->forest->physical_register_only(src_contexts[idx],
                                                   src_requirements[idx],
                                                   src_versions[idx],
-                                                  this, completion_event,
+                                                  this, local_completion,
                                                   src_targets
 #ifdef DEBUG_HIGH_LEVEL
                                                   , idx, get_logging_name()
@@ -2852,13 +2844,14 @@ namespace Legion {
         else
         {
           // Restricted case, get the instances from the parent
-          parent_ctx->get_local_references(src_parent_indexes[idx],src_targets);
+          parent_ctx->get_physical_references(src_parent_indexes[idx],
+                                              src_targets);
           set_mapping_state(idx, true/*src*/);
           runtime->forest->traverse_and_register(src_contexts[idx],
                                                  src_privilege_paths[idx],
                                                  src_requirements[idx],
                                                  src_versions[idx], this,
-                                                 completion_event, src_targets
+                                                 local_completion, src_targets
 #ifdef DEBUG_HIGH_LEVEL
                                                  , idx, get_logging_name()
                                                  , unique_op_id
@@ -2877,7 +2870,7 @@ namespace Legion {
           runtime->forest->physical_register_only(dst_contexts[idx],
                                                   dst_requirements[idx],
                                                   dst_versions[idx],
-                                                  this, completion_event,
+                                                  this, local_completion,
                                                   dst_targets
 #ifdef DEBUG_HIGH_LEVEL
                                                   , idx, get_logging_name()
@@ -2888,37 +2881,59 @@ namespace Legion {
         else
         {
           // Restricted case, get the instances from the parent
-          parent_ctx->get_local_references(dst_parent_indexes[idx],dst_targets);
+          parent_ctx->get_physical_references(dst_parent_indexes[idx],
+                                              dst_targets);
           set_mapping_state(idx, false/*src*/);
           runtime->forest->traverse_and_register(dst_contexts[idx],
                                                  dst_privilege_paths[idx],
                                                  dst_requirements[idx],
                                                  dst_versions[idx], this,
-                                                 completion_event, dst_targets
+                                                 local_completion, dst_targets
 #ifdef DEBUG_HIGH_LEVEL
                                                  , idx, get_logging_name()
                                                  , unique_op_id
 #endif
                                                  );
         }
+        Event local_sync_precondition = sync_precondition;
+        // See if we have any atomic locks we have to acquire
+        if ((idx < atomic_locks.size()) && !atomic_locks[idx].empty())
+        {
+          // Issue the acquires and releases for the reservations
+          // necessary for performing this across operation
+          const std::map<Reservation,bool> &local_locks = atomic_locks[idx];
+          for (std::map<Reservation,bool>::const_iterator it = 
+                local_locks.begin(); it != local_locks.end(); it++)
+          {
+            local_sync_precondition = 
+              Runtime::acquire_reservation<false>(it->first, it->second,
+                                                  local_sync_precondition);
+            // We can also issue the release here too
+            Runtime::release_reservation<false>(it->first, local_completion);
+          }
+        }
         // If we made it here, we passed all our error-checking so
         // now we can issue the copy/reduce across operation
+        // Trigger our local completion event contingent upon 
+        // the copy/reduce across being done
         if (!IS_REDUCE(dst_requirements[idx]))
-          copy_complete_events.insert(
-              runtime->forest->copy_across(src_contexts[idx], dst_contexts[idx],
-                                           src_requirements[idx],
-                                           dst_requirements[idx],
-                                           src_targets, dst_targets,
-                                           src_versions[idx], src_composite,
-                                           this, sync_precondition));
+        {
+          Event across_done = 
+            runtime->forest->copy_across(src_contexts[idx], dst_contexts[idx], 
+                                  src_requirements[idx], dst_requirements[idx],
+                                  src_targets, dst_targets, src_versions[idx], 
+                                  src_composite, this, local_sync_precondition);
+          Runtime::trigger_event<false>(local_completion, across_done);
+        }
         else
-          copy_complete_events.insert(
+        {
+          Event across_done = 
             runtime->forest->reduce_across(src_contexts[idx], dst_contexts[idx],
-                                           src_requirements[idx],
-                                           dst_requirements[idx],
-                                           src_targets, dst_targets,
-                                           src_versions[idx], src_composite,
-                                           this, sync_precondition));
+                                  src_requirements[idx], dst_requirements[idx],
+                                  src_targets, dst_targets, src_versions[idx], 
+                                  src_composite, this, local_sync_precondition);
+          Runtime::trigger_event<false>(local_completion, across_done);
+        }
         // Apply our changes to the version states
         src_versions[idx].apply_mapping(src_contexts[idx].get_id(),
                             runtime->address_space, applied_conditions);
@@ -2927,9 +2942,6 @@ namespace Legion {
       }
       Event copy_complete_event = 
         Runtime::merge_events<false>(copy_complete_events);
-#ifdef LEGION_SPY 
-      LegionSpy::log_event_dependence(copy_complete_event, completion_event);
-#endif
       // Chain all the unlock and barrier arrivals off of the
       // copy complete event
       if (!arrive_barriers.empty())
@@ -2950,7 +2962,7 @@ namespace Legion {
       else
         complete_mapping();
       // Handle the case for marking when the copy completes
-      completion_event.trigger(copy_complete_event);
+      Runtime::trigger_event<false>(completion_event, copy_complete_event);
       need_completion_trigger = false;
       complete_execution(copy_complete_event);
       // We succeeded mapping
@@ -3046,14 +3058,20 @@ namespace Legion {
     void CopyOp::update_atomic_locks(Reservation lock, bool exclusive)
     //--------------------------------------------------------------------------
     {
-      std::map<Reservation,bool>::iterator finder = atomic_locks.find(lock);
-      if (finder != atomic_locks.end())
+      // We should only be doing analysis on one region requirement
+      // at a time so we don't need to hold the operation lock when 
+      // updating this data structure
+      if (current_index >= atomic_locks.size())
+        atomic_locks.resize(current_index+1);
+      std::map<Reservation,bool> &local_locks = atomic_locks[current_index];
+      std::map<Reservation,bool>::iterator finder = local_locks.find(lock);
+      if (finder != local_locks.end())
       {
         if (!finder->second && exclusive)
           finder->second = true;
       }
       else
-        atomic_locks[lock] = exclusive;
+        local_locks[lock] = exclusive;
     }
 
     //--------------------------------------------------------------------------
@@ -4079,7 +4097,8 @@ namespace Legion {
       if (preconditions.empty())
         ready_event.trigger();
       else
-        ready_event.trigger(Runtime::merge_events<true>(preconditions));
+        Runtime::trigger_event<true>(ready_event,
+            Runtime::merge_events<true>(preconditions));
     }
 
     //--------------------------------------------------------------------------
@@ -4314,7 +4333,7 @@ namespace Legion {
       }
       else
       {
-        parent_ctx->get_local_references(parent_req_index, chosen_instances);
+        parent_ctx->get_physical_references(parent_req_index, chosen_instances);
       }
       // Now we can perform our close operation
       Event close_event = 
@@ -4680,7 +4699,7 @@ namespace Legion {
         parent_ctx->find_enclosing_context(parent_idx);
       // We already know the instances that we are going to need
       InstanceSet chosen_instances;
-      parent_ctx->get_local_references(parent_idx, chosen_instances);
+      parent_ctx->get_physical_references(parent_idx, chosen_instances);
       Event close_event = 
         runtime->forest->physical_close_context(physical_ctx, requirement,
                                                 version_info, this,
@@ -4707,7 +4726,7 @@ namespace Legion {
       }
 #endif
       complete_mapping();
-      completion_event.trigger(close_event);
+      Runtime::trigger_event<false>(completion_event, close_event);
       need_completion_trigger = false;
       complete_execution(close_event);
       // This should always succeed
@@ -4867,7 +4886,7 @@ namespace Legion {
         parent_ctx->find_enclosing_context(parent_idx);
       // We already know the instances that we are going to need
       InstanceSet chosen_instances;
-      parent_ctx->get_local_references(parent_idx, chosen_instances);
+      parent_ctx->get_physical_references(parent_idx, chosen_instances);
       // This should have exactly one instance and it should be 
       // composite reference
 #ifdef DEBUG_HIGH_LEVEL
@@ -4958,15 +4977,15 @@ namespace Legion {
                                            physical_req.region))
         {
           log_task.error("ERROR: Acquire operation requested privileges "
-                               "on logical region (%x,%d,%d) which is "
-                               "not a subregion of the physical instance "
-                               "region (%x,%d,%d)",
-                               launcher.logical_region.index_space.id,
-                               launcher.logical_region.field_space.id,
-                               launcher.logical_region.get_tree_id(),
-                               physical_req.region.index_space.id,
-                               physical_req.region.field_space.id,
-                               physical_req.region.get_tree_id());
+                         "on logical region (%x,%d,%d) which is "
+                         "not a subregion of the physical instance "
+                         "region (%x,%d,%d)",
+                         launcher.logical_region.index_space.id,
+                         launcher.logical_region.field_space.id,
+                         launcher.logical_region.get_tree_id(),
+                         physical_req.region.index_space.id,
+                         physical_req.region.field_space.id,
+                         physical_req.region.get_tree_id());
 #ifdef DEBUG_HIGH_LEVEL
           assert(false);
 #endif
@@ -4979,8 +4998,8 @@ namespace Legion {
               physical_req.privilege_fields.end())
           {
             log_task.error("ERROR: Acquire operation requested on "
-                                 "field %d which is not contained in the "
-                                 "requested physical instance", *it);
+                           "field %d which is not contained in the "
+                           "requested physical instance", *it);
 #ifdef DEBUG_HIGH_LEVEL
             assert(false);
 #endif
@@ -4991,10 +5010,10 @@ namespace Legion {
       if (launcher.fields.empty())
       {
         log_task.warning("WARNING: PRIVILEGE FIELDS OF ACQUIRE OPERATION"
-                               "IN TASK %s (ID %lld) HAS NO PRIVILEGE "
-                               "FIELDS! DID YOU FORGET THEM?!?",
-                               parent_ctx->get_task_name(), 
-                               parent_ctx->get_unique_id());
+                         "IN TASK %s (ID %lld) HAS NO PRIVILEGE "
+                         "FIELDS! DID YOU FORGET THEM?!?",
+                         parent_ctx->get_task_name(), 
+                         parent_ctx->get_unique_id());
       }
       requirement.privilege_fields = launcher.fields;
       logical_region = launcher.logical_region;
@@ -5130,7 +5149,8 @@ namespace Legion {
       if (preconditions.empty())
         ready_event.trigger();
       else
-        ready_event.trigger(Runtime::merge_events<true>(preconditions));
+        Runtime::trigger_event<true>(ready_event,
+            Runtime::merge_events<true>(preconditions));
     }
 
     //--------------------------------------------------------------------------
@@ -5180,7 +5200,7 @@ namespace Legion {
       // Map this is a restricted region. We already know the 
       // physical region that we want to map.
       InstanceSet mapped_instances;
-      parent_ctx->get_local_references(parent_req_index, mapped_instances);
+      parent_ctx->get_physical_references(parent_req_index, mapped_instances);
       // Invoke the mapper before doing anything else 
       invoke_mapper();
       // Now we can map the operation
@@ -5230,7 +5250,6 @@ namespace Legion {
           parent_ctx->get_task_completion());
       LegionSpy::log_op_user(unique_op_id, 0,
           result.get_manager()->get_instance().id);
-      LegionSpy::log_event_dependence(acquire_complete, completion_event);
       {
         Processor proc = Processor::get_executing_processor();
         LegionSpy::log_op_proc_user(unique_op_id, proc.id);
@@ -5254,7 +5273,7 @@ namespace Legion {
         complete_mapping(Runtime::merge_events<true>(applied_conditions));
       else
         complete_mapping();
-      completion_event.trigger(acquire_complete);
+      Runtime::trigger_event<false>(completion_event, acquire_complete);
       need_completion_trigger = false;
       complete_execution(acquire_complete);
       // we succeeded in mapping
@@ -5684,7 +5703,8 @@ namespace Legion {
       if (preconditions.empty())
         ready_event.trigger();
       else
-        ready_event.trigger(Runtime::merge_events<true>(preconditions));
+        Runtime::trigger_event<true>(ready_event,
+            Runtime::merge_events<true>(preconditions));
     }
 
     //--------------------------------------------------------------------------
@@ -5733,7 +5753,7 @@ namespace Legion {
         parent_ctx->find_enclosing_context(parent_req_index);
       // We already know what the answer has to be here 
       InstanceSet mapped_instances;
-      parent_ctx->get_local_references(parent_req_index, mapped_instances);
+      parent_ctx->get_physical_references(parent_req_index, mapped_instances);
       // Invoke the mapper before doing anything else 
       invoke_mapper();
       // Now we can map the operation
@@ -5782,7 +5802,6 @@ namespace Legion {
             mapped_instances[idx].get_view()->get_manager()->get_instance().id);
       LegionSpy::log_implicit_dependence(release_complete,
           parent_ctx->get_task_completion());
-      LegionSpy::log_event_dependence(release_complete, completion_event);
       {
         Processor proc = Processor::get_executing_processor();
         LegionSpy::log_op_proc_user(unique_op_id, proc.id);
@@ -5806,7 +5825,7 @@ namespace Legion {
         complete_mapping(Runtime::merge_events<true>(applied_conditions));
       else
         complete_mapping();
-      completion_event.trigger(release_complete);
+      Runtime::trigger_event<false>(completion_event, release_complete);
       need_completion_trigger = false;
       complete_execution(release_complete);
       // We succeeded in mapping
@@ -7100,7 +7119,8 @@ namespace Legion {
         index_tasks[idx]->trigger_remote_state_analysis(index_event);
         preconditions.insert(index_event);
       }
-      ready_event.trigger(Runtime::merge_events<true>(preconditions));
+      Runtime::trigger_event<true>(ready_event,
+          Runtime::merge_events<true>(preconditions));
     }
 
     //--------------------------------------------------------------------------
@@ -8210,15 +8230,13 @@ namespace Legion {
           completion_event);
       LegionSpy::log_implicit_dependence(completion_event,
           parent_ctx->get_task_completion());
-      LegionSpy::log_event_dependence(handle_ready, ready_event);
-      LegionSpy::log_event_dependence(ready_event, completion_event);
       {
         Processor local_proc = Processor::get_executing_processor();
         LegionSpy::log_op_proc_user(unique_op_id, local_proc.id);
       }
 #endif
       complete_mapping();
-      completion_event.trigger(ready_event);
+      Runtime::trigger_event<false>(completion_event, ready_event);
       need_completion_trigger = false;
       complete_execution(ready_event);
       // Return true since we succeeded
@@ -8418,7 +8436,8 @@ namespace Legion {
       if (preconditions.empty())
         ready_event.trigger();
       else
-        ready_event.trigger(Runtime::merge_events<true>(preconditions));
+        Runtime::trigger_event<true>(ready_event,
+            Runtime::merge_events<true>(preconditions));
     }
 
     //--------------------------------------------------------------------------
@@ -8492,11 +8511,9 @@ namespace Legion {
       LegionSpy::log_implicit_dependence(completion_event,
           parent_ctx->get_task_completion());
       LegionSpy::log_op_proc_user(unique_op_id, local_proc.id);
-      LegionSpy::log_event_dependence(handle_ready, ready_event);
-      LegionSpy::log_event_dependence(ready_event, completion_event);
 #endif
       complete_mapping();
-      completion_event.trigger(ready_event);
+      Runtime::trigger_event<false>(completion_event, ready_event);
       need_completion_trigger = false;
       complete_execution(ready_event);
       // return true since we succeeded
@@ -8893,7 +8910,8 @@ namespace Legion {
       if (preconditions.empty())
         ready_event.trigger();
       else
-        ready_event.trigger(Runtime::merge_events<true>(preconditions));
+        Runtime::trigger_event<true>(ready_event,
+            Runtime::merge_events<true>(preconditions));
     }
     
     //--------------------------------------------------------------------------
@@ -9395,7 +9413,8 @@ namespace Legion {
       if (preconditions.empty())
         ready_event.trigger();
       else
-        ready_event.trigger(Runtime::merge_events<true>(preconditions));
+        Runtime::trigger_event<true>(ready_event,
+            Runtime::merge_events<true>(preconditions));
     }
 
     //--------------------------------------------------------------------------
@@ -9431,10 +9450,10 @@ namespace Legion {
         complete_mapping(Runtime::merge_events<true>(applied_conditions));
       else
         complete_mapping();
-      Event acquired_event = result.get_ready_event();
-      completion_event.trigger(acquired_event);
+      Event attach_event = result.get_ready_event();
+      Runtime::trigger_event<false>(completion_event, attach_event);
       need_completion_trigger = false;
-      complete_execution(acquired_event);
+      complete_execution(attach_event);
       // Should always succeed
       return true;
     }
@@ -9753,7 +9772,8 @@ namespace Legion {
       if (preconditions.empty())
         ready_event.trigger();
       else
-        ready_event.trigger(Runtime::merge_events<true>(preconditions));
+        Runtime::trigger_event<true>(ready_event,
+            Runtime::merge_events<true>(preconditions));
     }
     
     //--------------------------------------------------------------------------
@@ -9798,7 +9818,7 @@ namespace Legion {
         complete_mapping(Runtime::merge_events<true>(applied_conditions));
       else
         complete_mapping();
-      completion_event.trigger(detach_event);
+      Runtime::trigger_event<false>(completion_event, detach_event);
       need_completion_trigger = false;
       complete_execution(detach_event);
       // This should always succeed

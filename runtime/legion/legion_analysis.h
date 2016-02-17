@@ -300,6 +300,7 @@ namespace Legion {
       const RegionRequirement &req;
       VersionInfo &version_info;
       const FieldMask traversal_mask;
+      const UniqueID context_uid;
     };
 
     /**
@@ -412,13 +413,6 @@ namespace Legion {
       VersionState* find_remote_version_state(VersionID vid, DistributedID did,
                                               AddressSpaceID owner_space);
     public:
-      inline bool has_persistent_views(void) const { return has_persistent; }
-      void add_persistent_view(MaterializedView *view);
-      void remove_persistent_view(MaterializedView *view);
-      void capture_persistent_views(
-                            LegionMap<LogicalView*,FieldMask>::aligned &views,
-                                    const FieldMask &capture_mask);
-    public:
       void print_physical_state(RegionTreeNode *node,
                                 const FieldMask &capture_mask,
                           LegionMap<ColorPoint,FieldMask>::aligned &to_traverse,
@@ -446,9 +440,6 @@ namespace Legion {
       FieldMask restricted_fields;
     protected:
       Reservation state_lock; 
-    protected:
-      bool has_persistent;
-      std::set<MaterializedView*> persistent_views;
     };
 
     typedef DynamicTableAllocator<CurrentState, 10, 8> CurrentStateAllocator;

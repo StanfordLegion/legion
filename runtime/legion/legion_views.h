@@ -175,34 +175,11 @@ namespace Legion {
         bool single;
       };
     public:
-      template<bool MAKE>
-      struct PersistenceFunctor {
-      public:
-        PersistenceFunctor(AddressSpaceID s, Runtime *rt, 
-                           SingleTask *p, LogicalRegion h,
-                           LogicalRegion u,
-                           DistributedID id, unsigned pidx, 
-                           std::set<Event> &d)
-          : source(s), runtime(rt), parent(p), handle(h),
-            upper(u), did(id), parent_idx(pidx), done_events(d) { }
-      public:
-        void apply(AddressSpaceID target);
-      protected:
-        AddressSpaceID source;
-        Runtime *runtime;
-        SingleTask *parent;
-        LogicalRegion handle;
-        LogicalRegion upper;
-        DistributedID did;
-        unsigned parent_idx;
-        std::set<Event> &done_events;
-      };
-    public:
       MaterializedView(RegionTreeForest *ctx, DistributedID did,
                        AddressSpaceID owner_proc, AddressSpaceID local_proc,
                        RegionTreeNode *node, InstanceManager *manager,
                        MaterializedView *parent, unsigned depth,
-                       bool register_now, bool persist = false);
+                       bool register_now, UniqueID context_uid = 0);
       MaterializedView(const MaterializedView &rhs);
       virtual ~MaterializedView(void);
     public:
@@ -222,13 +199,6 @@ namespace Legion {
     public:
       MaterializedView* get_materialized_subview(const ColorPoint &c);
       MaterializedView* get_materialized_parent_view(void) const;
-    public:
-      bool is_persistent(void) const;
-      void make_persistent(SingleTask *parent_ctx, unsigned parent_idx,
-                           AddressSpaceID source, UserEvent to_trigger,
-                           RegionTreeNode *top_node);
-      void unmake_persistent(SingleTask *parent_ctx, unsigned parent_idx,
-                             AddressSpaceID source, UserEvent to_trigger);
     public:
       void copy_field(FieldID fid, std::vector<Domain::CopySrcDstField> &infos);
     public:
@@ -378,10 +348,6 @@ namespace Legion {
                               Deserializer &derez, AddressSpaceID source);
       static void handle_send_update(Runtime *runtime, Deserializer &derez,
                                      AddressSpaceID source);
-      static void handle_make_persistent(Runtime *runtime, Deserializer &derez,
-                                         AddressSpaceID source);
-      static void handle_unmake_persistent(Runtime *runtime, 
-                                   Deserializer &derez, AddressSpaceID source);
     public:
       InstanceManager *const manager;
       MaterializedView *const parent;
@@ -420,8 +386,6 @@ namespace Legion {
     protected:
       // Useful for pruning the initial users at cleanup time
       std::set<Event> initial_user_events;
-    protected:
-      bool persistent_view; // only valid at the top-most node
     };
 
     /**
@@ -449,7 +413,7 @@ namespace Legion {
       ReductionView(RegionTreeForest *ctx, DistributedID did,
                     AddressSpaceID owner_proc, AddressSpaceID local_proc,
                     RegionTreeNode *node, ReductionManager *manager,
-                    bool register_now);
+                    bool register_now, UniqueID context_uid);
       ReductionView(const ReductionView &rhs);
       virtual ~ReductionView(void);
     public:

@@ -391,8 +391,6 @@ namespace Legion {
       SEND_FUTURE,
       SEND_FUTURE_RESULT,
       SEND_FUTURE_SUBSCRIPTION,
-      SEND_MAKE_PERSISTENT,
-      SEND_UNMAKE_PERSISTENT,
       SEND_MAPPER_MESSAGE,
       SEND_MAPPER_BROADCAST,
       SEND_TASK_IMPL_SEMANTIC_REQ,
@@ -484,8 +482,6 @@ namespace Legion {
         "Send Future",                                                \
         "Send Future Result",                                         \
         "Send Future Subscription",                                   \
-        "Send Make Persistent",                                       \
-        "Send Unmake Persistent",                                     \
         "Send Mapper Message",                                        \
         "Send Mapper Broadcast",                                      \
         "Send Task Impl Semantic Req",                                \

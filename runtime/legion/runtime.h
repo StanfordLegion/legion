@@ -1660,8 +1660,6 @@ namespace Legion {
       void send_future(AddressSpaceID target, Serializer &rez);
       void send_future_result(AddressSpaceID target, Serializer &rez);
       void send_future_subscription(AddressSpaceID target, Serializer &rez);
-      void send_make_persistent(AddressSpaceID target, Serializer &rez);
-      void send_unmake_persistent(AddressSpaceID target, Serializer &rez);
       void send_mapper_message(AddressSpaceID target, Serializer &rez);
       void send_mapper_broadcast(AddressSpaceID target, Serializer &rez);
       void send_task_impl_semantic_request(AddressSpaceID target, 
@@ -1783,8 +1781,6 @@ namespace Legion {
       void handle_future_send(Deserializer &derez, AddressSpaceID source);
       void handle_future_result(Deserializer &derez);
       void handle_future_subscription(Deserializer &derez);
-      void handle_make_persistent(Deserializer &derez, AddressSpaceID source);
-      void handle_unmake_persistent(Deserializer &derez, AddressSpaceID source);
       void handle_mapper_message(Deserializer &derez);
       void handle_mapper_broadcast(Deserializer &derez);
       void handle_task_impl_semantic_request(Deserializer &derez,
@@ -2404,6 +2400,15 @@ namespace Legion {
       static inline Event merge_events(Event e1, Event e2, Event e3);
       template<bool META>
       static inline Event merge_events(const std::set<Event> &events);
+      template<bool META>
+      static inline void trigger_event(UserEvent to_trigger,
+                                       Event precondition = Event::NO_EVENT);
+      template<bool META>
+      static inline Event acquire_reservation(Reservation r, bool exclusive,
+                                       Event precondition = Event::NO_EVENT);
+      template<bool META>
+      static inline void release_reservation(Reservation r, 
+                                       Event precondition = Event::NO_EVENT);
     };
 
     /**
@@ -2587,6 +2592,51 @@ namespace Legion {
       }
 #endif
       return result;
+    }
+
+    //--------------------------------------------------------------------------
+    template<bool META>
+    /*static*/ inline void Runtime::trigger_event(UserEvent to_trigger,
+                                                  Event precondition)
+    //--------------------------------------------------------------------------
+    {
+      to_trigger.trigger(precondition);
+#ifdef LEGION_SPY
+      if (!META && precondition.exists())
+        LegionSpy::log_event_dependence(precondition, to_trigger);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    template<bool META>
+    /*static*/ inline Event Runtime::acquire_reservation(Reservation r, 
+                                             bool exclusive, Event precondition)
+    //--------------------------------------------------------------------------
+    {
+      Event result = r.acquire(exclusive ? 0 : 1, exclusive, precondition);
+#ifdef LEGION_SPY
+      if (!META)
+      {
+        if (!result.exists())
+        {
+          UserEvent rename = UserEvent::create_user_event();
+          rename.trigger();
+          result = rename;
+        }
+        if (precondition.exists())
+          LegionSpy::log_event_dependence(precondition, result);
+      }
+#endif
+      return result;
+    }
+    
+    //--------------------------------------------------------------------------
+    template<bool META>
+    /*static*/ inline void Runtime::release_reservation(Reservation r,
+                                                        Event precondition)
+    //--------------------------------------------------------------------------
+    {
+      r.release(precondition);
     }
 
   }; // namespace Internal 

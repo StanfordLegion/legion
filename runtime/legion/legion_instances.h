@@ -144,6 +144,13 @@ namespace Legion {
       virtual void notify_invalid(void) = 0;
       virtual DistributedID send_manager(AddressSpaceID target) = 0; 
     public:
+      void register_logical_top_view(UniqueID context_uid, LogicalView *view);
+      void unregister_logical_top_view(LogicalView *view);
+    public:
+      UniqueID find_context_uid(LogicalView *top_view) const;
+      // This is the common case method so make it fast
+      LogicalView* find_logical_top_view(UniqueID context_uid) const;
+    public:
       inline PhysicalInstance get_instance(void) const
       {
 #ifdef DEBUG_HIGH_LEVEL
@@ -157,6 +164,7 @@ namespace Legion {
       RegionNode *const region_node;
     protected:
       PhysicalInstance instance;
+      std::map<UniqueID,LogicalView*> top_views;
     };
 
     /**
@@ -202,7 +210,7 @@ namespace Legion {
     public:
       inline Event get_use_event(void) const { return use_event; }
     public:
-      MaterializedView* create_top_view(unsigned depth);
+      MaterializedView* create_top_view(unsigned depth, UniqueID context_uid);
       void compute_copy_offsets(const FieldMask &copy_mask,
                                 std::vector<Domain::CopySrcDstField> &fields);
       void compute_copy_offsets(FieldID fid, 
@@ -285,7 +293,7 @@ namespace Legion {
                                       AddressSpaceID source,
                                       Deserializer &derez);
     public:
-      ReductionView* create_view(void);
+      ReductionView* create_view(UniqueID context_uid);
     public:
       const ReductionOp *const op;
       const ReductionOpID redop;

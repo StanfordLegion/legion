@@ -209,7 +209,8 @@ namespace Legion {
     TraversalInfo::TraversalInfo(ContextID c, Operation *o,
                                  const RegionRequirement &r, VersionInfo &info,
                                  const FieldMask &k)
-      : ctx(c), op(o), req(r), version_info(info), traversal_mask(k)
+      : ctx(c), op(o), req(r), version_info(info), traversal_mask(k),
+        context_uid(o->get_parent()->get_context_uid())
     //--------------------------------------------------------------------------
     {
     }
@@ -2271,8 +2272,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     CurrentState::CurrentState(RegionTreeNode *node, ContextID ctx)
-      : owner(node), state_lock(Reservation::create_reservation()),
-        has_persistent(false)
+      : owner(node), state_lock(Reservation::create_reservation())
     //--------------------------------------------------------------------------
     {
       // This first time we create the state, we need to pull down
@@ -2346,8 +2346,6 @@ namespace Legion {
       assert(prev_epoch_users.empty());
       assert(current_version_infos.empty());
       assert(previous_version_infos.empty());
-      assert(!has_persistent);
-      assert(persistent_views.empty());
 #endif
     }
 
@@ -2420,17 +2418,6 @@ namespace Legion {
       }
       outstanding_reduction_fields.clear();
       outstanding_reductions.clear();
-      if (!persistent_views.empty())
-      {
-        for (std::set<MaterializedView*>::const_iterator it =
-              persistent_views.begin(); it != persistent_views.end(); it++)
-        {
-          if ((*it)->remove_base_valid_ref(PERSISTENCE_REF))
-            legion_delete(*it);
-        }
-        persistent_views.clear();
-      }
-      has_persistent = false;
     } 
 
     //--------------------------------------------------------------------------
@@ -3024,67 +3011,6 @@ namespace Legion {
           result = create_remote_version_state(vid, did, owner_space);
       }
       return result;
-    }
-
-    //--------------------------------------------------------------------------
-    void CurrentState::add_persistent_view(MaterializedView *view)
-    //--------------------------------------------------------------------------
-    {
-      view->add_base_valid_ref(PERSISTENCE_REF);
-      // First see if we need to make the lock
-      bool remove_extra = false;
-      {
-        AutoLock s_lock(state_lock);
-        if (persistent_views.find(view) == persistent_views.end())
-          persistent_views.insert(view);
-        else
-          remove_extra = true;
-        has_persistent = true;
-      }
-      if (remove_extra)
-        view->remove_base_valid_ref(PERSISTENCE_REF);
-    }
-
-    //--------------------------------------------------------------------------
-    void CurrentState::remove_persistent_view(MaterializedView *view)
-    //--------------------------------------------------------------------------
-    {
-      bool remove_reference = false;
-      {
-        AutoLock s_lock(state_lock);
-        std::set<MaterializedView*>::iterator finder = 
-          persistent_views.find(view);
-        if (finder != persistent_views.end())
-        {
-          persistent_views.erase(finder);
-          remove_reference = true;
-        }
-      }
-      if (remove_reference && view->remove_base_valid_ref(PERSISTENCE_REF))
-        legion_delete(view);
-    }
-
-    //--------------------------------------------------------------------------
-    void CurrentState::capture_persistent_views(
-                        LegionMap<LogicalView*,FieldMask>::aligned &valid_views,
-                                                  const FieldMask &capture_mask)
-    //--------------------------------------------------------------------------
-    {
-      FieldMask empty_mask;
-      // If we are here then we know the lock exists
-      AutoLock s_lock(state_lock,1,false/*exclusive*/);
-      for (std::set<MaterializedView*>::const_iterator it = 
-            persistent_views.begin(); it != persistent_views.end(); it++)
-      {
-        if ((*it)->has_space(capture_mask))
-        {
-          LegionMap<LogicalView*,FieldMask>::aligned::const_iterator finder = 
-            valid_views.find(*it);
-          // Only need to add it if it is not already there
-          if (finder == valid_views.end())
-            valid_views[*it] = empty_mask;
-        }
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -6304,7 +6230,8 @@ namespace Legion {
         // Now if we have any done conditions we trigger the proper 
         // precondition event, otherwise we can do it immediately
         if (!done_conditions.empty())
-          to_trigger.trigger(Runtime::merge_events<true>(done_conditions));
+          Runtime::trigger_event<true>(to_trigger,
+              Runtime::merge_events<true>(done_conditions));
         else
           to_trigger.trigger();
       }
@@ -6544,7 +6471,8 @@ namespace Legion {
           (*it)->make_local(preconditions); 
         }
         if (!preconditions.empty())
-          to_trigger.trigger(Runtime::merge_events<true>(preconditions));
+          Runtime::trigger_event<true>(to_trigger,
+              Runtime::merge_events<true>(preconditions));
         else
           to_trigger.trigger();
       }

@@ -558,6 +558,68 @@ namespace Legion {
         send_remote_valid_update(owner_space, 1/*count*/, true/*add*/);
     }
 
+    //--------------------------------------------------------------------------
+    void PhysicalManager::register_logical_top_view(UniqueID context_uid,
+                                                    LogicalView *top_view)
+    //--------------------------------------------------------------------------
+    {
+      // Co-opt the gc lock for synchronization
+      AutoLock gc(gc_lock);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(top_views.find(context_uid) == top_views.end());
+#endif
+      top_views[context_uid] = top_view;
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalManager::unregister_logical_top_view(LogicalView *top_view)
+    //--------------------------------------------------------------------------
+    {
+      // Co-opt the gc lock for synchronization
+      AutoLock gc(gc_lock);
+      for (std::map<UniqueID,LogicalView*>::iterator it = top_views.begin();
+            it != top_views.end(); it++)
+      {
+        if (it->second == top_view)
+        {
+          top_views.erase(it);
+          return;
+        }
+      }
+      assert(false); // should never get here
+    }
+
+    //--------------------------------------------------------------------------
+    UniqueID PhysicalManager::find_context_uid(LogicalView *top_view) const
+    //--------------------------------------------------------------------------
+    {
+      // Co-opt the gc lock for synchronization
+      AutoLock gc(gc_lock,1,false/*exclusive*/);
+      for (std::map<UniqueID,LogicalView*>::const_iterator it = 
+            top_views.begin(); it != top_views.end(); it++)
+      {
+        if (it->second == top_view)
+          return it->first;
+      }
+      assert(false); // should never get here
+      return 0;
+    }
+  
+    //--------------------------------------------------------------------------
+    LogicalView* PhysicalManager::find_logical_top_view(
+                                                     UniqueID context_uid) const
+    //--------------------------------------------------------------------------
+    {
+      // Co-opt the gc lock for synchronization
+      AutoLock gc(gc_lock,1,false/*exclusive*/);
+      std::map<UniqueID,LogicalView*>::const_iterator finder = 
+        top_views.find(context_uid);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(finder != top_views.end());
+#endif
+      return finder->second;
+    }
+
     /////////////////////////////////////////////////////////////
     // InstanceManager 
     /////////////////////////////////////////////////////////////
@@ -747,7 +809,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    MaterializedView* InstanceManager::create_top_view(unsigned depth)
+    MaterializedView* InstanceManager::create_top_view(unsigned depth,
+                                                       UniqueID ctx_uid)
     //--------------------------------------------------------------------------
     {
       DistributedID view_did = 
@@ -757,7 +820,8 @@ namespace Legion {
                                                 context->runtime->address_space,
                                                 region_node, this,
                                             ((MaterializedView*)NULL/*parent*/),
-                                                depth, true/*register now*/);
+                                                depth, true/*register now*/,
+                                                ctx_uid);
       return result;
     }
 
@@ -1091,7 +1155,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ReductionView* ReductionManager::create_view(void)
+    ReductionView* ReductionManager::create_view(UniqueID context_uid)
     //--------------------------------------------------------------------------
     {
       DistributedID view_did = 
@@ -1099,7 +1163,8 @@ namespace Legion {
       ReductionView *result = legion_new<ReductionView>(context, view_did,
                                                 context->runtime->address_space,
                                                 context->runtime->address_space,
-                                                region_node, this, true/*reg*/);
+                                                region_node, this, 
+                                                true/*reg*/, context_uid);
       return result;
     }
 

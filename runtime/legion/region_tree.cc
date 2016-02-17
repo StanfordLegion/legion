@@ -620,7 +620,7 @@ namespace Legion {
       Event result = parent_node->create_subspaces_by_field(field_data,
                 subspaces, ((pending_node->mode & MUTABLE) != 0), precondition);
 #ifdef LEGION_SPY
-        LegionSpy::log_event_dependence(precondition, result);
+      LegionSpy::log_event_dependence(precondition, result);
 #endif
       // Now update the domains for all the sub-regions
       for (Domain::DomainPointIterator itr(color_space); itr; itr++)
@@ -684,7 +684,7 @@ namespace Legion {
       Event result = parent_node->create_subspaces_by_image(field_data,
                 subspaces, ((pending_node->mode & MUTABLE) != 0), precondition);
 #ifdef LEGION_SPY
-        LegionSpy::log_event_dependence(precondition, result);
+      LegionSpy::log_event_dependence(precondition, result);
 #endif
       // Now update the domains for all the sub-regions
       for (Domain::DomainPointIterator itr(color_space); itr; itr++)
@@ -750,7 +750,7 @@ namespace Legion {
       Event result = parent_node->create_subspaces_by_preimage(field_data,
                 subspaces, ((pending_node->mode & MUTABLE) != 0), precondition);
 #ifdef LEGION_SPY
-        LegionSpy::log_event_dependence(precondition, result);
+      LegionSpy::log_event_dependence(precondition, result);
 #endif
       // Now update the domains for all the sub-regions
       for (Domain::DomainPointIterator itr(color_space); itr; itr++)
@@ -833,7 +833,7 @@ namespace Legion {
       // Now set the result and trigger the handle ready event
       child_node->set_domain(Domain(result));
 #ifdef LEGION_SPY
-        LegionSpy::log_event_dependence(precondition, ready);
+      LegionSpy::log_event_dependence(precondition, ready);
 #endif
       return ready;
     }
@@ -878,7 +878,7 @@ namespace Legion {
       // Now set the result and trigger the handle ready event
       child_node->set_domain(Domain(result));
 #ifdef LEGION_SPY
-        LegionSpy::log_event_dependence(precondition, ready);
+      LegionSpy::log_event_dependence(precondition, ready);
 #endif
       return ready;
     }
@@ -925,7 +925,7 @@ namespace Legion {
       // Now set the result and trigger the handle ready event
       child_node->set_domain(Domain(result));
 #ifdef LEGION_SPY
-        LegionSpy::log_event_dependence(precondition, ready);
+      LegionSpy::log_event_dependence(precondition, ready);
 #endif
       return ready;
     }
@@ -1699,9 +1699,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void RegionTreeForest::initialize_current_context(RegionTreeContext ctx,
                     const RegionRequirement &req, const InstanceSet &sources,
-                    Event term_event, unsigned depth,
-                    std::map<PhysicalManager*,InstanceView*> &top_views,
-                    InstanceSet &targets)
+                    Event term_event, unsigned depth, UniqueID context_uid,
+                    std::map<PhysicalManager*,InstanceView*> &top_views)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -1711,20 +1710,103 @@ namespace Legion {
       RegionUsage usage(req);
       FieldMask user_mask = 
         top_node->column_source->get_field_mask(req.privilege_fields);
-      targets.resize(sources.size());
-      std::vector<LogicalView*> corresponding(targets.size());
+      std::vector<LogicalView*> corresponding(sources.size());
       // Build our set of corresponding views
       if (IS_REDUCE(req))
       {
-         
+        for (unsigned idx = 0; idx < sources.size(); idx++)
+        {
+          const InstanceRef &src_ref = sources[idx];
+          PhysicalManager *manager = src_ref.get_manager();
+#ifdef DEBUG_HIGH_LEVEL
+          assert(manager->is_reduction_manager());
+#endif
+          // Check to see if the view exists yet or not
+          std::map<PhysicalManager*,InstanceView*>::const_iterator 
+            finder = top_views.find(manager);
+          if (finder == top_views.end())
+          {
+            ReductionManager *reduc_manager = manager->as_reduction_manager();
+            ReductionView *new_view = 
+              reduc_manager->create_view(context_uid);
+            top_views[manager] = new_view;
+            corresponding[idx] = new_view;
+          }
+          else
+            corresponding[idx] = finder->second;
+        }
       }
       else
       {
-
+        for (unsigned idx = 0; idx < sources.size(); idx++)
+        {
+          const InstanceRef &src_ref = sources[idx];
+          PhysicalManager *manager = src_ref.get_manager();
+#ifdef DEBUG_HIGH_LEVEL
+          assert(manager->is_instance_manager());
+#endif
+          // Check to see if the view exists yet or not
+          std::map<PhysicalManager*,InstanceView*>::const_iterator 
+            finder = top_views.find(manager);
+          if (finder == top_views.end())
+          {
+            InstanceManager *inst_manager = manager->as_instance_manager();
+            MaterializedView *new_view = 
+              inst_manager->create_top_view(depth, context_uid);
+            top_views[manager] = new_view;
+            // See if we need to get the appropriate subview
+            if (top_node != manager->region_node)
+              corresponding[idx] = 
+                top_node->convert_reference_region(manager, context_uid);
+            else
+              corresponding[idx] = new_view;
+          }
+          else
+          {
+            // See if we have to pull down the right subview
+            if (top_node != manager->region_node)
+              corresponding[idx] = 
+                top_node->convert_reference_region(manager, context_uid);
+            else // they are the same so we can just use the view as is
+              corresponding[idx] = finder->second;
+          }
+        }
       }
       // Now we can register all these instances
       top_node->seed_state(ctx.get_id(), term_event, usage, 
-                           user_mask, targets, corresponding); 
+                           user_mask, sources, corresponding); 
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeForest::initialize_current_context(RegionTreeContext ctx,
+                                                  const RegionRequirement &req,
+                                                  const InstanceSet &sources,
+                                                  CompositeView *composite_view)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(req.handle_type == SINGULAR);
+      assert(sources.size() == 1);
+#endif
+      RegionNode *top_node = get_node(req.region);
+      RegionUsage usage(req);
+      FieldMask user_mask = 
+        top_node->column_source->get_field_mask(req.privilege_fields);
+      std::vector<LogicalView*> corresponding(1);
+      corresponding[0] = composite_view;
+      top_node->seed_state(ctx.get_id(), Event::NO_EVENT, usage,
+                           user_mask, sources, corresponding);
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeForest::invalidate_current_context(RegionTreeContext ctx,
+                                                      LogicalRegion handle,
+                                                      bool logical_users_only)
+    //--------------------------------------------------------------------------
+    {
+      RegionNode *top_node = get_node(handle);
+      CurrentInvalidator invalidator(ctx.get_id(), logical_users_only);
+      top_node->visit_node(&invalidator);
     }
 
     //--------------------------------------------------------------------------
@@ -2143,7 +2225,7 @@ namespace Legion {
         {
           const InstanceRef &dst_ref = dst_targets[it->first];
           LogicalView *view = 
-            dst_node->convert_reference(dst_ref, dst_ctx.get_id());
+            dst_node->convert_reference(dst_ref, info.context_uid);
 #ifdef DEBUG_HIGH_LEVEL
           assert(view->is_instance_view());
           assert(view->as_instance_view()->is_materialized_view());
@@ -9197,7 +9279,7 @@ namespace Legion {
         }
       }
       // Trigger the result;
-      to_trigger.trigger(distributed_allocation);
+      Runtime::trigger_event<true>(to_trigger, distributed_allocation);
     }
 
     //--------------------------------------------------------------------------
@@ -12359,9 +12441,6 @@ namespace Legion {
         else
           finder->second |= overlap;
       }
-      // Now see if we have any persistent views to capture
-      if (needs_space && state->manager->has_persistent_views())
-        state->manager->capture_persistent_views(valid_views, space_mask);
     }
 
     //--------------------------------------------------------------------------
@@ -13342,6 +13421,28 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    LogicalView* RegionTreeNode::convert_reference(const InstanceRef &ref,
+                                                   UniqueID ctx_uid) const
+    //--------------------------------------------------------------------------
+    {
+      PhysicalManager *manager = ref.get_manager();
+#ifdef DEBUG_HIGH_LEVEL
+      // Small sanity check to make sure they are in the same tree
+      assert(get_tree_id() == manager->region_node->get_tree_id());
+#endif
+      // If we're at the root, get the view we need for this context
+      if (manager->region_node == this)
+        return manager->find_logical_top_view(ctx_uid);
+      // If we didn't find it immediately, switch over to the explicit
+      // versions that don't have so many virtual function calls
+      if (is_region())
+        return as_region_node()->convert_reference_region(manager, ctx_uid);
+      else
+        return as_partition_node()->convert_reference_partition(manager, 
+                                                                ctx_uid);
+    }
+
+    //--------------------------------------------------------------------------
     void RegionTreeNode::find_complete_fields(const FieldMask &scope_fields,
                        const LegionMap<ColorPoint,FieldMask>::aligned &children,
                        FieldMask &complete_fields)
@@ -13367,7 +13468,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionTreeNode::convert_target_views(const InstanceSet &targets,
-                         ContextID ctx, std::vector<LogicalView*> &target_views)
+                      UniqueID ctx_uid, std::vector<LogicalView*> &target_views)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -13376,13 +13477,13 @@ namespace Legion {
       for (unsigned idx = 0; idx < targets.size(); idx++)
       {
         const InstanceRef &ref = targets[idx];
-        target_views[idx] = convert_reference(ref, ctx);
+        target_views[idx] = convert_reference(ref, ctx_uid);
       }
     }
 
     //--------------------------------------------------------------------------
     void RegionTreeNode::convert_target_views(const InstanceSet &targets,
-                    ContextID ctx, std::vector<MaterializedView*> &target_views)
+                 UniqueID ctx_uid, std::vector<MaterializedView*> &target_views)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -13394,7 +13495,7 @@ namespace Legion {
 #ifdef DEBUG_HIGH_LEVEL
         assert(!ref.is_composite_ref());
 #endif
-        LogicalView *view = convert_reference(ref, ctx);
+        LogicalView *view = convert_reference(ref, ctx_uid);
 #ifdef DEBUG_HIGH_LEVEL
         assert(!view->is_deferred_view());
         assert(view->is_instance_view());
@@ -13437,24 +13538,6 @@ namespace Legion {
         state.reset(); 
     }
     
-    //--------------------------------------------------------------------------
-    void RegionTreeNode::add_persistent_view(ContextID ctx, 
-                                             MaterializedView *persistent_view)
-    //--------------------------------------------------------------------------
-    {
-      CurrentState &state = get_current_state(ctx);
-      state.add_persistent_view(persistent_view);
-    }
-
-    //--------------------------------------------------------------------------
-    void RegionTreeNode::remove_persistent_view(ContextID ctx,
-                                              MaterializedView *persistent_view)
-    //--------------------------------------------------------------------------
-    {
-      CurrentState &state = get_current_state(ctx);
-      state.remove_persistent_view(persistent_view);
-    }
-
     //--------------------------------------------------------------------------
     bool RegionTreeNode::register_logical_view(LogicalView *view)
     //--------------------------------------------------------------------------
@@ -14363,7 +14446,7 @@ namespace Legion {
       // Iterate over all the targets and assign set the right views
       // In the process, issue any copies necessary to bring these 
       std::vector<MaterializedView*> target_views(targets.size());
-      convert_target_views(targets, info.ctx, target_views);
+      convert_target_views(targets, info.context_uid, target_views);
       closer.initialize_targets(this, state, target_views,
                                 closing_mask, complete_fields, targets);
       bool changed = false;
@@ -14410,6 +14493,7 @@ namespace Legion {
                                                 const std::set<FieldID> &fields,
                                                 size_t blocking_factor,
                                                 unsigned depth, Operation *op, 
+                                                UniqueID context_uid,
                                                 bool &remote_creation)
     //--------------------------------------------------------------------------
     {
@@ -14423,7 +14507,7 @@ namespace Legion {
       MaterializedView *result = NULL;
       if (manager != NULL)
       {
-        result = manager->create_top_view(depth);
+        result = manager->create_top_view(depth, context_uid);
 #ifdef DEBUG_HIGH_LEVEL
         assert(result != NULL);
 #endif
@@ -14445,7 +14529,8 @@ namespace Legion {
     ReductionView* RegionNode::create_reduction(Memory target_mem, FieldID fid,
                                                 bool reduction_list,
                                                 ReductionOpID redop,
-                                                Operation *op,
+                                                Operation *op, 
+                                                UniqueID context_uid,
                                                 bool &remote_creation)
     //--------------------------------------------------------------------------
     {
@@ -14458,7 +14543,7 @@ namespace Legion {
       ReductionView *result = NULL;
       if (manager != NULL)
       {
-        result = manager->create_view(); 
+        result = manager->create_view(context_uid); 
 #ifdef DEBUG_HIGH_LEVEL
         assert(result != NULL);
 #endif
@@ -14633,7 +14718,7 @@ namespace Legion {
 #ifdef DEBUG_HIGH_LEVEL
           assert(!ref.is_composite_ref());
 #endif
-          LogicalView *view = convert_reference(ref, info.ctx);
+          LogicalView *view = convert_reference(ref, info.context_uid);
 #ifdef DEBUG_HIGH_LEVEL
           assert(view->is_instance_view());
           assert(view->as_instance_view()->is_reduction_view());
@@ -14651,7 +14736,7 @@ namespace Legion {
       {
         // Normal instances
         std::vector<LogicalView*> new_views(targets.size());
-        convert_target_views(targets, info.ctx, new_views);
+        convert_target_views(targets, info.context_uid, new_views);
         if (IS_READ_ONLY(info.req))
         {
           // Read-only case
@@ -14882,7 +14967,7 @@ namespace Legion {
         for (unsigned idx = 0; idx < targets.size(); idx++)
         {
           InstanceRef &ref = targets[idx];
-          LogicalView *view = convert_reference(ref, info.ctx);
+          LogicalView *view = convert_reference(ref, info.context_uid);
 #ifdef DEBUG_HIGH_LEVEL
           assert(view->is_instance_view());
           assert(view->as_instance_view()->is_reduction_view());
@@ -15017,16 +15102,13 @@ namespace Legion {
         column_source->create_file_instance(req.privilege_fields,
                                             attach_mask, this, attach_op);
       // Wrap it in a view
-      MaterializedView *view = manager->create_top_view(row_source->depth);
+      UniqueID context_uid = attach_op->get_parent()->get_context_uid();
+      MaterializedView *view = manager->create_top_view(row_source->depth,
+                                                        context_uid);
 #ifdef DEBUG_HIGH_LEVEL
       assert(view != NULL);
 #endif
-      // Add this as a persistent view
       UserEvent ready_event = UserEvent::create_user_event();
-      view->make_persistent(attach_op->get_parent(), 
-                            attach_op->find_parent_index(0),
-                            context->runtime->address_space, ready_event,
-                            version_info.get_upper_bound_node());
       // Update the physical state with the new instance
       PhysicalState *state = get_physical_state(ctx, version_info);
       // We need to invalidate all other instances for these fields since
@@ -15042,7 +15124,8 @@ namespace Legion {
                                   const InstanceRef &ref)
     //--------------------------------------------------------------------------
     {
-      LogicalView *view = convert_reference(ref, ctx);
+      UniqueID context_uid = detach_op->get_parent()->get_context_uid();
+      LogicalView *view = convert_reference(ref, context_uid);
 #ifdef DEBUG_HIGH_LEVEL
       assert(view->is_instance_view());
       assert(view->as_instance_view()->is_materialized_view());
@@ -15052,13 +15135,22 @@ namespace Legion {
       // First remove this view from the set of valid views
       PhysicalState *state = get_physical_state(ctx, version_info);
       filter_valid_views(state, detach_view);
-      // Then remove it from the set of persistent views
-      UserEvent done_event = UserEvent::create_user_event();
-      detach_view->unmake_persistent(detach_op->get_parent(),
-                                     detach_op->find_parent_index(0),
-                                     context->runtime->address_space, 
-                                     done_event);
-      return done_event;
+      return Event::NO_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalView* RegionNode::convert_reference_region(
+                               PhysicalManager *manager, UniqueID ctx_uid) const
+    //--------------------------------------------------------------------------
+    {
+      if (manager->region_node == this)
+        return manager->find_logical_top_view(ctx_uid);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(parent != NULL);
+#endif
+      LogicalView *parent_view = 
+        parent->convert_reference_partition(manager, ctx_uid);
+      return parent_view->get_subview(row_source->color);
     }
 
     //--------------------------------------------------------------------------
@@ -15982,7 +16074,7 @@ namespace Legion {
     {
       // Find the target views
       std::vector<MaterializedView*> target_views(targets.size());
-      convert_target_views(targets, info.ctx, target_views);
+      convert_target_views(targets, info.context_uid, target_views);
       // Handle a special case here: if the node we're closing is a partition
       // and we're permitted to leave the partition open, then don't actually
       // close the partition. Instead close to the individual target child
@@ -16118,6 +16210,7 @@ namespace Legion {
                                                 const std::set<FieldID> &fields,
                                                 size_t blocking_factor,
                                                 unsigned depth, Operation *op,
+                                                UniqueID context_uid,
                                                 bool &remote_creation)
     //--------------------------------------------------------------------------
     {
@@ -16127,7 +16220,7 @@ namespace Legion {
       MaterializedView *result = parent->create_instance(target_mem, 
                                                          fields, 
                                                          blocking_factor,
-                                                         depth, op,
+                                                         depth, op, context_uid,
                                                          remote_creation);
       if (result != NULL)
       {
@@ -16140,6 +16233,7 @@ namespace Legion {
     ReductionView* PartitionNode::create_reduction(Memory target_mem, 
                                             FieldID fid, bool reduction_list,
                                             ReductionOpID redop, Operation *op,
+                                            UniqueID context_uid,
                                             bool &remote_creation)
     //--------------------------------------------------------------------------
     {
@@ -16147,7 +16241,7 @@ namespace Legion {
       assert(parent != NULL);
 #endif
       return parent->create_reduction(target_mem, fid, reduction_list, 
-                                      redop, op, remote_creation);
+                                      redop, op, context_uid, remote_creation);
     }
 
     //--------------------------------------------------------------------------
@@ -16198,6 +16292,20 @@ namespace Legion {
       {
         context->runtime->send_logical_partition_destruction(handle, target);
       }
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalView* PartitionNode::convert_reference_partition(
+                               PhysicalManager *manager, UniqueID ctx_uid) const
+    //--------------------------------------------------------------------------
+    {
+      // No need to bother with the check here
+#ifdef DEBUG_HIGH_LEVEL
+      assert(parent != NULL);
+#endif
+      LogicalView *parent_view = 
+        parent->convert_reference_region(manager, ctx_uid);
+      return parent_view->get_subview(row_source->color);
     }
 
     //--------------------------------------------------------------------------

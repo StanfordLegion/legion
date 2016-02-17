@@ -1738,7 +1738,8 @@ namespace Legion {
         {
           // Since we know we are on the owner node, we know we can
           // always ask our parent context to find the restricted instances
-          parent_ctx->get_local_references(must_premap[idx], chosen_instances);
+          parent_ctx->get_physical_references(must_premap[idx], 
+                                              chosen_instances);
         }
         else
         {
@@ -2245,7 +2246,6 @@ namespace Legion {
       deactivate_task();
       target_processors.clear();
       physical_instances.clear();
-      local_instances.clear();
       physical_regions.clear();
       inline_regions.clear();
       virtual_mapped.clear();
@@ -2383,6 +2383,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    UniqueID SingleTask::get_context_uid(void) const
+    //--------------------------------------------------------------------------
+    {
+      // For most single tasks, this is always the answer, the
+      // exception is for RemoteTask objects which override this method
+      return unique_op_id;
+    }
+
+    //--------------------------------------------------------------------------
     void SingleTask::destroy_user_lock(Reservation r)
     //--------------------------------------------------------------------------
     {
@@ -2419,17 +2428,6 @@ namespace Legion {
       assert(idx < physical_instances.size());
 #endif
       set = physical_instances[idx];
-    }
-
-    //--------------------------------------------------------------------------
-    void SingleTask::get_local_references(unsigned idx, InstanceSet &set)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock o_lock(op_lock,1,false/*exclusive*/);
-#ifdef DEBUG_HIGH_LEVEL
-      assert(idx < local_instances.size());
-#endif
-      set = local_instances[idx];
     }
 
     //--------------------------------------------------------------------------
@@ -3362,7 +3360,6 @@ namespace Legion {
             legion_new<PhysicalRegionImpl>(regions.back(), Event::NO_EVENT,
                  false/*mapped*/, this, map_id, tag, is_leaf(), runtime)));
       physical_instances.push_back(InstanceSet());
-      local_instances.push_back(InstanceSet());
       // Mark that this region was virtually mapped so we don't
       // try to close it when we are done executing.
       virtual_mapped.push_back(true);
@@ -3388,7 +3385,6 @@ namespace Legion {
               legion_new<PhysicalRegionImpl>(regions.back(), Event::NO_EVENT,
                     false/*mapped*/, this, map_id, tag, is_leaf(), runtime)));
         physical_instances.push_back(InstanceSet());
-        local_instances.push_back(InstanceSet());
         // Mark that the region was virtually mapped
         virtual_mapped.push_back(true);
         region_deleted.push_back(false);
@@ -4856,7 +4852,6 @@ namespace Legion {
       // For all of the physical contexts that were mapped, initialize them
       // with a specified reference to the current instance, otherwise
       // they were a virtual reference and we can ignore it.
-      local_instances.resize(regions.size());
       std::map<PhysicalManager*,InstanceView*> top_views;
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
@@ -4873,9 +4868,10 @@ namespace Legion {
         {
           runtime->forest->initialize_current_context(context,
               clone_requirements[idx], physical_instances[idx],
-              unmap_events[idx], get_depth()+1, top_views,local_instances[idx]);
+              unmap_events[idx], get_depth()+1, 
+              unique_op_id, top_views);
 #ifdef DEBUG_HIGH_LEVEL
-          assert(!local_instances[idx].empty());
+          assert(!physical_instances[idx].empty());
 #endif
           // If we need to add restricted coherence, do that now
           // Not we only need to do this for non-virtually mapped task
@@ -4909,7 +4905,7 @@ namespace Legion {
           // ever being read from, so all the dependences it will catch
           // are true dependences, therefore making it safe. :)
           runtime->forest->initialize_current_context(context,
-              clone_requirements[idx], composite_view);
+              clone_requirements[idx], physical_instances[idx], composite_view);
         }
       }
     }
@@ -5031,7 +5027,7 @@ namespace Legion {
             std::set<Event> ready_events;
             physical_instances[idx].update_wait_on_events(ready_events);
             Event precondition = Runtime::merge_events<false>(ready_events);
-            unmap_events[idx].trigger(precondition);
+            Runtime::trigger_event<false>(unmap_events[idx], precondition);
           }
           else
           { 
@@ -5112,7 +5108,7 @@ namespace Legion {
               if (!virtual_mapped[idx])
               {
                 physical_regions[idx].impl->reset_references(
-                    local_instances[idx], unmap_events[idx]);
+                    physical_instances[idx], unmap_events[idx]);
               }
             }
           } 
@@ -5121,7 +5117,6 @@ namespace Legion {
         {
           // Leaf and all non-virtual mappings
           // Mark that all the local instances are empty
-          local_instances.resize(regions.size());
           for (unsigned idx = 0; idx < regions.size(); idx++)
           {
             if (!virtual_mapped[idx])
@@ -5140,23 +5135,9 @@ namespace Legion {
         for (std::map<Reservation,bool>::const_iterator it = 
               atomic_locks.begin(); it != atomic_locks.end(); it++)
         {
-          Event next = Event::NO_EVENT;
-          if (it->second)
-            next = it->first.acquire(0, true/*exclusive*/,
-                                         start_condition);
-          else
-            next = it->first.acquire(1, false/*exclusive*/,
-                                         start_condition);
-#if LEGION_SPY
-          if (!next.exists())
-          {
-            UserEvent new_next = UserEvent::create_user_event();
-            new_next.trigger();
-            next = new_next;
-          }
-          LegionSpy::log_event_dependence(start_condition, next);
-#endif
-          start_condition = next;
+          start_condition = 
+            Runtime::acquire_reservation<false>(it->first, it->second,
+                                                start_condition);
         }
       }
       // STEP 3: Finally we get to launch the task
@@ -5248,7 +5229,7 @@ namespace Legion {
                           start_condition, task_priority, profiling_requests);
       // Finish the chaining optimization if we're doing it
       if (perform_chaining_optimization)
-        chain_complete_event.trigger(task_launch_event);
+        Runtime::trigger_event<false>(chain_complete_event, task_launch_event);
       // STEP 4: After we've launched the task, then we have to release any 
       // locks that we took for while the task was running.  
       if (!atomic_locks.empty())
@@ -5256,7 +5237,7 @@ namespace Legion {
         for (std::map<Reservation,bool>::const_iterator it = 
               atomic_locks.begin(); it != atomic_locks.end(); it++)
         {
-          it->first.release(term_event);
+          Runtime::release_reservation<false>(it->first, term_event);
         }
       }
     }
@@ -5275,7 +5256,6 @@ namespace Legion {
       assert(regions.size() == physical_instances.size());
       assert(regions.size() == virtual_mapped.size());
       assert(regions.size() == region_deleted.size());
-      assert(regions.size() == local_instances.size());
 #endif
 #ifdef LEGION_SPY
       for (unsigned idx = 0; idx < physical_instances.size(); idx++)
@@ -5331,7 +5311,6 @@ namespace Legion {
       assert(regions.size() == physical_instances.size());
       assert(regions.size() == virtual_mapped.size());
       assert(regions.size() == region_deleted.size());
-      assert(regions.size() == local_instances.size());
 #endif
       // Quick check to make sure the user didn't forget to end a trace
       if (current_trace != NULL)
@@ -5362,7 +5341,7 @@ namespace Legion {
 
       if (!is_leaf() || has_virtual_instances())
       {
-        for (unsigned idx = 0; idx < local_instances.size(); idx++)
+        for (unsigned idx = 0; idx < physical_instances.size(); idx++)
         {
           if (IS_READ_ONLY(regions[idx]) || IS_NO_ACCESS(regions[idx]) ||
               region_deleted[idx])
@@ -5372,7 +5351,7 @@ namespace Legion {
             if (!is_leaf())
             {
 #ifdef DEBUG_HIGH_LEVEL
-              assert(!local_instances[idx].empty());
+              assert(!physical_instances[idx].empty());
 #endif
               PostCloseOp *close_op = 
                 runtime->get_available_post_close_op(true);
@@ -6494,7 +6473,8 @@ namespace Legion {
       if (preconditions.empty())
         ready_event.trigger();
       else
-        ready_event.trigger(Runtime::merge_events<true>(preconditions));
+        Runtime::trigger_event<true>(ready_event,
+            Runtime::merge_events<true>(preconditions));
     }
 
     //--------------------------------------------------------------------------
@@ -7942,6 +7922,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    UniqueID RemoteTask::get_context_uid(void) const
+    //--------------------------------------------------------------------------
+    {
+      return remote_owner_uid;
+    }
+
+    //--------------------------------------------------------------------------
     bool RemoteTask::has_remote_state(void) const
     //--------------------------------------------------------------------------
     {
@@ -8778,7 +8765,8 @@ namespace Legion {
       if (preconditions.empty())
         ready_event.trigger();
       else
-        ready_event.trigger(Runtime::merge_events<true>(preconditions));
+        Runtime::trigger_event<true>(ready_event,
+            Runtime::merge_events<true>(preconditions));
     }
 
     //--------------------------------------------------------------------------
@@ -9821,7 +9809,8 @@ namespace Legion {
       if (preconditions.empty())
         ready_event.trigger();
       else
-        ready_event.trigger(Runtime::merge_events<true>(preconditions));
+        Runtime::trigger_event<true>(ready_event,
+            Runtime::merge_events<true>(preconditions));
     }
 
     //--------------------------------------------------------------------------

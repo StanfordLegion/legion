@@ -1247,7 +1247,8 @@ namespace Legion {
         std::set<Event> wait_on;
         references.update_wait_on_events(wait_on);
         wait_on.insert(ready_event);
-        termination_event.trigger(Runtime::merge_events<false>(wait_on));
+        Runtime::trigger_event<false>(termination_event,
+            Runtime::merge_events<false>(wait_on));
       }
       valid = false;
       mapped = false;
@@ -2874,16 +2875,6 @@ namespace Legion {
           case SEND_FUTURE_SUBSCRIPTION:
             {
               runtime->handle_future_subscription(derez);
-              break;
-            }
-          case SEND_MAKE_PERSISTENT:
-            {
-              runtime->handle_make_persistent(derez, remote_address_space);
-              break;
-            }
-          case SEND_UNMAKE_PERSISTENT:
-            {
-              runtime->handle_unmake_persistent(derez, remote_address_space);
               break;
             }
           case SEND_MAPPER_MESSAGE:
@@ -7085,14 +7076,9 @@ namespace Legion {
                                                      domain_ready);
       PendingPartitionOp *part_op = get_available_pending_partition_op(true);
       part_op->initialize_index_space_union(ctx, result, handles);
-      handle_ready.trigger(part_op->get_handle_ready());
-      domain_ready.trigger(part_op->get_completion_event());
-#ifdef LEGION_SPY
-      LegionSpy::log_event_dependence(part_op->get_handle_ready(), 
-                                      handle_ready);
-      LegionSpy::log_event_dependence(part_op->get_completion_event(), 
-                                      domain_ready);
-#endif
+      Runtime::trigger_event<false>(handle_ready, part_op->get_handle_ready());
+      Runtime::trigger_event<false>(domain_ready, 
+                                    part_op->get_completion_event());
       // Now we can add the operation to the queue
       Processor proc = ctx->get_executing_processor();
 #ifdef INORDER_EXECUTION
@@ -7137,14 +7123,9 @@ namespace Legion {
                                                      domain_ready);
       PendingPartitionOp *part_op = get_available_pending_partition_op(true);
       part_op->initialize_index_space_union(ctx, result, handle);
-      handle_ready.trigger(part_op->get_handle_ready());
-      domain_ready.trigger(part_op->get_completion_event());
-#ifdef LEGION_SPY
-      LegionSpy::log_event_dependence(part_op->get_handle_ready(), 
-                                      handle_ready);
-      LegionSpy::log_event_dependence(part_op->get_completion_event(), 
-                                      domain_ready);
-#endif
+      Runtime::trigger_event<false>(handle_ready, part_op->get_handle_ready());
+      Runtime::trigger_event<false>(domain_ready, 
+                                    part_op->get_completion_event());
       // Now we can add the operation to the queue
       Processor proc = ctx->get_executing_processor();
 #ifdef INORDER_EXECUTION
@@ -7191,14 +7172,9 @@ namespace Legion {
                                                      domain_ready);
       PendingPartitionOp *part_op = get_available_pending_partition_op(true);
       part_op->initialize_index_space_intersection(ctx, result, handles);
-      handle_ready.trigger(part_op->get_handle_ready());
-      domain_ready.trigger(part_op->get_completion_event());
-#ifdef LEGION_SPY
-      LegionSpy::log_event_dependence(part_op->get_handle_ready(), 
-                                      handle_ready);
-      LegionSpy::log_event_dependence(part_op->get_completion_event(), 
-                                      domain_ready);
-#endif
+      Runtime::trigger_event<false>(handle_ready, part_op->get_handle_ready());
+      Runtime::trigger_event<false>(domain_ready, 
+                                    part_op->get_completion_event());
       // Now we can add the operation to the queue
       Processor proc = ctx->get_executing_processor();
 #ifdef INORDER_EXECUTION
@@ -7245,14 +7221,9 @@ namespace Legion {
                                                      domain_ready);
       PendingPartitionOp *part_op = get_available_pending_partition_op(true);
       part_op->initialize_index_space_intersection(ctx, result, handle);
-      handle_ready.trigger(part_op->get_handle_ready());
-      domain_ready.trigger(part_op->get_completion_event());
-#ifdef LEGION_SPY
-      LegionSpy::log_event_dependence(part_op->get_handle_ready(), 
-                                      handle_ready);
-      LegionSpy::log_event_dependence(part_op->get_completion_event(), 
-                                      domain_ready);
-#endif
+      Runtime::trigger_event<false>(handle_ready, part_op->get_handle_ready());
+      Runtime::trigger_event<false>(domain_ready, 
+                                    part_op->get_completion_event());
       // Now we can add the operation to the queue
       Processor proc = ctx->get_executing_processor();
 #ifdef INORDER_EXECUTION
@@ -7300,14 +7271,9 @@ namespace Legion {
                                                      domain_ready);
       PendingPartitionOp *part_op = get_available_pending_partition_op(true);
       part_op->initialize_index_space_difference(ctx, result, initial, handles);
-      handle_ready.trigger(part_op->get_handle_ready());
-      domain_ready.trigger(part_op->get_completion_event());
-#ifdef LEGION_SPY
-      LegionSpy::log_event_dependence(part_op->get_handle_ready(), 
-                                      handle_ready);
-      LegionSpy::log_event_dependence(part_op->get_completion_event(), 
-                                      domain_ready);
-#endif
+      Runtime::trigger_event<false>(handle_ready, part_op->get_handle_ready());
+      Runtime::trigger_event<false>(domain_ready, 
+                                    part_op->get_completion_event());
       // Now we can add the operation to the queue
       Processor proc = ctx->get_executing_processor();
 #ifdef INORDER_EXECUTION
@@ -11799,22 +11765,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_make_persistent(AddressSpaceID target, Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(rez, SEND_MAKE_PERSISTENT,
-                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_unmake_persistent(AddressSpaceID target,Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(rez, SEND_UNMAKE_PERSISTENT,
-                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::send_mapper_message(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -12532,22 +12482,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       FutureImpl::handle_future_subscription(derez, this);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_make_persistent(Deserializer &derez,
-                                         AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      MaterializedView::handle_make_persistent(this, derez, source);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_unmake_persistent(Deserializer &derez,
-                                           AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      MaterializedView::handle_unmake_persistent(this, derez, source);
     }
 
     //--------------------------------------------------------------------------
@@ -15032,8 +14966,6 @@ namespace Legion {
           return "Runtime Remote Contexts";
         case TASK_INSTANCE_REGION_ALLOC:
           return "Task Physical Instances";
-        case TASK_LOCAL_REGION_ALLOC:
-          return "Task Local Regions";
         case TASK_INLINE_REGION_ALLOC:
           return "Task Inline Regions";
         case TASK_TRACES_ALLOC:

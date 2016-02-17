@@ -691,11 +691,12 @@ namespace Legion {
       std::vector<unsigned>       dst_parent_indexes;
       std::vector<VersionInfo>    src_versions;
       std::vector<VersionInfo>    dst_versions;
-      std::map<Reservation,bool>  atomic_locks;
     protected: // for support with mapping
       MapperManager*              mapper;
       unsigned                    current_index;
       bool                        current_src;
+    protected:
+      std::vector<std::map<Reservation,bool> > atomic_locks;
     protected:
       Mapper::CopyProfilingInfo   profiling_results;
       UserEvent                   profiling_reported;

@@ -223,9 +223,9 @@ namespace Legion {
                                AddressSpaceID own_addr, AddressSpaceID loc_addr,
                                RegionTreeNode *node, InstanceManager *man,
                                MaterializedView *par, unsigned dep,
-                               bool register_now, bool persist/* = false*/)
+                               bool register_now, UniqueID context_uid)
       : InstanceView(ctx, did, own_addr, loc_addr, node, register_now), 
-        manager(man), parent(par), depth(dep), persistent_view(persist)
+        manager(man), parent(par), depth(dep)
     //--------------------------------------------------------------------------
     {
       // Otherwise the instance lock will get filled in when we are unpacked
@@ -238,7 +238,11 @@ namespace Legion {
         add_nested_resource_ref(did);
       else 
       {
+#ifdef DEBUG_HIGH_LEVEL
+        assert(context_uid != 0);
+#endif
         manager->add_nested_resource_ref(did);
+        manager->register_logical_top_view(context_uid, this);
         // Do remote registration for the top of each remote tree
         if (!is_owner())
         {
@@ -276,6 +280,7 @@ namespace Legion {
       }
       if (parent == NULL)
       {
+        manager->unregister_logical_top_view(this);
         if (manager->remove_nested_resource_ref(did))
           delete manager;
         if (is_owner())
@@ -439,196 +444,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return parent;
-    }
-
-    //--------------------------------------------------------------------------
-    bool MaterializedView::is_persistent(void) const
-    //--------------------------------------------------------------------------
-    {
-      if (parent != NULL)
-        return parent->is_persistent();
-      return persistent_view;
-    }
-
-    //--------------------------------------------------------------------------
-    template<bool MAKE>
-    void MaterializedView::PersistenceFunctor<MAKE>::apply(
-                                                          AddressSpaceID target)
-    //--------------------------------------------------------------------------
-    {
-      if (target != source)
-      {
-        UserEvent to_trigger = UserEvent::create_user_event();
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          parent->pack_remote_ctx_info(rez);
-          rez.serialize(handle);
-          rez.serialize(did);
-          rez.serialize(parent_idx);
-          rez.serialize(to_trigger);
-          if (MAKE)
-            rez.serialize(upper);
-        }
-        if (MAKE)
-          runtime->send_make_persistent(target, rez);
-        else
-          runtime->send_unmake_persistent(target, rez);
-        done_events.insert(to_trigger);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void MaterializedView::make_persistent(SingleTask *parent_ctx,
-                                           unsigned parent_idx,
-                                           AddressSpaceID source, 
-                                           UserEvent to_trigger,
-                                           RegionTreeNode *upper_bound_node)
-    //--------------------------------------------------------------------------
-    {
-      if ((parent == NULL) || (logical_node == upper_bound_node))
-      {
-        // Mark that we are persistent, then figure out who else needs updates
-        if (!persistent_view)
-        {
-          // Retake the lock and see if we lost the race
-          AutoLock v_lock(view_lock);
-          if (!persistent_view)
-          {
-            persistent_view = true;
-            RegionTreeContext local_ctx = 
-              parent_ctx->find_enclosing_context(parent_idx);
-            logical_node->add_persistent_view(local_ctx.get_id(), this);
-          }
-          else
-          {
-            to_trigger.trigger();
-            return;
-          }
-        }
-        else
-        {
-          to_trigger.trigger();
-          return;
-        }
-        if (is_owner())
-        {
-#ifdef DEBUG_HIGH_LEVEL
-          assert(logical_node->is_region());
-          assert(upper_bound_node->is_region());
-#endif
-          // We're the owner, so send out any notifications to other
-          // views to inform them that this instance is now persistent
-          std::set<Event> done_events;
-          PersistenceFunctor<true> functor(source, runtime, parent_ctx,
-                                     logical_node->as_region_node()->handle,
-                                     upper_bound_node->as_region_node()->handle,
-                                     did, parent_idx, done_events);
-          map_over_remote_instances(functor);
-          to_trigger.trigger(Runtime::merge_events<true>(done_events));
-        }
-        else if (source != owner_space)
-        {
-          // If we are not the owner and the request didn't come from 
-          // the owner then, send a request to the owner
-          // to make all the views persistent
-          Serializer rez;
-          {
-            RezCheck z(rez);
-            parent_ctx->pack_remote_ctx_info(rez);
-#ifdef DEBUG_HIGH_LEVEL
-            assert(logical_node->is_region());
-#endif
-            rez.serialize(logical_node->as_region_node()->handle);
-            rez.serialize(did);
-            rez.serialize(parent_idx);
-            rez.serialize(to_trigger);
-#ifdef DEBUG_HIGH_LEVEL
-            assert(upper_bound_node->is_region());
-#endif
-            rez.serialize(upper_bound_node->as_region_node()->handle);
-          }
-          runtime->send_make_persistent(owner_space, rez);
-        }
-        else
-        {
-          // We've done our registration, so trigger our event
-          to_trigger.trigger();
-        }
-      }
-      else
-        parent->make_persistent(parent_ctx, parent_idx, source, 
-                                to_trigger, upper_bound_node);
-    }
-
-    //--------------------------------------------------------------------------
-    void MaterializedView::unmake_persistent(SingleTask *parent_ctx, 
-               unsigned parent_idx, AddressSpaceID source, UserEvent to_trigger)
-    //--------------------------------------------------------------------------
-    {
-      if (parent == NULL)
-      {
-        if (persistent_view)
-        {
-          // Retake the lock and see if we lost the race
-          AutoLock v_lock(view_lock);
-          if (persistent_view)
-          {
-            persistent_view = false;
-            RegionTreeContext local_ctx = 
-              parent_ctx->find_enclosing_context(parent_idx);
-            logical_node->remove_persistent_view(local_ctx.get_id(), this);
-          }
-          else
-          {
-            to_trigger.trigger();
-            return;
-          }
-        }
-        else
-        {
-          to_trigger.trigger();
-          return;
-        }
-        if (is_owner())
-        {
-#ifdef DEBUG_HIGH_LEVEL
-          assert(logical_node->is_region());
-#endif
-          // We're the owner, so send out any notifications to other
-          // views to inform them that this instance is now persistent
-          std::set<Event> done_events;
-          PersistenceFunctor<false> functor(source, runtime, parent_ctx,
-                                     logical_node->as_region_node()->handle,
-                                     LogicalRegion::NO_REGION,
-                                     did, parent_idx, done_events);
-          map_over_remote_instances(functor);
-          to_trigger.trigger(Runtime::merge_events<true>(done_events));
-        }
-        else if (source != owner_space)
-        {
-          // If we are not the owner and the request didn't come from 
-          // the owner then, send a request to the owner
-          // to make all the views persistent
-          Serializer rez;
-          {
-            RezCheck z(rez);
-            parent_ctx->pack_remote_ctx_info(rez);
-#ifdef DEBUG_HIGH_LEVEL
-            assert(logical_node->is_region());
-#endif
-            rez.serialize(logical_node->as_region_node()->handle);
-            rez.serialize(did);
-            rez.serialize(parent_idx);
-            rez.serialize(to_trigger);
-          }
-          runtime->send_unmake_persistent(owner_space, rez);
-        }
-        else
-          to_trigger.trigger();
-      }
-      else
-        parent->unmake_persistent(parent_ctx, parent_idx, source, to_trigger);
     }
 
     //--------------------------------------------------------------------------
@@ -903,7 +718,10 @@ namespace Legion {
             rez.serialize(logical_node->as_region_node()->handle);
             rez.serialize(owner_space);
             rez.serialize(depth);
-            rez.serialize(persistent_view);
+            // Find the context UID since we don't store it
+            // Must be the root view (parent == NULL) for this to work
+            UniqueID context_uid = manager->find_context_uid(this);
+            rez.serialize(context_uid);
           }
           runtime->send_materialized_view(target, rez);
         }
@@ -2661,8 +2479,8 @@ namespace Legion {
       derez.deserialize(owner_space);
       unsigned depth;
       derez.deserialize(depth);
-      bool is_persistent;
-      derez.deserialize(is_persistent);
+      UniqueID context_uid;
+      derez.deserialize(context_uid);
 
       RegionNode *target_node = runtime->forest->get_node(handle); 
       PhysicalManager *phy_man = target_node->find_manager(manager_did);
@@ -2676,7 +2494,7 @@ namespace Legion {
                                       target_node, inst_manager, 
                                       (MaterializedView*)NULL/*parent*/,
                                       depth, false/*don't register yet*/,
-                                      is_persistent);
+                                      context_uid);
       if (!target_node->register_logical_view(new_view))
       {
         if (new_view->remove_base_resource_ref(REMOTE_DID_REF))
@@ -2720,74 +2538,6 @@ namespace Legion {
       MaterializedView *mat_view = 
         view->as_instance_view()->as_materialized_view();
       mat_view->process_update(derez, source);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void MaterializedView::handle_make_persistent(Runtime *runtime,
-                                     Deserializer &derez, AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      UniqueID remote_owner_uid;
-      derez.deserialize(remote_owner_uid);
-      SingleTask *remote_ctx;
-      derez.deserialize(remote_ctx);
-      LogicalRegion handle;
-      derez.deserialize(handle);
-      DistributedID did;
-      derez.deserialize(did);
-      unsigned parent_idx;
-      derez.deserialize(parent_idx);
-      UserEvent to_trigger;
-      derez.deserialize(to_trigger);
-      LogicalRegion upper;
-      derez.deserialize(upper);
-
-      SingleTask *parent_ctx = runtime->find_remote_context(remote_owner_uid,
-                                                            remote_ctx);
-      RegionTreeNode *node = runtime->forest->get_node(handle);
-      RegionTreeNode *upper_bound = runtime->forest->get_node(upper);
-      LogicalView *view = node->find_view(did);
-#ifdef DEBUG_HIGH_LEVEL
-      assert(view->is_instance_view());
-      assert(view->as_instance_view()->is_materialized_view());
-#endif
-      MaterializedView *mat_view = 
-        view->as_instance_view()->as_materialized_view();
-      mat_view->make_persistent(parent_ctx, parent_idx, source, 
-                                to_trigger, upper_bound);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void MaterializedView::handle_unmake_persistent(
-                   Runtime *runtime, Deserializer &derez, AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      UniqueID remote_owner_uid;
-      derez.deserialize(remote_owner_uid);
-      SingleTask *remote_ctx;
-      derez.deserialize(remote_ctx);
-      LogicalRegion handle;
-      derez.deserialize(handle);
-      DistributedID did;
-      derez.deserialize(did);
-      unsigned parent_idx;
-      derez.deserialize(parent_idx);
-      UserEvent to_trigger;
-      derez.deserialize(to_trigger);
-
-      SingleTask *parent_ctx = runtime->find_remote_context(remote_owner_uid,
-                                                            remote_ctx);
-      RegionTreeNode *node = runtime->forest->get_node(handle);
-      LogicalView *view = node->find_view(did);
-#ifdef DEBUG_HIGH_LEVEL
-      assert(view->is_instance_view());
-      assert(view->as_instance_view()->is_materialized_view());
-#endif
-      MaterializedView *mat_view = 
-        view->as_instance_view()->as_materialized_view();
-      mat_view->unmake_persistent(parent_ctx, parent_idx, source, to_trigger);
     }
 
     /////////////////////////////////////////////////////////////
@@ -5645,7 +5395,7 @@ namespace Legion {
     ReductionView::ReductionView(RegionTreeForest *ctx, DistributedID did,
                                  AddressSpaceID own_sp, AddressSpaceID loc_sp,
                                  RegionTreeNode *node, ReductionManager *man,
-                                 bool register_now)
+                                 bool register_now, UniqueID context_uid)
       : InstanceView(ctx, did, own_sp, loc_sp, node, register_now), manager(man)
     //--------------------------------------------------------------------------
     {
@@ -5653,6 +5403,7 @@ namespace Legion {
       assert(manager != NULL);
 #endif
       manager->add_nested_resource_ref(did);
+      manager->register_logical_top_view(context_uid, this);
       if (!is_owner())
       {
         add_base_resource_ref(REMOTE_DID_REF);
@@ -5682,6 +5433,7 @@ namespace Legion {
         UpdateReferenceFunctor<RESOURCE_REF_KIND,false/*add*/> functor(this);
         map_over_remote_instances(functor);
       }
+      manager->unregister_logical_top_view(this);
       if (manager->remove_nested_resource_ref(did))
       {
         if (manager->is_list_manager())
@@ -6476,6 +6228,9 @@ namespace Legion {
           rez.serialize(manager_did);
           rez.serialize(logical_node->as_region_node()->handle);
           rez.serialize(owner_space);
+          // We only store this UID in the manager, so look it up here
+          UniqueID context_uid = manager->find_context_uid(this);
+          rez.serialize(context_uid);
         }
         runtime->send_reduction_view(target, rez);
         update_remote_instances(target);
@@ -6690,6 +6445,8 @@ namespace Legion {
       derez.deserialize(handle);
       AddressSpaceID owner_space;
       derez.deserialize(owner_space);
+      UniqueID context_uid;
+      derez.deserialize(context_uid);
 
       RegionNode *target_node = runtime->forest->get_node(handle);
       PhysicalManager *phy_man = target_node->find_manager(manager_did);
@@ -6701,7 +6458,7 @@ namespace Legion {
       ReductionView *new_view = legion_new<ReductionView>(runtime->forest,
                                    did, owner_space, runtime->address_space,
                                    target_node, red_manager,
-                                   false/*don't register yet*/);
+                                   false/*don't register yet*/, context_uid);
       if (!target_node->register_logical_view(new_view))
       {
         if (new_view->remove_base_resource_ref(REMOTE_DID_REF))
