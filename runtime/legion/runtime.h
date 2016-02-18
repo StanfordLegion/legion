@@ -1986,7 +1986,8 @@ namespace LegionRuntime {
       Event issue_runtime_meta_task(const void *args, size_t arglen,
                                     HLRTaskID tid, Operation *op = NULL,
                                     Event precondition = Event::NO_EVENT, 
-                                    int priority = 0,
+                                    int priority = 0, 
+                                    bool holds_reservation = false,
                                     Processor proc = Processor::NO_PROC);
     public:
       void allocate_context(SingleTask *task);

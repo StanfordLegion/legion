@@ -5414,7 +5414,7 @@ namespace LegionRuntime {
        *              require the runtime to be compiled with -DLEGION_SPY.
        * -hl:prof <int> Specify the number of nodes on which to enable
        *              profiling information to be collected.  By default
-       *              all nodes are enabled.  Zero will disable all
+       *              all nodes are disabled. Zero will disable all
        *              profiling while each number greater than zero will
        *              profile on that number of nodes.
        *

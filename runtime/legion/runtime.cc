@@ -3040,7 +3040,8 @@ namespace LegionRuntime {
       // Send the message
       Event next_event = runtime->issue_runtime_meta_task(sending_buffer, 
                                       sending_index, HLR_MESSAGE_ID, NULL,
-                                      last_message_event, 0/*priority*/,target);
+                                      last_message_event, 0/*priority*/,
+                                      false/*hold reservation*/, target);
       // Update the event
       last_message_event = next_event;
       // Reset the state of the buffer
@@ -5747,9 +5748,9 @@ namespace LegionRuntime {
         Processor::Kind kind = it->kind();
         if (kind != Processor::LOC_PROC)
           continue;
-        issue_runtime_meta_task(&args, sizeof(args), 
-                                HLR_MPI_RANK_ID, NULL,
-                                Event::NO_EVENT, 0/*priority*/, *it);
+        issue_runtime_meta_task(&args, sizeof(args), HLR_MPI_RANK_ID, NULL,
+                                Event::NO_EVENT, 0/*priority*/, 
+                                false/*holds reservation*/, *it);
         sent_targets.insert(target_space);
       }
       // Now set our own value, update the count, and see if we're done
@@ -14233,6 +14234,7 @@ namespace LegionRuntime {
     Event Internal::issue_runtime_meta_task(const void *args, size_t arglen,
                                            HLRTaskID tid, Operation *op,
                                            Event precondition, int priority,
+                                           bool holds_reservation,
                                            Processor target)
     //--------------------------------------------------------------------------
     {
@@ -14252,6 +14254,10 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(target.exists());
 #endif
+      // If we hold a reservation, bump the priority by a lot to avoid
+      // priority inversion when running meta task
+      if (holds_reservation)
+        priority += 1024;
       if (profiler != NULL && tid < HLR_MESSAGE_ID)
       {
         Realm::ProfilingRequestSet requests;
@@ -14388,7 +14394,8 @@ namespace LegionRuntime {
         deferred_recycle_args.did = did;
         issue_runtime_meta_task(&deferred_recycle_args,
                                 sizeof(deferred_recycle_args),
-                                HLR_DEFERRED_RECYCLE_ID, NULL, recycle_event);
+                                HLR_DEFERRED_RECYCLE_ID, NULL, recycle_event,
+                                0/*priority*/, true/*holds reservation*/);
       }
       else
         free_distributed_id(did);
@@ -18132,7 +18139,8 @@ namespace LegionRuntime {
       args.hlr_id = HLR_CONTINUATION_TASK_ID;
       args.continuation = this;
       Event done = runtime->issue_runtime_meta_task(&args, sizeof(args),
-                          HLR_CONTINUATION_TASK_ID, NULL, precondition);
+                          HLR_CONTINUATION_TASK_ID, NULL, precondition,
+                          0, true/*holds reservation*/);
       return done;
     }
 
