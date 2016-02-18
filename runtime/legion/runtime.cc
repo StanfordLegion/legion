@@ -6383,16 +6383,6 @@ namespace LegionRuntime {
       for (std::map<Color,Domain>::const_iterator it = coloring.begin();
             it != coloring.end(); it++)
       {
-        if (!it->second.is_valid())
-        {
-          log_run.error("Invalid domain passed as to 'create_index_partition' "
-                        "at color %d in task %s (ID %lld).", it->first,
-                        ctx->variants->name, ctx->get_unique_task_id());
-#ifdef DEBUG_HIGH_LEVEL
-          assert(false);
-#endif
-          exit(ERROR_EMPTY_INDEX_PARTITION);
-        }
         new_subspaces[DomainPoint::from_point<1>(
             Arrays::Point<1>(it->first))] = it->second;
       }
