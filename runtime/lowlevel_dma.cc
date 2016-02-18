@@ -2795,6 +2795,10 @@ namespace LegionRuntime {
     {
       Arrays::Rect<DIM> orig_rect = domain.get_rect<DIM>();
 
+      // empty rectangles are easy to copy...
+      if(orig_rect.volume() == 0)
+	return;
+
       // this is the SOA-friendly loop nesting
       for(OASByInst::iterator it = oas_by_inst->begin(); it != oas_by_inst->end(); it++) {
 	RegionInstance src_inst = it->first.first;
@@ -3506,6 +3510,10 @@ namespace LegionRuntime {
     {
       Arrays::Rect<DIM> orig_rect = domain.get_rect<DIM>();
 
+      // empty rectangles are easy to copy...
+      if(orig_rect.volume() == 0)
+	return;
+
       const ReductionOpUntyped *redop = get_runtime()->reduce_op_table[redop_id];
 
       // single source field for now
@@ -4118,6 +4126,11 @@ namespace LegionRuntime {
     template<int DIM>
     void FillRequest::perform_dma_rect(MemoryImpl *mem_impl)
     {
+      typename Arrays::Rect<DIM> rect = domain.get_rect<DIM>();
+      // empty rectangles are easy to fill...
+      if(rect.volume() == 0)
+	return;
+
       RegionInstanceImpl *inst_impl = get_runtime()->get_instance_impl(dst.inst);
       off_t field_start=0; int field_size=0;
       find_field_start(inst_impl->metadata.field_sizes, dst.offset,
@@ -4125,7 +4138,7 @@ namespace LegionRuntime {
       assert(field_size <= (int)fill_size);
       typename Arrays::Mapping<DIM, 1> *dst_linearization = 
         inst_impl->metadata.linearization.get_mapping<DIM>();
-      typename Arrays::Rect<DIM> rect = domain.get_rect<DIM>();
+
       int fill_elmts = 1;
       // Optimize our buffer for the target instance
       size_t fill_elmts_size = optimize_fill_buffer(inst_impl, fill_elmts);
