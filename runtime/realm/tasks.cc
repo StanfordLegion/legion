@@ -166,8 +166,6 @@ namespace Realm {
       // TODO: get this right when using user threads
       //ThreadLocal::current_processor = Processor::NO_PROC;
 
-      executing_thread = 0;
-
 #ifdef EVENT_GRAPH_TRACE
       unsigned long long stop = TimeStamp::get_current_time_in_micros();
       finish_enclosing();
@@ -987,6 +985,7 @@ namespace Realm {
 
   void UserThreadTaskScheduler::host_thread_loop(void)
   {
+    log_sched.debug() << "host thread started: sched=" << this << " thread=" << Thread::self();
     AutoHSLLock al(lock);
 
     // create a user worker thread - it won't start right away
@@ -1010,6 +1009,7 @@ namespace Realm {
       update_worker_count(+1, +1);
       worker = worker_create(false);
     }
+    log_sched.debug() << "host thread finished: sched=" << this << " thread=" << Thread::self();
   }
 
   void UserThreadTaskScheduler::thread_starting(Thread *thread)
