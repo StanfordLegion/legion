@@ -58,6 +58,7 @@ inline void makecontext_wrap(ucontext_t *u, void (*fn)(), int args, ...) { makec
 
 #include <string.h>
 #include <stdlib.h>
+#include <signal.h>
 #include <string>
 #include <map>
 
@@ -515,7 +516,8 @@ namespace Realm {
   // class Thread
 
   static bool handler_registered = false;
-  static int handler_signal = SIGUSR2;
+  // Valgrind uses SIGUSR2 on Darwin
+  static int handler_signal = SIGUSR1;
 
   static void signal_handler(int signal, siginfo_t *info, void *context)
   {
@@ -823,7 +825,13 @@ namespace Realm {
     void *target;
     void (*entry_wrapper)(void *);
     int magic;
+#ifndef __MACH__
     ucontext_t ctx;
+#else
+    // valgrind says Darwin's getcontext is writing past the end of ctx?
+    ucontext_t ctx;
+    int padding[512];
+#endif
     void *stack_base;
     size_t stack_size;
     bool ok_to_delete;
@@ -1007,7 +1015,6 @@ namespace Realm {
       }
     }
   }
-#endif
 
   void UserThread::alert_thread(void)
   {
@@ -1029,6 +1036,7 @@ namespace Realm {
       }
     }
   }
+#endif
 
 
   ////////////////////////////////////////////////////////////////////////
