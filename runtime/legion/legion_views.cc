@@ -1645,8 +1645,10 @@ namespace LegionRuntime {
 #ifdef DEBUG_PERF
       PerfTracer tracer(context, FIND_LOCAL_COPY_PRECONDITIONS_CALL);
 #endif
-      // First get our set of version data in case we need it 
-      const FieldVersions *versions = version_info.get_versions(logical_node);
+      // First get our set of version data in case we need it, it's really
+      // only safe to do this if we are at the bottom of our set of versions
+      const FieldVersions *versions = 
+        child_color.is_valid() ? NULL : version_info.get_versions(logical_node);
       std::set<Event> dead_events;
       LegionMap<Event,FieldMask>::aligned filter_previous;
       FieldMask dominated;
@@ -1832,8 +1834,8 @@ namespace LegionRuntime {
       // can see if we are writing the same version number
       // in which case there is no need for a dependence, thank
       // you wonchan and mini-aero for raising this case
-      if (!reading && (redop == 0) && !IS_REDUCE(user->usage) &&
-          user->same_versions(overlap, versions))
+      if (!reading && (redop == 0) && (versions != NULL) &&
+          !IS_REDUCE(user->usage) && user->same_versions(overlap, versions))
       {
         non_dominated |= overlap;
         return;
@@ -1875,8 +1877,8 @@ namespace LegionRuntime {
         return;
       if ((redop > 0) && (user->usage.redop == redop))
         return;
-      if (!reading && (redop == 0) && !IS_REDUCE(user->usage) &&
-          user->same_versions(overlap, versions))
+      if (!reading && (redop == 0) && (versions != NULL) &&
+          !IS_REDUCE(user->usage) && user->same_versions(overlap, versions))
         return;
       // Otherwise record the dependence
       LegionMap<Event,FieldMask>::aligned::iterator finder = 
