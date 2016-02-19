@@ -63,7 +63,10 @@ function config.parse_args()
       if rawargs[i+1] == nil or tonumber(rawargs[i+1]) == nil then
         error("option " .. rawargs[i] .. " missing argument")
       end
-      local v = tonumber(rawargs[i+1]) ~= 0
+      local v = tonumber(rawargs[i+1])
+      if type(default_options[k]) == "boolean" then
+        v = v~= 0
+      end
       options[k] = v
       i = i + 1
     else
