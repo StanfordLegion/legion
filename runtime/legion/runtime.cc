@@ -4677,7 +4677,7 @@ namespace Legion {
                                     stealing_disabled,
 				    all_procs.size()-1);
         proc_managers[*it] = manager;
-        Mapper *mapper = new Mapping::DefaultMapper(machine, external, *it);
+        Mapper *mapper = new Mapping::DefaultMapper(machine, *it);
         MapperManager *wrapper = wrap_mapper(this, mapper);
         manager->add_mapper(0, wrapper, false/*check*/, true/*owns*/); 
       }

@@ -371,6 +371,9 @@ namespace Legion {
                                       MappingInstance &instance);
       static void prepare_for_mapping(const InstanceSet &valid,
                            std::vector<MappingInstance> &input_valid);
+      static void prepare_for_mapping(const InstanceSet &valid,
+                           const std::set<Memory> &filter_memories,
+                           std::vector<MappingInstance> &input_valid);
       static void compute_ranking(
           const std::deque<MappingInstance>         &output,
           const InstanceSet                         &sources,

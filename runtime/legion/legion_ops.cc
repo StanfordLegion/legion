@@ -953,6 +953,9 @@ namespace Legion {
                                                    MappingInstance &instance) 
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(!ref.is_composite_ref());
+#endif
       instance = ref.get_mapping_instance();
       instance.ctx = &ref;
     }
@@ -966,7 +969,34 @@ namespace Legion {
       for (unsigned idx = 0; idx < valid.size(); idx++)
       {
         const InstanceRef &ref = valid[idx];
+#ifdef DEBUG_HIGH_LEVEL
+        assert(!ref.is_composite_ref());
+#endif
         MappingInstance &inst = input_valid[idx];
+        inst = ref.get_mapping_instance();
+        inst.ctx = &ref;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void Operation::prepare_for_mapping(const InstanceSet &valid,
+                                      const std::set<Memory> &visible_filter,
+                                      std::vector<MappingInstance> &input_valid)
+    //--------------------------------------------------------------------------
+    {
+      input_valid.reserve(valid.size());
+      unsigned next_index = 0;
+      for (unsigned idx = 0; idx < valid.size(); idx++)
+      {
+        const InstanceRef &ref = valid[idx];
+#ifdef DEBUG_HIGH_LEVEL
+        assert(!ref.is_composite_ref());
+#endif
+        if (visible_filter.find(ref.get_manager()->memory) == 
+            visible_filter.end())
+          continue;
+        input_valid.resize(next_index+1);
+        MappingInstance &inst = input_valid[next_index++];
         inst = ref.get_mapping_instance();
         inst.ctx = &ref;
       }
@@ -2166,7 +2196,16 @@ namespace Legion {
     {
       Mapper::MapInlineInput input;
       Mapper::MapInlineOutput output;
-      prepare_for_mapping(valid_instances, input.valid_instances);
+      if (!requirement.is_no_access())
+      {
+        std::set<Memory> visible_memories;
+        runtime->machine.get_visible_memories(
+            parent_ctx->get_executing_processor(), visible_memories);
+        prepare_for_mapping(valid_instances, visible_memories, 
+                            input.valid_instances);
+      }
+      else
+        prepare_for_mapping(valid_instances, input.valid_instances);
       // Invoke the mapper
       if (mapper == NULL)
       {
@@ -2746,6 +2785,7 @@ namespace Legion {
 #endif
                                                 );
         // Convert these to the valid set of mapping instances
+        // No need to filter for copies
         prepare_for_mapping(valid_instances, input.src_instances[idx]);
       }
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
@@ -2768,6 +2808,7 @@ namespace Legion {
                                                 , unique_op_id
 #endif
                                                 );
+        // No need to filter for copies
         prepare_for_mapping(valid_instances, input.dst_instances[idx]);
       }
       // Now we can ask the mapper what to do
@@ -4417,6 +4458,7 @@ namespace Legion {
     {
       Mapper::MapCloseInput input;
       Mapper::MapCloseOutput output;
+      // No need to filter for close operations
       prepare_for_mapping(valid_instances, input.valid_instances);
       if (mapper != NULL)
       {

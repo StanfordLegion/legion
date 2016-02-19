@@ -2433,6 +2433,36 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool RegionTreeForest::is_valid_mapping(const InstanceRef &ref,
+                                            const RegionRequirement &req)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(req.handle_type == SINGULAR);
+#endif
+      RegionNode *reg_node = get_node(req.region);
+      RegionNode *man_node = ref.get_manager()->region_node;
+      // If they are the same region, we're good to go
+      if (reg_node == man_node)
+        return true;
+      // If the region node depth is less than or equal to manager node depth, 
+      // that is bad, if they were at equal depth then they should have been
+      // exactly the same node
+      if (reg_node->row_source->depth <= man_node->row_source->depth)
+        return false;
+      // Now see if we can walk up tree from the region node to the manager node
+      while (reg_node->row_source->depth > man_node->row_source->depth)
+      {
+#ifdef DEBUG_HIGH_LEVEL
+        assert(reg_node->parent != NULL);
+#endif
+        reg_node = reg_node->parent->parent;
+      }
+      // If they are still not the same then we know it is no good
+      return (reg_node == man_node);
+    }
+
+    //--------------------------------------------------------------------------
     void RegionTreeForest::fill_fields(RegionTreeContext ctx,
                                        const RegionRequirement &req,
                                        const void *value, size_t value_size,

@@ -362,7 +362,7 @@ namespace Legion {
        */
       struct MapTaskInput {
         std::vector<std::vector<PhysicalInstance> >     valid_instances;
-        std::vector<unsigned>                           premapped_instances;
+        std::vector<unsigned>                           premapped_regions;
       };
       struct MapTaskOutput {
         std::vector<std::vector<PhysicalInstance> >     chosen_instances; 
@@ -1199,6 +1199,29 @@ namespace Legion {
 
       //MapperEvent merge_mapper_events(MapperContext ctx,
       //                                const std::set<MapperEvent> &events)const;
+    protected:
+      //------------------------------------------------------------------------
+      // Methods for introspecting task and variant information
+      //------------------------------------------------------------------------
+      void find_valid_variants(MapperContext ctx, TaskID task_id, 
+                               std::vector<VariantID> &valid_variants,
+                               Processor::Kind kind = Processor::NO_KIND) const;
+      const ExecutionConstraintSet& find_execution_constraints(
+                               MapperContext ctx, VariantID vid) const;
+      const TaskLayoutConstraintSet& find_layout_constraints(
+                               MapperContext ctx, VariantID vid) const;
+      LayoutConstraintID register_layout_constraints(MapperContext ctx,
+                             LayoutConstraintSet &layout_constraints) const;
+      enum ValidationError {
+        NO_VALIDATION_ERROR       = 0x00000000,
+        ILLEGAL_VARIANT_ERROR     = 0x00000001,
+        MIXED_PROCESSOR_ERROR     = 0x00000002,
+        REMOTE_INSTANCES_ERROR    = 0x00000004,
+        INCOMPLETE_FIELDS_ERROR   = 0x00000008,
+        INSTANCE_CONSTRAINT_ERROR = 0x00000010,
+      };
+      ValidationError validate_task_mapping(MapperContext ctx,
+       const MapTaskOutput &output, std::vector<ValidationError> &region_errors);
     protected:
       //------------------------------------------------------------------------
       // Methods for introspecting index space trees 

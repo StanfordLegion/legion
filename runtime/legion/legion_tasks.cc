@@ -1703,6 +1703,8 @@ namespace Legion {
       Mapper::PremapTaskOutput output;
       // Set up the inputs and outputs 
       std::vector<InstanceSet> valid_instances(must_premap.size());
+      std::set<Memory> visible_memories;
+      runtime->machine.get_visible_memories(target_proc, visible_memories);
       for (unsigned idx = 0; idx < must_premap.size(); idx++)
       {
         VersionInfo &version_info = get_version_info(must_premap[idx]);
@@ -1720,7 +1722,12 @@ namespace Legion {
                                                 , unique_op_id
 #endif
                                                 );
-        prepare_for_mapping(valid, input.valid_instances[must_premap[idx]]);
+        // If we need visible instances, filter them as part of the conversion
+        if (regions[idx].is_no_access())
+          prepare_for_mapping(valid, input.valid_instances[must_premap[idx]]);
+        else
+          prepare_for_mapping(valid, visible_memories, 
+                              input.valid_instances[must_premap[idx]]);
       }
       // Now invoke the mapper call
       if (mapper == NULL)
@@ -4419,12 +4426,14 @@ namespace Legion {
       // their valid instances, then fill in the mapper input structure
       valid.resize(regions.size());
       input.valid_instances.resize(regions.size());
+      std::set<Memory> visible_memories;
+      runtime->machine.get_visible_memories(target_proc, visible_memories);
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
         // Skip any early mapped regions
         if (early_mapped_regions.find(idx) != early_mapped_regions.end())
         {
-          input.premapped_instances.push_back(idx);
+          input.premapped_regions.push_back(idx);
           continue;
         }
         // Skip any NO_ACCESS or empty privilege field regions
@@ -4432,8 +4441,13 @@ namespace Legion {
           continue;
         InstanceSet &current_valid = valid[idx];
         perform_physical_traversal(idx, enclosing[idx], current_valid);
-        // Now we can prepare this for mapping
-        prepare_for_mapping(current_valid, input.valid_instances[idx]);
+        // Now we can prepare this for mapping,
+        // filter for visible memories if necessary
+        if (regions[idx].is_no_access())
+          prepare_for_mapping(current_valid, input.valid_instances[idx]);
+        else
+          prepare_for_mapping(current_valid, visible_memories,
+                              input.valid_instances[idx]);
       }
       // Prepare the output too
       output.chosen_instances.resize(regions.size());
@@ -4765,6 +4779,7 @@ namespace Legion {
                               , unique_op_id
 #endif
                               );
+        // No need to filter these because they are on the way out
         prepare_for_mapping(postmap_valid[idx], input.valid_instances[idx]);  
         prepare_for_mapping(physical_instances[idx], input.mapped_regions[idx]);
       }
