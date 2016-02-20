@@ -1505,6 +1505,18 @@ namespace LegionRuntime {
     {
     }
 
+    //--------------------------------------------------------------------------
+    TaskVariantRegistrar::TaskVariantRegistrar(TaskID task_id,
+					       const char *variant_name,
+					       bool global/*=true*/,
+					       GeneratorContext ctx/*=NULL*/)
+      : task_id(task_id), generator(ctx), global_registration(global), 
+        task_variant_name(variant_name), leaf_variant(false), 
+        inner_variant(false), idempotent_variant(false)
+    //--------------------------------------------------------------------------
+    {
+    }
+
     /////////////////////////////////////////////////////////////
     // MPILegionHandshake 
     /////////////////////////////////////////////////////////////

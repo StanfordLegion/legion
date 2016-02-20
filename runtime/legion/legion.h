@@ -1350,6 +1350,9 @@ namespace LegionRuntime {
       TaskVariantRegistrar(TaskID task_id, bool global = true,
                            GeneratorContext ctx = NULL,
                            const char *variant_name = NULL);
+      TaskVariantRegistrar(TaskID task_id, const char *variant_name,
+			   bool global = true,
+                           GeneratorContext ctx = NULL);
     public: // Add execution constraints
       inline TaskVariantRegistrar& 
         add_constraint(const ISAConstraint &constraint);
