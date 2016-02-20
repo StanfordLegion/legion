@@ -3352,12 +3352,35 @@ function codegen.expr_list_duplicate_partition(cx, node)
       __data = data,
       __partition = [partition.value].impl,
     }
+
+    -- Grab the root region to copy semantic info.
+    var root = c.legion_logical_partition_get_parent_logical_region(
+      [cx.runtime], [cx.context], [partition.value].impl)
+    while c.legion_logical_region_has_parent_logical_partition(
+      [cx.runtime], [cx.context], root)
+    do
+      var part = c.legion_logical_region_get_parent_logical_partition(
+        [cx.runtime], [cx.context], root)
+      root = c.legion_logical_partition_get_parent_logical_region(
+        [cx.runtime], [cx.context], part)
+    end
+
     for i = 0, [indices.value].__size do
       var color = [indices_type:data(indices.value)][i]
       var orig_r = c.legion_logical_partition_get_logical_subregion_by_color(
         [cx.runtime], [cx.context], [partition.value].impl, color)
       var r = c.legion_logical_region_create(
         [cx.runtime], [cx.context], orig_r.index_space, orig_r.field_space)
+      var new_root = c.legion_logical_partition_get_logical_subregion_by_tree(
+        [cx.runtime], [cx.context],
+        orig_r.index_space, orig_r.field_space, r.tree_id)
+
+      -- Attach semantic info.
+      var name : &int8
+      c.legion_logical_region_retrieve_name([cx.runtime], root, &name)
+      regentlib.assert(name ~= nil, "invalid name")
+      c.legion_logical_region_attach_name([cx.runtime], new_root, name)
+
       [expr_type:data(result)][i] = [expr_type.element_type] { impl = r }
     end
   end
