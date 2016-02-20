@@ -49,6 +49,12 @@ namespace Legion {
         Processor::Kind      proc_kind;
         bool                 tight_bound;
       };
+      struct CachedTaskMapping {
+      public:
+        unsigned long long                          task_hash;
+        VariantID                                   variant;
+        std::vector<std::vector<PhysicalInstance> > mapping;
+      };
     public:
       DefaultMapper(Machine machine, Processor local, 
                     const char *maper_name = NULL);
@@ -236,6 +242,7 @@ namespace Legion {
       template<int DIM>
       static LegionRuntime::Arrays::Point<DIM> default_select_blocking_factor(
             int factor, const LegionRuntime::Arrays::Rect<DIM> &rect_to_factor);
+      static unsigned long long compute_task_hash(const Task &task);
     protected:
       const Processor       local_proc;
       const Processor::Kind local_kind;
@@ -257,7 +264,9 @@ namespace Legion {
       // Cached mapping information about the application
       std::map<Domain,std::vector<TaskSlice> > cpu_slices_cache,
                                                gpu_slices_cache,io_slices_cache;
-      std::map<TaskID,VariantInfo> preferred_variants; 
+      std::map<TaskID,VariantInfo>             preferred_variants; 
+      std::map<std::pair<TaskID,Processor>,
+               std::list<CachedTaskMapping> >  cached_task_mappings;
     protected:
       // The maximum number of tasks a mapper will allow to be stolen at a time
       // Controlled by -dm:thefts

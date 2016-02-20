@@ -1201,17 +1201,29 @@ namespace Legion {
       //                                const std::set<MapperEvent> &events)const;
     protected:
       //------------------------------------------------------------------------
-      // Methods for introspecting task and variant information
+      // Methods for managing constraint information
       //------------------------------------------------------------------------
-      void find_valid_variants(MapperContext ctx, TaskID task_id, 
-                               std::vector<VariantID> &valid_variants,
-                               Processor::Kind kind = Processor::NO_KIND) const;
       const ExecutionConstraintSet& find_execution_constraints(
                                MapperContext ctx, VariantID vid) const;
       const TaskLayoutConstraintSet& find_layout_constraints(
                                MapperContext ctx, VariantID vid) const;
       LayoutConstraintID register_layout_constraints(MapperContext ctx,
                              LayoutConstraintSet &layout_constraints) const;
+    protected:
+      //------------------------------------------------------------------------
+      // Methods for accelerating mapping decisions
+      //------------------------------------------------------------------------
+      void find_valid_variants(MapperContext ctx, TaskID task_id, 
+                               std::vector<VariantID> &valid_variants,
+                               Processor::Kind kind = Processor::NO_KIND) const;
+      void filter_variants(MapperContext ctx, std::vector<VariantID> &variants,
+            const std::vector<std::vector<PhysicalInstance> > &chosen_intances);
+      void filter_instances(MapperContext ctx, VariantID chosen_variant,
+                  const std::vector<std::vector<PhysicalInstance> > &instances);
+    protected:
+      //------------------------------------------------------------------------
+      // Methods for validating mapping decisions
+      //------------------------------------------------------------------------
       enum ValidationError {
         NO_VALIDATION_ERROR       = 0x00000000,
         ILLEGAL_VARIANT_ERROR     = 0x00000001,
@@ -1221,7 +1233,20 @@ namespace Legion {
         INSTANCE_CONSTRAINT_ERROR = 0x00000010,
       };
       ValidationError validate_task_mapping(MapperContext ctx,
-       const MapTaskOutput &output, std::vector<ValidationError> &region_errors);
+       const MapTaskOutput &output,std::vector<ValidationError> &region_errors);
+    protected:
+      //------------------------------------------------------------------------
+      // Methods for managing physical instances 
+      //------------------------------------------------------------------------
+      PhysicalInstance create_physical_instance(MapperContext ctx,
+                          Memory target_memory, LayoutConstraintID constraints);
+      PhysicalInstance find_or_create_physical_instance(MapperContext ctx,
+                          Memory target_memory, LayoutConstraintID constraints);
+      bool still_exist(MapperContext ctx, PhysicalInstance instance);
+      bool still_exist(MapperContext ctx,
+                       const std::vector<PhysicalInstance> &instances);
+      bool still_exist(MapperContext ctx, 
+                  const std::vector<std::vector<PhysicalInstance> > &instances);
     protected:
       //------------------------------------------------------------------------
       // Methods for introspecting index space trees 

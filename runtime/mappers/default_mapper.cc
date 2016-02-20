@@ -832,7 +832,7 @@ namespace Legion {
         {
           case Processor::TOC_PROC:
             {
-              // GPUs are one off, so they only get one
+              // GPUs have their own memories so they only get one
               output.target_procs.push_back(task.target_proc);
               break;
             }
@@ -856,7 +856,58 @@ namespace Legion {
       }
       else
         output.target_procs.push_back(task.target_proc);
-      // Track which regions have already been premapped
+      // First, let's see if we've cached a result of this task mapping
+      const unsigned long long task_hash = compute_task_hash(task);
+      std::pair<TaskID,Processor> cache_key(task->task_id, task->target_proc);
+      std::map<std::pair<TaskID,Processor>,
+               std::list<CachedTaskMapping> >::iterator 
+        finder = cached_task_mappings.find(cache_key);
+      if (finder != cached_task_mappings.end())
+      {
+        bool found = false;
+        // Iterate through and see if we can find one with our variant and hash
+        for (std::list<CachedTaskMapping>::const_iterator it = 
+              finder->second.begin(); finder->second.end(); it++)
+        {
+          if ((it->variant == output.chosen_variant) &&
+              (it->task_hash == task_hash))
+          {
+            // Have to copy it before we do the external call which 
+            // might invalidate our iterator
+            output.chosen_instances = it->mapping;
+            found = true;
+            break;
+          }
+        }
+        if (found)
+        {
+          // See if all these instances still exist
+          if (still_exist(ctx, output.chosen_instances))
+            return;
+          // If some of them were deleted, go back and remove this entry
+          // Have to renew our iterators since they might have been
+          // invalidated during the 'still_exist' call
+          finder = cached_task_mappings.find(cache_key);
+          if (finder != cached_task_mappings.end())
+          {
+            for (std::list<CachedTaskMapping>::const_iterator it = 
+                  finder->second.begin(); finder->second.end(); it++)
+            {
+              if ((it->variant == output.chosen_variant) &&
+                  (it->task_hash == task_hash))
+              {
+                finder->second.erase(it);
+                break;
+              }
+            }
+            if (finder->second.empty())
+              cached_task_mappings.erase(finder);
+          }
+        }
+      }
+      // We didn't find a cached version of the mapping so we need to 
+      // do a full mapping
+      // Track which regions have already been mapped 
       std::vector<bool> done_regions(task.regions.size(), false);
       if (!input.premapped_regions.empty())
         for (std::vector<unsigned>::const_iterator it = 
@@ -879,18 +930,17 @@ namespace Legion {
         if ((task.regions[idx].privilege == NO_ACCESS) ||
             (task.regions[idx].privilege_fields.empty()))
         {
-          done_regions[idx] = true; // this is permanently valid now
+          done_regions[idx] = true; // we know we're done here
           continue;
         }
         const std::vector<PhysicalInstance> &valid = input.valid_instances[idx];
-        if (valid.empty())
-        {
+        if (valid.empty()) {
           // Check for reduction, in which case we always just make an instance
           if (task.regions[idx].privilege == REDUCE)
           {
             default_create_reduction_instance(ctx, task.target_proc,
                 task.regions[idx], output.chosen_instances[idx]);
-            done_regions[idx] = true; // this is permanently valid now
+            done_regions[idx] = true; // this is now good
             continue;
           }
           // No valid instances, so we need to do the more complex mapping 
@@ -902,14 +952,13 @@ namespace Legion {
               continue;
             output.chosen_instances[idx2].clear();
           }
-          // Keep going just to catch any other easy cases
-          continue;
+        } else {
+          // if we know we're not going to try to validate yet keep going
+          if (!try_validation)
+            continue;
+          // Otherwise, just copy the valid instances over
+          output.chosen_instances[idx] = valid;
         }
-        // if we know we're not going to try to validate yet keep going
-        if (!try_validation)
-          continue;
-        // Otherwise, just copy the valid instances over
-        output.chosen_instances[idx] = valid;
       }
       if (try_validation)
       {
@@ -941,13 +990,15 @@ namespace Legion {
           output.chosen_instances[idx].clear();
         }
       }
-      // Now let's map all the regions the hard way 
+      // Now let's map all the remaining regions the hard way 
+      const TaskLayoutConstraintSet &layout_constraints = 
+        find_layout_constraints(ctx, output.chosen_variant);
       for (unsigned idx = 0; idx < task.regions.size(); idx++)
       {
         if (done_regions[idx])
           continue;
-        default_create_custom_instance(ctx, task.target_proc, 
-            task.regions[idx], output.chosen_instances[idx]);
+        default_create_custom_instance(ctx, task.target_proc, idx,
+          task.regions[idx], layout_constraints, output.chosen_instances[idx]);
       }
       // The runtime is going to do this check anyway, might as well
       // do it ourselves to find anything wrong now
@@ -960,6 +1011,70 @@ namespace Legion {
                          "debugger.", task.get_task_name(), error);
         assert(false);
       }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ unsigned long long DefaultMapper::compute_task_hash(
+                                                               const Task &task)
+    //--------------------------------------------------------------------------
+    {
+      // Use Sean's "cheesy" hash function    
+      const unsigned long long c1 = 0x5491C27F12DB3FA4;
+      const unsigned long long c2 = 353435096;
+      // We have to hash all region requirements including region names,
+      // privileges, coherence modes, reduction operators, and fields
+      unsigned long long result = c2 + task->task_id;
+      for (unsigned idx = 0; idx < task->regions.size(); idx++)
+      {
+        const RegionRequirement &req = task->regions[idx];
+        result = result * c1 + c2 + req.handle_type;
+        if (req.handle_type != PART_PROJECTION) {
+          result = result * c1 + c2 + req.region.get_tree_id();
+          result = result * c1 + c2 + req.region.get_index_space().get_id();
+          result = result * c1 + c2 + req.region.get_field_space().get_id();
+        } else {
+          result = result * c1 + c2 + req.region.get_tree_id();
+          result = result * c1 + c2 + req.region.get_index_partition().get_id();
+          result = result * c1 + c2 + req.region.get_field_space().get_id();
+        }
+        for (std::set<FieldID>::const_iterator it = 
+              req.privilege_fields.begin(); it != 
+              req.privilege_fields.end(); it++)
+          result = result * c1 + c2 + *it;
+        result = result * c1 + c2 + req.privilege;
+        result = result * c1 + c2 + req.prop;
+        result = result * c1 + c2 + req.redop;
+      }
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    void DefaultMapper::default_create_custom_instance(MapperContext ctx,
+                          Processor target, unsigned index,
+                          const RegionRequirement &req,
+                          const TaskLayoutConstraintSet &layout_constraints,
+                          std::vector<PysicalInstance> &destination)
+    //--------------------------------------------------------------------------
+    {
+      std::set<FieldID> unhandled_fields = req.privilege_fields;
+      // Iterate over the constraints for this region requirement
+      for (std::multimap<unsigned,LayoutConstraintID>::const_iterator it = 
+            layout_constraints.layouts.lower_bound(); it != 
+            layout_constraints.layouts.upper_bound(); it++)
+      {
+        // Check to see if this set of constraints conflicts with
+        // the goal layout of the default mapper, if it does, then
+        // we'll just use these constraints, otherwise, we'll 
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void DefaultMapper::default_create_reduction_instance(MapperContext ctx,
+                          Processor target, const RegionRequirement &req,
+                          std::vector<PhysicalInstance> &destination)
+    //--------------------------------------------------------------------------
+    {
+
     }
 
     //--------------------------------------------------------------------------
