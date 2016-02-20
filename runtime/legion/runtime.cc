@@ -4492,6 +4492,14 @@ namespace LegionRuntime {
       AddressSpaceID owner_space = get_owner_space();
       if (owner_space != runtime->address_space)
         send_semantic_request(owner_space, tag); 
+      else
+      {
+        log_run.error("Invalid semantic tag %ld for task implementation", tag);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_INVALID_SEMANTIC_TAG);
+      }
       wait_on.wait();
       // When we wake up, we should be able to find everything
       AutoLock t_lock(task_lock,1,false/*exclusive*/);
