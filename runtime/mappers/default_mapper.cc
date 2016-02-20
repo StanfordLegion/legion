@@ -858,7 +858,7 @@ namespace Legion {
         output.target_procs.push_back(task.target_proc);
       // First, let's see if we've cached a result of this task mapping
       const unsigned long long task_hash = compute_task_hash(task);
-      std::pair<TaskID,Processor> cache_key(task->task_id, task->target_proc);
+      std::pair<TaskID,Processor> cache_key(task.task_id, task.target_proc);
       std::map<std::pair<TaskID,Processor>,
                std::list<CachedTaskMapping> >::iterator 
         finder = cached_task_mappings.find(cache_key);
@@ -881,12 +881,12 @@ namespace Legion {
         }
         if (found)
         {
-          // See if all these instances still exist
-          if (still_exist(ctx, output.chosen_instances))
+          // See if we can acquire these instances still
+          if (acquire_instances(ctx, output.chosen_instances))
             return;
           // If some of them were deleted, go back and remove this entry
           // Have to renew our iterators since they might have been
-          // invalidated during the 'still_exist' call
+          // invalidated during the 'acquire_instances' call
           finder = cached_task_mappings.find(cache_key);
           if (finder != cached_task_mappings.end())
           {
@@ -906,7 +906,12 @@ namespace Legion {
         }
       }
       // We didn't find a cached version of the mapping so we need to 
-      // do a full mapping
+      // do a full mapping, we already know what variant we want to use
+      // so let's use one of the acceleration functions to figure out
+      // which instances still need to be mapped.
+
+
+
       // Track which regions have already been mapped 
       std::vector<bool> done_regions(task.regions.size(), false);
       if (!input.premapped_regions.empty())

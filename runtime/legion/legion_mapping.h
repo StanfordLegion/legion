@@ -1216,10 +1216,17 @@ namespace Legion {
       void find_valid_variants(MapperContext ctx, TaskID task_id, 
                                std::vector<VariantID> &valid_variants,
                                Processor::Kind kind = Processor::NO_KIND) const;
-      void filter_variants(MapperContext ctx, std::vector<VariantID> &variants,
-            const std::vector<std::vector<PhysicalInstance> > &chosen_intances);
-      void filter_instances(MapperContext ctx, VariantID chosen_variant,
-                  const std::vector<std::vector<PhysicalInstance> > &instances);
+      // Filter variants based on the chosen instances
+      void filter_variants(MapperContext ctx, const Task &task,
+                           const std::vector<VariantID>        &variants,
+                           const std::vector<
+                               std::vector<PhysicalInstance> > &chosen_intances,
+                           std::vector<VariantID>              &results);
+      // Filter instances based on a chosen variant
+      void filter_instances(MapperContext ctx, const Task &task,
+                            VariantID chosen_variant, const std::vector<
+                                     std::vector<PhysicalInstance> > &instances,
+                            std::vector<std::set<FieldID> > &missing_fields);
     protected:
       //------------------------------------------------------------------------
       // Methods for validating mapping decisions
@@ -1242,10 +1249,26 @@ namespace Legion {
                           Memory target_memory, LayoutConstraintID constraints);
       PhysicalInstance find_or_create_physical_instance(MapperContext ctx,
                           Memory target_memory, LayoutConstraintID constraints);
-      bool still_exist(MapperContext ctx, PhysicalInstance instance);
-      bool still_exist(MapperContext ctx,
-                       const std::vector<PhysicalInstance> &instances);
-      bool still_exist(MapperContext ctx, 
+      // These methods will atomically check to make sure that these instances
+      // are still valid and then add an implicit reference to them to ensure
+      // that they aren't collected before this mapping call completes. They
+      // don't need to be called as part of mapping an instance, but they are
+      // highly recommended to ensure correctness. Acquiring instances and
+      // then not using them is also acceptable as the runtime will implicitly
+      // release the references after the call. Instances can also be released
+      // as might be expected if a mapper opts to attempt to map a different
+      // instance, but this is an optional performance improvement.
+      bool acquire_instance(MapperContext ctx, PhysicalInstance instance);
+      bool acquire_instances(MapperContext ctx,
+                             std::vector<PhysicalInstance> &instances,
+                             bool remove = false);
+      bool acquire_instances(MapperContext ctx,
+                        std::vector<std::vector<PhysicalInstance> > &instances,
+                             bool remove = false);
+      void release_instance(MapperContext ctx, const PhysicalInstance instance);
+      void release_instances(MapperContext ctx,
+                             const std::vector<PhysicalInstance> &instances);
+      void release_instances(MapperContext ctx,
                   const std::vector<std::vector<PhysicalInstance> > &instances);
     protected:
       //------------------------------------------------------------------------
