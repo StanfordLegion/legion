@@ -6965,6 +6965,16 @@ namespace LegionRuntime {
 #endif
           exit(ERROR_MUST_EPOCH_FAILURE);
         }
+        if (!(*it)->additional_procs.empty())
+        {
+          log_run.error("MUST EPOCH ERROR: Task %s (ID %lld) "
+              "has requested additional processors!",
+              (*it)->variants->name, (*it)->get_unique_task_id());
+#ifdef DEBUG_HIGH_LEVEL
+          assert(false);
+#endif
+          exit(ERROR_MUST_EPOCH_FAILURE);
+        }
         target_procs[(*it)->target_proc] = *it;
       }
 
