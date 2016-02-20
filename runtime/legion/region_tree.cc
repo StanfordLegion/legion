@@ -4917,6 +4917,15 @@ namespace LegionRuntime {
       AddressSpaceID owner_space = get_owner_space();
       if (owner_space != context->runtime->address_space)
         send_semantic_request(owner_space, tag);
+      else
+      {
+        log_run.error("ERROR: invalid semantic tag %ld for "
+                      "index tree node", tag);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_INVALID_SEMANTIC_TAG);
+      }
       // Now wait
       wait_on.wait();
       // When we wake up, we should be able to find everything
@@ -8284,6 +8293,15 @@ namespace LegionRuntime {
         }
         context->runtime->send_field_space_semantic_request(owner_space, rez);
       }
+      else
+      {
+        log_run.error("ERROR: invalid semantic tag %ld for "
+                      "field space %d", tag, handle.id);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_INVALID_SEMANTIC_TAG);
+      }
       // Now wait
       wait_on.wait();
       // When we wake up, we should be able to find everything
@@ -8347,6 +8365,15 @@ namespace LegionRuntime {
           rez.serialize(tag);
         }
         context->runtime->send_field_semantic_request(owner_space, rez);
+      }
+      else
+      {
+        log_run.error("ERROR: invalid semantic tag %ld for field %d "
+                      "of field space %d", tag, fid, handle.id);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_INVALID_SEMANTIC_TAG);
       }
       // Now wait
       wait_on.wait();
@@ -10115,6 +10142,15 @@ namespace LegionRuntime {
       AddressSpaceID owner_space = get_owner_space();
       if (owner_space != context->runtime->address_space)
         send_semantic_request(owner_space, tag);
+      else
+      {
+        log_run.error("ERROR: invalid semantic tag %ld for "
+                      "region tree node", tag);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_INVALID_SEMANTIC_TAG);
+      }
       // Now wait
       wait_on.wait();
       // When we wake up, we should be able to find everything
