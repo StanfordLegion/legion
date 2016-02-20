@@ -947,12 +947,15 @@ namespace LegionRuntime {
       const char* get_name(bool needs_lock = true) const;
       void attach_semantic_information(SemanticTag tag, AddressSpaceID source,
          const void *buffer, size_t size, bool is_mutable, bool send_to_owner);
-      void retrieve_semantic_information(SemanticTag tag,
-                                         const void *&buffer, size_t &size);
+      bool retrieve_semantic_information(SemanticTag tag,
+                                         const void *&buffer, size_t &size,
+                                         bool can_fail, bool wait_until);
       void send_semantic_info(AddressSpaceID target, SemanticTag tag,
                               const void *value, size_t size, bool is_mutable);
-      void send_semantic_request(AddressSpaceID target, SemanticTag tag);
-      void process_semantic_request(SemanticTag tag, AddressSpaceID target);
+      void send_semantic_request(AddressSpaceID target, SemanticTag tag, 
+                               bool can_fail, bool wait_until, UserEvent ready);
+      void process_semantic_request(SemanticTag tag, AddressSpaceID target, 
+                               bool can_fail, bool wait_until, UserEvent ready);
     public:
       inline AddressSpaceID get_owner_space(void) const
         { return get_owner_space(task_id, runtime); }
@@ -1593,21 +1596,28 @@ namespace LegionRuntime {
       void attach_semantic_information(LogicalPartition handle, SemanticTag tag,
                        const void *buffer, size_t size, bool is_mutable);
     public:
-      void retrieve_semantic_information(TaskID task_id, SemanticTag tag,
-                                         const void *&result, size_t &size);
-      void retrieve_semantic_information(IndexSpace handle, SemanticTag tag,
-                                         const void *&result, size_t &size);
-      void retrieve_semantic_information(IndexPartition handle, SemanticTag tag,
-                                         const void *&result, size_t &size);
-      void retrieve_semantic_information(FieldSpace handle, SemanticTag tag,
-                                         const void *&result, size_t &size);
-      void retrieve_semantic_information(FieldSpace handle, FieldID fid,
+      bool retrieve_semantic_information(TaskID task_id, SemanticTag tag,
+                                         const void *&result, size_t &size,
+                                         bool can_fail, bool wait_until);
+      bool retrieve_semantic_information(IndexSpace handle, SemanticTag tag,
+                                         const void *&result, size_t &size,
+                                         bool can_fail, bool wait_until);
+      bool retrieve_semantic_information(IndexPartition handle, SemanticTag tag,
+                                         const void *&result, size_t &size,
+                                         bool can_fail, bool wait_until);
+      bool retrieve_semantic_information(FieldSpace handle, SemanticTag tag,
+                                         const void *&result, size_t &size,
+                                         bool can_fail, bool wait_until);
+      bool retrieve_semantic_information(FieldSpace handle, FieldID fid,
                                          SemanticTag tag,
-                                         const void *&result, size_t &size);
-      void retrieve_semantic_information(LogicalRegion handle, SemanticTag tag,
-                                         const void *&result, size_t &size);
-      void retrieve_semantic_information(LogicalPartition part, SemanticTag tag,
-                                         const void *&result, size_t &size);
+                                         const void *&result, size_t &size,
+                                         bool can_fail, bool wait_until);
+      bool retrieve_semantic_information(LogicalRegion handle, SemanticTag tag,
+                                         const void *&result, size_t &size,
+                                         bool can_fail, bool wait_until);
+      bool retrieve_semantic_information(LogicalPartition part, SemanticTag tag,
+                                         const void *&result, size_t &size,
+                                         bool can_fail, bool wait_until);
     public:
       FieldID allocate_field(Context ctx, FieldSpace space, 
                              size_t field_size, FieldID fid, 

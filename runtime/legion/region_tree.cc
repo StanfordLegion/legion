@@ -4101,64 +4101,82 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeForest::retrieve_semantic_information(IndexSpace handle,
+    bool RegionTreeForest::retrieve_semantic_information(IndexSpace handle,
                                                          SemanticTag tag,
                                                          const void *&result,
-                                                         size_t &size)
+                                                         size_t &size,
+                                                         bool can_fail,
+                                                         bool wait_until)
     //--------------------------------------------------------------------------
     {
-      get_node(handle)->retrieve_semantic_information(tag, result, size);
+      return get_node(handle)->retrieve_semantic_information(tag, result, size,
+                                                          can_fail, wait_until);
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeForest::retrieve_semantic_information(IndexPartition handle,
+    bool RegionTreeForest::retrieve_semantic_information(IndexPartition handle,
                                                          SemanticTag tag,
                                                          const void *&result,
-                                                         size_t &size)
+                                                         size_t &size,
+                                                         bool can_fail,
+                                                         bool wait_until)
     //--------------------------------------------------------------------------
     {
-      get_node(handle)->retrieve_semantic_information(tag, result, size);
+      return get_node(handle)->retrieve_semantic_information(tag, result, size,
+                                                          can_fail, wait_until);
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeForest::retrieve_semantic_information(FieldSpace handle,
+    bool RegionTreeForest::retrieve_semantic_information(FieldSpace handle,
                                                          SemanticTag tag,
                                                          const void *&result,
-                                                         size_t &size)
+                                                         size_t &size,
+                                                         bool can_fail,
+                                                         bool wait_until)
     //--------------------------------------------------------------------------
     {
-      get_node(handle)->retrieve_semantic_information(tag, result, size);
+      return get_node(handle)->retrieve_semantic_information(tag, result, size,
+                                                         can_fail, wait_until);
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeForest::retrieve_semantic_information(FieldSpace handle,
+    bool RegionTreeForest::retrieve_semantic_information(FieldSpace handle,
                                                          FieldID fid,
                                                          SemanticTag tag,
                                                          const void *&result,
-                                                         size_t &size)
+                                                         size_t &size,
+                                                         bool can_fail,
+                                                         bool wait_until)
     //--------------------------------------------------------------------------
     {
-      get_node(handle)->retrieve_semantic_information(fid, tag, result, size);
+      return get_node(handle)->retrieve_semantic_information(fid, tag, result, 
+                                                  size, can_fail, wait_until);
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeForest::retrieve_semantic_information(LogicalRegion handle,
+    bool RegionTreeForest::retrieve_semantic_information(LogicalRegion handle,
                                                          SemanticTag tag,
                                                          const void *&result,
-                                                         size_t &size)
+                                                         size_t &size,
+                                                         bool can_fail,
+                                                         bool wait_until)
     //--------------------------------------------------------------------------
     {
-      get_node(handle)->retrieve_semantic_information(tag, result, size);
+      return get_node(handle)->retrieve_semantic_information(tag, result, size,
+                                                         can_fail, wait_until);
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeForest::retrieve_semantic_information(LogicalPartition part,
+    bool RegionTreeForest::retrieve_semantic_information(LogicalPartition part,
                                                          SemanticTag tag,
                                                          const void *&result,
-                                                         size_t &size)
+                                                         size_t &size,
+                                                         bool can_fail,
+                                                         bool wait_until)
     //--------------------------------------------------------------------------
     {
-      get_node(part)->retrieve_semantic_information(tag, result, size);
+      return get_node(part)->retrieve_semantic_information(tag, result, size,
+                                                         can_fail, wait_until);
     }
 
     //--------------------------------------------------------------------------
@@ -4882,12 +4900,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void IndexTreeNode::retrieve_semantic_information(SemanticTag tag,
+    bool IndexTreeNode::retrieve_semantic_information(SemanticTag tag,
                                                       const void *&result,
-                                                      size_t &size)
+                                                      size_t &size, 
+                                                      bool can_fail,
+                                                      bool wait_until)
     //--------------------------------------------------------------------------
     {
-      Event wait_on = Event::NO_EVENT;
+      UserEvent wait_on = UserEvent::NO_USER_EVENT;
       {
         AutoLock n_lock(node_lock);
         LegionMap<SemanticTag,SemanticInfo>::aligned::const_iterator finder = 
@@ -4899,26 +4919,34 @@ namespace LegionRuntime {
           {
             result = finder->second.buffer;
             size = finder->second.size;
-            return;
+            return true;
           }
-          else
+          else if (!can_fail && wait_until)
             wait_on = finder->second.ready_event;
+          else // we can fail, so make our user event
+            wait_on = UserEvent::create_user_event();
         }
         else
         {
-          // Otherwise make an event to wait on
-          UserEvent ready_event = UserEvent::create_user_event();
-          wait_on = ready_event;
-          semantic_info[tag] = SemanticInfo(ready_event);
+          if (!can_fail && wait_until)
+          {
+            // Otherwise make an event to wait on
+            wait_on = UserEvent::create_user_event();
+            semantic_info[tag] = SemanticInfo(wait_on);
+          }
+          else
+            wait_on = UserEvent::create_user_event();
         }
       }
       // If we are not the owner, send a request, otherwise we are
       // the owner and the information will get sent here
       AddressSpaceID owner_space = get_owner_space();
       if (owner_space != context->runtime->address_space)
-        send_semantic_request(owner_space, tag);
+        send_semantic_request(owner_space, tag, can_fail, wait_until, wait_on);
       else
       {
+        if (can_fail)
+          return false;
         log_run.error("ERROR: invalid semantic tag %ld for "
                       "index tree node", tag);
 #ifdef DEBUG_HIGH_LEVEL
@@ -4934,6 +4962,8 @@ namespace LegionRuntime {
         semantic_info.find(tag);
       if (finder == semantic_info.end())
       {
+        if (can_fail)
+          return false;
         log_run.error("ERROR: invalid semantic tag %ld for "
                             "index tree node", tag);   
 #ifdef DEBUG_HIGH_LEVEL
@@ -4943,6 +4973,7 @@ namespace LegionRuntime {
       }
       result = finder->second.buffer;
       size = finder->second.size;
+      return true;
     }
 
     //--------------------------------------------------------------------------
@@ -5419,7 +5450,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void IndexSpaceNode::send_semantic_request(AddressSpaceID target,
-                                               SemanticTag tag)
+               SemanticTag tag, bool can_fail, bool wait_until, UserEvent ready)
     //--------------------------------------------------------------------------
     {
       Serializer rez;
@@ -5427,6 +5458,9 @@ namespace LegionRuntime {
         RezCheck z(rez);
         rez.serialize(handle);
         rez.serialize(tag);
+        rez.serialize(can_fail);
+        rez.serialize(wait_until);
+        rez.serialize(ready);
       }
       context->runtime->send_index_space_semantic_request(target, rez);
     }
@@ -5453,7 +5487,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void IndexSpaceNode::process_semantic_request(SemanticTag tag,
-                                                  AddressSpaceID source)
+         AddressSpaceID source, bool can_fail, bool wait_until, UserEvent ready)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -5476,10 +5510,10 @@ namespace LegionRuntime {
             size = finder->second.size;
             is_mutable = finder->second.is_mutable;
           }
-          else
+          else if (!can_fail && wait_until)
             precondition = finder->second.ready_event;
         }
-        else
+        else if (!can_fail && wait_until)
         {
           // Don't have it yet, make a condition and hope that one comes
           UserEvent ready_event = UserEvent::create_user_event();
@@ -5489,15 +5523,20 @@ namespace LegionRuntime {
       }
       if (result == NULL)
       {
-        // Defer this until the semantic condition is ready
-        SemanticRequestArgs args;
-        args.hlr_id = HLR_INDEX_SPACE_SEMANTIC_INFO_REQ_TASK_ID;
-        args.proxy_this = this;
-        args.tag = tag;
-        args.source = source;
-        context->runtime->issue_runtime_meta_task(&args, sizeof(args),
-                            HLR_INDEX_SPACE_SEMANTIC_INFO_REQ_TASK_ID,
-                            NULL/*op*/, precondition);
+        if (can_fail || !wait_until)
+          ready.trigger();
+        else
+        {
+          // Defer this until the semantic condition is ready
+          SemanticRequestArgs args;
+          args.hlr_id = HLR_INDEX_SPACE_SEMANTIC_INFO_REQ_TASK_ID;
+          args.proxy_this = this;
+          args.tag = tag;
+          args.source = source;
+          context->runtime->issue_runtime_meta_task(&args, sizeof(args),
+                              HLR_INDEX_SPACE_SEMANTIC_INFO_REQ_TASK_ID,
+                              NULL/*op*/, precondition);
+        }
       }
       else
         send_semantic_info(source, tag, result, size, is_mutable);
@@ -5513,8 +5552,14 @@ namespace LegionRuntime {
       derez.deserialize(handle);
       SemanticTag tag;
       derez.deserialize(tag);
+      bool can_fail;
+      derez.deserialize(can_fail);
+      bool wait_until;
+      derez.deserialize(wait_until);
+      UserEvent ready;
+      derez.deserialize(ready);
       IndexSpaceNode *node = forest->get_node(handle);
-      node->process_semantic_request(tag, source);
+      node->process_semantic_request(tag, source, can_fail, wait_until, ready);
     }
 
     //--------------------------------------------------------------------------
@@ -6744,7 +6789,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void IndexPartNode::send_semantic_request(AddressSpaceID target, 
-                                              SemanticTag tag)
+               SemanticTag tag, bool can_fail, bool wait_until, UserEvent ready)
     //--------------------------------------------------------------------------
     {
       Serializer rez;
@@ -6752,6 +6797,9 @@ namespace LegionRuntime {
         RezCheck z(rez);
         rez.serialize(handle);
         rez.serialize(tag);
+        rez.serialize(can_fail);
+        rez.serialize(wait_until);
+        rez.serialize(ready);
       }
       context->runtime->send_index_partition_semantic_request(target, rez);
     }
@@ -6777,7 +6825,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void IndexPartNode::process_semantic_request(SemanticTag tag, 
-                                                 AddressSpaceID source)
+         AddressSpaceID source, bool can_fail, bool wait_until, UserEvent ready)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -6800,10 +6848,10 @@ namespace LegionRuntime {
             size = finder->second.size;
             is_mutable = finder->second.is_mutable;
           }
-          else
+          else if (!can_fail && wait_until)
             precondition = finder->second.ready_event;
         }
-        else
+        else if (!can_fail && wait_until)
         {
           // Don't have it yet, make a condition and hope that one comes
           UserEvent ready_event = UserEvent::create_user_event();
@@ -6813,15 +6861,20 @@ namespace LegionRuntime {
       }
       if (result == NULL)
       {
-        // Defer this until the semantic condition is ready
-        SemanticRequestArgs args;
-        args.hlr_id = HLR_INDEX_PART_SEMANTIC_INFO_REQ_TASK_ID;
-        args.proxy_this = this;
-        args.tag = tag;
-        args.source = source;
-        context->runtime->issue_runtime_meta_task(&args, sizeof(args),
-                            HLR_INDEX_PART_SEMANTIC_INFO_REQ_TASK_ID,
-                            NULL/*op*/, precondition);
+        if (can_fail || !wait_until)
+          ready.trigger();
+        else
+        {
+          // Defer this until the semantic condition is ready
+          SemanticRequestArgs args;
+          args.hlr_id = HLR_INDEX_PART_SEMANTIC_INFO_REQ_TASK_ID;
+          args.proxy_this = this;
+          args.tag = tag;
+          args.source = source;
+          context->runtime->issue_runtime_meta_task(&args, sizeof(args),
+                              HLR_INDEX_PART_SEMANTIC_INFO_REQ_TASK_ID,
+                              NULL/*op*/, precondition);
+        }
       }
       else
         send_semantic_info(source, tag, result, size, is_mutable);
@@ -6837,8 +6890,14 @@ namespace LegionRuntime {
       derez.deserialize(handle);
       SemanticTag tag;
       derez.deserialize(tag);
+      bool can_fail;
+      derez.deserialize(can_fail);
+      bool wait_until;
+      derez.deserialize(wait_until);
+      UserEvent ready;
+      derez.deserialize(ready);
       IndexPartNode *node = forest->get_node(handle);
-      node->process_semantic_request(tag, source);
+      node->process_semantic_request(tag, source, can_fail, wait_until, ready);
     }
 
     //--------------------------------------------------------------------------
@@ -8252,11 +8311,11 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void FieldSpaceNode::retrieve_semantic_information(SemanticTag tag,
-                                              const void *&result, size_t &size)
+    bool FieldSpaceNode::retrieve_semantic_information(SemanticTag tag,
+              const void *&result, size_t &size, bool can_fail, bool wait_until)
     //--------------------------------------------------------------------------
     {
-      Event wait_on = Event::NO_EVENT;
+      UserEvent wait_on = UserEvent::NO_USER_EVENT;
       {
         AutoLock n_lock(node_lock);
         LegionMap<SemanticTag,SemanticInfo>::aligned::const_iterator finder = 
@@ -8268,17 +8327,23 @@ namespace LegionRuntime {
           {
             result = finder->second.buffer;
             size = finder->second.size;
-            return;
+            return true;
           }
-          else
+          else if (!can_fail && wait_until)
             wait_on = finder->second.ready_event;
+          else
+            wait_on = UserEvent::create_user_event();
         }
         else
         {
           // Otherwise make an event to wait on
-          UserEvent ready_event = UserEvent::create_user_event();
-          wait_on = ready_event;
-          semantic_info[tag] = SemanticInfo(ready_event);
+          if (!can_fail && wait_until)
+          {
+            wait_on = UserEvent::create_user_event();
+            semantic_info[tag] = SemanticInfo(wait_on);
+          }
+          else
+            wait_on = UserEvent::create_user_event();
         }
       }
       // If we are not the owner, send a request, otherwise we are
@@ -8290,11 +8355,16 @@ namespace LegionRuntime {
         {
           rez.serialize(handle);
           rez.serialize(tag);
+          rez.serialize(can_fail);
+          rez.serialize(wait_until);
+          rez.serialize(wait_on);
         }
         context->runtime->send_field_space_semantic_request(owner_space, rez);
       }
       else
       {
+        if (can_fail)
+          return false;
         log_run.error("ERROR: invalid semantic tag %ld for "
                       "field space %d", tag, handle.id);
 #ifdef DEBUG_HIGH_LEVEL
@@ -8310,6 +8380,8 @@ namespace LegionRuntime {
         semantic_info.find(tag);
       if (finder == semantic_info.end())
       {
+        if (can_fail)
+          return false;
         log_run.error("ERROR: invalid semantic tag %ld for "
                             "field space %d", tag, handle.id);
 #ifdef DEBUG_HIGH_LEVEL
@@ -8319,14 +8391,16 @@ namespace LegionRuntime {
       }
       result = finder->second.buffer;
       size = finder->second.size;
+      return true;
     }
 
     //--------------------------------------------------------------------------
-    void FieldSpaceNode::retrieve_semantic_information(FieldID fid,
-                             SemanticTag tag, const void *&result, size_t &size)
+    bool FieldSpaceNode::retrieve_semantic_information(FieldID fid,
+                             SemanticTag tag, const void *&result, size_t &size,
+                             bool can_fail, bool wait_until)
     //--------------------------------------------------------------------------
     {
-      Event wait_on = Event::NO_EVENT;
+      UserEvent wait_on = UserEvent::NO_USER_EVENT;
       {
         AutoLock n_lock(node_lock);
         LegionMap<std::pair<FieldID,SemanticTag>,
@@ -8339,18 +8413,24 @@ namespace LegionRuntime {
           {
             result = finder->second.buffer;
             size = finder->second.size;
-            return;
+            return true;
           }
-          else
+          else if (!can_fail && wait_until)
             wait_on = finder->second.ready_event;
+          else
+            wait_on = UserEvent::create_user_event();
         }
         else
         {
           // Otherwise make an event to wait on
-          UserEvent ready_event = UserEvent::create_user_event();
-          wait_on = ready_event;
-          semantic_field_info[std::pair<FieldID,SemanticTag>(fid,tag)] = 
-            SemanticInfo(ready_event);
+          if (!can_fail && wait_until)
+          {
+            wait_on = UserEvent::create_user_event();
+            semantic_field_info[std::pair<FieldID,SemanticTag>(fid,tag)] = 
+              SemanticInfo(wait_on);
+          }
+          else
+            wait_on = UserEvent::create_user_event();
         }
       }
       // If we are not the owner, send a request, otherwise we are
@@ -8363,11 +8443,16 @@ namespace LegionRuntime {
           rez.serialize(handle);
           rez.serialize(fid);
           rez.serialize(tag);
+          rez.serialize(can_fail);
+          rez.serialize(wait_until);
+          rez.serialize(wait_on);
         }
         context->runtime->send_field_semantic_request(owner_space, rez);
       }
       else
       {
+        if (can_fail)
+          return false;
         log_run.error("ERROR: invalid semantic tag %ld for field %d "
                       "of field space %d", tag, fid, handle.id);
 #ifdef DEBUG_HIGH_LEVEL
@@ -8384,6 +8469,8 @@ namespace LegionRuntime {
           semantic_field_info.find(std::pair<FieldID,SemanticTag>(fid,tag));
       if (finder == semantic_field_info.end())
       {
+        if (can_fail)
+          return false;
         log_run.error("ERROR: invalid semantic tag %ld for field %d "
                             "of field space %d", tag, fid, handle.id);
 #ifdef DEBUG_HIGH_LEVEL
@@ -8393,6 +8480,7 @@ namespace LegionRuntime {
       }
       result = finder->second.buffer;
       size = finder->second.size;
+      return true;
     }
 
     //--------------------------------------------------------------------------
@@ -8433,7 +8521,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void FieldSpaceNode::process_semantic_request(SemanticTag tag,
-                                                  AddressSpaceID source)
+         AddressSpaceID source, bool can_fail, bool wait_until, UserEvent ready)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -8456,10 +8544,10 @@ namespace LegionRuntime {
             size = finder->second.size;
             is_mutable = finder->second.is_mutable;
           }
-          else
+          else if (!can_fail && wait_until)
             precondition = finder->second.ready_event;
         }
-        else
+        else if (!can_fail && wait_until)
         {
           // Don't have it yet, make a condition and hope that one comes
           UserEvent ready_event = UserEvent::create_user_event();
@@ -8469,15 +8557,20 @@ namespace LegionRuntime {
       }
       if (result == NULL)
       {
-        // Defer this until the semantic condition is ready
-        SemanticRequestArgs args;
-        args.hlr_id = HLR_FIELD_SPACE_SEMANTIC_INFO_REQ_TASK_ID;
-        args.proxy_this = this;
-        args.tag = tag;
-        args.source = source;
-        context->runtime->issue_runtime_meta_task(&args, sizeof(args),
-                            HLR_FIELD_SPACE_SEMANTIC_INFO_REQ_TASK_ID,
-                            NULL/*op*/, precondition);
+        if (can_fail || !wait_until)
+          ready.trigger();
+        else
+        {
+          // Defer this until the semantic condition is ready
+          SemanticRequestArgs args;
+          args.hlr_id = HLR_FIELD_SPACE_SEMANTIC_INFO_REQ_TASK_ID;
+          args.proxy_this = this;
+          args.tag = tag;
+          args.source = source;
+          context->runtime->issue_runtime_meta_task(&args, sizeof(args),
+                              HLR_FIELD_SPACE_SEMANTIC_INFO_REQ_TASK_ID,
+                              NULL/*op*/, precondition);
+        }
       }
       else
         send_semantic_info(source, tag, result, size, is_mutable);
@@ -8485,7 +8578,8 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void FieldSpaceNode::process_semantic_field_request(FieldID fid, 
-                                         SemanticTag tag, AddressSpaceID source)
+                               SemanticTag tag, AddressSpaceID source, 
+                               bool can_fail, bool wait_until, UserEvent ready)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -8509,10 +8603,10 @@ namespace LegionRuntime {
             size = finder->second.size;
             is_mutable = finder->second.is_mutable;
           }
-          else
+          else if (!can_fail && wait_until)
             precondition = finder->second.ready_event;
         }
-        else
+        else if (!can_fail && wait_until)
         {
           // Don't have it yet, make a condition and hope that one comes
           UserEvent ready_event = UserEvent::create_user_event();
@@ -8522,16 +8616,21 @@ namespace LegionRuntime {
       }
       if (result == NULL)
       {
-        // Defer this until the semantic condition is ready
-        SemanticFieldRequestArgs args;
-        args.hlr_id = HLR_FIELD_SEMANTIC_INFO_REQ_TASK_ID;
-        args.proxy_this = this;
-        args.fid = fid;
-        args.tag = tag;
-        args.source = source;
-        context->runtime->issue_runtime_meta_task(&args, sizeof(args),
-                            HLR_FIELD_SEMANTIC_INFO_REQ_TASK_ID,
-                            NULL/*op*/, precondition);
+        if (can_fail || !wait_until)
+          ready.trigger();
+        else
+        {
+          // Defer this until the semantic condition is ready
+          SemanticFieldRequestArgs args;
+          args.hlr_id = HLR_FIELD_SEMANTIC_INFO_REQ_TASK_ID;
+          args.proxy_this = this;
+          args.fid = fid;
+          args.tag = tag;
+          args.source = source;
+          context->runtime->issue_runtime_meta_task(&args, sizeof(args),
+                              HLR_FIELD_SEMANTIC_INFO_REQ_TASK_ID,
+                              NULL/*op*/, precondition);
+        }
       }
       else
         send_semantic_field_info(source, fid, tag, result, size, is_mutable);
@@ -8547,8 +8646,14 @@ namespace LegionRuntime {
       derez.deserialize(handle);
       SemanticTag tag;
       derez.deserialize(tag);
+      bool can_fail;
+      derez.deserialize(can_fail);
+      bool wait_until;
+      derez.deserialize(wait_until);
+      UserEvent ready;
+      derez.deserialize(ready);
       FieldSpaceNode *node = forest->get_node(handle);
-      node->process_semantic_request(tag, source);
+      node->process_semantic_request(tag, source, can_fail, wait_until, ready);
     }
 
     //--------------------------------------------------------------------------
@@ -8563,8 +8668,15 @@ namespace LegionRuntime {
       derez.deserialize(fid);
       SemanticTag tag;
       derez.deserialize(tag);
+      bool can_fail;
+      derez.deserialize(can_fail);
+      bool wait_until;
+      derez.deserialize(wait_until);
+      UserEvent ready;
+      derez.deserialize(ready);
       FieldSpaceNode *node = forest->get_node(handle);
-      node->process_semantic_field_request(fid, tag, source);
+      node->process_semantic_field_request(fid, tag, source, 
+                                           can_fail, wait_until, ready);
     }
 
     //--------------------------------------------------------------------------
@@ -10107,12 +10219,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeNode::retrieve_semantic_information(SemanticTag tag,
+    bool RegionTreeNode::retrieve_semantic_information(SemanticTag tag,
                                                        const void *&result,
-                                                       size_t &size)
+                                                       size_t &size,
+                                                       bool can_fail,
+                                                       bool wait_until)
     //--------------------------------------------------------------------------
     {
-      Event wait_on = Event::NO_EVENT;
+      UserEvent wait_on = UserEvent::NO_USER_EVENT;
       {
         AutoLock n_lock(node_lock);
         LegionMap<SemanticTag,SemanticInfo>::aligned::const_iterator finder = 
@@ -10124,26 +10238,34 @@ namespace LegionRuntime {
           {
             result = finder->second.buffer;
             size = finder->second.size;
-            return;
+            return true;
           }
-          else
+          else if (!can_fail && wait_until)
             wait_on = finder->second.ready_event;
+          else
+            wait_on = UserEvent::create_user_event();
         }
         else
         {
           // Otherwise make an event to wait on
-          UserEvent ready_event = UserEvent::create_user_event();
-          wait_on = ready_event;
-          semantic_info[tag] = SemanticInfo(ready_event);
+          if (!can_fail && wait_until)
+          {
+            wait_on = UserEvent::create_user_event();
+            semantic_info[tag] = SemanticInfo(wait_on);
+          }
+          else
+            wait_on = UserEvent::create_user_event();
         }
       }
       // If we are not the owner, send a request, otherwise we are
       // the owner and the information will get sent here
       AddressSpaceID owner_space = get_owner_space();
       if (owner_space != context->runtime->address_space)
-        send_semantic_request(owner_space, tag);
+        send_semantic_request(owner_space, tag, can_fail, wait_until, wait_on);
       else
       {
+        if (can_fail)
+          return false;
         log_run.error("ERROR: invalid semantic tag %ld for "
                       "region tree node", tag);
 #ifdef DEBUG_HIGH_LEVEL
@@ -10159,6 +10281,8 @@ namespace LegionRuntime {
         semantic_info.find(tag);
       if (finder == semantic_info.end())
       {
+        if (can_fail)
+          return false;
         log_run.error("ERROR: invalid semantic tag %ld for "
                             "region tree node", tag);   
 #ifdef DEBUG_HIGH_LEVEL
@@ -10168,6 +10292,7 @@ namespace LegionRuntime {
       }
       result = finder->second.buffer;
       size = finder->second.size;
+      return true;
     }
 
     //--------------------------------------------------------------------------
@@ -15598,7 +15723,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void RegionNode::send_semantic_request(AddressSpaceID target,
-                                           SemanticTag tag)
+               SemanticTag tag, bool can_fail, bool wait_until, UserEvent ready)
     //--------------------------------------------------------------------------
     {
       Serializer rez;
@@ -15606,6 +15731,9 @@ namespace LegionRuntime {
         RezCheck z(rez);
         rez.serialize(handle);
         rez.serialize(tag);
+        rez.serialize(can_fail);
+        rez.serialize(wait_until);
+        rez.serialize(ready);
       }
       context->runtime->send_logical_region_semantic_request(target, rez);
     }
@@ -15632,7 +15760,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void RegionNode::process_semantic_request(SemanticTag tag,
-                                              AddressSpaceID source)
+         AddressSpaceID source, bool can_fail, bool wait_until, UserEvent ready)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -15655,10 +15783,10 @@ namespace LegionRuntime {
             size = finder->second.size;
             is_mutable = finder->second.is_mutable;
           }
-          else
+          else if (!can_fail && wait_until)
             precondition = finder->second.ready_event;
         }
-        else
+        else if (!can_fail && wait_until)
         {
           // Don't have it yet, make a condition and hope that one comes
           UserEvent ready_event = UserEvent::create_user_event();
@@ -15668,15 +15796,20 @@ namespace LegionRuntime {
       }
       if (result == NULL)
       {
-        // Defer this until the semantic condition is ready
-        SemanticRequestArgs args;
-        args.hlr_id = HLR_REGION_SEMANTIC_INFO_REQ_TASK_ID;
-        args.proxy_this = this;
-        args.tag = tag;
-        args.source = source;
-        context->runtime->issue_runtime_meta_task(&args, sizeof(args),
-                            HLR_REGION_SEMANTIC_INFO_REQ_TASK_ID,
-                            NULL/*op*/, precondition);
+        if (can_fail || !wait_until)
+          ready.trigger();
+        else
+        {
+          // Defer this until the semantic condition is ready
+          SemanticRequestArgs args;
+          args.hlr_id = HLR_REGION_SEMANTIC_INFO_REQ_TASK_ID;
+          args.proxy_this = this;
+          args.tag = tag;
+          args.source = source;
+          context->runtime->issue_runtime_meta_task(&args, sizeof(args),
+                              HLR_REGION_SEMANTIC_INFO_REQ_TASK_ID,
+                              NULL/*op*/, precondition);
+        }
       }
       else
         send_semantic_info(source, tag, result, size, is_mutable);
@@ -15692,8 +15825,14 @@ namespace LegionRuntime {
       derez.deserialize(handle);
       SemanticTag tag;
       derez.deserialize(tag);
+      bool can_fail;
+      derez.deserialize(can_fail);
+      bool wait_until;
+      derez.deserialize(wait_until);
+      UserEvent ready;
+      derez.deserialize(ready);
       RegionNode *node = forest->get_node(handle);
-      node->process_semantic_request(tag, source);
+      node->process_semantic_request(tag, source, can_fail, wait_until, ready);
     }
 
     //--------------------------------------------------------------------------
@@ -16783,7 +16922,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void PartitionNode::send_semantic_request(AddressSpaceID target,
-                                              SemanticTag tag)
+               SemanticTag tag, bool can_fail, bool wait_until, UserEvent ready)
     //--------------------------------------------------------------------------
     {
       Serializer rez;
@@ -16791,6 +16930,9 @@ namespace LegionRuntime {
         RezCheck z(rez);
         rez.serialize(handle);
         rez.serialize(tag);
+        rez.serialize(can_fail);
+        rez.serialize(wait_until);
+        rez.serialize(ready);
       }
       context->runtime->send_logical_partition_semantic_request(target, rez);
     }
@@ -16817,7 +16959,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     void PartitionNode::process_semantic_request(SemanticTag tag,
-                                                 AddressSpaceID source)
+         AddressSpaceID source, bool can_fail, bool wait_until, UserEvent ready)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -16840,10 +16982,10 @@ namespace LegionRuntime {
             size = finder->second.size;
             is_mutable = finder->second.is_mutable;
           }
-          else
+          else if (!can_fail && wait_until)
             precondition = finder->second.ready_event;
         }
-        else
+        else if (!can_fail && wait_until)
         {
           // Don't have it yet, make a condition and hope that one comes
           UserEvent ready_event = UserEvent::create_user_event();
@@ -16853,15 +16995,20 @@ namespace LegionRuntime {
       }
       if (result == NULL)
       {
-        // Defer this until the semantic condition is ready
-        SemanticRequestArgs args;
-        args.hlr_id = HLR_PARTITION_SEMANTIC_INFO_REQ_TASK_ID;
-        args.proxy_this = this;
-        args.tag = tag;
-        args.source = source;
-        context->runtime->issue_runtime_meta_task(&args, sizeof(args),
-                            HLR_PARTITION_SEMANTIC_INFO_REQ_TASK_ID,
-                            NULL/*op*/, precondition);
+        if (can_fail || !wait_until)
+          ready.trigger();
+        else
+        {
+          // Defer this until the semantic condition is ready
+          SemanticRequestArgs args;
+          args.hlr_id = HLR_PARTITION_SEMANTIC_INFO_REQ_TASK_ID;
+          args.proxy_this = this;
+          args.tag = tag;
+          args.source = source;
+          context->runtime->issue_runtime_meta_task(&args, sizeof(args),
+                              HLR_PARTITION_SEMANTIC_INFO_REQ_TASK_ID,
+                              NULL/*op*/, precondition);
+        }
       }
       else
         send_semantic_info(source, tag, result, size, is_mutable);
@@ -16877,8 +17024,14 @@ namespace LegionRuntime {
       derez.deserialize(handle);
       SemanticTag tag;
       derez.deserialize(tag);
+      bool can_fail;
+      derez.deserialize(can_fail);
+      bool wait_until;
+      derez.deserialize(wait_until);
+      UserEvent ready;
+      derez.deserialize(ready);
       PartitionNode *node = forest->get_node(handle);
-      node->process_semantic_request(tag, source);
+      node->process_semantic_request(tag, source, can_fail, wait_until, ready);
     }
 
     //--------------------------------------------------------------------------

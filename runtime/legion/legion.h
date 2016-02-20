@@ -5130,9 +5130,14 @@ namespace LegionRuntime {
        * @param tag semantic tag
        * @param result pointer to assign to the semantic buffer
        * @param size where to write the size of the semantic buffer
+       * @param can_fail query allowed to fail
+       * @param wait_until_ready wait indefinitely for the tag
+       * @return true if the query succeeds
        */
-      void retrieve_semantic_information(TaskID task_id, SemanticTag tag,
-                                         const void *&result, size_t &size);
+      bool retrieve_semantic_information(TaskID task_id, SemanticTag tag,
+                                         const void *&result, size_t &size,
+                                         bool can_fail = false,
+                                         bool wait_until_ready = false);
 
       /**
        * Retrieve semantic information for an index space
@@ -5140,9 +5145,14 @@ namespace LegionRuntime {
        * @param tag semantic tag
        * @param result pointer to assign to the semantic buffer
        * @param size where to write the size of the semantic buffer
+       * @param can_fail query allowed to fail
+       * @param wait_until_ready wait indefinitely for the tag
+       * @return true if the query succeeds
        */
-      void retrieve_semantic_information(IndexSpace handle, SemanticTag tag,
-                                         const void *&result, size_t &size);
+      bool retrieve_semantic_information(IndexSpace handle, SemanticTag tag,
+                                         const void *&result, size_t &size,
+                                         bool can_fail = false,
+                                         bool wait_until_ready = false);
 
       /**
        * Retrieve semantic information for an index partition 
@@ -5150,9 +5160,14 @@ namespace LegionRuntime {
        * @param tag semantic tag
        * @param result pointer to assign to the semantic buffer
        * @param size where to write the size of the semantic buffer
+       * @param can_fail query allowed to fail
+       * @param wait_until_ready wait indefinitely for the tag
+       * @return true if the query succeeds
        */
-      void retrieve_semantic_information(IndexPartition handle, SemanticTag tag,
-                                         const void *&result, size_t &size);
+      bool retrieve_semantic_information(IndexPartition handle, SemanticTag tag,
+                                         const void *&result, size_t &size,
+                                         bool can_fail = false,
+                                         bool wait_until_ready = false);
 
       /**
        * Retrieve semantic information for a field space
@@ -5160,9 +5175,14 @@ namespace LegionRuntime {
        * @param tag semantic tag
        * @param result pointer to assign to the semantic buffer
        * @param size where to write the size of the semantic buffer
+       * @param can_fail query allowed to fail
+       * @param wait_until_ready wait indefinitely for the tag
+       * @return true if the query succeeds
        */
-      void retrieve_semantic_information(FieldSpace handle, SemanticTag tag,
-                                         const void *&result, size_t &size);
+      bool retrieve_semantic_information(FieldSpace handle, SemanticTag tag,
+                                         const void *&result, size_t &size,
+                                         bool can_fail = false,
+                                         bool wait_until_ready = false);
 
       /**
        * Retrieve semantic information for a specific field 
@@ -5171,10 +5191,15 @@ namespace LegionRuntime {
        * @param tag semantic tag
        * @param result pointer to assign to the semantic buffer
        * @param size where to write the size of the semantic buffer
+       * @param can_fail query allowed to fail
+       * @param wait_until_ready wait indefinitely for the tag
+       * @return true if the query succeeds
        */
-      void retrieve_semantic_information(FieldSpace handle, FieldID fid, 
+      bool retrieve_semantic_information(FieldSpace handle, FieldID fid, 
                                          SemanticTag tag,
-                                         const void *&result, size_t &size);
+                                         const void *&result, size_t &size,
+                                         bool can_fail = false,
+                                         bool wait_until_ready = false);
 
       /**
        * Retrieve semantic information for a logical region 
@@ -5182,9 +5207,14 @@ namespace LegionRuntime {
        * @param tag semantic tag
        * @param result pointer to assign to the semantic buffer
        * @param size where to write the size of the semantic buffer
+       * @param can_fail query allowed to fail
+       * @param wait_until_ready wait indefinitely for the tag
+       * @return true if the query succeeds
        */
-      void retrieve_semantic_information(LogicalRegion handle, SemanticTag tag,
-                                         const void *&result, size_t &size);
+      bool retrieve_semantic_information(LogicalRegion handle, SemanticTag tag,
+                                         const void *&result, size_t &size,
+                                         bool can_fail = false,
+                                         bool wait_until_ready = false);
 
       /**
        * Retrieve semantic information for a logical partition
@@ -5192,10 +5222,15 @@ namespace LegionRuntime {
        * @param tag semantic tag
        * @param result pointer to assign to the semantic buffer
        * @param size where to write the size of the semantic buffer
+       * @param can_fail query allowed to fail
+       * @param wait_until_ready wait indefinitely for the tag
+       * @return true if the query succeeds
        */
-      void retrieve_semantic_information(LogicalPartition handle, 
+      bool retrieve_semantic_information(LogicalPartition handle, 
                                          SemanticTag tag,
-                                         const void *&result, size_t &size);
+                                         const void *&result, size_t &size,
+                                         bool can_fail = false,
+                                         bool wait_until_ready = false);
 
       /**
        * Retrieve the name of a task

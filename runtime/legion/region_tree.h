@@ -597,19 +597,25 @@ namespace LegionRuntime {
                                        const void *buffer, size_t size,
                                        bool is_mutable);
     public:
-      void retrieve_semantic_information(IndexSpace handle, SemanticTag tag,
-                                         const void *&result, size_t &size);
-      void retrieve_semantic_information(IndexPartition handle, SemanticTag tag,
-                                         const void *&result, size_t &size);
-      void retrieve_semantic_information(FieldSpace handle, SemanticTag tag,
-                                         const void *&result, size_t &size);
-      void retrieve_semantic_information(FieldSpace handle, FieldID fid,
+      bool retrieve_semantic_information(IndexSpace handle, SemanticTag tag,
+                                         const void *&result, size_t &size,
+                                         bool can_fail, bool wait_until);
+      bool retrieve_semantic_information(IndexPartition handle, SemanticTag tag,
+                                         const void *&result, size_t &size,
+                                         bool can_fail, bool wait_until);
+      bool retrieve_semantic_information(FieldSpace handle, SemanticTag tag,
+                                         const void *&result, size_t &size,
+                                         bool can_fail, bool wait_until);
+      bool retrieve_semantic_information(FieldSpace handle, FieldID fid,
                                          SemanticTag tag,
-                                         const void *&result, size_t &size);
-      void retrieve_semantic_information(LogicalRegion handle, SemanticTag tag,
-                                         const void *&result, size_t &size);
-      void retrieve_semantic_information(LogicalPartition part, SemanticTag tag,
-                                         const void *&result, size_t &size);
+                                         const void *&result, size_t &size,
+                                         bool can_fail, bool wait_until);
+      bool retrieve_semantic_information(LogicalRegion handle, SemanticTag tag,
+                                         const void *&result, size_t &size,
+                                         bool can_fail, bool wait_until);
+      bool retrieve_semantic_information(LogicalPartition part, SemanticTag tag,
+                                         const void *&result, size_t &size,
+                                         bool can_fail, bool wait_until);
     public:
       Internal *const runtime;
     protected:
@@ -822,10 +828,11 @@ namespace LegionRuntime {
     public:
       void attach_semantic_information(SemanticTag tag, AddressSpaceID source,
                              const void *buffer, size_t size, bool is_mutable);
-      void retrieve_semantic_information(SemanticTag tag,
-                                         const void *&result, size_t &size);
+      bool retrieve_semantic_information(SemanticTag tag,
+                                         const void *&result, size_t &size,
+                                         bool can_fail, bool wait_until);
       virtual void send_semantic_request(AddressSpaceID target, 
-                                         SemanticTag tag) = 0;
+        SemanticTag tag, bool can_fail, bool wait_until, UserEvent ready) = 0;
       virtual void send_semantic_info(AddressSpaceID target, SemanticTag tag,
                         const void *buffer, size_t size, bool is_mutable) = 0;
     public:
@@ -920,10 +927,11 @@ namespace LegionRuntime {
       virtual void get_colors(std::set<ColorPoint> &colors);
     public:
       virtual void send_semantic_request(AddressSpaceID target, 
-                                         SemanticTag tag);
+           SemanticTag tag, bool can_fail, bool wait_until, UserEvent ready);
       virtual void send_semantic_info(AddressSpaceID target, SemanticTag tag,
                            const void *buffer, size_t size, bool is_mutable);
-      void process_semantic_request(SemanticTag tag, AddressSpaceID source);
+      void process_semantic_request(SemanticTag tag, AddressSpaceID source,
+                            bool can_fail, bool wait_until, UserEvent ready);
       static void handle_semantic_request(RegionTreeForest *forest,
                                  Deserializer &derez, AddressSpaceID source);
       static void handle_semantic_info(RegionTreeForest *forest,
@@ -1075,10 +1083,11 @@ namespace LegionRuntime {
       virtual void get_colors(std::set<ColorPoint> &colors);
     public:
       virtual void send_semantic_request(AddressSpaceID target, 
-                                         SemanticTag tag);
+             SemanticTag tag, bool can_fail, bool wait_until, UserEvent ready);
       virtual void send_semantic_info(AddressSpaceID target, SemanticTag tag,
                              const void *buffer, size_t size, bool is_mutable);
-      void process_semantic_request(SemanticTag tag, AddressSpaceID source);
+      void process_semantic_request(SemanticTag tag, AddressSpaceID source,
+                              bool can_fail, bool wait_until, UserEvent ready);
       static void handle_semantic_request(RegionTreeForest *forest,
                                    Deserializer &derez, AddressSpaceID source);
       static void handle_semantic_info(RegionTreeForest *forest,
@@ -1259,17 +1268,18 @@ namespace LegionRuntime {
                                        AddressSpaceID source,
                                        const void *buffer, size_t size,
                                        bool is_mutable);
-      void retrieve_semantic_information(SemanticTag tag,
-                                         const void *&result, size_t &size);
-      void retrieve_semantic_information(FieldID fid, SemanticTag tag,
-                                         const void *&result, size_t &size);
+      bool retrieve_semantic_information(SemanticTag tag,
+             const void *&result, size_t &size, bool can_fail, bool wait_until);
+      bool retrieve_semantic_information(FieldID fid, SemanticTag tag,
+             const void *&result, size_t &size, bool can_fail, bool wait_until);
       void send_semantic_info(AddressSpaceID target, SemanticTag tag,
                              const void *result, size_t size, bool is_mutable);
       void send_semantic_field_info(AddressSpaceID target, FieldID fid,
             SemanticTag tag, const void *result, size_t size, bool is_mutable);
-      void process_semantic_request(SemanticTag tag, AddressSpaceID source);
+      void process_semantic_request(SemanticTag tag, AddressSpaceID source,
+                              bool can_fail, bool wait_until, UserEvent ready);
       void process_semantic_field_request(FieldID fid, SemanticTag tag, 
-                                          AddressSpaceID source);
+       AddressSpaceID source, bool can_fail, bool wait_until, UserEvent ready);
       static void handle_semantic_request(RegionTreeForest *forest,
                                    Deserializer &derez, AddressSpaceID source);
       static void handle_field_semantic_request(RegionTreeForest *forest,
@@ -1441,10 +1451,10 @@ namespace LegionRuntime {
     public:
       void attach_semantic_information(SemanticTag tag, AddressSpaceID source,
                             const void *buffer, size_t size, bool is_mutable);
-      void retrieve_semantic_information(SemanticTag tag,
-                                         const void *&result, size_t &size);
+      bool retrieve_semantic_information(SemanticTag tag,
+           const void *&result, size_t &size, bool can_fail, bool wait_until);
       virtual void send_semantic_request(AddressSpaceID target, 
-                                         SemanticTag tag) = 0;
+          SemanticTag tag, bool can_fail, bool wait_until, UserEvent ready) = 0;
       virtual void send_semantic_info(AddressSpaceID target, SemanticTag tag,
                           const void *buffer, size_t size, bool is_mutable) = 0;
     public:
@@ -1901,10 +1911,11 @@ namespace LegionRuntime {
                             Deserializer &derez, AddressSpaceID source);
     public:
       virtual void send_semantic_request(AddressSpaceID target, 
-                                         SemanticTag tag);
+             SemanticTag tag, bool can_fail, bool wait_until, UserEvent ready);
       virtual void send_semantic_info(AddressSpaceID target, SemanticTag tag,
                              const void *buffer, size_t size, bool is_mutable);
-      void process_semantic_request(SemanticTag tag, AddressSpaceID source);
+      void process_semantic_request(SemanticTag tag, AddressSpaceID source,
+                              bool can_fail, bool wait_until, UserEvent ready);
       static void handle_semantic_request(RegionTreeForest *forest,
                                    Deserializer &derez, AddressSpaceID source);
       static void handle_semantic_info(RegionTreeForest *forest,
@@ -2076,10 +2087,11 @@ namespace LegionRuntime {
       virtual void send_node(AddressSpaceID target);
     public:
       virtual void send_semantic_request(AddressSpaceID target, 
-                                         SemanticTag tag);
+             SemanticTag tag, bool can_fail, bool wait_until, UserEvent ready);
       virtual void send_semantic_info(AddressSpaceID target, SemanticTag tag,
                              const void *buffer, size_t size, bool is_mutable);
-      void process_semantic_request(SemanticTag tag, AddressSpaceID source);
+      void process_semantic_request(SemanticTag tag, AddressSpaceID source,
+                              bool can_fail, bool wait_until, UserEvent ready);
       static void handle_semantic_request(RegionTreeForest *forest,
                                    Deserializer &derez, AddressSpaceID source);
       static void handle_semantic_info(RegionTreeForest *forest,
