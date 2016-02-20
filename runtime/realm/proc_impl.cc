@@ -277,6 +277,7 @@ namespace Realm {
       TaskRegistration *tro = new TaskRegistration(codedesc, 
 						   ByteArrayRef(user_data, user_data_len),
 						   finish_event, prs);
+      get_runtime()->optable.add_local_operation(finish_event, tro);
       // we haven't told anybody about this operation yet, so cancellation really shouldn't
       //  be possible
       bool ok_to_run = (tro->mark_ready() &&
@@ -993,10 +994,14 @@ namespace Realm {
 				     Event _finish_event, const ProfilingRequestSet &_requests)
     : Operation(_finish_event, _requests)
     , codedesc(_codedesc), userdata(_userdata)
-  {}
+  {
+    log_taskreg.debug() << "task registration created: op=" << (void *)this << " finish=" << _finish_event;
+  }
 
   TaskRegistration::~TaskRegistration(void)
-  {}
+  {
+    log_taskreg.debug() << "task registration destroyed: op=" << (void *)this;
+  }
 
   void TaskRegistration::print(std::ostream& os) const
   {
