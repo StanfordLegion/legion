@@ -54,6 +54,14 @@
 #ifndef MAX_NUM_PROCS
 #define MAX_NUM_PROCS                   64
 #endif
+// Maximum ID for an application task ID 
+#ifndef MAX_APPLICATION_TASK_ID
+#define MAX_APPLICATION_TASK_ID         (1<<20)
+#endif
+// Maximum ID for an application mapper ID
+#ifndef MAX_APPLICATION_MAPPER_ID
+#define MAX_APPLICATION_MAPPER_ID       (1<<20)
+#endif
 // Default number of mapper slots
 #ifndef DEFAULT_MAPPER_SLOTS
 #define DEFAULT_MAPPER_SLOTS            8
@@ -147,9 +155,12 @@
                    (x==24) ? 26 : (x==25) ? 12 : (x==26) ? 18 : (x==27) ? 6 : \
                    (x==28) ? 11 : (x==29) ? 5 : (x==30) ? 10 : 9)
 
-#ifndef FIELD_LOG2
-#define FIELD_LOG2         STATIC_LOG2(MAX_FIELDS) // log2(MAX_FIELDS)
+#ifndef LEGION_FIELD_LOG2
+#define LEGION_FIELD_LOG2         STATIC_LOG2(MAX_FIELDS) // log2(MAX_FIELDS)
 #endif
+
+#define LEGION_STRINGIFY(x) #x
+#define LEGION_MACRO_TO_STRING(x) LEGION_STRINGIFY(x)
 
 // The following enums are all re-exported by
 // namespace Legion. These versions are here to facilitate the
@@ -304,6 +315,8 @@ typedef enum legion_error_t {
   ERROR_INVALID_CONSTRAINT_ID = 145,
   ERROR_ILLEGAL_WAIT_FOR_SHUTDOWN = 146,
   ERROR_DEPRECATED_METHOD_USE = 147,
+  ERROR_MAX_APPLICATION_TASK_ID_EXCEEDED = 148,
+  ERROR_MAX_APPLICATION_MAPPER_ID_EXCEEDED = 149,
 }  legion_error_t;
 
 // enum and namepsaces don't really get along well
@@ -403,6 +416,7 @@ typedef unsigned int legion_projection_id_t;
 typedef unsigned int legion_region_tree_id_t;
 typedef unsigned int legion_address_space_id_t;
 typedef unsigned int legion_tunable_id_t;
+typedef unsigned int legion_generator_id_t;
 typedef unsigned long legion_distributed_id_t;
 typedef unsigned long legion_mapping_tag_id_t;
 typedef unsigned long legion_variant_id_t;
@@ -412,5 +426,5 @@ typedef unsigned long long legion_version_id_t;
 typedef legion_lowlevel_task_func_id_t legion_task_id_t;
 typedef unsigned long legion_layout_constraint_id_t;
 
-
 #endif // __LEGION_CONFIG_H__
+

@@ -2250,7 +2250,7 @@ namespace Legion {
           const void *name; size_t name_size;
           runtime->retrieve_semantic_information(
               requirement.region.get_field_space(), *it, NAME_SEMANTIC_TAG,
-              name, name_size);
+              name, name_size, false, false);
           log_run.error("Missing instance for field %s (FieldID: %d)",
                         static_cast<const char*>(name), *it);
         }
@@ -3392,7 +3392,7 @@ namespace Legion {
           const void *name; size_t name_size;
           runtime->retrieve_semantic_information(
               req.region.get_field_space(), *it, NAME_SEMANTIC_TAG,
-              name, name_size);
+              name, name_size, false, false);
           log_run.error("Missing instance for field %s (FieldID: %d)",
                         static_cast<const char*>(name), *it);
         }
@@ -4489,7 +4489,7 @@ namespace Legion {
           const void *name; size_t name_size;
           runtime->retrieve_semantic_information(
               requirement.region.get_field_space(), *it, NAME_SEMANTIC_TAG,
-              name, name_size);
+              name, name_size, false, false);
           log_run.error("Missing instance for field %s (FieldID: %d)",
                         static_cast<const char*>(name), *it);
         }
@@ -7298,7 +7298,7 @@ namespace Legion {
             assert(false);
 #endif
             exit(ERROR_INVALID_MAPPER_OUTPUT);
-          }
+          } 
           target_procs[proc] = task;
           task->current_proc = proc;
         }

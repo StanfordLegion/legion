@@ -773,7 +773,16 @@ namespace Legion {
       {
         TaskMap::const_iterator finder = task_profiles.find(task->task_id);
         if (finder == task_profiles.end() || finder->second.size() == 0)
-          return task->variants->get_all_variants().begin()->second.proc_kind;
+        {
+          const std::map<VariantID, TaskVariantCollection::Variant>&
+            all_variants = task->variants->get_all_variants();
+          if (all_variants.size() > 0)
+            return all_variants.begin()->second.proc_kind;
+          else
+            // if there is no variant registered yet, pick a processor kind
+            // that should always exist
+            return Processor::LOC_PROC;
+        }
         for (VariantMap::const_iterator it = finder->second.begin();
               it != finder->second.end(); it++)
         {

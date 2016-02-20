@@ -33,4 +33,7 @@
 #define REALM_USE_DLFCN
 #define REALM_USE_DLADDR
 
+// can Realm use exceptions to propagate errors back to the profiling interace?
+#define REALM_USE_EXCEPTIONS
+
 #endif

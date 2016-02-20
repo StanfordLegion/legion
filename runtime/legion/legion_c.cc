@@ -1729,6 +1729,23 @@ legion_logical_partition_get_logical_subregion_by_color(
 }
 
 legion_logical_region_t
+legion_logical_partition_get_logical_subregion_by_tree(
+  legion_runtime_t runtime_,
+  legion_context_t ctx_,
+  legion_index_space_t handle_,
+  legion_field_space_t fspace_,
+  legion_region_tree_id_t tid)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_);
+  IndexSpace handle = CObjectWrapper::unwrap(handle_);
+  FieldSpace fspace = CObjectWrapper::unwrap(fspace_);
+
+  LogicalRegion r = runtime->get_logical_subregion_by_tree(ctx, handle, fspace, tid);
+  return CObjectWrapper::wrap(r);
+}
+
+legion_logical_region_t
 legion_logical_partition_get_parent_logical_region(
   legion_runtime_t runtime_,
   legion_context_t ctx_,

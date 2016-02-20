@@ -117,6 +117,11 @@ namespace LegionRuntime {
     {
     }
 
+    void DmaRequest::print(std::ostream& os) const
+    {
+      os << "DmaRequest";
+    }
+
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -150,8 +155,11 @@ namespace LegionRuntime {
 		  int _priority,
                   const Realm::ProfilingRequestSet &reqs);
 
+    protected:
+      // deletion performed when reference count goes to zero
       virtual ~CopyRequest(void);
 
+    public:
       size_t compute_size(void) const;
       void serialize(void *buffer);
 
@@ -192,8 +200,11 @@ namespace LegionRuntime {
 		    int _priority,
                     const Realm::ProfilingRequestSet &reqs);
 
+    protected:
+      // deletion performed when reference count goes to zero
       virtual ~ReduceRequest(void);
 
+    public:
       size_t compute_size(void);
       void serialize(void *buffer);
 
@@ -234,8 +245,12 @@ namespace LegionRuntime {
                   Event _after_fill,
                   int priority,
                   const Realm::ProfilingRequestSet &reqs);
+
+    protected:
+      // deletion performed when reference count goes to zero
       virtual ~FillRequest(void);
 
+    public:
       size_t compute_size(void);
       void serialize(void *buffer);
 
@@ -290,8 +305,13 @@ namespace LegionRuntime {
 
     void DmaRequestQueue::enqueue_request(DmaRequest *r)
     {
-      // Record that it is ready
-      r->mark_ready();
+      // Record that it is ready - check for cancellation though
+      bool ok_to_run = r->mark_ready();
+      if(!ok_to_run) {
+	r->mark_finished(false /*!successful*/);
+	return;
+      }
+
       queue_mutex.lock();
 
       // there's a queue per priority level
@@ -509,8 +529,17 @@ namespace LegionRuntime {
       EventImpl::add_waiter(e, this);
     }
 
-    bool DmaRequest::Waiter::event_triggered(void)
+    bool DmaRequest::Waiter::event_triggered(Event e, bool poisoned)
     {
+      if(poisoned) {
+	Realm::log_poison.info() << "cancelling poisoned dma operation - op=" << req << " after=" << req->get_finish_event();
+	// cancel the dma operation - this has to work
+	bool did_cancel = req->attempt_cancellation(Realm::Faults::ERROR_POISONED_PRECONDITION,
+						    &e, sizeof(e));	
+	assert(did_cancel);
+	return false;
+      }
+
       log_dma.info("request %p triggered in state %d (lock = " IDFMT ")",
 		   req, req->state, current_lock.id);
 
@@ -527,10 +556,9 @@ namespace LegionRuntime {
       return false;
     }
 
-    void DmaRequest::Waiter::print_info(FILE *f)
+    void DmaRequest::Waiter::print(std::ostream& os) const
     {
-      fprintf(f,"dma request %p: after " IDFMT "/%d\n", 
-	      req, req->get_finish_event().id, req->get_finish_event().gen);
+      os << "dma request " << req << ": after " << req->get_finish_event();
     }
 
     bool CopyRequest::check_readiness(bool just_check, DmaRequestQueue *rq)
@@ -2042,7 +2070,8 @@ namespace LegionRuntime {
     class AIOFence : public Realm::Operation::AsyncWorkItem {
     public:
       AIOFence(Realm::Operation *_op) : Realm::Operation::AsyncWorkItem(_op) {}
-      void request_cancellation(void) {}
+      virtual void request_cancellation(void) {}
+      virtual void print(std::ostream& os) const { os << "AIOFence"; }
     };
 
     class AIOFenceOp : public AsyncFileIOContext::AIOOperation {
@@ -2074,7 +2103,7 @@ namespace LegionRuntime {
     {
       assert(completed);
       log_aio.debug("fence completed: op=%p req=%p", this, req);
-      f->mark_finished();
+      f->mark_finished(true /*successful*/);
       return true;
     }
 
@@ -2765,6 +2794,10 @@ namespace LegionRuntime {
     void CopyRequest::perform_dma_rect(MemPairCopier *mpc)
     {
       Arrays::Rect<DIM> orig_rect = domain.get_rect<DIM>();
+
+      // empty rectangles are easy to copy...
+      if(orig_rect.volume() == 0)
+	return;
 
       // this is the SOA-friendly loop nesting
       for(OASByInst::iterator it = oas_by_inst->begin(); it != oas_by_inst->end(); it++) {
@@ -3477,6 +3510,10 @@ namespace LegionRuntime {
     {
       Arrays::Rect<DIM> orig_rect = domain.get_rect<DIM>();
 
+      // empty rectangles are easy to copy...
+      if(orig_rect.volume() == 0)
+	return;
+
       const ReductionOpUntyped *redop = get_runtime()->reduce_op_table[redop_id];
 
       // single source field for now
@@ -4089,6 +4126,11 @@ namespace LegionRuntime {
     template<int DIM>
     void FillRequest::perform_dma_rect(MemoryImpl *mem_impl)
     {
+      typename Arrays::Rect<DIM> rect = domain.get_rect<DIM>();
+      // empty rectangles are easy to fill...
+      if(rect.volume() == 0)
+	return;
+
       RegionInstanceImpl *inst_impl = get_runtime()->get_instance_impl(dst.inst);
       off_t field_start=0; int field_size=0;
       find_field_start(inst_impl->metadata.field_sizes, dst.offset,
@@ -4096,7 +4138,7 @@ namespace LegionRuntime {
       assert(field_size <= (int)fill_size);
       typename Arrays::Mapping<DIM, 1> *dst_linearization = 
         inst_impl->metadata.linearization.get_mapping<DIM>();
-      typename Arrays::Rect<DIM> rect = domain.get_rect<DIM>();
+
       int fill_elmts = 1;
       // Optimize our buffer for the target instance
       size_t fill_elmts_size = optimize_fill_buffer(inst_impl, fill_elmts);
@@ -4168,7 +4210,7 @@ namespace LegionRuntime {
 
         virtual ~CopyCompletionProfiler(void) { }
 
-        virtual bool event_triggered(void)
+        virtual bool event_triggered(Event e)
         {
           mark_finished();
           return false;
@@ -4205,12 +4247,14 @@ namespace LegionRuntime {
 	DmaRequest *r = dequeue_request(aio_idle);
 
 	if(r) {
-          r->mark_started();
+          bool ok_to_run = r->mark_started();
+	  if(ok_to_run) {
+	    // this will automatically add any necessary AsyncWorkItem's
+	    r->perform_dma();
 
-          // this will automatically add any necessary AsyncWorkItem's
-	  r->perform_dma();
-
-	  r->mark_finished();
+	    r->mark_finished(true /*successful*/);
+	  } else
+	    r->mark_finished(false /*!successful*/);
 	}
       }
 
@@ -4278,6 +4322,7 @@ namespace Realm {
         Memory mem = it->inst.get_location();
         int node = ID(mem).node();
         if (((unsigned)node) == gasnet_mynode()) {
+	  get_runtime()->optable.add_local_operation(ev, r);
           r->check_readiness(false, dma_queue);
         } else {
           RemoteFillArgs args;
@@ -4293,11 +4338,16 @@ namespace Realm {
 
           r->serialize(msgdata);
 
+	  get_runtime()->optable.add_remote_operation(ev, node);
+
           RemoteFillMessage::request(node, args, msgdata, msglen, PAYLOAD_FREE);
+
+	  // release local copy of operation
+	  r->remove_reference();
         }
         finish_events.insert(ev);
       }
-      return GenEventImpl::merge_events(finish_events);
+      return GenEventImpl::merge_events(finish_events, false /*!ignore faults*/);
     }
     
     Event Domain::copy(RegionInstance src_inst, RegionInstance dst_inst,
@@ -4356,6 +4406,7 @@ namespace LegionRuntime {
 					 args.before_copy,
 					 args.after_copy,
 					 args.priority);
+	Realm::get_runtime()->optable.add_local_operation(args.after_copy, r);
 
 	r->check_readiness(false, dma_queue);
       } else {
@@ -4366,6 +4417,7 @@ namespace LegionRuntime {
 					     args.before_copy,
 					     args.after_copy,
 					     args.priority);
+	Realm::get_runtime()->optable.add_local_operation(args.after_copy, r);
 
 	r->check_readiness(false, dma_queue);
       }
@@ -4380,6 +4432,8 @@ namespace LegionRuntime {
                                        args.before_fill,
                                        args.after_fill,
                                        0 /* no room for args.priority */);
+      Realm::get_runtime()->optable.add_local_operation(args.after_fill, r);
+
       r->check_readiness(false, dma_queue);
     }
 
@@ -4448,6 +4502,7 @@ namespace Realm {
 
             if(((unsigned)dma_node) == gasnet_mynode()) {
               log_dma.info("performing serdez on local node");
+	      Realm::get_runtime()->optable.add_local_operation(ev, r);
               r->check_readiness(false, dma_queue);
               finish_events.insert(ev);
             } else {
@@ -4464,11 +4519,12 @@ namespace Realm {
               r->serialize(msgdata);
 
               log_dma.info("performing serdez on remote node (%d), event=" IDFMT "/%d", dma_node, args.after_copy.id, args.after_copy.gen);
+	      get_runtime()->optable.add_remote_operation(ev, dma_node);
               RemoteCopyMessage::request(dma_node, args, msgdata, msglen, PAYLOAD_FREE);
 
               finish_events.insert(ev);
               // done with the local copy of the request
-              delete r;
+	      r->remove_reference();
             }
 	  }
 	  else {
@@ -4534,6 +4590,8 @@ namespace Realm {
 	  
 	  if(((unsigned)dma_node) == gasnet_mynode()) {
 	    log_dma.info("performing copy on local node");
+
+	    get_runtime()->optable.add_local_operation(ev, r);
 	  
 	    r->check_readiness(false, dma_queue);
 
@@ -4552,17 +4610,18 @@ namespace Realm {
             r->serialize(msgdata);
 
 	    log_dma.info("performing copy on remote node (%d), event=" IDFMT "/%d", dma_node, args.after_copy.id, args.after_copy.gen);
+	    get_runtime()->optable.add_remote_operation(ev, dma_node);
 	    RemoteCopyMessage::request(dma_node, args, msgdata, msglen, PAYLOAD_FREE);
 	  
 	    finish_events.insert(ev);
 
 	    // done with the local copy of the request
-	    delete r;
+	    r->remove_reference();
 	  }
 	}
 
 	// final event is merge of all individual copies' events
-	return GenEventImpl::merge_events(finish_events);
+	return GenEventImpl::merge_events(finish_events, false /*!ignore faults*/);
       } else {
 	// we're doing a reduction - the semantics require that all source fields be pulled
 	//  together and applied as a "structure" to the reduction op
@@ -4600,6 +4659,8 @@ namespace Realm {
 
 	if(((unsigned)src_node) == gasnet_mynode()) {
 	  log_dma.info("performing reduction on local node");
+
+	  get_runtime()->optable.add_local_operation(ev, r);
 	  
 	  r->check_readiness(false, dma_queue);
 	} else {
@@ -4616,9 +4677,10 @@ namespace Realm {
 
 	  log_dma.info("performing reduction on remote node (%d), event=" IDFMT "/%d",
 		       src_node, args.after_copy.id, args.after_copy.gen);
+	  get_runtime()->optable.add_remote_operation(ev, src_node);
 	  RemoteCopyMessage::request(src_node, args, msgdata, msglen, PAYLOAD_FREE);
 	  // done with the local copy of the request
-	  delete r;
+	  r->remove_reference();
 	}
 
 	return ev;

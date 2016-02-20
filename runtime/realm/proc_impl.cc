@@ -189,8 +189,12 @@ namespace Realm {
       TaskRegistration *tro = new TaskRegistration(codedesc, 
 						   ByteArrayRef(user_data, user_data_len),
 						   finish_event, prs);
-      tro->mark_ready();
-      tro->mark_started();
+      get_runtime()->optable.add_local_operation(finish_event, tro);
+      // we haven't told anybody about this operation yet, so cancellation really shouldn't
+      //  be possible
+      bool ok_to_run = (tro->mark_ready() &&
+			tro->mark_started());
+      assert(ok_to_run);
 
       std::vector<Processor> local_procs;
       std::map<gasnet_node_t, std::vector<Processor> > remote_procs;
@@ -248,7 +252,7 @@ namespace Realm {
 					  reg_op);
       }
 
-      tro->mark_finished();
+      tro->mark_finished(true /*successful*/);
       return finish_event;
     }
 
@@ -273,8 +277,12 @@ namespace Realm {
       TaskRegistration *tro = new TaskRegistration(codedesc, 
 						   ByteArrayRef(user_data, user_data_len),
 						   finish_event, prs);
-      tro->mark_ready();
-      tro->mark_started();
+      get_runtime()->optable.add_local_operation(finish_event, tro);
+      // we haven't told anybody about this operation yet, so cancellation really shouldn't
+      //  be possible
+      bool ok_to_run = (tro->mark_ready() &&
+			tro->mark_started());
+      assert(ok_to_run);
 
       // do local processors first
       std::set<Processor> local_procs;
@@ -309,8 +317,35 @@ namespace Realm {
 	}
       }
 
-      tro->mark_finished();
+      tro->mark_finished(true /*successful*/);
       return finish_event;
+    }
+
+    // reports an execution fault in the currently running task
+    /*static*/ void Processor::report_execution_fault(int reason,
+						      const void *reason_data,
+						      size_t reason_size)
+    {
+#ifdef REALM_USE_EXCEPTIONS
+      if(Thread::self()->exceptions_permitted()) {
+	throw ApplicationException(reason, reason_data, reason_size);
+      } else
+#endif
+      {
+	Processor p = get_executing_processor();
+	assert(p.exists());
+	log_poison.fatal() << "FATAL: no handler for reported processor fault: proc=" << p
+			   << " reason=" << reason;
+	assert(0);
+      }
+    }
+
+    // reports a problem with a processor in general (this is primarily for fault injection)
+    void Processor::report_processor_fault(int reason,
+					   const void *reason_data,
+					   size_t reason_size) const
+    {
+      assert(0);
     }
 
 
@@ -404,8 +439,10 @@ namespace Realm {
     void ProcessorGroup::enqueue_task(Task *task)
     {
       // put it into the task queue - one of the member procs will eventually grab it
-      task->mark_ready();
-      task_queue.put(task, task->priority);
+      if(task->mark_ready())
+	task_queue.put(task, task->priority);
+      else
+	task->mark_finished(false /*!successful*/);
     }
 
     void ProcessorGroup::add_to_group(ProcessorGroup *group)
@@ -428,6 +465,7 @@ namespace Realm {
       // create a task object and insert it into the queue
       Task *task = new Task(me, func_id, args, arglen, reqs,
                             start_event, finish_event, priority);
+      get_runtime()->optable.add_local_operation(finish_event, task);
 
       if (start_event.has_triggered())
         enqueue_task(task);
@@ -441,16 +479,25 @@ namespace Realm {
   // class DeferredTaskSpawn
   //
 
-    bool DeferredTaskSpawn::event_triggered(void)
+    bool DeferredTaskSpawn::event_triggered(Event e, bool poisoned)
     {
+      if(poisoned) {
+	// cancel the task - this has to work
+	log_poison.info() << "cancelling poisoned task - task=" << task << " after=" << task->get_finish_event();
+	bool did_cancel = task->attempt_cancellation(Realm::Faults::ERROR_POISONED_PRECONDITION,
+						     &e, sizeof(e));	
+	assert(did_cancel);
+	task->mark_finished(false);
+	return true;
+      }
+
       proc->enqueue_task(task);
       return true;
     }
 
-    void DeferredTaskSpawn::print_info(FILE *f)
+    void DeferredTaskSpawn::print(std::ostream& os) const
     {
-      fprintf(f,"deferred task: func=%d proc=" IDFMT " finish=" IDFMT "/%d\n",
-             task->func_id, task->proc.id, task->get_finish_event().id, task->get_finish_event().gen);
+      os << "deferred task: func=" << task->func_id << " proc=" << task->proc << " finish=" << task->get_finish_event();
     }
 
 
@@ -507,13 +554,17 @@ namespace Realm {
     r_args.priority = priority;
     r_args.user_arglen = arglen;
     
-    if(!prs) {
+    if(!prs || prs->empty()) {
       // no profiling, so task args are the only payload
       Message::request(target, r_args, args, arglen, PAYLOAD_COPY);
     } else {
       // need to serialize both the task args and the profiling request
       //  into a single payload
-      Serialization::DynamicBufferSerializer dbs(arglen + 4096);  // assume profiling requests are < 4K
+      // allocate a little extra initial space for the profiling requests, but not too
+      //  much in case the copy sits around outside the srcdatapool for a long time
+      // (if we need more than this, we'll pay for a realloc during serialization, but it
+      //  will still work correctly)
+      Serialization::DynamicBufferSerializer dbs(arglen + 512);
 
       dbs.append_bytes(args, arglen);
       dbs << *prs;
@@ -563,7 +614,8 @@ namespace Realm {
     }
 
     // TODO: include status/profiling eventually
-    RegisterTaskCompleteMessage::send_request(args.sender, args.reg_op);
+    RegisterTaskCompleteMessage::send_request(args.sender, args.reg_op,
+					      true /*successful*/);
   }
 
   /*static*/ void RegisterTaskMessage::send_request(gasnet_node_t target,
@@ -599,16 +651,18 @@ namespace Realm {
 
   /*static*/ void RegisterTaskCompleteMessage::handle_request(RequestArgs args)
   {
-    args.reg_op->mark_finished();
+    args.reg_op->mark_finished(args.successful);
   }
 
   /*static*/ void RegisterTaskCompleteMessage::send_request(gasnet_node_t target,
-							    RemoteTaskRegistration *reg_op)
+							    RemoteTaskRegistration *reg_op,
+							    bool successful)
   {
     RequestArgs args;
 
     args.sender = gasnet_mynode();
     args.reg_op = reg_op;
+    args.successful = successful;
 
     Message::request(target, args);
   }
@@ -651,7 +705,11 @@ namespace Realm {
 		       << " proc=" << me
 		       << " finish=" << finish_event;
 
-      SpawnTaskMessage::send_request(ID(me).node(), me, func_id,
+      gasnet_node_t target = ID(me).node();
+
+      get_runtime()->optable.add_remote_operation(finish_event, target);
+
+      SpawnTaskMessage::send_request(target, me, func_id,
 				     args, arglen, &reqs,
 				     start_event, finish_event, priority);
     }
@@ -708,8 +766,10 @@ namespace Realm {
   void LocalTaskProcessor::enqueue_task(Task *task)
   {
     // just jam it into the task queue
-    task->mark_ready();
-    task_queue.put(task, task->priority);
+    if(task->mark_ready())
+      task_queue.put(task, task->priority);
+    else
+      task->mark_finished(false /*!successful*/);
   }
 
   void LocalTaskProcessor::spawn_task(Processor::TaskFuncID func_id,
@@ -722,6 +782,7 @@ namespace Realm {
     // create a task object for this
     Task *task = new Task(me, func_id, args, arglen, reqs,
 			  start_event, finish_event, priority);
+    get_runtime()->optable.add_local_operation(finish_event, task);
 
     // if the start event has already triggered, we can enqueue right away
     if(start_event.has_triggered()) {
@@ -933,7 +994,19 @@ namespace Realm {
 				     Event _finish_event, const ProfilingRequestSet &_requests)
     : Operation(_finish_event, _requests)
     , codedesc(_codedesc), userdata(_userdata)
-  {}
+  {
+    log_taskreg.debug() << "task registration created: op=" << (void *)this << " finish=" << _finish_event;
+  }
+
+  TaskRegistration::~TaskRegistration(void)
+  {
+    log_taskreg.debug() << "task registration destroyed: op=" << (void *)this;
+  }
+
+  void TaskRegistration::print(std::ostream& os) const
+  {
+    os << "TaskRegistration";
+  }
 
 
   ////////////////////////////////////////////////////////////////////////
@@ -949,6 +1022,11 @@ namespace Realm {
   void RemoteTaskRegistration::request_cancellation(void)
   {
     // ignored
+  }
+
+  void RemoteTaskRegistration::print(std::ostream& os) const
+  {
+    os << "RemoteTaskRegistration(node=" << target_node << ")";
   }
 
 

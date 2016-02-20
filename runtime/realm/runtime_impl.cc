@@ -200,8 +200,8 @@ namespace Realm {
       DeferredShutdown(RuntimeImpl *_runtime);
       virtual ~DeferredShutdown(void);
 
-      virtual bool event_triggered(void);
-      virtual void print_info(FILE *f);
+      virtual bool event_triggered(Event e, bool poisoned);
+      virtual void print(std::ostream& os) const;
 
     protected:
       RuntimeImpl *runtime;
@@ -214,16 +214,21 @@ namespace Realm {
     DeferredShutdown::~DeferredShutdown(void)
     {}
 
-    bool DeferredShutdown::event_triggered(void)
+    bool DeferredShutdown::event_triggered(Event e, bool poisoned)
     {
+      // no real good way to deal with a poisoned shutdown precondition
+      if(poisoned) {
+	log_poison.fatal() << "HELP!  poisoned precondition for runtime shutdown";
+	assert(false);
+      }
       log_runtime.info() << "triggering deferred shutdown";
       runtime->shutdown(true);
       return true; // go ahead and delete us
     }
 
-    void DeferredShutdown::print_info(FILE *f)
+    void DeferredShutdown::print(std::ostream& os) const
     {
-      fprintf(f, "deferred shutdown");
+      os << "deferred shutdown";
     }
 
     void Runtime::shutdown(Event wait_on /*= Event::NO_EVENT*/)
@@ -684,17 +689,9 @@ namespace Realm {
       }
       if (gasnet_nodes() > ((1 << ID::NODE_BITS) - 1))
       {
-#ifdef LEGION_IDS_ARE_64BIT
         fprintf(stderr,"ERROR: Launched %d nodes, but low-level IDs are only "
                        "configured for at most %d nodes. Update the allocation "
                        "of bits in ID", gasnet_nodes(), (1 << ID::NODE_BITS) - 1);
-#else
-        fprintf(stderr,"ERROR: Launched %d nodes, but low-level IDs are only "
-                       "configured for at most %d nodes.  Update the allocation "
-                       "of bits in ID or switch to 64-bit IDs with the "
-                       "-DLEGION_IDS_ARE_64BIT compile-time flag",
-                       gasnet_nodes(), (1 << ID::NODE_BITS) - 1);
-#endif
         gasnet_exit(1);
       }
 
@@ -710,6 +707,7 @@ namespace Realm {
       hcount += LockGrantMessage::Message::add_handler_entries(&handlers[hcount], "Lock Grant AM");
       hcount += EventSubscribeMessage::Message::add_handler_entries(&handlers[hcount], "Event Subscribe AM");
       hcount += EventTriggerMessage::Message::add_handler_entries(&handlers[hcount], "Event Trigger AM");
+      hcount += EventUpdateMessage::Message::add_handler_entries(&handlers[hcount], "Event Update AM");
       hcount += RemoteMemAllocRequest::Request::add_handler_entries(&handlers[hcount], "Remote Memory Allocation Request AM");
       hcount += RemoteMemAllocRequest::Response::add_handler_entries(&handlers[hcount], "Remote Memory Allocation Response AM");
       hcount += CreateInstanceRequest::Request::add_handler_entries(&handlers[hcount], "Create Instance Request AM");
@@ -1450,8 +1448,16 @@ namespace Realm {
       exit(0);
     }
 
+    // this is not member data of RuntimeImpl because we don't want use-after-free problems
+    static int shutdown_count = 0;
+
     void RuntimeImpl::shutdown(bool local_request /*= true*/)
     {
+      // filter out duplicate requests
+      bool already_started = (__sync_fetch_and_add(&shutdown_count, 1) > 0);
+      if(already_started)
+	return;
+
       if(local_request) {
 	log_runtime.info("shutdown request - notifying other nodes");
 	for(unsigned i = 0; i < gasnet_nodes(); i++)
@@ -1503,7 +1509,18 @@ namespace Realm {
 	log_runtime.info("shutdown request received - terminating");
       }
 
+#ifdef USE_GASNET
+      // don't start tearing things down until all processes agree
+      gasnet_barrier_notify(0, GASNET_BARRIERFLAG_ANONYMOUS);
+      gasnet_barrier_wait(0, GASNET_BARRIERFLAG_ANONYMOUS);
+#endif
+
       // Shutdown all the threads
+
+      // threads that cause inter-node communication have to stop first
+      LegionRuntime::LowLevel::stop_dma_worker_threads();
+      stop_activemsg_threads();
+
       {
 	std::vector<ProcessorImpl *>& local_procs = nodes[gasnet_mynode()].processors;
 	for(std::vector<ProcessorImpl *>::const_iterator it = local_procs.begin();
@@ -1578,11 +1595,6 @@ namespace Realm {
 	module_registrar.unload_module_sofiles();
       }
 
-      // need to kill other threads too so we can actually terminate process
-      // Exit out of the thread
-      LegionRuntime::LowLevel::stop_dma_worker_threads();
-      stop_activemsg_threads();
-
       // this terminates the process, so control never gets back to caller
       // would be nice to fix this...
       //if (exit_process)
@@ -1610,12 +1622,6 @@ namespace Realm {
       Node *n = &nodes[id.node()];
       GenEventImpl *impl = n->events.lookup_entry(id.index(), id.node());
       assert(impl->me == id);
-
-      // check to see if this is for a generation more than one ahead of what we
-      //  know of - this should only happen for remote events, but if it does it means
-      //  there are some generations we don't know about yet, so we can catch up (and
-      //  notify any local waiters right away)
-      impl->check_for_catchup(e.gen - 1);
 
       return impl;
     }

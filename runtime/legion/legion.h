@@ -1310,7 +1310,11 @@ namespace Legion {
     public:
       TaskVariantRegistrar(void);
       TaskVariantRegistrar(TaskID task_id, bool global = true,
+                           GeneratorContext ctx = NULL,
                            const char *variant_name = NULL);
+      TaskVariantRegistrar(TaskID task_id, const char *variant_name,
+			   bool global = true,
+                           GeneratorContext ctx = NULL);
     public: // Add execution constraints
       inline TaskVariantRegistrar& 
         add_constraint(const ISAConstraint &constraint);
@@ -1331,6 +1335,7 @@ namespace Legion {
       inline void set_idempotent(bool is_idempotent = true);
     public:
       TaskID                            task_id;
+      GeneratorContext                  generator;
       bool                              global_registration;
       const char*                       task_variant_name;
     public: // constraints
@@ -1341,7 +1346,79 @@ namespace Legion {
       bool                              inner_variant;
       bool                              idempotent_variant;
     };
- 
+
+    //==========================================================================
+    //                          Task Generators 
+    //==========================================================================
+
+    /**
+     * \struct TaskGeneratorArguments
+     * This structure defines the arguments that will be passed to a 
+     * task generator function. The task generator function will then
+     * be expected to generate one or more variants and register them
+     * with the runtime.
+     */
+    struct TaskGeneratorArguments {
+    public:
+      TaskID                            task_id;
+    public:
+      const void*                       user_data;
+      size_t                            user_data_size;
+    public:
+      MapperID                          mapper_id;
+      const void*                       mapper_args;
+      size_t                            mapper_args_size;
+    public:
+      std::vector<Processor>            target_procs;
+      // TODO: std::vector<PhysicalInstance> valid_instances;
+    };
+
+    /**
+     * \struct TaskGeneratorRegistrar
+     * The TaskGeneratorRegistrar records the arguments for registering
+     * a new task generator function for a specific task_id with the runtime. 
+     * The application must specify a unique generator ID to associate with 
+     * the generator function pointer for the particular task ID, but the
+     * same generator function pointer can be registered for multiple
+     * task IDs as long as the generator IDs are all different. The 
+     * application can also provide optional constraints on the kinds of
+     * task variants the generator can emit. All other arguments are optional 
+     * and can be filled in at the application's discretion.
+     */
+    struct TaskGeneratorRegistrar {
+    public:
+      TaskGeneratorRegistrar(void);
+      TaskGeneratorRegistrar(GeneratorID id, TaskID task_id, GeneratorFnptr fn,
+                             const void *udata = NULL, size_t udata_size = 0,
+                             const char *name = NULL);
+    public: // Add execution constraints
+      inline TaskGeneratorRegistrar& 
+        add_constraint(const ISAConstraint &constraint);
+      inline TaskGeneratorRegistrar&
+        add_constraint(const ProcessorConstraint &constraint);
+      inline TaskGeneratorRegistrar& 
+        add_constraint(const ResourceConstraint &constraint);
+      inline TaskGeneratorRegistrar&
+        add_constraint(const LaunchConstraint &constraint);
+      inline TaskGeneratorRegistrar&
+        add_constraint(const ColocationConstraint &constraint);
+    public: // Add layout constraint sets
+      inline TaskGeneratorRegistrar&
+        add_layout_constraint_set(unsigned index, LayoutConstraintID desc);
+    public:
+      GeneratorID                       generator_id;
+      TaskID                            task_id;
+      GeneratorFnptr                    generator;
+    public: // constraints
+      ExecutionConstraintSet            execution_constraints;
+      TaskLayoutConstraintSet           layout_constraints;
+    public:
+      const void*                       user_data;
+      size_t                            user_data_size;
+    public:
+      const char*                       name;
+    };
+
     //==========================================================================
     //                          Physical Data Classes
     //==========================================================================
@@ -3946,9 +4023,14 @@ namespace Legion {
        * @param tag semantic tag
        * @param result pointer to assign to the semantic buffer
        * @param size where to write the size of the semantic buffer
+       * @param can_fail query allowed to fail
+       * @param wait_until_ready wait indefinitely for the tag
+       * @return true if the query succeeds
        */
-      void retrieve_semantic_information(TaskID task_id, SemanticTag tag,
-                                         const void *&result, size_t &size);
+      bool retrieve_semantic_information(TaskID task_id, SemanticTag tag,
+                                         const void *&result, size_t &size,
+                                         bool can_fail = false,
+                                         bool wait_until_ready = false);
 
       /**
        * Retrieve semantic information for an index space
@@ -3956,9 +4038,14 @@ namespace Legion {
        * @param tag semantic tag
        * @param result pointer to assign to the semantic buffer
        * @param size where to write the size of the semantic buffer
+       * @param can_fail query allowed to fail
+       * @param wait_until_ready wait indefinitely for the tag
+       * @return true if the query succeeds
        */
-      void retrieve_semantic_information(IndexSpace handle, SemanticTag tag,
-                                         const void *&result, size_t &size);
+      bool retrieve_semantic_information(IndexSpace handle, SemanticTag tag,
+                                         const void *&result, size_t &size,
+                                         bool can_fail = false,
+                                         bool wait_until_ready = false);
 
       /**
        * Retrieve semantic information for an index partition 
@@ -3966,9 +4053,14 @@ namespace Legion {
        * @param tag semantic tag
        * @param result pointer to assign to the semantic buffer
        * @param size where to write the size of the semantic buffer
+       * @param can_fail query allowed to fail
+       * @param wait_until_ready wait indefinitely for the tag
+       * @return true if the query succeeds
        */
-      void retrieve_semantic_information(IndexPartition handle, SemanticTag tag,
-                                         const void *&result, size_t &size);
+      bool retrieve_semantic_information(IndexPartition handle, SemanticTag tag,
+                                         const void *&result, size_t &size,
+                                         bool can_fail = false,
+                                         bool wait_until_ready = false);
 
       /**
        * Retrieve semantic information for a field space
@@ -3976,9 +4068,14 @@ namespace Legion {
        * @param tag semantic tag
        * @param result pointer to assign to the semantic buffer
        * @param size where to write the size of the semantic buffer
+       * @param can_fail query allowed to fail
+       * @param wait_until_ready wait indefinitely for the tag
+       * @return true if the query succeeds
        */
-      void retrieve_semantic_information(FieldSpace handle, SemanticTag tag,
-                                         const void *&result, size_t &size);
+      bool retrieve_semantic_information(FieldSpace handle, SemanticTag tag,
+                                         const void *&result, size_t &size,
+                                         bool can_fail = false,
+                                         bool wait_until_ready = false);
 
       /**
        * Retrieve semantic information for a specific field 
@@ -3987,10 +4084,15 @@ namespace Legion {
        * @param tag semantic tag
        * @param result pointer to assign to the semantic buffer
        * @param size where to write the size of the semantic buffer
+       * @param can_fail query allowed to fail
+       * @param wait_until_ready wait indefinitely for the tag
+       * @return true if the query succeeds
        */
-      void retrieve_semantic_information(FieldSpace handle, FieldID fid, 
+      bool retrieve_semantic_information(FieldSpace handle, FieldID fid, 
                                          SemanticTag tag,
-                                         const void *&result, size_t &size);
+                                         const void *&result, size_t &size,
+                                         bool can_fail = false,
+                                         bool wait_until_ready = false);
 
       /**
        * Retrieve semantic information for a logical region 
@@ -3998,9 +4100,14 @@ namespace Legion {
        * @param tag semantic tag
        * @param result pointer to assign to the semantic buffer
        * @param size where to write the size of the semantic buffer
+       * @param can_fail query allowed to fail
+       * @param wait_until_ready wait indefinitely for the tag
+       * @return true if the query succeeds
        */
-      void retrieve_semantic_information(LogicalRegion handle, SemanticTag tag,
-                                         const void *&result, size_t &size);
+      bool retrieve_semantic_information(LogicalRegion handle, SemanticTag tag,
+                                         const void *&result, size_t &size,
+                                         bool can_fail = false,
+                                         bool wait_until_ready = false);
 
       /**
        * Retrieve semantic information for a logical partition
@@ -4008,10 +4115,15 @@ namespace Legion {
        * @param tag semantic tag
        * @param result pointer to assign to the semantic buffer
        * @param size where to write the size of the semantic buffer
+       * @param can_fail query allowed to fail
+       * @param wait_until_ready wait indefinitely for the tag
+       * @return true if the query succeeds
        */
-      void retrieve_semantic_information(LogicalPartition handle, 
+      bool retrieve_semantic_information(LogicalPartition handle, 
                                          SemanticTag tag,
-                                         const void *&result, size_t &size);
+                                         const void *&result, size_t &size,
+                                         bool can_fail = false,
+                                         bool wait_until_ready = false);
 
       /**
        * Retrieve the name of a task
@@ -4063,6 +4175,28 @@ namespace Legion {
        */
       void retrieve_name(LogicalPartition handle, const char *&result);
     public:
+      //------------------------------------------------------------------------
+      // Registration Callback Operations
+      // All of these calls must be made while in the registration
+      // function called before start-up.  This function is specified
+      // by calling the 'set_registration_callback' static method.
+      //------------------------------------------------------------------------
+
+      /**
+       * Dynamically generate a unique Mapper ID for use across the machine
+       * @return a Mapper ID that is globally unique across the machine
+       */
+      MapperID generate_dynamic_mapper_id(void);
+
+      /**
+       * Statically generate a unique Mapper ID for use across the machine.
+       * This can only be called prior to the runtime starting. It must
+       * be invoked symmetrically across all nodes in the machine prior
+       * to starting the rutnime.
+       * @return a MapperID that is globally unique across the machine
+       */
+      static MapperID generate_static_mapper_id(void);
+
       /**
        * Add a mapper at the given mapper ID for the runtime
        * to use when mapping tasks. If a specific processor is passed
@@ -4217,7 +4351,7 @@ namespace Legion {
        *              require the runtime to be compiled with -DLEGION_SPY.
        * -hl:prof <int> Specify the number of nodes on which to enable
        *              profiling information to be collected.  By default
-       *              all nodes are enabled.  Zero will disable all
+       *              all nodes are disabled. Zero will disable all
        *              profiling while each number greater than zero will
        *              profile on that number of nodes.
        *
@@ -4430,6 +4564,22 @@ namespace Legion {
       //------------------------------------------------------------------------
       // Task Registration Operations
       //------------------------------------------------------------------------
+      
+      /**
+       * Dynamically generate a unique Task ID for use across the machine
+       * @return a Task ID that is globally unique across the machine
+       */
+      TaskID generate_dynamic_task_id(void);
+
+      /**
+       * Statically generate a unique Task ID for use across the machine.
+       * This can only be called prior to the runtime starting. It must
+       * be invoked symmetrically across all nodes in the machine prior
+       * to starting the runtime.
+       * @return a TaskID that is globally unique across the machine
+       */
+      static TaskID generate_static_task_id(void);
+
       /**
        * Dynamically register a new task variant with the runtime with
        * a non-void return type.
@@ -4474,7 +4624,7 @@ namespace Legion {
        */
       template<typename UDT,
         void (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
-                         Context, Runtime*)>
+                         Context, Runtime*, const UDT&)>
       VariantID register_task_variant(const TaskVariantRegistrar &registrar,
                                       const UDT &user_data);
 
@@ -4543,6 +4693,41 @@ namespace Legion {
       static VariantID preregister_task_variant(
               const TaskVariantRegistrar &registrar, 
               const UDT &user_data, const char *task_name = NULL);
+    public:
+      //------------------------------------------------------------------------
+      // Task Generator Registration Operations
+      //------------------------------------------------------------------------
+     
+      /**
+       * Dynamically generate a unique generator ID for use across the machine.
+       * @return a Generator ID that is globally unique across the machine
+       */
+      GeneratorID generate_dynamic_generator_id(void);
+
+      /**
+       * Statically generate a unique Generator ID for use across the machine.
+       * This can only be called prior to the runtime starting. It must be 
+       * invoked symmetrically across all nodes in the machine prior to 
+       * starting the runtime.
+       * @return a Generator ID that is globally unique across the machine
+       */
+      static GeneratorID generate_static_generator_id(void);
+
+      /**
+       * Dynamically register a new task generator function with the runtime
+       * @param registrar the task generator registrar
+       */
+      void register_task_generator(const TaskGeneratorRegistrar &registrar);
+
+      /**
+       * Statically register a new task generator function with the runtime.
+       * This call must be made on all nodes and it will fail if done after
+       * the runtime has been started.
+       * @param registrar the task generator registrar
+       */
+      static void preregister_task_generator(
+                                   const TaskGeneratorRegistrar &registrar);
+                                   
 
     public:
       // ------------------ Deprecated task registration -----------------------
@@ -4662,11 +4847,8 @@ namespace Legion {
       friend class LegionTaskWrapper;
       friend class LegionSerialization;
       const std::vector<PhysicalRegion>& begin_task(Context ctx);
-      const std::vector<PhysicalRegion>& begin_inline_task(Context ctx);
       void end_task(Context ctx, const void *result, size_t result_size,
                     bool owned = false);
-      void end_inline_task(Context ctx, const void *result, size_t result_size,
-                           bool owned = false);
       Future from_value(const void *value, size_t value_size, bool owned);
     private:
       static ProjectionID register_region_projection_function(
@@ -4676,11 +4858,12 @@ namespace Legion {
     private:
       VariantID register_variant(const TaskVariantRegistrar &registrar,bool ret,
                                  const void *user_data, size_t user_data_size,
-                                 CodeDescriptor *realm, CodeDescriptor *indesc);
+                                 CodeDescriptor *realm);
       static VariantID preregister_variant(const TaskVariantRegistrar &reg,
                                  const void *user_data, size_t user_data_size,
-                                 CodeDescriptor *realm, CodeDescriptor *indesc,
-                                 bool has_return, const char *task_name);
+                                 CodeDescriptor *realm,
+                                 bool has_return, const char *task_name,
+                                 bool check_task_id = true);
     private:
       static ReductionOpTable& get_reduction_table(void);
       static SerdezOpTable& get_serdez_table(void);

@@ -600,6 +600,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool TaskOp::is_inline_task(void) const
+    //--------------------------------------------------------------------------
+    {
+      // should never be called except by inherited types
+      assert(false);
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
     const std::vector<PhysicalRegion>& TaskOp::begin_inline_task(void)
     //--------------------------------------------------------------------------
     {
@@ -1804,7 +1813,7 @@ namespace Legion {
               const void *name; size_t name_size;
               runtime->retrieve_semantic_information(
                   regions[must_premap[idx]].region.get_field_space(), *it,
-                  NAME_SEMANTIC_TAG, name, name_size);
+                  NAME_SEMANTIC_TAG, name, name_size, false, false);
               log_run.error("MIssing instance for field %s (FieldID: %d)",
                             static_cast<const char*>(name), *it);
             }
@@ -4593,7 +4602,7 @@ namespace Legion {
             const void *name; size_t name_size;
             runtime->retrieve_semantic_information(
                 regions[idx].region.get_field_space(), *it, NAME_SEMANTIC_TAG,
-                name, name_size);
+                name, name_size, false, false);
             log_run.error("Missing instance for field %s (FieldID: %d)",
                           static_cast<const char*>(name), *it);
           }
@@ -6025,8 +6034,13 @@ namespace Legion {
 #endif
       // Perform the reduction, see if we have to do serdez reductions
       if (serdez_redop_fns != NULL)
+      {
+        // Need to hold the lock to make the serialize/deserialize
+        // process atomic
+        AutoLock o_lock(op_lock);
         (*(serdez_redop_fns->fold_fn))(reduction_op, reduction_state,
-                                       reduction_state_size, result, exclusive);
+                                       reduction_state_size, result);
+      }
       else
         reduction_op->fold(reduction_state, result, 1, exclusive);
 
@@ -6106,6 +6120,7 @@ namespace Legion {
       remote_unique_id = get_unique_id();
       sent_remotely = false;
       top_level_task = false;
+      is_inline = false;
       has_remote_subtasks = false;
     }
 
@@ -7105,8 +7120,17 @@ namespace Legion {
       Processor current = parent_ctx->get_executing_processor();
       // Set the context to be the current inline context
       parent_ctx = ctx;
+      // Mark that we are an inline task
+      is_inline = true;
       variant->dispatch_inline(current, this); 
     }  
+
+    //--------------------------------------------------------------------------
+    bool IndividualTask::is_inline_task(void) const
+    //--------------------------------------------------------------------------
+    {
+      return is_inline;
+    }
 
     //--------------------------------------------------------------------------
     const std::vector<PhysicalRegion>& IndividualTask::begin_inline_task(void)
@@ -7417,6 +7441,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       slice_owner->recapture_version_info(idx);
+    }
+
+    //--------------------------------------------------------------------------
+    bool PointTask::is_inline_task(void) const
+    //--------------------------------------------------------------------------
+    {
+      // We are never an inline task
+      return false;
     }
 
     //--------------------------------------------------------------------------
@@ -9283,6 +9315,14 @@ namespace Legion {
       }
       // Trigger all our events event
       completion_event.trigger();
+    }
+
+    //--------------------------------------------------------------------------
+    bool IndexTask::is_inline_task(void) const
+    //--------------------------------------------------------------------------
+    {
+      // We are always an inline task if we are getting called here
+      return true;
     }
 
     //--------------------------------------------------------------------------

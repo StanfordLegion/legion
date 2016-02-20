@@ -40,10 +40,15 @@ namespace Realm {
 	   Event _before_event,
 	   Event _finish_event, int _priority);
 
+    protected:
+      // deletion performed when reference count goes to zero
       virtual ~Task(void);
 
-      virtual void mark_ready(void);
-      virtual void mark_started(void);
+    public:
+      virtual bool mark_ready(void);
+      virtual bool mark_started(void);
+
+      virtual void print(std::ostream& os) const;
 
       void execute_on_processor(Processor p);
 
@@ -251,6 +256,9 @@ namespace Realm {
 
       std::set<Thread *> all_hosts;
       std::set<Thread *> all_workers;
+
+      int host_startups_remaining;
+      GASNetCondVar host_startup_condvar;
 
     public:
       int cfg_num_host_threads;

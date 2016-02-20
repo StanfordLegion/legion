@@ -1029,6 +1029,19 @@ extern "C" {
     legion_color_t c);
 
   /**
+   * @return Caller does **NOT** take ownership of return value.
+   *
+   * @see Legion::Runtime::get_logical_subregion_by_tree()
+   */
+  legion_logical_region_t
+  legion_logical_partition_get_logical_subregion_by_tree(
+    legion_runtime_t runtime,
+    legion_context_t ctx,
+    legion_index_space_t handle,
+    legion_field_space_t fspace,
+    legion_region_tree_id_t tid);
+
+  /**
    * @see Legion::Runtime::get_parent_logical_region()
    */
   legion_logical_region_t

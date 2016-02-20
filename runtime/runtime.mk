@@ -271,7 +271,10 @@ endif
 CC_FLAGS	+= -DCOMPILE_TIME_MIN_LEVEL=$(OUTPUT_LEVEL)
 
 # demand warning-free compilation
-CC_FLAGS        += -Wall -Wno-strict-overflow -Werror
+CC_FLAGS        += -Wall -Wno-strict-overflow
+ifeq ($(strip $(WARNINGS_ARE_ERRORS)),1)
+CC_FLAGS        += -Werror
+endif
 
 #CC_FLAGS += -DUSE_MASKED_COPIES
 
@@ -287,6 +290,7 @@ LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/runtime_impl.cc \
 	           $(LG_RT_DIR)/lowlevel_dma.cc \
 	           $(LG_RT_DIR)/realm/module.cc \
 	           $(LG_RT_DIR)/realm/threads.cc \
+	           $(LG_RT_DIR)/realm/faults.cc \
 		   $(LG_RT_DIR)/realm/operation.cc \
 	           $(LG_RT_DIR)/realm/tasks.cc \
 	           $(LG_RT_DIR)/realm/metadata.cc \

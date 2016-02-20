@@ -95,7 +95,12 @@ namespace LegionRuntime {
       DmaRequest(int _priority, Event _after_copy,
                  const Realm::ProfilingRequestSet &reqs);
 
+    protected:
+      // deletion performed when reference count goes to zero
       virtual ~DmaRequest(void);
+
+    public:
+      virtual void print(std::ostream& os) const;
 
       virtual bool check_readiness(bool just_check, DmaRequestQueue *rq) = 0;
 
@@ -127,8 +132,8 @@ namespace LegionRuntime {
 
 	void sleep_on_event(Event e, Reservation l = Reservation::NO_RESERVATION);
 
-	virtual bool event_triggered(void);
-	virtual void print_info(FILE *f);
+	virtual bool event_triggered(Event e, bool poisoned);
+	virtual void print(std::ostream& os) const;
       };
     };
 

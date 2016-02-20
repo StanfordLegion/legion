@@ -109,8 +109,8 @@ namespace Legion {
       std::map<unsigned/*offset*/,unsigned/*size*/> offset_size_map;
     protected:
       Reservation layout_lock; 
-      std::map<FIELD_TYPE,LegionVector<OffsetEntry>::aligned > 
-                                                  memoized_offsets;
+      std::map<LEGION_FIELD_MASK_FIELD_TYPE,
+               LegionVector<OffsetEntry>::aligned > memoized_offsets;
       NodeSet known_nodes;
     };
  

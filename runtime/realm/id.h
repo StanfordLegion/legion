@@ -18,11 +18,6 @@
 #ifndef REALM_ID_H
 #define REALM_ID_H
 
-// support old define name
-#ifdef LEGION_IDS_ARE_64BIT
-#  define REALM_IDS_ARE_64BIT
-#endif
-
 namespace Realm {
 
     class ID {
@@ -104,7 +99,11 @@ namespace Realm {
 
     protected:
       IDType value;
+
+      friend std::ostream& operator<<(std::ostream& os, ID id);
     };
+
+    inline std::ostream& operator<<(std::ostream& os, ID id) { return os << std::hex << id.value << std::dec; }
 	
 }; // namespace Realm
 

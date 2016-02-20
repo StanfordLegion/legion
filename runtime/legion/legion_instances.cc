@@ -98,7 +98,8 @@ namespace Legion {
       // First check to see if we've memoized this result 
       {
         AutoLock o_lock(layout_lock,1,false/*exclusive*/);
-        std::map<FIELD_TYPE,LegionVector<OffsetEntry>::aligned >::const_iterator
+        std::map<LEGION_FIELD_MASK_FIELD_TYPE,
+                 LegionVector<OffsetEntry>::aligned >::const_iterator
           finder = memoized_offsets.find(hash_key);
         if (finder != memoized_offsets.end())
         {
@@ -162,7 +163,8 @@ namespace Legion {
 #endif
       // Add this to the results
       AutoLock o_lock(layout_lock);
-      std::map<FIELD_TYPE,LegionVector<OffsetEntry>::aligned >::iterator
+      std::map<LEGION_FIELD_MASK_FIELD_TYPE,
+               LegionVector<OffsetEntry>::aligned >::iterator
         finder = memoized_offsets.find(hash_key);
       if (finder == memoized_offsets.end())
         memoized_offsets[hash_key].push_back(OffsetEntry(copy_mask,local));

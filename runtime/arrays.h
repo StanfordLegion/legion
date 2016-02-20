@@ -21,6 +21,7 @@
 #include <string.h>
 #include <vector>
 #include <map>
+#include <ostream>
 
 #include <cassert>
 #ifndef __GNUC__

@@ -81,21 +81,21 @@ void top_level_task(const Task *task,
   LayoutConstraintID soa_layout_id = runtime->register_layout(layout_registrar);
 
   // Dynamically register some more tasks
-  TaskVariantRegistrar init_registrar(INIT_FIELD_TASK_ID, true/*global*/,
+  TaskVariantRegistrar init_registrar(INIT_FIELD_TASK_ID,
                                       "cpu_init_variant");
   // Add our constraints
   init_registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC))
       .add_layout_constraint_set(0/*index*/, soa_layout_id);
   runtime->register_task_variant<init_field_task>(init_registrar);
 
-  TaskVariantRegistrar stencil_registrar(STENCIL_TASK_ID, true/*global*/,
+  TaskVariantRegistrar stencil_registrar(STENCIL_TASK_ID,
                                          "cpu_stencil_variant");
   stencil_registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC))
       .add_layout_constraint_set(0/*index*/, soa_layout_id)
       .add_layout_constraint_set(1/*index*/, soa_layout_id);
   runtime->register_task_variant<stencil_task>(stencil_registrar);
 
-  TaskVariantRegistrar check_registrar(CHECK_TASK_ID, true/*global*/,
+  TaskVariantRegistrar check_registrar(CHECK_TASK_ID,
                                        "cpu_check_variant");
   check_registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC))
       .add_layout_constraint_set(0/*index*/, soa_layout_id)
@@ -446,7 +446,7 @@ int main(int argc, char **argv)
 {
   HighLevelRuntime::set_top_level_task_id(TOP_LEVEL_TASK_ID);
   // We'll only register our top-level task here
-  TaskVariantRegistrar registrar(TOP_LEVEL_TASK_ID, true/*global*/,
+  TaskVariantRegistrar registrar(TOP_LEVEL_TASK_ID,
                                  "top_level_variant");
   registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
   Runtime::preregister_task_variant<top_level_task>(registrar,"top_level_task");

@@ -27,6 +27,7 @@
 #include "processor.h"
 #include "memory.h"
 #include "instance.h"
+#include "faults.h"
 
 namespace Realm {
 
@@ -34,6 +35,7 @@ namespace Realm {
   //  these IDs directly
   enum ProfilingMeasurementID {
     PMID_OP_STATUS,    // completion status of operation
+    PMID_OP_BACKTRACE,  // backtrace of a failed operation
     PMID_OP_TIMELINE,  // when task was ready, started, completed
     PMID_OP_PROC_USAGE, // processor used by task
     PMID_OP_MEM_USAGE, // memories used by a copy
@@ -58,6 +60,12 @@ namespace Realm {
       Result result;
       int error_code;
       ByteArray error_details;
+    };
+
+    struct OperationBacktrace {
+      static const ProfilingMeasurementID ID = PMID_OP_BACKTRACE;
+
+      Backtrace backtrace;
     };
 
     struct OperationTimeline {

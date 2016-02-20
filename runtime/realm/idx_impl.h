@@ -86,7 +86,6 @@ namespace Realm {
       int valid_mask_count;
       bool valid_mask_complete;
       Event valid_mask_event;
-      GenEventImpl *valid_mask_event_impl;
       int valid_mask_first, valid_mask_last;
       bool valid_mask_contig;
       ElementMask *avail_mask;

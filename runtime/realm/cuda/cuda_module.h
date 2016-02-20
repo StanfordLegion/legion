@@ -179,6 +179,8 @@ namespace Realm {
 
       void enqueue_on_stream(GPUStream *stream);
 
+      virtual void print(std::ostream& os) const;
+
     protected:
       static void cuda_callback(CUstream stream, CUresult res, void *data);
     };

@@ -51,7 +51,24 @@ override CC_FLAGS := $(filter-out -DBOUNDS_CHECKS, \
                      $(filter-out -DLEGION_SPY, \
                        $(CC_FLAGS))))
 
-TESTS := serializing test_profiling ctxswitch proc_group barrier_reduce taskreg
+TESTS := serializing test_profiling ctxswitch barrier_reduce taskreg
+TESTS_SINGLENODE := proc_group
+
+ifeq ($(strip $(USE_GASNET)),1)
+  ifdef NODECOUNT
+    ifeq ($(CONDUIT),ibv)
+      LAUNCHER = mpirun -H localhost -n $(NODECOUNT) $(1)
+    else
+      $(error unsupported conduit $(CONDUIT))
+    endif
+  else
+    LAUNCHER = $(1)
+    TESTS += $(TESTS_SINGLENODE)
+  endif
+else
+  LAUNCHER = $(1)
+  TESTS += $(TESTS_SINGLENODE)
+endif
 
 # can set arguments to be passed to a test when running
 TESTARGS_ctxswitch := -ll:io 1 -t 20 -i 10000
@@ -71,7 +88,7 @@ REALM_LIB := librealm.a
 run_all : $(TESTS:%=run_%)
 
 run_% : %
-	./$* $(TESTARGS_$*)
+	$(call LAUNCHER, ./$*) $(TESTARGS_$*)
 
 build : $(TESTS)
 

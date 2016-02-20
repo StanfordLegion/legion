@@ -46,20 +46,25 @@ namespace Realm {
   {
   }
 
-  void Task::mark_ready(void)
+  void Task::print(std::ostream& os) const
+  {
+    os << "task(proc=" << proc << ", func=" << func_id << ")";
+  }
+
+  bool Task::mark_ready(void)
   {
     log_task.info() << "task " << this << " ready: func=" << func_id
 		    << " proc=" << proc << " arglen=" << args.size()
 		    << " before=" << before_event << " after=" << finish_event;
-    Operation::mark_ready();
+    return Operation::mark_ready();
   }
 
-  void Task::mark_started(void)
+  bool Task::mark_started(void)
   {
     log_task.info() << "task " << this << " started: func=" << func_id
 		    << " proc=" << proc << " arglen=" << args.size()
 		    << " before=" << before_event << " after=" << finish_event;
-    Operation::mark_started();
+    return Operation::mark_started();
   }
 
   void Task::mark_completed(void)
@@ -98,32 +103,50 @@ namespace Realm {
       measurements.add_measurement(opu);
     }
 
-    mark_started();
+    // mark that we're starting the task, checking for cancellation
+    bool ok_to_run = mark_started();
 
-    // make sure the current processor is set during execution of the task
-    ThreadLocal::current_processor = p;
+    if(ok_to_run) {
+      // make sure the current processor is set during execution of the task
+      ThreadLocal::current_processor = p;
 
-    //(*fptr)(args.base(), args.size(), p);
+#ifdef REALM_USE_EXCEPTIONS
+      // even if exceptions are enabled, we only install handlers if somebody is paying
+      //  attention to the OperationStatus
+      if(measurements.wants_measurement<ProfilingMeasurements::OperationStatus>()) {
+	try {
+	  Thread::ExceptionHandlerPresence ehp;
+	  get_runtime()->get_processor_impl(p)->execute_task(func_id, args);
+	  mark_finished(true /*successful*/);
+	}
+	catch (const ExecutionException& e) {
+	  e.populate_profiling_measurements(measurements);
+	  mark_terminated(e.error_code, e.details);
+	}
+      } else
+#endif
+      {
+	// just run the task - if it completes, we assume it was successful
+	get_runtime()->get_processor_impl(p)->execute_task(func_id, args);
 
-    get_runtime()->get_processor_impl(p)->execute_task(func_id, args);
+	mark_finished(true /*successful*/);
+      }
 
-    // and clear the TLS when we're done
-    // TODO: get this right when using user threads
-    //ThreadLocal::current_processor = Processor::NO_PROC;
-
-    mark_finished();
+      // and clear the TLS when we're done
+      // TODO: get this right when using user threads
+      //ThreadLocal::current_processor = Processor::NO_PROC;
 
 #ifdef EVENT_GRAPH_TRACE
-    unsigned long long stop = TimeStamp::get_current_time_in_micros();
-    finish_enclosing();
-    log_event_graph.debug("Task Time: (" IDFMT ",%d) %lld",
-			  finish_event.id, finish_event.gen,
-			  (stop - start));
+      unsigned long long stop = TimeStamp::get_current_time_in_micros();
+      finish_enclosing();
+      log_event_graph.debug("Task Time: (" IDFMT ",%d) %lld",
+			    finish_event.id, finish_event.gen,
+			    (stop - start));
 #endif
-#if 0
-    log_util(((func_id == 3) ? LEVEL_SPEW : LEVEL_INFO), 
-	     "task end: %d (%p) (%s)", func_id, fptr, argstr);
-#endif
+    } else {
+      // !ok_to_run
+      mark_finished(false /*!successful*/);
+    }
   }
 
 
@@ -291,7 +314,7 @@ namespace Realm {
   {
     //define DEBUG_THREAD_SCHEDULER
 #ifdef DEBUG_THREAD_SCHEDULER
-    printf("UWC: %p a=%d%+d u=%d%+d\n", Thread::self(),
+    printf("UWC: %p %p a=%d%+d u=%d%+d\n", Thread::self(), this,
 	   active_worker_count, active_delta,
 	   unassigned_worker_count, unassigned_delta);
 #endif
@@ -817,6 +840,7 @@ namespace Realm {
 						   CoreReservation& _core_rsrv)
     : proc(_proc)
     , core_rsrv(_core_rsrv)
+    , host_startup_condvar(lock)
     , cfg_num_host_threads(1)
   {
   }
@@ -826,9 +850,10 @@ namespace Realm {
     // cleanup should happen before destruction
     assert(all_workers.empty());
     assert(all_hosts.empty());
+    assert(active_worker_count == 0);
   }
 
-  void  UserThreadTaskScheduler::add_task_queue(TaskQueue *queue)
+  void UserThreadTaskScheduler::add_task_queue(TaskQueue *queue)
   {
     // call the parent implementation first
     ThreadedTaskScheduler::add_task_queue(queue);
@@ -849,6 +874,8 @@ namespace Realm {
       ThreadLaunchParameters tlp;
       tlp.set_stack_size(4096);  // really small stack is fine here
 
+      host_startups_remaining = cfg_num_host_threads;
+
       for(int i = 0; i < cfg_num_host_threads; i++) {
 	Thread *t = Thread::create_kernel_thread<UserThreadTaskScheduler,
 						 &UserThreadTaskScheduler::host_thread_loop>(this,
@@ -865,6 +892,12 @@ namespace Realm {
     log_sched.info() << "scheduler shutdown requested: sched=" << this;
     // set the shutdown flag and wait for all the host threads to exit
     AutoHSLLock al(lock);
+
+    // make sure everybody actually started before we tell them to shut down
+    while(host_startups_remaining > 0) {
+      printf("wait\n");
+      host_startup_condvar.wait();
+    }
 
     shutdown_flag = true;
     // setting the shutdown flag adds "work" to the system
@@ -907,18 +940,26 @@ namespace Realm {
   {
     AutoHSLLock al(lock);
 
-    while(!shutdown_flag) {
-      // create a user worker thread - it won't start right away
-      Thread *worker = worker_create(false);
+    // create a user worker thread - it won't start right away
+    Thread *worker = worker_create(false);
 
+    // now signal that we've started
+    int left = --host_startups_remaining;
+    if(left == 0)
+      host_startup_condvar.broadcast();
+
+    while(true) {
       // for user ctx switching, lock is HELD during thread switches
       Thread::user_switch(worker);
       do_user_thread_cleanup();
 
-      if(!shutdown_flag) {
-	printf("HELP!  Lost a user worker thread - making a new one...\n");
-	update_worker_count(+1, +1);
-      }
+      if(shutdown_flag)
+	break;
+
+      // getting here is unexpected
+      printf("HELP!  Lost a user worker thread - making a new one...\n");
+      update_worker_count(+1, +1);
+      worker = worker_create(false);
     }
   }
 

@@ -210,9 +210,7 @@ void top_level_task(const void *args, size_t arglen,
     fprintf(stdout,"Triggers throughput: %7.3f Thousands/s\n",(double(total_triggers)/latency));
   }
 
-  // Tell everyone to shutdown
   fprintf(stdout,"Cleaning up...\n");
-  Runtime::get_runtime().shutdown();
 }
 
 void level_builder(const void *args, size_t arglen, 
@@ -305,27 +303,29 @@ int main(int argc, char **argv)
   get_input_args().argv = argv;
   get_input_args().argc = argc;
 
-  // We should never return from this call
-  r.run(TOP_LEVEL_TASK, Runtime::ONE_TASK_ONLY, 0, 0, false/*!background*/);
+  // select a processor to run the top level task on
+  Processor p = Processor::NO_PROC;
+  {
+    std::set<Processor> all_procs;
+    Machine::get_machine().get_all_processors(all_procs);
+    for(std::set<Processor>::const_iterator it = all_procs.begin();
+	it != all_procs.end();
+	it++)
+      if(it->kind() == Processor::LOC_PROC) {
+	p = *it;
+	break;
+      }
+  }
+  assert(p.exists());
 
-#if OLD 
-  Processor::TaskIDTable task_table;
-  ReductionOpTable redop_table;
-  task_table[TOP_LEVEL_TASK] = top_level_task;
-  task_table[LEVEL_BUILDER] = level_builder;
-  task_table[SET_REMOTE_EVENT] = set_remote_event;
-  task_table[DUMMY_TASK] = dummy_task;
+  // collective launch of a single task - everybody gets the same finish event
+  Event e = r.collective_spawn(p, TOP_LEVEL_TASK, 0, 0);
 
-  // Initialize the machine
-  Machine m(&argc,&argv,task_table,redop_table,false/*cps style*/);
+  // request shutdown once that task is complete
+  r.shutdown(e);
 
-  // Set the input args
-  get_input_args().argv = argv;
-  get_input_args().argc = argc;
-
-  // We should never return from this call
-  m.run(TOP_LEVEL_TASK, Machine::ONE_TASK_ONLY);
-#endif
-
-  return -1;
+  // now sleep this thread until that shutdown actually happens
+  r.wait_for_shutdown();
+  
+  return 0;
 }
