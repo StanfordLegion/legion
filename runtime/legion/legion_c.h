@@ -2196,6 +2196,14 @@ extern "C" {
   legion_physical_region_get_logical_region(legion_physical_region_t handle);
 
   /**
+   * @see LegionRuntime::HighLevel::PhysicalRegion::get_fields()
+   */
+  size_t
+  legion_physical_region_get_field_count(legion_physical_region_t handle);
+  legion_field_id_t
+  legion_physical_region_get_field_id(legion_physical_region_t handle, size_t index);
+
+  /**
    * Safe for use only with instances with a single field.
    *
    * @return Caller takes ownership of return value.

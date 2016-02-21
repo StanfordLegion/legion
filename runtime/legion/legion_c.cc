@@ -3218,6 +3218,25 @@ legion_physical_region_get_logical_region(legion_physical_region_t handle_)
   return CObjectWrapper::wrap(region);
 }
 
+size_t
+legion_physical_region_get_field_count(legion_physical_region_t handle_)
+{
+  PhysicalRegion *handle = CObjectWrapper::unwrap(handle_);
+  std::vector<FieldID> fields;
+  handle->get_fields(fields);
+  return fields.size();
+}
+
+legion_field_id_t
+legion_physical_region_get_field_id(legion_physical_region_t handle_, size_t index)
+{
+  PhysicalRegion *handle = CObjectWrapper::unwrap(handle_);
+  std::vector<FieldID> fields;
+  handle->get_fields(fields);
+  assert((index >= 0) && (index < fields.size()));
+  return fields[index];
+}
+
 legion_accessor_generic_t
 legion_physical_region_get_accessor_generic(legion_physical_region_t handle_)
 {
