@@ -37,7 +37,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexPartition Mapper::get_index_partition(MapperContext ctx,
+    IndexPartition Mapper::mapper_rt_get_index_partition(MapperContext ctx,
                                            IndexSpace parent, Color color) const
     //--------------------------------------------------------------------------
     {
@@ -45,7 +45,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace Mapper::get_index_subspace(MapperContext ctx, 
+    IndexSpace Mapper::mapper_rt_get_index_subspace(MapperContext ctx, 
                                           IndexPartition p, Color c) const
     //--------------------------------------------------------------------------
     {
@@ -53,46 +53,47 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace Mapper::get_index_subspace(MapperContext ctx, IndexPartition p, 
-                                          const DomainPoint &color) const
+    IndexSpace Mapper::mapper_rt_get_index_subspace(MapperContext ctx, 
+                               IndexPartition p, const DomainPoint &color) const
     //--------------------------------------------------------------------------
     {
       return ctx->manager->get_index_subspace(p, color);
     }
 
     //--------------------------------------------------------------------------
-    bool Mapper::has_multiple_domains(MapperContext ctx,IndexSpace handle) const
+    bool Mapper::mapper_rt_has_multiple_domains(MapperContext ctx,
+                                                IndexSpace handle) const
     //--------------------------------------------------------------------------
     {
       return ctx->manager->has_multiple_domains(handle);
     }
 
     //--------------------------------------------------------------------------
-    Domain Mapper::get_index_space_domain(MapperContext ctx, 
-                                          IndexSpace handle) const
+    Domain Mapper::mapper_rt_get_index_space_domain(MapperContext ctx, 
+                                                    IndexSpace handle) const
     //--------------------------------------------------------------------------
     {
       return ctx->manager->get_index_space_domain(handle);
     }
 
     //--------------------------------------------------------------------------
-    void Mapper::get_index_space_domains(MapperContext ctx, IndexSpace handle,
-                                         std::vector<Domain> &domains) const
+    void Mapper::mapper_rt_get_index_space_domains(MapperContext ctx, 
+                          IndexSpace handle, std::vector<Domain> &domains) const
     //--------------------------------------------------------------------------
     {
       return ctx->manager->get_index_space_domains(handle, domains);
     }
 
     //--------------------------------------------------------------------------
-    Domain Mapper::get_index_partition_color_space(MapperContext ctx,
-                                                   IndexPartition p) const
+    Domain Mapper::mapper_rt_get_index_partition_color_space(MapperContext ctx,
+                                                         IndexPartition p) const
     //--------------------------------------------------------------------------
     {
       return ctx->manager->get_index_partition_color_space(p);
     }
 
     //--------------------------------------------------------------------------
-    void Mapper::get_index_space_partition_colors(MapperContext ctx,
+    void Mapper::mapper_rt_get_index_space_partition_colors(MapperContext ctx,
                               IndexSpace handle, std::set<Color> &colors) const
     //--------------------------------------------------------------------------
     {
@@ -100,71 +101,71 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool Mapper::is_index_partition_disjoint(MapperContext ctx,
-                                             IndexPartition p) const
+    bool Mapper::mapper_rt_is_index_partition_disjoint(MapperContext ctx,
+                                                       IndexPartition p) const
     //--------------------------------------------------------------------------
     {
       return ctx->manager->is_index_partition_disjoint(p);
     }
 
     //--------------------------------------------------------------------------
-    Color Mapper::get_index_space_color(MapperContext ctx, 
-                                        IndexSpace handle) const
+    Color Mapper::mapper_rt_get_index_space_color(MapperContext ctx, 
+                                                  IndexSpace handle) const
     //--------------------------------------------------------------------------
     {
       return ctx->manager->get_index_space_color(handle);
     }
 
     //--------------------------------------------------------------------------
-    Color Mapper::get_index_partition_color(MapperContext ctx,
-                                            IndexPartition handle) const
+    Color Mapper::mapper_rt_get_index_partition_color(MapperContext ctx,
+                                                    IndexPartition handle) const
     //--------------------------------------------------------------------------
     {
       return ctx->manager->get_index_partition_color(handle);
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace Mapper::get_parent_index_space(MapperContext ctx,
-                                              IndexPartition handle) const
+    IndexSpace Mapper::mapper_rt_get_parent_index_space(MapperContext ctx,
+                                                    IndexPartition handle) const
     //--------------------------------------------------------------------------
     {
       return ctx->manager->get_parent_index_space(handle);
     }
 
     //--------------------------------------------------------------------------
-    bool Mapper::has_parent_index_partition(MapperContext ctx,
-                                            IndexSpace handle) const
+    bool Mapper::mapper_rt_has_parent_index_partition(MapperContext ctx,
+                                                      IndexSpace handle) const
     //--------------------------------------------------------------------------
     {
       return ctx->manager->has_parent_index_partition(handle);
     }
 
     //--------------------------------------------------------------------------
-    IndexPartition Mapper::get_parent_index_partition(MapperContext ctx,
-                                                      IndexSpace handle) const
+    IndexPartition Mapper::mapper_rt_get_parent_index_partition(
+                                     MapperContext ctx, IndexSpace handle) const
     //--------------------------------------------------------------------------
     {
       return ctx->manager->get_parent_index_partition(handle);
     }
 
     //--------------------------------------------------------------------------
-    size_t Mapper::get_field_size(MapperContext ctx,
-                                  FieldSpace handle, FieldID fid) const
+    size_t Mapper::mapper_rt_get_field_size(MapperContext ctx,
+                                           FieldSpace handle, FieldID fid) const
     //--------------------------------------------------------------------------
     {
       return ctx->manager->get_field_size(handle, fid);
     }
 
     //--------------------------------------------------------------------------
-    void Mapper::get_field_space_fields(MapperContext ctx, FieldSpace handle, 
-                                        std::set<FieldID> &fields) const
+    void Mapper::mapper_rt_get_field_space_fields(MapperContext ctx, 
+                          FieldSpace handle, std::vector<FieldID> &fields) const
     //--------------------------------------------------------------------------
     {
       ctx->manager->get_field_space_fields(handle, fields);
     }
 
     //--------------------------------------------------------------------------
-    LogicalPartition Mapper::get_logical_partition(MapperContext ctx,
+    LogicalPartition Mapper::mapper_rt_get_logical_partition(MapperContext ctx,
                               LogicalRegion parent, IndexPartition handle) const
     //--------------------------------------------------------------------------
     {
@@ -172,25 +173,24 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    LogicalPartition Mapper::get_logical_partition_by_color(MapperContext ctx,
-                                           LogicalRegion par, Color color) const
+    LogicalPartition Mapper::mapper_rt_get_logical_partition_by_color(
+                        MapperContext ctx, LogicalRegion par, Color color) const
     //--------------------------------------------------------------------------
     {
       return ctx->manager->get_logical_partition_by_color(par, color);
     }
 
     //--------------------------------------------------------------------------
-    LogicalPartition Mapper::get_logical_partition_by_tree(MapperContext ctx,
-                                                        IndexPartition part,
-                                                        FieldSpace fspace, 
-                                                        RegionTreeID tid) const
+    LogicalPartition Mapper::mapper_rt_get_logical_partition_by_tree(
+                                      MapperContext ctx, IndexPartition part,
+                                      FieldSpace fspace, RegionTreeID tid) const
     //--------------------------------------------------------------------------
     {
       return ctx->manager->get_logical_partition_by_tree(part, fspace, tid);
     }
 
     //--------------------------------------------------------------------------
-    LogicalRegion Mapper::get_logical_subregion(MapperContext ctx,
+    LogicalRegion Mapper::mapper_rt_get_logical_subregion(MapperContext ctx,
                                LogicalPartition parent, IndexSpace handle) const
     //--------------------------------------------------------------------------
     {
@@ -198,39 +198,40 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    LogicalRegion Mapper::get_logical_subregion_by_color(MapperContext ctx,
-                                        LogicalPartition par, Color color) const
+    LogicalRegion Mapper::mapper_rt_get_logical_subregion_by_color(
+                     MapperContext ctx, LogicalPartition par, Color color) const
     //--------------------------------------------------------------------------
     {
       return ctx->manager->get_logical_subregion_by_color(par, color);
     }
 
     //--------------------------------------------------------------------------
-    LogicalRegion Mapper::get_logical_subregion_by_tree(MapperContext ctx,
-                   IndexSpace handle, FieldSpace fspace, RegionTreeID tid) const
+    LogicalRegion Mapper::mapper_rt_get_logical_subregion_by_tree(
+                                      MapperContext ctx, IndexSpace handle, 
+                                      FieldSpace fspace, RegionTreeID tid) const
     //--------------------------------------------------------------------------
     {
       return ctx->manager->get_logical_subregion_by_tree(handle, fspace, tid);
     }
 
     //--------------------------------------------------------------------------
-    Color Mapper::get_logical_region_color(MapperContext ctx,
-                                           LogicalRegion handle) const
+    Color Mapper::mapper_rt_get_logical_region_color(MapperContext ctx,
+                                                     LogicalRegion handle) const
     //--------------------------------------------------------------------------
     {
       return ctx->manager->get_logical_region_color(handle);
     }
 
     //--------------------------------------------------------------------------
-    Color Mapper::get_logical_partition_color(MapperContext ctx,
-                                              LogicalPartition handle) const
+    Color Mapper::mapper_rt_get_logical_partition_color(MapperContext ctx,
+                                                  LogicalPartition handle) const
     //--------------------------------------------------------------------------
     {
       return ctx->manager->get_logical_partition_color(handle);
     }
 
     //--------------------------------------------------------------------------
-    LogicalRegion Mapper::get_parent_logical_region(MapperContext ctx,
+    LogicalRegion Mapper::mapper_rt_get_parent_logical_region(MapperContext ctx,
                                                     LogicalPartition part) const
     //--------------------------------------------------------------------------
     {
@@ -238,16 +239,16 @@ namespace Legion {
     }
     
     //--------------------------------------------------------------------------
-    bool Mapper::has_parent_logical_partition(MapperContext ctx,
-                                              LogicalRegion handle) const
+    bool Mapper::mapper_rt_has_parent_logical_partition(MapperContext ctx,
+                                                     LogicalRegion handle) const
     //--------------------------------------------------------------------------
     {
       return ctx->manager->has_parent_logical_partition(handle);
     }
 
     //--------------------------------------------------------------------------
-    LogicalPartition Mapper::get_parent_logical_partition(MapperContext ctx,
-                                                          LogicalRegion r) const
+    LogicalPartition Mapper::mapper_rt_get_parent_logical_partition(
+                                       MapperContext ctx, LogicalRegion r) const
     //--------------------------------------------------------------------------
     {
       return ctx->manager->get_parent_logical_partition(r);

@@ -205,10 +205,10 @@ namespace Legion {
                                   const std::vector<unsigned> &indexes,
                                   CustomSerdezID serdez_id,
                                   AddressSpaceID source);
-      void get_all_fields(FieldSpace handle, std::set<FieldID> &fields);
       void get_all_regions(FieldSpace handle, std::set<LogicalRegion> &regions);
       size_t get_field_size(FieldSpace handle, FieldID fid);
-      void get_field_space_fields(FieldSpace handle, std::set<FieldID> &fields);
+      void get_field_space_fields(FieldSpace handle, 
+                                  std::vector<FieldID> &fields);
     public:
       void create_logical_region(LogicalRegion handle);
       bool destroy_logical_region(LogicalRegion handle, 
@@ -1249,7 +1249,7 @@ namespace Legion {
       void free_field(FieldID fid, AddressSpaceID source);
       bool has_field(FieldID fid);
       size_t get_field_size(FieldID fid);
-      void get_all_fields(std::set<FieldID> &to_set);
+      void get_all_fields(std::vector<FieldID> &to_set);
       void get_all_regions(std::set<LogicalRegion> &regions);
       void get_field_set(const FieldMask &mask, std::set<FieldID> &to_set);
       void get_field_set(const FieldMask &mask, const std::set<FieldID> &basis,

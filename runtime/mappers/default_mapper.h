@@ -54,6 +54,7 @@ namespace Legion {
         unsigned long long                          task_hash;
         VariantID                                   variant;
         std::vector<std::vector<PhysicalInstance> > mapping;
+        bool                                        has_reductions;
       };
     public:
       DefaultMapper(Machine machine, Processor local, 
@@ -197,22 +198,47 @@ namespace Legion {
                                       const MapperTaskResult&       result);
     public: // These virtual methods are not part of the mapper interface
             // but make it possible for inheriting mappers to easily
-            // override heuristics that the default mapper is employing
-      virtual void rank_processor_kinds(const Task &task,
-                                        std::vector<Processor::Kind> &ranking);
-      virtual VariantID select_best_variant(
+            // override policies that the default mapper is employing
+            // All method calls start with 'default_policy_'
+      virtual Processor default_policy_select_initial_processor(
+                                    MapperContext ctx, const Task &task);
+      virtual void default_policy_rank_processor_kinds(
+                                    MapperContext ctx, const Task &task, 
+                                    std::vector<Processor::Kind> &ranking);
+      virtual VariantID default_policy_select_best_variant(MapperContext ctx,
                                     const Task &task, Processor::Kind kind, 
                                     VariantID vid1, VariantID vid2,
                                     const ExecutionConstraintSet &execution1,
                                     const ExecutionConstraintSet &execution2,
                                     const TaskLayoutConstraintSet &layout1,
                                     const TaskLayoutConstraintSet &layout2);
+      virtual Memory default_policy_select_target_memory(
+                                    MapperContext ctx, Processor target_proc,
+                                    const Task &task, unsigned index);
+      virtual LayoutConstraintID default_policy_select_layout_constraints(
+                                    MapperContext ctx, Memory target_memory,
+                                    const Task &task, unsigned index,
+                                    bool needs_field_constraint_check,
+                                    bool &force_new_instances);
+      virtual void default_policy_fill_constraints(MapperContext ctx,
+                                    LayoutConstraintSet &constraints,
+                                    Memory target_memory,
+                                    const Task &task, unsigned index);
+      virtual LogicalRegion default_policy_select_instance_region(
+                                    MapperContext ctx, const Task &task,
+                                    unsigned index, Memory target_memory,
+                                    const LayoutConstraintSet &constraints,
+                                    bool force_new_instances, 
+                                    bool meets_constraints, bool reduction);
+      virtual int default_policy_select_garbage_collection_priority(
+                                    MapperContext ctx, const Task &task, 
+                                    int index, Memory memory, 
+                                    const PhysicalInstance &instance,
+                                    bool meets_fill_constraints,bool reduction);
     protected: // help for generating random numbers
-      long generate_random_integer(void) const;
-      double generate_random_real(void) const;
+      long default_generate_random_integer(void) const;
+      double default_generate_random_real(void) const;
     protected: // member helper methods
-      Processor default_select_initial_processor(const Task &task,
-                                                 MapperContext ctx); 
       Processor select_random_processor(
                               const std::vector<Processor> &procs) const;
       VariantInfo find_preferred_variant(const Task &task, MapperContext ctx,
@@ -224,24 +250,39 @@ namespace Legion {
                               const SliceTaskInput &input,
                                     SliceTaskOutput &output,
             std::map<Domain,std::vector<TaskSlice> > &cached_slices) const;
-      void default_create_custom_instance(MapperContext ctx, Processor target,
+      void default_create_custom_instances(MapperContext ctx, Processor target,
+                              const Task &task, unsigned index, 
                               const RegionRequirement &req,
-                              std::vector<PhysicalInstance> &destination);
-      void default_create_reduction_instance(MapperContext ctx,
-                              Processor target, const RegionRequirement &req,
-                              std::vector<PhysicalInstance> &destination);
+                              std::set<FieldID> &needed_fields, // will destroy
+                              const TaskLayoutConstraintSet &layout_constraints,
+                              bool needs_field_constraint_check,
+                              std::vector<PhysicalInstance> &instances);
+      void default_make_instance(MapperContext ctx, Memory target_memory,
+                              const LayoutConstraintSet &constraints, 
+                              PhysicalInstance &result,
+                              bool force_new, bool meets, bool reduction,
+                              const Task &task, int index, Processor target);
+      void default_report_failed_instance_creation(const Task &task, 
+                              unsigned index, Processor target_proc, 
+                              Memory target_memory) const;
+      void default_remove_cached_task(MapperContext ctx, VariantID variant,
+                              unsigned long long task_hash,
+                              const std::pair<TaskID,Processor> &cache_key,
+                              const std::vector<
+                                std::vector<PhysicalInstance> > &post_filter);
     protected: // static helper methods
       static const char* create_default_name(Processor p);
       template<int DIM>
       static void default_decompose_points(
-                            const LegionRuntime::Arrays::Rect<DIM> &point_rect,
-                            const std::vector<Processor> &targets,
-                            const LegionRuntime::Arrays::Point<DIM> &blocking, 
-                            bool recurse, bool stealable,
-                            std::vector<TaskSlice> &slices);
+                              const LegionRuntime::Arrays::Rect<DIM> &point_rect,
+                              const std::vector<Processor> &targets,
+                              const LegionRuntime::Arrays::Point<DIM> &blocking, 
+                              bool recurse, bool stealable,
+                              std::vector<TaskSlice> &slices);
       template<int DIM>
       static LegionRuntime::Arrays::Point<DIM> default_select_blocking_factor(
-            int factor, const LegionRuntime::Arrays::Rect<DIM> &rect_to_factor);
+                              int factor, const LegionRuntime::Arrays::
+                              Rect<DIM> &rect_to_factor);
       static unsigned long long compute_task_hash(const Task &task);
     protected:
       const Processor       local_proc;
@@ -252,6 +293,9 @@ namespace Legion {
     private:
       mutable unsigned short random_number_generator[3];
     protected: 
+      // Make these data structures mutable anticipating when the machine
+      // can change shape dynamically
+      unsigned               total_nodes;
       // There are a couple of parameters from the machine description that 
       // the default mapper uses to determine how to perform mapping.
       std::vector<Processor> local_ios;
@@ -267,6 +311,10 @@ namespace Legion {
       std::map<TaskID,VariantInfo>             preferred_variants; 
       std::map<std::pair<TaskID,Processor>,
                std::list<CachedTaskMapping> >  cached_task_mappings;
+      std::map<std::pair<Memory::Kind,FieldSpace>,
+               LayoutConstraintID>             layout_constraint_cache;
+      std::map<std::pair<Memory::Kind,ReductionOpID>,
+               LayoutConstraintID>             reduction_constraint_cache;
     protected:
       // The maximum number of tasks a mapper will allow to be stolen at a time
       // Controlled by -dm:thefts

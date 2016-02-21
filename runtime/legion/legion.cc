@@ -2550,7 +2550,9 @@ namespace Legion {
                                          std::set<FieldID> &fields)
     //--------------------------------------------------------------------------
     {
-      runtime->get_field_space_fields(ctx, handle, fields);
+      std::vector<FieldID> local;
+      runtime->get_field_space_fields(ctx, handle, local);
+      fields.insert(local.begin(), local.end());
     }
 
     //--------------------------------------------------------------------------

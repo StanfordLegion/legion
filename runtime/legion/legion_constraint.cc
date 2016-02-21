@@ -312,8 +312,9 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    SpecializedConstraint::SpecializedConstraint(SpecializedKind k)
-      : kind(k)
+    SpecializedConstraint::SpecializedConstraint(SpecializedKind k,
+                                                 ReductionOpID r)
+      : kind(k), redop(r)
     //--------------------------------------------------------------------------
     {
     }
@@ -323,6 +324,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       rez.serialize(kind);
+      if ((kind == REDUCTION_FOLD_SPECIALIZE) || 
+          (kind == REDUCTION_LIST_SPECIALIZE))
+        rez.serialize(redop);
     }
 
     //--------------------------------------------------------------------------
@@ -330,6 +334,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       derez.deserialize(kind);
+      if ((kind == REDUCTION_FOLD_SPECIALIZE) || 
+          (kind == REDUCTION_LIST_SPECIALIZE))
+        derez.deserialize(redop);
     }
 
     /////////////////////////////////////////////////////////////
@@ -380,8 +387,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FieldConstraint::FieldConstraint(const std::vector<FieldID> &order, bool cg)
-      : contiguous(cg), ordering(order)
+    FieldConstraint::FieldConstraint(const std::vector<FieldID> &set, 
+                                     bool cg, bool in)
+      : field_set(set), contiguous(cg), inorder(in)
     //--------------------------------------------------------------------------
     {
     }
@@ -391,9 +399,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       rez.serialize(contiguous);
-      rez.serialize<size_t>(ordering.size());
-      for (std::vector<FieldID>::const_iterator it = ordering.begin();
-            it != ordering.end(); it++)
+      rez.serialize(inorder);
+      rez.serialize<size_t>(field_set.size());
+      for (std::vector<FieldID>::const_iterator it = field_set.begin();
+            it != field_set.end(); it++)
         rez.serialize(*it);
     }
     
@@ -402,11 +411,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       derez.deserialize(contiguous);
+      derez.deserialize(inorder);
       size_t num_orders;
       derez.deserialize(num_orders);
-      ordering.resize(num_orders);
-      for (std::vector<FieldID>::iterator it = ordering.begin();
-            it != ordering.end(); it++)
+      field_set.resize(num_orders);
+      for (std::vector<FieldID>::iterator it = field_set.begin();
+            it != field_set.end(); it++)
         derez.deserialize(*it);
     }
 

@@ -3367,8 +3367,10 @@ namespace Legion {
     {
       // Already hold the lock from the caller
       RegionRequirement new_req(handle, READ_WRITE, EXCLUSIVE, handle);
-      runtime->forest->get_all_fields(handle.get_field_space(),
-                                      new_req.privilege_fields);
+      runtime->forest->get_field_space_fields(handle.get_field_space(),
+                                              new_req.instance_fields);
+      new_req.privilege_fields.insert(new_req.instance_fields.begin(),
+                                      new_req.instance_fields.end());
       // Now make a new region requirement and physical region
       regions.push_back(new_req);
       // Make a new unmapped physical region

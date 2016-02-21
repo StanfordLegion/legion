@@ -343,7 +343,8 @@ namespace Legion {
         VIRTUAL_SPECIALIZE,
       };
     public:
-      SpecializedConstraint(SpecializedKind kind = NORMAL_SPECIALIZE);
+      SpecializedConstraint(SpecializedKind kind = NORMAL_SPECIALIZE,
+                            ReductionOpID redop = 0);
     public:
       bool satisfies(const SpecializedConstraint *other) const;
       bool conflicts(const SpecializedConstraint *other) const;
@@ -352,6 +353,7 @@ namespace Legion {
       void deserialize(Deserializer &derez);
     protected:
       SpecializedKind kind;
+      ReductionOpID  redop;
     };
 
     /**
@@ -368,6 +370,9 @@ namespace Legion {
     public:
       MemoryConstraint(void);
       MemoryConstraint(Memory::Kind kind);
+    public:
+      inline bool is_valid(void) const { return has_kind; }
+      inline Memory::Kind get_kind(void) const { return kind; }
     public:
       bool satisfies(const MemoryConstraint *other) const;
       bool conflicts(const MemoryConstraint *other) const;
@@ -394,8 +399,13 @@ namespace Legion {
                                             FIELD_CONSTRAINT;
     public:
       FieldConstraint(void);
-      FieldConstraint(const std::vector<FieldID> &ordering,
-                      bool contiguous);
+      FieldConstraint(const std::vector<FieldID> &field_set,
+                      bool contiguous, bool inorder = true);
+    public:
+      inline bool is_contiguous(void) const { return contiguous; }
+      inline bool is_inorder(void) const { return inorder; }
+      inline const std::vector<FieldID>& get_field_set(void) const 
+        { return field_set; }
     public:
       bool satisfies(const FieldConstraint *other) const;
       bool conflicts(const FieldConstraint *other) const;
@@ -403,8 +413,9 @@ namespace Legion {
       void serialize(Serializer &rez) const;
       void deserialize(Deserializer &derez);
     protected:
+      std::vector<FieldID> field_set;
       bool contiguous;
-      std::vector<FieldID> ordering;
+      bool inorder;
     };
 
     /**

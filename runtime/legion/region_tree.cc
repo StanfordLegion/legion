@@ -1176,15 +1176,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeForest::get_all_fields(FieldSpace handle, 
-                                          std::set<FieldID> &to_set)
-    //--------------------------------------------------------------------------
-    {
-      FieldSpaceNode *node = get_node(handle);
-      node->get_all_fields(to_set);
-    }
-
-    //--------------------------------------------------------------------------
     void RegionTreeForest::get_all_regions(FieldSpace handle,
                                            std::set<LogicalRegion> &regions)
     //--------------------------------------------------------------------------
@@ -1211,7 +1202,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionTreeForest::get_field_space_fields(FieldSpace handle,
-                                                  std::set<FieldID> &fields)
+                                                  std::vector<FieldID> &fields)
     //--------------------------------------------------------------------------
     {
       FieldSpaceNode *node = get_node(handle);
@@ -8709,15 +8700,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FieldSpaceNode::get_all_fields(std::set<FieldID> &to_set)
+    void FieldSpaceNode::get_all_fields(std::vector<FieldID> &to_set)
     //--------------------------------------------------------------------------
     {
+      to_set.clear();
       AutoLock n_lock(node_lock,1,false/*exclusive*/);
+      to_set.reserve(fields.size());
       for (std::map<FieldID,FieldInfo>::const_iterator it = fields.begin();
             it != fields.end(); it++)
       {
         if (!it->second.destroyed)
-          to_set.insert(it->first);
+          to_set.push_back(it->first);
       }
     }
 

@@ -259,7 +259,7 @@ namespace Legion {
     public:
       size_t get_field_size(FieldSpace handle, FieldID fid);
       void get_field_space_fields(FieldSpace handle, 
-                                  std::set<FieldID> &fields);
+                                  std::vector<FieldID> &fields);
     public:
       LogicalPartition get_logical_partition(LogicalRegion parent, 
                                              IndexPartition handle);

@@ -1295,8 +1295,9 @@ namespace Legion {
       size_t get_field_size(Context ctx, FieldSpace handle, FieldID fid);
       size_t get_field_size(FieldSpace handle, FieldID fid);
       void get_field_space_fields(Context ctx, FieldSpace handle,
-                                  std::set<FieldID> &fields);
-      void get_field_space_fields(FieldSpace handle, std::set<FieldID> &fields);
+                                  std::vector<FieldID> &fields);
+      void get_field_space_fields(FieldSpace handle, 
+                                  std::vector<FieldID> &fields);
       // Called from deletion op
       void finalize_field_space_destroy(FieldSpace handle);
       void finalize_field_destroy(FieldSpace handle, FieldID fid);

@@ -7795,7 +7795,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void Runtime::get_field_space_fields(Context ctx, FieldSpace handle,
-                                          std::set<FieldID> &fields)
+                                         std::vector<FieldID> &fields)
     //--------------------------------------------------------------------------
     {
       forest->get_field_space_fields(handle, fields);
@@ -7803,7 +7803,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void Runtime::get_field_space_fields(FieldSpace handle, 
-                                          std::set<FieldID> &fields)
+                                         std::vector<FieldID> &fields)
     //--------------------------------------------------------------------------
     {
       forest->get_field_space_fields(handle, fields);

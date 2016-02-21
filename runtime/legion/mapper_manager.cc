@@ -1029,7 +1029,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void MapperManager::get_field_space_fields(FieldSpace handle, 
-                                               std::set<FieldID> &fields)
+                                               std::vector<FieldID> &fields)
     //--------------------------------------------------------------------------
     {
       runtime->get_field_space_fields(handle, fields);
