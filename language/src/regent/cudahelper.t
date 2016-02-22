@@ -87,12 +87,11 @@ local DriverAPI = {
   cuLinkDestroy = ef("cuLinkDestroy", {&CUlinkState_st} -> uint32);
 }
 
-do
-  -- handles the case that the binding library does not have support support
-  local binding_library_path = nil
+local function find_binding_library()
+  local result = nil
   local lg_rt_dir = os.getenv("LG_RT_DIR")
   if lg_rt_dir then
-    binding_library_path = lg_rt_dir ..
+    result = lg_rt_dir ..
       "/../bindings/terra/liblegion_terra.so"
   else
     -- if LG_RT_DIR was not set, try to find the library using INCLUDE_PATH
@@ -103,7 +102,7 @@ do
       path = string.sub(include_path, start, splitStart - 1)
       local f = io.open(path .. "/liblegion_terra.so", "r")
       if f ~= nil then
-        binding_library_path = path .. "/liblegion_terra.so"
+        result = path .. "/liblegion_terra.so"
         f.close()
         break
       end
@@ -111,11 +110,23 @@ do
       splitStart, splitEnd = string.find(include_path, ";", start)
     end
   end
+  return result
+end
+
+local dlfcn = terralib.includec("dlfcn.h")
+local terra has_symbol(path : rawstring, symbol : rawstring)
+  var lib = dlfcn.dlopen(path, dlfcn.RTLD_LAZY)
+  var has_symbol = dlfcn.dlsym(lib, symbol) ~= [&opaque](0)
+  dlfcn.dlclose(lib)
+  return has_symbol
+end
+
+do
+  -- handles the case that the binding library does not have support support
+  local binding_library_path = find_binding_library()
   assert(binding_library_path ~= nil,
     "failed to find 'liblegion_terra.so' in cudahelper")
-  has_cuInit_symbol =
-    os.execute("nm " .. binding_library_path .. " | grep cuInit > /dev/null") == 0
-  if has_cuInit_symbol then
+  if has_symbol(binding_library_path, "cuInit") then
     terra cudahelper.check_cuda_available()
       var r = DriverAPI.cuInit(0)
       return r == 0
