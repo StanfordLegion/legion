@@ -23,8 +23,6 @@ local std = {}
 
 std.config, std.args = config.parse_args()
 
-if std.config["cuda"] then cudahelper = require("regent/cudahelper") end
-
 -- #####################################
 -- ## Legion Bindings
 -- #################
@@ -38,6 +36,8 @@ local c = terralib.includecstring([[
 #include <stdlib.h>
 ]])
 std.c = c
+
+if std.config["cuda"] then cudahelper = require("regent/cudahelper") end
 
 -- #####################################
 -- ## Utilities
