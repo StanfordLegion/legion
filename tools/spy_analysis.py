@@ -186,7 +186,9 @@ def generate_html_instance_label(title, instance, color, verbose):
             '</table>'
 
 def compute_dependence_type(req1, req2):
-    if req1.is_read_only() and req2.is_read_only():
+    if req1.is_no_access() or req2.is_no_access():
+        return NO_DEPENDENCE
+    elif req1.is_read_only() and req2.is_read_only():
         return NO_DEPENDENCE
     elif req1.is_reduce() and req2.is_reduce():
         if req1.redop == req2.redop:
@@ -2046,8 +2048,11 @@ class Requirement(object):
         assert fid not in self.fields
         self.fields.append(fid)
 
+    def is_no_access(self):
+        return self.priv == NO_ACCESS
+
     def is_read_only(self):
-        return (self.priv == NO_ACCESS) or (self.priv == READ_ONLY)
+        return self.priv == READ_ONLY
 
     def has_write(self):
         return (self.priv == READ_WRITE) or (self.priv == REDUCE) or (self.priv == WRITE_ONLY)
