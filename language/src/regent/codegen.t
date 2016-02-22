@@ -5044,7 +5044,6 @@ function codegen.stat_for_list_vectorized(cx, node)
         symbol = node.symbol,
         value = node.value,
         block = node.orig_block,
-        vectorize = false,
         span = node.span,
         options = node.options,
       })
