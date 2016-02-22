@@ -157,12 +157,13 @@ bool verify_region_data(Domain domain, RegionInstance inst, std::vector<size_t> 
 
 struct WorkerTaskArgs {
   Memory src_mem, dst_mem;
+  bool test_xfer;
 };
 
 void top_level_task(const void *args, size_t arglen, const void *user_data, size_t user_data_len, Processor p)
 {
   printf("top level task - DMA random tests\n");
-  bool only_remote = false;
+  bool only_remote = false, test_xfer = false;
   // Parse the input arguments
 #define INT_ARG(argname, varname) do { \
         if(!strcmp((argv)[i], argname)) {		\
@@ -181,6 +182,7 @@ void top_level_task(const void *args, size_t arglen, const void *user_data, size
     for (int i = 1; i < inputs.argc; i++)
     {
       BOOL_ARG("-r", only_remote);
+      BOOL_ARG("-t", test_xfer);
     }
   }
 #undef INT_ARG
@@ -202,6 +204,7 @@ void top_level_task(const void *args, size_t arglen, const void *user_data, size
       WorkerTaskArgs args;
       args.src_mem = *src_it;
       args.dst_mem = *dst_it;
+      args.test_xfer = test_xfer;
       Event event = cur_proc.spawn(WORKER_TASK, &args, sizeof(args));
       event.wait();
     }
@@ -213,6 +216,7 @@ void worker_task(const void *args, size_t arglen, const void *user_data, size_t 
   printf("start worker task\n");
   const WorkerTaskArgs& worker_args = *(const WorkerTaskArgs *)args;
   Memory src_mem = worker_args.src_mem, dst_mem = worker_args.dst_mem;
+  bool test_xfer = worker_args.test_xfer;
   std::vector<size_t> field_sizes;
   for (unsigned i = 0; i < NUM_FIELDS; i++)
     field_sizes.push_back(sizeof(int));
@@ -252,7 +256,10 @@ void worker_task(const void *args, size_t arglen, const void *user_data, size_t 
     int block_size_vec[PATH_LEN];
     for (unsigned j = 0; j < PATH_LEN; j++) {
       //block_size_vec[j] = rand() % domain.get_volume() + 1;
-      block_size_vec[j] = domain.get_volume();
+      if (j == 0 || !test_xfer)
+        block_size_vec[j] = domain.get_volume();
+      else
+        block_size_vec[j] = 1;
       //printf("node = %d, kind = %d\n", ID(*it).node(), it->kind());
       // random field order of this region instance
       std::vector<size_t> rand_order;
