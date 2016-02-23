@@ -1,0 +1,22 @@
+# - Config file for Legion
+# It defines the following variables
+#  LEGION_INCLUDE_DIRS - include directories for FooBar
+#  LEGION_LIBRARIES    - libraries to link against
+#  LEGION_EXECUTABLE   - the bar executable
+ 
+# Compute paths
+get_filename_component(SELF_DIR "${CMAKE_CURRENT_LIST_FILE}" PATH)
+
+set(LEGION_INCLUDE_DIRS "${SELF_DIR}/include"
+     "${SELF_DIR}/include/realm"
+     "${SELF_DIR}/include/legion"
+     "${SELF_DIR}/include/mappers")
+
+set (LEGION_CMAKE_DIR "${SELF_DIR}/cmake")
+
+include("${LEGION_CMAKE_DIR}/legionTargets.cmake")
+include("${LEGION_CMAKE_DIR}/realmTargets.cmake")
+include("${LEGION_CMAKE_DIR}/legion_mappersTargets.cmake")
+ 
+set(LEGION_LIBRARIES legion realm legion_mappers)
+
