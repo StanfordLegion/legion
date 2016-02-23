@@ -1754,7 +1754,7 @@ namespace Legion {
       bool                                stealable;
       bool                                speculated;
     public:
-      // Parent task (only good for one recursion)
+      // Parent task (only guaranteed to be good for one recursion)
       Task*                               parent_task;
     };
 

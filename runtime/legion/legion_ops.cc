@@ -4071,6 +4071,7 @@ namespace Legion {
       assert(completion_event.exists());
 #endif
       initialize_operation(ctx, track);
+      parent_task = ctx;
       requirement = req;
       initialize_privilege_path(privilege_path, requirement);
     } 
@@ -7077,8 +7078,10 @@ namespace Legion {
       task_sets.clear();
       dependences.clear();
       mapping_dependences.clear();
-      output.task_mapping.clear();
+      input.tasks.clear();
+      input.constraints.clear();
       output.task_processors.clear();
+      output.constraint_mappings.clear();
       // Return this operation to the free list
       runtime->free_epoch_op(this);
     }
@@ -7180,7 +7183,6 @@ namespace Legion {
       // operations with us.  Note this step requires that we mark everything
       // as needing to locally map in the 'initialize' method.  Check for
       // error codes indicating failed pre-mapping.
-      Mapper::MapMustEpochInput input;
       if (!triggering_complete)
       {
         task_sets.resize(indiv_tasks.size()+index_tasks.size());
@@ -7237,30 +7239,13 @@ namespace Legion {
       input.mapping_tag = mapper_tag;
       input.tasks.insert(input.tasks.end(), single_tasks.begin(),
                                             single_tasks.end());
-      input.task_inputs.resize(single_tasks.size());
       // Also resize the outputs so the mapper knows what it is doing
-      output.task_mapping.resize(single_tasks.size());
+      output.constraint_mappings.resize(input.constraints.size());
       output.task_processors.resize(single_tasks.size(), Processor::NO_PROC);
       Processor mapper_proc = parent_ctx->get_executing_processor();
       MapperManager *mapper = runtime->find_mapper(mapper_proc, mapper_id);
-      {
-        std::vector<std::vector<RegionTreeContext> > 
-          contexts(single_tasks.size());
-        std::vector<std::vector<InstanceSet> > 
-          valid_instances(single_tasks.size());
-        // Do the before mapping call
-        for (unsigned idx = 0; idx < single_tasks.size(); idx++)
-          single_tasks[idx]->initialize_map_task_input(
-              input.task_inputs[idx], output.task_mapping[idx], 
-              contexts[idx], valid_instances[idx]);
-        // We've got all our meta-data set up so go ahead and issue the call
-        mapper->invoke_map_must_epoch(this, &input, &output);
-        // Now do the after mapping call
-        for (unsigned idx = 0; idx < single_tasks.size(); idx++)
-          single_tasks[idx]->finalize_map_task_output(
-              input.task_inputs[idx], output.task_mapping[idx],
-              contexts[idx], valid_instances[idx], true/*must epoch*/);
-      }
+      // We've got all our meta-data set up so go ahead and issue the call
+      mapper->invoke_map_must_epoch(this, &input, &output);
       // Check that all the tasks have been assigned to different processors
       {
         std::map<Processor,SingleTask*> target_procs;
@@ -7303,16 +7288,12 @@ namespace Legion {
           task->current_proc = proc;
         }
       }
-      // Now we can clear our target processors
-      output.task_processors.clear();
       // Then we need to actually perform the mapping
       {
         MustEpochMapper mapper(this); 
         if (!mapper.map_tasks(single_tasks, mapping_dependences))
           return false;
       }
-      // Once we're done here, we can clear our output
-      output.task_mapping.clear();
       // Everybody successfully mapped so now check that all
       // of the constraints have been satisfied
       std::vector<Mapper::MappingConstraint> &constraints = input.constraints;
@@ -7489,6 +7470,64 @@ namespace Legion {
         // and do not need to be recorded
       }
       return true;
+    }
+
+    //--------------------------------------------------------------------------
+    void MustEpochOp::must_epoch_map_task_callback(SingleTask *task,
+                                              Mapper::MapTaskInput &map_input,
+                                              Mapper::MapTaskOutput &map_output)
+    //--------------------------------------------------------------------------
+    {
+      // We have to do three things here
+      // 1. Update the target processor
+      // 2. Mark as inputs and outputs any regions which we know
+      //    the results for as a result of our must epoch mapping
+      // 3. Record that we premapped those regions
+      // First find the index for this task
+#ifdef DEBUG_HIGH_LEVEL
+      bool found = false;
+#endif
+      unsigned index = 0;
+      for (unsigned idx = 0; idx < single_tasks.size(); idx++)
+      {
+        if (single_tasks[idx] == task)
+        {
+          index = idx;
+#ifdef DEBUG_HIGH_LEVEL
+          found = true;
+#endif
+          break;
+        }
+      }
+#ifdef DEBUG_HIGH_LEVEL
+      assert(found);
+#endif
+      // Set the target processor by the index 
+      task->target_proc = output.task_processors[index]; 
+      // Now iterate over the constraints figure out which ones
+      for (unsigned idx = 0; idx < input.constraints.size(); idx++)
+      {
+        const Mapper::MappingConstraint &constraint = 
+          input.constraints[idx];
+        if (constraint.t1 == task)
+        {
+          // Save the valid instances and the destination instances
+          map_input.valid_instances[constraint.idx1] = 
+            output.constraint_mappings[idx];
+          map_output.chosen_instances[constraint.idx1] = 
+            output.constraint_mappings[idx];
+          // Also record that we premapped this
+          map_input.premapped_regions.push_back(constraint.idx1);
+        }
+        else if (constraint.t2 == task)
+        {
+          map_input.valid_instances[constraint.idx2] = 
+            output.constraint_mappings[idx];
+          map_output.chosen_instances[constraint.idx2] = 
+            output.constraint_mappings[idx];
+          map_input.premapped_regions.push_back(constraint.idx2);
+        }
+      }
     }
 
     //--------------------------------------------------------------------------

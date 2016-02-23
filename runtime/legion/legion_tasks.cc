@@ -2590,7 +2590,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SingleTask::pack_parent_task(Serializer &rez)
+    void SingleTask::pack_parent_task(Serializer &rez, AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
       // Starting with this context, pack up all the enclosing local fields
@@ -2601,6 +2601,11 @@ namespace Legion {
       RezCheck z(rez);
       int depth = get_depth();
       rez.serialize(depth);
+      // See if we need to pack up base task information
+      bool need_pack_base = !has_remote_instance(target);
+      rez.serialize<bool>(need_pack_base);
+      if (need_pack_base)
+        pack_base_task(rez, target);
       // Now pack them all up
       size_t num_local = locals.size();
       rez.serialize(num_local);
@@ -4419,17 +4424,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void SingleTask::initialize_map_task_input(Mapper::MapTaskInput &input,
                                                Mapper::MapTaskOutput &output,
-                                      std::vector<RegionTreeContext> &enclosing,
+                                               MustEpochOp *must_epoch_owner,
+                                const std::vector<RegionTreeContext> &enclosing,
                                       std::vector<InstanceSet> &valid)
     //--------------------------------------------------------------------------
     {
-      // Fill in our set of enclosing contexts if we need to
-      if (enclosing.empty())
-      {
-        enclosing.resize(regions.size());
-        for (unsigned idx = 0; idx < regions.size(); idx++)
-          enclosing[idx] = get_parent_context(idx);
-      }
 #ifdef DEBUG_HIGH_LEVEL
       assert(enclosing.size() == regions.size());
 #endif
@@ -4437,19 +4436,41 @@ namespace Legion {
       // their valid instances, then fill in the mapper input structure
       valid.resize(regions.size());
       input.valid_instances.resize(regions.size());
+      output.chosen_instances.resize(regions.size());
+      // If we have must epoch owner, we have to check for any 
+      // constrained mappings which must be heeded
+      if (must_epoch_owner != NULL)
+        must_epoch_owner->must_epoch_map_task_callback(this, input, output);
       std::set<Memory> visible_memories;
       runtime->machine.get_visible_memories(target_proc, visible_memories);
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
         // Skip any early mapped regions
-        if (early_mapped_regions.find(idx) != early_mapped_regions.end())
+        std::map<unsigned,InstanceSet>::const_iterator early_mapped_finder = 
+          early_mapped_regions.find(idx);
+        if (early_mapped_finder != early_mapped_regions.end())
         {
           input.premapped_regions.push_back(idx);
+          // Still fill in the valid regions so that mappers can use
+          // the instance names for constraints
+          prepare_for_mapping(early_mapped_finder->second, 
+                              input.valid_instances[idx]);
+          // We can also copy them over to the output too
+          output.chosen_instances[idx] = input.valid_instances[idx];
           continue;
         }
         // Skip any NO_ACCESS or empty privilege field regions
         if (IS_NO_ACCESS(regions[idx]) || regions[idx].privilege_fields.empty())
           continue;
+        // See if we've already got an output from a must-epoch mapping
+        if (output.chosen_instances[idx].empty())
+        {
+#ifdef DEBUG_HIGH_LEVEL
+          assert(must_epoch_owner != NULL);
+#endif
+          // We can skip this since we already know the result
+          continue;
+        }
         InstanceSet &current_valid = valid[idx];
         perform_physical_traversal(idx, enclosing[idx], current_valid);
         // Now we can prepare this for mapping,
@@ -4470,19 +4491,28 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void SingleTask::finalize_map_task_output(Mapper::MapTaskInput &input,
                                               Mapper::MapTaskOutput &output,
-                                      std::vector<RegionTreeContext> &enclosing,
-                                      std::vector<InstanceSet> &valid,
-                                      bool must_epoch_map /*= false*/)
+                                              MustEpochOp *must_epoch_owner,
+                                const std::vector<RegionTreeContext> &enclosing,
+                                      std::vector<InstanceSet> &valid)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
       assert(enclosing.size() == regions.size());
 #endif
       // first check the processors to make sure they are all on the
-      // same node and of the same kind
-      if (!Runtime::unsafe_mapper)
-        validate_target_processors(output.target_procs, must_epoch_map);
-      target_processors = output.target_procs;
+      // same node and of the same kind, if we know we have a must epoch
+      // owner then we also know there is only one valid choice
+      if (must_epoch_owner == NULL)
+      {
+        if (!Runtime::unsafe_mapper)
+          validate_target_processors(output.target_procs);
+        target_processors = output.target_procs;
+      }
+      else
+      {
+        // Only one valid choice in this case, ignore everything else
+        target_processors.push_back(this->target_proc);
+      }
       // fill in virtual_mapped
       virtual_mapped.resize(regions.size(),false);
       // Convert all the outputs into our set of physical instances and
@@ -4521,8 +4551,7 @@ namespace Legion {
                                 "which restricted instance of region "
                                 "requirement %d in memory " IDFMT " is not "
                                 "visible for task %s (ID %lld).",
-                                (must_epoch_map ? "map_must_epoch" : 
-                                 "map_task"), mapper->get_mapper_name(), idx,
+                                "map_task", mapper->get_mapper_name(), idx,
                                 mem.id, get_task_name(), get_unique_id());
                 else
                   log_run.error("Invalid mapper output from invocation of '%s' "
@@ -4530,8 +4559,7 @@ namespace Legion {
                                 "for which premapped instance of region "
                                 "requirement %d in memory " IDFMT " is not "
                                 "visible for task %s (ID %lld).", 
-                                (must_epoch_map ? "map_must_epoch" : 
-                                  "map_task"), mapper->get_mapper_name(), idx,
+                                "map_task", mapper->get_mapper_name(), idx,
                                 mem.id, get_task_name(), get_unique_id());
 #ifdef DEBUG_HIGH_LEVEL
                 assert(false);
@@ -4565,8 +4593,7 @@ namespace Legion {
                           "concrete instances for region requirement %d of "
                           "task %s (ID %lld). Only full concrete instances "
                           "or a single composite instance is supported.",
-                          (must_epoch_map ? "map_must_epoch" : "map_task"),
-                          mapper->get_mapper_name(), idx, 
+                          "map_task", mapper->get_mapper_name(), idx, 
                           get_task_name(), get_unique_id());
 #ifdef DEBUG_HIGH_LEVEL
             assert(false);
@@ -4579,8 +4606,7 @@ namespace Legion {
                           "mapper %s. Illegal composite mapping requested on "
                           "region requirement %d of task %s (UID %lld) which "
                           "has only reduction privileges.", 
-                          (must_epoch_map ? "map_must_epoch" : "map_task"), 
-                          mapper->get_mapper_name(), idx, 
+                          "map_task", mapper->get_mapper_name(), idx, 
                           get_task_name(), get_unique_id());
 #ifdef DEBUG_HIGH_LEVEL
             assert(false);
@@ -4595,9 +4621,9 @@ namespace Legion {
                         "mapper %s. Mapper failed to specify an instance for "
                         "%ld fields of region requirement %d on task %s "
                         "(ID %lld). The missing fields are listed below.",
-                        (must_epoch_map ? "map_must_epoch" : "map_task"),
-                        mapper->get_mapper_name(), missing_fields.size(),
-                        idx, get_task_name(), get_unique_id());
+                        "map_task", mapper->get_mapper_name(), 
+                        missing_fields.size(), idx, get_task_name(), 
+                        get_unique_id());
           for (std::vector<FieldID>::const_iterator it = 
                 missing_fields.begin(); it != missing_fields.end(); it++)
           {
@@ -4624,9 +4650,8 @@ namespace Legion {
             log_run.error("Invalid mapper output from invocation of '%s' on "
                           "mapper %s. Mapper specified instance that does "
                           "not meet region requirement %d for task %s "
-                          "(ID %lld).", (must_epoch_map ? "map_must_epoch" : 
-                            "map_task"), mapper->get_mapper_name(), idx,
-                          get_task_name(), get_unique_id());
+                          "(ID %lld).", "map_task", mapper->get_mapper_name(), 
+                          idx, get_task_name(), get_unique_id());
 #ifdef DEBUG_HIGH_LEVEL
             assert(false);
 #endif
@@ -4645,9 +4670,8 @@ namespace Legion {
                             "mapper %s. Mapper selected an instance for region "
                             "requirement %d in memory " IDFMT " which is not "
                             "visible from the target processors for task %s "
-                            "(ID %lld).", (must_epoch_map ? "map_must_epoch" : 
-                              "map_task"), mapper->get_mapper_name(), idx,
-                            mem.id, get_task_name(), get_unique_id());
+                            "(ID %lld).", "map_task", mapper->get_mapper_name(),
+                            idx, mem.id, get_task_name(), get_unique_id());
 #ifdef DEBUG_HIGH_LEVEL
               assert(false);
 #endif
@@ -4676,8 +4700,7 @@ namespace Legion {
                       "mapper %s. Mapper failed to specify a valid "
                       "task variant or generator capable of create a variant "
                       "implementation of task %s (ID %lld).",
-                      (must_epoch_map ? "map_must_epoch" : "map_task"),
-                      mapper->get_mapper_name(), get_task_name(),
+                      "map_task", mapper->get_mapper_name(), get_task_name(),
                       get_unique_id());
 #ifdef DEBUG_HIGH_LEVEL
         assert(false);
@@ -4686,11 +4709,32 @@ namespace Legion {
       }
       // Now that we know which variant to use, we can validate it
       if (!Runtime::unsafe_mapper)
-        validate_variant_selection(variant_impl, must_epoch_map);
+        validate_variant_selection(variant_impl);
       // Record anything else that needs to be recorded 
       selected_variant = output.chosen_variant;
       task_priority = output.task_priority;
       perform_postmap = output.postmap_task;
+    }
+
+    //--------------------------------------------------------------------------
+    void SingleTask::invoke_mapper(MustEpochOp *must_epoch_owner,
+                       const std::vector<RegionTreeContext> &enclosing_contexts)
+    //--------------------------------------------------------------------------
+    {
+      Mapper::MapTaskInput input;
+      Mapper::MapTaskOutput output;
+      // Initialize the mapping input which also does all the traversal
+      // down to the target nodes
+      std::vector<InstanceSet> valid_instances(regions.size());
+      initialize_map_task_input(input, output, must_epoch_owner, 
+                                enclosing_contexts, valid_instances);
+      // Now we can invoke the mapper to do the mapping
+      if (mapper == NULL)
+        mapper = runtime->find_mapper(current_proc, map_id);
+      mapper->invoke_map_task(this, &input, &output);
+      // Now we can convert the mapper output into our physical instances
+      finalize_map_task_output(input, output, must_epoch_owner, 
+                               enclosing_contexts, valid_instances);
     }
 
     //--------------------------------------------------------------------------
@@ -4701,27 +4745,9 @@ namespace Legion {
       std::vector<RegionTreeContext> enclosing_contexts(regions.size());
       for (unsigned idx = 0; idx < regions.size(); idx++)
         enclosing_contexts[idx] = get_parent_context(idx);
-      // If we were already mapped by a must epoch operation, then we
-      // are already know that our instance set is valid, so we can
-      // skip actually calling the mapper
-      if (must_epoch_op == NULL)
-      {
-        Mapper::MapTaskInput input;
-        Mapper::MapTaskOutput output;
-        // Initialize the mapping input which also does all the traversal
-        // down to the target nodes
-        std::vector<InstanceSet> valid_instances(regions.size());
-        initialize_map_task_input(input, output, 
-                                  enclosing_contexts, valid_instances);
-        // Now we can invoke the mapper to do the mapping
-        if (mapper == NULL)
-          mapper = runtime->find_mapper(current_proc, map_id);
-        mapper->invoke_map_task(this, &input, &output);
-        // Now we can convert the mapper output into our physical instances
-        finalize_map_task_output(input, output, 
-                                 enclosing_contexts, valid_instances);
-      }
-      // Now that we are here, apply our state to the region tree
+      // Now do the mapping call
+      invoke_mapper(must_epoch_op, enclosing_contexts);
+      // After we've got our results, apply the state to the region tree
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
         if (early_mapped_regions.find(idx) != early_mapped_regions.end())
@@ -6817,6 +6843,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool IndividualTask::has_remote_instance(AddressSpaceID remote_inst)
+    //--------------------------------------------------------------------------
+    {
+      if (is_remote())
+        return (remote_inst != runtime->find_address_space(orig_proc)); 
+      // Otherwise see if we already have a remote instance
+      AutoLock o_lock(op_lock,1,false/*exclusive*/);
+      return (remote_instances.find(remote_inst) != remote_instances.end());
+    }
+
+    //--------------------------------------------------------------------------
     void IndividualTask::trigger_task_complete(void)
     //--------------------------------------------------------------------------
     {
@@ -7015,7 +7052,7 @@ namespace Legion {
       rez.serialize(remote_outermost_context);
       rez.serialize(remote_owner_uid);
       rez.serialize(remote_parent_ctx);
-      parent_ctx->pack_parent_task(rez);
+      parent_ctx->pack_parent_task(rez, addr_target);
       if (!is_locally_mapped())
         pack_version_infos(rez, version_infos);
       pack_restrict_infos(rez, restrict_infos);
@@ -7513,6 +7550,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool PointTask::has_remote_instance(AddressSpaceID remote_inst)
+    //--------------------------------------------------------------------------
+    {
+      if (is_remote())
+        return (remote_inst != runtime->find_address_space(orig_proc)); 
+      // Otherwise see if we already have a remote instance
+      AutoLock o_lock(op_lock,1,false/*exclusive*/);
+      return (remote_instances.find(remote_inst) != remote_instances.end());
+    }
+
+    //--------------------------------------------------------------------------
     void PointTask::trigger_task_complete(void)
     //--------------------------------------------------------------------------
     {
@@ -7834,6 +7882,7 @@ namespace Legion {
       : WrapperTask(rt)
     //--------------------------------------------------------------------------
     {
+      // Make sure we can't go up above this task in the mapper interface
       parent_task = NULL;
     }
 
@@ -7944,6 +7993,10 @@ namespace Legion {
     {
       DerezCheck z(derez);
       derez.deserialize(depth);
+      bool unpack_base;
+      derez.deserialize<bool>(unpack_base);
+      if (unpack_base)
+        unpack_base_task(derez);
       size_t num_local;
       derez.deserialize(num_local);
       std::deque<LocalFieldInfo> temp_local(num_local);
@@ -8008,6 +8061,19 @@ namespace Legion {
       assert(remote_instances.find(remote_instance) == remote_instances.end());
 #endif
       remote_instances[remote_instance] = remote_ctx;
+    }
+
+    //--------------------------------------------------------------------------
+    bool RemoteTask::has_remote_instance(AddressSpaceID target)
+    //--------------------------------------------------------------------------
+    {
+      if (is_top_level_context)
+        return false;
+      if (target == runtime->find_address_space(orig_proc))
+        return true;
+      // To be precise we don't know, but that is enough to 
+      // need to send the data
+      return false;
     }
 
     //--------------------------------------------------------------------------
@@ -8178,6 +8244,15 @@ namespace Legion {
     {
       // should never be called
       assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    bool InlineTask::has_remote_instance(AddressSpaceID target)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return false;
     }
 
     //--------------------------------------------------------------------------
@@ -10120,7 +10195,7 @@ namespace Legion {
       rez.serialize(locally_mapped);
       rez.serialize(remote_owner_uid);
       rez.serialize(remote_parent_ctx);
-      parent_ctx->pack_parent_task(rez);
+      parent_ctx->pack_parent_task(rez, addr_target);
       if (!is_locally_mapped())
         pack_version_infos(rez, version_infos);
       if (is_remote())

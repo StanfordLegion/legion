@@ -52,24 +52,13 @@ namespace Legion {
     public:
       LogicalRegion get_logical_region(void) const;
     public:
-      // These methods check to see if the data represented
-      // by the is object is still up to date
-
-      // See if our valid field data is still up to date
-      bool is_current(void) const;
       // See if our instance still exists or if it has been
       // garbage collected
       bool exists(void) const;
     public:
-      // Check to see which fields contain valid data
-      // These methods will only work during the current mapper
-      // call. If the mapper retains a reference to the physical
-      // instance after the mapper call, all results for these
-      // methods only are undefined.
-      bool is_valid(FieldID fid) const;
-      bool is_valid(const std::set<FieldID> &fids) const;
-      bool all_valid(const std::set<FieldID> &fids) const;
-      size_t valid_count(const std::set<FieldID> &fids) const;
+      bool has_field(FieldID fid) const;
+      void has_fields(std::map<FieldID,bool> &fids) const;
+      bool remove_space_fields(std::set<FieldID> &fids) const;
     public:
       // Use these to specify the fields for which this instance
       // should be used. It is optional to specify this and is only
@@ -78,31 +67,26 @@ namespace Legion {
       void add_use_field(FieldID fid);
       void add_use_fields(const std::set<FieldID> &fids);
     public:
-      // Check to see if the instance contains certain fields
-      bool contains(FieldID fid) const;
-      bool contains(const std::set<FieldID> &fids) const;
-    public:
       // Check to see if a whole set of constraints are satisfied
-      bool satisfies(const LayoutConstraintSet &constraint_set) const;
+      bool entails(const LayoutConstraintSet &constraint_set) const;
       // Check to see if individual constraints are satisfied
-      bool satisfies(const SpecializedConstraint &constraint) const;   
-      bool satisfies(const MemoryConstraint &constraint) const;
-      bool satisfies(const OrderingConstraint &constraint) const;
-      bool satisfies(const SplittingConstraint &constraint) const;
-      bool satisfies(const FieldConstraint &constraint) const;
-      bool satisfies(const DimensionConstraint &constraint) const;
-      bool satisfies(const AlignmentConstraint &constraint) const;
-      bool satisfies(const OffsetConstraint &constraint) const;
-      bool satisfies(const PointerConstraint &constraint) const;
+      bool entails(const SpecializedConstraint &constraint) const;   
+      bool entails(const MemoryConstraint &constraint) const;
+      bool entails(const OrderingConstraint &constraint) const;
+      bool entails(const SplittingConstraint &constraint) const;
+      bool entails(const FieldConstraint &constraint) const;
+      bool entails(const DimensionConstraint &constraint) const;
+      bool entails(const AlignmentConstraint &constraint) const;
+      bool entails(const OffsetConstraint &constraint) const;
+      bool entails(const PointerConstraint &constraint) const;
     public:
-      bool is_composite(void) const;
-      static PhysicalInstance get_composite_instance(void);
+      bool is_virtual(void) const;
+      static PhysicalInstance get_virtual_instance(void);
     protected:
+      FRIEND_ALL_RUNTIME_CLASSES
       // Only the runtime can make an instance like this
       PhysicalInstance(PhysicalInstanceImpl *impl);
     protected:   
-      FRIEND_ALL_RUNTIME_CLASSES
-      PhysicalContextImpl   ctx;
       PhysicalInstanceImpl impl;
       std::set<FieldID>  fields;
     };
@@ -980,21 +964,20 @@ namespace Legion {
        * the mapping tag passed at the callsite in 'mapping_tag'.
        */
       struct MappingConstraint{
-        const Task*                             t1;
-        const Task*                             t2;
-        unsigned                                idx1;
-        unsigned                                idx2;
-        DependenceType                          dtype;
+        const Task*                                 t1;
+        const Task*                                 t2;
+        unsigned                                    idx1;
+        unsigned                                    idx2;
+        DependenceType                              dtype;
       };
       struct MapMustEpochInput {
-        std::vector<const Task*>                tasks;
-        std::vector<MappingConstraint>          constraints;
-        MappingTagID                            mapping_tag;
-        std::vector<MapTaskInput>               task_inputs;
+        std::vector<const Task*>                    tasks;
+        std::vector<MappingConstraint>              constraints;
+        MappingTagID                                mapping_tag;
       };
       struct MapMustEpochOutput {
-        std::vector<MapTaskOutput>              task_mapping; 
-        std::vector<Processor>                  task_processors;
+        std::vector<Processor>                      task_processors;
+        std::vector<std::vector<PhysicalInstance> > constraint_mappings;
       };
       //------------------------------------------------------------------------
       virtual void map_must_epoch(const MapperContext           ctx,
@@ -1219,11 +1202,18 @@ namespace Legion {
                                            LayoutConstraintID target) const;
     protected:
       //------------------------------------------------------------------------
-      // Methods for accelerating mapping decisions
+      // Methods for manipulating variants 
       //------------------------------------------------------------------------
       void mapper_rt_find_valid_variants(MapperContext ctx, TaskID task_id, 
                                          std::vector<VariantID> &valid_variants,
                                Processor::Kind kind = Processor::NO_KIND) const;
+      bool mapper_rt_is_leaf_variant(VariantID variant_id) const;
+      bool mapper_rt_is_inner_variant(VariantID variant_id) const;
+      bool mapper_rt_is_idempotent_variant(VariantID variant_id) const;
+    protected:
+      //------------------------------------------------------------------------
+      // Methods for accelerating mapping decisions
+      //------------------------------------------------------------------------
       // Filter variants based on the chosen instances
       void mapper_rt_filter_variants(MapperContext ctx, const Task &task,
                                   const std::vector<VariantID>        &variants,
@@ -1233,6 +1223,11 @@ namespace Legion {
       void mapper_rt_filter_instances(MapperContext ctx, const Task &task,
                                       VariantID chosen_variant, 
                    const std::vector<std::vector<PhysicalInstance> > &instances,
+                               std::vector<std::set<FieldID> > &missing_fields);
+      // Filter a specific set of instances for one region requirement
+      void mapper_rt_filter_instances(MapperContext ctx, const Task &task,
+                                      unsigned index, VariantID chosen_variant,
+                                const std::vector<PhysicalInstance> &instances,
                                std::vector<std::set<FieldID> > &missing_fields);
     protected:
       //------------------------------------------------------------------------
@@ -1248,6 +1243,11 @@ namespace Legion {
                                     const LayoutConstraintSet &constraints, 
                                     LogicalRegion r, PhysicalInstance &result, 
                                     bool &created, bool acquire = true) const;
+      bool mapper_rt_find_physical_instance(
+                                    MapperContext ctx, Memory target_mem,
+                                    const LayoutConstraintSet &constraints,
+                                    LogicalRegion r, PhysicalInstance &result,
+                                    bool acquire = true) const;
       void mapper_rt_set_garbage_collection_priority(MapperContext ctx, 
                                 PhysicalInstance instance, int priority) const;
       // These methods will atomically check to make sure that these instances

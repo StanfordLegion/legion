@@ -473,20 +473,21 @@ namespace Legion {
     public:
       void initialize_map_task_input(Mapper::MapTaskInput &input,
                                      Mapper::MapTaskOutput &output,
-                                     std::vector<RegionTreeContext> &enclosing,
+                                     MustEpochOp *must_epoch_owner,
+                               const std::vector<RegionTreeContext> &enclosing,
                                      std::vector<InstanceSet> &valid_instances);
       void finalize_map_task_output(Mapper::MapTaskInput &input,
                                     Mapper::MapTaskOutput &output,
-                                    std::vector<RegionTreeContext> &enclosing,
-                                    std::vector<InstanceSet> &valid_instances,
-                                    bool must_epoch_map = false);
+                                    MustEpochOp *must_epoch_owner,
+                              const std::vector<RegionTreeContext> &enclosing,
+                                    std::vector<InstanceSet> &valid_instances);
     protected: // mapper helper calls
-      void validate_target_processors(const std::vector<Processor> &procss,
-                                      bool must_epoch_map) const;
+      void validate_target_processors(const std::vector<Processor> &prcs) const;
       void find_visible_memories(std::set<Memory> &visible_memories) const;
-      void validate_variant_selection(VariantImpl *impl, 
-                                      bool must_epoch_map) const;
+      void validate_variant_selection(VariantImpl *impl) const; 
     protected:
+      void invoke_mapper(MustEpochOp *must_epoch_owner,
+          const std::vector<RegionTreeContext> &enclosing_contexts);
       bool map_all_regions(Event user_event,
                            MustEpochOp *must_epoch_owner = NULL); 
       void perform_post_mapping(void);
@@ -499,7 +500,7 @@ namespace Legion {
       void pack_single_task(Serializer &rez, AddressSpaceID target);
       void unpack_single_task(Deserializer &derez);
     public:
-      void pack_parent_task(Serializer &rez);
+      void pack_parent_task(Serializer &rez, AddressSpace target);
       virtual void pack_remote_ctx_info(Serializer &rez);
     public:
       const std::vector<PhysicalRegion>& begin_task(void);
@@ -538,6 +539,7 @@ namespace Legion {
       virtual void record_remote_state(void) = 0;
       virtual void record_remote_instance(AddressSpaceID remote_inst,
                                           RemoteTask *remote_ctx) = 0;
+      virtual bool has_remote_instance(AddressSpaceID remote_inst) = 0;
     public:
       RegionTreeContext find_enclosing_context(unsigned idx);
     public:
@@ -790,6 +792,7 @@ namespace Legion {
       virtual void record_remote_state(void);
       virtual void record_remote_instance(AddressSpaceID remote_inst,
                                           RemoteTask *remote_ctx);
+      virtual bool has_remote_instance(AddressSpaceID remote_inst);
     public:
       virtual void trigger_task_complete(void);
       virtual void trigger_task_commit(void);
@@ -897,6 +900,7 @@ namespace Legion {
       virtual void record_remote_state(void);
       virtual void record_remote_instance(AddressSpaceID remote_inst,
                                           RemoteTask *remote_ctx);
+      virtual bool has_remote_instance(AddressSpaceID remote_inst);
     public:
       virtual void trigger_task_complete(void);
       virtual void trigger_task_commit(void);
@@ -960,6 +964,7 @@ namespace Legion {
       virtual void record_remote_state(void) = 0;
       virtual void record_remote_instance(AddressSpaceID remote_inst,
                                           RemoteTask *remote_ctx) = 0;
+      virtual bool has_remote_instance(AddressSpaceID remote_inst) = 0;
     public:
       virtual Event get_task_completion(void) const = 0;
       virtual TaskKind get_task_kind(void) const = 0;
@@ -1020,6 +1025,7 @@ namespace Legion {
       virtual void record_remote_state(void);
       virtual void record_remote_instance(AddressSpaceID remote_inst,
                                           RemoteTask *remote_ctx);
+      virtual bool has_remote_instance(AddressSpaceID remote_inst);
     public:
       virtual Event get_task_completion(void) const;
       virtual TaskKind get_task_kind(void) const;
@@ -1073,6 +1079,7 @@ namespace Legion {
       virtual void record_remote_state(void);
       virtual void record_remote_instance(AddressSpaceID remote_inst,
                                           RemoteTask *remote_ctx);
+      virtual bool has_remote_instance(AddressSpaceID remote_inst);
     public:
       virtual Event get_task_completion(void) const;
       virtual TaskKind get_task_kind(void) const;

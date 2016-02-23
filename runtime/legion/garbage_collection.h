@@ -51,6 +51,7 @@ namespace Legion {
       PERSISTENCE_REF,
       INITIAL_CREATION_REF,
       REMOTE_CREATE_REF,
+      INSTANCE_MAPPER_REF,
       LAST_SOURCE_REF,
     };
 

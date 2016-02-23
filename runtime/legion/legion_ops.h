@@ -1417,6 +1417,9 @@ namespace Legion {
                              Operation *target_op, GenerationID target_gen,
                              unsigned source_idx, unsigned target_idx,
                              DependenceType dtype);
+      void must_epoch_map_task_callback(SingleTask *task, 
+                                        Mapper::MapTaskInput &input,
+                                        Mapper::MapTaskOutput &output);
     public:
       void add_mapping_dependence(Event precondition);
       void register_single_task(SingleTask *single, unsigned index);
@@ -1444,8 +1447,8 @@ namespace Legion {
       // Use a deque to keep everything in order
       std::deque<SingleTask*>      single_tasks;
     protected:
+      Mapper::MapMustEpochInput    input;
       Mapper::MapMustEpochOutput   output;
-    protected:
       MapperID                     mapper_id;
       MappingTagID                 mapper_tag;
     protected:

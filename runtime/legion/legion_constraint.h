@@ -401,6 +401,8 @@ namespace Legion {
       FieldConstraint(void);
       FieldConstraint(const std::vector<FieldID> &field_set,
                       bool contiguous, bool inorder = true);
+      FieldConstraint(const std::set<FieldID> &field_set,
+                      bool contiguous, bool inorder = true);
     public:
       inline bool is_contiguous(void) const { return contiguous; }
       inline bool is_inorder(void) const { return inorder; }

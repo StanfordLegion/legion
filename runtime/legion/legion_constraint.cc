@@ -395,6 +395,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    FieldConstraint::FieldConstraint(const std::set<FieldID> &set,
+                                     bool cg, bool in)
+      : field_set(set.begin(),set.end()), contiguous(cg), inorder(in)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
     void FieldConstraint::serialize(Serializer &rez) const
     //--------------------------------------------------------------------------
     {

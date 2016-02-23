@@ -21,6 +21,113 @@ namespace Legion {
   namespace Mapping {
 
     /////////////////////////////////////////////////////////////
+    // PhysicalInstance 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    PhysicalInstance(void)
+      : impl(NULL)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalInstance::PhysicalInstance(const PhysicalInstance &rhs)
+      : impl(rhs.impl)
+    //--------------------------------------------------------------------------
+    {
+      // By holding resource references, we prevent the data
+      // structure from being collected, it doesn't change if 
+      // the actual instance itself can be collected or not
+      if (impl != NULL)
+        impl->add_base_resource_ref(INSTANCE_MAPPER_REF);
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalInstance::~PhysicalInstance(void)
+    //--------------------------------------------------------------------------
+    {
+      if ((impl != NULL) && impl->remove_base_resource_ref(INSTANCE_MAPPER_REF))
+        legion_delete(impl);
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalInstance& PhysicalInstance::operator=(const PhysicalInstance &rhs)
+    //--------------------------------------------------------------------------
+    {
+      if ((impl != NULL) && impl->remove_base_resource_ref(INSTANCE_MAPPER_REF))
+        legion_delete(impl);
+      impl = rhs.impl;
+      if (impl != NULL)
+        impl->add_base_resource_ref(INSTANCE_MAPPER_REF);
+    }
+
+    //--------------------------------------------------------------------------
+    bool PhysicalInstance::operator<(const PhysicalInstance &rhs) const
+    //--------------------------------------------------------------------------
+    {
+      return (impl < rhs.impl);
+    }
+
+    //--------------------------------------------------------------------------
+    bool PhysicalInstance::operator==(const PhysicalInstance &rhs) const
+    //--------------------------------------------------------------------------
+    {
+      return (impl == rhs.impl);
+    }
+
+    //--------------------------------------------------------------------------
+    Memory PhysicalInstance::get_location(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (impl == NULL)
+        return Memory::NO_MEMORY;
+      return impl->memory;
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned long PhysicalInstance::get_instance_id(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (impl == NULL)
+        return 0;
+      return impl->get_instance().id;
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalRegion PhysicalInstance::get_logical_region(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (impl == NULL)
+        return LogicalRegion::NO_REGION;
+      return impl->region_node->handle;
+    }
+
+    //--------------------------------------------------------------------------
+    bool PhysicalInstance::exists(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (impl == NULL)
+        return false;
+      // Check to see if it still exists for now
+      return impl->get_instance().exists();
+    }
+
+    //--------------------------------------------------------------------------
+    bool PhysicalInstance::is_virtual(void) const
+    //--------------------------------------------------------------------------
+    {
+      return (impl == NULL);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ PhysicalInstance::get_virtual_instance(void)
+    //--------------------------------------------------------------------------
+    {
+      return PhysicalInstance();
+    }
+
+    /////////////////////////////////////////////////////////////
     // Mapper 
     /////////////////////////////////////////////////////////////
 

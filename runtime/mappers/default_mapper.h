@@ -39,15 +39,40 @@ namespace Legion {
      * and perform your own implementation of the mapper interface.
      */
     class DefaultMapper : public Mapper {
+    public:
+      enum DefaultTunables { // tunable IDs recognized by the default mapper
+        DEFAULT_TUNABLE_NODE_COUNT,
+        DEFAULT_TUNABLE_LOCAL_CPUS,
+        DEFAULT_TUNABLE_LOCAL_GPUS,
+        DEFAULT_TUNABLE_LOCAL_IOS,
+        DEFAULT_TUNABLE_GLOBAL_CPUS,
+        DEFAULT_TUNABLE_GLOBAL_GPUS,
+        DEFAULT_TUNABLE_GLOBAL_IOS,
+      };
+      enum MappingKind {
+        TASK_MAPPING,
+        INLINE_MAPPING,
+        COPY_MAPPING,
+        CLOSE_MAPPING,
+        ACQUIRE_MAPPING,
+        RELEASE_MAPPING,
+      };
+      enum MapperMessageType
+      {
+        INVALID_MESSAGE = 0,
+        PROFILING_SAMPLE = 1,
+        ADVERTISEMENT = 2,
+      };
     protected: // Internal types
       struct VariantInfo {
       public:
         VariantInfo(void)
-          : variant(0), tight_bound(false) { }
+          : variant(0), tight_bound(false), is_inner(false) { }
       public:
         VariantID            variant;
         Processor::Kind      proc_kind;
         bool                 tight_bound;
+        bool                 is_inner;
       };
       struct CachedTaskMapping {
       public:
@@ -55,6 +80,22 @@ namespace Legion {
         VariantID                                   variant;
         std::vector<std::vector<PhysicalInstance> > mapping;
         bool                                        has_reductions;
+      };
+      struct MapperMsgHdr {
+      public:
+        MapperMsgHdr(void) : magic(0xABCD), type(INVALID_MESSAGE) { }
+        bool is_valid_mapper_msg() const
+        {
+          return magic == 0xABCD && type != INVALID_MESSAGE;
+        }
+        uint32_t magic;
+        MapperMessageType type;
+      };
+      struct ProfilingSampleMsg : public MapperMsgHdr {
+      public:
+        ProfilingSampleMsg(void) : MapperMsgHdr(), task_id(0) { }
+        Processor::TaskFuncID task_id;
+        Utilities::MappingProfiler::Profile sample;
       };
     public:
       DefaultMapper(Machine machine, Processor local, 
@@ -212,29 +253,32 @@ namespace Legion {
                                     const ExecutionConstraintSet &execution2,
                                     const TaskLayoutConstraintSet &layout1,
                                     const TaskLayoutConstraintSet &layout2);
-      virtual Memory default_policy_select_target_memory(
-                                    MapperContext ctx, Processor target_proc,
-                                    const Task &task, unsigned index);
+      virtual Memory default_policy_select_target_memory(MapperContext ctx, 
+                                    Processor target_proc);
       virtual LayoutConstraintID default_policy_select_layout_constraints(
                                     MapperContext ctx, Memory target_memory,
-                                    const Task &task, unsigned index,
+                                    const RegionRequirement &req,
                                     bool needs_field_constraint_check,
                                     bool &force_new_instances);
       virtual void default_policy_fill_constraints(MapperContext ctx,
                                     LayoutConstraintSet &constraints,
                                     Memory target_memory,
-                                    const Task &task, unsigned index);
+                                    const RegionRequirement &req);
       virtual LogicalRegion default_policy_select_instance_region(
-                                    MapperContext ctx, const Task &task,
-                                    unsigned index, Memory target_memory,
+                                    MapperContext ctx, Memory target_memory,
+                                    const RegionRequirement &req,
                                     const LayoutConstraintSet &constraints,
                                     bool force_new_instances, 
                                     bool meets_constraints, bool reduction);
       virtual int default_policy_select_garbage_collection_priority(
-                                    MapperContext ctx, const Task &task, 
-                                    int index, Memory memory, 
+                                    MapperContext ctx, 
+                                    MappingKind kind, Memory memory, 
                                     const PhysicalInstance &instance,
                                     bool meets_fill_constraints,bool reduction);
+      virtual void default_policy_select_sources(MapperContext,
+                                    const PhysicalInstance &target,
+                                    const std::vector<PhysicalInstance> &source,
+                                    std::deque<PhysicalInstance> &ranking);
     protected: // help for generating random numbers
       long default_generate_random_integer(void) const;
       double default_generate_random_real(void) const;
@@ -250,18 +294,18 @@ namespace Legion {
                               const SliceTaskInput &input,
                                     SliceTaskOutput &output,
             std::map<Domain,std::vector<TaskSlice> > &cached_slices) const;
-      void default_create_custom_instances(MapperContext ctx, Processor target,
-                              const Task &task, unsigned index, 
-                              const RegionRequirement &req,
+      bool default_create_custom_instances(MapperContext ctx, 
+                              Processor target, Memory target_memory,
+                              const RegionRequirement &req, unsigned index,
                               std::set<FieldID> &needed_fields, // will destroy
                               const TaskLayoutConstraintSet &layout_constraints,
                               bool needs_field_constraint_check,
                               std::vector<PhysicalInstance> &instances);
-      void default_make_instance(MapperContext ctx, Memory target_memory,
+      bool default_make_instance(MapperContext ctx, Memory target_memory,
                               const LayoutConstraintSet &constraints, 
-                              PhysicalInstance &result,
+                              PhysicalInstance &result, MappingKind kind,
                               bool force_new, bool meets, bool reduction,
-                              const Task &task, int index, Processor target);
+                              const RegionRequirement &req, Processor target);
       void default_report_failed_instance_creation(const Task &task, 
                               unsigned index, Processor target_proc, 
                               Memory target_memory) const;
@@ -284,6 +328,10 @@ namespace Legion {
                               int factor, const LegionRuntime::Arrays::
                               Rect<DIM> &rect_to_factor);
       static unsigned long long compute_task_hash(const Task &task);
+      static inline bool physical_sort_func(
+                         const std::pair<PhysicalInstance,unsigned> &left,
+                         const std::pair<PhysicalInstance,unsigned> &right)
+    { return (left.second < right.second); }
     protected:
       const Processor       local_proc;
       const Processor::Kind local_kind;
@@ -325,18 +373,10 @@ namespace Legion {
       // Do a breadth-first traversal of the task tree, by default we do
       // a depth-first traversal to improve locality
       bool breadth_first_traversal;
-      // Whether or not copies can be made to avoid Write-After-Read dependences
-      // Controlled by -dm:war
-      bool war_enabled;
       // Track whether stealing is enabled
       bool stealing_enabled;
       // The maximum number of tasks scheduled per step
       unsigned max_schedule_count;
-    protected:
-      // Utilities for use within the default mapper 
-      Utilities::MachineQueryInterface machine_interface;
-      Utilities::MappingMemoizer memoizer;
-      Utilities::MappingProfiler profiler;
     };
 
   }; // namespace Mapping
