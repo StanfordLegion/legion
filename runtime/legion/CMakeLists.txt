@@ -24,6 +24,7 @@ set(legion_HEADERS
   rectangle_set.h
   region_tree.h
   runtime.h
+  legion_constraint.h
 )
 
 set(legion_SOURCES
@@ -51,13 +52,14 @@ target_include_directories(legion
     ${CMAKE_SOURCE_DIR}/runtime/mappers
     ${CMAKE_SOURCE_DIR}/runtime/realm)
 
+#target_link_libraries( legion legion_mappers)
 
 set ( PACKAGE_LIB_DESTINATION "${CMAKE_INSTALL_PREFIX}/lib")
 set ( PACKAGE_BIN_DESTINATION "${CMAKE_INSTALL_PREFIX}/bin")
-set ( PACKAGE_INCLUDE_DESTINATION "${CMAKE_INSTALL_PREFIX}/include")
+set ( PACKAGE_INCLUDE_DESTINATION "${CMAKE_INSTALL_PREFIX}/include/legion")
 
 
-install(TARGETS legion
+install(TARGETS legion EXPORT legionTargets
   ARCHIVE DESTINATION ${PACKAGE_LIB_DESTINATION}
   LIBRARY DESTINATION ${PACKAGE_LIB_DESTINATION}
   RUNTIME DESTINATION ${PACKAGE_BIN_DESTINATION}

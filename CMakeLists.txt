@@ -16,7 +16,11 @@
 
 project(legion)
 
+set (legion_VERSION 2.0)
+
 cmake_minimum_required(VERSION 2.8.12)
+
+include (GenerateExportHeader)
 
 #------------------------------------------------------------------------------#
 # Add our cmake directory to search path
@@ -120,10 +124,6 @@ if(ENABLE_CUDA)
 
 endif(ENABLE_CUDA)
 
-
-# FIXME: Debug
-message(STATUS "Extra Libraries: ${EXTRA_LIBS}")
-
 #------------------------------------------------------------------------------#
 # Legion options
 #------------------------------------------------------------------------------#
@@ -139,6 +139,20 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 
 #------------------------------------------------------------------------------#
+# install directories
+#------------------------------------------------------------------------------#
+
+set(LEGION_INSTALL_DIR ${CMAKE_INSTALL_PREFIX} CACHE PATH "Installation directory for Legion")
+set(INSTALL_LIB_DIR "${LEGION_INSTALL_DIR}/lib")
+set(INSTALL_BIN_DIR "${LEGION_INSTALL_DIR}/bin")
+set(INSTALL_INCLUDE_DIR "${LEGION_INSTALL_DIR}/include") 
+set(INSTALL_CMAKE_DIR ${LEGION_INSTALL_DIR})
+
+include_directories(
+  "${PROJECT_SOURCE_DIR}"   
+  "${PROJECT_BINARY_DIR}")
+
+#------------------------------------------------------------------------------#
 # Runtime library target
 #------------------------------------------------------------------------------#
 
@@ -150,6 +164,61 @@ add_subdirectory(runtime)
 
 add_subdirectory(examples)
 option(BUILD_EXAMPLES "Build Legion examples" OFF)
+
+#------------------------------------------------------------------------------#
+# Export settings
+#------------------------------------------------------------------------------#
+
+# Add all targets to the build-tree export set
+
+include(CMakePackageConfigHelpers)
+write_basic_package_version_file(
+  "${CMAKE_CURRENT_BINARY_DIR}/cmake/legionConfigVersion.cmake"
+  VERSION ${legion_VERSION}
+  COMPATIBILITY AnyNewerVersion
+)
+
+export(EXPORT realmTargets
+  FILE "${CMAKE_CURRENT_BINARY_DIR}/cmake/realmTargets.cmake"
+)
+
+export(EXPORT legionTargets
+  FILE "${CMAKE_CURRENT_BINARY_DIR}/cmake/legionTargets.cmake"
+)
+
+export(EXPORT legion_mappersTargets
+  FILE "${CMAKE_CURRENT_BINARY_DIR}/cmake/legion_mappersTargets.cmake"
+)
+
+configure_file(cmake/legionConfig.cmake.in
+  "${CMAKE_CURRENT_BINARY_DIR}/cmake/legionConfig.cmake"
+  @ONLY
+)
+
+install(EXPORT realmTargets
+  DESTINATION
+    "${INSTALL_CMAKE_DIR}/cmake"
+)
+
+install(EXPORT legionTargets
+  DESTINATION
+    "${INSTALL_CMAKE_DIR}/cmake"
+)
+
+install(EXPORT legion_mappersTargets
+  DESTINATION
+    "${INSTALL_CMAKE_DIR}/cmake"
+)
+
+install(
+  FILES
+    "${CMAKE_CURRENT_BINARY_DIR}/cmake/legionConfig.cmake"
+    "${CMAKE_CURRENT_BINARY_DIR}/cmake/legionConfigVersion.cmake"
+  DESTINATION
+    ${INSTALL_CMAKE_DIR}
+)
+
+export (PACKAGE legion)
 
 #------------------------------------------------------------------------------#
 # vim: set tabstop=2 shiftwidth=2 expandtab :

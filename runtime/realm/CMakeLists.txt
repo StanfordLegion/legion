@@ -53,6 +53,8 @@ set(realm_HEADERS
   threads.inl
   timers.h
   timers.inl
+  custom_serdez.h
+  custom_serdez.inl
   utils.h
 )
 
@@ -102,13 +104,15 @@ target_include_directories(realm
 
 set ( PACKAGE_LIB_DESTINATION "${CMAKE_INSTALL_PREFIX}/lib")
 set ( PACKAGE_BIN_DESTINATION "${CMAKE_INSTALL_PREFIX}/bin")
-set ( PACKAGE_INCLUDE_DESTINATION "${CMAKE_INSTALL_PREFIX}/include")
+set ( PACKAGE_INCLUDE_DESTINATION "${CMAKE_INSTALL_PREFIX}/include/realm")
 
-install(TARGETS realm
+install(
+  TARGETS realm EXPORT realmTargets
   ARCHIVE DESTINATION ${PACKAGE_LIB_DESTINATION}
   LIBRARY DESTINATION ${PACKAGE_LIB_DESTINATION}
   RUNTIME DESTINATION ${PACKAGE_BIN_DESTINATION}
 )
+
 
 foreach (file ${realm_HEADERS})
    install (FILES ${file} DESTINATION ${PACKAGE_INCLUDE_DESTINATION})
