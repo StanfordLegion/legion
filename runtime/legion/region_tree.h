@@ -1287,11 +1287,9 @@ namespace Legion {
                                             RegionNode *node, AttachOp *op);
     public:
       LayoutDescription* find_layout_description(const FieldMask &mask,
-                                                 const Domain &domain,
-                                                 size_t blocking_factor);
+                                          LayoutConstraints *constraints);
       LayoutDescription* create_layout_description(const FieldMask &mask,
-                                                   const Domain &domain,
-                                                   size_t blocking_factor,
+                                          LayoutConstraints *constraints,
                                    const std::set<FieldID> &create_fields,
                                    const std::vector<size_t> &field_sizes,
                                    const std::vector<unsigned> &indexes,

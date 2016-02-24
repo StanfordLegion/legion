@@ -970,58 +970,64 @@ namespace Legion {
     /**
      * \class LayoutConstraints
      * A class for tracking a long-lived set of constraints
+     * These can be moved around the system and referred to in 
+     * variout places so we make it a distributed collectable
      */
-    class LayoutConstraints : public LayoutConstraintSet {
+    class LayoutConstraints : 
+      public LayoutConstraintSet, public DistributedCollectable {
     public:
       static const AllocationType alloc_type = LAYOUT_CONSTRAINTS_ALLOC; 
-    public:
-      struct ReleaseFunctor {
+    protected:
+      struct RemoveFunctor {
       public:
-        ReleaseFunctor(Serializer &r, AddressSpaceID skip, Runtime *rt) 
-          : rez(r), to_skip(skip), runtime(rt) { }
+        RemoveFunctor(Serializer &r, Runtime *rt)
+          : rez(r), runtime(rt) { }
       public:
         void apply(AddressSpaceID target);
       private:
         Serializer &rez;
-        AddressSpaceID to_skip;
         Runtime *runtime;
       };
     public:
-      LayoutConstraints(LayoutConstraintID layout_id, Runtime *runtime, 
+      LayoutConstraints(LayoutConstraintID layout_id, FieldSpace handle, 
+                        DistributedID did, Runtime *runtime, 
+                        AddressSpace owner_space, AddressSpaceID local_space);
+      LayoutConstraints(LayoutConstraintID layout_id, 
+                        DistributedID did, Runtime *runtime, 
                         const LayoutConstraintRegistrar &registrar);
-      LayoutConstraints(LayoutConstraintID layout_id, Runtime *runtime);
       LayoutConstraints(const LayoutConstraints &rhs);
-      ~LayoutConstraints(void);
+      virtual ~LayoutConstraints(void);
     public:
       LayoutConstraints& operator=(const LayoutConstraints &rhs);
     public:
+      virtual void notify_active(void);
+      virtual void notify_valid(void);
+      virtual void notify_invalid(void);
+      virtual void notify_inactive(void);
+    public:
       inline FieldSpace get_field_space(void) const { return handle; }
-      inline Event get_ready_event(void) const { return ready_event; }
       inline const char* get_name(void) const { return constraints_name; }
     public:
-      void release_constraints(AddressSpaceID source);
-      void send_constraints(AddressSpaceID source, UserEvent done_event);
+      DistributedID send_constraints(AddressSpaceID source);
+      void send_constraint_response(AddressSpaceID source,UserEvent done_event);
       void update_constraints(Deserializer &derez);
     public:
-      AddressSpaceID get_owner(void) const;
-      static AddressSpaceID get_owner(LayoutConstraintID layout_id,
-                                      Runtime *runtime);
+      bool equal(const LayoutConstraintSet &other_constraints) const;
     public:
+      static AddressSpaceID get_owner_space(LayoutConstraintID layout_id,
+                                            Runtime *runtime);
+    public:
+      static void process_send(Runtime *runtime, Deserializer &derez,
+                               AddressSpaceID source);
       static void process_request(Runtime *runtime, Deserializer &derez,
                                   AddressSpaceID source);
-      static void process_response(Runtime *runtime, Deserializer &derez);
-      static void process_release(Runtime *runtime, Deserializer &derez,
-                                  AddressSpaceID source);
+      static LayoutConstraintID process_response(Runtime *runtime, 
+                          Deserializer &derez, AddressSpaceID source);
     public:
       const LayoutConstraintID layout_id;
-      Runtime *const runtime;
+      const FieldSpace handle;
     protected:
-      FieldSpace handle;
-      Event ready_event;
       char *constraints_name;
-    protected:
-      Reservation layout_lock;
-      NodeSet remote_instances; // only valid on the owner node
     };
 
     /**
@@ -1714,9 +1720,11 @@ namespace Legion {
       void send_back_logical_state(AddressSpaceID target, Serializer &rez);
       void send_variant_request(AddressSpaceID target, Serializer &rez);
       void send_variant_response(AddressSpaceID target, Serializer &rez);
+      void send_constraints(AddressSpaceID target, Serializer &rez);
       void send_constraint_request(AddressSpaceID target, Serializer &rez);
       void send_constraint_response(AddressSpaceID target, Serializer &rez);
       void send_constraint_release(AddressSpaceID target, Serializer &rez);
+      void send_constraint_removal(AddressSpaceID target, Serializer &rez);
     public:
       // Complementary tasks for handling messages
       void handle_task(Deserializer &derez);
@@ -1842,9 +1850,11 @@ namespace Legion {
                                        AddressSpaceID source);
       void handle_variant_request(Deserializer &derez, AddressSpaceID source);
       void handle_variant_response(Deserializer &derez);
+      void handle_constraint_send(Deserializer &derez, AddressSpaceID source);
       void handle_constraint_request(Deserializer &derez,AddressSpaceID source);
-      void handle_constraint_response(Deserializer &derez);
-      void handle_constraint_release(Deserializer &derez,AddressSpaceID source);
+      void handle_constraint_response(Deserializer &derez,AddressSpaceID src);
+      void handle_constraint_release(Deserializer &derez);
+      void handle_constraint_removal(Deserializer &derez);
       void handle_top_level_task_request(Deserializer &derez);
       void handle_top_level_task_complete(Deserializer &derez);
       void handle_shutdown_notification(AddressSpaceID source);
@@ -2132,6 +2142,7 @@ namespace Legion {
       // Constraint sets
       Reservation layout_constraints_lock;
       std::map<LayoutConstraintID,LayoutConstraints*> layout_constraints_table;
+      std::map<LayoutConstraintID,Event> pending_constraint_requests;
     protected:
       struct MapperInfo {
         MapperInfo(void)
@@ -2309,7 +2320,9 @@ namespace Legion {
       LayoutConstraintID register_layout(
           const LayoutConstraintRegistrar &registrar, 
           LayoutConstraintID id);
-      void release_layout(LayoutConstraintID layout_id, AddressSpaceID source);
+      bool register_layout(LayoutConstraints *new_constraints, bool needs_lock);
+      void release_layout(LayoutConstraintID layout_id);
+      void unregister_layout(LayoutConstraintID layout_id);
       static LayoutConstraintID preregister_layout(
                                      const LayoutConstraintRegistrar &registrar,
                                      LayoutConstraintID layout_id);
@@ -2318,6 +2331,7 @@ namespace Legion {
                                   LayoutConstraintSet &layout_constraints);
       const char* get_layout_constraints_name(LayoutConstraintID layout_id);
       LayoutConstraints* find_layout_constraints(LayoutConstraintID layout_id);
+      bool register_layout_constraints(LayoutConstraints *new_constraints);
     public:
       // Static methods for start-up and callback phases
       static int start(int argc, char **argv, bool background);
@@ -2508,6 +2522,23 @@ namespace Legion {
       const ProcessorManager *const manager;
       const MapperID map_id;
       MapperManager *result;
+    };
+
+    /**
+     * \class RegisterConstraintsContinuation
+     */
+    class RegisterConstraintsContinuation : public LegionContinuation {
+    public:
+      RegisterConstraintsContinuation(LayoutConstraints *cons, Runtime *rt)
+        : constraints(cons), runtime(rt) { }
+    public:
+      virtual void execute(void)
+      {
+        runtime->register_layout(constraints, false/*need lock*/);
+      }
+    protected:
+      LayoutConstraints *const constraints;
+      Runtime *const runtime;
     };
 
     //--------------------------------------------------------------------------

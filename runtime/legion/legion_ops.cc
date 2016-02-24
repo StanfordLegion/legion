@@ -957,7 +957,6 @@ namespace Legion {
       assert(!ref.is_composite_ref());
 #endif
       instance = ref.get_mapping_instance();
-      instance.ctx = &ref;
     }
 
     //--------------------------------------------------------------------------
@@ -974,7 +973,6 @@ namespace Legion {
 #endif
         MappingInstance &inst = input_valid[idx];
         inst = ref.get_mapping_instance();
-        inst.ctx = &ref;
       }
     }
 
@@ -998,7 +996,6 @@ namespace Legion {
         input_valid.resize(next_index+1);
         MappingInstance &inst = input_valid[next_index++];
         inst = ref.get_mapping_instance();
-        inst.ctx = &ref;
       }
     }
 

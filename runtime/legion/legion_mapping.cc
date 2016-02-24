@@ -32,13 +32,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalInstance::PhysicalInstance(const PhysicalInstance &rhs)
-      : impl(rhs.impl)
+    PhysicalInstance::PhysicalInstance(PhysicalInstanceImpl *i)
+      : impl(i)
     //--------------------------------------------------------------------------
     {
       // By holding resource references, we prevent the data
       // structure from being collected, it doesn't change if 
       // the actual instance itself can be collected or not
+      if (impl != NULL)
+        impl->add_base_resource_ref(INSTANCE_MAPPER_REF);
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalInstance::PhysicalInstance(const PhysicalInstance &rhs)
+      : impl(rhs.impl)
+    //--------------------------------------------------------------------------
+    {
       if (impl != NULL)
         impl->add_base_resource_ref(INSTANCE_MAPPER_REF);
     }
@@ -104,12 +113,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool PhysicalInstance::exists(void) const
+    bool PhysicalInstance::exists(bool strong_test /*= false*/) const
     //--------------------------------------------------------------------------
     {
       if (impl == NULL)
         return false;
-      // Check to see if it still exists for now
+      // Check to see if it still exists for now, maybe in the future
+      // we could do a full check to see if it still exists on its owner node
+      if (strong_test)
+        assert(false); // implement this
       return impl->get_instance().exists();
     }
 
@@ -125,6 +137,27 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return PhysicalInstance();
+    }
+
+    //--------------------------------------------------------------------------
+    bool PhysicalInstance::has_field(FieldID fid) const
+    //--------------------------------------------------------------------------
+    {
+
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalInstance::has_fields(std::map<FieldID,bool> &fields) const
+    //--------------------------------------------------------------------------
+    {
+
+    }
+
+    //--------------------------------------------------------------------------
+    bool PhysicalInstance::remove_space_fields(std::set<FieldID> &fids) const
+    //--------------------------------------------------------------------------
+    {
+
     }
 
     /////////////////////////////////////////////////////////////

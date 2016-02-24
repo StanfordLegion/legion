@@ -49,8 +49,7 @@ namespace Legion {
       };
     public:
       LayoutDescription(const FieldMask &mask,
-                        const Domain &domain,
-                        size_t blocking_factor,
+                        LayoutConstraints *constraints,
                         FieldSpaceNode *owner);
       LayoutDescription(const LayoutDescription &rhs);
       ~LayoutDescription(void);
@@ -72,17 +71,11 @@ namespace Legion {
                           size_t offset, size_t field_size,
                           CustomSerdezID serdez_id);
       const Domain::CopySrcDstField& find_field_info(FieldID fid) const;
-      size_t get_layout_size(void) const;
+      size_t get_total_field_size(void) const;
       void get_fields(std::vector<FieldID>& fields) const;
     public:
-      bool match_shape(const size_t field_size) const;
-      bool match_shape(const std::vector<size_t> &field_sizes, 
-                       const size_t bf) const;
-    public:
-      bool match_layout(const FieldMask &mask, 
-                        const size_t vol, const size_t bf) const;
       bool match_layout(const FieldMask &mask,
-                        const Domain &d, const size_t bf) const;
+                        const LayoutConstraintSet &constraints) const;
       bool match_layout(LayoutDescription *rhs) const;
     public:
       void set_descriptor(FieldDataDescriptor &desc, unsigned fid_idx) const;
@@ -96,8 +89,7 @@ namespace Legion {
       static size_t compute_layout_volume(const Domain &d);
     public:
       const FieldMask allocated_fields;
-      const size_t blocking_factor;
-      const size_t volume;
+      LayoutConstraints *const constraints;
       FieldSpaceNode *const owner;
     protected:
       std::map<FieldID,Domain::CopySrcDstField> field_infos;
@@ -224,10 +216,6 @@ namespace Legion {
       static void handle_send_manager(Runtime *runtime, 
                                       AddressSpaceID source,
                                       Deserializer &derez);
-    public:
-      bool match_instance(size_t field_size, const Domain &dom) const;
-      bool match_instance(const std::vector<size_t> &fields_sizes,
-                          const Domain &dom, const size_t bf) const;
     public:
       bool is_attached_file(void) const;
     public:

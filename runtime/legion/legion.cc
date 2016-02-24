@@ -3813,7 +3813,7 @@ namespace Legion {
     void Runtime::release_layout(LayoutConstraintID layout_id)
     //--------------------------------------------------------------------------
     {
-      runtime->release_layout(layout_id, runtime->address_space/*local*/);
+      runtime->release_layout(layout_id);
     }
 
     //--------------------------------------------------------------------------

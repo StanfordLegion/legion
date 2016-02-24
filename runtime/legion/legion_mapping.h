@@ -53,8 +53,11 @@ namespace Legion {
       LogicalRegion get_logical_region(void) const;
     public:
       // See if our instance still exists or if it has been
-      // garbage collected
-      bool exists(void) const;
+      // garbage collected, this is just a sample, using the
+      // acquire methods provided by the mapper_rt interface
+      // can prevent it from being collected during the
+      // lifetime of a mapper call.
+      bool exists(bool strong_test = false) const;
     public:
       bool has_field(FieldID fid) const;
       void has_fields(std::map<FieldID,bool> &fids) const;
@@ -1194,8 +1197,9 @@ namespace Legion {
                                MapperContext ctx, VariantID vid) const;
       const LayoutConstraintSet& mapper_rt_find_layout_constraints(
                                MapperContext ctx, LayoutConstraintID id) const;
-      LayoutConstraintID mapper_rt_register_layout_constraints(
-       MapperContext ctx, const LayoutConstraintSet &layout_constraints) const;
+      LayoutConstraintID mapper_rt_register_layout(MapperContext ctx, 
+                          const LayoutConstraintSet &layout_constraints) const;
+      void mapper_rt_release_layout(LayoutConstraintID layout_id) const;
       bool mapper_rt_do_constraints_conflict(LayoutConstraintID set1,
                                              LayoutConstraintID set2) const;
       bool mapper_rt_do_constraints_entail(LayoutConstraintID source,

@@ -33,10 +33,10 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    LayoutDescription::LayoutDescription(const FieldMask &mask, const Domain &d,
-                                         size_t bf, FieldSpaceNode *own)
-      : allocated_fields(mask), blocking_factor(bf), 
-        volume(compute_layout_volume(d)), owner(own)
+    LayoutDescription::LayoutDescription(const FieldMask &mask,
+                                         LayoutConstraints *con,
+                                         FieldSpaceNode *own)
+      : allocated_fields(mask), constraints(con), owner(own) 
     //--------------------------------------------------------------------------
     {
       layout_lock = Reservation::create_reservation();
@@ -45,8 +45,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     LayoutDescription::LayoutDescription(const LayoutDescription &rhs)
       : allocated_fields(rhs.allocated_fields), 
-        blocking_factor(rhs.blocking_factor), 
-        volume(rhs.volume), owner(rhs.owner)
+        constraints(rhs.constraints), owner(rhs.owner)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -245,7 +244,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    size_t LayoutDescription::get_layout_size(void) const
+    size_t LayoutDescription::get_total_field_size(void) const
     //--------------------------------------------------------------------------
     {
       size_t result = 0;
@@ -255,7 +254,6 @@ namespace Legion {
       {
         result += (it->second.size);
       }
-      result *= volume;
       return result;
     }
 
@@ -274,70 +272,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool LayoutDescription::match_shape(const size_t field_size) const
-    //--------------------------------------------------------------------------
-    {
-      if (field_infos.size() != 1)
-        return false;
-      if (field_infos.begin()->second.size != field_size)
-        return false;
-      return true;
-    }
-
-    //--------------------------------------------------------------------------
-    bool LayoutDescription::match_shape(const std::vector<size_t> &field_sizes,
-                                        const size_t bf) const
-    //--------------------------------------------------------------------------
-    {
-      if (field_sizes.size() != field_infos.size())
-        return false;
-      if (blocking_factor != bf)
-        return false;
-      unsigned offset = 0;
-      for (std::vector<size_t>::const_iterator it = field_sizes.begin();
-            it != field_sizes.end(); it++)
-      {
-        std::map<unsigned,unsigned>::const_iterator finder = 
-          offset_size_map.find(offset);
-        // Check to make sure we have the same offset
-        if (finder == offset_size_map.end())
-          return false;
-        // Check that the sizes are the same for the offset
-        if (finder->second != (*it))
-          return false;
-        offset += (*it);
-      }
-      return true;
-    }
-
-    //--------------------------------------------------------------------------
     bool LayoutDescription::match_layout(const FieldMask &mask,
-                                         const size_t vl, const size_t bf) const
+                         const LayoutConstraintSet &candidate_constraints) const
     //--------------------------------------------------------------------------
     {
-      if (blocking_factor != bf)
-        return false;
-      if (volume != vl)
-        return false;
       if (allocated_fields != mask)
         return false;
+      if (!constraints->equal(candidate_constraints))
+        return false;
       return true;
-    }
-
-    //--------------------------------------------------------------------------
-    bool LayoutDescription::match_layout(const FieldMask &mask, const Domain &d,
-                                         const size_t bf) const
-    //--------------------------------------------------------------------------
-    {
-      return match_layout(mask, compute_layout_volume(d), bf);
     }
 
     //--------------------------------------------------------------------------
     bool LayoutDescription::match_layout(LayoutDescription *rhs) const
     //--------------------------------------------------------------------------
     {
-      return match_layout(rhs->allocated_fields, rhs->volume, 
-                          rhs->blocking_factor);
+      return match_layout(rhs->allocated_fields, *rhs->constraints); 
     }
 
     //--------------------------------------------------------------------------
@@ -374,14 +324,16 @@ namespace Legion {
         rez.serialize<bool>(true);
         // If it is already on the remote node, then we only
         // need to the necessary information to identify it
+        DistributedID constraint_did = constraints->send_constraints(target);
+        rez.serialize(constraint_did);
         rez.serialize(allocated_fields);
-        rez.serialize(blocking_factor);
       }
       else
       {
         rez.serialize<bool>(false);
+        DistributedID constraint_did = constraints->send_constraints(target);
+        rez.serialize(constraint_did);
         rez.serialize(allocated_fields);
-        rez.serialize(blocking_factor);
         rez.serialize<size_t>(field_infos.size());
 #ifdef DEBUG_HIGH_LEVEL
         assert(field_infos.size() == field_indexes.size());
@@ -445,25 +397,29 @@ namespace Legion {
       derez.deserialize(has_local);
       FieldSpaceNode *field_space_node = region_node->column_source;
       LayoutDescription *result = NULL;
+      DistributedID constraint_did;
+      derez.deserialize(constraint_did);
+#ifdef DEBUG_HIGH_LEVEL
+      LayoutConstraints *constraints = dynamic_cast<LayoutConstraints*>(
+                      runtime->find_distributed_collectable(constraint_did));
+#else
+      LayoutConstraints *constraints = static_cast<LayoutConstraints*>(
+                      runtime->find_distributed_collectable(constraint_did));
+#endif
       FieldMask mask;
       derez.deserialize(mask);
       field_space_node->transform_field_mask(mask, source);
-      size_t blocking_factor;
-      derez.deserialize(blocking_factor);
       if (has_local)
       {
         // If we have a local layout, then we should be able to find it
-        result = field_space_node->find_layout_description(mask,  
-                                            region_node->get_domain_blocking(),
-                                            blocking_factor);
+        result = field_space_node->find_layout_description(mask, constraints);
       }
       else
       {
         // Otherwise create a new layout description, 
         // unpack it, and then try registering it with
         // the field space node
-        result = new LayoutDescription(mask, region_node->get_domain_blocking(),
-                                       blocking_factor, field_space_node);
+        result = new LayoutDescription(mask, constraints, field_space_node);
         result->unpack_layout_description(derez);
         result = field_space_node->register_layout_description(result);
       }
@@ -946,35 +902,6 @@ namespace Legion {
         inst_manager->register_with_runtime();
         inst_manager->update_remote_instances(source);
       }
-    }
-
-    //--------------------------------------------------------------------------
-    bool InstanceManager::match_instance(size_t field_size, 
-                                         const Domain &dom) const
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(layout != NULL);
-#endif
-      // First check to see if the domains are the same
-      if (region_node->get_domain_blocking() != dom)
-        return false;
-      return layout->match_shape(field_size);
-    }
-
-    //--------------------------------------------------------------------------
-    bool InstanceManager::match_instance(const std::vector<size_t> &field_sizes,
-                                         const Domain &dom, 
-                                         const size_t bf) const
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(layout != NULL);
-#endif
-      // First check to see if the domains are the same
-      if (region_node->get_domain_blocking() != dom)
-        return false;
-      return layout->match_shape(field_sizes, bf);
     }
 
     //--------------------------------------------------------------------------

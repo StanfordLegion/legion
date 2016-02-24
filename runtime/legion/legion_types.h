@@ -421,9 +421,11 @@ namespace Legion {
       SEND_BACK_LOGICAL_STATE,
       SEND_VARIANT_REQUEST,
       SEND_VARIANT_RESPONSE,
+      SEND_CONSTRAINTS,
       SEND_CONSTRAINT_REQUEST,
       SEND_CONSTRAINT_RESPONSE,
       SEND_CONSTRAINT_RELEASE,
+      SEND_CONSTRAINT_REMOVAL,
       SEND_TOP_LEVEL_TASK_REQUEST,
       SEND_TOP_LEVEL_TASK_COMPLETE,
       SEND_SHUTDOWN_NOTIFICATION,
@@ -513,9 +515,11 @@ namespace Legion {
         "Send Back Logical State",                                    \
         "Send Task Variant Request",                                  \
         "Send Task Variant Response",                                 \
+        "Send Constraints",                                           \
         "Send Constraint Request",                                    \
         "Send Constraint Response",                                   \
         "Send Constraint Release",                                    \
+        "Send Constraint Removal",                                    \
         "Top Level Task Request",                                     \
         "Top Level Task Complete",                                    \
         "Send Shutdown Notification",                                 \
