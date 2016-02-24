@@ -173,7 +173,7 @@ option(BUILD_EXAMPLES "Build Legion examples" OFF)
 
 include(CMakePackageConfigHelpers)
 write_basic_package_version_file(
-  "${CMAKE_CURRENT_BINARY_DIR}/cmake/legionConfigVersion.cmake"
+  "${CMAKE_CURRENT_BINARY_DIR}/legionConfigVersion.cmake"
   VERSION ${legion_VERSION}
   COMPATIBILITY AnyNewerVersion
 )
@@ -191,7 +191,7 @@ export(EXPORT legion_mappersTargets
 )
 
 configure_file(cmake/legionConfig.cmake.in
-  "${CMAKE_CURRENT_BINARY_DIR}/cmake/legionConfig.cmake"
+  "${CMAKE_CURRENT_BINARY_DIR}/legionConfig.cmake"
   @ONLY
 )
 
@@ -212,8 +212,8 @@ install(EXPORT legion_mappersTargets
 
 install(
   FILES
-    "${CMAKE_CURRENT_BINARY_DIR}/cmake/legionConfig.cmake"
-    "${CMAKE_CURRENT_BINARY_DIR}/cmake/legionConfigVersion.cmake"
+    "${CMAKE_CURRENT_BINARY_DIR}/legionConfig.cmake"
+    "${CMAKE_CURRENT_BINARY_DIR}/legionConfigVersion.cmake"
   DESTINATION
     ${INSTALL_CMAKE_DIR}
 )

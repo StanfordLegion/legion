@@ -44,6 +44,8 @@ set(legion_SOURCES
   runtime.cc
 )
 
+SET_SOURCE_FILES_PROPERTIES(legion.inl PROPERTIES HEADER_FILE_ONLY 1)
+
 add_library(legion ${legion_SOURCES})
 target_include_directories(legion
   PRIVATE

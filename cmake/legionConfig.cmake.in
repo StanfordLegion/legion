@@ -4,19 +4,36 @@
 #  LEGION_LIBRARIES    - libraries to link against
 #  LEGION_EXECUTABLE   - the bar executable
  
-# Compute paths
-get_filename_component(SELF_DIR "${CMAKE_CURRENT_LIST_FILE}" PATH)
+FIND_LIBRARY(LEGION_LIBRARY legion
+    PATHS @CMAKE_INSTALL_PREFIX@/lib
+    NO_DEFAULT_PATH
+)
 
-set(LEGION_INCLUDE_DIRS "${SELF_DIR}/include"
-     "${SELF_DIR}/include/realm"
-     "${SELF_DIR}/include/legion"
-     "${SELF_DIR}/include/mappers")
+FIND_LIBRARY(LEGION_MAPPERS_LIBRARY legion_mappers
+    PATHS @CMAKE_INSTALL_PREFIX@/lib
+    NO_DEFAULT_PATH
+)
 
-set (LEGION_CMAKE_DIR "${SELF_DIR}/cmake")
+FIND_LIBRARY(REALM_LIBRARY realm
+    PATHS @CMAKE_INSTALL_PREFIX@/lib
+    NO_DEFAULT_PATH
+)
 
-include("${LEGION_CMAKE_DIR}/legionTargets.cmake")
-include("${LEGION_CMAKE_DIR}/realmTargets.cmake")
-include("${LEGION_CMAKE_DIR}/legion_mappersTargets.cmake")
- 
-set(LEGION_LIBRARIES legion realm legion_mappers)
+SET(LEGION_LIBRARIES ${LEGION_LIBRARY}
+    ${LEGION_MAPPERS_LIBRARY} ${REALM_LIBRARY})
+
+FIND_PATH(LEGION_INCLUDE_DIR common.h
+    PATHS @CMAKE_INSTALL_PREFIX@/include
+    NO_DEFAULT_PATH
+)
+
+SET(LEGION_INCLUDE_DIRS "${LEGION_INCLUDE_DIR}"
+        "${LEGION_INCLUDE_DIR}/legion"
+        "${LEGION_INCLUDE_DIR}/realm"
+        "${LEGION_INCLUDE_DIR}/mappers")
+
+SET_SOURCE_FILES_PROPERTIES(${LEGION_INCLUDE_DIR}/legion/legion.inl PROPERTIES HEADER_FILE_ONLY 1)
+
+SET (LEGION_CMAKE_DIR "${LEGION_INCLUDE_DIR}/cmake")
+
 
