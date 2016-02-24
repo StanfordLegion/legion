@@ -30,6 +30,10 @@
 #include "arrays.h"
 #include "custom_serdez.h"
 
+#ifdef REALM_USE_LEGION_LAYOUT_CONSTRAINTS
+#include "legion_constraint.h"
+#endif
+
 namespace Realm {
 
   class ProfilingRequestSet;
@@ -953,6 +957,17 @@ namespace Realm {
                                      const ProfilingRequestSet &reqs,
 				     ReductionOpID redop_id = 0) const;
 
+#ifdef REALM_USE_LEGION_LAYOUT_CONSTRAINTS
+      // Note that the constraints are not const so that Realm can add
+      // to the set with additional constraints describing the exact 
+      // instance that was created.
+      RegionInstance create_instance(Memory memory, const std::vector<
+                                          std::pair<FieldID,size_t> > &fields,
+                                     Legion::LayoutConstraintSet &constraints,
+                                     const ProfilingRequestSet &reqs,
+                                     ReductionOpID redop_id = 0) const;
+#endif
+
       RegionInstance create_hdf5_instance(const char *file_name,
                                           const std::vector<size_t> &field_sizes,
                                           const std::vector<const char*> &field_files,
@@ -973,6 +988,20 @@ namespace Realm {
 	unsigned offset, size;
 	CustomSerdezID serdez_id;
       };
+
+#ifdef REALM_USE_LEGION_LAYOUT_CONSTRAINTS
+      struct CopySrcDstFieldInfo {
+      public:
+        CopySrcDstFieldInfo(void)
+          : inst(RegionInstance::NO_INST), field_id(0), serdez_id(0) { }
+        CopySrcDstFieldInfo(RegionInstance i, unsigned fid, CustomSerdezID sid = 0)
+          : inst(i), field_id(fid), serdez_id(sid) { }
+      public:
+        RegionInstance inst;
+        unsigned field_id;
+        CustomSerdezID serdez_id;
+      };
+#endif
 
       Event fill(const std::vector<CopySrcDstField> &dsts,
                  const void *fill_value, size_t fill_value_size,
@@ -1017,6 +1046,19 @@ namespace Realm {
                  const ProfilingRequestSet &reqeusts,
 		 Event wait_on = Event::NO_EVENT,
 		 ReductionOpID redop_id = 0, bool red_fold = false) const;
+
+#ifdef REALM_USE_LEGION_LAYOUT_CONSTRAINTS
+      Event fill(const std::vector<CopySrcDstFieldInfo> &dsts,
+                 const ProfilingRequestSet &requests,
+                 const void *fill_value, size_t fill_value_size,
+                 Event wait_on = Event::NO_EVENT) const;
+
+      Event copy(const std::vector<CopySrcDstFieldInfo>& srcs,
+                 const std::vector<CopySrcDstFieldInfo>& dsts,
+                 const ProfilingRequestSet &requests,
+                 Event wait_on = Event::NO_EVENT,
+                 ReductionOpID redop_id = 0, bool red_fold = false) const;
+#endif
     };
 
     inline std::ostream& operator<<(std::ostream& os, Domain d) 

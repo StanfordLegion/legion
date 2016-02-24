@@ -22,6 +22,9 @@
  */
 
 #include "legion_config.h"
+
+// Make sure we have the appropriate defines in place for including realm
+#define REALM_USE_LEGION_LAYOUT_CONSTRAINTS
 #include "realm.h"
 
 #include <cstdio>
