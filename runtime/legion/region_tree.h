@@ -429,10 +429,12 @@ namespace LegionRuntime {
                         const InstanceRef &dst_ref,
                         Event precondition);
       // This takes ownership of the value buffer
-      void fill_fields(RegionTreeContext ctx,
-                       const RegionRequirement &req,
-                       const void *value, size_t value_size,
-                       VersionInfo &version_info);
+      Event fill_fields(RegionTreeContext ctx, Operation *op,
+                        const RegionRequirement &req,
+                        const void *value, size_t value_size,
+                        VersionInfo &version_info,
+                        RestrictInfo &restrict_info,
+                        MappingRef &map_ref);
       InstanceRef attach_file(RegionTreeContext ctx,
                               const RegionRequirement &req,
                               AttachOp *attach_op,
@@ -1978,6 +1980,10 @@ namespace LegionRuntime {
       void fill_fields(ContextID ctx, const FieldMask &fill_mask,
                        const void *value, size_t value_size, 
                        VersionInfo &version_info);
+      Event eager_fill_fields(ContextID ctx, Operation *op,
+                              const FieldMask &fill_mask,
+                              const void *value, size_t value_size,
+                              VersionInfo &version_info, InstanceView *target);
       InstanceRef attach_file(ContextID ctx, const FieldMask &attach_mask,
                              const RegionRequirement &req, AttachOp *attach_op,
                              VersionInfo &version_info);

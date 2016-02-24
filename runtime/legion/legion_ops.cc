@@ -8714,8 +8714,30 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
         assert(value != NULL);
 #endif
-        runtime->forest->fill_fields(physical_ctx, requirement,
-                                     value, value_size, version_info);
+        MappingRef map_ref;
+        if (restrict_info.has_restrictions())
+        {
+          InstanceRef restrict_inst = privilege_path.translate_ref(
+              parent_ctx->get_local_reference(parent_req_index));
+          Processor local_proc = parent_ctx->get_executing_processor();
+          map_ref = runtime->forest->map_restricted_region(physical_ctx,
+                                                           requirement,
+                                                           0/*idx*/,
+                                                           version_info,
+                                                           local_proc,
+                                                           restrict_inst 
+#ifdef DEBUG_HIGH_LEVEL
+                                                           , get_logging_name()
+                                                           , unique_op_id
+#endif
+                                                           );
+#ifdef DEBUG_HIGH_LEVEL
+          assert(map_ref.has_ref());
+#endif
+        }
+        Event done_event = 
+          runtime->forest->fill_fields(physical_ctx, this, requirement, value,
+                             value_size, version_info, restrict_info, map_ref);
         std::set<Event> applied_conditions;
         version_info.apply_mapping(physical_ctx.get_id(),
                                    runtime->address_space, applied_conditions);
@@ -8727,7 +8749,7 @@ namespace LegionRuntime {
           complete_mapping(Event::merge_events(applied_conditions));
         else
           complete_mapping();
-        complete_execution();
+        complete_execution(done_event);
       }
       else
       {
@@ -8762,8 +8784,30 @@ namespace LegionRuntime {
       memcpy(result, future.impl->get_untyped_result(), result_size);
       RegionTreeContext physical_ctx = 
         parent_ctx->find_enclosing_context(parent_req_index);
-      runtime->forest->fill_fields(physical_ctx, requirement, 
-                                   result, result_size, version_info);
+      MappingRef map_ref;
+      if (restrict_info.has_restrictions())
+      {
+        InstanceRef restrict_inst = privilege_path.translate_ref(
+            parent_ctx->get_local_reference(parent_req_index));
+        Processor local_proc = parent_ctx->get_executing_processor();
+        map_ref = runtime->forest->map_restricted_region(physical_ctx,
+                                                         requirement,
+                                                         0/*idx*/,
+                                                         version_info,
+                                                         local_proc,
+                                                         restrict_inst 
+#ifdef DEBUG_HIGH_LEVEL
+                                                         , get_logging_name()
+                                                         , unique_op_id
+#endif
+                                                         );
+#ifdef DEBUG_HIGH_LEVEL
+        assert(map_ref.has_ref());
+#endif
+      }
+      Event done_event = 
+        runtime->forest->fill_fields(physical_ctx, this, requirement, result,
+                         result_size, version_info, restrict_info, map_ref);
       std::set<Event> applied_conditions;
       version_info.apply_mapping(physical_ctx.get_id(),
                                  runtime->address_space, applied_conditions);
@@ -8771,7 +8815,7 @@ namespace LegionRuntime {
         complete_mapping(Event::merge_events(applied_conditions));
       else
         complete_mapping();
-      complete_execution();
+      complete_execution(done_event);
     }
     
     //--------------------------------------------------------------------------
