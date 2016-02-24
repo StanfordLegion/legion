@@ -188,7 +188,6 @@ namespace Legion {
       inline const FieldMask& get_space_mask(void) const 
         { return manager->layout->allocated_fields; }
     public:
-      size_t get_blocking_factor(void) const;
       const FieldMask& get_physical_mask(void) const;
     public:
       virtual bool is_materialized_view(void) const;

@@ -14,8 +14,10 @@
  */
 
 #include "legion.h"
+#include "region_tree.h"
 #include "legion_mapping.h"
 #include "mapper_manager.h"
+#include "legion_instances.h"
 
 namespace Legion {
   namespace Mapping {
@@ -25,14 +27,14 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    PhysicalInstance(void)
+    PhysicalInstance::PhysicalInstance(void)
       : impl(NULL)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalInstance::PhysicalInstance(PhysicalInstanceImpl *i)
+    PhysicalInstance::PhysicalInstance(PhysicalInstanceImpl i)
       : impl(i)
     //--------------------------------------------------------------------------
     {
@@ -40,7 +42,7 @@ namespace Legion {
       // structure from being collected, it doesn't change if 
       // the actual instance itself can be collected or not
       if (impl != NULL)
-        impl->add_base_resource_ref(INSTANCE_MAPPER_REF);
+        impl->add_base_resource_ref(Internal::INSTANCE_MAPPER_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -49,14 +51,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (impl != NULL)
-        impl->add_base_resource_ref(INSTANCE_MAPPER_REF);
+        impl->add_base_resource_ref(Internal::INSTANCE_MAPPER_REF);
     }
 
     //--------------------------------------------------------------------------
     PhysicalInstance::~PhysicalInstance(void)
     //--------------------------------------------------------------------------
     {
-      if ((impl != NULL) && impl->remove_base_resource_ref(INSTANCE_MAPPER_REF))
+      if ((impl != NULL) && 
+          impl->remove_base_resource_ref(Internal::INSTANCE_MAPPER_REF))
         legion_delete(impl);
     }
 
@@ -64,11 +67,13 @@ namespace Legion {
     PhysicalInstance& PhysicalInstance::operator=(const PhysicalInstance &rhs)
     //--------------------------------------------------------------------------
     {
-      if ((impl != NULL) && impl->remove_base_resource_ref(INSTANCE_MAPPER_REF))
+      if ((impl != NULL) && 
+          impl->remove_base_resource_ref(Internal::INSTANCE_MAPPER_REF))
         legion_delete(impl);
       impl = rhs.impl;
       if (impl != NULL)
-        impl->add_base_resource_ref(INSTANCE_MAPPER_REF);
+        impl->add_base_resource_ref(Internal::INSTANCE_MAPPER_REF);
+      return *this;
     }
 
     //--------------------------------------------------------------------------
@@ -133,7 +138,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ PhysicalInstance::get_virtual_instance(void)
+    /*static*/ PhysicalInstance PhysicalInstance::get_virtual_instance(void)
     //--------------------------------------------------------------------------
     {
       return PhysicalInstance();
@@ -143,21 +148,32 @@ namespace Legion {
     bool PhysicalInstance::has_field(FieldID fid) const
     //--------------------------------------------------------------------------
     {
-
+      if (impl == NULL)
+        return false;
+      return impl->has_field(fid);
     }
 
     //--------------------------------------------------------------------------
     void PhysicalInstance::has_fields(std::map<FieldID,bool> &fields) const
     //--------------------------------------------------------------------------
     {
-
+      if (impl == NULL)
+      {
+        for (std::map<FieldID,bool>::iterator it = fields.begin();
+              it != fields.end(); it++)
+          it->second = false;
+        return;
+      }
+      return impl->has_fields(fields);
     }
 
     //--------------------------------------------------------------------------
-    bool PhysicalInstance::remove_space_fields(std::set<FieldID> &fids) const
+    void PhysicalInstance::remove_space_fields(std::set<FieldID> &fields) const
     //--------------------------------------------------------------------------
     {
-
+      if (impl == NULL)
+        return;
+      impl->remove_space_fields(fields);
     }
 
     /////////////////////////////////////////////////////////////

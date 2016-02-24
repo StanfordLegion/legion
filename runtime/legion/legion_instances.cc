@@ -210,6 +210,46 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool LayoutDescription::has_field(FieldID fid) const
+    //--------------------------------------------------------------------------
+    {
+      return (field_infos.find(fid) != field_infos.end());
+    }
+
+    //--------------------------------------------------------------------------
+    void LayoutDescription::has_fields(std::map<FieldID,bool> &to_test) const
+    //--------------------------------------------------------------------------
+    {
+      for (std::map<FieldID,bool>::iterator it = to_test.begin();
+            it != to_test.end(); it++)
+      {
+        if (field_infos.find(it->first) != field_infos.end())
+          it->second = true;
+        else
+          it->second = false;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void LayoutDescription::remove_space_fields(std::set<FieldID> &filter) const
+    //--------------------------------------------------------------------------
+    {
+      std::vector<FieldID> to_remove;
+      for (std::set<FieldID>::const_iterator it = filter.begin();
+            it != filter.end(); it++)
+      {
+        if (field_infos.find(*it) != field_infos.end())
+          to_remove.push_back(*it);
+      }
+      if (!to_remove.empty())
+      {
+        for (std::vector<FieldID>::const_iterator it = to_remove.begin();
+              it != to_remove.end(); it++)
+          filter.erase(*it);
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void LayoutDescription::add_field_info(FieldID fid, unsigned index,
                                            size_t offset, size_t field_size,
                                            CustomSerdezID serdez_id)
@@ -401,10 +441,12 @@ namespace Legion {
       derez.deserialize(constraint_did);
 #ifdef DEBUG_HIGH_LEVEL
       LayoutConstraints *constraints = dynamic_cast<LayoutConstraints*>(
-                      runtime->find_distributed_collectable(constraint_did));
+        region_node->context->runtime->find_distributed_collectable(
+                                                            constraint_did));
 #else
       LayoutConstraints *constraints = static_cast<LayoutConstraints*>(
-                      runtime->find_distributed_collectable(constraint_did));
+        region_node->context->runtime->find_distributed_collectable(
+                                                            constraint_did));
 #endif
       FieldMask mask;
       derez.deserialize(mask);
@@ -703,7 +745,10 @@ namespace Legion {
 #ifdef DEBUG_HIGH_LEVEL
       assert(layout != NULL);
 #endif
-      return layout->get_layout_size();
+      size_t field_sizes = layout->get_total_field_size();
+      size_t volume = 
+        region_node->row_source->get_domain_blocking().get_volume();
+      return (field_sizes * volume);
     }
 
     //--------------------------------------------------------------------------

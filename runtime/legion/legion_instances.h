@@ -67,6 +67,10 @@ namespace Legion {
                                 PhysicalInstance inst,
                                 std::vector<Domain::CopySrcDstField> &fields);
     public:
+      bool has_field(FieldID fid) const;
+      void has_fields(std::map<FieldID,bool> &fields) const;
+      void remove_space_fields(std::set<FieldID> &fields) const;
+    public:
       void add_field_info(FieldID fid, unsigned index,
                           size_t offset, size_t field_size,
                           CustomSerdezID serdez_id);
@@ -209,6 +213,14 @@ namespace Legion {
                                 std::vector<Domain::CopySrcDstField> &fields);
       void compute_copy_offsets(const std::vector<FieldID> &copy_fields,
                                 std::vector<Domain::CopySrcDstField> &fields);
+    public:
+      // Interface to the mapper PhysicalInstance
+      inline bool has_field(FieldID fid) const
+        { return layout->has_field(fid); }
+      inline void has_fields(std::map<FieldID,bool> &fields) const
+        { return layout->has_fields(fields); } 
+      void remove_space_fields(std::set<FieldID> &fields) const
+        { return layout->remove_space_fields(fields); }
     public:
       void set_descriptor(FieldDataDescriptor &desc, unsigned fid_idx) const;
     public:

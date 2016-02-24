@@ -61,7 +61,7 @@ namespace Legion {
     public:
       bool has_field(FieldID fid) const;
       void has_fields(std::map<FieldID,bool> &fids) const;
-      bool remove_space_fields(std::set<FieldID> &fids) const;
+      void remove_space_fields(std::set<FieldID> &fids) const;
     public:
       // Use these to specify the fields for which this instance
       // should be used. It is optional to specify this and is only
@@ -88,7 +88,7 @@ namespace Legion {
     protected:
       FRIEND_ALL_RUNTIME_CLASSES
       // Only the runtime can make an instance like this
-      PhysicalInstance(PhysicalInstanceImpl *impl);
+      PhysicalInstance(PhysicalInstanceImpl impl);
     protected:   
       PhysicalInstanceImpl impl;
       std::set<FieldID>  fields;

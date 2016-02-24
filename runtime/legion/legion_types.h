@@ -915,7 +915,7 @@ namespace Legion {
   // Anothing magical typedef
   namespace Mapping {
     typedef Internal::MappingCallInfo* MapperContext;
-    typedef const Internal::InstanceManager* PhysicalInstanceImpl;
+    typedef Internal::InstanceManager* PhysicalInstanceImpl;
   };
 
   namespace Internal {

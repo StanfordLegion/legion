@@ -4609,7 +4609,7 @@ namespace Legion {
                                       source, runtime->address_space);
       new_constraints->update_constraints(derez);
       // Try to register this, if it has already been registered we are done
-      if (!runtime->register_layout_constraints(new_constraints))
+      if (!runtime->register_layout(new_constraints, true/*need lock*/))
         legion_delete(new_constraints);
       else
         new_constraints->register_with_runtime();
@@ -4646,7 +4646,7 @@ namespace Legion {
         legion_new<LayoutConstraints>(lay_id, handle, did, runtime,
                                       source, runtime->address_space);
       new_constraints->update_constraints(derez);
-      if (!runtime->register_layout_constraints(new_constraints))
+      if (!runtime->register_layout(new_constraints, true/*need lock*/))
         legion_delete(new_constraints);
       else
         new_constraints->register_with_runtime();
