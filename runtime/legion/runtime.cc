@@ -11370,6 +11370,9 @@ namespace LegionRuntime {
                                       Processor proc)
     //--------------------------------------------------------------------------
     {
+      // TODO: figure out a way to put this check back in while
+      // still supporting dynamic ID generation
+#if 0
       if (map_id >= get_current_static_mapper_id())
       {
         log_run.error("Error registering mapper with ID %d. Exceeds the "
@@ -11382,6 +11385,7 @@ namespace LegionRuntime {
 #endif
         exit(ERROR_MAX_APPLICATION_MAPPER_ID_EXCEEDED);
       }
+#endif
 #ifdef DEBUG_HIGH_LEVEL
       assert(proc_managers.find(proc) != proc_managers.end());
 #endif
@@ -11824,6 +11828,8 @@ namespace LegionRuntime {
                                   bool check_task_id /*= true*/)
     //--------------------------------------------------------------------------
     {
+      // TODO: figure out a way to make this check safe with dynamic generation
+#if 0
       if (check_task_id && (registrar.task_id >= MAX_APPLICATION_TASK_ID))
       {
         log_run.error("Error registering task with ID %d. Exceeds the "
@@ -11836,6 +11842,7 @@ namespace LegionRuntime {
 #endif
         exit(ERROR_MAX_APPLICATION_TASK_ID_EXCEEDED);
       }
+#endif
       // See if we need to make a new variant ID
       if (vid == AUTO_GENERATE_ID) // Make a variant ID to use
         vid = get_unique_variant_id();
