@@ -434,7 +434,7 @@ namespace LegionRuntime {
                         const void *value, size_t value_size,
                         VersionInfo &version_info,
                         RestrictInfo &restrict_info,
-                        MappingRef &map_ref);
+                        MappingRef &map_ref, Event precondition);
       InstanceRef attach_file(RegionTreeContext ctx,
                               const RegionRequirement &req,
                               AttachOp *attach_op,
@@ -1983,7 +1983,8 @@ namespace LegionRuntime {
       Event eager_fill_fields(ContextID ctx, Operation *op,
                               const FieldMask &fill_mask,
                               const void *value, size_t value_size,
-                              VersionInfo &version_info, InstanceView *target);
+                              VersionInfo &version_info, InstanceView *target,
+                              Event precondition);
       InstanceRef attach_file(ContextID ctx, const FieldMask &attach_mask,
                              const RegionRequirement &req, AttachOp *attach_op,
                              VersionInfo &version_info);

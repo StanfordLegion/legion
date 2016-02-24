@@ -1452,6 +1452,27 @@ namespace LegionRuntime {
     }
 
     /////////////////////////////////////////////////////////////
+    // FillLauncher 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    FillLauncher::FillLauncher(LogicalRegion h, LogicalRegion p,
+                               TaskArgument arg, 
+                               Predicate pred /*= Predicate::TRUE_PRED*/)
+      : handle(h), parent(p), argument(arg), predicate(pred)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    FillLauncher::FillLauncher(LogicalRegion h, LogicalRegion p, Future f,
+                               Predicate pred /*= Predicate::TRUE_PRED*/)
+      : handle(h), parent(p), future(f), predicate(pred)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    /////////////////////////////////////////////////////////////
     // MustEpochLauncher 
     /////////////////////////////////////////////////////////////
 
@@ -3102,6 +3123,13 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       runtime->fill_fields(ctx, handle, parent, fields, f, pred);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::fill_fields(Context ctx, const FillLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      runtime->fill_fields(ctx, launcher);
     }
 
     //--------------------------------------------------------------------------

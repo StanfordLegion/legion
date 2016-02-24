@@ -9907,6 +9907,82 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void Internal::fill_fields(Context ctx, const FillLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      FillOp *fill_op = get_available_fill_op(true);
+#ifdef DEBUG_HIGH_LEVEL
+      if (ctx == DUMMY_CONTEXT)
+      {
+        log_run.error("Illegal dummy context fill operation!");
+        assert(false);
+        exit(ERROR_DUMMY_CONTEXT_OPERATION);
+      }
+      if (ctx->is_leaf())
+      {
+        log_task.error("Illegal fill operation call performed in "
+                             "leaf task %s (ID %lld)",
+                             ctx->variants->name, ctx->get_unique_task_id());
+        assert(false);
+        exit(ERROR_LEAF_TASK_VIOLATION);
+      }
+      fill_op->initialize(ctx, launcher, check_privileges);
+      log_run.debug("Registering a fill operation in task %s "
+                           "(ID %lld)",
+                           ctx->variants->name, ctx->get_unique_task_id());
+#else
+      fill_op->initialize(ctx, launcher, false/*check privileges*/);
+#endif
+      Processor proc = ctx->get_executing_processor();
+      // Check to see if we need to do any unmappings and remappings
+      // before we can issue this copy operation
+      std::vector<PhysicalRegion> unmapped_regions;
+      if (!unsafe_launch)
+        ctx->find_conflicting_regions(fill_op, unmapped_regions);
+      if (!unmapped_regions.empty())
+      {
+        // Unmap any regions which are conflicting
+        for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
+        {
+          unmapped_regions[idx].impl->unmap_region();
+        }
+      }
+#ifdef INORDER_EXECUTION
+      Event term_event = fill_op->get_completion_event();
+#endif
+      // Issue the copy operation
+      add_to_dependence_queue(proc, fill_op);
+#ifdef INORDER_EXECUTION
+      if (program_order_execution && !term_event.has_triggered())
+      {
+        pre_wait(proc);
+        term_event.wait();
+        post_wait(proc);
+      }
+#endif
+      // Remap any regions which we unmapped
+      if (!unmapped_regions.empty())
+      {
+        std::set<Event> mapped_events;
+        for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
+        {
+          MapOp *op = get_available_map_op(true);
+          op->initialize(ctx, unmapped_regions[idx]);
+          mapped_events.insert(op->get_completion_event());
+          add_to_dependence_queue(proc, op);
+        }
+        // Wait for all the re-mapping operations to complete
+        Event mapped_event = Event::merge_events(mapped_events);
+        if (!mapped_event.has_triggered())
+        {
+          pre_wait(proc);
+          mapped_event.wait();
+          post_wait(proc);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
     PhysicalRegion Internal::attach_hdf5(Context ctx, const char *file_name,
                                         LogicalRegion handle, 
                                         LogicalRegion parent,

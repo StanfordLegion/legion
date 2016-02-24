@@ -2664,7 +2664,7 @@ namespace LegionRuntime {
                                         const void *value, size_t value_size,
                                         VersionInfo &version_info,
                                         RestrictInfo &restrict_info,
-                                        MappingRef &map_ref)
+                                        MappingRef &map_ref, Event precondition)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -2688,15 +2688,17 @@ namespace LegionRuntime {
         assert(view->is_instance_view());
 #endif
         InstanceView *inst_view = view->as_instance_view();
-        Event done_event = fill_node->eager_fill_fields(ctx.get_id(),
-            op, eager_fields, value, value_size, version_info, inst_view);
+        Event done_event = fill_node->eager_fill_fields(ctx.get_id(), op, 
+                           eager_fields, value, value_size, version_info, 
+                           inst_view, precondition);
         // Remove these fields from the fill set
         fill_mask -= eager_fields;
         // If we still have fields to fill, do that now
         if (!!fill_mask)
           fill_node->fill_fields(ctx.get_id(), fill_mask,
                                  value, value_size, version_info);
-        // Return our done event
+        // We know the sync precondition is chained off at least
+        // one eager fill so we can return the done event
         return done_event;
       }
       else
@@ -2704,8 +2706,8 @@ namespace LegionRuntime {
         // Fill in these fields on this node
         fill_node->fill_fields(ctx.get_id(), fill_mask, 
                                value, value_size, version_info); 
-        // Nothing to wait for here
-        return Event::NO_EVENT;
+        // We didn't actually use the precondition so just return it
+        return precondition;
       }
     }
 
@@ -15707,7 +15709,8 @@ namespace LegionRuntime {
     Event RegionNode::eager_fill_fields(ContextID ctx, Operation *op,
                                         const FieldMask &fill_mask,
                                         const void *value, size_t value_size,
-                                VersionInfo &version_info, InstanceView *target)
+                                VersionInfo &version_info, InstanceView *target,
+                                        Event sync_precondition)
     //--------------------------------------------------------------------------
     {
       // Effectively a fill is a special kind of copy so we can analyze
@@ -15724,6 +15727,8 @@ namespace LegionRuntime {
         fill_domains.insert(get_domain(dom_pre));
       if (dom_pre.exists())
         preconditions[dom_pre] = fill_mask;
+      if (sync_precondition.exists())
+        preconditions[sync_precondition] = fill_mask;
       // Sort the preconditions into event sets
       LegionList<EventSet>::aligned event_sets;
       compute_event_sets(fill_mask, preconditions, event_sets);

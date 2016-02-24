@@ -1499,6 +1499,7 @@ namespace LegionRuntime {
                        LogicalRegion parent,
                        const std::set<FieldID> &fields,
                        Future f, const Predicate &pred);
+      void fill_fields(Context ctx, const FillLauncher &launcher);
     public:
       PhysicalRegion attach_hdf5(Context ctx, const char *file_name,
                                  LogicalRegion handle, LogicalRegion parent,
