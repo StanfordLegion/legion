@@ -328,6 +328,19 @@ namespace Realm {
   // class Barrier
   //
 
+  namespace {
+    Barrier make_no_barrier(void)
+    {
+      Barrier b;
+      b.id = 0;
+      b.gen = 0;
+      b.timestamp = 0;
+      return b;
+    }
+  };
+
+  /*static*/ const Barrier Barrier::NO_BARRIER = make_no_barrier();
+
   /*static*/ Barrier Barrier::create_barrier(unsigned expected_arrivals,
 					     ReductionOpID redop_id /*= 0*/,
 					     const void *initial_value /*= 0*/,

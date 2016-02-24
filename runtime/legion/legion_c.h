@@ -1676,6 +1676,14 @@ extern "C" {
                                  enum legion_region_flags_t flags);
 
   /**
+   * @see LegionRuntime::HighLevel::RegionRequirement::flags
+   */
+  void
+  legion_task_launcher_intersect_flags(legion_task_launcher_t launcher,
+                                       unsigned idx,
+                                       enum legion_region_flags_t flags);
+
+  /**
    * @see LegionRuntime::HighLevel::TaskLauncher::add_index_requirement()
    */
   unsigned
@@ -1824,6 +1832,14 @@ extern "C" {
   legion_index_launcher_add_flags(legion_index_launcher_t launcher,
                                   unsigned idx,
                                   enum legion_region_flags_t flags);
+
+  /**
+   * @see LegionRuntime::HighLevel::RegionRequirement::flags
+   */
+  void
+  legion_index_launcher_intersect_flags(legion_index_launcher_t launcher,
+                                        unsigned idx,
+                                        enum legion_region_flags_t flags);
 
   /**
    * @see LegionRuntime::HighLevel::IndexLauncher::add_index_requirement()

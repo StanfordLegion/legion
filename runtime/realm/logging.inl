@@ -224,4 +224,9 @@ namespace Realm {
     return *this;
   }
 
+  inline bool LoggerMessage::is_active(void) const
+  {
+    return active;
+  }
+
 }; // namespace Realm
