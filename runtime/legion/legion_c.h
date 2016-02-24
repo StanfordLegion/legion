@@ -1029,6 +1029,19 @@ extern "C" {
     legion_color_t c);
 
   /**
+   * @return Caller does **NOT** take ownership of return value.
+   *
+   * @see LegionRuntime::HighLevel::Runtime::get_logical_subregion_by_tree()
+   */
+  legion_logical_region_t
+  legion_logical_partition_get_logical_subregion_by_tree(
+    legion_runtime_t runtime,
+    legion_context_t ctx,
+    legion_index_space_t handle,
+    legion_field_space_t fspace,
+    legion_region_tree_id_t tid);
+
+  /**
    * @see LegionRuntime::HighLevel::Runtime::get_parent_logical_region()
    */
   legion_logical_region_t
@@ -1663,6 +1676,14 @@ extern "C" {
                                  enum legion_region_flags_t flags);
 
   /**
+   * @see LegionRuntime::HighLevel::RegionRequirement::flags
+   */
+  void
+  legion_task_launcher_intersect_flags(legion_task_launcher_t launcher,
+                                       unsigned idx,
+                                       enum legion_region_flags_t flags);
+
+  /**
    * @see LegionRuntime::HighLevel::TaskLauncher::add_index_requirement()
    */
   unsigned
@@ -1811,6 +1832,14 @@ extern "C" {
   legion_index_launcher_add_flags(legion_index_launcher_t launcher,
                                   unsigned idx,
                                   enum legion_region_flags_t flags);
+
+  /**
+   * @see LegionRuntime::HighLevel::RegionRequirement::flags
+   */
+  void
+  legion_index_launcher_intersect_flags(legion_index_launcher_t launcher,
+                                        unsigned idx,
+                                        enum legion_region_flags_t flags);
 
   /**
    * @see LegionRuntime::HighLevel::IndexLauncher::add_index_requirement()
@@ -2181,6 +2210,14 @@ extern "C" {
    */
   legion_logical_region_t
   legion_physical_region_get_logical_region(legion_physical_region_t handle);
+
+  /**
+   * @see LegionRuntime::HighLevel::PhysicalRegion::get_fields()
+   */
+  size_t
+  legion_physical_region_get_field_count(legion_physical_region_t handle);
+  legion_field_id_t
+  legion_physical_region_get_field_id(legion_physical_region_t handle, size_t index);
 
   /**
    * Safe for use only with instances with a single field.

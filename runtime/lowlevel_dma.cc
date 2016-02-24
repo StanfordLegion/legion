@@ -28,6 +28,7 @@
 #endif
 
 #include <queue>
+#include <iomanip>
 
 #define CHECK_PTHREAD(cmd) do { \
   int ret = (cmd); \
@@ -540,8 +541,8 @@ namespace LegionRuntime {
 	return false;
       }
 
-      log_dma.info("request %p triggered in state %d (lock = " IDFMT ")",
-		   req, req->state, current_lock.id);
+      log_dma.debug("request %p triggered in state %d (lock = " IDFMT ")",
+		    req, req->state, current_lock.id);
 
       if(current_lock.exists()) {
 	current_lock.release();
@@ -577,15 +578,15 @@ namespace LegionRuntime {
 	if(domain.get_dim() == 0) {
 	  IndexSpaceImpl *is_impl = get_runtime()->get_index_space_impl(domain.get_index_space());
 	  if(!is_impl->locked_data.valid) {
-	    log_dma.info("dma request %p - no index space metadata yet", this);
+	    log_dma.debug("dma request %p - no index space metadata yet", this);
 	    if(just_check) return false;
 
 	    Event e = is_impl->lock.acquire(1, false);
 	    if(e.has_triggered()) {
-	      log_dma.info("request %p - index space metadata invalid - instant trigger", this);
+	      log_dma.debug("request %p - index space metadata invalid - instant trigger", this);
 	      is_impl->lock.release();
 	    } else {
-	      log_dma.info("request %p - index space metadata invalid - sleeping on lock " IDFMT "", this, is_impl->lock.me.id);
+	      log_dma.debug("request %p - index space metadata invalid - sleeping on lock " IDFMT "", this, is_impl->lock.me.id);
 	      waiter.sleep_on_event(e, is_impl->lock.me);
 	      return false;
 	    }
@@ -595,7 +596,7 @@ namespace LegionRuntime {
           {
             Event e = is_impl->request_valid_mask();
             if(!e.has_triggered()) {
-              log_dma.info("request %p - valid mask needed for index space " IDFMT " - sleeping on event " IDFMT "/%d", this, domain.get_index_space().id, e.id, e.gen);
+              log_dma.debug("request %p - valid mask needed for index space " IDFMT " - sleeping on event " IDFMT "/%d", this, domain.get_index_space().id, e.id, e.gen);
 	      waiter.sleep_on_event(e);
               return false;
             }
@@ -611,10 +612,10 @@ namespace LegionRuntime {
 	    Event e = src_impl->request_metadata();
 	    if(!e.has_triggered()) {
 	      if(just_check) {
-		log_dma.info("dma request %p - no src instance (" IDFMT ") metadata yet", this, src_impl->me.id);
+		log_dma.debug("dma request %p - no src instance (" IDFMT ") metadata yet", this, src_impl->me.id);
 		return false;
 	      }
-	      log_dma.info("request %p - src instance metadata invalid - sleeping on event " IDFMT "/%d", this, e.id, e.gen);
+	      log_dma.debug("request %p - src instance metadata invalid - sleeping on event " IDFMT "/%d", this, e.id, e.gen);
 	      waiter.sleep_on_event(e);
 	      return false;
 	    }
@@ -624,10 +625,10 @@ namespace LegionRuntime {
 	    Event e = dst_impl->request_metadata();
 	    if(!e.has_triggered()) {
 	      if(just_check) {
-		log_dma.info("dma request %p - no dst instance (" IDFMT ") metadata yet", this, dst_impl->me.id);
+		log_dma.debug("dma request %p - no dst instance (" IDFMT ") metadata yet", this, dst_impl->me.id);
 		return false;
 	      }
-	      log_dma.info("request %p - dst instance metadata invalid - sleeping on event " IDFMT "/%d", this, e.id, e.gen);
+	      log_dma.debug("request %p - dst instance metadata invalid - sleeping on event " IDFMT "/%d", this, e.id, e.gen);
 	      waiter.sleep_on_event(e);
 	      return false;
 	    }
@@ -642,25 +643,25 @@ namespace LegionRuntime {
       if(state == STATE_BEFORE_EVENT) {
 	// has the before event triggered?  if not, wait on it
 	if(before_copy.has_triggered()) {
-	  log_dma.info("request %p - before event triggered", this);
+	  log_dma.debug("request %p - before event triggered", this);
 	  state = STATE_READY;
 	} else {
-	  log_dma.info("request %p - before event not triggered", this);
+	  log_dma.debug("request %p - before event not triggered", this);
 	  if(just_check) return false;
 
-	  log_dma.info("request %p - sleeping on before event", this);
+	  log_dma.debug("request %p - sleeping on before event", this);
 	  waiter.sleep_on_event(before_copy);
 	  return false;
 	}
       }
 
       if(state == STATE_READY) {
-	log_dma.info("request %p ready", this);
+	log_dma.debug("request %p ready", this);
 	if(just_check) return true;
 
 	state = STATE_QUEUED;
 	assert(rq != 0);
-	log_dma.info("request %p enqueued", this);
+	log_dma.debug("request %p enqueued", this);
 
 	// once we're enqueued, we may be deleted at any time, so no more
 	//  references
@@ -2795,6 +2796,10 @@ namespace LegionRuntime {
     {
       Arrays::Rect<DIM> orig_rect = domain.get_rect<DIM>();
 
+      // empty rectangles are easy to copy...
+      if(orig_rect.volume() == 0)
+	return;
+
       // this is the SOA-friendly loop nesting
       for(OASByInst::iterator it = oas_by_inst->begin(); it != oas_by_inst->end(); it++) {
 	RegionInstance src_inst = it->first.first;
@@ -2883,7 +2888,7 @@ namespace LegionRuntime {
 
     void CopyRequest::perform_dma(void)
     {
-      log_dma.info("request %p executing", this);
+      log_dma.debug("request %p executing", this);
 
       DetailedTimer::ScopedPush sp(TIME_COPY);
 
@@ -2894,7 +2899,6 @@ namespace LegionRuntime {
       // for now we launches an individual copy request for every serdez copy
       assert(serdez_id == 0 || (oas_by_inst->size() == 1 && oas_by_inst->begin()->second.size() == 1));
       MemPairCopier *mpc = MemPairCopier::create_copier(src_mem, dst_mem, 0, serdez_id);
-      log_dma.info("mpc created");
       switch(domain.get_dim()) {
       case 0:
 	{
@@ -2972,7 +2976,7 @@ namespace LegionRuntime {
       //RegionMetaDataUntyped::Impl *src_reg = src_data->region.impl();
       //RegionMetaDataUntyped::Impl *tgt_reg = tgt_data->region.impl();
 
-      log_dma.info("copy: " IDFMT "->" IDFMT " (" IDFMT "/%p)",
+      log_dma.debug("copy: " IDFMT "->" IDFMT " (" IDFMT "/%p)",
 		    src.id, target.id, is.id, is_impl->valid_mask);
 
       // if we're missing the valid mask at this point, we've screwed up
@@ -3075,7 +3079,7 @@ namespace LegionRuntime {
 	      // from the range executor and we have to trigger it ourselves
 	      Event finish_event = rexec.finish();
 	      if(finish_event.exists()) {
-		log_dma.info("triggering event " IDFMT "/%d after empty remote copy",
+		log_dma.debug("triggering event " IDFMT "/%d after empty remote copy",
 			     finish_event.id, finish_event.gen);
 		assert(finish_event == after_copy);
 		get_runtime()->get_singleevent_impl(finish_event)->trigger(finish_event.gen, gasnet_mynode());
@@ -3379,15 +3383,15 @@ namespace LegionRuntime {
 	if(domain.get_dim() == 0) {
 	  IndexSpaceImpl *is_impl = get_runtime()->get_index_space_impl(domain.get_index_space());
 	  if(!is_impl->locked_data.valid) {
-	    log_dma.info("dma request %p - no index space metadata yet", this);
+	    log_dma.debug("dma request %p - no index space metadata yet", this);
 	    if(just_check) return false;
 
 	    Event e = is_impl->lock.acquire(1, false);
 	    if(e.has_triggered()) {
-	      log_dma.info("request %p - index space metadata invalid - instant trigger", this);
+	      log_dma.debug("request %p - index space metadata invalid - instant trigger", this);
 	      is_impl->lock.release();
 	    } else {
-	      log_dma.info("request %p - index space metadata invalid - sleeping on lock " IDFMT "", this, is_impl->lock.me.id);
+	      log_dma.debug("request %p - index space metadata invalid - sleeping on lock " IDFMT "", this, is_impl->lock.me.id);
 	      waiter.sleep_on_event(e, is_impl->lock.me);
 	      return false;
 	    }
@@ -3397,7 +3401,7 @@ namespace LegionRuntime {
           {
             Event e = is_impl->request_valid_mask();
             if(!e.has_triggered()) {
-              log_dma.info("request %p - valid mask needed for index space " IDFMT " - sleeping on event " IDFMT "/%d", this, domain.get_index_space().id, e.id, e.gen);
+              log_dma.debug("request %p - valid mask needed for index space " IDFMT " - sleeping on event " IDFMT "/%d", this, domain.get_index_space().id, e.id, e.gen);
 	      waiter.sleep_on_event(e);
               return false;
             }
@@ -3414,10 +3418,10 @@ namespace LegionRuntime {
 	    Event e = src_impl->request_metadata();
 	    if(!e.has_triggered()) {
 	      if(just_check) {
-		log_dma.info("dma request %p - no src instance (" IDFMT ") metadata yet", this, src_impl->me.id);
+		log_dma.debug("dma request %p - no src instance (" IDFMT ") metadata yet", this, src_impl->me.id);
 		return false;
 	      }
-	      log_dma.info("request %p - src instance metadata invalid - sleeping on event " IDFMT "/%d", this, e.id, e.gen);
+	      log_dma.debug("request %p - src instance metadata invalid - sleeping on event " IDFMT "/%d", this, e.id, e.gen);
 	      waiter.sleep_on_event(e);
 	      return false;
 	    }
@@ -3431,10 +3435,10 @@ namespace LegionRuntime {
 	    Event e = dst_impl->request_metadata();
 	    if(!e.has_triggered()) {
 	      if(just_check) {
-		log_dma.info("dma request %p - no dst instance (" IDFMT ") metadata yet", this, dst_impl->me.id);
+		log_dma.debug("dma request %p - no dst instance (" IDFMT ") metadata yet", this, dst_impl->me.id);
 		return false;
 	      }
-	      log_dma.info("request %p - dst instance metadata invalid - sleeping on event " IDFMT "/%d", this, e.id, e.gen);
+	      log_dma.debug("request %p - dst instance metadata invalid - sleeping on event " IDFMT "/%d", this, e.id, e.gen);
 	      waiter.sleep_on_event(e);
 	      return false;
 	    }
@@ -3449,22 +3453,22 @@ namespace LegionRuntime {
       if(state == STATE_BEFORE_EVENT) {
 	// has the before event triggered?  if not, wait on it
 	if(before_copy.has_triggered()) {
-	  log_dma.info("request %p - before event triggered", this);
+	  log_dma.debug("request %p - before event triggered", this);
 	  if(inst_lock_needed) {
 	    // request an exclusive lock on the instance to protect reductions
 	    inst_lock_event = get_runtime()->get_instance_impl(dst.inst)->lock.acquire(0, true /*excl*/);
 	    state = STATE_INST_LOCK;
-	    log_dma.info("request %p - instance lock acquire event " IDFMT "/%d",
+	    log_dma.debug("request %p - instance lock acquire event " IDFMT "/%d",
 			 this, inst_lock_event.id, inst_lock_event.gen);
 	  } else {
 	    // go straight to ready
 	    state = STATE_READY;
 	  }
 	} else {
-	  log_dma.info("request %p - before event not triggered", this);
+	  log_dma.debug("request %p - before event not triggered", this);
 	  if(just_check) return false;
 
-	  log_dma.info("request %p - sleeping on before event", this);
+	  log_dma.debug("request %p - sleeping on before event", this);
 	  waiter.sleep_on_event(before_copy);
 	  return false;
 	}
@@ -3472,22 +3476,22 @@ namespace LegionRuntime {
 
       if(state == STATE_INST_LOCK) {
 	if(inst_lock_event.has_triggered()) {
-	  log_dma.info("request %p - instance lock acquired", this);
+	  log_dma.debug("request %p - instance lock acquired", this);
 	  state = STATE_READY;
 	} else {
-	  log_dma.info("request %p - instance lock - sleeping on event " IDFMT "/%d", this, inst_lock_event.id, inst_lock_event.gen);
+	  log_dma.debug("request %p - instance lock - sleeping on event " IDFMT "/%d", this, inst_lock_event.id, inst_lock_event.gen);
 	  waiter.sleep_on_event(inst_lock_event);
 	  return false;
 	}
       }
 
       if(state == STATE_READY) {
-	log_dma.info("request %p ready", this);
+	log_dma.debug("request %p ready", this);
 	if(just_check) return true;
 
 	state = STATE_QUEUED;
 	assert(rq != 0);
-	log_dma.info("request %p enqueued", this);
+	log_dma.debug("request %p enqueued", this);
 
 	// once we're enqueued, we may be deleted at any time, so no more
 	//  references
@@ -3505,6 +3509,10 @@ namespace LegionRuntime {
     void ReduceRequest::perform_dma_rect(MemPairCopier *mpc)
     {
       Arrays::Rect<DIM> orig_rect = domain.get_rect<DIM>();
+
+      // empty rectangles are easy to copy...
+      if(orig_rect.volume() == 0)
+	return;
 
       const ReductionOpUntyped *redop = get_runtime()->reduce_op_table[redop_id];
 
@@ -3600,7 +3608,7 @@ namespace LegionRuntime {
 
     void ReduceRequest::perform_dma(void)
     {
-      log_dma.info("request %p executing", this);
+      log_dma.debug("request %p executing", this);
 
       DetailedTimer::ScopedPush sp(TIME_COPY);
 
@@ -3908,6 +3916,20 @@ namespace LegionRuntime {
       fill_size = _fill_size;
       fill_buffer = malloc(fill_size);
       memcpy(fill_buffer, _fill_value, fill_size);
+
+      log_dma.info() << "dma request " << (void *)this << " created - is="
+		     << d << " fill dst=" << dst.inst << "[" << dst.offset << "+" << dst.size << "] size="
+		     << fill_size << " before=" << _before_fill << " after=" << _after_fill;
+      {
+	Realm::LoggerMessage msg(log_dma.debug());
+	if(msg.is_active()) {
+	  msg << "fill data =";
+	  msg << std::hex;
+	  for(size_t i = 0; i < _fill_size; i++)
+	    msg << ' ' << std::setfill('0') << std::setw(2) << (unsigned)((unsigned char *)(_fill_value))[i];
+	  msg << std::dec;
+	}
+      }
     }
 
     FillRequest::~FillRequest(void)
@@ -3959,15 +3981,15 @@ namespace LegionRuntime {
 	if(domain.get_dim() == 0) {
 	  IndexSpaceImpl *is_impl = get_runtime()->get_index_space_impl(domain.get_index_space());
 	  if(!is_impl->locked_data.valid) {
-	    log_dma.info("dma request %p - no index space metadata yet", this);
+	    log_dma.debug("dma request %p - no index space metadata yet", this);
 	    if(just_check) return false;
 
 	    Event e = is_impl->lock.acquire(1, false);
 	    if(e.has_triggered()) {
-	      log_dma.info("request %p - index space metadata invalid - instant trigger", this);
+	      log_dma.debug("request %p - index space metadata invalid - instant trigger", this);
 	      is_impl->lock.release();
 	    } else {
-	      log_dma.info("request %p - index space metadata invalid - sleeping on lock " IDFMT "", this, is_impl->lock.me.id);
+	      log_dma.debug("request %p - index space metadata invalid - sleeping on lock " IDFMT "", this, is_impl->lock.me.id);
 	      waiter.sleep_on_event(e, is_impl->lock.me);
 	      return false;
 	    }
@@ -3977,7 +3999,7 @@ namespace LegionRuntime {
           {
             Event e = is_impl->request_valid_mask();
             if(!e.has_triggered()) {
-              log_dma.info("request %p - valid mask needed for index space " IDFMT " - sleeping on event " IDFMT "/%d", this, domain.get_index_space().id, e.id, e.gen);
+              log_dma.debug("request %p - valid mask needed for index space " IDFMT " - sleeping on event " IDFMT "/%d", this, domain.get_index_space().id, e.id, e.gen);
 	      waiter.sleep_on_event(e);
               return false;
             }
@@ -3991,25 +4013,25 @@ namespace LegionRuntime {
       if(state == STATE_BEFORE_EVENT) {
 	// has the before event triggered?  if not, wait on it
 	if(before_fill.has_triggered()) {
-	  log_dma.info("request %p - before event triggered", this);
+	  log_dma.debug("request %p - before event triggered", this);
 	  state = STATE_READY;
 	} else {
-	  log_dma.info("request %p - before event not triggered", this);
+	  log_dma.debug("request %p - before event not triggered", this);
 	  if(just_check) return false;
 
-	  log_dma.info("request %p - sleeping on before event", this);
+	  log_dma.debug("request %p - sleeping on before event", this);
 	  waiter.sleep_on_event(before_fill);
 	  return false;
 	}
       }
 
       if(state == STATE_READY) {
-	log_dma.info("request %p ready", this);
+	log_dma.debug("request %p ready", this);
 	if(just_check) return true;
 
 	state = STATE_QUEUED;
 	assert(rq != 0);
-	log_dma.info("request %p enqueued", this);
+	log_dma.debug("request %p enqueued", this);
 
 	// once we're enqueued, we may be deleted at any time, so no more
 	//  references
@@ -4118,6 +4140,11 @@ namespace LegionRuntime {
     template<int DIM>
     void FillRequest::perform_dma_rect(MemoryImpl *mem_impl)
     {
+      typename Arrays::Rect<DIM> rect = domain.get_rect<DIM>();
+      // empty rectangles are easy to fill...
+      if(rect.volume() == 0)
+	return;
+
       RegionInstanceImpl *inst_impl = get_runtime()->get_instance_impl(dst.inst);
       off_t field_start=0; int field_size=0;
       find_field_start(inst_impl->metadata.field_sizes, dst.offset,
@@ -4125,7 +4152,7 @@ namespace LegionRuntime {
       assert(field_size <= (int)fill_size);
       typename Arrays::Mapping<DIM, 1> *dst_linearization = 
         inst_impl->metadata.linearization.get_mapping<DIM>();
-      typename Arrays::Rect<DIM> rect = domain.get_rect<DIM>();
+
       int fill_elmts = 1;
       // Optimize our buffer for the target instance
       size_t fill_elmts_size = optimize_fill_buffer(inst_impl, fill_elmts);
@@ -4485,10 +4512,10 @@ namespace Realm {
   					     wait_on, ev, priority, requests);
             // ask which node should perform the copy
             int dma_node = select_dma_node(mp.first, mp.second, redop_id, red_fold);
-            log_dma.info("copy: srcmem=" IDFMT " dstmem=" IDFMT " node=%d", mp.first.id, mp.second.id, dma_node);
+            log_dma.debug("copy: srcmem=" IDFMT " dstmem=" IDFMT " node=%d", mp.first.id, mp.second.id, dma_node);
 
             if(((unsigned)dma_node) == gasnet_mynode()) {
-              log_dma.info("performing serdez on local node");
+              log_dma.debug("performing serdez on local node");
 	      Realm::get_runtime()->optable.add_local_operation(ev, r);
               r->check_readiness(false, dma_queue);
               finish_events.insert(ev);
@@ -4505,7 +4532,7 @@ namespace Realm {
 
               r->serialize(msgdata);
 
-              log_dma.info("performing serdez on remote node (%d), event=" IDFMT "/%d", dma_node, args.after_copy.id, args.after_copy.gen);
+              log_dma.debug("performing serdez on remote node (%d), event=" IDFMT "/%d", dma_node, args.after_copy.id, args.after_copy.gen);
 	      get_runtime()->optable.add_remote_operation(ev, dma_node);
               RemoteCopyMessage::request(dma_node, args, msgdata, msglen, PAYLOAD_FREE);
 
@@ -4545,7 +4572,7 @@ namespace Realm {
 	assert(src_it == srcs.end());
 	assert(dst_it == dsts.end());
 
-	log_dma.info("copy: %zd distinct src/dst mem pairs, is=" IDFMT "", oas_by_mem.size(), is_id);
+	log_dma.debug("copy: %zd distinct src/dst mem pairs, is=" IDFMT "", oas_by_mem.size(), is_id);
 
 	for(OASByMem::const_iterator it = oas_by_mem.begin(); it != oas_by_mem.end(); it++) {
 	  Memory src_mem = it->first.first;
@@ -4573,10 +4600,10 @@ namespace Realm {
 
 	  // ask which node should perform the copy
 	  int dma_node = select_dma_node(src_mem, dst_mem, redop_id, red_fold);
-	  log_dma.info("copy: srcmem=" IDFMT " dstmem=" IDFMT " node=%d", src_mem.id, dst_mem.id, dma_node);
+	  log_dma.debug("copy: srcmem=" IDFMT " dstmem=" IDFMT " node=%d", src_mem.id, dst_mem.id, dma_node);
 	  
 	  if(((unsigned)dma_node) == gasnet_mynode()) {
-	    log_dma.info("performing copy on local node");
+	    log_dma.debug("performing copy on local node");
 
 	    get_runtime()->optable.add_local_operation(ev, r);
 	  
@@ -4596,7 +4623,7 @@ namespace Realm {
 
             r->serialize(msgdata);
 
-	    log_dma.info("performing copy on remote node (%d), event=" IDFMT "/%d", dma_node, args.after_copy.id, args.after_copy.gen);
+	    log_dma.debug("performing copy on remote node (%d), event=" IDFMT "/%d", dma_node, args.after_copy.id, args.after_copy.gen);
 	    get_runtime()->optable.add_remote_operation(ev, dma_node);
 	    RemoteCopyMessage::request(dma_node, args, msgdata, msglen, PAYLOAD_FREE);
 	  
@@ -4645,7 +4672,7 @@ namespace Realm {
 					     0 /*priority*/, requests);
 
 	if(((unsigned)src_node) == gasnet_mynode()) {
-	  log_dma.info("performing reduction on local node");
+	  log_dma.debug("performing reduction on local node");
 
 	  get_runtime()->optable.add_local_operation(ev, r);
 	  
@@ -4662,7 +4689,7 @@ namespace Realm {
           void *msgdata = malloc(msglen);
           r->serialize(msgdata);
 
-	  log_dma.info("performing reduction on remote node (%d), event=" IDFMT "/%d",
+	  log_dma.debug("performing reduction on remote node (%d), event=" IDFMT "/%d",
 		       src_node, args.after_copy.id, args.after_copy.gen);
 	  get_runtime()->optable.add_remote_operation(ev, src_node);
 	  RemoteCopyMessage::request(src_node, args, msgdata, msglen, PAYLOAD_FREE);

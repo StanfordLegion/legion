@@ -872,7 +872,7 @@ namespace Realm {
       update_worker_count(cfg_num_host_threads, cfg_num_host_threads);
 
       ThreadLaunchParameters tlp;
-      tlp.set_stack_size(4096);  // really small stack is fine here
+      tlp.set_stack_size(32768);  // really small stack is fine here (4KB is too small)
 
       host_startups_remaining = cfg_num_host_threads;
 

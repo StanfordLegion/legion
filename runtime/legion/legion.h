@@ -1292,6 +1292,38 @@ namespace LegionRuntime {
       MappingTagID                    tag;
     };
 
+    /**
+     * \struct FillLauncher
+     * Fill launchers are objects that describe the parameters
+     * for issuing a fill operation.
+     * @see Runtime
+     */
+    struct FillLauncher {
+    public:
+      FillLauncher(void);
+      FillLauncher(LogicalRegion handle, LogicalRegion parent,
+                   TaskArgument arg, Predicate pred = Predicate::TRUE_PRED);
+      FillLauncher(LogicalRegion handle, LogicalRegion parent,
+                   Future f, Predicate pred = Predicate::TRUE_PRED);
+    public:
+      inline void set_argument(TaskArgument arg);
+      inline void set_future(Future f);
+      inline void add_field(FieldID fid);
+      inline void add_grant(Grant g);
+      inline void add_wait_barrier(PhaseBarrier bar);
+      inline void add_arrival_barrier(PhaseBarrier bar);
+    public:
+      LogicalRegion                   handle;
+      LogicalRegion                   parent;
+      TaskArgument                    argument;
+      Future                          future;
+      Predicate                       predicate;
+      std::set<FieldID>               fields;
+      std::vector<Grant>              grants;
+      std::vector<PhaseBarrier>       wait_barriers;
+      std::vector<PhaseBarrier>       arrive_barriers;
+    };
+
     //==========================================================================
     //                          Task Variant Registrars 
     //==========================================================================
@@ -1350,6 +1382,9 @@ namespace LegionRuntime {
       TaskVariantRegistrar(TaskID task_id, bool global = true,
                            GeneratorContext ctx = NULL,
                            const char *variant_name = NULL);
+      TaskVariantRegistrar(TaskID task_id, const char *variant_name,
+			   bool global = true,
+                           GeneratorContext ctx = NULL);
     public: // Add execution constraints
       inline TaskVariantRegistrar& 
         add_constraint(const ISAConstraint &constraint);
@@ -4467,6 +4502,14 @@ namespace LegionRuntime {
       void fill_fields(Context ctx, LogicalRegion handle, LogicalRegion parent,
                        const std::set<FieldID> &fields,
                        Future f, Predicate pred = Predicate::TRUE_PRED);
+
+      /**
+       * Perform a fill operation using a launcher which specifies
+       * all of the parameters of the launch.
+       * @param ctx enclosing task context
+       * @param launcher the launcher that describes the fill operation
+       */
+      void fill_fields(Context ctx, const FillLauncher &launcher);
     public:
       //------------------------------------------------------------------------
       // File Operations
@@ -5130,9 +5173,14 @@ namespace LegionRuntime {
        * @param tag semantic tag
        * @param result pointer to assign to the semantic buffer
        * @param size where to write the size of the semantic buffer
+       * @param can_fail query allowed to fail
+       * @param wait_until_ready wait indefinitely for the tag
+       * @return true if the query succeeds
        */
-      void retrieve_semantic_information(TaskID task_id, SemanticTag tag,
-                                         const void *&result, size_t &size);
+      bool retrieve_semantic_information(TaskID task_id, SemanticTag tag,
+                                         const void *&result, size_t &size,
+                                         bool can_fail = false,
+                                         bool wait_until_ready = false);
 
       /**
        * Retrieve semantic information for an index space
@@ -5140,9 +5188,14 @@ namespace LegionRuntime {
        * @param tag semantic tag
        * @param result pointer to assign to the semantic buffer
        * @param size where to write the size of the semantic buffer
+       * @param can_fail query allowed to fail
+       * @param wait_until_ready wait indefinitely for the tag
+       * @return true if the query succeeds
        */
-      void retrieve_semantic_information(IndexSpace handle, SemanticTag tag,
-                                         const void *&result, size_t &size);
+      bool retrieve_semantic_information(IndexSpace handle, SemanticTag tag,
+                                         const void *&result, size_t &size,
+                                         bool can_fail = false,
+                                         bool wait_until_ready = false);
 
       /**
        * Retrieve semantic information for an index partition 
@@ -5150,9 +5203,14 @@ namespace LegionRuntime {
        * @param tag semantic tag
        * @param result pointer to assign to the semantic buffer
        * @param size where to write the size of the semantic buffer
+       * @param can_fail query allowed to fail
+       * @param wait_until_ready wait indefinitely for the tag
+       * @return true if the query succeeds
        */
-      void retrieve_semantic_information(IndexPartition handle, SemanticTag tag,
-                                         const void *&result, size_t &size);
+      bool retrieve_semantic_information(IndexPartition handle, SemanticTag tag,
+                                         const void *&result, size_t &size,
+                                         bool can_fail = false,
+                                         bool wait_until_ready = false);
 
       /**
        * Retrieve semantic information for a field space
@@ -5160,9 +5218,14 @@ namespace LegionRuntime {
        * @param tag semantic tag
        * @param result pointer to assign to the semantic buffer
        * @param size where to write the size of the semantic buffer
+       * @param can_fail query allowed to fail
+       * @param wait_until_ready wait indefinitely for the tag
+       * @return true if the query succeeds
        */
-      void retrieve_semantic_information(FieldSpace handle, SemanticTag tag,
-                                         const void *&result, size_t &size);
+      bool retrieve_semantic_information(FieldSpace handle, SemanticTag tag,
+                                         const void *&result, size_t &size,
+                                         bool can_fail = false,
+                                         bool wait_until_ready = false);
 
       /**
        * Retrieve semantic information for a specific field 
@@ -5171,10 +5234,15 @@ namespace LegionRuntime {
        * @param tag semantic tag
        * @param result pointer to assign to the semantic buffer
        * @param size where to write the size of the semantic buffer
+       * @param can_fail query allowed to fail
+       * @param wait_until_ready wait indefinitely for the tag
+       * @return true if the query succeeds
        */
-      void retrieve_semantic_information(FieldSpace handle, FieldID fid, 
+      bool retrieve_semantic_information(FieldSpace handle, FieldID fid, 
                                          SemanticTag tag,
-                                         const void *&result, size_t &size);
+                                         const void *&result, size_t &size,
+                                         bool can_fail = false,
+                                         bool wait_until_ready = false);
 
       /**
        * Retrieve semantic information for a logical region 
@@ -5182,9 +5250,14 @@ namespace LegionRuntime {
        * @param tag semantic tag
        * @param result pointer to assign to the semantic buffer
        * @param size where to write the size of the semantic buffer
+       * @param can_fail query allowed to fail
+       * @param wait_until_ready wait indefinitely for the tag
+       * @return true if the query succeeds
        */
-      void retrieve_semantic_information(LogicalRegion handle, SemanticTag tag,
-                                         const void *&result, size_t &size);
+      bool retrieve_semantic_information(LogicalRegion handle, SemanticTag tag,
+                                         const void *&result, size_t &size,
+                                         bool can_fail = false,
+                                         bool wait_until_ready = false);
 
       /**
        * Retrieve semantic information for a logical partition
@@ -5192,10 +5265,15 @@ namespace LegionRuntime {
        * @param tag semantic tag
        * @param result pointer to assign to the semantic buffer
        * @param size where to write the size of the semantic buffer
+       * @param can_fail query allowed to fail
+       * @param wait_until_ready wait indefinitely for the tag
+       * @return true if the query succeeds
        */
-      void retrieve_semantic_information(LogicalPartition handle, 
+      bool retrieve_semantic_information(LogicalPartition handle, 
                                          SemanticTag tag,
-                                         const void *&result, size_t &size);
+                                         const void *&result, size_t &size,
+                                         bool can_fail = false,
+                                         bool wait_until_ready = false);
 
       /**
        * Retrieve the name of a task

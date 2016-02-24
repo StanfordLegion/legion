@@ -664,6 +664,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     PhaseBarrier::PhaseBarrier(void)
+      : phase_barrier(Barrier::NO_BARRIER)
     //--------------------------------------------------------------------------
     {
     }
@@ -1451,6 +1452,27 @@ namespace LegionRuntime {
     }
 
     /////////////////////////////////////////////////////////////
+    // FillLauncher 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    FillLauncher::FillLauncher(LogicalRegion h, LogicalRegion p,
+                               TaskArgument arg, 
+                               Predicate pred /*= Predicate::TRUE_PRED*/)
+      : handle(h), parent(p), argument(arg), predicate(pred)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    FillLauncher::FillLauncher(LogicalRegion h, LogicalRegion p, Future f,
+                               Predicate pred /*= Predicate::TRUE_PRED*/)
+      : handle(h), parent(p), future(f), predicate(pred)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    /////////////////////////////////////////////////////////////
     // MustEpochLauncher 
     /////////////////////////////////////////////////////////////
 
@@ -1500,6 +1522,18 @@ namespace LegionRuntime {
                                                const char *name/*= NULL*/)
       : task_id(tid), generator(ctx), global_registration(global), 
         task_variant_name(name), leaf_variant(false), 
+        inner_variant(false), idempotent_variant(false)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    TaskVariantRegistrar::TaskVariantRegistrar(TaskID task_id,
+					       const char *variant_name,
+					       bool global/*=true*/,
+					       GeneratorContext ctx/*=NULL*/)
+      : task_id(task_id), generator(ctx), global_registration(global), 
+        task_variant_name(variant_name), leaf_variant(false), 
         inner_variant(false), idempotent_variant(false)
     //--------------------------------------------------------------------------
     {
@@ -3092,6 +3126,13 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::fill_fields(Context ctx, const FillLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      runtime->fill_fields(ctx, launcher);
+    }
+
+    //--------------------------------------------------------------------------
     PhysicalRegion Runtime::attach_hdf5(Context ctx, 
                                                  const char *file_name,
                                                  LogicalRegion handle,
@@ -3579,72 +3620,92 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::retrieve_semantic_information(TaskID task_id, SemanticTag tag,
-                                              const void *&result, size_t &size)
+    bool Runtime::retrieve_semantic_information(TaskID task_id, SemanticTag tag,
+                                              const void *&result, size_t &size,
+                                                bool can_fail, bool wait_until)
     //--------------------------------------------------------------------------
     {
-      runtime->retrieve_semantic_information(task_id, tag, result, size);
+      return runtime->retrieve_semantic_information(task_id, tag, result, size,
+                                                    can_fail, wait_until);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::retrieve_semantic_information(IndexSpace handle,
+    bool Runtime::retrieve_semantic_information(IndexSpace handle,
                                                          SemanticTag tag,
                                                          const void *&result,
-                                                         size_t &size)
+                                                         size_t &size,
+                                                         bool can_fail,
+                                                         bool wait_until)
     //--------------------------------------------------------------------------
     {
-      runtime->retrieve_semantic_information(handle, tag, result, size);
+      return runtime->retrieve_semantic_information(handle, tag, result, size,
+                                                    can_fail, wait_until);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::retrieve_semantic_information(IndexPartition handle,
+    bool Runtime::retrieve_semantic_information(IndexPartition handle,
                                                          SemanticTag tag,
                                                          const void *&result,
-                                                         size_t &size)
+                                                         size_t &size,
+                                                         bool can_fail,
+                                                         bool wait_until)
     //--------------------------------------------------------------------------
     {
-      runtime->retrieve_semantic_information(handle, tag, result, size);
+      return runtime->retrieve_semantic_information(handle, tag, result, size,
+                                                    can_fail, wait_until);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::retrieve_semantic_information(FieldSpace handle,
+    bool Runtime::retrieve_semantic_information(FieldSpace handle,
                                                          SemanticTag tag,
                                                          const void *&result,
-                                                         size_t &size)
+                                                         size_t &size,
+                                                         bool can_fail,
+                                                         bool wait_until)
     //--------------------------------------------------------------------------
     {
-      runtime->retrieve_semantic_information(handle, tag, result, size);
+      return runtime->retrieve_semantic_information(handle, tag, result, size,
+                                                    can_fail, wait_until);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::retrieve_semantic_information(FieldSpace handle,
+    bool Runtime::retrieve_semantic_information(FieldSpace handle,
                                                          FieldID fid,
                                                          SemanticTag tag,
                                                          const void *&result,
-                                                         size_t &size)
+                                                         size_t &size,
+                                                         bool can_fail,
+                                                         bool wait_until)
     //--------------------------------------------------------------------------
     {
-      runtime->retrieve_semantic_information(handle, fid, tag, result, size);
+      return runtime->retrieve_semantic_information(handle, fid, tag, result, 
+                                                    size, can_fail, wait_until);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::retrieve_semantic_information(LogicalRegion handle,
+    bool Runtime::retrieve_semantic_information(LogicalRegion handle,
                                                          SemanticTag tag,
                                                          const void *&result,
-                                                         size_t &size)
+                                                         size_t &size,
+                                                         bool can_fail,
+                                                         bool wait_until)
     //--------------------------------------------------------------------------
     {
-      runtime->retrieve_semantic_information(handle, tag, result, size);
+      return runtime->retrieve_semantic_information(handle, tag, result, size,
+                                                    can_fail, wait_until);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::retrieve_semantic_information(LogicalPartition part,
+    bool Runtime::retrieve_semantic_information(LogicalPartition part,
                                                          SemanticTag tag,
                                                          const void *&result,
-                                                         size_t &size)
+                                                         size_t &size,
+                                                         bool can_fail,
+                                                         bool wait_until)
     //--------------------------------------------------------------------------
     {
-      runtime->retrieve_semantic_information(part, tag, result, size);
+      return runtime->retrieve_semantic_information(part, tag, result, size,
+                                                    can_fail, wait_until);
     }
 
     //--------------------------------------------------------------------------
@@ -3653,7 +3714,7 @@ namespace LegionRuntime {
     {
       const void* dummy_ptr; size_t dummy_size;
       Runtime::retrieve_semantic_information(task_id, NAME_SEMANTIC_TAG,
-                                             dummy_ptr, dummy_size);
+                                         dummy_ptr, dummy_size, false, false);
       result = reinterpret_cast<const char*>(dummy_ptr);
     }
 
@@ -3663,7 +3724,7 @@ namespace LegionRuntime {
     {
       const void* dummy_ptr; size_t dummy_size;
       Runtime::retrieve_semantic_information(handle,
-          NAME_SEMANTIC_TAG, dummy_ptr, dummy_size);
+          NAME_SEMANTIC_TAG, dummy_ptr, dummy_size, false, false);
       result = reinterpret_cast<const char*>(dummy_ptr);
     }
 
@@ -3674,7 +3735,7 @@ namespace LegionRuntime {
     {
       const void* dummy_ptr; size_t dummy_size;
       Runtime::retrieve_semantic_information(handle,
-          NAME_SEMANTIC_TAG, dummy_ptr, dummy_size);
+          NAME_SEMANTIC_TAG, dummy_ptr, dummy_size, false, false);
       result = reinterpret_cast<const char*>(dummy_ptr);
     }
 
@@ -3684,7 +3745,7 @@ namespace LegionRuntime {
     {
       const void* dummy_ptr; size_t dummy_size;
       Runtime::retrieve_semantic_information(handle,
-          NAME_SEMANTIC_TAG, dummy_ptr, dummy_size);
+          NAME_SEMANTIC_TAG, dummy_ptr, dummy_size, false, false);
       result = reinterpret_cast<const char*>(dummy_ptr);
     }
 
@@ -3696,7 +3757,7 @@ namespace LegionRuntime {
     {
       const void* dummy_ptr; size_t dummy_size;
       Runtime::retrieve_semantic_information(handle, fid,
-          NAME_SEMANTIC_TAG, dummy_ptr, dummy_size);
+          NAME_SEMANTIC_TAG, dummy_ptr, dummy_size, false, false);
       result = reinterpret_cast<const char*>(dummy_ptr);
     }
 
@@ -3707,7 +3768,7 @@ namespace LegionRuntime {
     {
       const void* dummy_ptr; size_t dummy_size;
       Runtime::retrieve_semantic_information(handle,
-          NAME_SEMANTIC_TAG, dummy_ptr, dummy_size);
+          NAME_SEMANTIC_TAG, dummy_ptr, dummy_size, false, false);
       result = reinterpret_cast<const char*>(dummy_ptr);
     }
 
@@ -3718,7 +3779,7 @@ namespace LegionRuntime {
     {
       const void* dummy_ptr; size_t dummy_size;
       Runtime::retrieve_semantic_information(part,
-          NAME_SEMANTIC_TAG, dummy_ptr, dummy_size);
+          NAME_SEMANTIC_TAG, dummy_ptr, dummy_size, false, false);
       result = reinterpret_cast<const char*>(dummy_ptr);
     }
 

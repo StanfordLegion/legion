@@ -1748,6 +1748,23 @@ legion_logical_partition_get_logical_subregion_by_color(
 }
 
 legion_logical_region_t
+legion_logical_partition_get_logical_subregion_by_tree(
+  legion_runtime_t runtime_,
+  legion_context_t ctx_,
+  legion_index_space_t handle_,
+  legion_field_space_t fspace_,
+  legion_region_tree_id_t tid)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_);
+  IndexSpace handle = CObjectWrapper::unwrap(handle_);
+  FieldSpace fspace = CObjectWrapper::unwrap(fspace_);
+
+  LogicalRegion r = runtime->get_logical_subregion_by_tree(ctx, handle, fspace, tid);
+  return CObjectWrapper::wrap(r);
+}
+
+legion_logical_region_t
 legion_logical_partition_get_parent_logical_region(
   legion_runtime_t runtime_,
   legion_context_t ctx_,
@@ -2500,6 +2517,16 @@ legion_task_launcher_add_flags(legion_task_launcher_t launcher_,
   launcher->region_requirements[idx].add_flags(flags);
 }
 
+void
+legion_task_launcher_intersect_flags(legion_task_launcher_t launcher_,
+                                     unsigned idx,
+                                     enum legion_region_flags_t flags)
+{
+  TaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+
+  launcher->region_requirements[idx].flags &= flags;
+}
+
 unsigned
 legion_task_launcher_add_index_requirement(
   legion_task_launcher_t launcher_,
@@ -2707,6 +2734,16 @@ legion_index_launcher_add_flags(legion_index_launcher_t launcher_,
   IndexLauncher *launcher = CObjectWrapper::unwrap(launcher_);
 
   launcher->region_requirements[idx].add_flags(flags);
+}
+
+void
+legion_index_launcher_intersect_flags(legion_index_launcher_t launcher_,
+                                      unsigned idx,
+                                      enum legion_region_flags_t flags)
+{
+  IndexLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+
+  launcher->region_requirements[idx].flags &= flags;
 }
 
 unsigned
@@ -3199,6 +3236,25 @@ legion_physical_region_get_logical_region(legion_physical_region_t handle_)
 
   LogicalRegion region = handle->get_logical_region();
   return CObjectWrapper::wrap(region);
+}
+
+size_t
+legion_physical_region_get_field_count(legion_physical_region_t handle_)
+{
+  PhysicalRegion *handle = CObjectWrapper::unwrap(handle_);
+  std::vector<FieldID> fields;
+  handle->get_fields(fields);
+  return fields.size();
+}
+
+legion_field_id_t
+legion_physical_region_get_field_id(legion_physical_region_t handle_, size_t index)
+{
+  PhysicalRegion *handle = CObjectWrapper::unwrap(handle_);
+  std::vector<FieldID> fields;
+  handle->get_fields(fields);
+  assert((index >= 0) && (index < fields.size()));
+  return fields[index];
 }
 
 legion_accessor_generic_t

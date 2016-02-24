@@ -517,8 +517,11 @@ namespace Realm {
           }
 #endif
 	  // case 1: we own the lock
-	  // can we grant it?
-	  if((count == ZERO_COUNT) || ((mode == new_mode) && (mode != MODE_EXCL))) {
+	  // can we grant it?  (don't if there is a higher priority waiter)
+	  if((count == ZERO_COUNT) ||
+	     ((mode == new_mode) &&
+	      (mode != MODE_EXCL) &&
+	      (local_waiters.empty() || (local_waiters.begin()->first > mode)))) {
 	    mode = new_mode;
 	    count++;
 	    log_reservation.spew("count ++(1) [%p]=%d", &count, count);

@@ -109,9 +109,9 @@ namespace Realm {
     LoggerMessage(void);  // default constructor makes an inactive message
     LoggerMessage(Logger *_logger, bool _active, Logger::LoggingLevel _level);
 
-    LoggerMessage(const LoggerMessage& to_copy);
 
   public:
+    LoggerMessage(const LoggerMessage& to_copy);
     ~LoggerMessage(void);
 
     template <typename T>
@@ -119,6 +119,8 @@ namespace Realm {
 
     // vprintf-style
     LoggerMessage& vprintf(const char *fmt, va_list ap);
+
+    bool is_active(void) const;
 
   protected:
     Logger *logger;
