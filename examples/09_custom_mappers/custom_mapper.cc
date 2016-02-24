@@ -205,7 +205,7 @@ AdversarialMapper::AdversarialMapper(Machine m,
   // only want to print out this information one time, so only
   // do it if we are the mapper for the first processor in the
   // list of all processors in the machine.
-  if ((*(all_procs.begin())) == local_proc)
+  if (all_procs.begin()->id + 1 == local_proc.id)
   {
     // Print out how many processors there are and each
     // of their kinds.
@@ -300,6 +300,20 @@ AdversarialMapper::AdversarialMapper(Machine m,
         case Memory::DISK_MEM:
           {
             printf("  Disk Memory ID %x has %ld KB\n",
+                    it->id, memory_size_in_kb);
+            break;
+          }
+        // HDF framebuffer memory for a single GPU
+        case Memory::HDF_MEM:
+          {
+            printf("  HDF Memory ID %x has %ld KB\n",
+                    it->id, memory_size_in_kb);
+            break;
+          }
+        // File memory on a single node
+        case Memory::FILE_MEM:
+          {
+            printf("  File Memory ID %x has %ld KB\n",
                     it->id, memory_size_in_kb);
             break;
           }
