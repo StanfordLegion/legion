@@ -5131,8 +5131,8 @@ namespace LegionRuntime {
         unique_field_id((unique == 0) ? runtime_stride : unique),
         unique_variant_id((unique == 0) ? runtime_stride : unique),
         unique_constraint_id((unique == 0) ? runtime_stride : unique),
-        unique_task_id(generate_static_task_id(false/*check*/)+unique),
-        unique_mapper_id(generate_static_mapper_id(false/*check*/)+unique),
+        unique_task_id(get_current_static_task_id()+unique),
+        unique_mapper_id(get_current_static_mapper_id()+unique),
         available_lock(Reservation::create_reservation()), total_contexts(0),
         group_lock(Reservation::create_reservation()),
         distributed_id_lock(Reservation::create_reservation()),
@@ -11240,11 +11240,19 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ MapperID Internal::generate_static_mapper_id(bool do_check)
+    /*static*/ MapperID& Internal::get_current_static_mapper_id(void)
     //--------------------------------------------------------------------------
     {
-      static MapperID next_mapper = MAX_APPLICATION_MAPPER_ID;
-      if (do_check && runtime_started)
+      static MapperID current_mapper_id = MAX_APPLICATION_MAPPER_ID;
+      return current_mapper_id;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ MapperID Internal::generate_static_mapper_id(void)
+    //--------------------------------------------------------------------------
+    {
+      MapperID &next_mapper = get_current_static_mapper_id(); 
+      if (runtime_started)
       {
         log_run.error("Illegal call to 'generate_static_mapper_id' after "
                       "the runtime has been started!");
@@ -11261,7 +11269,7 @@ namespace LegionRuntime {
                                       Processor proc)
     //--------------------------------------------------------------------------
     {
-      if (map_id >= MAX_APPLICATION_MAPPER_ID)
+      if (map_id >= get_current_static_mapper_id())
       {
         log_run.error("Error registering mapper with ID %d. Exceeds the "
                       "statically set bounds on application mapper IDs of %d. "
@@ -17290,11 +17298,19 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ TaskID Internal::generate_static_task_id(bool do_check)
+    /*static*/ TaskID& Internal::get_current_static_task_id(void)
     //--------------------------------------------------------------------------
     {
-      static TaskID next_task = MAX_APPLICATION_TASK_ID;
-      if (do_check && runtime_started)
+      static TaskID current_task_id = MAX_APPLICATION_TASK_ID;
+      return current_task_id;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ TaskID Internal::generate_static_task_id(void)
+    //--------------------------------------------------------------------------
+    {
+      TaskID &next_task = get_current_static_task_id(); 
+      if (runtime_started)
       {
         log_run.error("Illegal call to 'generate_static_task_id' after "
                       "the runtime has been started!");
@@ -17324,7 +17340,7 @@ namespace LegionRuntime {
 #endif
         exit(ERROR_STATIC_CALL_POST_RUNTIME_START);
       }
-      if (check_id && (registrar.task_id >= MAX_APPLICATION_TASK_ID))
+      if (check_id && (registrar.task_id >= get_current_static_task_id()))
       {
         log_run.error("Error preregistering task with ID %d. Exceeds the "
                       "statically set bounds on application task IDs of %d. "
