@@ -31,7 +31,7 @@
 #include "custom_serdez.h"
 
 #ifdef REALM_USE_LEGION_LAYOUT_CONSTRAINTS
-#include "legion_constraint.h"
+#include "legion_realm.h" // forward declarations for legion types
 #endif
 
 namespace Realm {
@@ -961,8 +961,8 @@ namespace Realm {
       // Note that the constraints are not const so that Realm can add
       // to the set with additional constraints describing the exact 
       // instance that was created.
-      RegionInstance create_instance(Memory memory, const std::vector<
-                                          std::pair<FieldID,size_t> > &fields,
+      RegionInstance create_instance(Memory memory, 
+            const std::vector<std::pair<unsigned/*FieldID*/,size_t> > &fields,
                                      Legion::LayoutConstraintSet &constraints,
                                      const ProfilingRequestSet &reqs,
                                      ReductionOpID redop_id = 0) const;

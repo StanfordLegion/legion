@@ -13,19 +13,12 @@
  * limitations under the License.
  */
 
-
 #ifndef __LEGION_TYPES_H__
 #define __LEGION_TYPES_H__
 
 /**
  * \file legion_types.h
  */
-
-#include "legion_config.h"
-
-// Make sure we have the appropriate defines in place for including realm
-#define REALM_USE_LEGION_LAYOUT_CONSTRAINTS
-#include "realm.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -40,6 +33,12 @@
 #include <list>
 #include <deque>
 #include <vector>
+
+#include "legion_config.h"
+
+// Make sure we have the appropriate defines in place for including realm
+#define REALM_USE_LEGION_LAYOUT_CONSTRAINTS
+#include "realm.h"
 
 namespace BindingLib { class Utility; } // BindingLib namespace
 
@@ -200,6 +199,11 @@ namespace Legion {
       OPEN_READ_WRITE     = 2, // unknown dirty information below
       OPEN_SINGLE_REDUCE  = 3, // only one open child with reductions below
       OPEN_MULTI_REDUCE   = 4, // multiple open children with same reduction
+    }; 
+
+    // redop IDs - none used in HLR right now, but 0 isn't allowed
+    enum {
+      REDOP_ID_AVAILABLE    = 1,
     };
 
     // Runtime task numbering 
@@ -211,11 +215,6 @@ namespace Legion {
       HLR_MAPPER_PROFILING_ID = Realm::Processor::TASK_ID_FIRST_AVAILABLE+2,
       HLR_LAUNCH_TOP_LEVEL_ID = Realm::Processor::TASK_ID_FIRST_AVAILABLE+3,
       TASK_ID_AVAILABLE       = Realm::Processor::TASK_ID_FIRST_AVAILABLE+4,
-    };
-
-    // redop IDs - none used in HLR right now, but 0 isn't allowed
-    enum {
-      REDOP_ID_AVAILABLE    = 1,
     };
 
     // Enumeration of high-level runtime tasks
@@ -764,72 +763,6 @@ namespace Legion {
     extern LegionRuntime::Logger::Category log_spy;              \
     extern LegionRuntime::Logger::Category log_shutdown;
 
-    // Timing events
-    enum {
-#ifdef PRECISE_HIGH_LEVEL_TIMING
-      TIME_HIGH_LEVEL_CREATE_REGION = 100,
-      TIME_HIGH_LEVEL_DESTROY_REGION = 101,
-      TIME_HIGH_LEVEL_SMASH_REGION = 102
-      TIME_HIGH_LEVEL_JOIN_REGION = 103
-      TIME_HIGH_LEVEL_CREATE_PARTITION = 104,
-      TIME_HIGH_LEVEL_DESTROY_PARTITION = 105,
-      TIME_HIGH_LEVEL_ENQUEUE_TASKS = 106,
-      TIME_HIGH_LEVEL_STEAL_REQUEST = 107,
-      TIME_HIGH_LEVEL_CHILDREN_MAPPED = 108,
-      TIME_HIGH_LEVEL_FINISH_TASK = 109,
-      TIME_HIGH_LEVEL_NOTIFY_START = 110,
-      TIME_HIGH_LEVEL_NOTIFY_MAPPED = 111,
-      TIME_HIGH_LEVEL_NOTIFY_FINISH = 112,
-      TIME_HIGH_LEVEL_EXECUTE_TASK = 113,
-      TIME_HIGH_LEVEL_SCHEDULER = 114,
-      TIME_HIGH_LEVEL_ISSUE_STEAL = 115,
-      TIME_HIGH_LEVEL_GET_SUBREGION = 116,
-      TIME_HIGH_LEVEL_INLINE_MAP = 117,
-      TIME_HIGH_LEVEL_CREATE_INDEX_SPACE = 118,
-      TIME_HIGH_LEVEL_DESTROY_INDEX_SPACE = 119,
-      TIME_HIGH_LEVEL_CREATE_INDEX_PARTITION = 120,
-      TIME_HIGH_LEVEL_DESTROY_INDEX_PARTITION = 121,
-      TIME_HIGH_LEVEL_GET_INDEX_PARTITION = 122,
-      TIME_HIGH_LEVEL_GET_INDEX_SUBSPACE = 123,
-      TIME_HIGH_LEVEL_CREATE_FIELD_SPACE = 124,
-      TIME_HIGH_LEVEL_DESTROY_FIELD_SPACE = 125,
-      TIME_HIGH_LEVEL_GET_LOGICAL_PARTITION = 126,
-      TIME_HIGH_LEVEL_GET_LOGICAL_SUBREGION = 127,
-      TIME_HIGH_LEVEL_ALLOCATE_FIELD = 128,
-      TIME_HIGH_LEVEL_FREE_FIELD = 129,
-#else
-      TIME_HIGH_LEVEL_CREATE_REGION = TIME_HIGH_LEVEL, 
-      TIME_HIGH_LEVEL_DESTROY_REGION = TIME_HIGH_LEVEL, 
-      TIME_HIGH_LEVEL_SMASH_REGION = TIME_HIGH_LEVEL, 
-      TIME_HIGH_LEVEL_JOIN_REGION = TIME_HIGH_LEVEL, 
-      TIME_HIGH_LEVEL_CREATE_PARTITION = TIME_HIGH_LEVEL, 
-      TIME_HIGH_LEVEL_DESTROY_PARTITION = TIME_HIGH_LEVEL, 
-      TIME_HIGH_LEVEL_ENQUEUE_TASKS = TIME_HIGH_LEVEL, 
-      TIME_HIGH_LEVEL_STEAL_REQUEST = TIME_HIGH_LEVEL, 
-      TIME_HIGH_LEVEL_CHILDREN_MAPPED = TIME_HIGH_LEVEL, 
-      TIME_HIGH_LEVEL_FINISH_TASK = TIME_HIGH_LEVEL, 
-      TIME_HIGH_LEVEL_NOTIFY_START = TIME_HIGH_LEVEL, 
-      TIME_HIGH_LEVEL_NOTIFY_MAPPED = TIME_HIGH_LEVEL, 
-      TIME_HIGH_LEVEL_NOTIFY_FINISH = TIME_HIGH_LEVEL, 
-      TIME_HIGH_LEVEL_EXECUTE_TASK = TIME_HIGH_LEVEL, 
-      TIME_HIGH_LEVEL_SCHEDULER = TIME_HIGH_LEVEL,
-      TIME_HIGH_LEVEL_ISSUE_STEAL = TIME_HIGH_LEVEL, 
-      TIME_HIGH_LEVEL_GET_SUBREGION = TIME_HIGH_LEVEL, 
-      TIME_HIGH_LEVEL_INLINE_MAP = TIME_HIGH_LEVEL, 
-      TIME_HIGH_LEVEL_CREATE_INDEX_SPACE = TIME_HIGH_LEVEL, 
-      TIME_HIGH_LEVEL_DESTROY_INDEX_SPACE = TIME_HIGH_LEVEL, 
-      TIME_HIGH_LEVEL_CREATE_INDEX_PARTITION = TIME_HIGH_LEVEL, 
-      TIME_HIGH_LEVEL_DESTROY_INDEX_PARTITION = TIME_HIGH_LEVEL, 
-      TIME_HIGH_LEVEL_GET_INDEX_PARTITION = TIME_HIGH_LEVEL, 
-      TIME_HIGH_LEVEL_GET_INDEX_SUBSPACE = TIME_HIGH_LEVEL, 
-      TIME_HIGH_LEVEL_CREATE_FIELD_SPACE = TIME_HIGH_LEVEL, 
-      TIME_HIGH_LEVEL_DESTROY_FIELD_SPACE = TIME_HIGH_LEVEL, 
-      TIME_HIGH_LEVEL_GET_LOGICAL_PARTITION = TIME_HIGH_LEVEL, 
-      TIME_HIGH_LEVEL_GET_LOGICAL_SUBREGION = TIME_HIGH_LEVEL, 
-      TIME_HIGH_LEVEL_ALLOCATE_FIELD = TIME_HIGH_LEVEL, 
-      TIME_HIGH_LEVEL_FREE_FIELD = TIME_HIGH_LEVEL, 
-#endif
-    };
   }; // Internal namespace
 
   // Typedefs that are needed everywhere
@@ -921,7 +854,8 @@ namespace Legion {
     typedef Internal::InstanceManager* PhysicalInstanceImpl;
   };
 
-  namespace Internal {
+  namespace Internal { 
+
     // Pull some of the mapper types into the internal space
     typedef Mapping::Mapper Mapper;
     typedef Mapping::PhysicalInstance MappingInstance;
