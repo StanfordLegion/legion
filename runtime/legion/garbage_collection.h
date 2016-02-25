@@ -53,6 +53,7 @@ namespace Legion {
       REMOTE_CREATE_REF,
       INSTANCE_MAPPER_REF,
       APPLICATION_REF,
+      MAPPING_ACQUIRE_REF,
       LAST_SOURCE_REF,
     };
 
@@ -80,6 +81,7 @@ namespace Legion {
       "Initial Creation Reference",                 \
       "Remote Creation Reference",                  \
       "Application Reference",                      \
+      "Mapping Acquire Reference",                  \
     }
 
     extern LegionRuntime::Logger::Category log_garbage;

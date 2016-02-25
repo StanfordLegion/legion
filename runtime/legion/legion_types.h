@@ -417,9 +417,8 @@ namespace Legion {
       SEND_VERSION_STATE_INIT,
       SEND_VERSION_STATE_REQUEST,
       SEND_VERSION_STATE_RESPONSE,
-      SEND_INSTANCE_CREATION,
-      SEND_REDUCTION_CREATION,
-      SEND_CREATION_RESPONSE,
+      SEND_INSTANCE_REQUEST,
+      SEND_INSTANCE_RESPONSE,
       SEND_BACK_LOGICAL_STATE,
       SEND_VARIANT_REQUEST,
       SEND_VARIANT_RESPONSE,
@@ -511,9 +510,8 @@ namespace Legion {
         "Send Version State Init",                                    \
         "Send Version State Request",                                 \
         "Send Version State Response",                                \
-        "Send Instance Creation",                                     \
-        "Send Reduction Creation",                                    \
-        "Send Creation Response",                                     \
+        "Send Instance Request",                                      \
+        "Send Instance Response",                                     \
         "Send Back Logical State",                                    \
         "Send Task Variant Request",                                  \
         "Send Task Variant Response",                                 \
@@ -550,6 +548,7 @@ namespace Legion {
     class PredicateImpl;
     class MPILegionHandshakeImpl;
     class ProcessorManager;
+    class MemoryManager;
     class MessageManager;
     class GarbageCollectionEpoch;
     class TaskImpl;
@@ -690,6 +689,7 @@ namespace Legion {
     friend class Internal::PhysicalRegionImpl;              \
     friend class Internal::TaskImpl;                        \
     friend class Internal::ProcessorManager;                \
+    friend class Internal::MemoryManager;                   \
     friend class Internal::Operation;                       \
     friend class Internal::SpeculativeOp;                   \
     friend class Internal::MapOp;                           \
@@ -745,6 +745,7 @@ namespace Legion {
     friend class Internal::ListReductionManager;            \
     friend class Internal::FoldReductionManager;            \
     friend class Internal::TreeStateLogger;                 \
+    friend class Internal::MapperManager;                   \
     friend class BindingLib::Utility;                       \
     friend class CObjectWrapper;                  
 
@@ -798,6 +799,7 @@ namespace Legion {
   typedef std::map<Realm::ReductionOpID, SerdezRedopFns> SerdezRedopTable;
   typedef ::legion_address_space_t AddressSpace;
   typedef ::legion_task_priority_t TaskPriority;
+  typedef ::legion_garbage_collection_priority_t GCPriority;
   typedef ::legion_color_t Color;
   typedef ::legion_field_id_t FieldID;
   typedef ::legion_trace_id_t TraceID;
@@ -851,7 +853,7 @@ namespace Legion {
   // Anothing magical typedef
   namespace Mapping {
     typedef Internal::MappingCallInfo* MapperContext;
-    typedef Internal::InstanceManager* PhysicalInstanceImpl;
+    typedef Internal::PhysicalManager* PhysicalInstanceImpl;
   };
 
   namespace Internal { 

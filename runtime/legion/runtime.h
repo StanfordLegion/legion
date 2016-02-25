@@ -562,33 +562,92 @@ namespace Legion {
      */
     class MemoryManager {
     public:
+      enum RequestKind {
+        CREATE_INSTANCE_CONSTRAINTS,
+        CREATE_INSTANCE_LAYOUT,
+        CREATE_AND_FIND_CONSTRAINTS,
+        CREATE_AND_FIND_LAYOUT,
+        FIND_ONLY_CONSTRAINTS,
+        FIND_ONLY_LAYOUT,
+      };
+    public:
+      struct InstanceInfo {
+      public:
+        InstanceInfo(void)
+          : priority(0), instance_size(0) { }
+        InstanceInfo(size_t size, GCPriority p = 0)
+          : priority(p), instance_size(size) { }
+      public:
+        GCPriority priority;
+        size_t instance_size;
+        std::map<MapperID,GCPriority> mapper_priorities;
+      };
+    public:
       MemoryManager(Memory mem, Runtime *rt);
       MemoryManager(const MemoryManager &rhs);
       ~MemoryManager(void);
     public:
       MemoryManager& operator=(const MemoryManager &rhs);
     public:
-      // Update the manager with information about physical instances
       void allocate_physical_instance(PhysicalManager *manager);
       void free_physical_instance(PhysicalManager *manager);
+    public:
+      bool create_physical_instance(const LayoutConstraintSet &contraints,
+                                    LogicalRegion r, MappingInstance &result,
+                                    MapperID mapper_id, GCPriority priority);
+      bool create_physical_instance(LayoutConstraints *constraints,
+                                    LogicalRegion r, MappingInstance &result,
+                                    MapperID mapper_id, GCPriority priority);
+      bool find_or_create_physical_instance(
+                                    const LayoutConstraintSet &constraints,
+                                    LogicalRegion r, MappingInstance &result,
+                                    bool &created, MapperID mapper_id,
+                                    GCPriority priority);
+      bool find_or_create_physical_instance(
+                                    LayoutConstraints *constraints,
+                                    LogicalRegion r, MappingInstance &result,
+                                    bool &created, MapperID mapper_id,
+                                    GCPriority priority);
+      bool find_physical_instance(  const LayoutConstraintSet &constraints,
+                                    LogicalRegion r, MappingInstance &result);
+      bool find_physical_instance(  LayoutConstraints *constraints,
+                                    LogicalRegion r, MappingInstance &result);
+    public:
+      void process_instance_request(Deserializer &derez, AddressSpaceID source);
+      void process_instance_response(Deserializer &derez);
+    protected:
+      bool find_satisfying_instance(const LayoutConstraintSet &constraints,
+                                    LogicalRegion r, MappingInstance &result);
+      bool find_satisfying_instance(LayoutConstraints *constraints,
+                                    LogicalRegion r, MappingInstance &result);
+      bool find_persistent_instance(const LayoutConstraintSet &constraints,
+                                    LogicalRegion r, MappingInstance &result);
+      bool find_persistent_instance(LayoutConstraints *constraints,
+                                    LogicalRegion r, MappingInstance &result);
     protected:
       // The memory that we are managing
       const Memory memory;
+      // The owner address space
+      const AddressSpaceID owner_space;
+      // Is this the owner memory or not
+      const bool is_owner;
       // The capacity in bytes of this memory
       const size_t capacity;
       // The remaining capacity in this memory
       size_t remaining_capacity;
       // The runtime we are associate with
       Runtime *const runtime;
+    protected:
       // Reservation for controlling access to the data
       // structures in this memory manager
       Reservation manager_lock;
-      // Current set of physical instances and their sizes
-      LegionMap<InstanceManager*, size_t, 
+      // We maintain two lists of instances here
+      // A list of all instances we know are still allocated here
+      LegionMap<PhysicalManager*,InstanceInfo,
                 MEMORY_INSTANCES_ALLOC>::tracked physical_instances;
-      // Current set of reduction instances and their sizes
-      LegionMap<ReductionManager*, size_t,
-                MEMORY_REDUCTION_ALLOC>::tracked reduction_instances;
+      // A list of all the instances that eligible for collection
+      LegionSet<PhysicalManager*,
+                MEMORY_GARBAGE_ALLOC>::tracked collectable_instances;
     };
 
     /**
@@ -1525,7 +1584,8 @@ namespace Legion {
       void add_mapper(MapperID map_id, Mapper *mapper, Processor proc);
       void replace_default_mapper(Mapper *mapper, Processor proc);
       MapperManager* find_mapper(Processor target, MapperID map_id);
-      static MapperManager* wrap_mapper(Runtime *runtime, Mapper *mapper);
+      static MapperManager* wrap_mapper(Runtime *runtime, Mapper *mapper,
+                                        MapperID map_id);
     public:
       void register_projection_functor(ProjectionID pid,
                                        ProjectionFunctor *func);
@@ -1597,9 +1657,9 @@ namespace Legion {
                                      bool can_fail = false);
     public:
       // Memory manager functions
-      MemoryManager* find_memory(Memory mem);
-      void allocate_physical_instance(PhysicalManager *instance);
-      void free_physical_instance(PhysicalManager *instance);
+      MemoryManager* find_memory_manager(Memory mem);
+      void allocate_physical_instance(PhysicalManager *manager);
+      void free_physical_instance(PhysicalManager *manager);
       AddressSpaceID find_address_space(Memory handle) const;
     public:
       // Messaging functions
@@ -1712,11 +1772,8 @@ namespace Legion {
                                              Serializer &rez);
       void send_version_state_request(AddressSpaceID target, Serializer &rez);
       void send_version_state_response(AddressSpaceID target, Serializer &rez);
-      void send_remote_instance_creation_request(AddressSpaceID target,
-                                                 Serializer &rez);
-      void send_remote_reduction_creation_request(AddressSpaceID target,
-                                                  Serializer &rez);
-      void send_remote_creation_response(AddressSpaceID target,Serializer &rez);
+      void send_instance_request(AddressSpaceID target, Serializer &rez);
+      void send_instance_response(AddressSpaceID target, Serializer &rez);
       void send_back_logical_state(AddressSpaceID target, Serializer &rez);
       void send_variant_request(AddressSpaceID target, Serializer &rez);
       void send_variant_response(AddressSpaceID target, Serializer &rez);
@@ -1841,11 +1898,8 @@ namespace Legion {
       void handle_version_state_request(Deserializer &derez);
       void handle_version_state_response(Deserializer &derez,
                                          AddressSpaceID source);
-      void handle_remote_instance_creation(Deserializer &derez, 
-                                           AddressSpaceID source);
-      void handle_remote_reduction_creation(Deserializer &derez,
-                                            AddressSpaceID source);
-      void handle_remote_creation_response(Deserializer &derez);
+      void handle_instance_request(Deserializer &derez, AddressSpaceID source);
+      void handle_instance_response(Deserializer &derez);
       void handle_logical_state_return(Deserializer &derez,
                                        AddressSpaceID source);
       void handle_variant_request(Deserializer &derez, AddressSpaceID source);
@@ -1859,6 +1913,31 @@ namespace Legion {
       void handle_top_level_task_complete(Deserializer &derez);
       void handle_shutdown_notification(AddressSpaceID source);
       void handle_shutdown_response(Deserializer &derez, AddressSpaceID source);
+    public: // Calls to handle mapper requests
+      bool create_physical_instance(Memory target_memory,
+                                    const LayoutConstraintSet &constraints,
+                                    LogicalRegion r, MappingInstance &result,
+                                    MapperID mapper_id, GCPriority priority);
+      bool create_physical_instance(Memory target_memory, 
+                                    LayoutConstraintID layout_id,
+                                    LogicalRegion r, MappingInstance &result,
+                                    MapperID mapper_id, GCPriority priority);
+      bool find_or_create_physical_instance(Memory target_memory,
+                                    const LayoutConstraintSet &constraints,
+                                    LogicalRegion r, MappingInstance &result,
+                                    bool &created, MapperID mapper_id, 
+                                    GCPriority priority);
+      bool find_or_create_physical_instance(Memory target_memory,
+                                    LayoutConstraintID layout_id,
+                                    LogicalRegion r, MappingInstance &result,
+                                    bool &created, MapperID mapper_id,
+                                    GCPriority priority);
+      bool find_physical_instance(Memory target_memory,
+                                    const LayoutConstraintSet &constraints,
+                                    LogicalRegion r, MappingInstance &result);
+      bool find_physical_instance(Memory target_memory,
+                                    LayoutConstraintID layout_id,
+                                    LogicalRegion r, MappingInstance &result);
     public:
       // Helper methods for the RegionTreeForest
       inline unsigned get_context_count(void) { return total_contexts; }

@@ -35,6 +35,7 @@
 //==========================================================================
 
 #define AUTO_GENERATE_ID   UINT_MAX
+#define MAX_GC_PRIORITY    UINT_MAX
 
 #ifndef MAX_RETURN_SIZE
 #define MAX_RETURN_SIZE    2048 // maximum return type size in bytes
@@ -400,6 +401,7 @@ typedef legion_lowlevel_reduction_op_id_t legion_reduction_op_id_t;
 typedef legion_lowlevel_custom_serdez_id_t legion_custom_serdez_id_t;
 typedef legion_lowlevel_address_space_t legion_address_space_t;
 typedef int legion_task_priority_t;
+typedef int legion_garbage_collection_priority_t;
 typedef unsigned int legion_color_t;
 typedef unsigned int legion_field_id_t;
 typedef unsigned int legion_trace_id_t;

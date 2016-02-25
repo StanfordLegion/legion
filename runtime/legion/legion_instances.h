@@ -140,12 +140,25 @@ namespace Legion {
       virtual void notify_invalid(void) = 0;
       virtual DistributedID send_manager(AddressSpaceID target) = 0; 
     public:
+      // Support for mapper queries
+      virtual bool has_field(FieldID fid) const = 0;
+      virtual void has_fields(std::map<FieldID,bool> &fields) const = 0;
+      virtual void remove_space_fields(std::set<FieldID> &fields) const = 0;
+      inline bool is_normal_instance(void) const 
+        { return is_instance_manager(); }
+      inline bool is_reduction_instance(void) const
+        { return is_reduction_manager(); }
+    public:
       void register_logical_top_view(UniqueID context_uid, LogicalView *view);
       void unregister_logical_top_view(LogicalView *view);
     public:
       UniqueID find_context_uid(LogicalView *top_view) const;
       // This is the common case method so make it fast
       LogicalView* find_logical_top_view(UniqueID context_uid) const;
+    public:
+      bool meets_region(LogicalRegion r) const;
+      bool entails(const LayoutConstraintSet &constraints) const;
+      bool entails(LayoutConstraints *constraints) const;
     public:
       inline PhysicalInstance get_instance(void) const
       {
@@ -215,11 +228,11 @@ namespace Legion {
                                 std::vector<Domain::CopySrcDstField> &fields);
     public:
       // Interface to the mapper PhysicalInstance
-      inline bool has_field(FieldID fid) const
+      virtual bool has_field(FieldID fid) const
         { return layout->has_field(fid); }
-      inline void has_fields(std::map<FieldID,bool> &fields) const
+      virtual void has_fields(std::map<FieldID,bool> &fields) const
         { return layout->has_fields(fields); } 
-      void remove_space_fields(std::set<FieldID> &fields) const
+      virtual void remove_space_fields(std::set<FieldID> &fields) const
         { return layout->remove_space_fields(fields); }
     public:
       void set_descriptor(FieldDataDescriptor &desc, unsigned fid_idx) const;
@@ -251,7 +264,7 @@ namespace Legion {
      */
     class ReductionManager : public PhysicalManager {
     public:
-      ReductionManager(RegionTreeForest *ctx, DistributedID did,
+      ReductionManager(RegionTreeForest *ctx, DistributedID did, FieldID fid,
                        AddressSpaceID owner_space, AddressSpaceID local_space,
                        Memory mem, PhysicalInstance inst, 
                        RegionNode *region_node, ReductionOpID redop, 
@@ -287,6 +300,11 @@ namespace Legion {
       virtual FoldReductionManager* as_fold_manager(void) const = 0;
       virtual Event get_use_event(void) const = 0;
     public:
+      // Support for mapper queries
+      virtual bool has_field(FieldID fid) const;
+      virtual void has_fields(std::map<FieldID,bool> &fields) const;
+      virtual void remove_space_fields(std::set<FieldID> &fields) const;
+    public:
       virtual DistributedID send_manager(AddressSpaceID target); 
     public:
       static void handle_send_manager(Runtime *runtime,
@@ -297,6 +315,7 @@ namespace Legion {
     public:
       const ReductionOp *const op;
       const ReductionOpID redop;
+      const FieldID logical_field;
     };
 
     /**
@@ -307,7 +326,7 @@ namespace Legion {
     public:
       static const AllocationType alloc_type = LIST_MANAGER_ALLOC;
     public:
-      ListReductionManager(RegionTreeForest *ctx, DistributedID did,
+      ListReductionManager(RegionTreeForest *ctx, DistributedID did,FieldID fid,
                            AddressSpaceID owner_space, 
                            AddressSpaceID local_space,
                            Memory mem, PhysicalInstance inst, 
@@ -352,7 +371,7 @@ namespace Legion {
     public:
       static const AllocationType alloc_type = FOLD_MANAGER_ALLOC;
     public:
-      FoldReductionManager(RegionTreeForest *ctx, DistributedID did,
+      FoldReductionManager(RegionTreeForest *ctx, DistributedID did,FieldID fid,
                            AddressSpaceID owner_space, 
                            AddressSpaceID local_space,
                            Memory mem, PhysicalInstance inst, 

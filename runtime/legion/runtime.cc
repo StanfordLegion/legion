@@ -2287,8 +2287,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     MemoryManager::MemoryManager(Memory m, Runtime *rt)
-      : memory(m), capacity(m.capacity()),
-        remaining_capacity(capacity), runtime(rt), 
+      : memory(m), owner_space(m.address_space()), 
+        is_owner(m.address_space() == rt->address_space),
+        capacity(m.capacity()), remaining_capacity(capacity), runtime(rt), 
         manager_lock(Reservation::create_reservation())
     //--------------------------------------------------------------------------
     {
@@ -2296,7 +2297,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     MemoryManager::MemoryManager(const MemoryManager &rhs)
-      : memory(Memory::NO_MEMORY), capacity(0), runtime(NULL)
+      : memory(Memory::NO_MEMORY), owner_space(0), 
+        is_owner(false), capacity(0), runtime(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -2310,7 +2312,7 @@ namespace Legion {
       manager_lock.destroy_reservation();
       manager_lock = Reservation::NO_RESERVATION;
       physical_instances.clear();
-      reduction_instances.clear();
+      collectable_instances.clear();
     }
 
     //--------------------------------------------------------------------------
@@ -2329,16 +2331,10 @@ namespace Legion {
       const size_t inst_size = manager->get_instance_size();  
       AutoLock m_lock(manager_lock);
       remaining_capacity -= inst_size;
-      if (manager->is_reduction_manager())
-      {
-        ReductionManager *reduc = manager->as_reduction_manager();
-        reduction_instances[reduc] = inst_size;
-      }
-      else
-      {
-        InstanceManager *inst = manager->as_instance_manager();
-        physical_instances[inst] = inst_size;
-      }
+#ifdef DEBUG_HIGH_LEVEL
+      assert(physical_instances.find(manager) == physical_instances.end());
+#endif
+      physical_instances[manager] = InstanceInfo(inst_size);
     }
 
     //--------------------------------------------------------------------------
@@ -2346,26 +2342,389 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock m_lock(manager_lock);
-      if (manager->is_reduction_manager())
-      {
-        std::map<ReductionManager*,size_t>::iterator finder =
-          reduction_instances.find(manager->as_reduction_manager());
+      std::map<PhysicalManager*,InstanceInfo>::iterator finder = 
+        physical_instances.find(manager);
 #ifdef DEBUG_HIGH_LEVEL
-        assert(finder != reduction_instances.end());
+      assert(finder != physical_instances.end());
 #endif
-        remaining_capacity += finder->second;
-        reduction_instances.erase(finder);
+      remaining_capacity += finder->second.instance_size;
+      physical_instances.erase(finder);
+    }
+
+    //--------------------------------------------------------------------------
+    bool MemoryManager::create_physical_instance(
+                                const LayoutConstraintSet &constraints,
+                                LogicalRegion r, MappingInstance &result,
+                                MapperID mapper_id, GCPriority priority)
+    //--------------------------------------------------------------------------
+    {
+      volatile bool success = false;
+      if (!is_owner)
+      {
+        // Not the owner, send a meessage to the owner to request the creation
+        Serializer rez;
+        UserEvent ready_event = UserEvent::create_user_event();
+        {
+          RezCheck z(rez);
+          rez.serialize(memory);
+          rez.serialize(CREATE_INSTANCE_CONSTRAINTS);
+          rez.serialize(ready_event);
+          rez.serialize(r);
+          constraints.serialize(rez);
+          // pack the pointers for the result
+          rez.serialize(&success);
+          rez.serialize(&result);
+        }
+        runtime->send_instance_request(owner_space, rez);
+        ready_event.wait();
+        // When the event is triggered, everything will be filled in
       }
       else
       {
-        std::map<InstanceManager*,size_t>::iterator finder = 
-          physical_instances.find(manager->as_instance_manager());
-#ifdef DEBUG_HIGH_LEVEL
-        assert(finder != physical_instances.end());
-#endif
-        remaining_capacity += finder->second;
-        physical_instances.erase(finder);
+        // Try to make the result
       }
+      return success;
+    }
+    
+    //--------------------------------------------------------------------------
+    bool MemoryManager::create_physical_instance(LayoutConstraints *constraints,
+                                       LogicalRegion r, MappingInstance &result,
+                                       MapperID mapper_id, GCPriority priority)
+    //--------------------------------------------------------------------------
+    {
+      volatile bool success = false;
+      if (!is_owner)
+      {
+        // Not the owner, send a meessage to the owner to request the creation
+        constraints->send_constraints(owner_space);
+        Serializer rez;
+        UserEvent ready_event = UserEvent::create_user_event();
+        {
+          RezCheck z(rez);
+          rez.serialize(memory);
+          rez.serialize(CREATE_INSTANCE_LAYOUT);
+          rez.serialize(ready_event);
+          rez.serialize(r);
+          rez.serialize(constraints->layout_id);
+          rez.serialize(&success);
+          rez.serialize(&result);
+        }
+        runtime->send_instance_request(owner_space, rez);
+        ready_event.wait();
+        // When the event is triggered, everything will be filled in
+      }
+      else
+      {
+        // Try to make the instance
+      }
+      return success;
+    }
+
+    //--------------------------------------------------------------------------
+    bool MemoryManager::find_or_create_physical_instance(
+                                  const LayoutConstraintSet &constraints,
+                                  LogicalRegion r, MappingInstance &result,
+                                  bool &created, MapperID mapper_id,
+                                  GCPriority priority)
+    //--------------------------------------------------------------------------
+    {
+      volatile bool success = false;
+      if (!is_owner)
+      {
+        // See if we can find it locally
+        success = find_persistent_instance(constraints, r, result);
+        if (success)
+        {
+          created = false;
+          return true;
+        }
+        // Not the owner, send a message to the owner to request creation
+        Serializer rez;
+        UserEvent ready_event = UserEvent::create_user_event();
+        {
+          RezCheck z(rez);
+          rez.serialize(memory);
+          rez.serialize(CREATE_AND_FIND_CONSTRAINTS);
+          rez.serialize(ready_event);
+          rez.serialize(r);
+          constraints.serialize(rez);
+          rez.serialize(&success);
+          rez.serialize(&result);
+        }
+        runtime->send_instance_request(owner_space, rez);
+        ready_event.wait();
+        // When the event is triggered, everything will be filled in
+      }
+      else
+      {
+        // Try to find an instance first and then make one
+        success = find_satisfying_instance(constraints, r, result);
+        if (!success)
+        {
+          // If we couldn't find it, we have to make it
+
+          created = true;
+        }
+        else
+          created = false;
+      }
+      return success;
+    }
+
+    //--------------------------------------------------------------------------
+    bool MemoryManager::find_or_create_physical_instance(
+                                LayoutConstraints *constraints, LogicalRegion r,
+                                MappingInstance &result, bool &created,
+                                MapperID mapper_id, GCPriority priority)
+    //--------------------------------------------------------------------------
+    {
+      volatile bool success = false;
+      if (!is_owner)
+      {
+        // See if we can find it locally
+        success = find_persistent_instance(constraints, r, result);
+        if (success)
+        {
+          created = false;
+          return true;
+        }
+        constraints->send_constraints(owner_space);
+        // Not the owner, send a message to the owner to request creation
+        Serializer rez;
+        UserEvent ready_event = UserEvent::create_user_event();
+        {
+          RezCheck z(rez);
+          rez.serialize(memory);
+          rez.serialize(CREATE_AND_FIND_LAYOUT);
+          rez.serialize(ready_event);
+          rez.serialize(r);
+          rez.serialize(constraints->layout_id);
+          rez.serialize(&success);
+          rez.serialize(&result);
+          rez.serialize(&created);
+        }
+        runtime->send_instance_request(owner_space, rez);
+        ready_event.wait();
+        // When the event is triggered, everything will be filled
+      }
+      else
+      {
+        // Try to find an instance first and then make one
+        success = find_satisfying_instance(constraints, r, result);
+        if (!success)
+        {
+          // If we couldn't find it, we have to make it
+
+          created = true;
+        }
+        else
+          created = false;
+      }
+      return success;
+    }
+
+    //--------------------------------------------------------------------------
+    bool MemoryManager::find_physical_instance(
+                                       const LayoutConstraintSet &constraints,
+                                       LogicalRegion r, MappingInstance &result)
+    //--------------------------------------------------------------------------
+    {
+      volatile bool success = false;
+      if (!is_owner)
+      {
+        // See if we can find it locally 
+        success = find_persistent_instance(constraints, r, result);
+        if (success)
+          return true;
+        // Not the owner, send a message to the owner to try and find it
+        Serializer rez;
+        UserEvent ready_event = UserEvent::create_user_event();
+        {
+          RezCheck z(rez);
+          rez.serialize(memory);
+          rez.serialize(FIND_ONLY_CONSTRAINTS);
+          rez.serialize(ready_event);
+          rez.serialize(r);
+          constraints.serialize(rez);
+          rez.serialize(&success);
+          rez.serialize(&result);
+        }
+        runtime->send_instance_request(owner_space, rez);
+        ready_event.wait();
+        // When the event is triggered, everything will be filled
+      }
+      else
+      {
+        // Try to find an instance
+        success = find_satisfying_instance(constraints, r, result);
+      }
+      return success;
+    }
+
+    //--------------------------------------------------------------------------
+    bool MemoryManager::find_physical_instance(LayoutConstraints *constraints,
+                                      LogicalRegion r, MappingInstance &result)
+    //--------------------------------------------------------------------------
+    {
+      volatile bool success = false;
+      if (!is_owner)
+      {
+        // See if we can find a persistent instance
+        success = find_persistent_instance(constraints, r, result);
+        if (success)
+          return true;
+        constraints->send_constraints(owner_space);
+        Serializer rez;
+        UserEvent ready_event = UserEvent::create_user_event();
+        {
+          RezCheck z(rez);
+          rez.serialize(memory);
+          rez.serialize(FIND_ONLY_LAYOUT);
+          rez.serialize(ready_event);
+          rez.serialize(r);
+          rez.serialize(constraints->layout_id);
+          rez.serialize(&success);
+          rez.serialize(&result);
+        }
+        runtime->send_instance_request(owner_space, rez);
+        ready_event.wait();
+        // When the event is triggered, everything will be filled
+      }
+      else
+      {
+        // Try to find an instance
+        success = find_satisfying_instance(constraints, r, result);
+      }
+      return success;
+    }
+
+    //--------------------------------------------------------------------------
+    void MemoryManager::process_instance_request(Deserializer &derez,
+                                                 AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      RequestKind kind;
+      derez.deserialize(kind);
+      UserEvent to_trigger;
+      derez.deserialize(to_trigger);
+      LogicalRegion r;
+      derez.deserialize(r);
+      switch (kind)
+      {
+        case CREATE_INSTANCE_CONSTRAINTS:
+          {
+
+          }
+        case CREATE_INSTANCE_LAYOUT:
+          {
+
+          }
+        case CREATE_AND_FIND_CONSTRAINTS:
+          {
+
+          }
+        case CREATE_AND_FIND_LAYOUT:
+          {
+
+          }
+        case FIND_ONLY_CONSTRAINTS:
+          {
+
+          }
+        case FIND_ONLY_LAYOUT:
+          {
+
+          }
+        default:
+          assert(false);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void MemoryManager::process_instance_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+
+    }
+    
+    //--------------------------------------------------------------------------
+    bool MemoryManager::find_satisfying_instance(
+                                const LayoutConstraintSet &constraints,
+                                LogicalRegion r, MappingInstance &result)
+    //--------------------------------------------------------------------------
+    {
+      // Hold the lock while iterating here
+      AutoLock m_lock(manager_lock, 1, false/*exclusive*/);
+      for (std::map<PhysicalManager*,InstanceInfo>::const_iterator it = 
+            physical_instances.begin(); it != physical_instances.end(); it++)
+      {
+        if (it->first->meets_region(r) && it->first->entails(constraints))
+        {
+          result = MappingInstance(it->first);
+          return true;
+        }
+      }
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    bool MemoryManager::find_satisfying_instance(LayoutConstraints *constraints,
+                                      LogicalRegion r, MappingInstance &result)
+    //--------------------------------------------------------------------------
+    {
+      // Hold the lock while iterating here
+      AutoLock m_lock(manager_lock, 1, false/*exclusive*/);
+      for (std::map<PhysicalManager*,InstanceInfo>::const_iterator it = 
+            physical_instances.begin(); it != physical_instances.end(); it++)
+      {
+        if (it->first->meets_region(r) && it->first->entails(constraints))
+        {
+          result = MappingInstance(it->first);
+          return true;
+        }
+      }
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    bool MemoryManager::find_persistent_instance(
+                                       const LayoutConstraintSet &constraints,
+                                       LogicalRegion r, MappingInstance &result)
+    //--------------------------------------------------------------------------
+    {
+      // Hold the lock while iterating here
+      AutoLock m_lock(manager_lock, 1, false/*exclusive*/);
+      for (std::map<PhysicalManager*,InstanceInfo>::const_iterator it = 
+            physical_instances.begin(); it != physical_instances.end(); it++)
+      {
+        if ((it->second.priority == MAX_GC_PRIORITY) &&
+            it->first->meets_region(r) && it->first->entails(constraints))
+        {
+          result = MappingInstance(it->first);
+          return true;
+        }
+      }
+      return false;
+    }
+    
+    //--------------------------------------------------------------------------
+    bool MemoryManager::find_persistent_instance(
+                                       LayoutConstraints *constraints,
+                                       LogicalRegion r, MappingInstance &result)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock m_lock(manager_lock, 1, false/*exclusive*/);
+      for (std::map<PhysicalManager*,InstanceInfo>::const_iterator it = 
+            physical_instances.begin(); it != physical_instances.end(); it++)
+      {
+        if ((it->second.priority == MAX_GC_PRIORITY) &&
+            it->first->meets_region(r) && it->first->entails(constraints))
+        {
+          result = MappingInstance(it->first);
+          return true;
+        }
+      }
+      return false;
     }
 
     /////////////////////////////////////////////////////////////
@@ -3010,21 +3369,14 @@ namespace Legion {
                                                      remote_address_space);
               break;
             }
-          case SEND_INSTANCE_CREATION:
+          case SEND_INSTANCE_REQUEST:
             {
-              runtime->handle_remote_instance_creation(derez, 
-                                                       remote_address_space);
+              runtime->handle_instance_request(derez, remote_address_space);
               break;
             }
-          case SEND_REDUCTION_CREATION:
+          case SEND_INSTANCE_RESPONSE:
             {
-              runtime->handle_remote_reduction_creation(derez,
-                                                        remote_address_space);
-              break;
-            }
-          case SEND_CREATION_RESPONSE:
-            {
-              runtime->handle_remote_creation_response(derez);
+              runtime->handle_instance_response(derez);
               break;
             }
           case SEND_BACK_LOGICAL_STATE:
@@ -4779,7 +5131,7 @@ namespace Legion {
 				    all_procs.size()-1);
         proc_managers[*it] = manager;
         Mapper *mapper = new Mapping::DefaultMapper(machine, *it);
-        MapperManager *wrapper = wrap_mapper(this, mapper);
+        MapperManager *wrapper = wrap_mapper(this, mapper, 0);
         manager->add_mapper(0, wrapper, false/*check*/, true/*owns*/); 
       }
       // Initialize the message manager array so that we can construct
@@ -10588,7 +10940,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // First, wrap this mapper in a mapper manager
-      MapperManager *manager = wrap_mapper(this, mapper);
+      MapperManager *manager = wrap_mapper(this, mapper, map_id);
       if (!proc.exists())
       {
         bool own = true;
@@ -10644,7 +10996,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // First, wrap this mapper in a mapper manager
-      MapperManager *manager = wrap_mapper(this, mapper); 
+      MapperManager *manager = wrap_mapper(this, mapper, 0); 
       if (!proc.exists())
       {
         bool own = true;
@@ -10666,7 +11018,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ MapperManager* Runtime::wrap_mapper(Runtime *rt, Mapper *mapper)
+    /*static*/ MapperManager* Runtime::wrap_mapper(Runtime *rt, Mapper *mapper,
+                                                   MapperID map_id)
     //--------------------------------------------------------------------------
     {
       MapperManager *manager = NULL;
@@ -10674,17 +11027,19 @@ namespace Legion {
       {
         case Mapper::CONCURRENT_MAPPER_MODEL:
           {
-            manager = new ConcurrentManager(rt, mapper);
+            manager = new ConcurrentManager(rt, mapper, map_id);
             break;
           }
         case Mapper::SERIALIZED_REENTRANT_MAPPER_MODEL:
           {
-            manager = new SerializingManager(rt, mapper, true/*reentrant*/);
+            manager = new SerializingManager(rt, mapper, 
+                                             map_id, true/*reentrant*/);
             break;
           }
         case Mapper::SERIALIZED_NON_REENTRANT_MAPPER_MODEL:
           {
-            manager = new SerializingManager(rt, mapper, false/*reentrant*/);
+            manager = new SerializingManager(rt, mapper, 
+                                             map_id, false/*reentrant*/);
             break;
           }
         default:
@@ -11186,33 +11541,38 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    MemoryManager* Runtime::find_memory(Memory mem)
+    MemoryManager* Runtime::find_memory_manager(Memory mem)
     //--------------------------------------------------------------------------
     {
-      AutoLock m_lock(memory_manager_lock);
-      std::map<Memory,MemoryManager*>::const_iterator finder = 
-        memory_managers.find(mem);
-      if (finder != memory_managers.end())
-        return finder->second;
+      {
+        AutoLock m_lock(memory_manager_lock,1,false/*exclusive*/);
+        std::map<Memory,MemoryManager*>::const_iterator finder = 
+          memory_managers.find(mem);
+        if (finder != memory_managers.end())
+          return finder->second;
+      }
       // Otherwise, if we haven't made it yet, make it now
       MemoryManager *result = new MemoryManager(mem, this);
       // Put it in the map
+      AutoLock m_lock(memory_manager_lock);
       memory_managers[mem] = result;
       return result;
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::allocate_physical_instance(PhysicalManager *instance)
+    void Runtime::allocate_physical_instance(PhysicalManager *manager)
     //--------------------------------------------------------------------------
     {
-      find_memory(instance->memory)->allocate_physical_instance(instance);
+      MemoryManager *memory_manager = find_memory_manager(manager->memory);
+      memory_manager->allocate_physical_instance(manager);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::free_physical_instance(PhysicalManager *instance)
+    void Runtime::free_physical_instance(PhysicalManager *manager)
     //--------------------------------------------------------------------------
     {
-      find_memory(instance->memory)->free_physical_instance(instance);
+      MemoryManager *memory_manager = find_memory_manager(manager->memory);
+      memory_manager->free_physical_instance(manager);
     }
 
     //--------------------------------------------------------------------------
@@ -12147,32 +12507,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_remote_instance_creation_request(AddressSpaceID target,
-                                                        Serializer &rez)
+    void Runtime::send_instance_request(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_message(rez, SEND_INSTANCE_CREATION,
+      find_messenger(target)->send_message(rez, SEND_INSTANCE_REQUEST,
                                         DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_remote_reduction_creation_request(AddressSpaceID target,
-                                                         Serializer &rez)
+    void Runtime::send_instance_response(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_message(rez, SEND_REDUCTION_CREATION,
+      find_messenger(target)->send_message(rez, SEND_INSTANCE_RESPONSE,
                                         DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
-    //--------------------------------------------------------------------------
-    void Runtime::send_remote_creation_response(AddressSpaceID target,
-                                                Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(rez, SEND_CREATION_RESPONSE,
-                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
-    }
-    
     //--------------------------------------------------------------------------
     void Runtime::send_back_logical_state(AddressSpaceID target,
                                            Serializer &rez)
@@ -12871,28 +13220,26 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_remote_instance_creation(Deserializer &derez,
-                                                  AddressSpaceID source)
+    void Runtime::handle_instance_request(Deserializer &derez, 
+                                          AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      FieldSpaceNode::handle_remote_instance_creation(forest, derez, source);
+      DerezCheck z(derez);
+      Memory target_memory;
+      derez.deserialize(target_memory);
+      MemoryManager *manager = find_memory_manager(target_memory);
+      manager->process_instance_request(derez, source);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_remote_reduction_creation(Deserializer &derez,
-                                                   AddressSpaceID source)
+    void Runtime::handle_instance_response(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      FieldSpaceNode::handle_remote_reduction_creation(forest, derez, source);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_remote_creation_response(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      UserEvent done_event;
-      derez.deserialize(done_event);
-      done_event.trigger();
+      DerezCheck z(derez);
+      Memory target_memory;
+      derez.deserialize(target_memory);
+      MemoryManager *manager = find_memory_manager(target_memory);
+      manager->process_instance_response(derez);
     }
 
     //--------------------------------------------------------------------------
@@ -13015,6 +13362,79 @@ namespace Legion {
         local->finalize();
         delete local;
       }
+    }
+
+    //--------------------------------------------------------------------------
+    bool Runtime::create_physical_instance(Memory target_memory,
+                                       const LayoutConstraintSet &constraints,
+                                       LogicalRegion r, MappingInstance &result,
+                                       MapperID mapper_id, GCPriority priority)
+    //--------------------------------------------------------------------------
+    {
+      MemoryManager *manager = find_memory_manager(target_memory);
+      return manager->create_physical_instance(constraints, r, result,
+                                               mapper_id, priority);
+    }
+
+    //--------------------------------------------------------------------------
+    bool Runtime::create_physical_instance(Memory target_memory,
+                                       LayoutConstraintID layout_id,
+                                       LogicalRegion r, MappingInstance &result,
+                                       MapperID mapper_id, GCPriority priority)
+    //--------------------------------------------------------------------------
+    {
+      LayoutConstraints *constraints = find_layout_constraints(layout_id);
+      MemoryManager *manager = find_memory_manager(target_memory);
+      return manager->create_physical_instance(constraints, r, result,
+                                               mapper_id, priority);
+    }
+
+    //--------------------------------------------------------------------------
+    bool Runtime::find_or_create_physical_instance(Memory target_memory,
+                                       const LayoutConstraintSet &constraints,
+                                       LogicalRegion r, MappingInstance &result,
+                                       bool &created, MapperID mapper_id,
+                                       GCPriority priority)
+    //--------------------------------------------------------------------------
+    {
+      MemoryManager *manager = find_memory_manager(target_memory);
+      return manager->find_or_create_physical_instance(constraints, r, 
+                                         result, created, mapper_id, priority);
+    }
+
+    //--------------------------------------------------------------------------
+    bool Runtime::find_or_create_physical_instance(Memory target_memory,
+                                      LayoutConstraintID layout_id,
+                                      LogicalRegion r, MappingInstance &result,
+                                      bool &created, MapperID mapper_id,
+                                      GCPriority priority)
+    //--------------------------------------------------------------------------
+    {
+      LayoutConstraints *constraints = find_layout_constraints(layout_id);
+      MemoryManager *manager = find_memory_manager(target_memory);
+      return manager->find_or_create_physical_instance(constraints, r, 
+                                         result, created, mapper_id, priority);
+    }
+
+    //--------------------------------------------------------------------------
+    bool Runtime::find_physical_instance(Memory target_memory,
+                                      const LayoutConstraintSet &constraints,
+                                      LogicalRegion r, MappingInstance &result)
+    //--------------------------------------------------------------------------
+    {
+      MemoryManager *manager = find_memory_manager(target_memory);
+      return manager->find_physical_instance(constraints, r, result);
+    }
+
+    //--------------------------------------------------------------------------
+    bool Runtime::find_physical_instance(Memory target_memory,
+                                      LayoutConstraintID layout_id,
+                                      LogicalRegion r, MappingInstance &result)
+    //--------------------------------------------------------------------------
+    {
+      LayoutConstraints *constraints = find_layout_constraints(layout_id);
+      MemoryManager *manager = find_memory_manager(target_memory);
+      return manager->find_physical_instance(constraints, r, result);
     }
 
 #ifdef HANG_TRACE
@@ -15186,10 +15606,8 @@ namespace Legion {
           return "Physical Versions";
         case MEMORY_INSTANCES_ALLOC:
           return "Memory Manager Instances";
-        case MEMORY_REDUCTION_ALLOC:
-          return "Memory Manager Reductions";
-        case MEMORY_AVAILABLE_ALLOC:
-          return "Memory Manager Available";
+        case MEMORY_GARBAGE_ALLOC:
+          return "Memory Garbage Instances";
         case PROCESSOR_GROUP_ALLOC:
           return "Processor Groups";
         case RUNTIME_DISTRIBUTED_ALLOC:

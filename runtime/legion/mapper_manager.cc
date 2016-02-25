@@ -16,18 +16,22 @@
 #include "legion.h"
 #include "legion_ops.h"
 #include "legion_tasks.h"
+#include "legion_instances.h"
 #include "mapper_manager.h"
 
 namespace Legion {
   namespace Internal {
+
+      LEGION_EXTERN_LOGGER_DECLARATIONS
 
     /////////////////////////////////////////////////////////////
     // Mapper Manager 
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    MapperManager::MapperManager(Runtime *rt, Mapping::Mapper *mp)
-      : runtime(rt), mapper(mp), mapper_lock(Reservation::create_reservation())
+    MapperManager::MapperManager(Runtime *rt, Mapping::Mapper *mp, MapperID mid)
+      : runtime(rt), mapper(mp), mapper_id(mid), 
+        mapper_lock(Reservation::create_reservation())
     //--------------------------------------------------------------------------
     {
     }
@@ -919,6 +923,138 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool MapperManager::create_physical_instance(
+                                    MappingCallInfo *ctx, Memory target_memory,
+                                    const LayoutConstraintSet &constraints, 
+                                    LogicalRegion r, MappingInstance &result, 
+                                    bool acquire, GCPriority priority)
+    //--------------------------------------------------------------------------
+    {
+      pause_mapper_call(ctx);
+      bool success = runtime->create_physical_instance(target_memory, 
+                                  constraints, r, result, mapper_id, priority);
+      if (success && acquire)
+        acquire_physical_instance(ctx, result);
+      resume_mapper_call(ctx);
+      return success;
+    }
+
+    //--------------------------------------------------------------------------
+    bool MapperManager::create_physical_instance(
+                                    MappingCallInfo *ctx, Memory target_memory,
+                                    LayoutConstraintID layout_id,
+                                    LogicalRegion r, MappingInstance &result,
+                                    bool acquire, GCPriority priority)
+    //--------------------------------------------------------------------------
+    {
+      pause_mapper_call(ctx);
+      bool success = runtime->create_physical_instance(target_memory, layout_id,
+                                                r, result, mapper_id, priority);
+      if (success && acquire)
+        acquire_physical_instance(ctx, result);
+      resume_mapper_call(ctx);
+      return success;
+    }
+
+    //--------------------------------------------------------------------------
+    bool MapperManager::find_or_create_physical_instance(
+                                    MappingCallInfo *ctx, Memory target_memory,
+                                    const LayoutConstraintSet &constraints, 
+                                    LogicalRegion r, MappingInstance &result, 
+                                    bool &created, bool acquire, 
+                                    GCPriority priority)
+    //--------------------------------------------------------------------------
+    {
+      pause_mapper_call(ctx);
+      bool success = runtime->find_or_create_physical_instance(target_memory,
+                        constraints, r, result, created, mapper_id, priority);
+      if (success && acquire)
+        acquire_physical_instance(ctx, result);
+      resume_mapper_call(ctx);
+      return success;
+    }
+
+    //--------------------------------------------------------------------------
+    bool MapperManager::find_or_create_physical_instance(
+                                    MappingCallInfo *ctx, Memory target_memory,
+                                    LayoutConstraintID layout_id,
+                                    LogicalRegion r, MappingInstance &result,
+                                    bool &created, bool acquire, 
+                                    GCPriority priority)
+    //--------------------------------------------------------------------------
+    {
+      pause_mapper_call(ctx);
+      bool success = runtime->find_or_create_physical_instance(target_memory,
+                         layout_id, r, result, created, mapper_id, priority);
+      if (success && acquire)
+        acquire_physical_instance(ctx, result);
+      resume_mapper_call(ctx);
+      return success;
+    }
+
+    //--------------------------------------------------------------------------
+    bool MapperManager::find_physical_instance(  
+                                    MappingCallInfo *ctx, Memory target_memory,
+                                    const LayoutConstraintSet &constraints,
+                                    LogicalRegion r, MappingInstance &result,
+                                    bool acquire)
+    //--------------------------------------------------------------------------
+    {
+      pause_mapper_call(ctx);
+      bool success = runtime->find_physical_instance(target_memory, constraints,
+                                                     r, result);
+      if (success && acquire)
+        acquire_physical_instance(ctx, result);
+      resume_mapper_call(ctx);
+      return success;
+    }
+
+    //--------------------------------------------------------------------------
+    bool MapperManager::find_physical_instance(  
+                                    MappingCallInfo *ctx, Memory target_memory,
+                                    LayoutConstraintID layout_id,
+                                    LogicalRegion r, MappingInstance &result,
+                                    bool acquire)
+    //--------------------------------------------------------------------------
+    {
+      pause_mapper_call(ctx);
+      bool success = runtime->find_physical_instance(target_memory, layout_id,
+                                                     r, result);
+      if (success && acquire)
+        acquire_physical_instance(ctx, result);
+      resume_mapper_call(ctx);
+      return success;
+    }
+
+    //--------------------------------------------------------------------------
+    void MapperManager::acquire_physical_instance(MappingCallInfo *ctx,
+                                                  const MappingInstance &inst)
+    //--------------------------------------------------------------------------
+    {
+      // Check for acquire calls in invalid mapper calls
+      if (ctx->acquired_regions == NULL)
+      {
+        log_run.warning("WARNING: Ignoring call to acquire region in "
+                        "unsupported mapper call %s in mapper %s.",
+                        get_mapper_call_name(ctx->kind), 
+                        mapper->get_mapper_name());
+        return;
+      }
+      PhysicalManager *manager = inst.impl;    
+#ifdef DEBUG_HIGH_LEVEL
+      assert(manager != NULL);
+#endif
+      std::set<PhysicalManager*>::const_iterator finder = 
+        ctx->acquired_regions->find(manager);
+      // Check to see if we've already acquired it, if we have, we are done
+      if (finder != ctx->acquired_regions->end())
+        return;
+      // Otherwise at it
+      manager->add_base_gc_ref(MAPPING_ACQUIRE_REF);
+      ctx->acquired_regions->insert(manager);
+    }
+
+    //--------------------------------------------------------------------------
     IndexPartition MapperManager::get_index_partition(IndexSpace parent, 
                                                       Color color)
     //--------------------------------------------------------------------------
@@ -1154,14 +1290,26 @@ namespace Legion {
       available_infos.push_back(info);
     }
 
+    //--------------------------------------------------------------------------
+    /*static*/ const char* MapperManager::get_mapper_call_name(
+                                                           MappingCallKind kind)
+    //--------------------------------------------------------------------------
+    {
+      MAPPER_CALL_NAMES(call_names); 
+#ifdef DEBUG_HIGH_LEVEL
+      assert(kind < LAST_MAPPER_CALL);
+#endif
+      return call_names[kind];
+    }
+
     /////////////////////////////////////////////////////////////
     // Serializing Manager 
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
     SerializingManager::SerializingManager(Runtime *rt, Mapping::Mapper *mp,
-                                           bool init_reentrant)
-      : MapperManager(rt, mp), permit_reentrant(init_reentrant), 
+                                           MapperID map_id, bool init_reentrant)
+      : MapperManager(rt, mp, map_id), permit_reentrant(init_reentrant), 
         executing_call(NULL), paused_calls(0)
     //--------------------------------------------------------------------------
     {
@@ -1169,7 +1317,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     SerializingManager::SerializingManager(const SerializingManager &rhs)
-      : MapperManager(NULL,NULL)
+      : MapperManager(NULL,NULL,0)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -1412,15 +1560,16 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    ConcurrentManager::ConcurrentManager(Runtime *rt, Mapping::Mapper *mp)
-      : MapperManager(rt, mp), lock_state(UNLOCKED_STATE)
+    ConcurrentManager::ConcurrentManager(Runtime *rt, Mapping::Mapper *mp,
+                                         MapperID map_id)
+      : MapperManager(rt, mp, map_id), lock_state(UNLOCKED_STATE)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     ConcurrentManager::ConcurrentManager(const ConcurrentManager &rhs)
-      : MapperManager(NULL,NULL)
+      : MapperManager(NULL,NULL,0)
     //--------------------------------------------------------------------------
     {
       // should never be called

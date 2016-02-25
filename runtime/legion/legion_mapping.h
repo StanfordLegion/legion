@@ -58,6 +58,9 @@ namespace Legion {
       // can prevent it from being collected during the
       // lifetime of a mapper call.
       bool exists(bool strong_test = false) const;
+      bool is_normal_instance(void) const;
+      bool is_virtual_instance(void) const;
+      bool is_reduction_instance(void) const;
     public:
       bool has_field(FieldID fid) const;
       void has_fields(std::map<FieldID,bool> &fids) const;
@@ -83,7 +86,6 @@ namespace Legion {
       bool entails(const OffsetConstraint &constraint) const;
       bool entails(const PointerConstraint &constraint) const;
     public:
-      bool is_virtual(void) const;
       static PhysicalInstance get_virtual_instance(void);
     protected:
       FRIEND_ALL_RUNTIME_CLASSES
@@ -1241,19 +1243,38 @@ namespace Legion {
                                     MapperContext ctx, Memory target_memory,
                                     const LayoutConstraintSet &constraints, 
                                     LogicalRegion r, PhysicalInstance &result, 
-                                    bool acquire = true) const;
+                                    bool acquire = true, 
+                                    GCPriority priority = 0) const;
+      bool mapper_rt_create_physical_instance(
+                                    MapperContext ctx, Memory target_memory,
+                                    LayoutConstraintID layout_id,
+                                    LogicalRegion r, PhysicalInstance &result,
+                                    bool acquire = true,
+                                    GCPriority priority = 0) const;
       bool mapper_rt_find_or_create_physical_instance(
-                                    MapperContext ctx, Memory target_mem,
+                                    MapperContext ctx, Memory target_memory,
                                     const LayoutConstraintSet &constraints, 
                                     LogicalRegion r, PhysicalInstance &result, 
-                                    bool &created, bool acquire = true) const;
+                                    bool &created, bool acquire = true,
+                                    GCPriority priority = 0) const;
+      bool mapper_rt_find_or_create_physical_instance(
+                                    MapperContext ctx, Memory target_memory,
+                                    LayoutConstraintID layout_id,
+                                    LogicalRegion r, PhysicalInstance &result,
+                                    bool &created, bool acquire = true,
+                                    GCPriority priority = 0) const;
       bool mapper_rt_find_physical_instance(
-                                    MapperContext ctx, Memory target_mem,
+                                    MapperContext ctx, Memory target_memory,
                                     const LayoutConstraintSet &constraints,
                                     LogicalRegion r, PhysicalInstance &result,
                                     bool acquire = true) const;
+      bool mapper_rt_find_physical_instance(
+                                    MapperContext ctx, Memory target_memory,
+                                    LayoutConstraintID layout_id,
+                                    LogicalRegion r, PhysicalInstance &result,
+                                    bool acquire = true) const;
       void mapper_rt_set_garbage_collection_priority(MapperContext ctx, 
-                                PhysicalInstance instance, int priority) const;
+                        PhysicalInstance instance, GCPriority priority) const;
       // These methods will atomically check to make sure that these instances
       // are still valid and then add an implicit reference to them to ensure
       // that they aren't collected before this mapping call completes. They

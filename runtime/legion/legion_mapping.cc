@@ -131,10 +131,28 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool PhysicalInstance::is_virtual(void) const
+    bool PhysicalInstance::is_normal_instance(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (impl == NULL)
+        return false;
+      return impl->is_normal_instance();
+    }
+
+    //--------------------------------------------------------------------------
+    bool PhysicalInstance::is_virtual_instance(void) const
     //--------------------------------------------------------------------------
     {
       return (impl == NULL);
+    }
+
+    //--------------------------------------------------------------------------
+    bool PhysicalInstance::is_reduction_instance(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (impl == NULL)
+        return false;
+      return impl->is_reduction_instance();
     }
 
     //--------------------------------------------------------------------------
@@ -190,6 +208,80 @@ namespace Legion {
     Mapper::~Mapper(void)
     //--------------------------------------------------------------------------
     {
+    }
+
+    //--------------------------------------------------------------------------
+    bool Mapper::mapper_rt_create_physical_instance(
+                                    MapperContext ctx, Memory target_memory,
+                                    const LayoutConstraintSet &constraints, 
+                                    LogicalRegion r, PhysicalInstance &result, 
+                                    bool acquire, GCPriority priority) const
+    //--------------------------------------------------------------------------
+    {
+      return ctx->manager->create_physical_instance(ctx, target_memory, 
+                            constraints, r, result, acquire, priority);
+    }
+
+    //--------------------------------------------------------------------------
+    bool Mapper::mapper_rt_create_physical_instance(
+                                    MapperContext ctx, Memory target_memory,
+                                    LayoutConstraintID layout_id,
+                                    LogicalRegion r, PhysicalInstance &result,
+                                    bool acquire, GCPriority priority) const
+    //--------------------------------------------------------------------------
+    {
+      return ctx->manager->create_physical_instance(ctx, target_memory, 
+                              layout_id, r, result, acquire, priority);
+    }
+
+    //--------------------------------------------------------------------------
+    bool Mapper::mapper_rt_find_or_create_physical_instance(
+                                    MapperContext ctx, Memory target_memory,
+                                    const LayoutConstraintSet &constraints, 
+                                    LogicalRegion r, PhysicalInstance &result, 
+                                    bool &created, bool acquire,
+                                    GCPriority priority) const
+    //--------------------------------------------------------------------------
+    {
+      return ctx->manager->find_or_create_physical_instance(ctx, target_memory, 
+                           constraints, r, result, created, acquire, priority);
+    }
+
+    //--------------------------------------------------------------------------
+    bool Mapper::mapper_rt_find_or_create_physical_instance(
+                                    MapperContext ctx, Memory target_memory,
+                                    LayoutConstraintID layout_id,
+                                    LogicalRegion r, PhysicalInstance &result,
+                                    bool &created, bool acquire,
+                                    GCPriority priority) const
+    //--------------------------------------------------------------------------
+    {
+      return ctx->manager->find_or_create_physical_instance(ctx, target_memory,
+                             layout_id, r, result, created, acquire, priority);
+    }
+
+    //--------------------------------------------------------------------------
+    bool Mapper::mapper_rt_find_physical_instance(
+                                    MapperContext ctx, Memory target_memory,
+                                    const LayoutConstraintSet &constraints,
+                                    LogicalRegion r, PhysicalInstance &result,
+                                    bool acquire) const
+    //--------------------------------------------------------------------------
+    {
+      return ctx->manager->find_physical_instance(ctx, target_memory, 
+                                      constraints, r, result, acquire);
+    }
+
+    //--------------------------------------------------------------------------
+    bool Mapper::mapper_rt_find_physical_instance(
+                                    MapperContext ctx, Memory target_memory,
+                                    LayoutConstraintID layout_id,
+                                    LogicalRegion r, PhysicalInstance &result,
+                                    bool acquire) const
+    //--------------------------------------------------------------------------
+    {
+      return ctx->manager->find_physical_instance(ctx, target_memory,
+                                      layout_id, r, result, acquire);
     }
 
     //--------------------------------------------------------------------------

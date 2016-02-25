@@ -1010,7 +1010,7 @@ namespace Legion {
       for (std::deque<MappingInstance>::const_iterator it = 
             output.begin(); it != output.end(); it++)
       {
-        const InstanceManager *manager = it->impl;
+        const PhysicalManager *manager = it->impl;
         for (unsigned idx = 0; idx < sources.size(); idx++)
         {
           if (manager == sources[idx].get_manager())

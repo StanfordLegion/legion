@@ -620,6 +620,35 @@ namespace Legion {
       return finder->second;
     }
 
+    //--------------------------------------------------------------------------
+    bool PhysicalManager::meets_region(LogicalRegion handle) const
+    //--------------------------------------------------------------------------
+    {
+      // Check to see if the region tree IDs are the same
+      if (handle.get_tree_id() != region_node->handle.get_tree_id())
+        return false;
+      // Same region tree
+      RegionNode *handle_node = context->get_node(handle);
+      // Same node and we are done
+      if (handle_node == region_node)
+        return true;
+      // At this point the manager node must be above the handle node
+      // in order for it to still have a chance of being valid
+      const unsigned inst_depth = region_node->row_source->depth;
+      if (handle_node->row_source->depth <= inst_depth)
+        return false;
+      // Walk the handle node up until its depth is the same as the
+      // node for this instance
+      while (handle_node->row_source->depth > inst_depth)
+      {
+#ifdef DEBUG_HIGH_LEVEL
+        assert(handle_node->parent != NULL);
+#endif
+        handle_node = handle_node->parent->parent;
+      }
+      return (handle_node == region_node);
+    }
+
     /////////////////////////////////////////////////////////////
     // InstanceManager 
     /////////////////////////////////////////////////////////////
@@ -962,14 +991,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ReductionManager::ReductionManager(RegionTreeForest *ctx, DistributedID did,
-                                       AddressSpaceID owner_space, 
+                                       FieldID f, AddressSpaceID owner_space, 
                                        AddressSpaceID local_space,
                                        Memory mem, PhysicalInstance inst, 
                                        RegionNode *node, ReductionOpID red, 
                                        const ReductionOp *o, bool reg_now)
       : PhysicalManager(ctx, did, owner_space, local_space, mem, 
                         node, inst, reg_now), 
-        op(o), redop(red)
+        op(o), redop(red), logical_field(f)
     //--------------------------------------------------------------------------
     { 
     }
@@ -1043,6 +1072,34 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool ReductionManager::has_field(FieldID fid) const
+    //--------------------------------------------------------------------------
+    {
+      return (logical_field == fid); 
+    }
+
+    //--------------------------------------------------------------------------
+    void ReductionManager::has_fields(std::map<FieldID,bool> &fields) const
+    //--------------------------------------------------------------------------
+    {
+      for (std::map<FieldID,bool>::iterator it = fields.begin();
+            it != fields.end(); it++)
+      {
+        if (it->first == logical_field)
+          it->second = true;
+        else
+          it->second = false;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ReductionManager::remove_space_fields(std::set<FieldID> &fields) const
+    //--------------------------------------------------------------------------
+    {
+      fields.erase(logical_field);
+    }
+
+    //--------------------------------------------------------------------------
     DistributedID ReductionManager::send_manager(AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
@@ -1057,6 +1114,7 @@ namespace Legion {
           rez.serialize(memory);
           rez.serialize(instance);
           rez.serialize(redop);
+          rez.serialize(logical_field);
           rez.serialize(region_node->handle);
           rez.serialize<bool>(is_foldable());
           rez.serialize(get_pointer_space());
@@ -1085,6 +1143,8 @@ namespace Legion {
       derez.deserialize(inst);
       ReductionOpID redop;
       derez.deserialize(redop);
+      FieldID logical_field;
+      derez.deserialize(logical_field);
       LogicalRegion handle;
       derez.deserialize(handle);
       bool foldable;
@@ -1099,7 +1159,8 @@ namespace Legion {
       if (foldable)
       {
         FoldReductionManager *manager = 
-                        legion_new<FoldReductionManager>(runtime->forest, did,
+                        legion_new<FoldReductionManager>(
+                                            runtime->forest, did, logical_field,
                                             owner_space, runtime->address_space,
                                             mem, inst, target_node, redop, op,
                                             use_event, false/*register now*/);
@@ -1114,7 +1175,8 @@ namespace Legion {
       else
       {
         ListReductionManager *manager = 
-                        legion_new<ListReductionManager>(runtime->forest, did,
+                        legion_new<ListReductionManager>(
+                                            runtime->forest, did, logical_field,
                                             owner_space, runtime->address_space,
                                             mem, inst, target_node, redop, op,
                                             ptr_space, false/*register now*/);
@@ -1149,6 +1211,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ListReductionManager::ListReductionManager(RegionTreeForest *ctx, 
                                                DistributedID did,
+                                               FieldID f,
                                                AddressSpaceID owner_space, 
                                                AddressSpaceID local_space,
                                                Memory mem, 
@@ -1157,7 +1220,7 @@ namespace Legion {
                                                ReductionOpID red,
                                                const ReductionOp *o, 
                                                Domain dom, bool reg_now)
-      : ReductionManager(ctx, did, owner_space, local_space, mem, 
+      : ReductionManager(ctx, did, f, owner_space, local_space, mem, 
                          inst, node, red, o, reg_now), ptr_space(dom)
     //--------------------------------------------------------------------------
     {
@@ -1171,7 +1234,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ListReductionManager::ListReductionManager(const ListReductionManager &rhs)
-      : ReductionManager(NULL, 0, 0, 0, Memory::NO_MEMORY,
+      : ReductionManager(NULL, 0, 0, 0, 0, Memory::NO_MEMORY,
                          PhysicalInstance::NO_INST, NULL, 0, NULL, false),
         ptr_space(Domain::NO_DOMAIN)
     //--------------------------------------------------------------------------
@@ -1330,6 +1393,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FoldReductionManager::FoldReductionManager(RegionTreeForest *ctx, 
                                                DistributedID did,
+                                               FieldID f,
                                                AddressSpaceID owner_space, 
                                                AddressSpaceID local_space,
                                                Memory mem,
@@ -1339,7 +1403,7 @@ namespace Legion {
                                                const ReductionOp *o,
                                                Event u_event,
                                                bool register_now)
-      : ReductionManager(ctx, did, owner_space, local_space, mem, 
+      : ReductionManager(ctx, did, f, owner_space, local_space, mem, 
                          inst, node, red, o, register_now), use_event(u_event)
     //--------------------------------------------------------------------------
     {
@@ -1353,7 +1417,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FoldReductionManager::FoldReductionManager(const FoldReductionManager &rhs)
-      : ReductionManager(NULL, 0, 0, 0, Memory::NO_MEMORY,
+      : ReductionManager(NULL, 0, 0, 0, 0, Memory::NO_MEMORY,
                          PhysicalInstance::NO_INST, NULL, 0, NULL, false),
         use_event(Event::NO_EVENT)
     //--------------------------------------------------------------------------

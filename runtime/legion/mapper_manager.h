@@ -23,6 +23,7 @@ namespace Legion {
   namespace Internal {
 
     enum MappingCallKind {
+      GET_MAPPER_NAME_CALL,
       GET_MAPER_SYNC_MODEL_CALL,
       SELECT_TASK_OPTIONS_CALL,
       PREMAP_TASK_CALL,
@@ -59,16 +60,62 @@ namespace Legion {
       PERMIT_STEAL_REQUEST_CALL,
       HANDLE_MESSAGE_CALL,
       HANDLE_TASK_RESULT_CALL,
+      LAST_MAPPER_CALL,
     };
+
+#define MAPPER_CALL_NAMES(name)                     \
+    const char *name[LAST_MAPPER_CALL] = {          \
+      "get_mapper_name",                            \
+      "get_mapper_sync_model",                      \
+      "select_task_options",                        \
+      "premap_task",                                \
+      "slice_task",                                 \
+      "map_task",                                   \
+      "select_task_variant",                        \
+      "postmap_task",                               \
+      "select_task_sources",                        \
+      "speculate (for task)",                       \
+      "report profiling (for task)",                \
+      "map_inline",                                 \
+      "select_inline_sources",                      \
+      "report profiling (for inline)",              \
+      "map_copy",                                   \
+      "select_copy_sources",                        \
+      "speculate (for copy)",                       \
+      "report_profiling (for copy)",                \
+      "map_close",                                  \
+      "select_close_sources",                       \
+      "report_profiling (for close)",               \
+      "map_acquire",                                \
+      "speculate (for acquire)",                    \
+      "report_profiling (for acquire)",             \
+      "map_release",                                \
+      "select_release_sources",                     \
+      "speculate (for release)",                    \
+      "report_profiling (for release)",             \
+      "configure_context",                          \
+      "select_tunable_value",                       \
+      "map_must_epoch",                             \
+      "map_dataflow_graph",                         \
+      "select_tasks_to_map",                        \
+      "select_steal_targets",                       \
+      "permit_steal_request",                       \
+      "handle_message",                             \
+      "handle_task_result",                         \
+    }
+
 
     class MappingCallInfo {
     public:
-      MappingCallInfo(MapperManager *man, MappingCallKind k)
-        : manager(man), resume(UserEvent::NO_USER_EVENT), kind(k) { }
+      MappingCallInfo(MapperManager *man, MappingCallKind k,
+                      std::set<PhysicalManager*> *regions = NULL)
+        : manager(man), resume(UserEvent::NO_USER_EVENT), 
+          kind(k), acquired_regions(regions) { }
     public:
-      MapperManager *const manager;
-      UserEvent            resume;
-      MappingCallKind      kind;
+      MapperManager*const              manager;
+      UserEvent                        resume;
+      MappingCallKind                  kind;
+      std::set<PhysicalManager*>*const acquired_regions;
     };
 
     /**
@@ -89,7 +136,7 @@ namespace Legion {
         void *arg1, *arg2, *arg3;
       };
     public:
-      MapperManager(Runtime *runtime, Mapping::Mapper *mapper);
+      MapperManager(Runtime *runtime, Mapping::Mapper *mapper, MapperID map_id);
       virtual ~MapperManager(void);
     public:
       const char* get_mapper_name(void);
@@ -236,6 +283,37 @@ namespace Legion {
       void broadcast(MappingCallInfo *info, const void *message, 
                      size_t message_size, int radix);
     public:
+      bool create_physical_instance(MappingCallInfo *ctx, Memory target_memory,
+                                    const LayoutConstraintSet &constraints, 
+                                    LogicalRegion r, MappingInstance &result, 
+                                    bool acquire, GCPriority priority);
+      bool create_physical_instance(MappingCallInfo *ctx, Memory target_memory,
+                                    LayoutConstraintID layout_id,
+                                    LogicalRegion r, MappingInstance &result,
+                                    bool acquire, GCPriority priority);
+      bool find_or_create_physical_instance(
+                                    MappingCallInfo *ctx, Memory target_memory,
+                                    const LayoutConstraintSet &constraints, 
+                                    LogicalRegion r, MappingInstance &result, 
+                                    bool &created, bool acquire, 
+                                    GCPriority priority);
+      bool find_or_create_physical_instance(
+                                    MappingCallInfo *ctx, Memory target_memory,
+                                    LayoutConstraintID layout_id,
+                                    LogicalRegion r, MappingInstance &result,
+                                    bool &created, bool acquire,
+                                    GCPriority priority);
+      bool find_physical_instance(  MappingCallInfo *ctx, Memory target_memory,
+                                    const LayoutConstraintSet &constraints,
+                                    LogicalRegion r, MappingInstance &result,
+                                    bool acquire);
+      bool find_physical_instance(  MappingCallInfo *ctx, Memory target_memory,
+                                    LayoutConstraintID layout_id,
+                                    LogicalRegion r, MappingInstance &result,
+                                    bool acquire);
+      void acquire_physical_instance(MappingCallInfo *ctx, 
+                                     const MappingInstance &inst);
+    public:
       IndexPartition get_index_partition(IndexSpace parent, Color color);
       IndexSpace get_index_subspace(IndexPartition p, Color c);
       IndexSpace get_index_subspace(IndexPartition p, 
@@ -283,8 +361,11 @@ namespace Legion {
       MappingCallInfo* allocate_call_info(MappingCallKind kind, bool need_lock);
       void free_call_info(MappingCallInfo *info, bool need_lock);
     public:
+      static const char* get_mapper_call_name(MappingCallKind kind);
+    public:
       Runtime *const runtime;
       Mapping::Mapper *const mapper;
+      const MapperID mapper_id;
     protected:
       Reservation mapper_lock;
     protected:
@@ -301,7 +382,7 @@ namespace Legion {
     class SerializingManager : public MapperManager {
     public:
       SerializingManager(Runtime *runtime, Mapping::Mapper *mapper,
-                         bool reentrant);
+                         MapperID map_id, bool reentrant);
       SerializingManager(const SerializingManager &rhs);
       virtual ~SerializingManager(void);
     public:
@@ -350,7 +431,8 @@ namespace Legion {
         EXCLUSIVE_STATE,
       };
     public:
-      ConcurrentManager(Runtime *runtime, Mapping::Mapper *mapper);
+      ConcurrentManager(Runtime *runtime, Mapping::Mapper *mapper,
+                        MapperID map_id);
       ConcurrentManager(const ConcurrentManager &rhs);
       virtual ~ConcurrentManager(void);
     public:
