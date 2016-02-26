@@ -2152,5 +2152,37 @@ namespace LegionRuntime {
       return left = static_cast<AllocateMode>(l);
     }
 
+    //--------------------------------------------------------------------------
+    inline std::ostream& operator<<(std::ostream& os, const LogicalRegion& lr)
+    //--------------------------------------------------------------------------
+    {
+      os << "LogicalRegion(" << lr.tree_id << "," << lr.index_space << "," << lr.field_space << ")";
+      return os;
+    }
+
+    //--------------------------------------------------------------------------
+    inline std::ostream& operator<<(std::ostream& os, const IndexSpace& is)
+    //--------------------------------------------------------------------------
+    {
+      os << "IndexSpace(" << is.id << "," << is.tid << ")";
+      return os;
+    }
+
+    //--------------------------------------------------------------------------
+    inline std::ostream& operator<<(std::ostream& os, const FieldSpace& fs)
+    //--------------------------------------------------------------------------
+    {
+      os << "FieldSpace(" << fs.id << ")";
+      return os;
+    }
+
+    //--------------------------------------------------------------------------
+    inline std::ostream& operator<<(std::ostream& os, const PhaseBarrier& pb)
+    //--------------------------------------------------------------------------
+    {
+      os << "PhaseBarrier(" << pb.phase_barrier << ")";
+      return os;
+    }
+
   };
 };

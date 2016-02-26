@@ -71,6 +71,7 @@ namespace LegionRuntime {
       inline IndexTreeID get_tree_id(void) const { return tid; }
       inline bool exists(void) const { return (id != 0); }
     private:
+      friend std::ostream& operator<<(std::ostream& os, const IndexSpace& is);
       IndexSpaceID id;
       IndexTreeID tid;
     };
@@ -133,6 +134,7 @@ namespace LegionRuntime {
       inline FieldSpaceID get_id(void) const { return id; }
       inline bool exists(void) const { return (id != 0); }
     private:
+      friend std::ostream& operator<<(std::ostream& os, const FieldSpace& fs);
       FieldSpaceID id;
     };
 
@@ -171,6 +173,7 @@ namespace LegionRuntime {
       inline RegionTreeID get_tree_id(void) const { return tree_id; }
       inline bool exists(void) const { return (tree_id != 0); } 
     private:
+      friend std::ostream& operator<<(std::ostream& os, const LogicalRegion& lr);
       // These are private so the user can't just arbitrarily change them
       RegionTreeID tree_id;
       IndexSpace index_space;
@@ -667,6 +670,7 @@ namespace LegionRuntime {
     public:
       bool operator<(const PhaseBarrier &rhs) const;
       bool operator==(const PhaseBarrier &rhs) const;
+      bool operator!=(const PhaseBarrier &rhs) const;
     public:
       void arrive(unsigned count = 1);
       void wait(void);
@@ -674,6 +678,7 @@ namespace LegionRuntime {
       Barrier get_barrier(void) const { return phase_barrier; }
     protected:
       Barrier phase_barrier;
+      friend std::ostream& operator<<(std::ostream& os, const PhaseBarrier& pb);
     };
 
    /**
