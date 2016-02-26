@@ -28,42 +28,48 @@
 #include "atomics.h" // for __sync_fetch_and_add
 #endif
 
+#ifdef __CUDACC__
+#define CUDAPREFIX __host__ __device__
+#else
+#define CUDAPREFIX
+#endif
+
 // why must I define this every time I need it?
-static inline int imin(int a, int b) { return (a < b) ? a : b; }
-static inline int imax(int a, int b) { return (a > b) ? a : b; }
+CUDAPREFIX static inline int imin(int a, int b) { return (a < b) ? a : b; }
+CUDAPREFIX static inline int imax(int a, int b) { return (a > b) ? a : b; }
 
 namespace LegionRuntime {
   namespace Arrays {
     template <unsigned DIM>
     class Point {
     public:
-      Point(void) {}
-      Point(const int *vals) { for(unsigned i = 0; i < DIM; i++) x[i] = vals[i]; }
-      Point(const Point<DIM>& other) { for(unsigned i = 0; i < DIM; i++) x[i] = other.x[i]; }
+      CUDAPREFIX Point(void) {}
+      CUDAPREFIX Point(const int *vals) { for(unsigned i = 0; i < DIM; i++) x[i] = vals[i]; }
+      CUDAPREFIX Point(const Point<DIM>& other) { for(unsigned i = 0; i < DIM; i++) x[i] = other.x[i]; }
 
-      Point& operator=(const Point<DIM>& other) 
+      CUDAPREFIX Point& operator=(const Point<DIM>& other) 
       { 
 	for(unsigned i = 0; i < DIM; i++) x[i] = other.x[i];
 	return *this;
       }
 
-      void to_array(int *vals) const { for(unsigned i = 0; i < DIM; i++) vals[i] = x[i]; }
+      CUDAPREFIX void to_array(int *vals) const { for(unsigned i = 0; i < DIM; i++) vals[i] = x[i]; }
 
-      bool operator==(const Point<DIM>& other) const
+      CUDAPREFIX bool operator==(const Point<DIM>& other) const
       { 
 	for(unsigned i = 0; i < DIM; i++) 
 	  if(x[i] != other.x[i]) return false; 
 	return true; 
       }
 
-      bool operator!=(const Point<DIM>& other) const
+      CUDAPREFIX bool operator!=(const Point<DIM>& other) const
       { 
 	for(unsigned i = 0; i < DIM; i++) 
 	  if(x[i] != other.x[i]) return true; 
 	return false; 
       }
 
-      bool operator<=(const Point<DIM>& other) const
+      CUDAPREFIX bool operator<=(const Point<DIM>& other) const
       { 
 	for(unsigned i = 0; i < DIM; i++) 
 	  if(x[i] > other.x[i]) return false; 
@@ -82,19 +88,19 @@ namespace LegionRuntime {
 	}
       };
 
-      int operator[](unsigned idx) const { return x[idx]; }
+      CUDAPREFIX int operator[](unsigned idx) const { return x[idx]; }
   
-      static Point<DIM> ZEROES(void)
+      CUDAPREFIX static Point<DIM> ZEROES(void)
       {
         Point<DIM> z; for(unsigned i = 0; i < DIM; i++) z.x[i] = 0; return z;
       }
 
-      static Point<DIM> ONES(void)
+      CUDAPREFIX static Point<DIM> ONES(void)
       {
         Point<DIM> o; for(unsigned i = 0; i < DIM; i++) o.x[i] = 1; return o;
       }
 
-      Point<DIM> operator+(const Point<DIM> other) const
+      CUDAPREFIX Point<DIM> operator+(const Point<DIM> other) const
       {
         Point<DIM> res;
         for(unsigned i = 0; i < DIM; i++)
@@ -102,7 +108,7 @@ namespace LegionRuntime {
 	return res;
       }
   
-      Point<DIM> operator-(const Point<DIM> other) const
+      CUDAPREFIX Point<DIM> operator-(const Point<DIM> other) const
       {
         Point<DIM> res;
         for(unsigned i = 0; i < DIM; i++)
@@ -111,7 +117,7 @@ namespace LegionRuntime {
       }
   
       // element-wise multiplication and division
-      Point<DIM> operator*(const Point<DIM> other) const
+      CUDAPREFIX Point<DIM> operator*(const Point<DIM> other) const
       {
         Point<DIM> res;
         for(unsigned i = 0; i < DIM; i++)
@@ -119,7 +125,7 @@ namespace LegionRuntime {
 	return res;
       }
   
-      Point<DIM> operator/(const Point<DIM> other) const
+      CUDAPREFIX Point<DIM> operator/(const Point<DIM> other) const
       {
         Point<DIM> res;
         for(unsigned i = 0; i < DIM; i++)
@@ -127,7 +133,7 @@ namespace LegionRuntime {
 	return res;
       }
 
-      static Point<DIM> sum(const Point<DIM> a, const Point<DIM> b)
+      CUDAPREFIX static Point<DIM> sum(const Point<DIM> a, const Point<DIM> b)
       {
         Point<DIM> res;
         for(unsigned i = 0; i < DIM; i++)
@@ -135,7 +141,7 @@ namespace LegionRuntime {
 	return res;
       }
 
-      static Point<DIM> min(const Point<DIM> a, const Point<DIM> b)
+      CUDAPREFIX static Point<DIM> min(const Point<DIM> a, const Point<DIM> b)
       {
         Point<DIM> res;
         for(unsigned i = 0; i < DIM; i++)
@@ -143,7 +149,7 @@ namespace LegionRuntime {
 	return res;
       }
 
-      static Point<DIM> max(const Point<DIM> a, const Point<DIM> b)
+      CUDAPREFIX static Point<DIM> max(const Point<DIM> a, const Point<DIM> b)
       {
         Point<DIM> res;
         for(unsigned i = 0; i < DIM; i++)
@@ -151,7 +157,7 @@ namespace LegionRuntime {
 	return res;
       }
 
-      static int dot(const Point<DIM> a, const Point<DIM> b)
+      CUDAPREFIX static int dot(const Point<DIM> a, const Point<DIM> b)
       {
 	int v = 0;
         for(unsigned i = 0; i < DIM; i++)
@@ -159,7 +165,7 @@ namespace LegionRuntime {
 	return v;
       }
   
-      int dot(const Point<DIM> other) const
+      CUDAPREFIX int dot(const Point<DIM> other) const
       {
         int v = 0;
         for(unsigned i = 0; i < DIM; i++) v += x[i] * other.x[i];
@@ -174,54 +180,54 @@ namespace LegionRuntime {
     class Point<1> {
     public:
       enum { DIM = 1 };
-      Point(void) {}
-      Point(int val) { x[0] = val; }
-      Point(const int *vals) { for(unsigned i = 0; i < DIM; i++) x[i] = vals[i]; }
-      Point(const Point<1>& other) { for(unsigned i = 0; i < DIM; i++) x[i] = other.x[i]; }
+      CUDAPREFIX Point(void) {}
+      CUDAPREFIX Point(int val) { x[0] = val; }
+      CUDAPREFIX Point(const int *vals) { for(unsigned i = 0; i < DIM; i++) x[i] = vals[i]; }
+      CUDAPREFIX Point(const Point<1>& other) { for(unsigned i = 0; i < DIM; i++) x[i] = other.x[i]; }
 
-      Point& operator=(const Point<1>& other) 
+      CUDAPREFIX Point& operator=(const Point<1>& other) 
       { 
 	for(unsigned i = 0; i < 1; i++) x[i] = other.x[i];
 	return *this;
       }
 
-      void to_array(int *vals) const { for(unsigned i = 0; i < DIM; i++) vals[i] = x[i]; }
+      CUDAPREFIX void to_array(int *vals) const { for(unsigned i = 0; i < DIM; i++) vals[i] = x[i]; }
   
-      int operator[](unsigned idx) const { return x[0]; }
-      operator int(void) const { return x[0]; }
+      CUDAPREFIX int operator[](unsigned idx) const { return x[0]; }
+      CUDAPREFIX operator int(void) const { return x[0]; }
       
-      bool operator==(const Point<DIM> &other) const
+      CUDAPREFIX bool operator==(const Point<DIM> &other) const
       {
         for(unsigned i = 0; i < DIM; i++) 
 	  if(x[i] != other.x[i]) return false; 
 	return true;
       }
 
-      bool operator!=(const Point<DIM> &other) const
+      CUDAPREFIX bool operator!=(const Point<DIM> &other) const
       {
         for(unsigned i = 0; i < DIM; i++) 
 	  if(x[i] != other.x[i]) return true; 
 	return false;
       }
 
-      bool operator<=(const Point<DIM> &other) const
+      CUDAPREFIX bool operator<=(const Point<DIM> &other) const
       {
         for(unsigned i = 0; i < DIM; i++) 
 	  if(x[i] > other.x[i]) return false; 
 	return true;
       }
   
-      static Point<DIM> ZEROES(void)
+      CUDAPREFIX static Point<DIM> ZEROES(void)
       {
         Point<DIM> z; for(unsigned i = 0; i < DIM; i++) z.x[i] = 0; return z;
       }
 
-      static Point<DIM> ONES(void)
+      CUDAPREFIX static Point<DIM> ONES(void)
       {
         Point<DIM> o; for(unsigned i = 0; i < DIM; i++) o.x[i] = 1; return o;
       }
 
-      static Point<DIM> sum(const Point<DIM> a, const Point<DIM> b)
+      CUDAPREFIX static Point<DIM> sum(const Point<DIM> a, const Point<DIM> b)
       {
         Point<DIM> res;
         for(unsigned i = 0; i < DIM; i++)
@@ -229,7 +235,7 @@ namespace LegionRuntime {
 	return res;
       }
 
-      static Point<DIM> min(const Point<DIM> a, const Point<DIM> b)
+      CUDAPREFIX static Point<DIM> min(const Point<DIM> a, const Point<DIM> b)
       {
         Point<DIM> res;
         for(unsigned i = 0; i < DIM; i++)
@@ -237,7 +243,7 @@ namespace LegionRuntime {
 	return res;
       }
 
-      static Point<DIM> max(const Point<DIM> a, const Point<DIM> b)
+      CUDAPREFIX static Point<DIM> max(const Point<DIM> a, const Point<DIM> b)
       {
         Point<DIM> res;
         for(unsigned i = 0; i < DIM; i++)
@@ -245,7 +251,7 @@ namespace LegionRuntime {
 	return res;
       }
 
-      static int dot(const Point<DIM> a, const Point<DIM> b)
+      CUDAPREFIX static int dot(const Point<DIM> a, const Point<DIM> b)
       {
 	int v = 0;
         for(unsigned i = 0; i < DIM; i++)
@@ -253,7 +259,7 @@ namespace LegionRuntime {
 	return v;
       }
 
-      Point<DIM> operator+(const Point<DIM> other) const
+      CUDAPREFIX Point<DIM> operator+(const Point<DIM> other) const
       {
         Point<DIM> res;
         for(unsigned i = 0; i < DIM; i++)
@@ -261,7 +267,7 @@ namespace LegionRuntime {
 	return res;
       }
 
-      Point<DIM> operator-(const Point<DIM> other) const
+      CUDAPREFIX Point<DIM> operator-(const Point<DIM> other) const
       {
         Point<DIM> res;
         for(unsigned i = 0; i < DIM; i++)
@@ -270,7 +276,7 @@ namespace LegionRuntime {
       }
   
       // element-wise multiplication and division
-      Point<DIM> operator*(const Point<DIM> other) const
+      CUDAPREFIX Point<DIM> operator*(const Point<DIM> other) const
       {
         Point<DIM> res;
         for(unsigned i = 0; i < DIM; i++)
@@ -278,7 +284,7 @@ namespace LegionRuntime {
 	return res;
       }
   
-      Point<DIM> operator/(const Point<DIM> other) const
+      CUDAPREFIX Point<DIM> operator/(const Point<DIM> other) const
       {
         Point<DIM> res;
         for(unsigned i = 0; i < DIM; i++)
@@ -286,20 +292,20 @@ namespace LegionRuntime {
 	return res;
       }
 
-      int dot(const Point<DIM> other) const { return dot(*this, other); }
+      CUDAPREFIX int dot(const Point<DIM> other) const { return dot(*this, other); }
   
     public:
       int x[1];
     };
 
-    inline Point<1> make_point(int x)
+    CUDAPREFIX inline Point<1> make_point(int x)
     {
       Point<1> p;
       p.x[0] = x;
       return p;
     }
 
-    inline Point<2> make_point(int x, int y)
+    CUDAPREFIX inline Point<2> make_point(int x, int y)
     {
       Point<2> p;
       p.x[0] = x;
@@ -307,7 +313,7 @@ namespace LegionRuntime {
       return p;
     }
 
-    inline Point<3> make_point(int x, int y, int z)
+    CUDAPREFIX inline Point<3> make_point(int x, int y, int z)
     {
       Point<3> p;
       p.x[0] = x;
@@ -329,52 +335,52 @@ namespace LegionRuntime {
     template <unsigned DIM>
     class Rect {
     public:
-      Rect(void) {}
-      explicit Rect(const int *vals) : lo(vals), hi(vals + DIM) {}
-      Rect(const Point<DIM> _lo, const Point<DIM> _hi) : lo(_lo), hi(_hi) {}
-      Rect(const Rect<DIM>& other) : lo(other.lo), hi(other.hi) {}
+      CUDAPREFIX Rect(void) {}
+      CUDAPREFIX explicit Rect(const int *vals) : lo(vals), hi(vals + DIM) {}
+      CUDAPREFIX Rect(const Point<DIM> _lo, const Point<DIM> _hi) : lo(_lo), hi(_hi) {}
+      CUDAPREFIX Rect(const Rect<DIM>& other) : lo(other.lo), hi(other.hi) {}
 
-      Rect& operator=(const Rect<DIM>& other)
+      CUDAPREFIX Rect& operator=(const Rect<DIM>& other)
       {
 	lo = other.lo;
 	hi = other.hi;
 	return *this;
       }
 
-      void to_array(int *vals) const { lo.to_array(vals); hi.to_array(vals + DIM); }
+      CUDAPREFIX void to_array(int *vals) const { lo.to_array(vals); hi.to_array(vals + DIM); }
 
-      bool operator==(const Rect<DIM>& other)
+      CUDAPREFIX bool operator==(const Rect<DIM>& other)
       {
 	return ((lo == other.lo) && (hi == other.hi));
       }
 
-      bool operator!=(const Rect<DIM>& other)
+      CUDAPREFIX bool operator!=(const Rect<DIM>& other)
       {
 	return ((lo != other.lo) || (hi != other.hi));
       }
 
-      bool overlaps(const Rect<DIM>& other) const
+      CUDAPREFIX bool overlaps(const Rect<DIM>& other) const
       {
 	for(unsigned i = 0; i < DIM; i++)
 	  if((hi.x[i] < other.lo.x[i]) || (lo.x[i] > other.hi.x[i])) return false;
 	return true;
       }
 
-      bool contains(const Rect<DIM>& other) const
+      CUDAPREFIX bool contains(const Rect<DIM>& other) const
       {
 	for(unsigned i = 0; i < DIM; i++)
 	  if((lo.x[i] > other.lo.x[i]) || (hi.x[i] < other.hi.x[i])) return false;
 	return true;
       }
 
-      bool contains(const Point<DIM> &point) const
+      CUDAPREFIX bool contains(const Point<DIM> &point) const
       {
         for (unsigned i = 0; i < DIM; i++)
           if ((point.x[i] < lo.x[i]) || (point.x[i] > hi.x[i])) return false;
         return true;
       }
 
-      size_t volume(void) const
+      CUDAPREFIX size_t volume(void) const
       {
 	size_t v = 1;
 	for(unsigned i = 0; i < DIM; i++) {
@@ -384,20 +390,20 @@ namespace LegionRuntime {
 	return v;
       }
 
-      int dim_size(int dim) const
+      CUDAPREFIX int dim_size(int dim) const
       {
         assert(dim >= 0);
         assert(dim < int(DIM));
         return (hi.x[dim] - lo.x[dim] + 1);
       }
 
-      Rect<DIM> intersection(const Rect<DIM>& other)
+      CUDAPREFIX Rect<DIM> intersection(const Rect<DIM>& other)
       {
 	return Rect<DIM>(Point<DIM>::max(lo, other.lo),
 			 Point<DIM>::min(hi, other.hi));
       }
 
-      Rect<DIM> convex_hull(const Rect<DIM>& other)
+      CUDAPREFIX Rect<DIM> convex_hull(const Rect<DIM>& other)
       {
         return Rect<DIM>(Point<DIM>::min(lo, other.lo),
                          Point<DIM>::max(hi, other.hi));
