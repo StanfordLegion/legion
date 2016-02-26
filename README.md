@@ -194,8 +194,7 @@ push "c" to configure, then "g" to create makefile
 make
 make install
 
-After you build legion, specify PATH to the legion install directory in your project's CMakeLists.txt and add legion libraries and include path to CMAKE_EXE_LINKER_FLAGS.
-
+In purpose to use Legion in externale cmake project use "find_package (legion REQUIRED NO_MODULE)" to get and information avout Legion include directories, libraries and flags.
 
 
 Debugging Programs
