@@ -332,7 +332,7 @@ namespace Legion {
     Memory MaterializedView::get_location(void) const
     //--------------------------------------------------------------------------
     {
-      return manager->memory;
+      return manager->get_memory();
     }
 
     //--------------------------------------------------------------------------
@@ -6416,7 +6416,7 @@ namespace Legion {
     Memory ReductionView::get_location(void) const
     //--------------------------------------------------------------------------
     {
-      return manager->memory;
+      return manager->get_memory();
     }
 
     //--------------------------------------------------------------------------

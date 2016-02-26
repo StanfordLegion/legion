@@ -4695,7 +4695,7 @@ namespace Legion {
           char *valid_mask = overlap.to_string();
           logger->log("Instance " IDFMT "   Memory " IDFMT "   Mask %s",
                       current->manager->get_instance().id, 
-                      current->manager->memory.id, valid_mask);
+                      current->manager->get_memory().id, valid_mask);
           free(valid_mask);
         }
         logger->up();
@@ -4724,7 +4724,7 @@ namespace Legion {
           logger->log("Reduction Instance " IDFMT "   Memory " IDFMT 
                       "  Mask %s",
                       it->first->manager->get_instance().id, 
-                      it->first->manager->memory.id, valid_mask);
+                      it->first->manager->get_memory().id, valid_mask);
           free(valid_mask);
         }
         logger->up();
@@ -6933,7 +6933,7 @@ namespace Legion {
       assert(!composite);
       assert(ptr.manager != NULL);
 #endif
-      return ptr.manager->memory;
+      return ptr.manager->get_memory();
     }
 
     //--------------------------------------------------------------------------

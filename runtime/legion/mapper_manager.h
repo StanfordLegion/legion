@@ -285,34 +285,37 @@ namespace Legion {
     public:
       bool create_physical_instance(MappingCallInfo *ctx, Memory target_memory,
                                     const LayoutConstraintSet &constraints, 
-                                    LogicalRegion r, MappingInstance &result, 
+                                    const std::vector<LogicalRegion> &regions,
+                                    MappingInstance &result, 
                                     bool acquire, GCPriority priority);
       bool create_physical_instance(MappingCallInfo *ctx, Memory target_memory,
                                     LayoutConstraintID layout_id,
-                                    LogicalRegion r, MappingInstance &result,
+                                    const std::vector<LogicalRegion> &regions,
+                                    MappingInstance &result,
                                     bool acquire, GCPriority priority);
       bool find_or_create_physical_instance(
                                     MappingCallInfo *ctx, Memory target_memory,
                                     const LayoutConstraintSet &constraints, 
-                                    LogicalRegion r, MappingInstance &result, 
-                                    bool &created, bool acquire, 
-                                    GCPriority priority);
+                                    const std::vector<LogicalRegion> &regions,
+                                    MappingInstance &result, bool &created, 
+                                    bool acquire, GCPriority priority);
       bool find_or_create_physical_instance(
                                     MappingCallInfo *ctx, Memory target_memory,
                                     LayoutConstraintID layout_id,
-                                    LogicalRegion r, MappingInstance &result,
-                                    bool &created, bool acquire,
-                                    GCPriority priority);
+                                    const std::vector<LogicalRegion> &regions,
+                                    MappingInstance &result, bool &created, 
+                                    bool acquire, GCPriority priority);
       bool find_physical_instance(  MappingCallInfo *ctx, Memory target_memory,
                                     const LayoutConstraintSet &constraints,
-                                    LogicalRegion r, MappingInstance &result,
-                                    bool acquire);
+                                    const std::vector<LogicalRegion> &regions,
+                                    MappingInstance &result, bool acquire);
       bool find_physical_instance(  MappingCallInfo *ctx, Memory target_memory,
                                     LayoutConstraintID layout_id,
-                                    LogicalRegion r, MappingInstance &result,
-                                    bool acquire);
-      void acquire_physical_instance(MappingCallInfo *ctx, 
-                                     const MappingInstance &inst);
+                                    const std::vector<LogicalRegion> &regions,
+                                    MappingInstance &result, bool acquire);
+    public:
+      void check_region_consistency(MappingCallInfo *info, const char *call,
+                                    const std::vector<LogicalRegion> &regions);
     public:
       IndexPartition get_index_partition(IndexSpace parent, Color color);
       IndexSpace get_index_subspace(IndexPartition p, Color c);

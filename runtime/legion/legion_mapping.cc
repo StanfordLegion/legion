@@ -96,7 +96,7 @@ namespace Legion {
     {
       if (impl == NULL)
         return Memory::NO_MEMORY;
-      return impl->memory;
+      return impl->get_memory();
     }
 
     //--------------------------------------------------------------------------
@@ -214,74 +214,78 @@ namespace Legion {
     bool Mapper::mapper_rt_create_physical_instance(
                                     MapperContext ctx, Memory target_memory,
                                     const LayoutConstraintSet &constraints, 
-                                    LogicalRegion r, PhysicalInstance &result, 
+                                    const std::vector<LogicalRegion> &regions,
+                                    PhysicalInstance &result, 
                                     bool acquire, GCPriority priority) const
     //--------------------------------------------------------------------------
     {
       return ctx->manager->create_physical_instance(ctx, target_memory, 
-                            constraints, r, result, acquire, priority);
+                      constraints, regions, result, acquire, priority);
     }
 
     //--------------------------------------------------------------------------
     bool Mapper::mapper_rt_create_physical_instance(
                                     MapperContext ctx, Memory target_memory,
                                     LayoutConstraintID layout_id,
-                                    LogicalRegion r, PhysicalInstance &result,
+                                    const std::vector<LogicalRegion> &regions,
+                                    PhysicalInstance &result,
                                     bool acquire, GCPriority priority) const
     //--------------------------------------------------------------------------
     {
       return ctx->manager->create_physical_instance(ctx, target_memory, 
-                              layout_id, r, result, acquire, priority);
+                        layout_id, regions, result, acquire, priority);
     }
 
     //--------------------------------------------------------------------------
     bool Mapper::mapper_rt_find_or_create_physical_instance(
                                     MapperContext ctx, Memory target_memory,
                                     const LayoutConstraintSet &constraints, 
-                                    LogicalRegion r, PhysicalInstance &result, 
-                                    bool &created, bool acquire,
-                                    GCPriority priority) const
+                                    const std::vector<LogicalRegion> &regions, 
+                                    PhysicalInstance &result, bool &created, 
+                                    bool acquire, GCPriority priority) const
     //--------------------------------------------------------------------------
     {
       return ctx->manager->find_or_create_physical_instance(ctx, target_memory, 
-                           constraints, r, result, created, acquire, priority);
+                     constraints, regions, result, created, acquire, priority);
     }
 
     //--------------------------------------------------------------------------
     bool Mapper::mapper_rt_find_or_create_physical_instance(
                                     MapperContext ctx, Memory target_memory,
                                     LayoutConstraintID layout_id,
-                                    LogicalRegion r, PhysicalInstance &result,
-                                    bool &created, bool acquire,
-                                    GCPriority priority) const
+                                    const std::vector<LogicalRegion> &regions,
+                                    PhysicalInstance &result, bool &created, 
+                                    bool acquire, GCPriority priority) const
     //--------------------------------------------------------------------------
     {
       return ctx->manager->find_or_create_physical_instance(ctx, target_memory,
-                             layout_id, r, result, created, acquire, priority);
+                       layout_id, regions, result, created, acquire, priority);
     }
 
     //--------------------------------------------------------------------------
     bool Mapper::mapper_rt_find_physical_instance(
                                     MapperContext ctx, Memory target_memory,
                                     const LayoutConstraintSet &constraints,
-                                    LogicalRegion r, PhysicalInstance &result,
+                                    const std::vector<LogicalRegion> &regions,
+                                    PhysicalInstance &result,
                                     bool acquire) const
     //--------------------------------------------------------------------------
     {
       return ctx->manager->find_physical_instance(ctx, target_memory, 
-                                      constraints, r, result, acquire);
+                              constraints, regions, result, acquire);
     }
 
     //--------------------------------------------------------------------------
     bool Mapper::mapper_rt_find_physical_instance(
                                     MapperContext ctx, Memory target_memory,
                                     LayoutConstraintID layout_id,
-                                    LogicalRegion r, PhysicalInstance &result,
+                                    const std::vector<LogicalRegion> &regions, 
+                                    PhysicalInstance &result,
                                     bool acquire) const
     //--------------------------------------------------------------------------
     {
       return ctx->manager->find_physical_instance(ctx, target_memory,
-                                      layout_id, r, result, acquire);
+                                layout_id, regions, result, acquire);
     }
 
     //--------------------------------------------------------------------------

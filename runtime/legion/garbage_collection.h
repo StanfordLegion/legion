@@ -54,6 +54,7 @@ namespace Legion {
       INSTANCE_MAPPER_REF,
       APPLICATION_REF,
       MAPPING_ACQUIRE_REF,
+      MAX_GC_REF,
       LAST_SOURCE_REF,
     };
 
@@ -82,6 +83,7 @@ namespace Legion {
       "Remote Creation Reference",                  \
       "Application Reference",                      \
       "Mapping Acquire Reference",                  \
+      "Maximum GC Priority Reference",              \
     }
 
     extern LegionRuntime::Logger::Category log_garbage;
@@ -134,12 +136,17 @@ namespace Legion {
       enum State {
         INACTIVE_STATE,
         ACTIVE_INVALID_STATE,
+        ACTIVE_DELETED_STATE,
         VALID_STATE,
+        DELETED_STATE,
         PENDING_ACTIVE_STATE,
         PENDING_INACTIVE_STATE,
         PENDING_VALID_STATE,
         PENDING_INVALID_STATE,
-        DELETED_STATE,
+        PENDING_ACTIVE_VALID_STATE,
+        PENDING_ACTIVE_DELETED_STATE,
+        PENDING_INVALID_DELETED_STATE,
+        PENDING_INACTIVE_DELETED_STATE,
       };
     public:
       template<ReferenceKind REF_KIND, bool ADD>
@@ -180,12 +187,18 @@ namespace Legion {
                                            unsigned cnt = 1);
       inline bool remove_nested_resource_ref(DistributedID source, 
                                              unsigned cnt = 1);
+    public: // some help for manaing physical instances 
+      inline bool try_add_base_valid_ref(ReferenceSource source,
+                                         bool must_be_valid,
+                                         unsigned cnt = 1);
+      bool try_active_deletion(void);
     private:
       void add_gc_reference(unsigned cnt);
       bool remove_gc_reference(unsigned cnt);
     private:
       void add_valid_reference(unsigned cnt);
       bool remove_valid_reference(unsigned cnt);
+      bool try_add_valid_reference(bool must_be_valid, unsigned cnt);
     private:
       void add_resource_reference(unsigned cnt);
       bool remove_resource_reference(unsigned cnt);
@@ -500,6 +513,21 @@ namespace Legion {
       log_nested_ref<false>(RESOURCE_REF_KIND, did, source, cnt);
 #endif
       return remove_resource_reference(cnt);
+    }
+
+    //--------------------------------------------------------------------------
+    inline bool DistributedCollectable::try_add_base_valid_ref(
+                 ReferenceSource source, bool must_be_valid, unsigned cnt/*=1*/) 
+    //--------------------------------------------------------------------------
+    {
+#ifdef LEGION_GC
+      bool result = try_add_valid_reference(must_be_valid, cnt);
+      if (result)
+        log_base_ref<true>(VALID_REF_KIND, did, source, cnt);
+      return result; 
+#else
+      return try_add_valid_reference(must_be_valid, cnt);
+#endif
     }
 
   }; // namespace Internal 

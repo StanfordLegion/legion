@@ -493,21 +493,27 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    PhysicalManager::PhysicalManager(RegionTreeForest *ctx, DistributedID did,
+    PhysicalManager::PhysicalManager(RegionTreeForest *ctx, 
+                                     MemoryManager *memory, DistributedID did,
                                      AddressSpaceID owner_space,
                                      AddressSpaceID local_space,
-                                     Memory mem, RegionNode *node,
+                                     RegionNode *node,
                                      PhysicalInstance inst, bool register_now)
       : DistributedCollectable(ctx->runtime, did, owner_space, 
                                local_space, register_now), 
-        context(ctx), memory(mem), region_node(node), instance(inst)
+        context(ctx), memory_manager(memory), region_node(node), instance(inst)
     //--------------------------------------------------------------------------
     {
       if (register_now)
         region_node->register_physical_manager(this);
       // If we are not the owner, add a resource reference
       if (!is_owner())
+      {
+        // Register it with the memory manager, the memory manager
+        // on the owner node will handle this
+        memory_manager->register_remote_instance(this);
         add_base_resource_ref(REMOTE_DID_REF);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -523,11 +529,12 @@ namespace Legion {
         UpdateReferenceFunctor<RESOURCE_REF_KIND,false/*add*/> functor(this);
         map_over_remote_instances(functor);
       }
+      else
+        memory_manager->unregister_remote_instance(this);
       if (is_owner() && instance.exists())
       {
         log_leak.warning("Leaking physical instance " IDFMT " in memory"
-                               IDFMT "",
-                               instance.id, memory.id);
+                               IDFMT "", instance.id, get_memory().id);
       }
     }
 
@@ -539,9 +546,23 @@ namespace Legion {
       if (is_owner())
         assert(instance.exists());
 #endif
+      memory_manager->activate_instance(this);
       // If we are not the owner, send a reference
       if (!is_owner())
         send_remote_gc_update(owner_space, 1/*count*/, true/*add*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalManager::notify_inactive(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      if (is_owner())
+        assert(instance.exists());
+#endif
+      memory_manager->deactivate_instance(this);
+      if (!is_owner())
+        send_remote_gc_update(owner_space, 1/*count*/, false/*add*/);
     }
 
     //--------------------------------------------------------------------------
@@ -553,9 +574,23 @@ namespace Legion {
       if (is_owner())
         assert(instance.exists());
 #endif
+      memory_manager->validate_instance(this);
       // If we are not the owner, send a reference
       if (!is_owner())
         send_remote_valid_update(owner_space, 1/*count*/, true/*add*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalManager::notify_invalid(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      if (is_owner())
+        assert(instance.exists());
+#endif
+      memory_manager->invalidate_instance(this);
+      if (!is_owner())
+        send_remote_valid_update(owner_space, 1/*count*/, false/*add*/);
     }
 
     //--------------------------------------------------------------------------
@@ -621,32 +656,70 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool PhysicalManager::meets_region(LogicalRegion handle) const
+    bool PhysicalManager::meets_regions(
+                                const std::vector<LogicalRegion> &regions) const
     //--------------------------------------------------------------------------
     {
-      // Check to see if the region tree IDs are the same
-      if (handle.get_tree_id() != region_node->handle.get_tree_id())
-        return false;
-      // Same region tree
-      RegionNode *handle_node = context->get_node(handle);
-      // Same node and we are done
-      if (handle_node == region_node)
-        return true;
-      // At this point the manager node must be above the handle node
-      // in order for it to still have a chance of being valid
-      const unsigned inst_depth = region_node->row_source->depth;
-      if (handle_node->row_source->depth <= inst_depth)
-        return false;
-      // Walk the handle node up until its depth is the same as the
-      // node for this instance
-      while (handle_node->row_source->depth > inst_depth)
+      for (std::vector<LogicalRegion>::const_iterator it = 
+            regions.begin(); it != regions.end(); it++)
       {
+        // Check to see if the region tree IDs are the same
+        if (it->get_tree_id() != region_node->handle.get_tree_id())
+          return false;
+        // Same region tree
+        RegionNode *handle_node = context->get_node(*it);
+        // Same node and we are done
+        if (handle_node == region_node)
+          continue;
+        // At this point the manager node must be above the handle node
+        // in order for it to still have a chance of being valid
+        const unsigned inst_depth = region_node->row_source->depth;
+        if (handle_node->row_source->depth <= inst_depth)
+          return false;
+        // Walk the handle node up until its depth is the same as the
+        // node for this instance
+        while (handle_node->row_source->depth > inst_depth)
+        {
 #ifdef DEBUG_HIGH_LEVEL
-        assert(handle_node->parent != NULL);
+          assert(handle_node->parent != NULL);
 #endif
-        handle_node = handle_node->parent->parent;
+          handle_node = handle_node->parent->parent;
+        }
+        if (handle_node != region_node)
+          return false;
       }
-      return (handle_node == region_node);
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalManager::perform_deletion(Event deferred_event) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(is_owner());
+#endif
+      log_garbage.info("Deleting physical instance " IDFMT " in memory " 
+                       IDFMT "", instance.id, memory_manager->memory.id);
+#ifndef DISABLE_GC
+      instance.destroy(deferred_event);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void PhysicalManager::delete_physical_manager(
+                                                       PhysicalManager *manager)
+    //--------------------------------------------------------------------------
+    {
+      if (manager->is_reduction_manager())
+      {
+        ReductionManager *reduc_manager = manager->as_reduction_manager();
+        if (reduc_manager->is_list_manager())
+          legion_delete(reduc_manager->as_list_manager());
+        else
+          legion_delete(reduc_manager->as_fold_manager());
+      }
+      else
+        legion_delete(manager->as_instance_manager());
     }
 
     /////////////////////////////////////////////////////////////
@@ -657,17 +730,15 @@ namespace Legion {
     InstanceManager::InstanceManager(RegionTreeForest *ctx, DistributedID did,
                                      AddressSpaceID owner_space, 
                                      AddressSpaceID local_space,
-                                     Memory mem, PhysicalInstance inst,
+                                     MemoryManager *mem, PhysicalInstance inst,
                                      RegionNode *node, LayoutDescription *desc, 
                                      Event u_event, unsigned dep, 
                                      bool reg_now, InstanceFlag flags)
-      : PhysicalManager(ctx, did, owner_space, local_space, mem, 
+      : PhysicalManager(ctx, mem, did, owner_space, local_space,
                         node, inst, reg_now), layout(desc), use_event(u_event), 
         depth(dep), instance_flags(flags)
     //--------------------------------------------------------------------------
     {
-      // Tell the runtime so it can update the per memory data structures
-      context->runtime->allocate_physical_instance(this);
       // Add a reference to the layout
       layout->add_reference();
 #ifdef LEGION_GC
@@ -678,7 +749,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     InstanceManager::InstanceManager(const InstanceManager &rhs)
-      : PhysicalManager(NULL, 0, 0, 0, Memory::NO_MEMORY,
+      : PhysicalManager(NULL, NULL, 0, 0, 0,
                         NULL, PhysicalInstance::NO_INST, false), 
         layout(NULL), use_event(Event::NO_EVENT), depth(0)
     //--------------------------------------------------------------------------
@@ -691,12 +762,6 @@ namespace Legion {
     InstanceManager::~InstanceManager(void)
     //--------------------------------------------------------------------------
     {
-      // Tell the runtime this instance no longer exists
-      // If we were the owner we already did this when we
-      // garbage collected the physical instance
-      if (!is_owner())
-        context->runtime->free_physical_instance(this);
-
       if (layout->remove_reference())
         delete layout;
     }
@@ -781,66 +846,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InstanceManager::notify_inactive(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(context, GARBAGE_COLLECT_CALL);
-#endif
-      if (is_owner())
-      {
-        // Always call this up front to see if we need to reclaim the
-        // physical instance from the runtime because we recycled it.
-        // Note we can do this here and not worry about a race with
-        // notify_invalid because we are guaranteed they are called
-        // sequentially by the state machine in the distributed
-        // collectable implementation.
-        //bool reclaimed = context->runtime->reclaim_physical_instance(this);
-        // Now tell the runtime that this instance will no longer exist
-        context->runtime->free_physical_instance(this);
-        AutoLock gc(gc_lock);
-#ifdef DEBUG_HIGH_LEVEL
-        assert(instance.exists());
-#endif
-        // Do the deletion for this instance
-        // If either of these conditions were true, then we
-        // should actually delete the physical instance.
-        log_garbage.debug("Garbage collecting physical instance " IDFMT
-                              " in memory " IDFMT " in address space %d",
-                              instance.id, memory.id, owner_space);
-#ifndef DISABLE_GC
-        instance.destroy(use_event);
-#endif
-        // Mark that this instance has been garbage collected
-        instance = PhysicalInstance::NO_INST;
-      }
-      else // Remove our gc reference
-        send_remote_gc_update(owner_space, 1/*count*/, false/*add*/);
-    }
-
-
-#ifdef DEBUG_HIGH_LEVEL
-    //--------------------------------------------------------------------------
-    void InstanceManager::notify_valid(void)
-    //--------------------------------------------------------------------------
-    {
-      assert(instance.exists());
-      PhysicalManager::notify_valid();
-    }
-#endif
-
-    //--------------------------------------------------------------------------
-    void InstanceManager::notify_invalid(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(context, NOTIFY_INVALID_CALL);
-#endif
-      if (!is_owner()) // If we are not the owner, remove our valid reference
-        send_remote_valid_update(owner_space, 1/*count*/, false/*add*/);
-    }
-
-    //--------------------------------------------------------------------------
     MaterializedView* InstanceManager::create_top_view(unsigned depth,
                                                        UniqueID ctx_uid)
     //--------------------------------------------------------------------------
@@ -917,7 +922,7 @@ namespace Legion {
           RezCheck z(rez);
           rez.serialize(did);
           rez.serialize(owner_space);
-          rez.serialize(memory);
+          rez.serialize(memory_manager->memory);
           rez.serialize(instance);
           rez.serialize(region_node->handle);
           rez.serialize(use_event);
@@ -961,9 +966,10 @@ namespace Legion {
       LayoutDescription *layout = 
         LayoutDescription::handle_unpack_layout_description(derez, source, 
                                                             target_node);
+      MemoryManager *memory = runtime->find_memory_manager(mem);
       InstanceManager *inst_manager = legion_new<InstanceManager>(
                                         runtime->forest, did, owner_space,
-                                        runtime->address_space, mem, inst, 
+                                        runtime->address_space, memory, inst,
                                         target_node, layout, use_event,
                                         depth, false/*reg now*/, flags);
       if (!target_node->register_physical_manager(inst_manager))
@@ -993,10 +999,10 @@ namespace Legion {
     ReductionManager::ReductionManager(RegionTreeForest *ctx, DistributedID did,
                                        FieldID f, AddressSpaceID owner_space, 
                                        AddressSpaceID local_space,
-                                       Memory mem, PhysicalInstance inst, 
+                                       MemoryManager *mem,PhysicalInstance inst,
                                        RegionNode *node, ReductionOpID red, 
                                        const ReductionOp *o, bool reg_now)
-      : PhysicalManager(ctx, did, owner_space, local_space, mem, 
+      : PhysicalManager(ctx, mem, did, owner_space, local_space,
                         node, inst, reg_now), 
         op(o), redop(red), logical_field(f)
     //--------------------------------------------------------------------------
@@ -1035,40 +1041,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return const_cast<ReductionManager*>(this);
-    }
-
-    //--------------------------------------------------------------------------
-    void ReductionManager::notify_inactive(void)
-    //--------------------------------------------------------------------------
-    {
-      if (is_owner())
-      {
-        context->runtime->free_physical_instance(this);
-        AutoLock gc(gc_lock);
-#ifdef DEBUG_HIGH_LEVEL
-        assert(instance.exists());
-#endif
-        log_garbage.debug("Garbage collecting reduction instance " IDFMT
-                                " in memory " IDFMT " in address space %d",
-                                instance.id, memory.id, owner_space);
-#ifndef DISABLE_GC
-        instance.destroy();
-#endif
-        instance = PhysicalInstance::NO_INST;
-      }
-      else // If we are not the owner remove our gc reference
-        send_remote_gc_update(owner_space, 1/*count*/, false/*add*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void ReductionManager::notify_invalid(void)
-    //--------------------------------------------------------------------------
-    {
-      // For right now we'll do nothing
-      // There doesn't seem like much point in recycling reduction instances
-      // If we are not the owner remove our valid reference
-      if (!is_owner())
-        send_remote_valid_update(owner_space, 1/*count*/, false/*add*/);
     }
 
     //--------------------------------------------------------------------------
@@ -1111,7 +1083,7 @@ namespace Legion {
           RezCheck z(rez);
           rez.serialize(did);
           rez.serialize(owner_space);
-          rez.serialize(memory);
+          rez.serialize(memory_manager->memory);
           rez.serialize(instance);
           rez.serialize(redop);
           rez.serialize(logical_field);
@@ -1155,6 +1127,7 @@ namespace Legion {
       derez.deserialize(use_event);
 
       RegionNode *target_node = runtime->forest->get_node(handle);
+      MemoryManager *memory = runtime->find_memory_manager(mem);
       const ReductionOp *op = Runtime::get_reduction_op(redop);
       if (foldable)
       {
@@ -1162,7 +1135,7 @@ namespace Legion {
                         legion_new<FoldReductionManager>(
                                             runtime->forest, did, logical_field,
                                             owner_space, runtime->address_space,
-                                            mem, inst, target_node, redop, op,
+                                            memory, inst, target_node, redop,op,
                                             use_event, false/*register now*/);
         if (!target_node->register_physical_manager(manager))
           legion_delete(manager);
@@ -1178,7 +1151,7 @@ namespace Legion {
                         legion_new<ListReductionManager>(
                                             runtime->forest, did, logical_field,
                                             owner_space, runtime->address_space,
-                                            mem, inst, target_node, redop, op,
+                                            memory, inst, target_node, redop,op,
                                             ptr_space, false/*register now*/);
         if (!target_node->register_physical_manager(manager))
           legion_delete(manager);
@@ -1214,7 +1187,7 @@ namespace Legion {
                                                FieldID f,
                                                AddressSpaceID owner_space, 
                                                AddressSpaceID local_space,
-                                               Memory mem, 
+                                               MemoryManager *mem,
                                                PhysicalInstance inst, 
                                                RegionNode *node,
                                                ReductionOpID red,
@@ -1224,8 +1197,6 @@ namespace Legion {
                          inst, node, red, o, reg_now), ptr_space(dom)
     //--------------------------------------------------------------------------
     {
-      // Tell the runtime so it can update the per memory data structures
-      context->runtime->allocate_physical_instance(this);
 #ifdef LEGION_GC
       log_garbage.info("GC List Reduction Manager %ld " IDFMT " " IDFMT " ",
                         did, inst.id, mem.id);
@@ -1234,7 +1205,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ListReductionManager::ListReductionManager(const ListReductionManager &rhs)
-      : ReductionManager(NULL, 0, 0, 0, 0, Memory::NO_MEMORY,
+      : ReductionManager(NULL, 0, 0, 0, 0, NULL,
                          PhysicalInstance::NO_INST, NULL, 0, NULL, false),
         ptr_space(Domain::NO_DOMAIN)
     //--------------------------------------------------------------------------
@@ -1249,11 +1220,6 @@ namespace Legion {
     {
       // Free up our pointer space
       ptr_space.get_index_space().destroy();
-      // Tell the runtime that this instance no longer exists
-      // If we were the owner we already did this when we garbage
-      // collected the physical instance
-      if (!is_owner())
-        context->runtime->free_physical_instance(this);
     }
 
     //--------------------------------------------------------------------------
@@ -1396,7 +1362,7 @@ namespace Legion {
                                                FieldID f,
                                                AddressSpaceID owner_space, 
                                                AddressSpaceID local_space,
-                                               Memory mem,
+                                               MemoryManager *mem,
                                                PhysicalInstance inst, 
                                                RegionNode *node,
                                                ReductionOpID red,
@@ -1407,8 +1373,6 @@ namespace Legion {
                          inst, node, red, o, register_now), use_event(u_event)
     //--------------------------------------------------------------------------
     {
-      // Tell the runtime so it can update the per memory data structures
-      context->runtime->allocate_physical_instance(this);
 #ifdef LEGION_GC
       log_garbage.info("GC Fold Reduction Manager %ld " IDFMT " " IDFMT " ",
                         did, inst.id, mem.id);
@@ -1417,7 +1381,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FoldReductionManager::FoldReductionManager(const FoldReductionManager &rhs)
-      : ReductionManager(NULL, 0, 0, 0, 0, Memory::NO_MEMORY,
+      : ReductionManager(NULL, 0, 0, 0, 0, NULL,
                          PhysicalInstance::NO_INST, NULL, 0, NULL, false),
         use_event(Event::NO_EVENT)
     //--------------------------------------------------------------------------
@@ -1430,11 +1394,6 @@ namespace Legion {
     FoldReductionManager::~FoldReductionManager(void)
     //--------------------------------------------------------------------------
     {
-      // Tell the runtime that this instance no longer exists
-      // If we were the owner we already did this when we garbage
-      // collected the physical instance
-      if (!is_owner())
-        context->runtime->free_physical_instance(this);
     }
 
     //--------------------------------------------------------------------------

@@ -926,15 +926,20 @@ namespace Legion {
     bool MapperManager::create_physical_instance(
                                     MappingCallInfo *ctx, Memory target_memory,
                                     const LayoutConstraintSet &constraints, 
-                                    LogicalRegion r, MappingInstance &result, 
+                                    const std::vector<LogicalRegion> &regions,
+                                    MappingInstance &result, 
                                     bool acquire, GCPriority priority)
     //--------------------------------------------------------------------------
     {
+      if (!target_memory.exists())
+        return false;
+      if (regions.empty())
+        return false;
+      if (regions.size() > 1)
+        check_region_consistency(ctx, "create_physical_instance", regions);
       pause_mapper_call(ctx);
       bool success = runtime->create_physical_instance(target_memory, 
-                                  constraints, r, result, mapper_id, priority);
-      if (success && acquire)
-        acquire_physical_instance(ctx, result);
+                  constraints, regions, result, mapper_id, acquire, priority);
       resume_mapper_call(ctx);
       return success;
     }
@@ -943,15 +948,20 @@ namespace Legion {
     bool MapperManager::create_physical_instance(
                                     MappingCallInfo *ctx, Memory target_memory,
                                     LayoutConstraintID layout_id,
-                                    LogicalRegion r, MappingInstance &result,
+                                    const std::vector<LogicalRegion> &regions,
+                                    MappingInstance &result,
                                     bool acquire, GCPriority priority)
     //--------------------------------------------------------------------------
     {
+      if (!target_memory.exists())
+        return false;
+      if (regions.empty())
+        return false;
+      if (regions.size() > 1)
+        check_region_consistency(ctx, "create_physical_instance", regions);
       pause_mapper_call(ctx);
       bool success = runtime->create_physical_instance(target_memory, layout_id,
-                                                r, result, mapper_id, priority);
-      if (success && acquire)
-        acquire_physical_instance(ctx, result);
+                                 regions, result, mapper_id, acquire, priority);
       resume_mapper_call(ctx);
       return success;
     }
@@ -960,16 +970,21 @@ namespace Legion {
     bool MapperManager::find_or_create_physical_instance(
                                     MappingCallInfo *ctx, Memory target_memory,
                                     const LayoutConstraintSet &constraints, 
-                                    LogicalRegion r, MappingInstance &result, 
-                                    bool &created, bool acquire, 
-                                    GCPriority priority)
+                                    const std::vector<LogicalRegion> &regions,
+                                    MappingInstance &result, bool &created, 
+                                    bool acquire, GCPriority priority)
     //--------------------------------------------------------------------------
     {
+      if (!target_memory.exists())
+        return false;
+      if (regions.empty())
+        return false;
+      if (regions.size() > 1)
+        check_region_consistency(ctx, "find_or_create_physical_instance", 
+                                 regions);
       pause_mapper_call(ctx);
       bool success = runtime->find_or_create_physical_instance(target_memory,
-                        constraints, r, result, created, mapper_id, priority);
-      if (success && acquire)
-        acquire_physical_instance(ctx, result);
+          constraints, regions, result, created, mapper_id, acquire, priority);
       resume_mapper_call(ctx);
       return success;
     }
@@ -978,16 +993,21 @@ namespace Legion {
     bool MapperManager::find_or_create_physical_instance(
                                     MappingCallInfo *ctx, Memory target_memory,
                                     LayoutConstraintID layout_id,
-                                    LogicalRegion r, MappingInstance &result,
-                                    bool &created, bool acquire, 
-                                    GCPriority priority)
+                                    const std::vector<LogicalRegion> &regions,
+                                    MappingInstance &result, bool &created, 
+                                    bool acquire, GCPriority priority)
     //--------------------------------------------------------------------------
     {
+      if (!target_memory.exists())
+        return false;
+      if (regions.empty())
+        return false;
+      if (regions.size() > 1)
+        check_region_consistency(ctx, "find_or_create_physical_instance", 
+                                 regions);
       pause_mapper_call(ctx);
       bool success = runtime->find_or_create_physical_instance(target_memory,
-                         layout_id, r, result, created, mapper_id, priority);
-      if (success && acquire)
-        acquire_physical_instance(ctx, result);
+           layout_id, regions, result, created, mapper_id, acquire, priority);
       resume_mapper_call(ctx);
       return success;
     }
@@ -996,15 +1016,19 @@ namespace Legion {
     bool MapperManager::find_physical_instance(  
                                     MappingCallInfo *ctx, Memory target_memory,
                                     const LayoutConstraintSet &constraints,
-                                    LogicalRegion r, MappingInstance &result,
-                                    bool acquire)
+                                    const std::vector<LogicalRegion> &regions,
+                                    MappingInstance &result, bool acquire)
     //--------------------------------------------------------------------------
     {
+      if (!target_memory.exists())
+        return false;
+      if (regions.empty())
+        return false;
+      if (regions.size() > 1)
+        check_region_consistency(ctx, "find_physical_instance", regions);
       pause_mapper_call(ctx);
       bool success = runtime->find_physical_instance(target_memory, constraints,
-                                                     r, result);
-      if (success && acquire)
-        acquire_physical_instance(ctx, result);
+                                                     regions, result, acquire);
       resume_mapper_call(ctx);
       return success;
     }
@@ -1013,45 +1037,51 @@ namespace Legion {
     bool MapperManager::find_physical_instance(  
                                     MappingCallInfo *ctx, Memory target_memory,
                                     LayoutConstraintID layout_id,
-                                    LogicalRegion r, MappingInstance &result,
-                                    bool acquire)
+                                    const std::vector<LogicalRegion> &regions,
+                                    MappingInstance &result, bool acquire)
     //--------------------------------------------------------------------------
     {
+      if (!target_memory.exists())
+        return false;
+      if (regions.empty())
+        return false;
+      if (regions.size() > 1)
+        check_region_consistency(ctx, "find_physical_instance", regions);
       pause_mapper_call(ctx);
       bool success = runtime->find_physical_instance(target_memory, layout_id,
-                                                     r, result);
-      if (success && acquire)
-        acquire_physical_instance(ctx, result);
+                                                     regions, result, acquire);
       resume_mapper_call(ctx);
       return success;
     }
 
     //--------------------------------------------------------------------------
-    void MapperManager::acquire_physical_instance(MappingCallInfo *ctx,
-                                                  const MappingInstance &inst)
+    void MapperManager::check_region_consistency(MappingCallInfo *info,
+                                                 const char *call_name,
+                                      const std::vector<LogicalRegion> &regions)
     //--------------------------------------------------------------------------
     {
-      // Check for acquire calls in invalid mapper calls
-      if (ctx->acquired_regions == NULL)
+      RegionTreeID tree_id = 0;
+      for (unsigned idx = 0; idx < regions.size(); idx++)
       {
-        log_run.warning("WARNING: Ignoring call to acquire region in "
-                        "unsupported mapper call %s in mapper %s.",
-                        get_mapper_call_name(ctx->kind), 
-                        mapper->get_mapper_name());
-        return;
-      }
-      PhysicalManager *manager = inst.impl;    
+        if (idx > 0)
+        {
+          RegionTreeID other_id = regions[idx].get_tree_id();
+          if (other_id != tree_id)
+          {
+            log_run.error("Invalid region arguments passed to %s in "
+                          "mapper call %s of mapper %s. All region arguments "
+                          "must be from the same region tree (%d != %d).",
+                          call_name, get_mapper_call_name(info->kind),
+                          mapper->get_mapper_name(), tree_id, other_id);
 #ifdef DEBUG_HIGH_LEVEL
-      assert(manager != NULL);
+            assert(false);
 #endif
-      std::set<PhysicalManager*>::const_iterator finder = 
-        ctx->acquired_regions->find(manager);
-      // Check to see if we've already acquired it, if we have, we are done
-      if (finder != ctx->acquired_regions->end())
-        return;
-      // Otherwise at it
-      manager->add_base_gc_ref(MAPPING_ACQUIRE_REF);
-      ctx->acquired_regions->insert(manager);
+            exit(ERROR_INVALID_ARGUMENTS_TO_MAPPER_RUNTIME);
+          }
+        }
+        else
+          tree_id = regions[idx].get_tree_id();
+      }
     }
 
     //--------------------------------------------------------------------------

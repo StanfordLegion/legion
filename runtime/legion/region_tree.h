@@ -394,6 +394,12 @@ namespace Legion {
                         const RegionRequirement &req, DetachOp *detach_op, 
                         VersionInfo &version_info, const InstanceRef &ref);
     public:
+      size_t compute_needed_size(const LayoutConstraintSet &constraints,
+                                 const std::vector<LogicalRegion> &regions); 
+      PhysicalManager* create_physical_region(
+                                 const LayoutConstraintSet &constraints,
+                                 const std::vector<LogicalRegion> &regions);
+    public:
       void send_back_logical_state(RegionTreeContext local_context,
                                    RegionTreeContext remote_context,
                                    const RegionRequirement &req,

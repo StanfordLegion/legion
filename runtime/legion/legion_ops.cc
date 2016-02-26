@@ -990,7 +990,7 @@ namespace Legion {
 #ifdef DEBUG_HIGH_LEVEL
         assert(!ref.is_composite_ref());
 #endif
-        if (visible_filter.find(ref.get_manager()->memory) == 
+        if (visible_filter.find(ref.get_manager()->get_memory()) == 
             visible_filter.end())
           continue;
         input_valid.resize(next_index+1);

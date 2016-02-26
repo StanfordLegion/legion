@@ -1242,36 +1242,40 @@ namespace Legion {
       bool mapper_rt_create_physical_instance(
                                     MapperContext ctx, Memory target_memory,
                                     const LayoutConstraintSet &constraints, 
-                                    LogicalRegion r, PhysicalInstance &result, 
-                                    bool acquire = true, 
+                                    const std::vector<LogicalRegion> &regions,
+                                    PhysicalInstance &result, bool acquire=true,
                                     GCPriority priority = 0) const;
       bool mapper_rt_create_physical_instance(
                                     MapperContext ctx, Memory target_memory,
                                     LayoutConstraintID layout_id,
-                                    LogicalRegion r, PhysicalInstance &result,
-                                    bool acquire = true,
+                                    const std::vector<LogicalRegion> &regions,
+                                    PhysicalInstance &result, bool acquire=true,
                                     GCPriority priority = 0) const;
       bool mapper_rt_find_or_create_physical_instance(
                                     MapperContext ctx, Memory target_memory,
                                     const LayoutConstraintSet &constraints, 
-                                    LogicalRegion r, PhysicalInstance &result, 
-                                    bool &created, bool acquire = true,
+                                    const std::vector<LogicalRegion> &regions,
+                                    PhysicalInstance &result, bool &created, 
+                                    bool acquire = true, 
                                     GCPriority priority = 0) const;
       bool mapper_rt_find_or_create_physical_instance(
                                     MapperContext ctx, Memory target_memory,
                                     LayoutConstraintID layout_id,
-                                    LogicalRegion r, PhysicalInstance &result,
-                                    bool &created, bool acquire = true,
+                                    const std::vector<LogicalRegion> &regions,
+                                    PhysicalInstance &result, bool &created, 
+                                    bool acquire = true,
                                     GCPriority priority = 0) const;
       bool mapper_rt_find_physical_instance(
                                     MapperContext ctx, Memory target_memory,
                                     const LayoutConstraintSet &constraints,
-                                    LogicalRegion r, PhysicalInstance &result,
+                                    const std::vector<LogicalRegion> &regions,
+                                    PhysicalInstance &result,
                                     bool acquire = true) const;
       bool mapper_rt_find_physical_instance(
                                     MapperContext ctx, Memory target_memory,
                                     LayoutConstraintID layout_id,
-                                    LogicalRegion r, PhysicalInstance &result,
+                                    const std::vector<LogicalRegion> &regions,
+                                    PhysicalInstance &result,
                                     bool acquire = true) const;
       void mapper_rt_set_garbage_collection_priority(MapperContext ctx, 
                         PhysicalInstance instance, GCPriority priority) const;

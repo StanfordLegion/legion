@@ -318,6 +318,7 @@ typedef enum legion_error_t {
   ERROR_DEPRECATED_METHOD_USE = 147,
   ERROR_MAX_APPLICATION_TASK_ID_EXCEEDED = 148,
   ERROR_MAX_APPLICATION_MAPPER_ID_EXCEEDED = 149,
+  ERROR_INVALID_ARGUMENTS_TO_MAPPER_RUNTIME = 150,
 }  legion_error_t;
 
 // enum and namepsaces don't really get along well

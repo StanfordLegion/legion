@@ -16,6 +16,7 @@
 #ifndef __LEGION_INSTANCES_H__
 #define __LEGION_INSTANCES_H__
 
+#include "runtime.h"
 #include "legion_types.h"
 #include "legion_utilities.h"
 #include "legion_allocation.h"
@@ -117,9 +118,9 @@ namespace Legion {
      */
     class PhysicalManager : public DistributedCollectable {
     public:
-      PhysicalManager(RegionTreeForest *ctx, DistributedID did,
-                      AddressSpaceID owner_space, AddressSpaceID local_space,
-                      Memory mem, RegionNode *node,
+      PhysicalManager(RegionTreeForest *ctx, MemoryManager *memory_manager,
+                      DistributedID did, AddressSpaceID owner_space, 
+                      AddressSpaceID local_space, RegionNode *node,
                       PhysicalInstance inst, bool register_now);
       virtual ~PhysicalManager(void);
     public:
@@ -135,9 +136,9 @@ namespace Legion {
       virtual ReductionManager* as_reduction_manager(void) const = 0;
       virtual size_t get_instance_size(void) const = 0;
       virtual void notify_active(void);
-      virtual void notify_inactive(void) = 0;
+      virtual void notify_inactive(void);
       virtual void notify_valid(void);
-      virtual void notify_invalid(void) = 0;
+      virtual void notify_invalid(void);
       virtual DistributedID send_manager(AddressSpaceID target) = 0; 
     public:
       // Support for mapper queries
@@ -156,7 +157,7 @@ namespace Legion {
       // This is the common case method so make it fast
       LogicalView* find_logical_top_view(UniqueID context_uid) const;
     public:
-      bool meets_region(LogicalRegion r) const;
+      bool meets_regions(const std::vector<LogicalRegion> &regions) const;
       bool entails(const LayoutConstraintSet &constraints) const;
       bool entails(LayoutConstraints *constraints) const;
     public:
@@ -167,9 +168,13 @@ namespace Legion {
 #endif
         return instance;
       }
+      inline Memory get_memory(void) const { return memory_manager->memory; }
+    public:
+      void perform_deletion(Event deferred_event) const;
+      static void delete_physical_manager(PhysicalManager *manager);
     public:
       RegionTreeForest *const context;
-      const Memory memory;
+      MemoryManager *const memory_manager;
       RegionNode *const region_node;
     protected:
       PhysicalInstance instance;
@@ -191,9 +196,9 @@ namespace Legion {
     public:
       InstanceManager(RegionTreeForest *ctx, DistributedID did,
                       AddressSpaceID owner_space, AddressSpaceID local_space,
-                      Memory mem, PhysicalInstance inst, RegionNode *node,
-                      LayoutDescription *desc, Event use_event, 
-                      unsigned depth, bool register_now,
+                      MemoryManager *memory, PhysicalInstance inst, 
+                      RegionNode *node, LayoutDescription *desc, 
+                      Event use_event, unsigned depth, bool register_now,
                       InstanceFlag flag = NO_INSTANCE_FLAG);
       InstanceManager(const InstanceManager &rhs);
       virtual ~InstanceManager(void);
@@ -211,11 +216,6 @@ namespace Legion {
       virtual InstanceManager* as_instance_manager(void) const;
       virtual ReductionManager* as_reduction_manager(void) const;
       virtual size_t get_instance_size(void) const;
-      virtual void notify_inactive(void);
-#ifdef DEBUG_HIGH_LEVEL
-      virtual void notify_valid(void);
-#endif
-      virtual void notify_invalid(void);
     public:
       inline Event get_use_event(void) const { return use_event; }
     public:
@@ -266,7 +266,7 @@ namespace Legion {
     public:
       ReductionManager(RegionTreeForest *ctx, DistributedID did, FieldID fid,
                        AddressSpaceID owner_space, AddressSpaceID local_space,
-                       Memory mem, PhysicalInstance inst, 
+                       MemoryManager *mem, PhysicalInstance inst, 
                        RegionNode *region_node, ReductionOpID redop, 
                        const ReductionOp *op, bool register_now);
       virtual ~ReductionManager(void);
@@ -282,8 +282,6 @@ namespace Legion {
       virtual InstanceManager* as_instance_manager(void) const;
       virtual ReductionManager* as_reduction_manager(void) const;
       virtual size_t get_instance_size(void) const = 0;
-      virtual void notify_inactive(void);
-      virtual void notify_invalid(void);
     public:
       virtual bool is_foldable(void) const = 0;
       virtual void find_field_offsets(const FieldMask &reduce_mask,
@@ -329,7 +327,7 @@ namespace Legion {
       ListReductionManager(RegionTreeForest *ctx, DistributedID did,FieldID fid,
                            AddressSpaceID owner_space, 
                            AddressSpaceID local_space,
-                           Memory mem, PhysicalInstance inst, 
+                           MemoryManager *mem, PhysicalInstance inst, 
                            RegionNode *node, ReductionOpID redop, 
                            const ReductionOp *op, Domain dom, bool reg_now);
       ListReductionManager(const ListReductionManager &rhs);
@@ -374,7 +372,7 @@ namespace Legion {
       FoldReductionManager(RegionTreeForest *ctx, DistributedID did,FieldID fid,
                            AddressSpaceID owner_space, 
                            AddressSpaceID local_space,
-                           Memory mem, PhysicalInstance inst, 
+                           MemoryManager *mem, PhysicalInstance inst, 
                            RegionNode *node, ReductionOpID redop, 
                            const ReductionOp *op, Event use_event,
                            bool register_now);

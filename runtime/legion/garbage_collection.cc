@@ -167,6 +167,10 @@ namespace Legion {
     {
 #ifdef DEBUG_HIGH_LEVEL
       assert(current_state != DELETED_STATE);
+      assert(current_state != ACTIVE_DELETED_STATE);
+      assert(current_state != PENDING_ACTIVE_DELETED_STATE);
+      assert(current_state != PENDING_INVALID_DELETED_STATE);
+      assert(current_state != PENDING_INACTIVE_DELETED_STATE);
 #endif
       bool need_activate = false;
       bool need_validate = false;
@@ -208,6 +212,10 @@ namespace Legion {
     {
 #ifdef DEBUG_HIGH_LEVEL
       assert(current_state != DELETED_STATE);
+      assert(current_state != ACTIVE_DELETED_STATE);
+      assert(current_state != PENDING_ACTIVE_DELETED_STATE);
+      assert(current_state != PENDING_INVALID_DELETED_STATE);
+      assert(current_state != PENDING_INACTIVE_DELETED_STATE);
 #endif
       bool need_activate = false;
       bool need_validate = false;
@@ -239,6 +247,91 @@ namespace Legion {
                             need_invalidate, need_deactivate, do_deletion);
       }
       return do_deletion;
+    }
+
+    //--------------------------------------------------------------------------
+    bool DistributedCollectable::try_add_valid_reference(bool must_be_valid,
+                                                        unsigned cnt /*=1*/)
+    //--------------------------------------------------------------------------
+    {
+      bool need_activate = false;
+      bool need_validate = false;
+      bool need_invalidate = false;
+      bool need_deactivate = false;
+      bool do_deletion = false;
+      bool done = false;
+      bool first = true;
+      while (!done)
+      {
+        if (need_activate)
+          notify_active();
+        if (need_validate)
+          notify_valid();
+        if (need_invalidate)
+          notify_invalid();
+        if (need_deactivate)
+          notify_inactive();
+        AutoLock gc(gc_lock);
+        // Check our state and see if this is going to work
+        if (must_be_valid && (current_state != VALID_STATE))
+          return false;
+        // If we are in any of the deleted states, it is no good
+        if ((current_state == DELETED_STATE) || 
+            (current_state == ACTIVE_DELETED_STATE) ||
+            (current_state == PENDING_ACTIVE_DELETED_STATE) ||
+            (current_state == PENDING_INVALID_DELETED_STATE) ||
+            (current_state == PENDING_INACTIVE_DELETED_STATE))
+          return false;
+        if (first)
+        {
+          valid_references += cnt;
+          first = false;
+        }
+        done = update_state(need_activate, need_validate,
+                            need_invalidate, need_deactivate, do_deletion);
+      }
+      if (do_deletion)
+      {
+        // This probably indicates a race in reference counting algorithm
+        assert(false);
+        delete this;
+      }
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    bool DistributedCollectable::try_active_deletion(void)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock gc(gc_lock);
+      // We can only do this from five states
+      // Note this also prevents duplicate deletions
+      if (current_state == INACTIVE_STATE)
+      {
+        current_state = DELETED_STATE;
+        return true;
+      }
+      if (current_state == ACTIVE_INVALID_STATE)
+      {
+        current_state = ACTIVE_DELETED_STATE;
+        return true;
+      }
+      if (current_state == PENDING_INACTIVE_STATE)
+      {
+        current_state = PENDING_INACTIVE_DELETED_STATE;
+        return true;
+      }
+      if (current_state == PENDING_ACTIVE_STATE)
+      {
+        current_state = PENDING_ACTIVE_DELETED_STATE;
+        return true;
+      }
+      if (current_state == PENDING_INVALID_STATE)
+      {
+        current_state = PENDING_INVALID_DELETED_STATE;
+        return true;
+      }
+      return false; 
     }
 
     //--------------------------------------------------------------------------
@@ -764,18 +857,23 @@ namespace Legion {
           {
             // See if we have any reason to be active
 #ifdef USE_REMOTE_REFERENCES
-            if ((gc_references > 0) || (valid_references > 0) ||
-                || !create_gc_refs.empty() || !create_valid_refs.empty())
+            if ((valid_references > 0) || (!create_valid_refs.empty()))
 #else
-            if ((gc_references > 0) || (valid_references > 0))
+            if (valid_references > 0)
 #endif
             {
-              // Move to the pending active state
+              current_state = PENDING_ACTIVE_VALID_STATE;
+              need_activate = true;
+            }
+#ifdef USE_REMOTE_REFERENCES
+            else if ((gc_references > 0) || !create_gc_refs.empty())
+#else
+            else if (gc_references > 0)  
+#endif
+            {
               current_state = PENDING_ACTIVE_STATE;
               need_activate = true;
             }
-            else
-              need_activate = false;
             need_validate = false;
             need_invalidate = false;
             need_deactivate = false;
@@ -815,6 +913,32 @@ namespace Legion {
             need_invalidate = false;
             break;
           }
+        case ACTIVE_DELETED_STATE:
+          {
+            // We should never move to a valid state from here
+#ifdef USE_REMOTE_REFERENCES
+            if ((valid_references > 0) || !create_valid_refs.empty())
+#else
+            if (valid_references > 0)
+#endif           
+              assert(false);
+            // See if we have a reason to move towards deletion
+#ifdef USE_REMOTE_REFERENCES
+            else if ((gc_references == 0) && create_gc_refs.empty())
+#else
+            else if (gc_references == 0)
+#endif
+            {
+              current_state = PENDING_INACTIVE_DELETED_STATE;
+              need_deactivate = true;
+            }
+            else
+              need_deactivate = false;
+            need_validate = false;
+            need_activate = false;
+            need_invalidate = false;
+            break;
+          }
         case VALID_STATE:
           {
             // See if we have a reason to be invalid
@@ -832,6 +956,12 @@ namespace Legion {
             need_activate = false;
             need_validate = false;
             need_deactivate = false;
+            break;
+          }
+        case DELETED_STATE:
+          {
+            // Hitting this is universally bad
+            assert(false);
             break;
           }
         case PENDING_ACTIVE_STATE:
@@ -888,10 +1018,18 @@ namespace Legion {
             {
               // See if we are still inactive
 #ifdef USE_REMOTE_REFERENCES
-              if ((gc_references == 0) && (valid_references == 0) &&
-                  create_gc_refs.empty() && create_valid_refs.empty())
+              if ((valid_references > 0) || !create_valid_refs.empty())
 #else
-              if ((gc_references == 0) && (valid_references == 0))
+              if (valid_references > 0)
+#endif
+              {
+                current_state = PENDING_ACTIVE_VALID_STATE;
+                need_activate = true;
+              }
+#ifdef USE_REMOTE_REFERENCES
+              else if ((gc_references == 0) && create_gc_refs.empty())
+#else
+              else if (gc_references == 0)
 #endif
               {
                 current_state = INACTIVE_STATE;
@@ -992,6 +1130,178 @@ namespace Legion {
             need_invalidate = false;
             break;
           }
+        case PENDING_ACTIVE_VALID_STATE:
+          {
+            // See if we were the ones doing the action
+            if (need_activate)
+            {
+#ifdef USE_REMOTE_REFERENCES
+              if ((valid_references > 0) || !create_valid_refs.empty())
+#else
+              if (valid_references > 0)
+#endif
+              {
+                // Still going to valid
+                current_state = PENDING_VALID_STATE;
+                need_validate = true;
+                need_deactivate = false;
+              }
+#ifdef USE_REMOTE_REFERENCES
+              else if ((gc_references == 0) && create_gc_refs.empty())
+#else
+              else if (gc_references == 0)
+#endif
+              {
+                // all our references disappeared
+                current_state = PENDING_INACTIVE_STATE;
+                need_validate = false;
+                need_deactivate = true;
+              }
+              else
+              {
+                // our valid references disappeared, but we at least
+                // have some gc references now
+                current_state = ACTIVE_INVALID_STATE;
+                need_validate = false;
+                need_deactivate = false;
+              }
+            }
+            else
+            {
+              // We weren't the ones doing the activate so we are of no help
+              need_validate = false;
+              need_deactivate = false;
+            }
+            need_activate = false;
+            need_invalidate = false;
+            break;
+          }
+        case PENDING_ACTIVE_DELETED_STATE:
+          {
+            // See if were the ones doing the work
+            if (need_activate)
+            {
+// See if we are still active
+#ifdef USE_REMOTE_REFERENCES
+              if ((valid_references > 0) || !create_valid_refs.empty())
+#else
+              if (valid_references > 0)
+#endif
+              {
+                // This is really bad if it happens
+                assert(false);
+              }
+#ifdef USE_REMOTE_REFERENCES
+              else if ((gc_references > 0) || !create_gc_refs.empty())
+#else
+              else if (gc_references > 0)
+#endif
+              {
+                // Nothing more to do
+                current_state = ACTIVE_DELETED_STATE;
+                need_deactivate = false;
+              }
+              else
+              {
+                // Not still active, go to pending inactive 
+                current_state = PENDING_INACTIVE_DELETED_STATE;
+                need_deactivate = true;
+              }
+            }
+            else
+            {
+              // We weren't the ones doing the activate so 
+              // we can't help, just keep going
+              need_deactivate = false;
+            }
+            need_activate = false;
+            need_validate = false;
+            need_invalidate = false;
+            break;
+          }
+        case PENDING_INVALID_DELETED_STATE:
+          {
+            // See if we were doing the invalidate
+            if (need_invalidate)
+            {
+              // Check to see if we are still valid
+#ifdef USE_REMOTE_REFERENCES
+              if ((valid_references > 0) || !create_valid_refs.empty())
+#else
+              if (valid_references > 0)
+#endif
+              {
+                // Really bad if this happens
+                assert(false);
+              }
+#ifdef USE_REMOTE_REFERENCES
+              else if ((gc_references == 0) && create_gc_refs.empty())
+#else
+              else if (gc_references == 0)
+#endif
+              {
+                // No longer active either
+                current_state = PENDING_INACTIVE_DELETED_STATE;
+                need_deactivate = true;
+              }
+              else
+              {
+                current_state = ACTIVE_DELETED_STATE;
+                need_deactivate = false;
+              }
+            }
+            else
+            {
+              // We weren't the ones doing the invalidate
+              // so we can't help
+              need_deactivate = false;
+            }
+            need_validate = false;
+            need_activate = false;
+            need_invalidate = false;
+            break;
+          }
+        case PENDING_INACTIVE_DELETED_STATE:
+          {
+            // See if we were doing the deactivate
+            if (need_deactivate)
+            {
+              // See if we are still inactive
+#ifdef USE_REMOTE_REFERENCES
+              if ((valid_references > 0) || !create_valid_refs.empty())
+#else
+              if (valid_references > 0)
+#endif
+              {
+                // This is really bad if it happens
+                assert(false);
+              }
+#ifdef USE_REMOTE_REFERENCES
+              else if ((gc_references == 0) && create_gc_refs.empty())
+#else
+              else if (gc_references == 0)
+#endif
+              {
+                current_state = DELETED_STATE;
+                need_activate = false;
+              }
+              else
+              {
+                current_state = PENDING_ACTIVE_DELETED_STATE;
+                need_activate = true;
+              }
+            }
+            else
+            {
+              // We weren't the ones doing the deactivate
+              // so we can't help, just keep going
+              need_activate = false;
+            }
+            need_validate = false;
+            need_invalidate = false;
+            need_deactivate = false;
+            break;
+          }
         default:
           assert(false); // should never get here
       }
@@ -1012,13 +1322,15 @@ namespace Legion {
 #ifdef USE_REMOTE_REFERENCES
       bool result = ((resource_references == 0) && (gc_references == 0) &&
               (valid_references == 0) && create_gc_refs.empty() && 
-              create_valid_refs.empty() && (current_state == INACTIVE_STATE));
+              create_valid_refs.empty() && 
+              ((current_state == INACTIVE_STATE) || 
+               (current_state == DELETED_STATE)));
 #else
       bool result = ((resource_references == 0) && (gc_references == 0) &&
-              (valid_references == 0) && (current_state == INACTIVE_STATE));
+              (valid_references == 0) && 
+              ((current_state == INACTIVE_STATE) || 
+               (current_state == DELETED_STATE)));
 #endif
-      if (result)
-        current_state = DELETED_STATE;
       return result;
     }
 

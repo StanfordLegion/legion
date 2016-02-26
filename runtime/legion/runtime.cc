@@ -2311,8 +2311,14 @@ namespace Legion {
     {
       manager_lock.destroy_reservation();
       manager_lock = Reservation::NO_RESERVATION;
-      physical_instances.clear();
-      collectable_instances.clear();
+      for (std::map<PhysicalManager*,InstanceInfo>::const_iterator it = 
+            current_instances.begin(); it != current_instances.end(); it++)
+      {
+        if (is_owner)
+          it->first->perform_deletion(Event::NO_EVENT);
+        if (it->first->remove_base_resource_ref(MEMORY_MANAGER_REF))
+          PhysicalManager::delete_physical_manager(it->first);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -2325,37 +2331,118 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MemoryManager::allocate_physical_instance(PhysicalManager *manager)
+    void MemoryManager::register_remote_instance(PhysicalManager *manager)
     //--------------------------------------------------------------------------
     {
-      const size_t inst_size = manager->get_instance_size();  
+      const size_t inst_size = manager->get_instance_size();
+      // Add a resource reference
+      manager->add_base_resource_ref(MEMORY_MANAGER_REF);
       AutoLock m_lock(manager_lock);
-      remaining_capacity -= inst_size;
 #ifdef DEBUG_HIGH_LEVEL
-      assert(physical_instances.find(manager) == physical_instances.end());
+      assert(current_instances.find(manager) == current_instances.end());
 #endif
-      physical_instances[manager] = InstanceInfo(inst_size);
+      // Make it valid to start since we know when we were created
+      // that we were made valid to begin with
+      InstanceInfo &info = current_instances[manager];
+      info.instance_size = inst_size;
     }
 
     //--------------------------------------------------------------------------
-    void MemoryManager::free_physical_instance(PhysicalManager *manager)
+    void MemoryManager::unregister_remote_instance(PhysicalManager *manager)
+    //--------------------------------------------------------------------------
+    {
+      {
+        AutoLock m_lock(manager_lock);
+   #ifdef DEBUG_HIGH_LEVEL
+        assert(current_instances.find(manager) == current_instances.end());
+#endif     
+        current_instances.erase(manager);
+      }
+      if (manager->remove_base_resource_ref(MEMORY_MANAGER_REF))
+        PhysicalManager::delete_physical_manager(manager);
+    }
+
+    //--------------------------------------------------------------------------
+    void MemoryManager::activate_instance(PhysicalManager *manager)
     //--------------------------------------------------------------------------
     {
       AutoLock m_lock(manager_lock);
       std::map<PhysicalManager*,InstanceInfo>::iterator finder = 
-        physical_instances.find(manager);
+        current_instances.find(manager);
 #ifdef DEBUG_HIGH_LEVEL
-      assert(finder != physical_instances.end());
+      assert(current_instances.find(manager) != current_instances.end());
+      if (finder->second.current_state != VALID_STATE)
+        assert(finder->second.current_state == COLLECTABLE_STATE);
 #endif
-      remaining_capacity += finder->second.instance_size;
-      physical_instances.erase(finder);
+      if (finder->second.current_state != VALID_STATE)
+        finder->second.current_state = ACTIVE_STATE;
+    }
+
+    //--------------------------------------------------------------------------
+    void MemoryManager::deactivate_instance(PhysicalManager *manager)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock m_lock(manager_lock);
+      std::map<PhysicalManager*,InstanceInfo>::iterator finder =
+        current_instances.find(manager);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(finder != current_instances.end());
+      assert((finder->second.current_state == ACTIVE_STATE) ||
+             (finder->second.current_state == ACTIVE_COLLECTED_STATE));
+#endif
+      InstanceInfo &info = finder->second;
+      // See if we deleted this yet
+      if (finder->second.current_state == ACTIVE_COLLECTED_STATE)
+      {
+        // already deferred collected this, so we can trigger 
+        // the deletion now this should only happen on the owner node
+#ifdef DEBUG_HIGH_LEVEL
+        assert(is_owner);
+        assert(info.deferred_collect.exists());
+#endif
+        info.deferred_collect.trigger();
+        // Now we can delete our entry because it has been deleted
+        current_instances.erase(finder);
+      }
+      else // didn't collect it yet
+        info.current_state = COLLECTABLE_STATE;
+    }
+
+    //--------------------------------------------------------------------------
+    void MemoryManager::validate_instance(PhysicalManager *manager)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock m_lock(manager_lock);
+      std::map<PhysicalManager*,InstanceInfo>::iterator finder = 
+        current_instances.find(manager);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(finder != current_instances.end());
+      if (finder->second.current_state != VALID_STATE)
+        assert(finder->second.current_state == ACTIVE_STATE);
+#endif
+      finder->second.current_state = VALID_STATE;
+    }
+
+    //--------------------------------------------------------------------------
+    void MemoryManager::invalidate_instance(PhysicalManager *manager)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock m_lock(manager_lock);
+      std::map<PhysicalManager*,InstanceInfo>::iterator finder = 
+        current_instances.find(manager);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(finder != current_instances.end());
+      assert(finder->second.current_state == VALID_STATE);
+#endif
+      finder->second.current_state = ACTIVE_STATE;
     }
 
     //--------------------------------------------------------------------------
     bool MemoryManager::create_physical_instance(
                                 const LayoutConstraintSet &constraints,
-                                LogicalRegion r, MappingInstance &result,
-                                MapperID mapper_id, GCPriority priority)
+                                const std::vector<LogicalRegion> &regions,
+                                MappingInstance &result, MapperID mapper_id, 
+                                bool acquire, GCPriority priority, bool remote)
     //--------------------------------------------------------------------------
     {
       volatile bool success = false;
@@ -2369,9 +2456,13 @@ namespace Legion {
           rez.serialize(memory);
           rez.serialize(CREATE_INSTANCE_CONSTRAINTS);
           rez.serialize(ready_event);
-          rez.serialize(r);
+          rez.serialize<size_t>(regions.size());
+          for (unsigned idx = 0; idx < regions.size(); idx++)
+            rez.serialize(regions[idx]);
+          rez.serialize<bool>(acquire);
           constraints.serialize(rez);
-          // pack the pointers for the result
+          rez.serialize(mapper_id);
+          rez.serialize(priority);
           rez.serialize(&success);
           rez.serialize(&result);
         }
@@ -2382,14 +2473,18 @@ namespace Legion {
       else
       {
         // Try to make the result
+        success = allocate_physical_instance(constraints, regions,
+                     result, acquire, mapper_id, priority, remote);
       }
       return success;
     }
     
     //--------------------------------------------------------------------------
     bool MemoryManager::create_physical_instance(LayoutConstraints *constraints,
-                                       LogicalRegion r, MappingInstance &result,
-                                       MapperID mapper_id, GCPriority priority)
+                                     const std::vector<LogicalRegion> &regions,
+                                     MappingInstance &result,MapperID mapper_id,
+                                     bool acquire, GCPriority priority, 
+                                     bool remote)
     //--------------------------------------------------------------------------
     {
       volatile bool success = false;
@@ -2404,8 +2499,13 @@ namespace Legion {
           rez.serialize(memory);
           rez.serialize(CREATE_INSTANCE_LAYOUT);
           rez.serialize(ready_event);
-          rez.serialize(r);
+          rez.serialize<size_t>(regions.size());
+          for (unsigned idx = 0; idx < regions.size(); idx++)
+            rez.serialize(regions[idx]);
+          rez.serialize<bool>(acquire);
           rez.serialize(constraints->layout_id);
+          rez.serialize(mapper_id);
+          rez.serialize(priority);
           rez.serialize(&success);
           rez.serialize(&result);
         }
@@ -2416,6 +2516,8 @@ namespace Legion {
       else
       {
         // Try to make the instance
+        success = allocate_physical_instance(*constraints, regions,
+                     result, acquire, mapper_id, priority, remote);
       }
       return success;
     }
@@ -2423,33 +2525,40 @@ namespace Legion {
     //--------------------------------------------------------------------------
     bool MemoryManager::find_or_create_physical_instance(
                                   const LayoutConstraintSet &constraints,
-                                  LogicalRegion r, MappingInstance &result,
-                                  bool &created, MapperID mapper_id,
-                                  GCPriority priority)
+                                  const std::vector<LogicalRegion> &regions,
+                                  MappingInstance &result, bool &created, 
+                                  MapperID mapper_id, bool acquire,
+                                  GCPriority priority, bool remote)
     //--------------------------------------------------------------------------
     {
       volatile bool success = false;
+      // Set created to default to false
+      created = false;
       if (!is_owner)
       {
-        // See if we can find it locally
-        success = find_persistent_instance(constraints, r, result);
+        // See if we can find a locally valid instance first
+        success = find_valid_instance(constraints, regions, result, 
+                                      acquire, remote);
         if (success)
-        {
-          created = false;
           return true;
-        }
         // Not the owner, send a message to the owner to request creation
         Serializer rez;
         UserEvent ready_event = UserEvent::create_user_event();
         {
           RezCheck z(rez);
           rez.serialize(memory);
-          rez.serialize(CREATE_AND_FIND_CONSTRAINTS);
+          rez.serialize(FIND_OR_CREATE_CONSTRAINTS);
           rez.serialize(ready_event);
-          rez.serialize(r);
+          rez.serialize<size_t>(regions.size());
+          for (unsigned idx = 0; idx < regions.size(); idx++)
+            rez.serialize(regions[idx]);
+          rez.serialize<bool>(acquire);
           constraints.serialize(rez);
+          rez.serialize(mapper_id);
+          rez.serialize(priority);
           rez.serialize(&success);
           rez.serialize(&result);
+          rez.serialize(&created);
         }
         runtime->send_instance_request(owner_space, rez);
         ready_event.wait();
@@ -2458,36 +2567,39 @@ namespace Legion {
       else
       {
         // Try to find an instance first and then make one
-        success = find_satisfying_instance(constraints, r, result);
+        success = find_satisfying_instance(constraints, regions, 
+                                       result, acquire, remote);
         if (!success)
         {
           // If we couldn't find it, we have to make it
-
-          created = true;
+          success = allocate_physical_instance(constraints, regions, 
+                      result, acquire, mapper_id, priority, remote);
+          if (success)
+            created = true;
         }
-        else
-          created = false;
       }
       return success;
     }
 
     //--------------------------------------------------------------------------
     bool MemoryManager::find_or_create_physical_instance(
-                                LayoutConstraints *constraints, LogicalRegion r,
+                                LayoutConstraints *constraints, 
+                                const std::vector<LogicalRegion> &regions,
                                 MappingInstance &result, bool &created,
-                                MapperID mapper_id, GCPriority priority)
+                                MapperID mapper_id, bool acquire,
+                                GCPriority priority, bool remote)
     //--------------------------------------------------------------------------
     {
       volatile bool success = false;
+      // Set created to false in case we fail
+      created = false;
       if (!is_owner)
       {
         // See if we can find it locally
-        success = find_persistent_instance(constraints, r, result);
+        success = find_valid_instance(constraints, regions, result, 
+                                      acquire, remote);
         if (success)
-        {
-          created = false;
           return true;
-        }
         constraints->send_constraints(owner_space);
         // Not the owner, send a message to the owner to request creation
         Serializer rez;
@@ -2495,10 +2607,15 @@ namespace Legion {
         {
           RezCheck z(rez);
           rez.serialize(memory);
-          rez.serialize(CREATE_AND_FIND_LAYOUT);
+          rez.serialize(FIND_OR_CREATE_LAYOUT);
           rez.serialize(ready_event);
-          rez.serialize(r);
+          rez.serialize<size_t>(regions.size());
+          for (unsigned idx = 0; idx < regions.size(); idx++)
+            rez.serialize(regions[idx]);
+          rez.serialize<bool>(acquire);
           rez.serialize(constraints->layout_id);
+          rez.serialize(mapper_id);
+          rez.serialize(priority);
           rez.serialize(&success);
           rez.serialize(&result);
           rez.serialize(&created);
@@ -2510,30 +2627,34 @@ namespace Legion {
       else
       {
         // Try to find an instance first and then make one
-        success = find_satisfying_instance(constraints, r, result);
+        success = find_satisfying_instance(constraints, regions, 
+                                           result, acquire, remote);
         if (!success)
         {
           // If we couldn't find it, we have to make it
-
-          created = true;
+          success = allocate_physical_instance(*constraints, regions,
+                       result, acquire, mapper_id, priority, remote);
+          if (success)
+            created = true;
         }
-        else
-          created = false;
       }
       return success;
     }
 
     //--------------------------------------------------------------------------
     bool MemoryManager::find_physical_instance(
-                                       const LayoutConstraintSet &constraints,
-                                       LogicalRegion r, MappingInstance &result)
+                                     const LayoutConstraintSet &constraints,
+                                     const std::vector<LogicalRegion> &regions,
+                                     MappingInstance &result, 
+                                     bool acquire, bool remote)
     //--------------------------------------------------------------------------
     {
       volatile bool success = false;
       if (!is_owner)
       {
         // See if we can find it locally 
-        success = find_persistent_instance(constraints, r, result);
+        success = find_valid_instance(constraints, regions, result, 
+                                      acquire, remote);
         if (success)
           return true;
         // Not the owner, send a message to the owner to try and find it
@@ -2544,7 +2665,10 @@ namespace Legion {
           rez.serialize(memory);
           rez.serialize(FIND_ONLY_CONSTRAINTS);
           rez.serialize(ready_event);
-          rez.serialize(r);
+          rez.serialize(regions.size());
+          for (unsigned idx = 0; idx < regions.size(); idx++)
+            rez.serialize(regions[idx]);
+          rez.serialize<bool>(acquire);
           constraints.serialize(rez);
           rez.serialize(&success);
           rez.serialize(&result);
@@ -2556,21 +2680,25 @@ namespace Legion {
       else
       {
         // Try to find an instance
-        success = find_satisfying_instance(constraints, r, result);
+        success = find_satisfying_instance(constraints, regions, 
+                                           result, acquire, remote);
       }
       return success;
     }
 
     //--------------------------------------------------------------------------
     bool MemoryManager::find_physical_instance(LayoutConstraints *constraints,
-                                      LogicalRegion r, MappingInstance &result)
+                                      const std::vector<LogicalRegion> &regions,
+                                      MappingInstance &result, 
+                                      bool acquire, bool remote)
     //--------------------------------------------------------------------------
     {
       volatile bool success = false;
       if (!is_owner)
       {
         // See if we can find a persistent instance
-        success = find_persistent_instance(constraints, r, result);
+        success = find_valid_instance(constraints, regions, result, 
+                                      acquire, remote);
         if (success)
           return true;
         constraints->send_constraints(owner_space);
@@ -2581,7 +2709,10 @@ namespace Legion {
           rez.serialize(memory);
           rez.serialize(FIND_ONLY_LAYOUT);
           rez.serialize(ready_event);
-          rez.serialize(r);
+          rez.serialize<size_t>(regions.size());
+          for (unsigned idx = 0; idx < regions.size(); idx++)
+            rez.serialize(regions[idx]);
+          rez.serialize<bool>(acquire);
           rez.serialize(constraints->layout_id);
           rez.serialize(&success);
           rez.serialize(&result);
@@ -2593,7 +2724,8 @@ namespace Legion {
       else
       {
         // Try to find an instance
-        success = find_satisfying_instance(constraints, r, result);
+        success = find_satisfying_instance(constraints, regions, result,
+                                           acquire, remote);
       }
       return success;
     }
@@ -2603,37 +2735,246 @@ namespace Legion {
                                                  AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(is_owner);
+#endif
       RequestKind kind;
       derez.deserialize(kind);
       UserEvent to_trigger;
       derez.deserialize(to_trigger);
-      LogicalRegion r;
-      derez.deserialize(r);
+      size_t num_regions;
+      derez.deserialize(num_regions);
+      std::vector<LogicalRegion> regions(num_regions);
+      for (unsigned idx = 0; idx < num_regions; idx++)
+        derez.deserialize(regions[idx]);
+      bool acquire;
+      derez.deserialize(acquire);
       switch (kind)
       {
         case CREATE_INSTANCE_CONSTRAINTS:
           {
-
+            LayoutConstraintSet constraints;
+            constraints.deserialize(derez);
+            MapperID mapper_id;
+            derez.deserialize(mapper_id);
+            GCPriority priority;
+            derez.deserialize(priority);
+            bool *remote_success;
+            derez.deserialize(remote_success);
+            MappingInstance *remote_target;
+            derez.deserialize(remote_target);
+            MappingInstance result;
+            bool success = create_physical_instance(constraints, regions, 
+                    result, mapper_id, acquire, priority, true/*remote*/);
+            if (success)
+            {
+              // Send back the response starting with the instance
+              PhysicalManager *manager = result.impl;
+              DistributedID did = manager->send_manager(source);
+              Serializer rez;
+              {
+                RezCheck z(rez);
+                rez.serialize(memory);
+                rez.serialize(to_trigger);
+                rez.serialize(did);
+                rez.serialize<bool>(acquire);
+                rez.serialize(remote_target);
+                rez.serialize(remote_success);
+                rez.serialize(kind);
+              }
+              runtime->send_instance_response(source, rez);
+            }
+            else // we can just trigger the done event since we failed
+              to_trigger.trigger();
+            break;
           }
         case CREATE_INSTANCE_LAYOUT:
           {
-
+            LayoutConstraintID layout_id;
+            derez.deserialize(layout_id);
+            MapperID mapper_id;
+            derez.deserialize(mapper_id);
+            GCPriority priority;
+            derez.deserialize(priority);
+            bool *remote_success;
+            derez.deserialize(remote_success);
+            MappingInstance *remote_target;
+            derez.deserialize(remote_target);
+            LayoutConstraints *constraints = 
+              runtime->find_layout_constraints(layout_id);
+            MappingInstance result;
+            bool success = create_physical_instance(constraints, regions, 
+                    result, mapper_id, acquire, priority, true/*remote*/);
+            if (success)
+            {
+              PhysicalManager *manager = result.impl;
+              DistributedID did = manager->send_manager(source);
+              Serializer rez;
+              {
+                RezCheck z(rez);
+                rez.serialize(memory);
+                rez.serialize(to_trigger);
+                rez.serialize(did);
+                rez.serialize<bool>(acquire);
+                rez.serialize(remote_target);
+                rez.serialize(remote_success);
+                rez.serialize(kind);
+              }
+              runtime->send_instance_response(source, rez);
+            }
+            else // if we failed, we can just trigger the response
+              to_trigger.trigger();
+            break;
           }
-        case CREATE_AND_FIND_CONSTRAINTS:
+        case FIND_OR_CREATE_CONSTRAINTS:
           {
-
+            LayoutConstraintSet constraints;
+            constraints.deserialize(derez);
+            MapperID mapper_id;
+            derez.deserialize(mapper_id);
+            GCPriority priority;
+            derez.deserialize(priority);
+            bool *remote_success, *remote_created;
+            derez.deserialize(remote_success);
+            MappingInstance *remote_target;
+            derez.deserialize(remote_target);
+            derez.deserialize(remote_created);
+            MappingInstance result;
+            bool created;
+            bool success = find_or_create_physical_instance(constraints, 
+                                    regions, result, created, mapper_id, 
+                                    acquire, priority, true/*remote*/);
+            if (success)
+            {
+              PhysicalManager *manager = result.impl;
+              DistributedID did = manager->send_manager(source);
+              Serializer rez;
+              {
+                RezCheck z(rez);
+                rez.serialize(memory);
+                rez.serialize(to_trigger);
+                rez.serialize(did);
+                rez.serialize<bool>(acquire);
+                rez.serialize(remote_target);
+                rez.serialize(remote_success);
+                rez.serialize(kind);
+                rez.serialize(remote_created);
+                rez.serialize<bool>(created);
+              }
+              runtime->send_instance_response(source, rez);
+            }
+            else // if we failed, we can just trigger the response
+              to_trigger.trigger();
+            break;
           }
-        case CREATE_AND_FIND_LAYOUT:
+        case FIND_OR_CREATE_LAYOUT:
           {
-
+            LayoutConstraintID layout_id;
+            derez.deserialize(layout_id);
+            MapperID mapper_id;
+            derez.deserialize(mapper_id);
+            GCPriority priority;
+            derez.deserialize(priority);
+            bool *remote_success, *remote_created;
+            derez.deserialize(remote_success);
+            MappingInstance *remote_target;
+            derez.deserialize(remote_target);
+            derez.deserialize(remote_created);
+            LayoutConstraints *constraints = 
+              runtime->find_layout_constraints(layout_id);
+            MappingInstance result;
+            bool created;
+            bool success = find_or_create_physical_instance(constraints, 
+                                     regions, result, created, mapper_id, 
+                                     acquire, priority, true/*remote*/);
+            if (success)
+            {
+              PhysicalManager *manager = result.impl;
+              DistributedID did = manager->send_manager(source);
+              Serializer rez;
+              {
+                RezCheck z(rez);
+                rez.serialize(memory);
+                rez.serialize(to_trigger);
+                rez.serialize(did);
+                rez.serialize<bool>(acquire);
+                rez.serialize(remote_target);
+                rez.serialize(remote_success);
+                rez.serialize(kind);
+                rez.serialize(remote_created);
+                rez.serialize<bool>(created);
+              }
+              runtime->send_instance_response(source, rez);
+            }
+            else // we failed so just trigger the response
+              to_trigger.trigger();
+            break;
           }
         case FIND_ONLY_CONSTRAINTS:
           {
-
+            LayoutConstraintSet constraints; 
+            constraints.deserialize(derez);
+            bool *remote_success;
+            derez.deserialize(remote_success);
+            MappingInstance *remote_target;
+            derez.deserialize(remote_target);
+            MappingInstance result;
+            bool success = find_physical_instance(constraints, regions,
+                                      result, acquire, true/*remote*/);
+            if (success)
+            {
+              PhysicalManager *manager = result.impl;
+              DistributedID did = manager->send_manager(source);
+              Serializer rez;
+              {
+                RezCheck z(rez);
+                rez.serialize(memory);
+                rez.serialize(to_trigger);
+                rez.serialize(did);
+                rez.serialize<bool>(acquire);
+                rez.serialize(remote_target);
+                rez.serialize(remote_success);
+                rez.serialize(kind);
+              }
+              runtime->send_instance_response(source, rez);
+            }
+            else // we failed so we can just trigger the response
+              to_trigger.trigger();
+            break;
           }
         case FIND_ONLY_LAYOUT:
           {
-
+            LayoutConstraintID layout_id;
+            derez.deserialize(layout_id);
+            bool *remote_success;
+            derez.deserialize(remote_success);
+            MappingInstance *remote_target;
+            derez.deserialize(remote_target);
+            LayoutConstraints *constraints = 
+              runtime->find_layout_constraints(layout_id);
+            MappingInstance result;
+            bool success = find_physical_instance(constraints, regions, 
+                                      result, acquire, true/*remote*/);
+            if (success)
+            {
+              PhysicalManager *manager = result.impl;
+              DistributedID did = manager->send_manager(source);
+              Serializer rez;
+              {
+                RezCheck z(rez);
+                rez.serialize(memory);
+                rez.serialize(to_trigger);
+                rez.serialize(did);
+                rez.serialize<bool>(acquire);
+                rez.serialize(remote_target);
+                rez.serialize(remote_success);
+                rez.serialize(kind);
+              }
+              runtime->send_instance_response(source, rez);
+            }
+            else // we failed so just trigger
+              to_trigger.trigger();
+            break;
           }
         default:
           assert(false);
@@ -2641,27 +2982,96 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MemoryManager::process_instance_response(Deserializer &derez)
+    void MemoryManager::process_instance_response(Deserializer &derez,
+                                                  AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-
+      UserEvent to_trigger;
+      derez.deserialize(to_trigger);
+      DistributedID did;
+      derez.deserialize(did);
+      bool acquire;
+      derez.deserialize(acquire);
+      MappingInstance *target;
+      derez.deserialize(target);
+      bool *success;
+      derez.deserialize(success);
+      RequestKind kind;
+      derez.deserialize(kind);
+      // Find the manager
+#ifdef DEBUG_HIGH_LEVEL
+      PhysicalManager *manager = dynamic_cast<PhysicalManager*>(
+                            runtime->find_distributed_collectable(did));
+#else
+      PhysicalManager *manager = static_cast<PhysicalManager*>(
+                            runtime->find_distributed_collectable(did));
+#endif
+      // If we acquired on the owner node, add our own local reference
+      // and then remove the remote DID
+      if (acquire)
+      {
+        manager->add_base_valid_ref(MAPPING_ACQUIRE_REF);
+        manager->send_remote_valid_update(source, 1, false/*add*/);
+      }
+      *target = MappingInstance(manager);
+      *success = true;
+      if ((kind == FIND_OR_CREATE_CONSTRAINTS) || 
+          (kind == FIND_OR_CREATE_LAYOUT))
+      {
+        bool *created_ptr;
+        derez.deserialize(created_ptr);
+        bool created;
+        derez.deserialize(created);
+        *created_ptr = created;
+      }
+      // Trigger that we are done
+      to_trigger.trigger();
     }
     
     //--------------------------------------------------------------------------
     bool MemoryManager::find_satisfying_instance(
                                 const LayoutConstraintSet &constraints,
-                                LogicalRegion r, MappingInstance &result)
+                                const std::vector<LogicalRegion> &regions,
+                                MappingInstance &result, 
+                                bool acquire, bool remote)
     //--------------------------------------------------------------------------
     {
       // Hold the lock while iterating here
-      AutoLock m_lock(manager_lock, 1, false/*exclusive*/);
-      for (std::map<PhysicalManager*,InstanceInfo>::const_iterator it = 
-            physical_instances.begin(); it != physical_instances.end(); it++)
+      std::deque<PhysicalManager*> candidates;
       {
-        if (it->first->meets_region(r) && it->first->entails(constraints))
+        AutoLock m_lock(manager_lock, 1, false/*exclusive*/);
+        for (std::map<PhysicalManager*,InstanceInfo>::const_iterator it = 
+              current_instances.begin(); it != current_instances.end(); it++)
         {
-          result = MappingInstance(it->first);
-          return true;
+          // Skip it if has already been collected
+          if (it->second.current_state == ACTIVE_COLLECTED_STATE)
+            continue;
+          candidates.push_back(it->first);
+        }
+      }
+      // If we have any candidates check their constraints
+      if (!candidates.empty())
+      {
+        for (std::deque<PhysicalManager*>::const_iterator it = 
+              candidates.begin(); it != candidates.end(); it++)
+        {
+          if (!(*it)->meets_regions(regions))
+            continue;
+          if ((*it)->entails(constraints))
+          {
+            // Check to see if we need to acquire
+            if (acquire)
+            {
+              // If we fail to acquire then keep going
+              if (!(*it)->try_add_base_valid_ref(
+                    remote ? REMOTE_DID_REF : MAPPING_ACQUIRE_REF,
+                                       false/*must already be valid*/))
+                continue;
+            }
+            // If we make it here, we succeeded
+            result = MappingInstance(*it);
+            return true;
+          }
         }
       }
       return false;
@@ -2669,59 +3079,411 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool MemoryManager::find_satisfying_instance(LayoutConstraints *constraints,
-                                      LogicalRegion r, MappingInstance &result)
+                                      const std::vector<LogicalRegion> &regions,
+                                      MappingInstance &result, 
+                                      bool acquire, bool remote)
     //--------------------------------------------------------------------------
     {
       // Hold the lock while iterating here
-      AutoLock m_lock(manager_lock, 1, false/*exclusive*/);
-      for (std::map<PhysicalManager*,InstanceInfo>::const_iterator it = 
-            physical_instances.begin(); it != physical_instances.end(); it++)
+      std::deque<PhysicalManager*> candidates;
       {
-        if (it->first->meets_region(r) && it->first->entails(constraints))
+        AutoLock m_lock(manager_lock, 1, false/*exclusive*/);
+        for (std::map<PhysicalManager*,InstanceInfo>::const_iterator it = 
+              current_instances.begin(); it != current_instances.end(); it++)
         {
-          result = MappingInstance(it->first);
-          return true;
+          // Skip it if has already been collected
+          if (it->second.current_state == ACTIVE_COLLECTED_STATE)
+            continue;
+          candidates.push_back(it->first);
+        }
+      }
+      // If we have any candidates check their constraints
+      if (!candidates.empty())
+      {
+        for (std::deque<PhysicalManager*>::const_iterator it = 
+              candidates.begin(); it != candidates.end(); it++)
+        {
+          if (!(*it)->meets_regions(regions))
+            continue;
+          if ((*it)->entails(constraints))
+          {
+            // Check to see if we need to acquire
+            if (acquire)
+            {
+              // If we fail to acquire then keep going
+              if (!(*it)->try_add_base_valid_ref(
+                    remote ? REMOTE_DID_REF : MAPPING_ACQUIRE_REF,
+                                       false/*must already be valid*/))
+                continue;
+            }
+            // If we make it here, we succeeded
+            result = MappingInstance(*it);
+            return true;
+          }
         }
       }
       return false;
     }
 
     //--------------------------------------------------------------------------
-    bool MemoryManager::find_persistent_instance(
-                                       const LayoutConstraintSet &constraints,
-                                       LogicalRegion r, MappingInstance &result)
+    bool MemoryManager::find_valid_instance(
+                                     const LayoutConstraintSet &constraints,
+                                     const std::vector<LogicalRegion> &regions,
+                                     MappingInstance &result, 
+                                     bool acquire, bool remote)
     //--------------------------------------------------------------------------
     {
       // Hold the lock while iterating here
-      AutoLock m_lock(manager_lock, 1, false/*exclusive*/);
-      for (std::map<PhysicalManager*,InstanceInfo>::const_iterator it = 
-            physical_instances.begin(); it != physical_instances.end(); it++)
+      std::deque<PhysicalManager*> candidates;
       {
-        if ((it->second.priority == MAX_GC_PRIORITY) &&
-            it->first->meets_region(r) && it->first->entails(constraints))
+        AutoLock m_lock(manager_lock, 1, false/*exclusive*/);
+        for (std::map<PhysicalManager*,InstanceInfo>::const_iterator it = 
+              current_instances.begin(); it != current_instances.end(); it++)
         {
-          result = MappingInstance(it->first);
-          return true;
+          // Only consider ones that are currently valid
+          if (it->second.current_state != VALID_STATE)
+            continue;
+          candidates.push_back(it->first);
+        }
+      }
+      // If we have any candidates check their constraints
+      if (!candidates.empty())
+      {
+        for (std::deque<PhysicalManager*>::const_iterator it = 
+              candidates.begin(); it != candidates.end(); it++)
+        {
+          if (!(*it)->meets_regions(regions))
+            continue;
+          if ((*it)->entails(constraints))
+          {
+            // Check to see if we need to acquire
+            if (acquire)
+            {
+              // If we fail to acquire then keep going
+              if (!(*it)->try_add_base_valid_ref(
+                    remote ? REMOTE_DID_REF : MAPPING_ACQUIRE_REF,
+                                       true/*must already be valid*/))
+                continue;
+            }
+            // If we make it here, we succeeded
+            result = MappingInstance(*it);
+            return true;
+          }
         }
       }
       return false;
     }
     
     //--------------------------------------------------------------------------
-    bool MemoryManager::find_persistent_instance(
-                                       LayoutConstraints *constraints,
-                                       LogicalRegion r, MappingInstance &result)
+    bool MemoryManager::find_valid_instance(
+                                     LayoutConstraints *constraints,
+                                     const std::vector<LogicalRegion> &regions,
+                                     MappingInstance &result, 
+                                     bool acquire, bool remote)
     //--------------------------------------------------------------------------
     {
-      AutoLock m_lock(manager_lock, 1, false/*exclusive*/);
-      for (std::map<PhysicalManager*,InstanceInfo>::const_iterator it = 
-            physical_instances.begin(); it != physical_instances.end(); it++)
+      // Hold the lock while iterating here
+      std::deque<PhysicalManager*> candidates;
       {
-        if ((it->second.priority == MAX_GC_PRIORITY) &&
-            it->first->meets_region(r) && it->first->entails(constraints))
+        AutoLock m_lock(manager_lock, 1, false/*exclusive*/);
+        for (std::map<PhysicalManager*,InstanceInfo>::const_iterator it = 
+              current_instances.begin(); it != current_instances.end(); it++)
         {
-          result = MappingInstance(it->first);
+          // Only consider ones that are currently valid
+          if (it->second.current_state != VALID_STATE)
+            continue;
+          candidates.push_back(it->first);
+        }
+      }
+      // If we have any candidates check their constraints
+      if (!candidates.empty())
+      {
+        for (std::deque<PhysicalManager*>::const_iterator it = 
+              candidates.begin(); it != candidates.end(); it++)
+        {
+          if (!(*it)->meets_regions(regions))
+            continue;
+          if ((*it)->entails(constraints))
+          {
+            // Check to see if we need to acquire
+            if (acquire)
+            {
+              // If we fail to acquire then keep going
+              if (!(*it)->try_add_base_valid_ref(
+                    remote ? REMOTE_DID_REF : MAPPING_ACQUIRE_REF,
+                                       true/*must already be valid*/))
+                continue;
+            }
+            // If we make it here, we succeeded
+            result = MappingInstance(*it);
+            return true;
+          }
+        }
+      }
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    template<bool SMALLER>
+    bool MemoryManager::CollectableInfo<SMALLER>::operator<(
+                                               const CollectableInfo &rhs) const
+    //--------------------------------------------------------------------------
+    {
+      if (SMALLER)
+      {
+        // For smaller, we want largest instances first, then largest priorities
+        if (instance_size > rhs.instance_size)
           return true;
+        else if (instance_size < rhs.instance_size)
+          return false;
+        else
+        {
+          if (priority > rhs.priority)
+            return true;
+          else if (priority < rhs.priority)
+            return false;
+          else
+          {
+            if (((unsigned long)manager) < ((unsigned long)rhs.manager))
+              return true;
+            return false;
+          }
+        }
+      }
+      else
+      {
+        // For larger, we want smallest sizes first, then largest priorities
+        if (instance_size < rhs.instance_size)
+          return true;
+        else if (instance_size > rhs.instance_size)
+          return false;
+        else
+        {
+          if (priority > rhs.priority)
+            return true;
+          else if (priority < rhs.priority)
+            return false;
+          else
+          {
+            if (((unsigned long)manager) < ((unsigned long)rhs.manager))
+              return true;
+            return false;
+          }
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    template<bool SMALLER>
+    bool MemoryManager::CollectableInfo<SMALLER>::operator==(
+                                               const CollectableInfo &rhs) const
+    //--------------------------------------------------------------------------
+    {
+      if ((((unsigned long)manager) == ((unsigned long)rhs.manager)) &&
+          (instance_size == rhs.instance_size) && (priority == rhs.priority))
+        return true;
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    void MemoryManager::find_instances_by_state(size_t needed_size, 
+                                                InstanceState state,
+                std::set<CollectableInfo<true> > &smaller_instances,
+                std::set<CollectableInfo<false> > &larger_instances) const
+    //--------------------------------------------------------------------------
+    {
+      AutoLock m_lock(manager_lock,1,false/*exclusive*/);
+      for (std::map<PhysicalManager*,InstanceInfo>::const_iterator it = 
+            current_instances.begin(); it != current_instances.end(); it++)
+      {
+        if (it->second.current_state != state)
+          continue;
+        if (it->second.instance_size >= needed_size)
+          larger_instances.insert(CollectableInfo<false>(it->first,
+                it->second.instance_size, it->second.priority));
+        else
+          smaller_instances.insert(CollectableInfo<true>(it->first,
+                it->second.instance_size, it->second.priority));
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    bool MemoryManager::allocate_physical_instance(
+                                      const LayoutConstraintSet &constraints,
+                                      const std::vector<LogicalRegion> &regions,
+                                      MappingInstance &result, bool acquire,
+                                      MapperID mapper_id, GCPriority priority,
+                                      bool remote)  
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(is_owner);
+#endif
+      // First, just try to make the instance as is, if it works we are done 
+      PhysicalManager *manager = 
+                runtime->forest->create_physical_region(constraints, regions);
+      if (manager != NULL)
+      {
+        record_created_instance(manager, acquire, mapper_id, priority, remote);
+        result = MappingInstance(manager);
+        return true;
+      }
+      // If that didn't work find the set of immediately collectable regions
+      // Rank them by size and then by GC priority
+      // Start with all the ones larger than given size and try to 
+      // delete them starting from the smallest size and highest priority
+      // If that didnt' work try to delete enough from the small set to 
+      // open up space.
+      size_t needed_size = 
+        runtime->forest->compute_needed_size(constraints, regions);
+      std::set<CollectableInfo<true> > smaller_instances;
+      std::set<CollectableInfo<false> > larger_instances;
+      find_instances_by_state(needed_size, COLLECTABLE_STATE,
+                              smaller_instances, larger_instances);
+      size_t total_bytes_deleted = 0;
+      if (!larger_instances.empty() &&
+          delete_and_allocate<false>(constraints, regions, result, acquire,
+                                     mapper_id, priority, remote, needed_size,
+                                     total_bytes_deleted, larger_instances))
+        return true;
+      else
+        larger_instances.clear();
+      if (!smaller_instances.empty() &&
+          delete_and_allocate<true>(constraints, regions, result, acquire,
+                                    mapper_id, priority, remote, needed_size,
+                                    total_bytes_deleted, smaller_instances))
+        return true;
+      else
+        smaller_instances.clear();
+      // If we still haven't been able to allocate the region do the same
+      // thing as above except with the active regions and deferred deletions
+      find_instances_by_state(needed_size, ACTIVE_STATE, 
+                              smaller_instances, larger_instances);
+      if (!larger_instances.empty() &&
+          delete_and_allocate<false>(constraints, regions, result, acquire,
+                                     mapper_id, priority, remote, needed_size,
+                                     total_bytes_deleted, larger_instances))
+        return true;
+      if (!smaller_instances.empty() &&
+          delete_and_allocate<true>(constraints, regions, result, acquire,
+                                    mapper_id, priority, remote, needed_size,
+                                    total_bytes_deleted, smaller_instances))
+        return true;
+      // If we made it here well then we failed 
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    void MemoryManager::record_created_instance(PhysicalManager *manager,
+             bool acquire, MapperID mapper_id, GCPriority priority, bool remote)
+    //--------------------------------------------------------------------------
+    {
+      // First do the insertion
+      // If we're going to add a valid reference, mark this valid early
+      // to avoid races with deletions
+      bool early_valid = acquire || (priority == MAX_GC_PRIORITY);
+      size_t instance_size = manager->get_instance_size();
+      // Since we're going to put this in the table add a reference
+      manager->add_base_resource_ref(MEMORY_MANAGER_REF);
+      {
+        AutoLock m_lock(manager_lock);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(current_instances.find(manager) == current_instances.end());
+#endif
+        InstanceInfo &info = current_instances[manager];
+        if (early_valid)
+          info.current_state = VALID_STATE;
+        info.priority = priority;
+        info.instance_size = instance_size;
+        // Record the priority if necessary
+        if (priority != 0)
+          info.mapper_priorities[mapper_id] = priority;
+      }
+      // Now we can add any references that we need to
+      if (acquire)
+      {
+        if (remote)
+          manager->add_base_valid_ref(REMOTE_DID_REF);
+        else
+          manager->add_base_valid_ref(MAPPING_ACQUIRE_REF);
+      }
+      if (priority == MAX_GC_REF)
+        manager->add_base_valid_ref(MAX_GC_REF);
+    }
+
+    //--------------------------------------------------------------------------
+    Event MemoryManager::record_deleted_instance(PhysicalManager *manager)
+    //--------------------------------------------------------------------------
+    {
+      Event result = Event::NO_EVENT;
+      {
+        AutoLock m_lock(manager_lock);
+        std::map<PhysicalManager*,InstanceInfo>::iterator finder = 
+          current_instances.find(manager);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(finder != current_instances.end());
+        assert(finder->second.current_state != VALID_STATE);
+        assert(finder->second.current_state != ACTIVE_COLLECTED_STATE);
+#endif
+        // If we are still in an active mode, record the event,
+        // otherwise we can delete everything now and trigger
+        // the event immediately
+        if (finder->second.current_state == ACTIVE_STATE)
+        {
+          finder->second.current_state = ACTIVE_COLLECTED_STATE;
+          finder->second.deferred_collect = UserEvent::create_user_event();
+          result = finder->second.deferred_collect;
+        }
+        else
+        {
+#ifdef DEBUG_HIGH_LEVEL
+          assert(finder->second.current_state == COLLECTABLE_STATE);
+#endif
+          current_instances.erase(finder);
+        }
+      }
+      // if we actually deleted it here, remove our resource reference
+      if (!result.exists() &&
+          manager->remove_base_resource_ref(MEMORY_MANAGER_REF))
+        PhysicalManager::delete_physical_manager(manager);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    template<bool SMALLER>
+    bool MemoryManager::delete_and_allocate(
+                                const LayoutConstraintSet &constraints,
+                                const std::vector<LogicalRegion> &regions,
+                                MappingInstance &result, bool acquire,
+                                MapperID mapper_id, GCPriority priority,
+                                bool remote, size_t needed_size, 
+                                size_t &total_bytes_deleted,
+                          const std::set<CollectableInfo<SMALLER> > &instances)
+    //--------------------------------------------------------------------------
+    {
+      for (typename std::set<CollectableInfo<SMALLER> >::const_iterator it = 
+            instances.begin(); it != instances.end(); it++)
+      {
+        PhysicalManager *target_manager = it->manager;
+        if (target_manager->try_active_deletion())
+        {
+          Event deferred_delete = record_deleted_instance(target_manager);
+          target_manager->perform_deletion(deferred_delete);
+          total_bytes_deleted += it->instance_size;
+          // Only need to do the test if we're smaller
+          if (!SMALLER || (total_bytes_deleted >= needed_size))
+          {
+            PhysicalManager *manager =
+              runtime->forest->create_physical_region(constraints, regions);
+            // If we succeeded we are done
+            if (manager != NULL)
+            {
+              record_created_instance(manager, acquire, 
+                                      mapper_id, priority, remote);
+              result = MappingInstance(manager);
+              return true;
+            }
+          }
         }
       }
       return false;
@@ -3376,7 +4138,7 @@ namespace Legion {
             }
           case SEND_INSTANCE_RESPONSE:
             {
-              runtime->handle_instance_response(derez);
+              runtime->handle_instance_response(derez, remote_address_space);
               break;
             }
           case SEND_BACK_LOGICAL_STATE:
@@ -11560,22 +12322,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::allocate_physical_instance(PhysicalManager *manager)
-    //--------------------------------------------------------------------------
-    {
-      MemoryManager *memory_manager = find_memory_manager(manager->memory);
-      memory_manager->allocate_physical_instance(manager);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::free_physical_instance(PhysicalManager *manager)
-    //--------------------------------------------------------------------------
-    {
-      MemoryManager *memory_manager = find_memory_manager(manager->memory);
-      memory_manager->free_physical_instance(manager);
-    }
-
-    //--------------------------------------------------------------------------
     AddressSpaceID Runtime::find_address_space(Memory handle) const
     //--------------------------------------------------------------------------
     {
@@ -12551,6 +13297,8 @@ namespace Legion {
     void Runtime::send_constraints(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
+      // This is pushing constraints so it is alright to keep on
+      // the default virtual channel
       find_messenger(target)->send_message(rez, SEND_CONSTRAINTS,
                                        DEFAULT_VIRTUAL_CHANNEL, false/*flush*/);
     }
@@ -12560,8 +13308,9 @@ namespace Legion {
                                            Serializer &rez)
     //--------------------------------------------------------------------------
     {
+      // This is paging in constraints so it needs its own virtual channel
       find_messenger(target)->send_message(rez, SEND_CONSTRAINT_REQUEST,
-                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+                              LAYOUT_CONSTRAINT_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -12569,8 +13318,9 @@ namespace Legion {
                                             Serializer &rez)
     //--------------------------------------------------------------------------
     {
+      // This is paging in constraints so it needs its own virtual channel
       find_messenger(target)->send_message(rez, SEND_CONSTRAINT_RESPONSE,
-                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+                              LAYOUT_CONSTRAINT_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13232,14 +13982,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_instance_response(Deserializer &derez)
+    void Runtime::handle_instance_response(Deserializer &derez,
+                                           AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
       Memory target_memory;
       derez.deserialize(target_memory);
       MemoryManager *manager = find_memory_manager(target_memory);
-      manager->process_instance_response(derez);
+      manager->process_instance_response(derez, source);
     }
 
     //--------------------------------------------------------------------------
@@ -13366,75 +14117,83 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool Runtime::create_physical_instance(Memory target_memory,
-                                       const LayoutConstraintSet &constraints,
-                                       LogicalRegion r, MappingInstance &result,
-                                       MapperID mapper_id, GCPriority priority)
+                                     const LayoutConstraintSet &constraints,
+                                     const std::vector<LogicalRegion> &regions,
+                                     MappingInstance &result,MapperID mapper_id,
+                                     bool acquire, GCPriority priority)
     //--------------------------------------------------------------------------
     {
       MemoryManager *manager = find_memory_manager(target_memory);
-      return manager->create_physical_instance(constraints, r, result,
-                                               mapper_id, priority);
+      return manager->create_physical_instance(constraints, regions, result,
+                                               mapper_id, acquire, priority);
     }
 
     //--------------------------------------------------------------------------
     bool Runtime::create_physical_instance(Memory target_memory,
-                                       LayoutConstraintID layout_id,
-                                       LogicalRegion r, MappingInstance &result,
-                                       MapperID mapper_id, GCPriority priority)
+                                     LayoutConstraintID layout_id,
+                                     const std::vector<LogicalRegion> &regions,
+                                     MappingInstance &result,MapperID mapper_id,
+                                     bool acquire, GCPriority priority)
     //--------------------------------------------------------------------------
     {
       LayoutConstraints *constraints = find_layout_constraints(layout_id);
       MemoryManager *manager = find_memory_manager(target_memory);
-      return manager->create_physical_instance(constraints, r, result,
-                                               mapper_id, priority);
+      return manager->create_physical_instance(constraints, regions, result,
+                                               mapper_id, acquire, priority);
     }
 
     //--------------------------------------------------------------------------
     bool Runtime::find_or_create_physical_instance(Memory target_memory,
-                                       const LayoutConstraintSet &constraints,
-                                       LogicalRegion r, MappingInstance &result,
-                                       bool &created, MapperID mapper_id,
-                                       GCPriority priority)
+                                     const LayoutConstraintSet &constraints,
+                                     const std::vector<LogicalRegion> &regions,
+                                     MappingInstance &result, bool &created, 
+                                     MapperID mapper_id, bool acquire,
+                                     GCPriority priority)
     //--------------------------------------------------------------------------
     {
       MemoryManager *manager = find_memory_manager(target_memory);
-      return manager->find_or_create_physical_instance(constraints, r, 
-                                         result, created, mapper_id, priority);
+      return manager->find_or_create_physical_instance(constraints, regions, 
+                             result, created, mapper_id, acquire, priority);
     }
 
     //--------------------------------------------------------------------------
     bool Runtime::find_or_create_physical_instance(Memory target_memory,
-                                      LayoutConstraintID layout_id,
-                                      LogicalRegion r, MappingInstance &result,
-                                      bool &created, MapperID mapper_id,
-                                      GCPriority priority)
+                                    LayoutConstraintID layout_id,
+                                    const std::vector<LogicalRegion> &regions,
+                                    MappingInstance &result, bool &created, 
+                                    MapperID mapper_id, bool acquire, 
+                                    GCPriority priority)
     //--------------------------------------------------------------------------
     {
       LayoutConstraints *constraints = find_layout_constraints(layout_id);
       MemoryManager *manager = find_memory_manager(target_memory);
-      return manager->find_or_create_physical_instance(constraints, r, 
-                                         result, created, mapper_id, priority);
+      return manager->find_or_create_physical_instance(constraints, regions,
+                             result, created, mapper_id, acquire, priority);
     }
 
     //--------------------------------------------------------------------------
     bool Runtime::find_physical_instance(Memory target_memory,
                                       const LayoutConstraintSet &constraints,
-                                      LogicalRegion r, MappingInstance &result)
+                                      const std::vector<LogicalRegion> &regions,
+                                      MappingInstance &result, bool acquire)
     //--------------------------------------------------------------------------
     {
       MemoryManager *manager = find_memory_manager(target_memory);
-      return manager->find_physical_instance(constraints, r, result);
+      return manager->find_physical_instance(constraints, regions, 
+                                             result, acquire);
     }
 
     //--------------------------------------------------------------------------
     bool Runtime::find_physical_instance(Memory target_memory,
                                       LayoutConstraintID layout_id,
-                                      LogicalRegion r, MappingInstance &result)
+                                      const std::vector<LogicalRegion> &regions,
+                                      MappingInstance &result, bool acquire)
     //--------------------------------------------------------------------------
     {
       LayoutConstraints *constraints = find_layout_constraints(layout_id);
       MemoryManager *manager = find_memory_manager(target_memory);
-      return manager->find_physical_instance(constraints, r, result);
+      return manager->find_physical_instance(constraints, regions, 
+                                             result, acquire);
     }
 
 #ifdef HANG_TRACE
