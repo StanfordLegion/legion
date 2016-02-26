@@ -6990,6 +6990,10 @@ namespace LegionRuntime {
       {
         IndexSpace is(context->runtime->get_unique_index_space_id(),
                       handle.get_tree_id());
+
+        if (Internal::legion_spy_enabled)
+          LegionSpy::log_index_subspace(handle.id, is.id, c.get_point());
+
         if (parent->kind == UNSTRUCTURED_KIND)
         {
           // Make a new sub-index space first based on the 
