@@ -1428,7 +1428,7 @@ namespace LegionRuntime {
     }
 #endif
 
-    void *AccessorType::Generic::Untyped::raw_span_ptr(ptr_t ptr, size_t req_count, size_t& act_count, ByteOffset& stride)
+    void *AccessorType::Generic::Untyped::raw_span_ptr(ptr_t ptr, size_t req_count, size_t& act_count, ByteOffset& stride) const
     {
       RegionInstanceImpl *impl = (RegionInstanceImpl *) internal;
 
@@ -1457,7 +1457,7 @@ namespace LegionRuntime {
     }
 
     template <int DIM>
-    void *AccessorType::Generic::Untyped::raw_rect_ptr(const Rect<DIM>& r, Rect<DIM>& subrect, ByteOffset *offsets)
+    void *AccessorType::Generic::Untyped::raw_rect_ptr(const Rect<DIM>& r, Rect<DIM>& subrect, ByteOffset *offsets) const
     {
       RegionInstanceImpl *impl = (RegionInstanceImpl *) internal;
       MemoryImpl *mem = get_runtime()->get_memory_impl(impl->memory);
@@ -1500,8 +1500,23 @@ namespace LegionRuntime {
     }
 
     template <int DIM>
+    void *AccessorType::Generic::Untyped::raw_rect_ptr(ByteOffset *offsets) const
+    {
+      // caller didn't give us a rectangle, so ask for something really big...
+      Point<DIM> lo = Point<DIM>::ZEROES();
+      Point<DIM> hi;
+      for(unsigned i = 0; i < DIM; i++)
+	hi.x[i] = INT_MAX;
+      Rect<DIM> r(lo, hi);
+      Rect<DIM> subrect;
+      void *ptr = raw_rect_ptr<DIM>(r, subrect, offsets);
+      assert(r == subrect);
+      return ptr;
+    }
+
+    template <int DIM>
     void *AccessorType::Generic::Untyped::raw_rect_ptr(const Rect<DIM>& r, Rect<DIM>& subrect, ByteOffset *offsets,
-						       const std::vector<off_t> &field_offsets, ByteOffset &field_stride)
+						       const std::vector<off_t> &field_offsets, ByteOffset &field_stride) const
     {
       if(field_offsets.size() < 1)
 	return 0;
@@ -1586,7 +1601,7 @@ namespace LegionRuntime {
     }
 
     template <int DIM>
-    void *AccessorType::Generic::Untyped::raw_dense_ptr(const Rect<DIM>& r, Rect<DIM>& subrect, ByteOffset &elem_stride)
+    void *AccessorType::Generic::Untyped::raw_dense_ptr(const Rect<DIM>& r, Rect<DIM>& subrect, ByteOffset &elem_stride) const
     {
       RegionInstanceImpl *impl = (RegionInstanceImpl *) internal;
       MemoryImpl *mem = get_runtime()->get_memory_impl(impl->memory);
@@ -1629,7 +1644,7 @@ namespace LegionRuntime {
 
     template <int DIM>
     void *AccessorType::Generic::Untyped::raw_dense_ptr(const Rect<DIM>& r, Rect<DIM>& subrect, ByteOffset &elem_stride,
-							const std::vector<off_t> &field_offsets, ByteOffset &field_stride)
+							const std::vector<off_t> &field_offsets, ByteOffset &field_stride) const
     {
       if(field_offsets.size() < 1)
 	return 0;
@@ -1710,12 +1725,15 @@ namespace LegionRuntime {
       return dst;
     }
 
-    template void *AccessorType::Generic::Untyped::raw_rect_ptr<1>(const Rect<1>& r, Rect<1>& subrect, ByteOffset *offset);
-    template void *AccessorType::Generic::Untyped::raw_rect_ptr<2>(const Rect<2>& r, Rect<2>& subrect, ByteOffset *offset);
-    template void *AccessorType::Generic::Untyped::raw_rect_ptr<3>(const Rect<3>& r, Rect<3>& subrect, ByteOffset *offset);
-    template void *AccessorType::Generic::Untyped::raw_dense_ptr<1>(const Rect<1>& r, Rect<1>& subrect, ByteOffset &elem_stride);
-    template void *AccessorType::Generic::Untyped::raw_dense_ptr<2>(const Rect<2>& r, Rect<2>& subrect, ByteOffset &elem_stride);
-    template void *AccessorType::Generic::Untyped::raw_dense_ptr<3>(const Rect<3>& r, Rect<3>& subrect, ByteOffset &elem_stride);
+    template void *AccessorType::Generic::Untyped::raw_rect_ptr<1>(ByteOffset *offset) const;
+    template void *AccessorType::Generic::Untyped::raw_rect_ptr<2>(ByteOffset *offset) const;
+    template void *AccessorType::Generic::Untyped::raw_rect_ptr<3>(ByteOffset *offset) const;
+    template void *AccessorType::Generic::Untyped::raw_rect_ptr<1>(const Rect<1>& r, Rect<1>& subrect, ByteOffset *offset) const;
+    template void *AccessorType::Generic::Untyped::raw_rect_ptr<2>(const Rect<2>& r, Rect<2>& subrect, ByteOffset *offset) const;
+    template void *AccessorType::Generic::Untyped::raw_rect_ptr<3>(const Rect<3>& r, Rect<3>& subrect, ByteOffset *offset) const;
+    template void *AccessorType::Generic::Untyped::raw_dense_ptr<1>(const Rect<1>& r, Rect<1>& subrect, ByteOffset &elem_stride) const;
+    template void *AccessorType::Generic::Untyped::raw_dense_ptr<2>(const Rect<2>& r, Rect<2>& subrect, ByteOffset &elem_stride) const;
+    template void *AccessorType::Generic::Untyped::raw_dense_ptr<3>(const Rect<3>& r, Rect<3>& subrect, ByteOffset &elem_stride) const;
 
     void AccessorType::Generic::Untyped::report_fault(ptr_t ptr, size_t bytes, off_t offset /*= 0*/) const
     {
