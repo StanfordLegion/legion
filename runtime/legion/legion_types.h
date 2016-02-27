@@ -420,6 +420,10 @@ namespace Legion {
       SEND_VERSION_STATE_RESPONSE,
       SEND_INSTANCE_REQUEST,
       SEND_INSTANCE_RESPONSE,
+      SEND_GC_PRIORITY_UPDATE,
+      SEND_MAX_GC_RESPONSE,
+      SEND_ACQUIRE_REQUEST,
+      SEND_ACQUIRE_RESPONSE,
       SEND_BACK_LOGICAL_STATE,
       SEND_VARIANT_REQUEST,
       SEND_VARIANT_RESPONSE,
@@ -513,6 +517,10 @@ namespace Legion {
         "Send Version State Response",                                \
         "Send Instance Request",                                      \
         "Send Instance Response",                                     \
+        "Send GC Priority Update",                                    \
+        "Send Max GC Response",                                       \
+        "Send Acquire Request",                                       \
+        "Send Acquire Response",                                      \
         "Send Back Logical State",                                    \
         "Send Task Variant Request",                                  \
         "Send Task Variant Response",                                 \
@@ -653,6 +661,7 @@ namespace Legion {
     class ListReductionManager;
     class FoldReductionManager;
     class ReductionView;
+    class InstanceBuilder;
 
     class RegionAnalyzer;
     class RegionMapper;

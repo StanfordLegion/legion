@@ -171,6 +171,8 @@ namespace Legion {
       inline Memory get_memory(void) const { return memory_manager->memory; }
     public:
       void perform_deletion(Event deferred_event) const;
+      void set_garbage_collection_priority(MapperID mapper_id, Processor p,
+                                           GCPriority priority); 
       static void delete_physical_manager(PhysicalManager *manager);
     public:
       RegionTreeForest *const context;
@@ -405,6 +407,47 @@ namespace Legion {
       virtual Event get_use_event(void) const;
     public:
       const Event use_event;
+    };
+
+    /**
+     * \class InstanceBuilder 
+     * A helper for building physical instances of logical regions
+     */
+    class InstanceBuilder {
+    public:
+      InstanceBuilder(const std::vector<LogicalRegion> &regs,
+                      const LayoutConstraintSet &cons,
+                      MemoryManager *memory)
+        : regions(regs), constraints(cons), memory_manager(memory),
+          ancestor(NULL), instance_domain(Domain::NO_DOMAIN), 
+          own_domain(false), valid(false) { }
+    public:
+      size_t compute_needed_size(RegionTreeForest *forest);
+      PhysicalManager* create_physical_instance(RegionTreeForest *forest);
+    protected:
+      void initialize(RegionTreeForest *forest);
+      void compute_ancestor_and_domain(RegionTreeForest *forest);
+      RegionNode* find_common_ancestor(RegionNode *one, RegionNode *two) const;
+    protected:
+      void compute_new_parameters(void);
+      void compute_old_parameters(void);
+    protected:
+      const std::vector<LogicalRegion> &regions;
+      const LayoutConstraintSet &constraints;
+      MemoryManager *const memory_manager;
+    protected:
+      RegionNode *ancestor;
+      Domain instance_domain;
+      bool own_domain;
+#ifdef NEW_INSTANCE_CREATION
+
+#else
+      std::vector<size_t> field_sizes;
+      size_t block_size;
+      ReductionOpID redop_id;
+#endif
+    public:
+      bool valid;
     };
 
   }; // namespace Internal 

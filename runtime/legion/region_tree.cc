@@ -9025,7 +9025,7 @@ namespace Legion {
           FieldMask inst_mask = get_field_mask(create_fields);
           // See if we can find a layout description object
           LayoutDescription *layout = 
-            find_layout_description(inst_mask, domain, blocking_factor);
+            ind_layout_description(inst_mask, domain, blocking_factor);
           if (layout == NULL)
           {
             // Now we need to make a layout
@@ -17033,7 +17033,7 @@ namespace Legion {
       }
       logger->up();
     }
-#endif
+#endif 
 
   }; // namespace Internal 
 }; // namespace Legion

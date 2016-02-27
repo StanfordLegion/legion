@@ -1278,7 +1278,7 @@ namespace Legion {
                                     PhysicalInstance &result,
                                     bool acquire = true) const;
       void mapper_rt_set_garbage_collection_priority(MapperContext ctx, 
-                        PhysicalInstance instance, GCPriority priority) const;
+                const PhysicalInstance &instance, GCPriority priority) const;
       // These methods will atomically check to make sure that these instances
       // are still valid and then add an implicit reference to them to ensure
       // that they aren't collected before this mapping call completes. They
@@ -1289,7 +1289,7 @@ namespace Legion {
       // as might be expected if a mapper opts to attempt to map a different
       // instance, but this is an optional performance improvement.
       bool mapper_rt_acquire_instance(MapperContext ctx, 
-                                      PhysicalInstance instance) const;
+                                      const PhysicalInstance &instance) const;
       bool mapper_rt_acquire_instances(MapperContext ctx,
                           const std::vector<PhysicalInstance> &instances) const;
       bool mapper_rt_acquire_and_filter_instances(MapperContext ctx,
@@ -1299,7 +1299,7 @@ namespace Legion {
       bool mapper_rt_acquire_and_filter_instances(MapperContext ctx,
                   std::vector<std::vector<PhysicalInstance> > &instances) const;
       void mapper_rt_release_instance(MapperContext ctx, 
-                                         const PhysicalInstance instance) const;
+                                        const PhysicalInstance &instance) const;
       void mapper_rt_release_instances(MapperContext ctx,
                           const std::vector<PhysicalInstance> &instances) const;
       void mapper_rt_release_instances(MapperContext ctx,

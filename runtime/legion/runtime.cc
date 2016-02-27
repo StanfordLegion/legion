@@ -2442,7 +2442,8 @@ namespace Legion {
                                 const LayoutConstraintSet &constraints,
                                 const std::vector<LogicalRegion> &regions,
                                 MappingInstance &result, MapperID mapper_id, 
-                                bool acquire, GCPriority priority, bool remote)
+                                Processor processor, bool acquire, 
+                                GCPriority priority, bool remote)
     //--------------------------------------------------------------------------
     {
       volatile bool success = false;
@@ -2462,6 +2463,7 @@ namespace Legion {
           rez.serialize<bool>(acquire);
           constraints.serialize(rez);
           rez.serialize(mapper_id);
+          rez.serialize(processor);
           rez.serialize(priority);
           rez.serialize(&success);
           rez.serialize(&result);
@@ -2474,7 +2476,7 @@ namespace Legion {
       {
         // Try to make the result
         success = allocate_physical_instance(constraints, regions,
-                     result, acquire, mapper_id, priority, remote);
+                     result, acquire, mapper_id, processor, priority, remote);
       }
       return success;
     }
@@ -2483,8 +2485,8 @@ namespace Legion {
     bool MemoryManager::create_physical_instance(LayoutConstraints *constraints,
                                      const std::vector<LogicalRegion> &regions,
                                      MappingInstance &result,MapperID mapper_id,
-                                     bool acquire, GCPriority priority, 
-                                     bool remote)
+                                     Processor processor, bool acquire, 
+                                     GCPriority priority, bool remote)
     //--------------------------------------------------------------------------
     {
       volatile bool success = false;
@@ -2505,6 +2507,7 @@ namespace Legion {
           rez.serialize<bool>(acquire);
           rez.serialize(constraints->layout_id);
           rez.serialize(mapper_id);
+          rez.serialize(processor);
           rez.serialize(priority);
           rez.serialize(&success);
           rez.serialize(&result);
@@ -2517,7 +2520,7 @@ namespace Legion {
       {
         // Try to make the instance
         success = allocate_physical_instance(*constraints, regions,
-                     result, acquire, mapper_id, priority, remote);
+                     result, acquire, mapper_id, processor, priority, remote);
       }
       return success;
     }
@@ -2527,8 +2530,8 @@ namespace Legion {
                                   const LayoutConstraintSet &constraints,
                                   const std::vector<LogicalRegion> &regions,
                                   MappingInstance &result, bool &created, 
-                                  MapperID mapper_id, bool acquire,
-                                  GCPriority priority, bool remote)
+                                  MapperID mapper_id, Processor processor,
+                                  bool acquire, GCPriority priority,bool remote)
     //--------------------------------------------------------------------------
     {
       volatile bool success = false;
@@ -2555,6 +2558,7 @@ namespace Legion {
           rez.serialize<bool>(acquire);
           constraints.serialize(rez);
           rez.serialize(mapper_id);
+          rez.serialize(processor);
           rez.serialize(priority);
           rez.serialize(&success);
           rez.serialize(&result);
@@ -2573,7 +2577,7 @@ namespace Legion {
         {
           // If we couldn't find it, we have to make it
           success = allocate_physical_instance(constraints, regions, 
-                      result, acquire, mapper_id, priority, remote);
+                      result, acquire, mapper_id, processor, priority, remote);
           if (success)
             created = true;
         }
@@ -2586,8 +2590,8 @@ namespace Legion {
                                 LayoutConstraints *constraints, 
                                 const std::vector<LogicalRegion> &regions,
                                 MappingInstance &result, bool &created,
-                                MapperID mapper_id, bool acquire,
-                                GCPriority priority, bool remote)
+                                MapperID mapper_id, Processor processor,
+                                bool acquire, GCPriority priority, bool remote)
     //--------------------------------------------------------------------------
     {
       volatile bool success = false;
@@ -2615,6 +2619,7 @@ namespace Legion {
           rez.serialize<bool>(acquire);
           rez.serialize(constraints->layout_id);
           rez.serialize(mapper_id);
+          rez.serialize(processor);
           rez.serialize(priority);
           rez.serialize(&success);
           rez.serialize(&result);
@@ -2633,7 +2638,7 @@ namespace Legion {
         {
           // If we couldn't find it, we have to make it
           success = allocate_physical_instance(*constraints, regions,
-                       result, acquire, mapper_id, priority, remote);
+                       result, acquire, mapper_id, processor, priority, remote);
           if (success)
             created = true;
         }
@@ -2731,6 +2736,196 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void MemoryManager::set_garbage_collection_priority(
+                                PhysicalManager *manager, MapperID mapper_id, 
+                                Processor processor, GCPriority priority)
+    //--------------------------------------------------------------------------
+    {
+      bool remove_max_reference = false;
+      if (!is_owner)
+      {
+        UserEvent max_gc_wait = UserEvent::NO_USER_EVENT;
+        bool remove_max_gc_ref = false;
+        std::pair<MapperID,Processor> key(mapper_id,processor);
+        // Check to see if this is or is going to be a max priority instance
+        if (priority == MAX_GC_REF)
+        {
+          // See if we need a handback
+          AutoLock m_lock(manager_lock,1,false);
+          std::map<PhysicalManager*,InstanceInfo>::const_iterator finder = 
+            current_instances.find(manager);
+          if (finder != current_instances.end())
+          {
+            // If priority is already max priority, then we are done
+            if (finder->second.max_priority == priority)
+              return;
+            // Make an event for a callback
+            max_gc_wait = UserEvent::create_user_event();
+          }
+        }
+        else
+        {
+          AutoLock m_lock(manager_lock);
+          std::map<PhysicalManager*,InstanceInfo>::iterator finder = 
+            current_instances.find(manager);
+          if (finder != current_instances.end())
+          {
+            if (finder->second.max_priority == MAX_GC_REF)
+            {
+              finder->second.mapper_priorities.erase(key);
+              if (finder->second.mapper_priorities.empty())
+              {
+                finder->second.max_priority = 0;
+                remove_max_gc_ref = true;
+              }
+            }
+          }
+        }
+        // Won't delete the whole manager because we still hold
+        // a resource reference
+        if (remove_max_gc_ref)
+          manager->remove_base_valid_ref(MAX_GC_REF);
+        // We are not the owner so send a message to the owner
+        // to update the priority, no need to send the manager
+        // since we know we are sending to the owner node
+        volatile bool success = true;
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(memory);
+          rez.serialize(manager->did);
+          rez.serialize(mapper_id);
+          rez.serialize(processor);
+          rez.serialize(priority);
+          rez.serialize(max_gc_wait);
+          if (max_gc_wait.exists())
+            rez.serialize(&success);
+        }
+        runtime->send_gc_priority_update(owner_space, rez);
+        // In most cases, we will fire and forget, the one exception
+        // is if we are waiting for a confirmation of setting max priority
+        if (max_gc_wait.exists())
+        {
+          max_gc_wait.wait();
+          bool remove_duplicate = false;
+          if (success)
+          {
+            // Add our local reference
+            manager->add_base_valid_ref(MAX_GC_REF);
+            manager->send_remote_valid_update(owner_space, 1, false/*add*/);
+            // Then record it
+            AutoLock m_lock(manager_lock);
+            InstanceInfo &info = current_instances[manager];
+            if (info.max_priority == MAX_GC_PRIORITY)
+              remove_duplicate = true; // lost the race
+            else
+              info.max_priority = MAX_GC_PRIORITY;
+            info.mapper_priorities[key] = MAX_GC_PRIORITY;
+          }
+          if (remove_duplicate && manager->remove_base_valid_ref(MAX_GC_REF))
+            PhysicalManager::delete_physical_manager(manager);
+        }
+      }
+      else
+      {
+        // If this a max priority, try adding the reference beforehand, if
+        // it fails then we know the instance is already deleted so whatever
+        if ((priority == MAX_GC_PRIORITY) &&
+            !manager->try_add_base_valid_ref(MAX_GC_REF, true/*must be valid*/))
+          return;
+        // Do the update locally 
+        AutoLock m_lock(manager_lock);
+        std::map<PhysicalManager*,InstanceInfo>::iterator finder = 
+          current_instances.find(manager);
+        if (finder != current_instances.end())
+        {
+          std::map<std::pair<MapperID,Processor>,GCPriority> 
+            &mapper_priorities = finder->second.mapper_priorities;
+          std::pair<MapperID,Processor> key(mapper_id,processor);
+          // If the new priority is MAX_GC and we were already at MAX_GC
+          // then we need to remove the redundant reference when we are done
+          if ((priority == MAX_GC_PRIORITY) && 
+              (finder->second.max_priority == MAX_GC_PRIORITY))
+            remove_max_reference = true;
+          // See if we can find the current priority  
+          std::map<std::pair<MapperID,Processor>,GCPriority>::iterator 
+            priority_finder = mapper_priorities.find(key);
+          if (priority_finder != mapper_priorities.end())
+          {
+            // See if it changed
+            if (priority_finder->second != priority)
+            {
+              // Update the max if necessary
+              if (priority > finder->second.max_priority)
+              {
+                // It increased
+                finder->second.max_priority = priority;
+              }
+              // It might go down if this was (one of) the max priority
+              else if ((priority < finder->second.max_priority) &&
+                       (finder->second.max_priority == priority_finder->second))
+              {
+                // This was (one of) the max priorities, but it 
+                // is about to go down so compute the new max
+                GCPriority new_max = priority;
+                for (std::map<std::pair<MapperID,Processor>,GCPriority>::
+                      const_iterator it = mapper_priorities.begin(); it != 
+                      mapper_priorities.end(); it++)
+                {
+                  if (it->first == key)
+                    continue;
+                  if (it->second > new_max)
+                    new_max = it->second;
+                }
+                if ((finder->second.max_priority == MAX_GC_PRIORITY) &&
+                    (new_max < MAX_GC_PRIORITY))
+                  remove_max_reference = true;
+                finder->second.max_priority = new_max;
+              }
+              // Finally update the priority
+              priority_finder->second = priority;
+            }
+          }
+          else // previous priority was zero, see if we need to update it
+          {
+            mapper_priorities[key] = priority;
+            if (priority > finder->second.max_priority)
+              finder->second.max_priority = priority;
+          }
+        }
+      }
+      if (remove_max_reference && manager->remove_base_valid_ref(MAX_GC_REF))
+        PhysicalManager::delete_physical_manager(manager);
+    }
+
+    //--------------------------------------------------------------------------
+    Event MemoryManager::acquire_instances(
+                                     const std::set<PhysicalManager*> &managers,
+                                     std::vector<bool> &results)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(!is_owner); // should never be called on the owner
+#endif
+      results.resize(managers.size(), true/*all good*/);
+      // Package everything up and send the request 
+      UserEvent done = UserEvent::create_user_event();
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(memory);
+        rez.serialize<size_t>(managers.size());
+        for (std::set<PhysicalManager*>::const_iterator it = 
+              managers.begin(); it != managers.end(); it++)
+          rez.serialize((*it)->did);
+        rez.serialize(&results);
+        rez.serialize(done);
+      }
+      runtime->send_acquire_request(owner_space, rez);
+      return done;
+    }
+
+    //--------------------------------------------------------------------------
     void MemoryManager::process_instance_request(Deserializer &derez,
                                                  AddressSpaceID source)
     //--------------------------------------------------------------------------
@@ -2757,6 +2952,8 @@ namespace Legion {
             constraints.deserialize(derez);
             MapperID mapper_id;
             derez.deserialize(mapper_id);
+            Processor processor;
+            derez.deserialize(processor);
             GCPriority priority;
             derez.deserialize(priority);
             bool *remote_success;
@@ -2765,7 +2962,7 @@ namespace Legion {
             derez.deserialize(remote_target);
             MappingInstance result;
             bool success = create_physical_instance(constraints, regions, 
-                    result, mapper_id, acquire, priority, true/*remote*/);
+              result, mapper_id, processor, acquire, priority, true/*remote*/);
             if (success)
             {
               // Send back the response starting with the instance
@@ -2794,6 +2991,8 @@ namespace Legion {
             derez.deserialize(layout_id);
             MapperID mapper_id;
             derez.deserialize(mapper_id);
+            Processor processor;
+            derez.deserialize(processor);
             GCPriority priority;
             derez.deserialize(priority);
             bool *remote_success;
@@ -2804,7 +3003,7 @@ namespace Legion {
               runtime->find_layout_constraints(layout_id);
             MappingInstance result;
             bool success = create_physical_instance(constraints, regions, 
-                    result, mapper_id, acquire, priority, true/*remote*/);
+              result, mapper_id, processor, acquire, priority, true/*remote*/);
             if (success)
             {
               PhysicalManager *manager = result.impl;
@@ -2832,6 +3031,8 @@ namespace Legion {
             constraints.deserialize(derez);
             MapperID mapper_id;
             derez.deserialize(mapper_id);
+            Processor processor;
+            derez.deserialize(processor);
             GCPriority priority;
             derez.deserialize(priority);
             bool *remote_success, *remote_created;
@@ -2842,8 +3043,8 @@ namespace Legion {
             MappingInstance result;
             bool created;
             bool success = find_or_create_physical_instance(constraints, 
-                                    regions, result, created, mapper_id, 
-                                    acquire, priority, true/*remote*/);
+                                regions, result, created, mapper_id, 
+                                processor, acquire, priority, true/*remote*/);
             if (success)
             {
               PhysicalManager *manager = result.impl;
@@ -2873,6 +3074,8 @@ namespace Legion {
             derez.deserialize(layout_id);
             MapperID mapper_id;
             derez.deserialize(mapper_id);
+            Processor processor;
+            derez.deserialize(processor);
             GCPriority priority;
             derez.deserialize(priority);
             bool *remote_success, *remote_created;
@@ -2885,8 +3088,8 @@ namespace Legion {
             MappingInstance result;
             bool created;
             bool success = find_or_create_physical_instance(constraints, 
-                                     regions, result, created, mapper_id, 
-                                     acquire, priority, true/*remote*/);
+                                 regions, result, created, mapper_id, 
+                                 processor, acquire, priority, true/*remote*/);
             if (success)
             {
               PhysicalManager *manager = result.impl;
@@ -3023,8 +3226,241 @@ namespace Legion {
         bool created;
         derez.deserialize(created);
         *created_ptr = created;
+        if (created)
+        {
+          bool max_priority;
+          derez.deserialize(max_priority);
+          if (max_priority)
+          {
+            MapperID mapper_id;
+            derez.deserialize(mapper_id);
+            Processor processor;
+            derez.deserialize(processor);
+            // Record the instance as a max priority instance
+            bool remove_duplicate = false;
+            // No need to be safe here, we have a valid reference
+            manager->add_base_valid_ref(MAX_GC_REF);
+            {
+              std::pair<MapperID,Processor> key(mapper_id,processor);
+              AutoLock m_lock(manager_lock);
+              InstanceInfo &info = current_instances[manager];
+              if (info.max_priority == MAX_GC_REF)
+                remove_duplicate = true;
+              else
+                info.max_priority = MAX_GC_REF;
+              info.mapper_priorities[key] = MAX_GC_REF;
+            }
+            if (remove_duplicate && manager->remove_base_valid_ref(MAX_GC_REF))
+              PhysicalManager::delete_physical_manager(manager);
+          }
+        }
+      }
+      else if ((kind == CREATE_INSTANCE_CONSTRAINTS) ||
+               (kind == CREATE_INSTANCE_LAYOUT))
+      {
+        bool max_priority;
+        derez.deserialize(max_priority);
+        if (max_priority)
+        {
+          MapperID mapper_id;
+          derez.deserialize(mapper_id);
+          Processor processor;
+          derez.deserialize(processor);
+          bool remove_duplicate = false;
+          // No need to be safe here, we have a valid reference
+          manager->add_base_valid_ref(MAX_GC_REF);
+          {
+            std::pair<MapperID,Processor> key(mapper_id,processor);
+            AutoLock m_lock(manager_lock);
+            InstanceInfo &info = current_instances[manager];
+            if (info.max_priority == MAX_GC_REF)
+              remove_duplicate = true;
+            else
+              info.max_priority = MAX_GC_REF;
+            info.mapper_priorities[key] = MAX_GC_REF;
+          }
+          if (remove_duplicate && manager->remove_base_valid_ref(MAX_GC_REF))
+            PhysicalManager::delete_physical_manager(manager);
+        }
       }
       // Trigger that we are done
+      to_trigger.trigger();
+    }
+
+    //--------------------------------------------------------------------------
+    void MemoryManager::process_gc_priority_update(Deserializer &derez,
+                                                   AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DistributedID did;
+      derez.deserialize(did);
+      MapperID mapper_id;
+      derez.deserialize(mapper_id);
+      Processor processor;
+      derez.deserialize(processor);
+      GCPriority priority;
+      derez.deserialize(priority);
+      UserEvent max_gc_event;
+      derez.deserialize(max_gc_event);
+      // Hold our lock to make sure our allocation doesn't change
+      // when getting the reference
+      PhysicalManager *manager = NULL;
+      {
+        AutoLock m_lock(manager_lock,1,false/*exclusive*/);
+        DistributedCollectable *dc = 
+          runtime->weak_find_distributed_collectable(did);
+        if (dc != NULL)
+        {
+#ifdef DEBUG_HIGH_LEVEL
+          manager = dynamic_cast<PhysicalManager*>(dc);
+#else
+          manager = static_cast<PhysicalManager*>(dc);
+#endif
+          manager->add_base_resource_ref(MEMORY_MANAGER_REF);
+        }
+      }
+      // If the instance was already collected, there is nothing to do
+      if (manager == NULL)
+      {
+        if (max_gc_event.exists())
+        {
+          bool *success;
+          derez.deserialize(success);
+          // Only have to send the message back when we fail
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(memory);
+            rez.serialize(success);
+            rez.serialize(max_gc_event);
+          }
+          runtime->send_max_gc_response(source, rez);
+        }
+        return;
+      }
+      set_garbage_collection_priority(manager, mapper_id, processor, priority);
+      if (max_gc_event.exists())
+      {
+        bool *success;
+        derez.deserialize(success);
+        // If we succeed we can trigger immediately, otherwise we
+        // have to send back the response to fail
+        if (!manager->try_add_base_valid_ref(REMOTE_DID_REF,
+                                             false/*must be valid*/))
+        {
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(memory);
+            rez.serialize(success);
+            rez.serialize(max_gc_event);
+          }
+          runtime->send_max_gc_response(source, rez);
+        }
+        else
+          max_gc_event.trigger();
+      }
+      // Remote our reference
+      if (manager->remove_base_resource_ref(MEMORY_MANAGER_REF))
+        PhysicalManager::delete_physical_manager(manager);
+    }
+
+    //--------------------------------------------------------------------------
+    void MemoryManager::process_max_gc_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      bool *success;
+      derez.deserialize(success);
+      UserEvent to_trigger;
+      derez.deserialize(to_trigger);
+      *success = false;
+      to_trigger.trigger();
+    }
+
+    //--------------------------------------------------------------------------
+    void MemoryManager::process_acquire_request(Deserializer &derez,
+                                                AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      std::vector<unsigned> failures;
+      size_t num_managers;
+      derez.deserialize(num_managers);
+      for (unsigned idx = 0; idx < num_managers; idx++)
+      {
+        DistributedID did;
+        derez.deserialize(did);
+        PhysicalManager *manager = NULL;
+        // Prevent changes until we can get a resource reference
+        {
+          AutoLock m_lock(manager_lock,1,false/*exclusive*/);
+          DistributedCollectable *dc = 
+            runtime->weak_find_distributed_collectable(did);
+          if (dc != NULL)
+          {
+#ifdef DEBUG_HIGH_LEVEL
+            manager = dynamic_cast<PhysicalManager*>(dc);
+#else
+            manager = static_cast<PhysicalManager*>(dc);
+#endif
+            manager->add_base_resource_ref(MEMORY_MANAGER_REF);
+          }
+        }
+        if (manager == NULL)
+        {
+          failures.push_back(idx);
+          continue;
+        }
+        // Otherwise try to acquire it locally
+        if (!manager->try_add_base_valid_ref(REMOTE_DID_REF, 
+                                             false/*needs valid*/))
+        {
+          failures.push_back(idx);
+          if (manager->remove_base_resource_ref(MEMORY_MANAGER_REF))
+            PhysicalManager::delete_physical_manager(manager);
+        }
+        else // just remove our reference since we succeeded
+          manager->remove_base_resource_ref(MEMORY_MANAGER_REF);
+      }
+      std::vector<unsigned> *target;
+      derez.deserialize(target);
+      UserEvent to_trigger;
+      derez.deserialize(to_trigger);
+      // See if we had any failures
+      if (!failures.empty())
+      {
+        // Send back the failures
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(memory);
+          rez.serialize(target);
+          rez.serialize<size_t>(failures.size());
+          for (unsigned idx = 0; idx < failures.size(); idx++)
+            rez.serialize(idx);
+          rez.serialize(to_trigger);
+        }
+        runtime->send_acquire_response(source, rez);
+      }
+      else // if we succeeded, then this is easy, just trigger
+        to_trigger.trigger();
+    }
+
+    //--------------------------------------------------------------------------
+    void MemoryManager::process_acquire_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      std::vector<unsigned> *target;
+      derez.deserialize(target);
+      size_t num_failures;
+      derez.deserialize(num_failures);
+      for (unsigned idx = 0; idx < num_failures; idx++)
+      {
+        unsigned index;
+        derez.deserialize(index);
+        (*target)[index] = false;
+      }
+      UserEvent to_trigger;
+      derez.deserialize(to_trigger);
       to_trigger.trigger();
     }
     
@@ -3300,10 +3736,10 @@ namespace Legion {
           continue;
         if (it->second.instance_size >= needed_size)
           larger_instances.insert(CollectableInfo<false>(it->first,
-                it->second.instance_size, it->second.priority));
+                it->second.instance_size, it->second.max_priority));
         else
           smaller_instances.insert(CollectableInfo<true>(it->first,
-                it->second.instance_size, it->second.priority));
+                it->second.instance_size, it->second.max_priority));
       }
     }
 
@@ -3312,19 +3748,20 @@ namespace Legion {
                                       const LayoutConstraintSet &constraints,
                                       const std::vector<LogicalRegion> &regions,
                                       MappingInstance &result, bool acquire,
-                                      MapperID mapper_id, GCPriority priority,
-                                      bool remote)  
+                                      MapperID mapper_id, Processor p,
+                                      GCPriority priority, bool remote)  
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
       assert(is_owner);
 #endif
       // First, just try to make the instance as is, if it works we are done 
+      InstanceBuilder builder(regions, constraints, this);
       PhysicalManager *manager = 
-                runtime->forest->create_physical_region(constraints, regions);
+                              builder.create_physical_instance(runtime->forest);
       if (manager != NULL)
       {
-        record_created_instance(manager, acquire, mapper_id, priority, remote);
+        record_created_instance(manager, acquire, mapper_id, p,priority,remote);
         result = MappingInstance(manager);
         return true;
       }
@@ -3334,23 +3771,22 @@ namespace Legion {
       // delete them starting from the smallest size and highest priority
       // If that didnt' work try to delete enough from the small set to 
       // open up space.
-      size_t needed_size = 
-        runtime->forest->compute_needed_size(constraints, regions);
+      const size_t needed_size = builder.compute_needed_size(runtime->forest);
       std::set<CollectableInfo<true> > smaller_instances;
       std::set<CollectableInfo<false> > larger_instances;
       find_instances_by_state(needed_size, COLLECTABLE_STATE,
                               smaller_instances, larger_instances);
       size_t total_bytes_deleted = 0;
       if (!larger_instances.empty() &&
-          delete_and_allocate<false>(constraints, regions, result, acquire,
-                                     mapper_id, priority, remote, needed_size,
+          delete_and_allocate<false>(builder, result, acquire, mapper_id, p, 
+                                     priority, remote, needed_size,
                                      total_bytes_deleted, larger_instances))
         return true;
       else
         larger_instances.clear();
       if (!smaller_instances.empty() &&
-          delete_and_allocate<true>(constraints, regions, result, acquire,
-                                    mapper_id, priority, remote, needed_size,
+          delete_and_allocate<true>(builder, result, acquire, mapper_id, p, 
+                                    priority, remote, needed_size, 
                                     total_bytes_deleted, smaller_instances))
         return true;
       else
@@ -3360,13 +3796,13 @@ namespace Legion {
       find_instances_by_state(needed_size, ACTIVE_STATE, 
                               smaller_instances, larger_instances);
       if (!larger_instances.empty() &&
-          delete_and_allocate<false>(constraints, regions, result, acquire,
-                                     mapper_id, priority, remote, needed_size,
+          delete_and_allocate<false>(builder, result, acquire, mapper_id, p, 
+                                     priority, remote, needed_size, 
                                      total_bytes_deleted, larger_instances))
         return true;
       if (!smaller_instances.empty() &&
-          delete_and_allocate<true>(constraints, regions, result, acquire,
-                                    mapper_id, priority, remote, needed_size,
+          delete_and_allocate<true>(builder, result, acquire, mapper_id, p, 
+                                    priority, remote, needed_size, 
                                     total_bytes_deleted, smaller_instances))
         return true;
       // If we made it here well then we failed 
@@ -3375,9 +3811,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void MemoryManager::record_created_instance(PhysicalManager *manager,
-             bool acquire, MapperID mapper_id, GCPriority priority, bool remote)
+                           bool acquire, MapperID mapper_id, Processor p, 
+                           GCPriority priority, bool remote)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(is_owner);
+#endif
       // First do the insertion
       // If we're going to add a valid reference, mark this valid early
       // to avoid races with deletions
@@ -3393,11 +3833,10 @@ namespace Legion {
         InstanceInfo &info = current_instances[manager];
         if (early_valid)
           info.current_state = VALID_STATE;
-        info.priority = priority;
+        info.max_priority = priority;
         info.instance_size = instance_size;
-        // Record the priority if necessary
-        if (priority != 0)
-          info.mapper_priorities[mapper_id] = priority;
+        info.mapper_priorities[
+          std::pair<MapperID,Processor>(mapper_id,p)] = priority;
       }
       // Now we can add any references that we need to
       if (acquire)
@@ -3451,13 +3890,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<bool SMALLER>
-    bool MemoryManager::delete_and_allocate(
-                                const LayoutConstraintSet &constraints,
-                                const std::vector<LogicalRegion> &regions,
+    bool MemoryManager::delete_and_allocate(InstanceBuilder &builder,
                                 MappingInstance &result, bool acquire,
-                                MapperID mapper_id, GCPriority priority,
-                                bool remote, size_t needed_size, 
-                                size_t &total_bytes_deleted,
+                                MapperID mapper_id, Processor p, 
+                                GCPriority priority, bool remote, 
+                                size_t needed_size, size_t &total_bytes_deleted,
                           const std::set<CollectableInfo<SMALLER> > &instances)
     //--------------------------------------------------------------------------
     {
@@ -3473,13 +3910,13 @@ namespace Legion {
           // Only need to do the test if we're smaller
           if (!SMALLER || (total_bytes_deleted >= needed_size))
           {
-            PhysicalManager *manager =
-              runtime->forest->create_physical_region(constraints, regions);
+            PhysicalManager *manager = 
+              builder.create_physical_instance(runtime->forest);
             // If we succeeded we are done
             if (manager != NULL)
             {
               record_created_instance(manager, acquire, 
-                                      mapper_id, priority, remote);
+                                      mapper_id, p, priority, remote);
               result = MappingInstance(manager);
               return true;
             }
@@ -4139,6 +4576,26 @@ namespace Legion {
           case SEND_INSTANCE_RESPONSE:
             {
               runtime->handle_instance_response(derez, remote_address_space);
+              break;
+            }
+          case SEND_GC_PRIORITY_UPDATE:
+            {
+              runtime->handle_gc_priority_update(derez, remote_address_space);
+              break;
+            }
+          case SEND_MAX_GC_RESPONSE:
+            {
+              runtime->handle_max_gc_response(derez);
+              break;
+            }
+          case SEND_ACQUIRE_REQUEST:
+            {
+              runtime->handle_acquire_request(derez, remote_address_space);
+              break;
+            }
+          case SEND_ACQUIRE_RESPONSE:
+            {
+              runtime->handle_acquire_response(derez);
               break;
             }
           case SEND_BACK_LOGICAL_STATE:
@@ -5893,7 +6350,7 @@ namespace Legion {
 				    all_procs.size()-1);
         proc_managers[*it] = manager;
         Mapper *mapper = new Mapping::DefaultMapper(machine, *it);
-        MapperManager *wrapper = wrap_mapper(this, mapper, 0);
+        MapperManager *wrapper = wrap_mapper(this, mapper, 0, *it);
         manager->add_mapper(0, wrapper, false/*check*/, true/*owns*/); 
       }
       // Initialize the message manager array so that we can construct
@@ -11702,7 +12159,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // First, wrap this mapper in a mapper manager
-      MapperManager *manager = wrap_mapper(this, mapper, map_id);
+      MapperManager *manager = wrap_mapper(this, mapper, map_id, proc);
       if (!proc.exists())
       {
         bool own = true;
@@ -11758,7 +12215,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // First, wrap this mapper in a mapper manager
-      MapperManager *manager = wrap_mapper(this, mapper, 0); 
+      MapperManager *manager = wrap_mapper(this, mapper, 0, proc); 
       if (!proc.exists())
       {
         bool own = true;
@@ -11781,7 +12238,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ MapperManager* Runtime::wrap_mapper(Runtime *rt, Mapper *mapper,
-                                                   MapperID map_id)
+                                                   MapperID map_id, Processor p)
     //--------------------------------------------------------------------------
     {
       MapperManager *manager = NULL;
@@ -11789,19 +12246,19 @@ namespace Legion {
       {
         case Mapper::CONCURRENT_MAPPER_MODEL:
           {
-            manager = new ConcurrentManager(rt, mapper, map_id);
+            manager = new ConcurrentManager(rt, mapper, map_id, p);
             break;
           }
         case Mapper::SERIALIZED_REENTRANT_MAPPER_MODEL:
           {
             manager = new SerializingManager(rt, mapper, 
-                                             map_id, true/*reentrant*/);
+                                             map_id, p, true/*reentrant*/);
             break;
           }
         case Mapper::SERIALIZED_NON_REENTRANT_MAPPER_MODEL:
           {
             manager = new SerializingManager(rt, mapper, 
-                                             map_id, false/*reentrant*/);
+                                             map_id, p, false/*reentrant*/);
             break;
           }
         default:
@@ -13269,6 +13726,38 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_gc_priority_update(AddressSpaceID target,Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_GC_PRIORITY_UPDATE,
+                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_max_gc_response(AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_MAX_GC_RESPONSE,
+                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_acquire_request(AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_ACQUIRE_REQUEST,
+                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+    
+    //--------------------------------------------------------------------------
+    void Runtime::send_acquire_response(AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_ACQUIRE_RESPONSE,
+                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_back_logical_state(AddressSpaceID target,
                                            Serializer &rez)
     //--------------------------------------------------------------------------
@@ -13994,6 +14483,52 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::handle_gc_priority_update(Deserializer &derez,
+                                            AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      Memory target_memory;
+      derez.deserialize(target_memory);
+      MemoryManager *manager = find_memory_manager(target_memory);
+      manager->process_gc_priority_update(derez, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_max_gc_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      Memory target_memory;
+      derez.deserialize(target_memory);
+      MemoryManager *manager = find_memory_manager(target_memory);
+      manager->process_max_gc_response(derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_acquire_request(Deserializer &derez, 
+                                         AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      Memory target_memory;
+      derez.deserialize(target_memory);
+      MemoryManager *manager = find_memory_manager(target_memory);
+      manager->process_acquire_request(derez, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_acquire_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      Memory target_memory;
+      derez.deserialize(target_memory);
+      MemoryManager *manager = find_memory_manager(target_memory);
+      manager->process_acquire_response(derez);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::handle_logical_state_return(Deserializer &derez, 
                                                AddressSpaceID source)
     //--------------------------------------------------------------------------
@@ -14119,27 +14654,29 @@ namespace Legion {
     bool Runtime::create_physical_instance(Memory target_memory,
                                      const LayoutConstraintSet &constraints,
                                      const std::vector<LogicalRegion> &regions,
-                                     MappingInstance &result,MapperID mapper_id,
+                                     MappingInstance &result,
+                                     MapperID mapper_id, Processor processor, 
                                      bool acquire, GCPriority priority)
     //--------------------------------------------------------------------------
     {
       MemoryManager *manager = find_memory_manager(target_memory);
       return manager->create_physical_instance(constraints, regions, result,
-                                               mapper_id, acquire, priority);
+                                   mapper_id, processor, acquire, priority);
     }
 
     //--------------------------------------------------------------------------
     bool Runtime::create_physical_instance(Memory target_memory,
                                      LayoutConstraintID layout_id,
                                      const std::vector<LogicalRegion> &regions,
-                                     MappingInstance &result,MapperID mapper_id,
+                                     MappingInstance &result,
+                                     MapperID mapper_id, Processor processor,
                                      bool acquire, GCPriority priority)
     //--------------------------------------------------------------------------
     {
       LayoutConstraints *constraints = find_layout_constraints(layout_id);
       MemoryManager *manager = find_memory_manager(target_memory);
       return manager->create_physical_instance(constraints, regions, result,
-                                               mapper_id, acquire, priority);
+                                   mapper_id, processor, acquire, priority);
     }
 
     //--------------------------------------------------------------------------
@@ -14147,13 +14684,13 @@ namespace Legion {
                                      const LayoutConstraintSet &constraints,
                                      const std::vector<LogicalRegion> &regions,
                                      MappingInstance &result, bool &created, 
-                                     MapperID mapper_id, bool acquire,
-                                     GCPriority priority)
+                                     MapperID mapper_id, Processor processor,
+                                     bool acquire, GCPriority priority)
     //--------------------------------------------------------------------------
     {
       MemoryManager *manager = find_memory_manager(target_memory);
       return manager->find_or_create_physical_instance(constraints, regions, 
-                             result, created, mapper_id, acquire, priority);
+                   result, created, mapper_id, processor, acquire, priority);
     }
 
     //--------------------------------------------------------------------------
@@ -14161,14 +14698,14 @@ namespace Legion {
                                     LayoutConstraintID layout_id,
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, bool &created, 
-                                    MapperID mapper_id, bool acquire, 
-                                    GCPriority priority)
+                                    MapperID mapper_id, Processor processor,
+                                    bool acquire, GCPriority priority)
     //--------------------------------------------------------------------------
     {
       LayoutConstraints *constraints = find_layout_constraints(layout_id);
       MemoryManager *manager = find_memory_manager(target_memory);
       return manager->find_or_create_physical_instance(constraints, regions,
-                             result, created, mapper_id, acquire, priority);
+                  result, created, mapper_id, processor, acquire, priority);
     }
 
     //--------------------------------------------------------------------------

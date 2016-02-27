@@ -16,8 +16,9 @@
 #include "legion.h"
 #include "legion_ops.h"
 #include "legion_tasks.h"
-#include "legion_instances.h"
 #include "mapper_manager.h"
+#include "legion_instances.h"
+#include "garbage_collection.h"
 
 namespace Legion {
   namespace Internal {
@@ -29,8 +30,9 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    MapperManager::MapperManager(Runtime *rt, Mapping::Mapper *mp, MapperID mid)
-      : runtime(rt), mapper(mp), mapper_id(mid), 
+    MapperManager::MapperManager(Runtime *rt, Mapping::Mapper *mp, 
+                                 MapperID mid, Processor p)
+      : runtime(rt), mapper(mp), mapper_id(mid), processor(p),
         mapper_lock(Reservation::create_reservation())
     //--------------------------------------------------------------------------
     {
@@ -937,9 +939,18 @@ namespace Legion {
         return false;
       if (regions.size() > 1)
         check_region_consistency(ctx, "create_physical_instance", regions);
+      if (acquire && (ctx->acquired_instances == NULL))
+      {
+        log_run.warning("Ignoring acquire request to create_physical_instance "
+                        "in unsupported mapper call %s in mapper %s", 
+                        get_mapper_call_name(ctx->kind), get_mapper_name());
+        acquire = false;
+      }
       pause_mapper_call(ctx);
       bool success = runtime->create_physical_instance(target_memory, 
-                  constraints, regions, result, mapper_id, acquire, priority);
+        constraints, regions, result, mapper_id, processor, acquire, priority);
+      if (success && acquire)
+        record_acquired_instance(ctx, result.impl);
       resume_mapper_call(ctx);
       return success;
     }
@@ -959,9 +970,18 @@ namespace Legion {
         return false;
       if (regions.size() > 1)
         check_region_consistency(ctx, "create_physical_instance", regions);
+      if (acquire && (ctx->acquired_instances == NULL))
+      {
+        log_run.warning("Ignoring acquire request to create_physical_instance "
+                        "in unsupported mapper call %s in mapper %s", 
+                        get_mapper_call_name(ctx->kind), get_mapper_name());
+        acquire = false;
+      }
       pause_mapper_call(ctx);
       bool success = runtime->create_physical_instance(target_memory, layout_id,
-                                 regions, result, mapper_id, acquire, priority);
+                      regions, result, mapper_id, processor, acquire, priority);
+      if (success && acquire)
+        record_acquired_instance(ctx, result.impl);
       resume_mapper_call(ctx);
       return success;
     }
@@ -982,9 +1002,19 @@ namespace Legion {
       if (regions.size() > 1)
         check_region_consistency(ctx, "find_or_create_physical_instance", 
                                  regions);
+      if (acquire && (ctx->acquired_instances == NULL))
+      {
+        log_run.warning("Ignoring acquire request to find_or_create_physical"
+                        "_instance in unsupported mapper call %s in mapper %s",
+                        get_mapper_call_name(ctx->kind), get_mapper_name());
+        acquire = false;
+      }
       pause_mapper_call(ctx);
       bool success = runtime->find_or_create_physical_instance(target_memory,
-          constraints, regions, result, created, mapper_id, acquire, priority);
+                                      constraints, regions, result, created, 
+                                      mapper_id, processor, acquire, priority);
+      if (success && acquire)
+        record_acquired_instance(ctx, result.impl);
       resume_mapper_call(ctx);
       return success;
     }
@@ -1005,9 +1035,19 @@ namespace Legion {
       if (regions.size() > 1)
         check_region_consistency(ctx, "find_or_create_physical_instance", 
                                  regions);
+      if (acquire && (ctx->acquired_instances == NULL))
+      {
+        log_run.warning("Ignoring acquire request to find_or_create_physical"
+                        "_instance in unsupported mapper call %s in mapper %s",
+                        get_mapper_call_name(ctx->kind), get_mapper_name());
+        acquire = false;
+      }
       pause_mapper_call(ctx);
       bool success = runtime->find_or_create_physical_instance(target_memory,
-           layout_id, regions, result, created, mapper_id, acquire, priority);
+                                       layout_id, regions, result, created, 
+                                       mapper_id, processor, acquire, priority);
+      if (success && acquire)
+        record_acquired_instance(ctx, result.impl);
       resume_mapper_call(ctx);
       return success;
     }
@@ -1026,9 +1066,18 @@ namespace Legion {
         return false;
       if (regions.size() > 1)
         check_region_consistency(ctx, "find_physical_instance", regions);
+      if (acquire && (ctx->acquired_instances == NULL))
+      {
+        log_run.warning("Ignoring acquire request to find_physical_instance "
+                        "in unsupported mapper call %s in mapper %s",
+                        get_mapper_call_name(ctx->kind), get_mapper_name());
+        acquire = false;
+      }
       pause_mapper_call(ctx);
       bool success = runtime->find_physical_instance(target_memory, constraints,
                                                      regions, result, acquire);
+      if (success && acquire)
+        record_acquired_instance(ctx, result.impl);
       resume_mapper_call(ctx);
       return success;
     }
@@ -1047,11 +1096,454 @@ namespace Legion {
         return false;
       if (regions.size() > 1)
         check_region_consistency(ctx, "find_physical_instance", regions);
+      if (acquire && (ctx->acquired_instances == NULL))
+      {
+        log_run.warning("Ignoring acquire request to find_physical_instance "
+                        "in unsupported mapper call %s in mapper %s",
+                        get_mapper_call_name(ctx->kind), get_mapper_name());
+        acquire = false;
+      }
       pause_mapper_call(ctx);
       bool success = runtime->find_physical_instance(target_memory, layout_id,
                                                      regions, result, acquire);
+      if (success && acquire)
+        record_acquired_instance(ctx, result.impl);
       resume_mapper_call(ctx);
       return success;
+    }
+
+    //--------------------------------------------------------------------------
+    void MapperManager::set_garbage_collection_priority(MappingCallInfo *ctx,
+                           const MappingInstance &instance, GCPriority priority)
+    //--------------------------------------------------------------------------
+    {
+      PhysicalManager *manager = instance.impl;
+      if (manager == NULL)
+        return;
+      pause_mapper_call(ctx);
+      manager->set_garbage_collection_priority(mapper_id, processor, priority);
+      resume_mapper_call(ctx);
+    }
+
+    //--------------------------------------------------------------------------
+    bool MapperManager::acquire_instance(MappingCallInfo *ctx,
+                                         const MappingInstance &instance)
+    //--------------------------------------------------------------------------
+    {
+      if (ctx->acquired_instances == NULL)
+      {
+        log_run.warning("Ignoring acquire request in unsupported mapper call "
+                        "%s in mapper %s", get_mapper_call_name(ctx->kind),
+                        get_mapper_name());
+        return false;
+      }
+      PhysicalManager *manager = instance.impl;
+      // virtual instances are easy
+      if (manager == NULL)
+        return true;
+      // See if we already acquired it
+      if (ctx->acquired_instances->find(manager) !=
+          ctx->acquired_instances->end())
+        return true;
+      pause_mapper_call(ctx);
+      if (manager->try_add_base_valid_ref(MAPPING_ACQUIRE_REF,
+                                          !manager->is_owner()))
+      {
+        resume_mapper_call(ctx);
+        return true;
+      }
+      else if (manager->is_owner())
+      {
+        resume_mapper_call(ctx);
+        return false;
+      }
+      std::set<PhysicalManager*> instances; 
+      instances.insert(manager);
+      std::vector<bool> results(1,true);
+      Event wait_on = 
+        manager->memory_manager->acquire_instances(instances, results);
+      if (wait_on.exists())
+        wait_on.wait(); // wait for the results to be ready
+      bool success = results[0];
+      if (success)
+        record_acquired_instance(ctx, instance.impl);
+      resume_mapper_call(ctx);
+      return success;
+    }
+
+    //--------------------------------------------------------------------------
+    bool MapperManager::acquire_instances(MappingCallInfo *ctx,
+                                  const std::vector<MappingInstance> &instances)
+    //--------------------------------------------------------------------------
+    {
+      if (ctx->acquired_instances == NULL)
+      {
+        log_run.warning("Ignoring acquire request in unsupported mapper call "
+                        "%s in mapper %s", get_mapper_call_name(ctx->kind),
+                        get_mapper_name());
+        return false;
+      }
+      // Quick fast path
+      if (instances.size() == 1)
+        return acquire_instance(ctx, instances[0]);
+      pause_mapper_call(ctx);
+      // Figure out which instances we need to acquire and sort by memories
+      std::map<MemoryManager*,AcquireStatus> acquire_requests;
+      bool local_acquired = perform_local_acquires(ctx, instances,
+                                                   acquire_requests, NULL);
+      if (acquire_requests.empty())
+      {
+        resume_mapper_call(ctx);
+        return local_acquired;
+      }
+      bool remote_acquired = perform_remote_acquires(ctx, acquire_requests);
+      resume_mapper_call(ctx);
+      return (local_acquired && remote_acquired);
+    }
+
+    //--------------------------------------------------------------------------
+    bool MapperManager::acquire_and_filter_instances(MappingCallInfo *ctx,
+                                        std::vector<MappingInstance> &instances)
+    //--------------------------------------------------------------------------
+    {
+      if (ctx->acquired_instances == NULL)
+      {
+        log_run.warning("Ignoring acquire request in unsupported mapper call "
+                        "%s in mapper %s", get_mapper_call_name(ctx->kind),
+                        get_mapper_name());
+        return false;
+      }
+      // Quick fast path
+      if (instances.size() == 1)
+      {
+        bool result = acquire_instance(ctx, instances[0]);
+        if (!result)
+          instances.clear();
+        return result;
+      }
+      pause_mapper_call(ctx); 
+      // Figure out which instances we need to acquire and sort by memories
+      std::map<MemoryManager*,AcquireStatus> acquire_requests;
+      std::vector<unsigned> to_erase;
+      bool local_acquired = perform_local_acquires(ctx, instances,
+                                                  acquire_requests, &to_erase);
+      // Filter any invalid local instances
+      if (!to_erase.empty())
+      {
+        // Erase from the back
+        for (std::vector<unsigned>::const_reverse_iterator it = 
+              to_erase.rbegin(); it != to_erase.rend(); it++)
+          instances.erase(instances.begin()+(*it)); 
+        to_erase.clear();
+      }
+      if (acquire_requests.empty())
+      {
+        resume_mapper_call(ctx);
+        return local_acquired;
+      }
+      bool remote_acquired = perform_remote_acquires(ctx, acquire_requests);
+      if (!remote_acquired)
+      {
+        std::map<PhysicalManager*,unsigned> &already_acquired = 
+          *(ctx->acquired_instances);
+        // Figure out which instances weren't deleted yet
+        for (unsigned idx = 0; idx < instances.size(); idx++)
+        {
+          if (already_acquired.find(instances[idx].impl) == 
+              already_acquired.end())
+            to_erase.push_back(idx);
+        }
+        if (!to_erase.empty())
+        {
+          // Erase from the back
+          for (std::vector<unsigned>::const_reverse_iterator it = 
+                to_erase.rbegin(); it != to_erase.rend(); it++)
+            instances.erase(instances.begin()+(*it));
+        }
+      }
+      return (local_acquired && remote_acquired);
+    }
+
+    //--------------------------------------------------------------------------
+    bool MapperManager::acquire_instances(MappingCallInfo *ctx,
+                    const std::vector<std::vector<MappingInstance> > &instances)
+    //--------------------------------------------------------------------------
+    {
+      if (ctx->acquired_instances == NULL)
+      {
+        log_run.warning("Ignoring acquire request in unsupported mapper call "
+                        "%s in mapper %s", get_mapper_call_name(ctx->kind),
+                        get_mapper_name());
+        return false;
+      }
+      pause_mapper_call(ctx); 
+      // Figure out which instances we need to acquire and sort by memories
+      std::map<MemoryManager*,AcquireStatus> acquire_requests;
+      bool local_acquired = true;
+      for (std::vector<std::vector<MappingInstance> >::const_iterator it = 
+            instances.begin(); it != instances.end(); it++)
+      {
+        if (!perform_local_acquires(ctx, *it, acquire_requests, NULL))
+          local_acquired = false;
+      }
+      if (acquire_requests.empty())
+      {
+        resume_mapper_call(ctx);
+        return local_acquired;
+      }
+      bool remote_acquired = perform_remote_acquires(ctx, acquire_requests);
+      resume_mapper_call(ctx);
+      return (local_acquired && remote_acquired);
+    }
+
+    //--------------------------------------------------------------------------
+    bool MapperManager::acquire_and_filter_instances(MappingCallInfo *ctx,
+                          std::vector<std::vector<MappingInstance> > &instances)
+    //--------------------------------------------------------------------------
+    {
+      if (ctx->acquired_instances == NULL)
+      {
+        log_run.warning("Ignoring acquire request in unsupported mapper call "
+                        "%s in mapper %s", get_mapper_call_name(ctx->kind),
+                        get_mapper_name());
+        return false;
+      }
+      pause_mapper_call(ctx);
+      // Figure out which instances we need to acquire and sort by memories
+      std::map<MemoryManager*,AcquireStatus> acquire_requests;
+      std::vector<unsigned> to_erase;
+      bool local_acquired = true;
+      for (std::vector<std::vector<MappingInstance> >::iterator it = 
+            instances.begin(); it != instances.end(); it++)
+      {
+        if (!perform_local_acquires(ctx, *it, acquire_requests, &to_erase))
+        {
+          local_acquired = false;
+          // Erase from the back
+          for (std::vector<unsigned>::const_reverse_iterator rit = 
+                to_erase.rbegin(); rit != to_erase.rend(); rit++)
+            it->erase(it->begin()+(*rit));
+          to_erase.clear();
+        }
+      }
+      if (acquire_requests.empty())
+      {
+        resume_mapper_call(ctx);
+        return local_acquired;
+      }
+      bool remote_acquired = perform_remote_acquires(ctx, acquire_requests);
+      if (!remote_acquired)
+      {
+        std::map<PhysicalManager*,unsigned> &already_acquired = 
+          *(ctx->acquired_instances); 
+        std::vector<unsigned> to_erase;
+        for (std::vector<std::vector<MappingInstance> >::iterator it = 
+              instances.begin(); it != instances.end(); it++)
+        {
+          std::vector<MappingInstance> &current = *it;
+          for (unsigned idx = 0; idx < current.size(); idx++)
+          {
+            if (already_acquired.find(current[idx].impl) == 
+                already_acquired.end())
+              to_erase.push_back(idx);
+          }
+          if (!to_erase.empty())
+          {
+            // Erase from the back
+            for (std::vector<unsigned>::const_reverse_iterator rit = 
+                  to_erase.rbegin(); rit != to_erase.rend(); rit++)
+              current.erase(current.begin()+(*rit));
+            to_erase.clear();
+          }
+        }
+      }
+      resume_mapper_call(ctx);
+      return (local_acquired && remote_acquired);
+    }
+
+    //--------------------------------------------------------------------------
+    bool MapperManager::perform_local_acquires(MappingCallInfo *info,
+                      const std::vector<MappingInstance> &instances,
+                      std::map<MemoryManager*,AcquireStatus> &acquire_requests,
+                      std::vector<unsigned> *to_erase)
+    //--------------------------------------------------------------------------
+    {
+      std::map<PhysicalManager*,unsigned> &already_acquired = 
+        *(info->acquired_instances);
+      bool local_acquired = true;
+      for (unsigned idx = 0; idx < instances.size(); idx++)
+      {
+        PhysicalManager *manager = instances[idx].impl;
+        if (manager == NULL)
+          continue;
+        if (already_acquired.find(manager) != already_acquired.end())
+          continue;
+        // Try to add an acquired reference immediately
+        // If we're remote it has to be valid already to be sound, but if
+        // we're local whatever works
+        if (manager->try_add_base_valid_ref(MAPPING_ACQUIRE_REF, 
+                                            !manager->is_owner()))
+        {
+          // We already know it wasn't there before
+          already_acquired[manager] = 1;
+          continue;
+        }
+        // if we failed on the owner node, it will never work
+        else if (manager->is_owner()) 
+        {
+          if (to_erase != NULL)
+            to_erase->push_back(idx);
+          local_acquired = false;
+          continue; 
+        }
+        acquire_requests[manager->memory_manager].instances.insert(manager);
+      }
+      return local_acquired;
+    }
+
+    //--------------------------------------------------------------------------
+    bool MapperManager::perform_remote_acquires(MappingCallInfo *info,
+                       std::map<MemoryManager*,AcquireStatus> &acquire_requests)
+    //--------------------------------------------------------------------------
+    {
+      std::set<Event> done_events;
+      // Issue the requests and see what we need to wait on
+      for (std::map<MemoryManager*,AcquireStatus>::iterator it = 
+            acquire_requests.begin(); it != acquire_requests.end(); it++)
+      {
+        Event wait_on = it->first->acquire_instances(it->second.instances,
+                                                     it->second.results);
+        if (wait_on.exists())
+          done_events.insert(wait_on);          
+      }
+      // See if we have to wait for our results to be done
+      if (!done_events.empty())
+      {
+        Event ready = Runtime::merge_events<true>(done_events);
+        ready.wait();
+      }
+      // Now find out which ones we acquired and which ones didn't
+      bool all_acquired = true;
+      for (std::map<MemoryManager*,AcquireStatus>::const_iterator req_it = 
+            acquire_requests.begin(); req_it != acquire_requests.end();req_it++)
+      {
+        unsigned idx = 0;
+        for (std::set<PhysicalManager*>::const_iterator it =  
+              req_it->second.instances.begin(); it != 
+              req_it->second.instances.end(); it++, idx++)
+        {
+          if (req_it->second.results[idx])
+          {
+            // record that we acquired it
+            record_acquired_instance(info, *it); 
+            // make the reference a local reference and 
+            // remove our remote did reference
+            (*it)->add_base_valid_ref(MAPPING_ACQUIRE_REF);
+            (*it)->send_remote_valid_update(req_it->first->owner_space,
+                                            1, false/*add*/);
+          }
+          else
+            all_acquired = false;
+        }
+      }
+      return all_acquired;
+    }
+
+    //--------------------------------------------------------------------------
+    void MapperManager::release_instance(MappingCallInfo *ctx, 
+                                         const MappingInstance &instance)
+    //--------------------------------------------------------------------------
+    {
+      if (ctx->acquired_instances == NULL)
+      {
+        log_run.warning("Ignoring release request in unsupported mapper call "
+                        "%s in mapper %s", get_mapper_call_name(ctx->kind),
+                        get_mapper_name());
+        return;
+      }
+      pause_mapper_call(ctx);
+      release_acquired_instance(ctx, instance.impl); 
+      resume_mapper_call(ctx);
+    }
+
+    //--------------------------------------------------------------------------
+    void MapperManager::release_instances(MappingCallInfo *ctx,
+                                 const std::vector<MappingInstance> &instances)
+    //--------------------------------------------------------------------------
+    {
+      if (ctx->acquired_instances == NULL)
+      {
+        log_run.warning("Ignoring release request in unsupported mapper call "
+                        "%s in mapper %s", get_mapper_call_name(ctx->kind),
+                        get_mapper_name());
+        return;
+      }
+      pause_mapper_call(ctx);
+      for (unsigned idx = 0; idx < instances.size(); idx++)
+        release_acquired_instance(ctx, instances[idx].impl);
+      resume_mapper_call(ctx);
+    }
+
+    //--------------------------------------------------------------------------
+    void MapperManager::release_instances(MappingCallInfo *ctx, 
+                   const std::vector<std::vector<MappingInstance> > &instances)
+    //--------------------------------------------------------------------------
+    {
+      if (ctx->acquired_instances == NULL)
+      {
+        log_run.warning("Ignoring release request in unsupported mapper call "
+                        "%s in mapper %s", get_mapper_call_name(ctx->kind),
+                        get_mapper_name());
+        return;
+      }
+      pause_mapper_call(ctx);
+      for (std::vector<std::vector<MappingInstance> >::const_iterator it = 
+            instances.begin(); it != instances.end(); it++)
+      {
+        for (unsigned idx = 0; idx < it->size(); idx++)
+          release_acquired_instance(ctx, (*it)[idx].impl);
+      }
+      resume_mapper_call(ctx);
+    }
+
+    //--------------------------------------------------------------------------
+    void MapperManager::record_acquired_instance(MappingCallInfo *ctx,
+                                                 PhysicalManager *manager)
+    //--------------------------------------------------------------------------
+    {
+      if (manager == NULL)
+        return;
+#ifdef DEBUG_HIGH_LEVEL
+      assert(ctx->acquired_instances != NULL);
+#endif
+      std::map<PhysicalManager*,unsigned> &acquired =*(ctx->acquired_instances);
+      std::map<PhysicalManager*,unsigned>::iterator finder = 
+        acquired.find(manager); 
+      if (finder == acquired.end())
+        acquired[manager] = 1; // first reference
+      else
+        finder->second++;
+    }
+
+    //--------------------------------------------------------------------------
+    void MapperManager::release_acquired_instance(MappingCallInfo *ctx,
+                                                  PhysicalManager *manager)
+    //--------------------------------------------------------------------------
+    {
+      if (manager == NULL)
+        return;
+#ifdef DEBUG_HIGH_LEVEL
+      assert(ctx->acquired_instances != NULL);
+#endif
+      std::map<PhysicalManager*,unsigned> &acquired =*(ctx->acquired_instances);
+      std::map<PhysicalManager*,unsigned>::iterator finder = 
+        acquired.find(manager);
+      if (finder == acquired.end())
+        return;
+      // Release the refrences and then keep going, we know there is 
+      // a resource reference so no need to check for deletion
+      manager->remove_base_valid_ref(MAPPING_ACQUIRE_REF, finder->second);
+      acquired.erase(finder);
     }
 
     //--------------------------------------------------------------------------
@@ -1085,206 +1577,309 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexPartition MapperManager::get_index_partition(IndexSpace parent, 
+    IndexPartition MapperManager::get_index_partition(MappingCallInfo *ctx,
+                                                      IndexSpace parent, 
                                                       Color color)
     //--------------------------------------------------------------------------
     {
-      return runtime->get_index_partition(parent, color);
+      pause_mapper_call(ctx);
+      IndexPartition result = runtime->get_index_partition(parent, color);
+      resume_mapper_call(ctx);
+      return result;
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace MapperManager::get_index_subspace(IndexPartition p, Color c)
+    IndexSpace MapperManager::get_index_subspace(MappingCallInfo *ctx,
+                                                 IndexPartition p, Color c)
     //--------------------------------------------------------------------------
     {
-      return runtime->get_index_subspace(p, c);
+      pause_mapper_call(ctx);
+      IndexSpace result = runtime->get_index_subspace(p, c);
+      resume_mapper_call(ctx);
+      return result;
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace MapperManager::get_index_subspace(IndexPartition p, 
+    IndexSpace MapperManager::get_index_subspace(MappingCallInfo *ctx,
+                                                 IndexPartition p, 
                                                  const DomainPoint &color)
     //--------------------------------------------------------------------------
     {
-      return runtime->get_index_subspace(p, color);
+      pause_mapper_call(ctx);
+      IndexSpace result = runtime->get_index_subspace(p, color);
+      resume_mapper_call(ctx);
+      return result;
     }
 
     //--------------------------------------------------------------------------
-    bool MapperManager::has_multiple_domains(IndexSpace handle)
+    bool MapperManager::has_multiple_domains(MappingCallInfo *ctx,
+                                             IndexSpace handle)
     //--------------------------------------------------------------------------
     {
-      return runtime->has_multiple_domains(handle);
+      pause_mapper_call(ctx);
+      bool result = runtime->has_multiple_domains(handle);
+      resume_mapper_call(ctx);
+      return result;
     }
 
     //--------------------------------------------------------------------------
-    Domain MapperManager::get_index_space_domain(IndexSpace handle)
+    Domain MapperManager::get_index_space_domain(MappingCallInfo *ctx,
+                                                 IndexSpace handle)
     //--------------------------------------------------------------------------
     {
-      return runtime->get_index_space_domain(handle);
+      pause_mapper_call(ctx);
+      Domain result = runtime->get_index_space_domain(handle);
+      resume_mapper_call(ctx);
+      return result;
     }
 
     //--------------------------------------------------------------------------
-    void MapperManager::get_index_space_domains(IndexSpace handle,
+    void MapperManager::get_index_space_domains(MappingCallInfo *ctx,
+                                                IndexSpace handle,
                                                 std::vector<Domain> &domains)
     //--------------------------------------------------------------------------
     {
-      return runtime->get_index_space_domains(handle, domains);
+      pause_mapper_call(ctx);
+      runtime->get_index_space_domains(handle, domains);
+      resume_mapper_call(ctx);
     }
 
     //--------------------------------------------------------------------------
-    Domain MapperManager::get_index_partition_color_space(IndexPartition p)
+    Domain MapperManager::get_index_partition_color_space(MappingCallInfo *ctx,
+                                                          IndexPartition p)
     //--------------------------------------------------------------------------
     {
-      return runtime->get_index_partition_color_space(p);
+      pause_mapper_call(ctx);
+      Domain result = runtime->get_index_partition_color_space(p);
+      resume_mapper_call(ctx);
+      return result;
     }
 
     //--------------------------------------------------------------------------
-    void MapperManager::get_index_space_partition_colors(
+    void MapperManager::get_index_space_partition_colors(MappingCallInfo *ctx,
                                      IndexSpace handle, std::set<Color> &colors)
     //--------------------------------------------------------------------------
     {
+      pause_mapper_call(ctx);
       runtime->get_index_space_partition_colors(handle, colors);
+      resume_mapper_call(ctx);
     }
 
     //--------------------------------------------------------------------------
-    bool MapperManager::is_index_partition_disjoint(IndexPartition p)
+    bool MapperManager::is_index_partition_disjoint(MappingCallInfo *ctx,
+                                                    IndexPartition p)
     //--------------------------------------------------------------------------
     {
-      return runtime->is_index_partition_disjoint(p);
+      pause_mapper_call(ctx);
+      bool result = runtime->is_index_partition_disjoint(p);
+      resume_mapper_call(ctx);
+      return result;
     }
 
     //--------------------------------------------------------------------------
-    Color MapperManager::get_index_space_color(IndexSpace handle)
+    Color MapperManager::get_index_space_color(MappingCallInfo *ctx,
+                                               IndexSpace handle)
     //--------------------------------------------------------------------------
     {
-      return runtime->get_index_space_color(handle);
+      pause_mapper_call(ctx);
+      Color result = runtime->get_index_space_color(handle);
+      resume_mapper_call(ctx);
+      return result;
     }
 
     //--------------------------------------------------------------------------
-    Color MapperManager::get_index_partition_color(IndexPartition handle)
+    Color MapperManager::get_index_partition_color(MappingCallInfo *ctx,
+                                                   IndexPartition handle)
     //--------------------------------------------------------------------------
     {
-      return runtime->get_index_partition_color(handle);
+      pause_mapper_call(ctx);
+      Color result = runtime->get_index_partition_color(handle);
+      resume_mapper_call(ctx);
+      return result;
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace MapperManager::get_parent_index_space(IndexPartition handle)
+    IndexSpace MapperManager::get_parent_index_space(MappingCallInfo *ctx,
+                                                     IndexPartition handle)
     //--------------------------------------------------------------------------
     {
-      return runtime->get_parent_index_space(handle);
+      pause_mapper_call(ctx);
+      IndexSpace result = runtime->get_parent_index_space(handle);
+      resume_mapper_call(ctx);
+      return result;
     }
 
     //--------------------------------------------------------------------------
-    bool MapperManager::has_parent_index_partition(IndexSpace handle)
+    bool MapperManager::has_parent_index_partition(MappingCallInfo *ctx,
+                                                   IndexSpace handle)
     //--------------------------------------------------------------------------
     {
-      return runtime->has_parent_index_partition(handle);
+      pause_mapper_call(ctx);
+      bool result = runtime->has_parent_index_partition(handle);
+      resume_mapper_call(ctx);
+      return result;
     }
 
     //--------------------------------------------------------------------------
-    IndexPartition MapperManager::get_parent_index_partition(IndexSpace handle)
+    IndexPartition MapperManager::get_parent_index_partition(
+                                        MappingCallInfo *ctx, IndexSpace handle)
     //--------------------------------------------------------------------------
     {
-      return runtime->get_parent_index_partition(handle);
+      pause_mapper_call(ctx);
+      IndexPartition result = runtime->get_parent_index_partition(handle);
+      resume_mapper_call(ctx);
+      return result;
     }
 
     //--------------------------------------------------------------------------
-    size_t MapperManager::get_field_size(FieldSpace handle, FieldID fid)
+    size_t MapperManager::get_field_size(MappingCallInfo *ctx,
+                                         FieldSpace handle, FieldID fid)
     //--------------------------------------------------------------------------
     {
-      return runtime->get_field_size(handle, fid);
+      pause_mapper_call(ctx);
+      size_t result = runtime->get_field_size(handle, fid);
+      resume_mapper_call(ctx);
+      return result;
     }
 
     //--------------------------------------------------------------------------
-    void MapperManager::get_field_space_fields(FieldSpace handle, 
-                                               std::vector<FieldID> &fields)
+    void MapperManager::get_field_space_fields(MappingCallInfo *ctx,
+                                FieldSpace handle, std::vector<FieldID> &fields)
     //--------------------------------------------------------------------------
     {
+      pause_mapper_call(ctx);
       runtime->get_field_space_fields(handle, fields);
+      resume_mapper_call(ctx);
     }
 
     //--------------------------------------------------------------------------
-    LogicalPartition MapperManager::get_logical_partition(LogicalRegion parent,
+    LogicalPartition MapperManager::get_logical_partition(MappingCallInfo *ctx,
+                                                          LogicalRegion parent,
                                                           IndexPartition handle)
     //--------------------------------------------------------------------------
     {
-      return runtime->get_logical_partition(parent, handle);
+      pause_mapper_call(ctx);
+      LogicalPartition result = runtime->get_logical_partition(parent, handle);
+      resume_mapper_call(ctx);
+      return result;
     }
 
     //--------------------------------------------------------------------------
     LogicalPartition MapperManager::get_logical_partition_by_color(
-                                           LogicalRegion par, Color color)
+                           MappingCallInfo *ctx, LogicalRegion par, Color color)
     //--------------------------------------------------------------------------
     {
-      return runtime->get_logical_partition_by_color(par, color);
+      pause_mapper_call(ctx);
+      LogicalPartition result = 
+        runtime->get_logical_partition_by_color(par, color);
+      resume_mapper_call(ctx);
+      return result;
     }
 
     //--------------------------------------------------------------------------
     LogicalPartition MapperManager::get_logical_partition_by_tree(
+                                                        MappingCallInfo *ctx,
                                                         IndexPartition part,
                                                         FieldSpace fspace, 
                                                         RegionTreeID tid)
     //--------------------------------------------------------------------------
     {
-      return runtime->get_logical_partition_by_tree(part, fspace, tid);
+      pause_mapper_call(ctx);
+      LogicalPartition result = 
+        runtime->get_logical_partition_by_tree(part, fspace, tid);
+      resume_mapper_call(ctx);
+      return result;
     }
 
     //--------------------------------------------------------------------------
-    LogicalRegion MapperManager::get_logical_subregion(LogicalPartition parent,
+    LogicalRegion MapperManager::get_logical_subregion(MappingCallInfo *ctx,
+                                                       LogicalPartition parent,
                                                        IndexSpace handle)
     //--------------------------------------------------------------------------
     {
-      return runtime->get_logical_subregion(parent, handle);
+      pause_mapper_call(ctx);
+      LogicalRegion result = runtime->get_logical_subregion(parent, handle);
+      resume_mapper_call(ctx);
+      return result;
     }
 
     //--------------------------------------------------------------------------
     LogicalRegion MapperManager::get_logical_subregion_by_color(
-                                        LogicalPartition par, Color color)
+                        MappingCallInfo *ctx, LogicalPartition par, Color color)
     //--------------------------------------------------------------------------
     {
-      return runtime->get_logical_subregion_by_color(par, color);
+      pause_mapper_call(ctx);
+      LogicalRegion result = runtime->get_logical_subregion_by_color(par,color);
+      resume_mapper_call(ctx);
+      return result;
     }
 
     //--------------------------------------------------------------------------
     LogicalRegion MapperManager::get_logical_subregion_by_tree(
-                   IndexSpace handle, FieldSpace fspace, RegionTreeID tid)
+                                      MappingCallInfo *ctx, IndexSpace handle, 
+                                      FieldSpace fspace, RegionTreeID tid)
     //--------------------------------------------------------------------------
     {
-      return runtime->get_logical_subregion_by_tree(handle, fspace, tid);
+      pause_mapper_call(ctx);
+      LogicalRegion result = 
+        runtime->get_logical_subregion_by_tree(handle, fspace, tid);
+      resume_mapper_call(ctx);
+      return result;
     }
 
     //--------------------------------------------------------------------------
-    Color MapperManager::get_logical_region_color(LogicalRegion handle)
+    Color MapperManager::get_logical_region_color(MappingCallInfo *ctx,
+                                                  LogicalRegion handle)
     //--------------------------------------------------------------------------
     {
-      return runtime->get_logical_region_color(handle);
+      pause_mapper_call(ctx);
+      Color result = runtime->get_logical_region_color(handle);
+      resume_mapper_call(ctx);
+      return result;
     }
 
     //--------------------------------------------------------------------------
-    Color MapperManager::get_logical_partition_color(LogicalPartition handle)
+    Color MapperManager::get_logical_partition_color(MappingCallInfo *ctx,
+                                                     LogicalPartition handle)
     //--------------------------------------------------------------------------
     {
-      return runtime->get_logical_partition_color(handle);
+      pause_mapper_call(ctx);
+      Color result = runtime->get_logical_partition_color(handle);
+      resume_mapper_call(ctx);
+      return result;
     }
 
     //--------------------------------------------------------------------------
-    LogicalRegion MapperManager::get_parent_logical_region(LogicalPartition part)
+    LogicalRegion MapperManager::get_parent_logical_region(MappingCallInfo *ctx,
+                                                          LogicalPartition part)
     //--------------------------------------------------------------------------
     {
-      return runtime->get_parent_logical_region(part);
+      pause_mapper_call(ctx);
+      LogicalRegion result = runtime->get_parent_logical_region(part);
+      resume_mapper_call(ctx);
+      return result;
     }
     
     //--------------------------------------------------------------------------
-    bool MapperManager::has_parent_logical_partition(LogicalRegion handle)
+    bool MapperManager::has_parent_logical_partition(MappingCallInfo *ctx,
+                                                     LogicalRegion handle)
     //--------------------------------------------------------------------------
     {
-      return runtime->has_parent_logical_partition(handle);
+      pause_mapper_call(ctx);
+      bool result = runtime->has_parent_logical_partition(handle);
+      resume_mapper_call(ctx);
+      return result;
     }
 
     //--------------------------------------------------------------------------
     LogicalPartition MapperManager::get_parent_logical_partition(
-                                                                LogicalRegion r)
+                                          MappingCallInfo *ctx, LogicalRegion r)
     //--------------------------------------------------------------------------
     {
-      return runtime->get_parent_logical_partition(r);
+      pause_mapper_call(ctx);
+      LogicalPartition result = runtime->get_parent_logical_partition(r);
+      resume_mapper_call(ctx);
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -1338,8 +1933,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     SerializingManager::SerializingManager(Runtime *rt, Mapping::Mapper *mp,
-                                           MapperID map_id, bool init_reentrant)
-      : MapperManager(rt, mp, map_id), permit_reentrant(init_reentrant), 
+                             MapperID map_id, Processor p, bool init_reentrant)
+      : MapperManager(rt, mp, map_id, p), permit_reentrant(init_reentrant), 
         executing_call(NULL), paused_calls(0)
     //--------------------------------------------------------------------------
     {
@@ -1347,7 +1942,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     SerializingManager::SerializingManager(const SerializingManager &rhs)
-      : MapperManager(NULL,NULL,0)
+      : MapperManager(NULL,NULL,0,Processor::NO_PROC)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -1591,15 +2186,15 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ConcurrentManager::ConcurrentManager(Runtime *rt, Mapping::Mapper *mp,
-                                         MapperID map_id)
-      : MapperManager(rt, mp, map_id), lock_state(UNLOCKED_STATE)
+                                         MapperID map_id, Processor p)
+      : MapperManager(rt, mp, map_id, p), lock_state(UNLOCKED_STATE)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     ConcurrentManager::ConcurrentManager(const ConcurrentManager &rhs)
-      : MapperManager(NULL,NULL,0)
+      : MapperManager(NULL,NULL,0,Processor::NO_PROC)
     //--------------------------------------------------------------------------
     {
       // should never be called

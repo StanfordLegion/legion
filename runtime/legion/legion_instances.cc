@@ -706,6 +706,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void PhysicalManager::set_garbage_collection_priority(MapperID mapper_id,
+                                            Processor proc, GCPriority priority)
+    //--------------------------------------------------------------------------
+    {
+      memory_manager->set_garbage_collection_priority(this, mapper_id,
+                                                      proc, priority);
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ void PhysicalManager::delete_physical_manager(
                                                        PhysicalManager *manager)
     //--------------------------------------------------------------------------
@@ -1512,6 +1521,174 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return use_event;
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Instance Builder
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    size_t InstanceBuilder::compute_needed_size(RegionTreeForest *forest)
+    //--------------------------------------------------------------------------
+    {
+      if (!valid)
+        initialize(forest);
+      return 0;
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalManager* InstanceBuilder::create_physical_instance(
+                                                       RegionTreeForest *forest)
+    //--------------------------------------------------------------------------
+    {
+      if (!valid)
+        initialize(forest);
+      return NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    void InstanceBuilder::initialize(RegionTreeForest *forest)
+    //--------------------------------------------------------------------------
+    {
+      compute_ancestor_and_domain(forest); 
+#ifdef NEW_INSTANCE_CREATION
+
+#else
+      compute_old_parameters();
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void InstanceBuilder::compute_ancestor_and_domain(RegionTreeForest *forest)
+    //--------------------------------------------------------------------------
+    {
+      // First let's get the domain for this region 
+      ancestor = forest->get_node(regions[0]);
+      if (regions.size() > 1)
+      {
+        // Compute an union of the all the index spaces for the basis
+        // and the common ancestor of all regions
+        const Domain &first = ancestor->row_source->get_domain_blocking();
+        switch (first.get_dim())
+        {
+          case 0:
+            {
+              Realm::ElementMask result = 
+                first.get_index_space().get_valid_mask();
+              for (unsigned idx = 1; idx < regions.size(); idx++)
+              {
+                RegionNode *next = forest->get_node(regions[idx]);
+                const Domain &next_domain = next->get_domain_blocking();
+                result |= next_domain.get_index_space().get_valid_mask();
+                // Find the common ancestor
+                ancestor = find_common_ancestor(ancestor, next);
+              }
+              instance_domain = Domain(
+                  Realm::IndexSpace::create_index_space(result));
+              own_domain = true;
+              break;
+            }
+          case 1:
+            {
+              LegionRuntime::Arrays::Rect<1> result = first.get_rect<1>();
+              for (unsigned idx = 1; idx < regions.size(); idx++)
+              {
+                RegionNode *next = forest->get_node(regions[idx]);
+                const Domain &next_domain = next->get_domain_blocking();
+                LegionRuntime::Arrays::Rect<1> next_rect = 
+                  next_domain.get_rect<1>();
+                result = result.convex_hull(next_rect);
+                // Find the common ancesstor
+                ancestor = find_common_ancestor(ancestor, next); 
+              }
+              instance_domain = Domain::from_rect<1>(result);
+              break;
+            }
+          case 2:
+            {
+              LegionRuntime::Arrays::Rect<2> result = first.get_rect<2>();
+              for (unsigned idx = 1; idx < regions.size(); idx++)
+              {
+                RegionNode *next = forest->get_node(regions[idx]);
+                const Domain &next_domain = next->get_domain_blocking();
+                LegionRuntime::Arrays::Rect<2> next_rect = 
+                  next_domain.get_rect<2>();
+                result = result.convex_hull(next_rect);
+                // Find the common ancesstor
+                ancestor = find_common_ancestor(ancestor, next); 
+              }
+              instance_domain = Domain::from_rect<2>(result);
+              break;
+            }
+          case 3:
+            {
+              LegionRuntime::Arrays::Rect<3> result = first.get_rect<3>();
+              for (unsigned idx = 1; idx < regions.size(); idx++)
+              {
+                RegionNode *next = forest->get_node(regions[idx]);
+                const Domain &next_domain = next->get_domain_blocking();
+                LegionRuntime::Arrays::Rect<3> next_rect = 
+                  next_domain.get_rect<3>();
+                result = result.convex_hull(next_rect);
+                // Find the common ancesstor
+                ancestor = find_common_ancestor(ancestor, next); 
+              }
+              instance_domain = Domain::from_rect<3>(result);
+              break;
+            }
+          default:
+            assert(false); // unsupported number of dimensions
+        }
+      }
+      else
+        instance_domain = ancestor->row_source->get_domain_blocking();
+    }
+
+    //--------------------------------------------------------------------------
+    RegionNode* InstanceBuilder::find_common_ancestor(RegionNode *one,
+                                                      RegionNode *two) const
+    //--------------------------------------------------------------------------
+    {
+      // Make them the same level
+      while (one->row_source->depth > two->row_source->depth)
+      {
+#ifdef DEBUG_HIGH_LEVEL
+        assert(one->parent != NULL);
+#endif
+        one = one->parent->parent;
+      }
+      while (one->row_source->depth < two->row_source->depth)
+      {
+#ifdef DEBUG_HIGH_LEVEL
+        assert(two->parent != NULL);
+#endif
+        two = two->parent->parent;
+      }
+      // While they are not the same, make them both go up
+      while (one != two)
+      {
+#ifdef DEBUG_HIGH_LEVEL
+        assert(one->parent != NULL);
+        assert(two->parent != NULL);
+#endif
+        one = one->parent->parent;
+        two = two->parent->parent;
+      }
+      return one;
+    }
+
+    //--------------------------------------------------------------------------
+    void InstanceBuilder::compute_new_parameters(void)
+    //--------------------------------------------------------------------------
+    {
+
+    }
+
+    //--------------------------------------------------------------------------
+    void InstanceBuilder::compute_old_parameters(void)
+    //--------------------------------------------------------------------------
+    {
+      
     }
 
   }; // namespace Internal 

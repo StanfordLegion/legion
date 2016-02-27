@@ -582,13 +582,13 @@ namespace Legion {
         InstanceInfo(void)
           : current_state(COLLECTABLE_STATE), 
             deferred_collect(UserEvent::NO_USER_EVENT),
-            priority(0), instance_size(0) { }
+            instance_size(0), max_priority(0) { }
       public:
         InstanceState current_state;
         UserEvent deferred_collect;
-        GCPriority priority;
         size_t instance_size;
-        std::map<MapperID,GCPriority> mapper_priorities;
+        GCPriority max_priority;
+        std::map<std::pair<MapperID,Processor>,GCPriority> mapper_priorities;
       };
       template<bool SMALLER>
       struct CollectableInfo {
@@ -623,25 +623,27 @@ namespace Legion {
       bool create_physical_instance(const LayoutConstraintSet &contraints,
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, MapperID mapper_id,
-                                    bool acquire, GCPriority priority,
-                                    bool remote = false);
+                                    Processor processor, bool acquire, 
+                                    GCPriority priority, bool remote = false);
       bool create_physical_instance(LayoutConstraints *constraints,
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, MapperID mapper_id,
-                                    bool acquire, GCPriority priority,
-                                    bool remote = false);
+                                    Processor processor, bool acquire, 
+                                    GCPriority priority, bool remote = false);
       bool find_or_create_physical_instance(
                                     const LayoutConstraintSet &constraints,
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, bool &created, 
-                                    MapperID mapper_id, bool acquire,
-                                    GCPriority priority, bool remote = false);
+                                    MapperID mapper_id, Processor processor,
+                                    bool acquire, GCPriority priority, 
+                                    bool remote = false);
       bool find_or_create_physical_instance(
                                     LayoutConstraints *constraints,
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, bool &created, 
-                                    MapperID mapper_id, bool acquire,
-                                    GCPriority priority, bool remote = false);
+                                    MapperID mapper_id, Processor processor,
+                                    bool acquire, GCPriority priority, 
+                                    bool remote = false);
       bool find_physical_instance(  const LayoutConstraintSet &constraints,
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, bool acquire,
@@ -650,9 +652,18 @@ namespace Legion {
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, bool acquire,
                                     bool remote = false);
+      void set_garbage_collection_priority(PhysicalManager *manager,
+                                    MapperID mapper_id, Processor proc,
+                                    GCPriority priority);
+      Event acquire_instances(const std::set<PhysicalManager*> &managers,
+                                    std::vector<bool> &results);
     public:
       void process_instance_request(Deserializer &derez, AddressSpaceID source);
       void process_instance_response(Deserializer &derez,AddressSpaceID source);
+      void process_gc_priority_update(Deserializer &derez, AddressSpaceID src);
+      void process_max_gc_response(Deserializer &derez);
+      void process_acquire_request(Deserializer &derez, AddressSpaceID source);
+      void process_acquire_response(Deserializer &derez);
     protected:
       bool find_satisfying_instance(const LayoutConstraintSet &constraints,
                                     const std::vector<LogicalRegion> &regions,
@@ -674,21 +685,21 @@ namespace Legion {
       bool allocate_physical_instance(const LayoutConstraintSet &constraints,
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, bool acquire,
-                                    MapperID mapper_id, GCPriority priority,
-                                    bool remote);
+                                    MapperID mapper_id, Processor p,
+                                    GCPriority priority, bool remote);
       void record_created_instance( PhysicalManager *manager, bool acquire,
-                                    MapperID mapper_id, GCPriority priority,
-                                    bool remote);
+                                    MapperID mapper_id, Processor proc,
+                                    GCPriority priority, bool remote);
       Event record_deleted_instance(PhysicalManager *manager); 
       void find_instances_by_state(size_t needed_size, InstanceState state, 
                      std::set<CollectableInfo<true> > &smaller_instances,
                      std::set<CollectableInfo<false> > &larger_instances) const;
       template<bool SMALLER>
-      bool delete_and_allocate(     const LayoutConstraintSet &constraints,
-                                    const std::vector<LogicalRegion> &regions,
+      bool delete_and_allocate(     InstanceBuilder &builder, 
                                     MappingInstance &result, bool acquire,
-                                    MapperID mapper_id, GCPriority priority,
-                                    bool remote, size_t needed_size, 
+                                    MapperID mapper_id, Processor p,
+                                    GCPriority priority, bool remote, 
+                                    size_t needed_size, 
                                     size_t &total_bytes_deleted,
                       const std::set<CollectableInfo<SMALLER> > &instances);
     public:
@@ -1650,7 +1661,7 @@ namespace Legion {
       void replace_default_mapper(Mapper *mapper, Processor proc);
       MapperManager* find_mapper(Processor target, MapperID map_id);
       static MapperManager* wrap_mapper(Runtime *runtime, Mapper *mapper,
-                                        MapperID map_id);
+                                        MapperID map_id, Processor proc);
     public:
       void register_projection_functor(ProjectionID pid,
                                        ProjectionFunctor *func);
@@ -1837,6 +1848,10 @@ namespace Legion {
       void send_version_state_response(AddressSpaceID target, Serializer &rez);
       void send_instance_request(AddressSpaceID target, Serializer &rez);
       void send_instance_response(AddressSpaceID target, Serializer &rez);
+      void send_gc_priority_update(AddressSpaceID target, Serializer &rez);
+      void send_max_gc_response(AddressSpaceID target, Serializer &rez);
+      void send_acquire_request(AddressSpaceID target, Serializer &rez);
+      void send_acquire_response(AddressSpaceID target, Serializer &rez);
       void send_back_logical_state(AddressSpaceID target, Serializer &rez);
       void send_variant_request(AddressSpaceID target, Serializer &rez);
       void send_variant_response(AddressSpaceID target, Serializer &rez);
@@ -1963,6 +1978,10 @@ namespace Legion {
                                          AddressSpaceID source);
       void handle_instance_request(Deserializer &derez, AddressSpaceID source);
       void handle_instance_response(Deserializer &derez,AddressSpaceID source);
+      void handle_gc_priority_update(Deserializer &derez,AddressSpaceID source);
+      void handle_max_gc_response(Deserializer &derez);
+      void handle_acquire_request(Deserializer &derez, AddressSpaceID source);
+      void handle_acquire_response(Deserializer &derez);
       void handle_logical_state_return(Deserializer &derez,
                                        AddressSpaceID source);
       void handle_variant_request(Deserializer &derez, AddressSpaceID source);
@@ -1981,24 +2000,26 @@ namespace Legion {
                                     const LayoutConstraintSet &constraints,
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, MapperID mapper_id,
-                                    bool acquire, GCPriority priority);
+                                    Processor processor, bool acquire, 
+                                    GCPriority priority);
       bool create_physical_instance(Memory target_memory, 
                                     LayoutConstraintID layout_id,
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, MapperID mapper_id,
-                                    bool acquire, GCPriority priority);
+                                    Processor processor, bool acquire, 
+                                    GCPriority priority);
       bool find_or_create_physical_instance(Memory target_memory,
                                     const LayoutConstraintSet &constraints,
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, bool &created, 
-                                    MapperID mapper_id, bool acquire, 
-                                    GCPriority priority);
+                                    MapperID mapper_id, Processor processor,
+                                    bool acquire, GCPriority priority);
       bool find_or_create_physical_instance(Memory target_memory,
                                     LayoutConstraintID layout_id,
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, bool &created, 
-                                    MapperID mapper_id, bool acquire,
-                                    GCPriority priority);
+                                    MapperID mapper_id, Processor processor,
+                                    bool acquire, GCPriority priority);
       bool find_physical_instance(Memory target_memory,
                                     const LayoutConstraintSet &constraints,
                                     const std::vector<LogicalRegion> &regions,

@@ -104,18 +104,18 @@ namespace Legion {
       "handle_task_result",                         \
     }
 
-
     class MappingCallInfo {
     public:
       MappingCallInfo(MapperManager *man, MappingCallKind k,
-                      std::set<PhysicalManager*> *regions = NULL)
+                      std::map<PhysicalManager*,unsigned> *instances = NULL)
         : manager(man), resume(UserEvent::NO_USER_EVENT), 
-          kind(k), acquired_regions(regions) { }
+          kind(k), acquired_instances(instances) { }
     public:
-      MapperManager*const              manager;
-      UserEvent                        resume;
-      MappingCallKind                  kind;
-      std::set<PhysicalManager*>*const acquired_regions;
+      MapperManager*const               manager;
+      UserEvent                         resume;
+      MappingCallKind                   kind;
+      std::map<PhysicalManager*,
+               unsigned/*count*/>*const acquired_instances;
     };
 
     /**
@@ -135,8 +135,14 @@ namespace Legion {
         MappingCallKind call;
         void *arg1, *arg2, *arg3;
       };
+      struct AcquireStatus {
+      public:
+        std::set<PhysicalManager*> instances;
+        std::vector<bool> results;
+      };
     public:
-      MapperManager(Runtime *runtime, Mapping::Mapper *mapper, MapperID map_id);
+      MapperManager(Runtime *runtime, Mapping::Mapper *mapper, 
+                    MapperID map_id, Processor p);
       virtual ~MapperManager(void);
     public:
       const char* get_mapper_name(void);
@@ -313,52 +319,104 @@ namespace Legion {
                                     LayoutConstraintID layout_id,
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, bool acquire);
+      void set_garbage_collection_priority(MappingCallInfo *ctx, 
+                                    const MappingInstance &instance, 
+                                    GCPriority priority);
+      bool acquire_instance(        MappingCallInfo *ctx, 
+                                    const MappingInstance &instance);
+      bool acquire_instances(       MappingCallInfo *ctx,
+                                    const std::vector<MappingInstance> &insts);
+      bool acquire_and_filter_instances(MappingCallInfo *ctx,
+                                    std::vector<MappingInstance> &instances);
+      bool acquire_instances(       MappingCallInfo *ctx, const std::vector<
+                                    std::vector<MappingInstance> > &instances);
+      bool acquire_and_filter_instances(MappingCallInfo *ctx, std::vector<
+                                    std::vector<MappingInstance> > &instances);
+      void release_instance(        MappingCallInfo *ctx, 
+                                    const MappingInstance &instance);
+      void release_instances(       MappingCallInfo *ctx,
+                                    const std::vector<MappingInstance> &insts);
+      void release_instances(       MappingCallInfo *ctx, const std::vector<
+                                    std::vector<MappingInstance> > &instances);
     public:
+      void record_acquired_instance(MappingCallInfo *info, 
+                                    PhysicalManager *manager);
+      void release_acquired_instance(MappingCallInfo *info,
+                                     PhysicalManager *manager);
       void check_region_consistency(MappingCallInfo *info, const char *call,
                                     const std::vector<LogicalRegion> &regions);
+      bool perform_local_acquires(MappingCallInfo *info,
+                                  const std::vector<MappingInstance> &instances,
+                       std::map<MemoryManager*,AcquireStatus> &acquire_requests,
+                                  std::vector<unsigned> *to_erase); 
+      bool perform_remote_acquires(MappingCallInfo *info,
+                      std::map<MemoryManager*,AcquireStatus> &acquire_requests);
     public:
-      IndexPartition get_index_partition(IndexSpace parent, Color color);
-      IndexSpace get_index_subspace(IndexPartition p, Color c);
-      IndexSpace get_index_subspace(IndexPartition p, 
+      IndexPartition get_index_partition(MappingCallInfo *info,
+                                         IndexSpace parent, Color color);
+      IndexSpace get_index_subspace(MappingCallInfo *info,
+                                    IndexPartition p, Color c);
+      IndexSpace get_index_subspace(MappingCallInfo *info,
+                                    IndexPartition p, 
                                     const DomainPoint &color);
-      bool has_multiple_domains(IndexSpace handle);
-      Domain get_index_space_domain(IndexSpace handle);
-      void get_index_space_domains(IndexSpace handle,
+      bool has_multiple_domains(MappingCallInfo *info, IndexSpace handle);
+      Domain get_index_space_domain(MappingCallInfo *info, IndexSpace handle);
+      void get_index_space_domains(MappingCallInfo *info, IndexSpace handle,
                                    std::vector<Domain> &domains);
-      Domain get_index_partition_color_space(IndexPartition p);
-      void get_index_space_partition_colors(IndexSpace sp, 
+      Domain get_index_partition_color_space(MappingCallInfo *info,
+                                             IndexPartition p);
+      void get_index_space_partition_colors(MappingCallInfo *info, 
+                                            IndexSpace sp, 
                                             std::set<Color> &colors);
-      bool is_index_partition_disjoint(IndexPartition p);
+      bool is_index_partition_disjoint(MappingCallInfo *info,
+                                       IndexPartition p);
       template<unsigned DIM>
-      IndexSpace get_index_subspace(IndexPartition p, 
+      IndexSpace get_index_subspace(MappingCallInfo *info,
+                                    IndexPartition p, 
                                     ColorPoint &color_point);
-      Color get_index_space_color(IndexSpace handle);
-      Color get_index_partition_color(IndexPartition handle);
-      IndexSpace get_parent_index_space(IndexPartition handle);
-      bool has_parent_index_partition(IndexSpace handle);
-      IndexPartition get_parent_index_partition(IndexSpace handle);
+      Color get_index_space_color(MappingCallInfo *info, IndexSpace handle);
+      Color get_index_partition_color(MappingCallInfo *info, 
+                                      IndexPartition handle);
+      IndexSpace get_parent_index_space(MappingCallInfo *info,
+                                        IndexPartition handle);
+      bool has_parent_index_partition(MappingCallInfo *info,
+                                      IndexSpace handle);
+      IndexPartition get_parent_index_partition(MappingCallInfo *info,
+                                                IndexSpace handle);
     public:
-      size_t get_field_size(FieldSpace handle, FieldID fid);
-      void get_field_space_fields(FieldSpace handle, 
+      size_t get_field_size(MappingCallInfo *info, 
+                            FieldSpace handle, FieldID fid);
+      void get_field_space_fields(MappingCallInfo *info, FieldSpace handle, 
                                   std::vector<FieldID> &fields);
     public:
-      LogicalPartition get_logical_partition(LogicalRegion parent, 
+      LogicalPartition get_logical_partition(MappingCallInfo *info,
+                                             LogicalRegion parent, 
                                              IndexPartition handle);
-      LogicalPartition get_logical_partition_by_color(LogicalRegion parent, 
+      LogicalPartition get_logical_partition_by_color(MappingCallInfo *info,
+                                                      LogicalRegion parent, 
                                                       Color color);
-      LogicalPartition get_logical_partition_by_tree(IndexPartition handle, 
+      LogicalPartition get_logical_partition_by_tree(MappingCallInfo *info,
+                                                     IndexPartition handle, 
                                            FieldSpace fspace, RegionTreeID tid);
-      LogicalRegion get_logical_subregion(LogicalPartition parent, 
+      LogicalRegion get_logical_subregion(MappingCallInfo *info,
+                                          LogicalPartition parent, 
                                           IndexSpace handle);
-      LogicalRegion get_logical_subregion_by_color(LogicalPartition parent, 
+      LogicalRegion get_logical_subregion_by_color(MappingCallInfo *info,
+                                                   LogicalPartition parent, 
                                                    Color color);
-      LogicalRegion get_logical_subregion_by_tree(IndexSpace handle, 
+      LogicalRegion get_logical_subregion_by_tree(MappingCallInfo *info,
+                                                  IndexSpace handle, 
                                           FieldSpace fspace, RegionTreeID tid);
-      Color get_logical_region_color(LogicalRegion handle);
-      Color get_logical_partition_color(LogicalPartition handle);
-      LogicalRegion get_parent_logical_region(LogicalPartition handle);
-      bool has_parent_logical_partition(LogicalRegion handle);
-      LogicalPartition get_parent_logical_partition(LogicalRegion handle);
+      Color get_logical_region_color(MappingCallInfo *info, 
+                                     LogicalRegion handle);
+      Color get_logical_partition_color(MappingCallInfo *info,
+                                        LogicalPartition handle);
+      LogicalRegion get_parent_logical_region(MappingCallInfo *info,
+                                              LogicalPartition handle);
+      bool has_parent_logical_partition(MappingCallInfo *info, 
+                                        LogicalRegion handle);
+      LogicalPartition get_parent_logical_partition(MappingCallInfo *info,
+                                                    LogicalRegion handle);
     protected:
       // Both these must be called while holding the lock
       MappingCallInfo* allocate_call_info(MappingCallKind kind, bool need_lock);
@@ -369,6 +427,7 @@ namespace Legion {
       Runtime *const runtime;
       Mapping::Mapper *const mapper;
       const MapperID mapper_id;
+      const Processor processor;
     protected:
       Reservation mapper_lock;
     protected:
@@ -385,7 +444,7 @@ namespace Legion {
     class SerializingManager : public MapperManager {
     public:
       SerializingManager(Runtime *runtime, Mapping::Mapper *mapper,
-                         MapperID map_id, bool reentrant);
+                         MapperID map_id, Processor p, bool reentrant);
       SerializingManager(const SerializingManager &rhs);
       virtual ~SerializingManager(void);
     public:
@@ -435,7 +494,7 @@ namespace Legion {
       };
     public:
       ConcurrentManager(Runtime *runtime, Mapping::Mapper *mapper,
-                        MapperID map_id);
+                        MapperID map_id, Processor p);
       ConcurrentManager(const ConcurrentManager &rhs);
       virtual ~ConcurrentManager(void);
     public:

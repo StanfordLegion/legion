@@ -289,11 +289,83 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Mapper::mapper_rt_set_garbage_collection_priority(MapperContext ctx,
+                    const PhysicalInstance &instance, GCPriority priority) const
+    //--------------------------------------------------------------------------
+    {
+      ctx->manager->set_garbage_collection_priority(ctx, instance, priority);
+    }
+
+    //--------------------------------------------------------------------------
+    bool Mapper::mapper_rt_acquire_instance(MapperContext ctx, 
+                                         const PhysicalInstance &instance) const
+    //--------------------------------------------------------------------------
+    {
+      return ctx->manager->acquire_instance(ctx, instance);
+    }
+
+    //--------------------------------------------------------------------------
+    bool Mapper::mapper_rt_acquire_instances(MapperContext ctx,
+                          const std::vector<PhysicalInstance> &instances) const
+    //--------------------------------------------------------------------------
+    {
+      return ctx->manager->acquire_instances(ctx, instances);
+    }
+
+    //--------------------------------------------------------------------------
+    bool Mapper::mapper_rt_acquire_and_filter_instances(MapperContext ctx,
+                                std::vector<PhysicalInstance> &instances) const
+    //--------------------------------------------------------------------------
+    {
+      return ctx->manager->acquire_and_filter_instances(ctx, instances);
+    }
+
+    //--------------------------------------------------------------------------
+    bool Mapper::mapper_rt_acquire_instances(MapperContext ctx,
+            const std::vector<std::vector<PhysicalInstance> > &instances) const
+    //--------------------------------------------------------------------------
+    {
+      return ctx->manager->acquire_instances(ctx, instances);
+    }
+
+    //--------------------------------------------------------------------------
+    bool Mapper::mapper_rt_acquire_and_filter_instances(MapperContext ctx,
+                  std::vector<std::vector<PhysicalInstance> > &instances) const
+    //--------------------------------------------------------------------------
+    {
+      return ctx->manager->acquire_and_filter_instances(ctx, instances);
+    }
+
+    //--------------------------------------------------------------------------
+    void Mapper::mapper_rt_release_instance(MapperContext ctx, 
+                                         const PhysicalInstance &instance) const
+    //--------------------------------------------------------------------------
+    {
+      ctx->manager->release_instance(ctx, instance);
+    }
+
+    //--------------------------------------------------------------------------
+    void Mapper::mapper_rt_release_instances(MapperContext ctx,
+                          const std::vector<PhysicalInstance> &instances) const
+    //--------------------------------------------------------------------------
+    {
+      ctx->manager->release_instances(ctx, instances);
+    }
+
+    //--------------------------------------------------------------------------
+    void Mapper::mapper_rt_release_instances(MapperContext ctx,
+            const std::vector<std::vector<PhysicalInstance> > &instances) const
+    //--------------------------------------------------------------------------
+    {
+      ctx->manager->release_instances(ctx, instances);
+    }
+
+    //--------------------------------------------------------------------------
     IndexPartition Mapper::mapper_rt_get_index_partition(MapperContext ctx,
                                            IndexSpace parent, Color color) const
     //--------------------------------------------------------------------------
     {
-      return ctx->manager->get_index_partition(parent, color);
+      return ctx->manager->get_index_partition(ctx, parent, color);
     }
 
     //--------------------------------------------------------------------------
@@ -301,7 +373,7 @@ namespace Legion {
                                           IndexPartition p, Color c) const
     //--------------------------------------------------------------------------
     {
-      return ctx->manager->get_index_subspace(p, c);
+      return ctx->manager->get_index_subspace(ctx, p, c);
     }
 
     //--------------------------------------------------------------------------
@@ -309,7 +381,7 @@ namespace Legion {
                                IndexPartition p, const DomainPoint &color) const
     //--------------------------------------------------------------------------
     {
-      return ctx->manager->get_index_subspace(p, color);
+      return ctx->manager->get_index_subspace(ctx, p, color);
     }
 
     //--------------------------------------------------------------------------
@@ -317,7 +389,7 @@ namespace Legion {
                                                 IndexSpace handle) const
     //--------------------------------------------------------------------------
     {
-      return ctx->manager->has_multiple_domains(handle);
+      return ctx->manager->has_multiple_domains(ctx, handle);
     }
 
     //--------------------------------------------------------------------------
@@ -325,7 +397,7 @@ namespace Legion {
                                                     IndexSpace handle) const
     //--------------------------------------------------------------------------
     {
-      return ctx->manager->get_index_space_domain(handle);
+      return ctx->manager->get_index_space_domain(ctx, handle);
     }
 
     //--------------------------------------------------------------------------
@@ -333,7 +405,7 @@ namespace Legion {
                           IndexSpace handle, std::vector<Domain> &domains) const
     //--------------------------------------------------------------------------
     {
-      return ctx->manager->get_index_space_domains(handle, domains);
+      return ctx->manager->get_index_space_domains(ctx, handle, domains);
     }
 
     //--------------------------------------------------------------------------
@@ -341,7 +413,7 @@ namespace Legion {
                                                          IndexPartition p) const
     //--------------------------------------------------------------------------
     {
-      return ctx->manager->get_index_partition_color_space(p);
+      return ctx->manager->get_index_partition_color_space(ctx, p);
     }
 
     //--------------------------------------------------------------------------
@@ -349,7 +421,7 @@ namespace Legion {
                               IndexSpace handle, std::set<Color> &colors) const
     //--------------------------------------------------------------------------
     {
-      ctx->manager->get_index_space_partition_colors(handle, colors);
+      ctx->manager->get_index_space_partition_colors(ctx, handle, colors);
     }
 
     //--------------------------------------------------------------------------
@@ -357,7 +429,7 @@ namespace Legion {
                                                        IndexPartition p) const
     //--------------------------------------------------------------------------
     {
-      return ctx->manager->is_index_partition_disjoint(p);
+      return ctx->manager->is_index_partition_disjoint(ctx, p);
     }
 
     //--------------------------------------------------------------------------
@@ -365,7 +437,7 @@ namespace Legion {
                                                   IndexSpace handle) const
     //--------------------------------------------------------------------------
     {
-      return ctx->manager->get_index_space_color(handle);
+      return ctx->manager->get_index_space_color(ctx, handle);
     }
 
     //--------------------------------------------------------------------------
@@ -373,7 +445,7 @@ namespace Legion {
                                                     IndexPartition handle) const
     //--------------------------------------------------------------------------
     {
-      return ctx->manager->get_index_partition_color(handle);
+      return ctx->manager->get_index_partition_color(ctx, handle);
     }
 
     //--------------------------------------------------------------------------
@@ -381,7 +453,7 @@ namespace Legion {
                                                     IndexPartition handle) const
     //--------------------------------------------------------------------------
     {
-      return ctx->manager->get_parent_index_space(handle);
+      return ctx->manager->get_parent_index_space(ctx, handle);
     }
 
     //--------------------------------------------------------------------------
@@ -389,7 +461,7 @@ namespace Legion {
                                                       IndexSpace handle) const
     //--------------------------------------------------------------------------
     {
-      return ctx->manager->has_parent_index_partition(handle);
+      return ctx->manager->has_parent_index_partition(ctx, handle);
     }
 
     //--------------------------------------------------------------------------
@@ -397,7 +469,7 @@ namespace Legion {
                                      MapperContext ctx, IndexSpace handle) const
     //--------------------------------------------------------------------------
     {
-      return ctx->manager->get_parent_index_partition(handle);
+      return ctx->manager->get_parent_index_partition(ctx, handle);
     }
 
     //--------------------------------------------------------------------------
@@ -405,7 +477,7 @@ namespace Legion {
                                            FieldSpace handle, FieldID fid) const
     //--------------------------------------------------------------------------
     {
-      return ctx->manager->get_field_size(handle, fid);
+      return ctx->manager->get_field_size(ctx, handle, fid);
     }
 
     //--------------------------------------------------------------------------
@@ -413,7 +485,7 @@ namespace Legion {
                           FieldSpace handle, std::vector<FieldID> &fields) const
     //--------------------------------------------------------------------------
     {
-      ctx->manager->get_field_space_fields(handle, fields);
+      ctx->manager->get_field_space_fields(ctx, handle, fields);
     }
 
     //--------------------------------------------------------------------------
@@ -421,7 +493,7 @@ namespace Legion {
                               LogicalRegion parent, IndexPartition handle) const
     //--------------------------------------------------------------------------
     {
-      return ctx->manager->get_logical_partition(parent, handle);
+      return ctx->manager->get_logical_partition(ctx, parent, handle);
     }
 
     //--------------------------------------------------------------------------
@@ -429,7 +501,7 @@ namespace Legion {
                         MapperContext ctx, LogicalRegion par, Color color) const
     //--------------------------------------------------------------------------
     {
-      return ctx->manager->get_logical_partition_by_color(par, color);
+      return ctx->manager->get_logical_partition_by_color(ctx, par, color);
     }
 
     //--------------------------------------------------------------------------
@@ -438,7 +510,7 @@ namespace Legion {
                                       FieldSpace fspace, RegionTreeID tid) const
     //--------------------------------------------------------------------------
     {
-      return ctx->manager->get_logical_partition_by_tree(part, fspace, tid);
+      return ctx->manager->get_logical_partition_by_tree(ctx, part, fspace,tid);
     }
 
     //--------------------------------------------------------------------------
@@ -446,7 +518,7 @@ namespace Legion {
                                LogicalPartition parent, IndexSpace handle) const
     //--------------------------------------------------------------------------
     {
-      return ctx->manager->get_logical_subregion(parent, handle);
+      return ctx->manager->get_logical_subregion(ctx, parent, handle);
     }
 
     //--------------------------------------------------------------------------
@@ -454,7 +526,7 @@ namespace Legion {
                      MapperContext ctx, LogicalPartition par, Color color) const
     //--------------------------------------------------------------------------
     {
-      return ctx->manager->get_logical_subregion_by_color(par, color);
+      return ctx->manager->get_logical_subregion_by_color(ctx, par, color);
     }
 
     //--------------------------------------------------------------------------
@@ -463,7 +535,7 @@ namespace Legion {
                                       FieldSpace fspace, RegionTreeID tid) const
     //--------------------------------------------------------------------------
     {
-      return ctx->manager->get_logical_subregion_by_tree(handle, fspace, tid);
+      return ctx->manager->get_logical_subregion_by_tree(ctx,handle,fspace,tid);
     }
 
     //--------------------------------------------------------------------------
@@ -471,7 +543,7 @@ namespace Legion {
                                                      LogicalRegion handle) const
     //--------------------------------------------------------------------------
     {
-      return ctx->manager->get_logical_region_color(handle);
+      return ctx->manager->get_logical_region_color(ctx, handle);
     }
 
     //--------------------------------------------------------------------------
@@ -479,7 +551,7 @@ namespace Legion {
                                                   LogicalPartition handle) const
     //--------------------------------------------------------------------------
     {
-      return ctx->manager->get_logical_partition_color(handle);
+      return ctx->manager->get_logical_partition_color(ctx, handle);
     }
 
     //--------------------------------------------------------------------------
@@ -487,7 +559,7 @@ namespace Legion {
                                                     LogicalPartition part) const
     //--------------------------------------------------------------------------
     {
-      return ctx->manager->get_parent_logical_region(part);
+      return ctx->manager->get_parent_logical_region(ctx, part);
     }
     
     //--------------------------------------------------------------------------
@@ -495,7 +567,7 @@ namespace Legion {
                                                      LogicalRegion handle) const
     //--------------------------------------------------------------------------
     {
-      return ctx->manager->has_parent_logical_partition(handle);
+      return ctx->manager->has_parent_logical_partition(ctx, handle);
     }
 
     //--------------------------------------------------------------------------
@@ -503,7 +575,7 @@ namespace Legion {
                                        MapperContext ctx, LogicalRegion r) const
     //--------------------------------------------------------------------------
     {
-      return ctx->manager->get_parent_logical_partition(r);
+      return ctx->manager->get_parent_logical_partition(ctx, r);
     }
 
   }; // namespace Mapping

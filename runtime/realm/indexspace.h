@@ -961,11 +961,10 @@ namespace Realm {
       // Note that the constraints are not const so that Realm can add
       // to the set with additional constraints describing the exact 
       // instance that was created.
-      RegionInstance create_instance(Memory memory, 
-            const std::vector<std::pair<unsigned/*FieldID*/,size_t> > &fields,
-                                     Legion::LayoutConstraintSet &constraints,
-                                     const ProfilingRequestSet &reqs,
-                                     ReductionOpID redop_id = 0) const;
+      Event create_instance(RegionInstance &result,
+              const std::vector<std::pair<unsigned/*FieldID*/,size_t> > &fields,
+              const Legion::LayoutConstraintSet &constraints, 
+              const ProfilingRequestSet &reqs) const;
 #endif
 
       RegionInstance create_hdf5_instance(const char *file_name,
