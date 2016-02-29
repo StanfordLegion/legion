@@ -340,7 +340,9 @@ namespace Realm {
   {
     Module::create_code_translators(runtime);
 
-    // no code translators
+#ifdef REALM_USE_DLFCN
+    runtime->add_code_translator(new DSOCodeTranslator);
+#endif
   }
 
   // clean up any common resources created by the module - this will be called
@@ -423,6 +425,11 @@ namespace Realm {
       dma_channels.push_back(c);
     }
 
+    void RuntimeImpl::add_code_translator(CodeTranslator *t)
+    {
+      code_translators.push_back(t);
+    }
+
     void RuntimeImpl::add_proc_mem_affinity(const Machine::ProcessorMemoryAffinity& pma)
     {
       machine->add_proc_mem_affinity(pma);
@@ -441,6 +448,11 @@ namespace Realm {
     const std::vector<DMAChannel *>& RuntimeImpl::get_dma_channels(void) const
     {
       return dma_channels;
+    }
+
+    const std::vector<CodeTranslator *>& RuntimeImpl::get_code_translators(void) const
+    {
+      return code_translators;
     }
 
     static void add_proc_mem_affinities(MachineImpl *machine,
@@ -893,6 +905,11 @@ namespace Realm {
 	  it != modules.end();
 	  it++)
 	(*it)->create_dma_channels(this);
+
+      for(std::vector<Module *>::const_iterator it = modules.begin();
+	  it != modules.end();
+	  it++)
+	(*it)->create_code_translators(this);
 
       // now that we've created all the processors/etc., we can try to come up with core
       //  allocations that satisfy everybody's requirements - this will also start up any
@@ -1584,6 +1601,9 @@ namespace Realm {
 
 	// delete all the DMA channels that we were given
 	delete_container_contents(dma_channels);
+
+	// same for code translators
+	delete_container_contents(code_translators);
 
 	for(std::vector<Module *>::iterator it = modules.begin();
 	    it != modules.end();
