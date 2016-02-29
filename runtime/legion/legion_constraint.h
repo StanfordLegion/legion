@@ -153,7 +153,7 @@ namespace Legion {
     public:
       void serialize(Serializer &rez) const;
       void deserialize(Deserializer &derez);
-    protected:
+    public:
       uint64_t isa_prop;
     };
 
@@ -181,7 +181,7 @@ namespace Legion {
     public:
       void serialize(Serializer &rez) const;
       void deserialize(Deserializer &derez);
-    protected:
+    public:
       Processor::Kind kind;
       bool valid;
     };
@@ -223,7 +223,7 @@ namespace Legion {
     public:
       void serialize(Serializer &rez) const;
       void deserialize(Deserializer &derez);
-    protected:
+    public:
       ResourceKind resource_kind;
       EqualityKind equality_kind;
       size_t value;
@@ -260,7 +260,7 @@ namespace Legion {
     public:
       void serialize(Serializer &rez) const;
       void deserialize(Deserializer &derez);
-    protected:
+    public:
       LaunchKind launch_kind;
       size_t values[3];
       int dims;
@@ -286,7 +286,7 @@ namespace Legion {
     public:
       void serialize(Serializer &rez) const;
       void deserialize(Deserializer &derez);
-    protected:
+    public:
       std::set<unsigned> indexes;
     };
 
@@ -349,9 +349,12 @@ namespace Legion {
       bool satisfies(const SpecializedConstraint *other) const;
       bool conflicts(const SpecializedConstraint *other) const;
     public:
+      inline SpecializedKind get_kind(void) const { return kind; }
+      inline ReductionOpID get_reduction_op(void) const { return redop; }
+    public:
       void serialize(Serializer &rez) const;
       void deserialize(Deserializer &derez);
-    protected:
+    public:
       SpecializedKind kind;
       ReductionOpID  redop;
     };
@@ -379,7 +382,7 @@ namespace Legion {
     public:
       void serialize(Serializer &rez) const;
       void deserialize(Deserializer &derez);
-    protected:
+    public:
       Memory::Kind kind;
       bool has_kind;
     };
@@ -414,7 +417,7 @@ namespace Legion {
     public:
       void serialize(Serializer &rez) const;
       void deserialize(Deserializer &derez);
-    protected:
+    public:
       std::vector<FieldID> field_set;
       bool contiguous;
       bool inorder;
@@ -458,9 +461,9 @@ namespace Legion {
     public:
       void serialize(Serializer &rez) const;
       void deserialize(Deserializer &derez);
-    protected:
-      bool contiguous;
+    public:
       std::vector<DimensionKind> ordering;
+      bool contiguous;
     };
 
     /**
@@ -487,7 +490,7 @@ namespace Legion {
     public:
       void serialize(Serializer &rez) const;
       void deserialize(Deserializer &derez);
-    protected:
+    public:
       DimensionKind kind;
       size_t value;
       bool chunks;
@@ -511,7 +514,7 @@ namespace Legion {
     public:
       void serialize(Serializer &rez) const;
       void deserialize(Deserializer &derez);
-    protected:
+    public:
       DimensionKind kind;
       EqualityKind eqk;
       size_t value;
@@ -537,7 +540,7 @@ namespace Legion {
     public:
       void serialize(Serializer &rez) const;
       void deserialize(Deserializer &derez);
-    protected:
+    public:
       FieldID fid;
       EqualityKind eqk;
       size_t alignment;
@@ -561,7 +564,7 @@ namespace Legion {
     public:
       void serialize(Serializer &rez) const;
       void deserialize(Deserializer &derez);
-    protected:
+    public:
       FieldID fid;
       off_t offset;
     };
@@ -584,7 +587,7 @@ namespace Legion {
     public:
       void serialize(Serializer &rez) const;
       void deserialize(Deserializer &derez);
-    protected:
+    public:
       bool is_valid;
       FieldID fid;
       uintptr_t ptr;
@@ -602,13 +605,13 @@ namespace Legion {
       LayoutConstraintSet&
         add_constraint(const SpecializedConstraint &constraint);
       LayoutConstraintSet&
+        add_constraint(const FieldConstraint &constraint);
+      LayoutConstraintSet&
         add_constraint(const MemoryConstraint &constraint);
       LayoutConstraintSet&
         add_constraint(const OrderingConstraint &constraint);
       LayoutConstraintSet&
         add_constraint(const SplittingConstraint &constraint);
-      LayoutConstraintSet&
-        add_constraint(const FieldConstraint &constraint);
       LayoutConstraintSet&
         add_constraint(const DimensionConstraint &constraint);
       LayoutConstraintSet&
@@ -622,11 +625,11 @@ namespace Legion {
       void deserialize(Deserializer &derez);
     public:
       SpecializedConstraint            specialized_constraint;
+      FieldConstraint                  field_constraint;
       MemoryConstraint                 memory_constraint;
       PointerConstraint                pointer_constraint;
-      std::vector<OrderingConstraint>  ordering_constraints;
+      OrderingConstraint               ordering_constraint;
       std::vector<SplittingConstraint> splitting_constraints;
-      std::vector<FieldConstraint>     field_constraints; 
       std::vector<DimensionConstraint> dimension_constraints;
       std::vector<AlignmentConstraint> alignment_constraints; 
       std::vector<OffsetConstraint>    offset_constraints;

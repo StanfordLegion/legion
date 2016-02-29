@@ -1859,6 +1859,10 @@ namespace Legion {
                               , unique_op_id
 #endif
                               );
+        // Now apply our mapping
+        AddressSpaceID owner_space = runtime->find_address_space(orig_proc);
+        version_info.apply_mapping(req_ctx.get_id(), owner_space,
+                                   applied_conditions);
       }
       return true;
     }
@@ -4920,8 +4924,7 @@ namespace Legion {
         {
           runtime->forest->initialize_current_context(context,
               clone_requirements[idx], physical_instances[idx],
-              unmap_events[idx], get_depth()+1, 
-              unique_op_id, top_views);
+              unmap_events[idx], unique_op_id, top_views);
 #ifdef DEBUG_HIGH_LEVEL
           assert(!physical_instances[idx].empty());
 #endif
@@ -6199,6 +6202,10 @@ namespace Legion {
       version_infos.clear();
       restrict_infos.clear();
       map_applied_conditions.clear();
+#ifdef DEBUG_HIGH_LEVEL
+      assert(acquired_instances.empty());
+#endif
+      acquired_instances.clear();
       // Read this before freeing the task
       // Should be safe, but we'll be careful
       bool is_top_level_task = top_level_task;
@@ -6563,6 +6570,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    std::map<PhysicalManager*,unsigned>* 
+                                IndividualTask::get_acquired_instances_ref(void)
+    //--------------------------------------------------------------------------
+    {
+      return &acquired_instances;
+    }
+
+    //--------------------------------------------------------------------------
     void IndividualTask::report_interfering_close_requirement(unsigned idx)
     //--------------------------------------------------------------------------
     {
@@ -6628,7 +6643,13 @@ namespace Legion {
           early_map_indexes.push_back(idx);
       }
       if (!early_map_indexes.empty())
-        return early_map_regions(map_applied_conditions, early_map_indexes);
+      {
+        bool result = early_map_regions(map_applied_conditions, 
+                                        early_map_indexes);
+        if (!acquired_instances.empty())
+          release_acquired_instances(acquired_instances);
+        return result;
+      }
       return true;
     }
 
@@ -6695,6 +6716,8 @@ namespace Legion {
           }
           // Mark that we have completed mapping
           complete_mapping(applied_condition);
+          if (!acquired_instances.empty())
+            release_acquired_instances(acquired_instances);
         }
       }
       return map_success;
@@ -7510,6 +7533,14 @@ namespace Legion {
     {
       // should never be called
       assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    std::map<PhysicalManager*,unsigned>* 
+                                     PointTask::get_acquired_instances_ref(void)
+    //--------------------------------------------------------------------------
+    {
+      return slice_owner->get_acquired_instances_ref();
     }
 
     //--------------------------------------------------------------------------
@@ -8421,6 +8452,10 @@ namespace Legion {
       reduction_future = Future();
       rerun_analysis_requirements.clear();
       map_applied_conditions.clear();
+#ifdef DEBUG_HIGH_LEVEL
+      assert(acquired_instances.empty());
+#endif
+      acquired_instances.clear();
       runtime->free_index_task(this);
     }
 
@@ -9130,7 +9165,13 @@ namespace Legion {
           early_map_indexes.push_back(idx);
       }
       if (!early_map_indexes.empty())
-        return early_map_regions(map_applied_conditions, early_map_indexes);
+      {
+        bool result = early_map_regions(map_applied_conditions, 
+                                        early_map_indexes);
+        if (!acquired_instances.empty())
+          release_acquired_instances(acquired_instances);
+        return result;
+      }
       return true;
     }
 
@@ -9420,6 +9461,14 @@ namespace Legion {
       }
       else
         fold_reduction_future(res, res_size, owned, true/*exclusive*/);
+    }
+
+    //--------------------------------------------------------------------------
+    std::map<PhysicalManager*,unsigned>* 
+                                     IndexTask::get_acquired_instances_ref(void)
+    //--------------------------------------------------------------------------
+    {
+      return &acquired_instances;
     }
 
     //--------------------------------------------------------------------------
@@ -9909,6 +9958,10 @@ namespace Legion {
       }
       temporary_futures.clear();
       temporary_virtual_refs.clear();
+#ifdef DEBUG_HIGH_LEVEL
+      assert(acquired_instances.empty());
+#endif
+      acquired_instances.clear();
       runtime->free_slice_task(this);
     }
 
@@ -9998,6 +10051,14 @@ namespace Legion {
         version_infos[idx].apply_mapping(get_parent_context(idx).get_id(),
                                          owner_space, map_conditions);
       }
+    }
+
+    //--------------------------------------------------------------------------
+    std::map<PhysicalManager*,unsigned>* 
+                                     SliceTask::get_acquired_instances_ref(void)
+    //--------------------------------------------------------------------------
+    {
+      return &acquired_instances;
     }
 
     //--------------------------------------------------------------------------
@@ -10587,6 +10648,8 @@ namespace Legion {
                                          applied_condition);
       }
       complete_mapping(applied_condition);
+      if (!acquired_instances.empty())
+        release_acquired_instances(acquired_instances);
       complete_execution();
       // Now that we've mapped, we can remove any composite references
       // that we are holding

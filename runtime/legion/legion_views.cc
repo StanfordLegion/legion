@@ -222,10 +222,10 @@ namespace Legion {
                                RegionTreeForest *ctx, DistributedID did,
                                AddressSpaceID own_addr, AddressSpaceID loc_addr,
                                RegionTreeNode *node, InstanceManager *man,
-                               MaterializedView *par, unsigned dep,
-                               bool register_now, UniqueID context_uid)
+                               MaterializedView *par, bool register_now, 
+                               UniqueID context_uid)
       : InstanceView(ctx, did, own_addr, loc_addr, node, register_now), 
-        manager(man), parent(par), depth(dep)
+        manager(man), parent(par)
     //--------------------------------------------------------------------------
     {
       // Otherwise the instance lock will get filled in when we are unpacked
@@ -258,7 +258,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     MaterializedView::MaterializedView(const MaterializedView &rhs)
       : InstanceView(NULL, 0, 0, 0, NULL, false),
-        manager(NULL), parent(NULL), depth(0)
+        manager(NULL), parent(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -404,7 +404,7 @@ namespace Legion {
       MaterializedView *child_view = legion_new<MaterializedView>(context,
                                             did, owner_space, local_space,
                                             child_node, manager, this, 
-                                            depth, false/*don't register*/);
+                                            false/*don't register*/);
       // Retake the lock and try and add it, see if
       // someone else added the child in the meantime
       bool free_child_view = false;
@@ -710,7 +710,6 @@ namespace Legion {
             rez.serialize(manager_did);
             rez.serialize(logical_node->as_region_node()->handle);
             rez.serialize(owner_space);
-            rez.serialize(depth);
             // Find the context UID since we don't store it
             // Must be the root view (parent == NULL) for this to work
             UniqueID context_uid = manager->find_context_uid(this);
@@ -2362,14 +2361,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void MaterializedView::set_descriptor(FieldDataDescriptor &desc,
-                                          unsigned fid_idx) const
+                                          FieldID field_id) const
     //--------------------------------------------------------------------------
     {
       // Get the low-level index space
       const Domain &dom = logical_node->get_domain_no_wait();
       desc.index_space = dom.get_index_space();
       // Then ask the manager to fill in the rest of the information
-      manager->set_descriptor(desc, fid_idx);
+      manager->set_descriptor(desc, field_id);
     }
 
     //--------------------------------------------------------------------------
@@ -2472,8 +2471,6 @@ namespace Legion {
       derez.deserialize(handle);
       AddressSpaceID owner_space;
       derez.deserialize(owner_space);
-      unsigned depth;
-      derez.deserialize(depth);
       UniqueID context_uid;
       derez.deserialize(context_uid);
 
@@ -2488,7 +2485,7 @@ namespace Legion {
                                       did, owner_space, runtime->address_space,
                                       target_node, inst_manager, 
                                       (MaterializedView*)NULL/*parent*/,
-                                      depth, false/*don't register yet*/,
+                                      false/*don't register yet*/,
                                       context_uid);
       if (!target_node->register_logical_view(new_view))
       {
@@ -3593,7 +3590,7 @@ namespace Legion {
     void CompositeView::find_field_descriptors(Event term_event, 
                                                const RegionUsage &usage, 
                                                const FieldMask &user_mask,
-                                               unsigned fid_idx, Operation *op,
+                                               FieldID field_id, Operation *op,
                                    std::vector<FieldDataDescriptor> &field_data,
                                    std::set<Event> &preconditions)
     //--------------------------------------------------------------------------
@@ -3602,7 +3599,7 @@ namespace Legion {
       for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it =
             roots.begin(); it != roots.end(); it++)
       {
-        if (it->second.is_set(fid_idx))
+        if (!!(it->second & user_mask))
         {
           Event target_pre;
           const Domain &target = 
@@ -3610,7 +3607,7 @@ namespace Legion {
           std::vector<Realm::IndexSpace> already_handled;
           std::set<Event> already_preconditions;
           it->first->find_field_descriptors(term_event, usage,
-                                            user_mask, fid_idx, op, 
+                                            user_mask, field_id, op, 
                                             target.get_index_space(),
                                             target_pre, field_data, 
                                             preconditions, already_handled,
@@ -3626,7 +3623,7 @@ namespace Legion {
     bool CompositeView::find_field_descriptors(Event term_event,
                                                const RegionUsage &usage,
                                                const FieldMask &user_mask,
-                                               unsigned fid_idx, Operation *op,
+                                               FieldID field_id, Operation *op,
                                                Realm::IndexSpace target,
                                                Event target_precondition,
                                    std::vector<FieldDataDescriptor> &field_data,
@@ -3639,10 +3636,10 @@ namespace Legion {
       for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it =
             roots.begin(); it != roots.end(); it++)
       {
-        if (it->second.is_set(fid_idx))
+        if (!!(it->second & user_mask))
         {
           return it->first->find_field_descriptors(term_event, usage, user_mask,
-                                                   fid_idx, op,
+                                                   field_id, op,
                                                    target, target_precondition,
                                                    field_data, preconditions,
                                                    already_handled, 
@@ -4486,7 +4483,7 @@ namespace Legion {
     bool CompositeNode::find_field_descriptors(Event term_event,
                                                const RegionUsage &usage, 
                                                const FieldMask &user_mask,
-                                               unsigned fid_idx, Operation *op,
+                                               FieldID field_id, Operation *op,
                                                Realm::IndexSpace target,
                                                Event target_precondition,
                                    std::vector<FieldDataDescriptor> &field_data,
@@ -4512,7 +4509,7 @@ namespace Legion {
       for (LegionMap<CompositeNode*,ChildInfo>::aligned::const_iterator it = 
             open_children.begin(); it != open_children.end(); it++)
       {
-        if (it->second.open_fields.is_set(fid_idx))
+        if (!!(it->second.open_fields & user_mask))
         {
           bool done;
           // Compute the low-level index space to ask for from the child
@@ -4532,7 +4529,7 @@ namespace Legion {
             Event child_ready = Realm::IndexSpace::compute_index_spaces(ops,
                                                         false/*mutable*/, pre);
             done = it->first->find_field_descriptors(term_event, usage,
-                                                   user_mask,fid_idx, op,
+                                                   user_mask, field_id, op,
                                                    ops[0].result, child_ready,
                                                    field_data, preconditions,
                                                    handled_index_spaces,
@@ -4542,7 +4539,7 @@ namespace Legion {
           }
           else
             done = it->first->find_field_descriptors(term_event, usage,
-                                                user_mask, fid_idx, op,
+                                                user_mask, field_id, op,
                                                 child_domain.get_index_space(), 
                                                 child_precondition,
                                                 field_data, preconditions,
@@ -4616,7 +4613,7 @@ namespace Legion {
             valid_views.begin(); it != valid_views.end(); it++)
       {
         // Check to see if the instance is valid for our target field
-        if (it->second.is_set(fid_idx))
+        if (!!(it->second & user_mask))
         {
           // See if this is a composite view
           if (it->first->is_instance_view())
@@ -4628,7 +4625,7 @@ namespace Legion {
               it->first->as_instance_view()->as_materialized_view();
             // Record the instance and its information
             field_data.push_back(FieldDataDescriptor());
-            view->set_descriptor(field_data.back(), fid_idx);
+            view->set_descriptor(field_data.back(), field_id);
               
             field_data.back().index_space = remaining_space;
             // Register ourselves as a user of this instance
@@ -4667,7 +4664,7 @@ namespace Legion {
       // If we still have a composite view, then register that
       if (deferred_view != NULL)
         return deferred_view->find_field_descriptors(term_event, usage, 
-                                                     user_mask, fid_idx, op, 
+                                                     user_mask, field_id, op,
                                                      remaining_space, 
                                                      remaining_precondition,
                                                      field_data, preconditions,
@@ -5355,7 +5352,7 @@ namespace Legion {
     void FillView::find_field_descriptors(Event term_event, 
                                           const RegionUsage &usage,
                                           const FieldMask &user_mask,
-                                          unsigned fid_idx, Operation *op,
+                                          FieldID field_id, Operation *op,
                                   std::vector<FieldDataDescriptor> &field_data,
                                           std::set<Event> &preconditions)
     //--------------------------------------------------------------------------
@@ -5368,7 +5365,7 @@ namespace Legion {
     bool FillView::find_field_descriptors(Event term_event,
                                           const RegionUsage &usage,
                                           const FieldMask &user_mask,
-                                          unsigned fid_idx, Operation *op,
+                                          FieldID field_id, Operation *op,
                                           Realm::IndexSpace target,
                                           Event target_precondition,
                                   std::vector<FieldDataDescriptor> &field_data,

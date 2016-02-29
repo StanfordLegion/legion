@@ -7719,8 +7719,6 @@ namespace Legion {
     //-------------------------------------------------------------------------
     {
       BITMASK mk, mp, mv, t;
-      BITMASK one;
-      one.set_bit(0);
 
       x = x & m;
       mk = ~m >> 1;
@@ -7746,8 +7744,6 @@ namespace Legion {
     //-------------------------------------------------------------------------
     {
       BITMASK mk, mp, mv, t;
-      BITMASK one;
-      one.set_bit(0);
 
       x = x & m;
       mk = ~m << 1;

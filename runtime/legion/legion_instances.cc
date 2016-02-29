@@ -33,13 +33,43 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    LayoutDescription::LayoutDescription(const FieldMask &mask,
+    LayoutDescription::LayoutDescription(FieldSpaceNode *own,
+                                         const FieldMask &mask,
                                          LayoutConstraints *con,
-                                         FieldSpaceNode *own)
+                                   const std::vector<unsigned> &mask_index_map,
+                                     const std::vector<CustomSerdezID> &serdez,
+                    const std::vector<std::pair<FieldID,size_t> > &field_sizes)
       : allocated_fields(mask), constraints(con), owner(own) 
     //--------------------------------------------------------------------------
     {
       layout_lock = Reservation::create_reservation();
+      field_infos.resize(field_sizes.size());
+      // Switch data structures from layout by field order to order
+      // of field locations in the bit mask
+#ifdef DEBUG_HIGH_LEVEL
+      assert(mask_index_map.size() == FieldMask::pop_count(allocated_fields));
+#endif
+#ifndef NEW_INSTANCE_CREATION
+      std::vector<size_t> offsets(field_sizes.size(),0);
+      for (unsigned idx = 1; idx < field_sizes.size(); idx++)
+        offsets[idx] = offsets[idx-1] + field_sizes[idx].second;
+#endif
+      for (unsigned idx = 0; idx < mask_index_map.size(); idx++)
+      {
+        // This gives us the index in the field ordered data structures
+        unsigned index = mask_index_map[idx];
+        FieldID fid = field_sizes[index].first;
+        field_indexes[fid] = idx;
+#ifdef NEW_INSTANCE_CREATION
+        Domain::CopySrcDstFieldInfo &info = field_infos[idx];
+        info.field_id = fid;
+#else
+        Domain::CopySrcDstField &info = field_infos[idx];
+        info.offset = offsets[index];
+        info.size = field_sizes[index].second;
+#endif
+        info.serdez_id = serdez[index];
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -56,7 +86,7 @@ namespace Legion {
     LayoutDescription::~LayoutDescription(void)
     //--------------------------------------------------------------------------
     {
-      memoized_offsets.clear();
+      comp_cache.clear();
       layout_lock.destroy_reservation();
       layout_lock = Reservation::NO_RESERVATION;
     }
@@ -92,83 +122,78 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       uint64_t hash_key = copy_mask.get_hash_key();
-      size_t added_offset_count = 0;
       bool found_in_cache = false;
+      FieldMask compressed;
       // First check to see if we've memoized this result 
       {
         AutoLock o_lock(layout_lock,1,false/*exclusive*/);
         std::map<LEGION_FIELD_MASK_FIELD_TYPE,
-                 LegionVector<OffsetEntry>::aligned >::const_iterator
-          finder = memoized_offsets.find(hash_key);
-        if (finder != memoized_offsets.end())
+                 LegionList<std::pair<FieldMask,FieldMask> >::aligned>::
+                   const_iterator finder = comp_cache.find(hash_key);
+        if (finder != comp_cache.end())
         {
-          for (LegionVector<OffsetEntry>::aligned::const_iterator it = 
-                finder->second.begin(); it != finder->second.end(); it++)
+          for (LegionList<std::pair<FieldMask,FieldMask> >::aligned::
+                const_iterator it = finder->second.begin(); 
+                it != finder->second.end(); it++)
           {
-            if (it->offset_mask == copy_mask)
+            if (it->first == copy_mask)
             {
-              fields.insert(fields.end(),it->offsets.begin(),it->offsets.end());
               found_in_cache = true;
-              added_offset_count = it->offsets.size();
+              compressed = it->second;
               break;
             }
           }
         }
       }
-      if (found_in_cache)
+      if (!found_in_cache)
       {
-#ifdef DEBUG_HIGH_LEVEL
-        assert(added_offset_count <= fields.size());
-#endif
-        // Go through and fill in all the annonymous instances
-        for (unsigned idx = fields.size() - added_offset_count;
-              idx < fields.size(); idx++)
-        {
-          fields[idx].inst = instance;
-        }
-        // Now we're done
-        return;
+        compressed = copy_mask;
+        compress_mask<STATIC_LOG2(MAX_FIELDS)>(compressed, allocated_fields);
+        // Save the result in the cache
+        AutoLock o_lock(layout_lock);
+        comp_cache[hash_key].push_back(
+            std::pair<FieldMask,FieldMask>(copy_mask,compressed));
       }
       // It is absolutely imperative that these infos be added in
       // the order in which they appear in the field mask so that 
       // they line up in the same order with the source/destination infos
-      // (depending on the calling context of this function)
+      // (depending on the calling context of this function
+      int pop_count = FieldMask::pop_count(compressed);
 #ifdef DEBUG_HIGH_LEVEL
-      int pop_count = 0;
-#endif
-      std::vector<Domain::CopySrcDstField> local;
-      for (std::map<unsigned,FieldID>::const_iterator it = 
-            field_indexes.begin(); it != field_indexes.end(); it++)
-      {
-        if (copy_mask.is_set(it->first))
-        {
-          std::map<FieldID,Domain::CopySrcDstField>::const_iterator finder = 
-            field_infos.find(it->second);
-#ifdef DEBUG_HIGH_LEVEL
-          assert(finder != field_infos.end());
-          pop_count++;
-#endif
-          fields.push_back(finder->second);
-          // Because instances are annonymous in layout descriptions
-          // we have to fill them in as we add them to fields
-          fields.back().inst = instance;
-          local.push_back(finder->second);
-        }
-      }
-#ifdef DEBUG_HIGH_LEVEL
-      // Make sure that we added exactly the number of infos as
-      // there were fields set in the bit mask
       assert(pop_count == FieldMask::pop_count(copy_mask));
 #endif
-      // Add this to the results
-      AutoLock o_lock(layout_lock);
-      std::map<LEGION_FIELD_MASK_FIELD_TYPE,
-               LegionVector<OffsetEntry>::aligned >::iterator
-        finder = memoized_offsets.find(hash_key);
-      if (finder == memoized_offsets.end())
-        memoized_offsets[hash_key].push_back(OffsetEntry(copy_mask,local));
-      else
-        finder->second.push_back(OffsetEntry(copy_mask,local));
+      unsigned offset = fields.size();
+      fields.resize(offset + pop_count);
+      for (int idx = 0; idx < pop_count; idx++)
+      {
+        int index = compressed.find_index_set(idx);
+        Domain::CopySrcDstField &field = fields[offset+idx];
+        field = field_infos[index];
+        // Our field infos are annonymous so specify the instance now
+        field.inst = instance;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    template<unsigned LOG2MAX>
+    /*static*/ void LayoutDescription::compress_mask(FieldMask &x, FieldMask m)
+    //--------------------------------------------------------------------------
+    {
+      FieldMask mk, mp, mv, t;
+
+      x = x & m;
+      mk = ~m << 1;
+      for (unsigned i = 0; i < LOG2MAX; i++)
+      {
+        mp = mk ^ (mk << 1);
+        for (unsigned idx = 1; idx < LOG2MAX; idx++)
+          mp = mp ^ (mp << (1 << idx));
+        mv = mp & m;
+        m = (m ^ mv) | (mv >> (1 << i));
+        t = x & mv;
+        x = (x ^ t) | (t >> (1 << i));
+        mk = mk & ~mp;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -176,12 +201,12 @@ namespace Legion {
         PhysicalInstance instance, std::vector<Domain::CopySrcDstField> &fields)
     //--------------------------------------------------------------------------
     {
-      std::map<FieldID,Domain::CopySrcDstField>::const_iterator
-        finder = field_infos.find(fid);
+      std::map<FieldID,unsigned>::const_iterator finder = 
+        field_indexes.find(fid);
 #ifdef DEBUG_HIGH_LEVEL
-      assert(finder != field_infos.end());
+      assert(finder != field_indexes.end());
 #endif
-      fields.push_back(finder->second);
+      fields.push_back(field_infos[finder->second]);
       // Since instances are annonymous in layout descriptions we
       // have to fill them in when we add the field info
       fields.back().inst = instance;
@@ -194,18 +219,20 @@ namespace Legion {
                                    std::vector<Domain::CopySrcDstField> &fields)
     //--------------------------------------------------------------------------
     {
-      for (std::vector<FieldID>::const_iterator it = copy_fields.begin();
-            it != copy_fields.end(); it++)
+      unsigned offset = fields.size();
+      fields.resize(offset + copy_fields.size());
+      for (unsigned idx = 0; idx < copy_fields.size(); idx++)
       {
-        std::map<FieldID,Domain::CopySrcDstField>::const_iterator
-          finder = field_infos.find(*it);
+        std::map<FieldID,unsigned>::const_iterator
+          finder = field_indexes.find(copy_fields[idx]);
 #ifdef DEBUG_HIGH_LEVEL
-        assert(finder != field_infos.end());
+        assert(finder != field_indexes.end());
 #endif
-        fields.push_back(finder->second);
+        Domain::CopySrcDstField &info = fields[offset+idx];
+        info = field_infos[finder->second];
         // Since instances are annonymous in layout descriptions we
         // have to fill them in when we add the field info
-        fields.back().inst = instance;
+        info.inst = instance;
       }
     }
 
@@ -213,7 +240,7 @@ namespace Legion {
     bool LayoutDescription::has_field(FieldID fid) const
     //--------------------------------------------------------------------------
     {
-      return (field_infos.find(fid) != field_infos.end());
+      return (field_indexes.find(fid) != field_indexes.end());
     }
 
     //--------------------------------------------------------------------------
@@ -223,7 +250,7 @@ namespace Legion {
       for (std::map<FieldID,bool>::iterator it = to_test.begin();
             it != to_test.end(); it++)
       {
-        if (field_infos.find(it->first) != field_infos.end())
+        if (field_indexes.find(it->first) != field_indexes.end())
           it->second = true;
         else
           it->second = false;
@@ -238,7 +265,7 @@ namespace Legion {
       for (std::set<FieldID>::const_iterator it = filter.begin();
             it != filter.end(); it++)
       {
-        if (field_infos.find(*it) != field_infos.end())
+        if (field_indexes.find(*it) != field_indexes.end())
           to_remove.push_back(*it);
       }
       if (!to_remove.empty())
@@ -250,37 +277,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LayoutDescription::add_field_info(FieldID fid, unsigned index,
-                                           size_t offset, size_t field_size,
-                                           CustomSerdezID serdez_id)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(field_infos.find(fid) == field_infos.end());
-      assert(field_indexes.find(index) == field_indexes.end());
-#endif
-      // Use annonymous instances when creating these field infos since
-      // we specifying layouts independently of any one instance
-      field_infos[fid] = Domain::CopySrcDstField(PhysicalInstance::NO_INST,
-                                                 offset, field_size, serdez_id);
-      field_indexes[index] = fid;
-#ifdef DEBUG_HIGH_LEVEL
-      assert(offset_size_map.find(offset) == offset_size_map.end());
-#endif
-      offset_size_map[offset] = field_size;
-    }
-
-    //--------------------------------------------------------------------------
     const Domain::CopySrcDstField& LayoutDescription::find_field_info(
                                                               FieldID fid) const
     //--------------------------------------------------------------------------
     {
-      std::map<FieldID,Domain::CopySrcDstField>::const_iterator finder = 
-        field_infos.find(fid);
+      std::map<FieldID,unsigned>::const_iterator finder = 
+        field_indexes.find(fid);
 #ifdef DEBUG_HIGH_LEVEL
-      assert(finder != field_infos.end());
+      assert(finder != field_indexes.end());
 #endif
-      return finder->second;
+      return field_infos[finder->second];
     }
 
     //--------------------------------------------------------------------------
@@ -289,10 +295,10 @@ namespace Legion {
     {
       size_t result = 0;
       // Add up all the field sizes
-      for (std::map<FieldID,Domain::CopySrcDstField>::const_iterator it = 
+      for (std::vector<Domain::CopySrcDstField>::const_iterator it = 
             field_infos.begin(); it != field_infos.end(); it++)
       {
-        result += (it->second.size);
+        result += it->size;
       }
       return result;
     }
@@ -303,50 +309,49 @@ namespace Legion {
     {
       // order field ids by their offsets by inserting them to std::map
       std::map<unsigned, FieldID> offsets;
-      for (std::map<FieldID, Domain::CopySrcDstField>::const_iterator it =
-            field_infos.begin(); it != field_infos.end(); ++it)
-        offsets[it->second.offset] = it->first;
+      for (std::map<FieldID,unsigned>::const_iterator it = 
+            field_indexes.begin(); it != field_indexes.end(); it++)
+      {
+        const Domain::CopySrcDstField &info = field_infos[it->second];
+        offsets[info.offset] = it->first;
+      }
       for (std::map<unsigned, FieldID>::const_iterator it = offsets.begin();
            it != offsets.end(); ++it)
         fields.push_back(it->second);
     }
 
     //--------------------------------------------------------------------------
-    bool LayoutDescription::match_layout(const FieldMask &mask,
+    bool LayoutDescription::match_layout(
                          const LayoutConstraintSet &candidate_constraints) const
     //--------------------------------------------------------------------------
     {
-      if (allocated_fields != mask)
-        return false;
       if (!constraints->equal(candidate_constraints))
         return false;
       return true;
     }
 
+#if 0
     //--------------------------------------------------------------------------
     bool LayoutDescription::match_layout(LayoutDescription *rhs) const
     //--------------------------------------------------------------------------
     {
       return match_layout(rhs->allocated_fields, *rhs->constraints); 
     }
+#endif
 
     //--------------------------------------------------------------------------
     void LayoutDescription::set_descriptor(FieldDataDescriptor &desc,
-                                           unsigned fid_idx) const
+                                           FieldID fid) const
     //--------------------------------------------------------------------------
     {
-      std::map<unsigned,FieldID>::const_iterator idx_finder = 
-        field_indexes.find(fid_idx);
+      std::map<FieldID,unsigned>::const_iterator finder = 
+        field_indexes.find(fid);
 #ifdef DEBUG_HIGH_LEVEL
-      assert(idx_finder != field_indexes.end());
+      assert(finder != field_indexes.end());
 #endif
-      std::map<FieldID,Domain::CopySrcDstField>::const_iterator finder = 
-        field_infos.find(idx_finder->second);
-#ifdef DEBUG_HIGH_LEVEL
-      assert(finder != field_infos.end());
-#endif
-      desc.field_offset = finder->second.offset;
-      desc.field_size = finder->second.size;
+      const Domain::CopySrcDstField &info = field_infos[finder->second];
+      desc.field_offset = info.offset;
+      desc.field_size = info.size;
     }
 
     //--------------------------------------------------------------------------
@@ -360,38 +365,14 @@ namespace Legion {
       // we will just send the layout twice and everything will be
       // resolved on the far side
       if (known_nodes.contains(target))
-      {
         rez.serialize<bool>(true);
-        // If it is already on the remote node, then we only
-        // need to the necessary information to identify it
-        DistributedID constraint_did = constraints->send_constraints(target);
-        rez.serialize(constraint_did);
-        rez.serialize(allocated_fields);
-      }
       else
-      {
         rez.serialize<bool>(false);
-        DistributedID constraint_did = constraints->send_constraints(target);
-        rez.serialize(constraint_did);
-        rez.serialize(allocated_fields);
-        rez.serialize<size_t>(field_infos.size());
-#ifdef DEBUG_HIGH_LEVEL
-        assert(field_infos.size() == field_indexes.size());
-#endif
-        for (std::map<unsigned,FieldID>::const_iterator it = 
-              field_indexes.begin(); it != field_indexes.end(); it++)
-        {
-          std::map<FieldID,Domain::CopySrcDstField>::const_iterator finder = 
-            field_infos.find(it->second);
-#ifdef DEBUG_HIGH_LEVEL
-          assert(finder != field_infos.end());
-#endif
-          rez.serialize(it->second);
-          rez.serialize(finder->second.offset);
-          rez.serialize(finder->second.size);
-          rez.serialize(finder->second.serdez_id);
-        }
-      }
+      // If it is already on the remote node, then we only
+      // need to the necessary information to identify it
+      DistributedID constraint_did = constraints->send_constraints(target);
+      rez.serialize(constraint_did);
+      rez.serialize(allocated_fields);
     }
 
     //--------------------------------------------------------------------------
@@ -410,10 +391,6 @@ namespace Legion {
         derez.deserialize(info.offset);
         derez.deserialize(info.size);
         derez.deserialize(info.serdez_id);
-#ifdef DEBUG_HIGH_LEVEL
-        assert(offset_size_map.find(info.offset) == offset_size_map.end());
-#endif
-        offset_size_map[info.offset] = info.size;
       }
     }
 
@@ -458,12 +435,16 @@ namespace Legion {
       }
       else
       {
-        // Otherwise create a new layout description, 
-        // unpack it, and then try registering it with
-        // the field space node
-        result = new LayoutDescription(mask, constraints, field_space_node);
-        result->unpack_layout_description(derez);
-        result = field_space_node->register_layout_description(result);
+        const std::vector<FieldID> &field_set = 
+          constraints->field_constraint.get_field_set();
+        std::vector<std::pair<FieldID,size_t> > field_sizes(field_set.size());
+        std::vector<unsigned> mask_index_map(field_set.size());
+        std::vector<CustomSerdezID> serdez(field_set.size());
+        mask.clear();
+        field_space_node->compute_create_offsets(field_set, field_sizes,
+                                        mask_index_map, serdez, mask);
+        result = field_space_node->create_layout_description(mask, constraints,
+                                       mask_index_map, serdez, field_sizes);
       }
 #ifdef DEBUG_HIGH_LEVEL
       assert(result != NULL);
@@ -472,20 +453,6 @@ namespace Legion {
       // Only do this after we've registered the instance
       result->update_known_nodes(source);
       return result;
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ size_t LayoutDescription::compute_layout_volume(const Domain &d)
-    //--------------------------------------------------------------------------
-    {
-      if (d.get_dim() == 0)
-      {
-        const Realm::ElementMask &mask = 
-          d.get_index_space().get_valid_mask();
-        return mask.get_num_elmts();
-      }
-      else
-        return d.get_volume();
     }
 
     /////////////////////////////////////////////////////////////
@@ -498,10 +465,12 @@ namespace Legion {
                                      AddressSpaceID owner_space,
                                      AddressSpaceID local_space,
                                      RegionNode *node,
-                                     PhysicalInstance inst, bool register_now)
+                                     PhysicalInstance inst, const Domain &d, 
+                                     bool own, bool register_now)
       : DistributedCollectable(ctx->runtime, did, owner_space, 
                                local_space, register_now), 
-        context(ctx), memory_manager(memory), region_node(node), instance(inst)
+        context(ctx), memory_manager(memory), region_node(node), 
+        instance(inst), instance_domain(d), own_domain(own)
     //--------------------------------------------------------------------------
     {
       if (register_now)
@@ -535,6 +504,12 @@ namespace Legion {
       {
         log_leak.warning("Leaking physical instance " IDFMT " in memory"
                                IDFMT "", instance.id, get_memory().id);
+      }
+      // If we own our domain, then we need to delete it now
+      if (own_domain)
+      {
+        Realm::IndexSpace is = instance_domain.get_index_space();
+        is.destroy();
       }
     }
 
@@ -671,22 +646,65 @@ namespace Legion {
         // Same node and we are done
         if (handle_node == region_node)
           continue;
-        // At this point the manager node must be above the handle node
-        // in order for it to still have a chance of being valid
-        const unsigned inst_depth = region_node->row_source->depth;
-        if (handle_node->row_source->depth <= inst_depth)
-          return false;
-        // Walk the handle node up until its depth is the same as the
-        // node for this instance
-        while (handle_node->row_source->depth > inst_depth)
+        // Now check to see if our instance domain dominates the region
+        IndexSpaceNode *index_node = handle_node->row_source; 
+        std::vector<Domain> to_check;
+        index_node->get_domains_blocking(to_check);
+        switch (instance_domain.get_dim())
         {
-#ifdef DEBUG_HIGH_LEVEL
-          assert(handle_node->parent != NULL);
-#endif
-          handle_node = handle_node->parent->parent;
+          case 0:
+            {
+              const Realm::ElementMask &our_mask = 
+                instance_domain.get_index_space().get_valid_mask();
+              for (unsigned idx = 0; idx < to_check.size(); idx++)
+              {
+                const Realm::ElementMask &other_mask = 
+                  to_check[idx].get_index_space().get_valid_mask();
+                if (!!(other_mask - our_mask))
+                  return false;
+              }
+              break;
+            }
+          case 1:
+            {
+              LegionRuntime::Arrays::Rect<1> our_rect = 
+                instance_domain.get_rect<1>();
+              for (unsigned idx = 0; idx < to_check.size(); idx++)
+              {
+                LegionRuntime::Arrays::Rect<1> other_rect = 
+                  to_check[idx].get_rect<1>();
+                if (!our_rect.dominates(other_rect))
+                  return false;
+              }
+              break;
+            }
+          case 2:
+            {
+              LegionRuntime::Arrays::Rect<2> our_rect = 
+                instance_domain.get_rect<2>();
+              for (unsigned idx = 0; idx < to_check.size(); idx++)
+              {
+                LegionRuntime::Arrays::Rect<2> other_rect = 
+                  to_check[idx].get_rect<2>();
+                if (!our_rect.dominates(other_rect))
+                  return false;
+              }
+            }
+          case 3:
+            {
+              LegionRuntime::Arrays::Rect<3> our_rect = 
+                instance_domain.get_rect<3>();
+              for (unsigned idx = 0; idx < to_check.size(); idx++)
+              {
+                LegionRuntime::Arrays::Rect<3> other_rect = 
+                  to_check[idx].get_rect<3>();
+                if (!our_rect.dominates(other_rect))
+                  return false;
+              }
+            }
+          default:
+            assert(false); // unhandled number of dimensions
         }
-        if (handle_node != region_node)
-          return false;
       }
       return true;
     }
@@ -740,12 +758,13 @@ namespace Legion {
                                      AddressSpaceID owner_space, 
                                      AddressSpaceID local_space,
                                      MemoryManager *mem, PhysicalInstance inst,
+                                     const Domain &instance_domain, bool own,
                                      RegionNode *node, LayoutDescription *desc, 
-                                     Event u_event, unsigned dep, 
-                                     bool reg_now, InstanceFlag flags)
+                                     Event u_event, bool reg_now, 
+                                     InstanceFlag flags)
       : PhysicalManager(ctx, mem, did, owner_space, local_space,
-                        node, inst, reg_now), layout(desc), use_event(u_event), 
-        depth(dep), instance_flags(flags)
+                        node, inst, instance_domain, own, reg_now), 
+        layout(desc), use_event(u_event), instance_flags(flags)
     //--------------------------------------------------------------------------
     {
       // Add a reference to the layout
@@ -758,9 +777,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     InstanceManager::InstanceManager(const InstanceManager &rhs)
-      : PhysicalManager(NULL, NULL, 0, 0, 0,
-                        NULL, PhysicalInstance::NO_INST, false), 
-        layout(NULL), use_event(Event::NO_EVENT), depth(0)
+      : PhysicalManager(NULL, NULL, 0, 0, 0, NULL, 
+                        PhysicalInstance::NO_INST, 
+                        Domain::NO_DOMAIN, false, false),
+        layout(NULL), use_event(Event::NO_EVENT)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -855,8 +875,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    MaterializedView* InstanceManager::create_top_view(unsigned depth,
-                                                       UniqueID ctx_uid)
+    MaterializedView* InstanceManager::create_top_view(UniqueID ctx_uid)
     //--------------------------------------------------------------------------
     {
       DistributedID view_did = 
@@ -866,7 +885,7 @@ namespace Legion {
                                                 context->runtime->address_space,
                                                 region_node, this,
                                             ((MaterializedView*)NULL/*parent*/),
-                                                depth, true/*register now*/,
+                                                true/*register now*/,
                                                 ctx_uid);
       return result;
     }
@@ -933,9 +952,9 @@ namespace Legion {
           rez.serialize(owner_space);
           rez.serialize(memory_manager->memory);
           rez.serialize(instance);
+          rez.serialize(instance_domain);
           rez.serialize(region_node->handle);
           rez.serialize(use_event);
-          rez.serialize(depth);
           rez.serialize(instance_flags);
           layout->pack_layout_description(rez, target);
         }
@@ -963,12 +982,12 @@ namespace Legion {
       derez.deserialize(mem);
       PhysicalInstance inst;
       derez.deserialize(inst);
+      Domain inst_domain;
+      derez.deserialize(inst_domain);
       LogicalRegion handle;
       derez.deserialize(handle);
       Event use_event;
       derez.deserialize(use_event);
-      unsigned depth;
-      derez.deserialize(depth);
       InstanceFlag flags;
       derez.deserialize(flags);
       RegionNode *target_node = runtime->forest->get_node(handle);
@@ -979,8 +998,9 @@ namespace Legion {
       InstanceManager *inst_manager = legion_new<InstanceManager>(
                                         runtime->forest, did, owner_space,
                                         runtime->address_space, memory, inst,
+                                        inst_domain, false/*owns*/,
                                         target_node, layout, use_event,
-                                        depth, false/*reg now*/, flags);
+                                        false/*reg now*/, flags);
       if (!target_node->register_physical_manager(inst_manager))
       {
         if (inst_manager->remove_base_resource_ref(REMOTE_DID_REF))
@@ -1009,10 +1029,11 @@ namespace Legion {
                                        FieldID f, AddressSpaceID owner_space, 
                                        AddressSpaceID local_space,
                                        MemoryManager *mem,PhysicalInstance inst,
+                                       const Domain &inst_domain, bool own_dom,
                                        RegionNode *node, ReductionOpID red, 
                                        const ReductionOp *o, bool reg_now)
       : PhysicalManager(ctx, mem, did, owner_space, local_space,
-                        node, inst, reg_now), 
+                        node, inst, inst_domain, own_dom, reg_now), 
         op(o), redop(red), logical_field(f)
     //--------------------------------------------------------------------------
     { 
@@ -1094,6 +1115,7 @@ namespace Legion {
           rez.serialize(owner_space);
           rez.serialize(memory_manager->memory);
           rez.serialize(instance);
+          rez.serialize(instance_domain);
           rez.serialize(redop);
           rez.serialize(logical_field);
           rez.serialize(region_node->handle);
@@ -1122,6 +1144,8 @@ namespace Legion {
       derez.deserialize(mem);
       PhysicalInstance inst;
       derez.deserialize(inst);
+      Domain inst_dom;
+      derez.deserialize(inst_dom);
       ReductionOpID redop;
       derez.deserialize(redop);
       FieldID logical_field;
@@ -1144,7 +1168,8 @@ namespace Legion {
                         legion_new<FoldReductionManager>(
                                             runtime->forest, did, logical_field,
                                             owner_space, runtime->address_space,
-                                            memory, inst, target_node, redop,op,
+                                            memory, inst, inst_dom,false/*own*/,
+                                            target_node, redop, op,
                                             use_event, false/*register now*/);
         if (!target_node->register_physical_manager(manager))
           legion_delete(manager);
@@ -1160,7 +1185,8 @@ namespace Legion {
                         legion_new<ListReductionManager>(
                                             runtime->forest, did, logical_field,
                                             owner_space, runtime->address_space,
-                                            memory, inst, target_node, redop,op,
+                                            memory, inst, inst_dom,false/*own*/,
+                                            target_node, redop, op,
                                             ptr_space, false/*register now*/);
         if (!target_node->register_physical_manager(manager))
           legion_delete(manager);
@@ -1198,12 +1224,14 @@ namespace Legion {
                                                AddressSpaceID local_space,
                                                MemoryManager *mem,
                                                PhysicalInstance inst, 
+                                               const Domain &d, bool own_dom,
                                                RegionNode *node,
                                                ReductionOpID red,
                                                const ReductionOp *o, 
                                                Domain dom, bool reg_now)
       : ReductionManager(ctx, did, f, owner_space, local_space, mem, 
-                         inst, node, red, o, reg_now), ptr_space(dom)
+                         inst, d, own_dom, node, red, o, reg_now),
+        ptr_space(dom)
     //--------------------------------------------------------------------------
     {
 #ifdef LEGION_GC
@@ -1215,7 +1243,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ListReductionManager::ListReductionManager(const ListReductionManager &rhs)
       : ReductionManager(NULL, 0, 0, 0, 0, NULL,
-                         PhysicalInstance::NO_INST, NULL, 0, NULL, false),
+                         PhysicalInstance::NO_INST, 
+                         Domain::NO_DOMAIN, false, NULL, 0, NULL, false),
         ptr_space(Domain::NO_DOMAIN)
     //--------------------------------------------------------------------------
     {
@@ -1373,13 +1402,15 @@ namespace Legion {
                                                AddressSpaceID local_space,
                                                MemoryManager *mem,
                                                PhysicalInstance inst, 
+                                               const Domain &d, bool own_dom,
                                                RegionNode *node,
                                                ReductionOpID red,
                                                const ReductionOp *o,
                                                Event u_event,
                                                bool register_now)
       : ReductionManager(ctx, did, f, owner_space, local_space, mem, 
-                         inst, node, red, o, register_now), use_event(u_event)
+                         inst, d, own_dom, node, red, o, register_now), 
+        use_event(u_event)
     //--------------------------------------------------------------------------
     {
 #ifdef LEGION_GC
@@ -1391,7 +1422,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FoldReductionManager::FoldReductionManager(const FoldReductionManager &rhs)
       : ReductionManager(NULL, 0, 0, 0, 0, NULL,
-                         PhysicalInstance::NO_INST, NULL, 0, NULL, false),
+                         PhysicalInstance::NO_INST, 
+                         Domain::NO_DOMAIN, false, NULL, 0, NULL, false),
         use_event(Event::NO_EVENT)
     //--------------------------------------------------------------------------
     {
@@ -1533,7 +1565,10 @@ namespace Legion {
     {
       if (!valid)
         initialize(forest);
-      return 0;
+      size_t total_field_bytes = 0;
+      for (unsigned idx = 0; idx < field_sizes.size(); idx++)
+        total_field_bytes += field_sizes[idx].second;
+      return (total_field_bytes * instance_domain.get_volume());
     }
 
     //--------------------------------------------------------------------------
@@ -1543,7 +1578,77 @@ namespace Legion {
     {
       if (!valid)
         initialize(forest);
-      return NULL;
+#ifdef NEW_INSTANCE_CREATION
+      PhysicalInstance instance = PhysicalInstance::NO_INST;
+      Event ready = forest->create_instance(instance_domain, 
+                  memory_manager->memory, field_sizes, instance, constraints);
+#else
+      PhysicalInstance instance = forest->create_instance(instance_domain,
+                                       memory_manager->memory, sizes_only, 
+                                       block_size, redop_id, creator_id);
+      Event ready = Event::NO_EVENT;
+#endif
+      // If we couldn't make it then we are done
+      if (!instance.exists())
+        return NULL;
+      // Figure out what kind of instance we just made
+      PhysicalManager *result = NULL;
+      DistributedID did = forest->runtime->get_available_distributed_id(false);
+      AddressSpaceID local_space = forest->runtime->address_space;
+      switch (constraints.specialized_constraint.get_kind())
+      {
+        case SpecializedConstraint::NORMAL_SPECIALIZE:
+          {
+            FieldSpaceNode *field_node = ancestor->column_source;
+            // Now let's find the layout constraints to use for this instance
+            LayoutDescription *layout = 
+              field_node->find_layout_description(instance_mask, constraints);
+            // If we couldn't find one then we make one
+            if (layout == NULL)
+            {
+              // First make a new layout constraint
+              LayoutConstraints *layout_constraints = 
+               forest->runtime->register_layout(field_node->handle,constraints);
+              // Then make our description
+              layout = field_node->create_layout_description(instance_mask,
+                       layout_constraints, mask_index_map, serdez, field_sizes);
+            }
+            // Now we can make the manager
+            result = legion_new<InstanceManager>(forest, did, local_space,
+                                                 local_space, memory_manager,
+                                                 instance, instance_domain,
+                                                 own_domain, ancestor, layout,
+                                                 ready, true/*register now*/);
+            break;
+          }
+        case SpecializedConstraint::REDUCTION_FOLD_SPECIALIZE:
+          {
+#ifdef DEBUG_HIGH_LEVEL
+            assert(field_sizes.size() == 1);
+#endif
+            result = legion_new<FoldReductionManager>(forest, did, 
+                                                      field_sizes[0].first,
+                                                      local_space, local_space,
+                                                      memory_manager, instance,
+                                                      instance_domain, own_domain,
+                                                      ancestor, redop_id,
+                                                      reduction_op, ready, 
+                                                      true/*register now*/);
+            break;
+          }
+        case SpecializedConstraint::REDUCTION_LIST_SPECIALIZE:
+          {
+            // TODO: implement this
+            assert(false);
+            break;
+          }
+        default:
+          assert(false); // illegal specialized case
+      }
+#ifdef DEBUG_HIGH_LEVEL
+      assert(result != NULL);
+#endif
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -1552,7 +1657,7 @@ namespace Legion {
     {
       compute_ancestor_and_domain(forest); 
 #ifdef NEW_INSTANCE_CREATION
-
+      compute_new_parameters();
 #else
       compute_old_parameters();
 #endif
@@ -1681,14 +1786,87 @@ namespace Legion {
     void InstanceBuilder::compute_new_parameters(void)
     //--------------------------------------------------------------------------
     {
-
+      FieldSpaceNode *field_node = ancestor->column_source;      
+      const std::vector<FieldID> &field_set = 
+        constraints.field_constraint.get_field_set(); 
+      field_sizes.resize(field_set.size());
+      mask_index_map.resize(field_set.size());
+      serdez.resize(field_set.size());
+      field_node->compute_create_offsets(field_set, field_sizes,
+                                         mask_index_map, serdez, instance_mask);
     }
 
     //--------------------------------------------------------------------------
     void InstanceBuilder::compute_old_parameters(void)
     //--------------------------------------------------------------------------
     {
-      
+      FieldSpaceNode *field_node = ancestor->column_source;      
+      const std::vector<FieldID> &field_set = 
+        constraints.field_constraint.get_field_set(); 
+      field_sizes.resize(field_set.size());
+      mask_index_map.resize(field_set.size());
+      serdez.resize(field_set.size());
+      field_node->compute_create_offsets(field_set, field_sizes,
+                                         mask_index_map, serdez, instance_mask);
+      sizes_only.resize(field_sizes.size());
+      for (unsigned idx = 0; idx < field_sizes.size(); idx++)
+        sizes_only[idx] = field_sizes[idx].second;
+      // Now figure out what kind of instance we're going to make, look at
+      // the constraints and see if we recognize any of them
+      switch (constraints.specialized_constraint.get_kind())
+      {
+        case SpecializedConstraint::NORMAL_SPECIALIZE:
+          {
+            const std::vector<DimensionKind> &ordering = 
+                                      constraints.ordering_constraint.ordering;
+            // See if we are making an AOS or SOA instance
+            if (!ordering.empty())
+            {
+              // If fields are first, it is AOS if the fields
+              // are last it is SOA, otherwise, see if we can find
+              // fields in which case we can't support it yet
+              if (ordering.front() == DIM_F)
+                block_size = 1;
+              else if (ordering.back() == DIM_F)
+                block_size = instance_domain.get_volume();
+              else
+              {
+                for (unsigned idx = 0; idx < ordering.size(); idx++)
+                {
+                  if (ordering[idx] == DIM_F)
+                    assert(false); // need to handle this case
+                }
+                block_size = instance_domain.get_volume();
+              }
+            }
+            else
+              block_size = instance_domain.get_volume();
+            // redop id is already zero
+            break;
+          }
+        case SpecializedConstraint::REDUCTION_FOLD_SPECIALIZE:
+          {
+            block_size = 1;
+            redop_id = constraints.specialized_constraint.get_reduction_op();
+            reduction_op = Runtime::get_reduction_op(redop_id);
+            break;
+          }
+        case SpecializedConstraint::REDUCTION_LIST_SPECIALIZE:
+          {
+            // TODO: implement list reduction instances
+            assert(false);
+            redop_id = constraints.specialized_constraint.get_reduction_op();
+            reduction_op = Runtime::get_reduction_op(redop_id);
+            break;
+          }
+        case SpecializedConstraint::VIRTUAL_SPECIALIZE:
+          {
+            log_run.error("Illegal request to create a virtual instance");
+            assert(false);
+          }
+        default:
+          assert(false); // unknown kind
+      }
     }
 
   }; // namespace Internal 

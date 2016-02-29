@@ -238,6 +238,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    /*static*/ void Operation::release_acquired_instances(
+                        std::map<PhysicalManager*,unsigned> &acquired_instances)
+    //--------------------------------------------------------------------------
+    {
+      for (std::map<PhysicalManager*,unsigned>::iterator it = 
+            acquired_instances.begin(); it != acquired_instances.end(); it++)
+      {
+        if (it->first->remove_base_valid_ref(MAPPING_ACQUIRE_REF, it->second))
+          PhysicalManager::delete_physical_manager(it->first);
+      }
+      acquired_instances.clear();
+    }
+
+    //--------------------------------------------------------------------------
     void Operation::initialize_operation(SingleTask *ctx, bool track, 
                                          unsigned regs/*= 0*/)
     //--------------------------------------------------------------------------
@@ -383,6 +397,16 @@ namespace Legion {
     {
       // Should only be called for inherited types
       assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    std::map<PhysicalManager*,unsigned>* 
+                                     Operation::get_acquired_instances_ref(void)
+    //--------------------------------------------------------------------------
+    {
+      // should only be called for inherited types
+      assert(false);
+      return NULL;
     }
 
     //--------------------------------------------------------------------------
@@ -1724,6 +1748,10 @@ namespace Legion {
       region = PhysicalRegion();
       privilege_path.clear();
       version_info.clear();
+#ifdef DEBUG_HIGH_LEVEL
+      assert(acquired_instances.empty());
+#endif
+      acquired_instances.clear();
       atomic_locks.clear();
       profiling_results = Mapper::InlineProfilingInfo();
       // Now return this operation to the queue
@@ -1911,6 +1939,8 @@ namespace Legion {
         complete_mapping(Runtime::merge_events<true>(applied_conditions));
       else
         complete_mapping();
+      if (!acquired_instances.empty())
+        release_acquired_instances(acquired_instances);
       
       if (!map_complete_event.has_triggered())
       {
@@ -1936,7 +1966,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void MapOp::deferred_execute(void)
     //--------------------------------------------------------------------------
-    {
+    { 
       // Note that completing mapping and execution should
       // be enough to trigger the completion operation call
       // Trigger an early commit of this operation
@@ -1989,6 +2019,13 @@ namespace Legion {
       mapper->invoke_select_inline_sources(this, &input, &output);
       compute_ranking(output.chosen_ranking, sources, ranking);
     } 
+
+    //--------------------------------------------------------------------------
+    std::map<PhysicalManager*,unsigned>* MapOp::get_acquired_instances_ref(void)
+    //--------------------------------------------------------------------------
+    {
+      return &acquired_instances;
+    }
 
     //--------------------------------------------------------------------------
     void MapOp::update_atomic_locks(Reservation lock, bool exclusive)
@@ -2616,6 +2653,10 @@ namespace Legion {
       dst_parent_indexes.clear();
       src_versions.clear();
       dst_versions.clear();
+#ifdef DEBUG_HIGH_LEVEL
+      assert(acquired_instances.empty());
+#endif
+      acquired_instances.clear();
       atomic_locks.clear();
       profiling_results = Mapper::CopyProfilingInfo();
       // Return this operation to the runtime
@@ -2999,6 +3040,8 @@ namespace Legion {
         complete_mapping(Runtime::merge_events<true>(applied_conditions));
       else
         complete_mapping();
+      if (!acquired_instances.empty())
+        release_acquired_instances(acquired_instances);
       // Handle the case for marking when the copy completes
       Runtime::trigger_event<false>(completion_event, copy_complete_event);
       need_completion_trigger = false;
@@ -3090,6 +3133,14 @@ namespace Legion {
       mapper->invoke_select_copy_sources(this, &input, &output);
       // Fill in the ranking based on the output
       compute_ranking(output.chosen_ranking, sources, ranking);
+    }
+
+    //--------------------------------------------------------------------------
+    std::map<PhysicalManager*,unsigned>* 
+                                        CopyOp::get_acquired_instances_ref(void)
+    //--------------------------------------------------------------------------
+    {
+      return &acquired_instances;
     }
 
     //--------------------------------------------------------------------------
@@ -4325,6 +4376,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       deactivate_trace_close();
+#ifdef DEBUG_HIGH_LEVEL
+      assert(acquired_instances.empty());
+#endif
+      acquired_instances.clear();
       profiling_results = Mapper::CloseProfilingInfo();
       runtime->free_inter_close_op(this);
     }
@@ -4405,6 +4460,8 @@ namespace Legion {
         complete_mapping(Runtime::merge_events<true>(applied_conditions));
       else
         complete_mapping();
+      if (!acquired_instances.empty())
+        release_acquired_instances(acquired_instances);
       complete_execution(close_event);
       // This should always succeed
       return true;
@@ -4447,6 +4504,14 @@ namespace Legion {
       }
       mapper->invoke_select_close_sources(this, &input, &output);
       compute_ranking(output.chosen_ranking, sources, ranking);
+    }
+
+    //--------------------------------------------------------------------------
+    std::map<PhysicalManager*,unsigned>* 
+                                  InterCloseOp::get_acquired_instances_ref(void)
+    //--------------------------------------------------------------------------
+    {
+      return &acquired_instances;
     }
 
     //--------------------------------------------------------------------------
@@ -4683,6 +4748,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       deactivate_close();
+#ifdef DEBUG_HIGH_LEVEL
+      assert(acquired_instances.empty());
+#endif
+      acquired_instances.clear();
       profiling_results = Mapper::CloseProfilingInfo();
       runtime->free_post_close_op(this);
     }
@@ -4766,6 +4835,8 @@ namespace Legion {
       }
 #endif
       complete_mapping();
+      if (!acquired_instances.empty())
+        release_acquired_instances(acquired_instances);
       Runtime::trigger_event<false>(completion_event, close_event);
       need_completion_trigger = false;
       complete_execution(close_event);
@@ -4809,6 +4880,14 @@ namespace Legion {
       }
       mapper->invoke_select_close_sources(this, &input, &output);
       compute_ranking(output.chosen_ranking, sources, ranking);
+    }
+
+    //--------------------------------------------------------------------------
+    std::map<PhysicalManager*,unsigned>* 
+                                   PostCloseOp::get_acquired_instances_ref(void)
+    //--------------------------------------------------------------------------
+    {
+      return &acquired_instances;
     }
 
     //--------------------------------------------------------------------------
@@ -5120,6 +5199,10 @@ namespace Legion {
       wait_barriers.clear();
       arrive_barriers.clear();
       version_info.clear();
+#ifdef DEBUG_HIGH_LEVEL
+      assert(acquired_instances.empty());
+#endif
+      acquired_instances.clear();
       profiling_results = Mapper::AcquireProfilingInfo();
       // Return this operation to the runtime
       runtime->free_acquire_op(this);
@@ -5313,6 +5396,8 @@ namespace Legion {
         complete_mapping(Runtime::merge_events<true>(applied_conditions));
       else
         complete_mapping();
+      if (!acquired_instances.empty())
+        release_acquired_instances(acquired_instances);
       Runtime::trigger_event<false>(completion_event, acquire_complete);
       need_completion_trigger = false;
       complete_execution(acquire_complete);
@@ -5337,6 +5422,14 @@ namespace Legion {
       assert(idx == 0);
 #endif
       return parent_req_index;
+    }
+
+    //--------------------------------------------------------------------------
+    std::map<PhysicalManager*,unsigned>* 
+                                     AcquireOp::get_acquired_instances_ref(void)
+    //--------------------------------------------------------------------------
+    {
+      return &acquired_instances;
     }
 
     //--------------------------------------------------------------------------
@@ -5673,6 +5766,10 @@ namespace Legion {
       wait_barriers.clear();
       arrive_barriers.clear();
       version_info.clear();
+#ifdef DEBUG_HIGH_LEVEL
+      assert(acquired_instances.empty());
+#endif
+      acquired_instances.clear();
       profiling_results = Mapper::ReleaseProfilingInfo();
       // Return this operation to the runtime
       runtime->free_release_op(this);
@@ -5865,6 +5962,8 @@ namespace Legion {
         complete_mapping(Runtime::merge_events<true>(applied_conditions));
       else
         complete_mapping();
+      if (!acquired_instances.empty())
+        release_acquired_instances(acquired_instances);
       Runtime::trigger_event<false>(completion_event, release_complete);
       need_completion_trigger = false;
       complete_execution(release_complete);
@@ -5908,6 +6007,14 @@ namespace Legion {
       }
       mapper->invoke_select_release_sources(this, &input, &output);
       compute_ranking(output.chosen_ranking, sources, ranking);
+    }
+
+    //--------------------------------------------------------------------------
+    std::map<PhysicalManager*,unsigned>* 
+                                     ReleaseOp::get_acquired_instances_ref(void)
+    //--------------------------------------------------------------------------
+    {
+      return &acquired_instances;
     }
 
     //--------------------------------------------------------------------------
@@ -9556,27 +9663,31 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhysicalInstance AttachOp::create_instance(const Domain &dom,
-                                               const std::vector<size_t> &sizes)
+             const std::vector<size_t> &sizes, LayoutConstraintSet &constraints)
     //--------------------------------------------------------------------------
     {
+      // TODO: Update attach operation to fill in 
+      // constraints for different file types
+      assert(false);
       if (file_type == HDF5_FILE) {
         // First build the set of field paths
         std::vector<const char*> field_files(field_map.size());
         unsigned idx = 0;
-        for (std::map<FieldID,const char*>::const_iterator it = field_map.begin();
-              it != field_map.end(); it++, idx++)
+        for (std::map<FieldID,const char*>::const_iterator it = 
+              field_map.begin(); it != field_map.end(); it++, idx++)
         {
           field_files[idx] = it->second;
         }
         // Now ask the low-level runtime to create the instance
         PhysicalInstance result = dom.create_hdf5_instance(file_name, sizes,
-                               field_files, (file_mode == LEGION_FILE_READ_ONLY));
+                             field_files, (file_mode == LEGION_FILE_READ_ONLY));
 #ifdef DEBUG_HIGH_LEVEL
       assert(result.exists());
 #endif
         return result;
       } else if (file_type == NORMAL_FILE) {
-        PhysicalInstance result = dom.create_file_instance(file_name, sizes, file_mode);
+        PhysicalInstance result = 
+          dom.create_file_instance(file_name, sizes, file_mode);
         return result;
       } else {
         assert(0);

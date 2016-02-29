@@ -402,6 +402,18 @@ namespace LegionRuntime {
         return Rect<DIM>(Point<DIM>::min(lo, other.lo),
                          Point<DIM>::max(hi, other.hi));
       }
+
+      bool dominates(const Rect<DIM>& other) const
+      {
+        for (int i = 0; i < DIM; i++)
+        {
+          if (other.lo.x[i] < lo.x[i])
+            return false;
+          if (other.hi.x[i] > hi.x[i])
+            return false;
+        }
+        return true;
+      }
   
       Point<DIM> lo, hi;
     };

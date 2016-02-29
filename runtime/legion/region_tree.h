@@ -275,7 +275,7 @@ namespace Legion {
     public:
       void initialize_current_context(RegionTreeContext ctx,
                     const RegionRequirement &req, const InstanceSet &source,
-                    Event term_event, unsigned depth, UniqueID context_uid,
+                    Event term_event, UniqueID context_uid,
                     std::map<PhysicalManager*,InstanceView*> &top_views);
       void initialize_current_context(RegionTreeContext ctx,
                                       const RegionRequirement &req,
@@ -503,14 +503,17 @@ namespace Legion {
                        const std::vector<Domain::CopySrcDstField> &src_fields,
                        const std::vector<Domain::CopySrcDstField> &dst_fields,
                        Event precondition = Event::NO_EVENT);
-      PhysicalInstance create_instance(const Domain &dom, Memory target, 
-                                       size_t field_size, UniqueID op_id);
+#ifdef NEW_INSTANCE_CREATION
+      Event create_instance(const Domain &dom, Memory target,
+                            const std::vector<std::pair<FieldID,size_t> > &fids,
+                            PhysicalInstance &instance,
+                            LegionConstraintSet &constraints);
+#else
       PhysicalInstance create_instance(const Domain &dom, Memory target,
                                        const std::vector<size_t> &field_sizes,
-                                       size_t blocking_factor, UniqueID op_id);
-      PhysicalInstance create_instance(const Domain &dom, Memory target,
-                                       size_t field_size, ReductionOpID redop,
-                                       UniqueID op_id);
+                                       size_t blocking_factor, 
+                                       ReductionOpID redop, UniqueID op_id);
+#endif
     protected:
       void initialize_path(IndexTreeNode* child, IndexTreeNode *parent,
                            RegionTreePath &path);
@@ -1265,35 +1268,26 @@ namespace Legion {
       unsigned get_field_index(FieldID fid) const;
       void get_field_indexes(const std::vector<FieldID> &fields,
                              std::vector<unsigned> &indexes) const;
-    protected:
-      void compute_create_offsets(const std::set<FieldID> &create_fields,
-                                  std::vector<size_t> &field_sizes,
-                                  std::vector<unsigned> &indexes,
-                                  std::vector<CustomSerdezID> &serdez);
     public:
-      InstanceManager* create_instance(Memory location, Domain dom,
-                                       const std::set<FieldID> &fields,
-                                       size_t blocking_factor, unsigned depth,
-                                       RegionNode *node, DistributedID did,
-                                       UniqueID op_id, bool &remote);
-      ReductionManager* create_reduction(Memory location, Domain dom,
-                                        FieldID fid, bool reduction_list,
-                                        RegionNode *node, ReductionOpID redop,
-                                        DistributedID did, UniqueID op_id,
-                                        bool &remote_creation);
+      void compute_create_offsets(const std::vector<FieldID> &create_fields,
+                      std::vector<std::pair<FieldID,size_t> > &fields_sizes,
+                                  std::vector<unsigned> &mask_index_map,
+                                  std::vector<CustomSerdezID> &serdez,
+                                  FieldMask &instance_mask);
     public:
       InstanceManager* create_file_instance(const std::set<FieldID> &fields,
                                             const FieldMask &attach_mask,
                                             RegionNode *node, AttachOp *op);
     public:
-      LayoutDescription* find_layout_description(const FieldMask &mask,
-                                          LayoutConstraints *constraints);
-      LayoutDescription* create_layout_description(const FieldMask &mask,
-                                          LayoutConstraints *constraints,
-                                   const std::set<FieldID> &create_fields,
-                                   const std::vector<size_t> &field_sizes,
-                                   const std::vector<unsigned> &indexes,
-                                   const std::vector<CustomSerdezID> &serdez);
+      LayoutDescription* find_layout_description(const FieldMask &field_mask,
+                                        const LayoutConstraintSet &constraints);
+      LayoutDescription* find_layout_description(const FieldMask &field_mask,
+                                                LayoutConstraints *constraints);
+      LayoutDescription* create_layout_description(const FieldMask &layout_mask,
+                                                 LayoutConstraints *constraints,
+                                           const std::vector<unsigned> &indexes,
+                                     const std::vector<CustomSerdezID> &serdez,
+                    const std::vector<std::pair<FieldID,size_t> > &field_sizes);
       LayoutDescription* register_layout_description(LayoutDescription *desc);
     public:
       void upgrade_distributed_alloc(UserEvent to_trigger);
@@ -1312,11 +1306,6 @@ namespace Legion {
                                                    Deserializer &derez);
       static void handle_distributed_alloc_upgrade(RegionTreeForest *forest,
                                                    Deserializer &derez);
-    public:
-      static void handle_remote_instance_creation(RegionTreeForest *forest,
-                                Deserializer &derez, AddressSpaceID source);
-      static void handle_remote_reduction_creation(RegionTreeForest *forest,
-                                Deserializer &derez, AddressSpaceID source);
     public:
       // Help with debug printing
       char* to_string(const FieldMask &mask) const;
@@ -1701,19 +1690,6 @@ namespace Legion {
                                             const InstanceSet &targets, 
                                             VersionInfo &version_info,
                                  const std::set<ColorPoint> &next_children) = 0;
-      virtual MaterializedView * create_instance(Memory target_mem,
-                                                const std::set<FieldID> &fields,
-                                                size_t blocking_factor,
-                                                unsigned depth, Operation *op,
-                                                UniqueID context_uid,
-                                                bool &remote_creation) = 0;
-      virtual ReductionView* create_reduction(Memory target_mem,
-                                              FieldID fid,
-                                              bool reduction_list,
-                                              ReductionOpID redop,
-                                              Operation *op,
-                                              UniqueID context_uid,
-                                              bool &remote_creation) = 0;
       virtual void send_node(AddressSpaceID target) = 0;
       virtual void print_logical_context(ContextID ctx, 
                                          TreeStateLogger *logger,
@@ -1844,19 +1820,6 @@ namespace Legion {
                                             const InstanceSet &targets,
                                             VersionInfo &version_info,
                                      const std::set<ColorPoint> &next_children);
-      virtual MaterializedView* create_instance(Memory target_mem,
-                                                const std::set<FieldID> &fields,
-                                                size_t blocking_factor,
-                                                unsigned depth, Operation *op,
-                                                UniqueID context_uid,
-                                                bool &remote);
-      virtual ReductionView* create_reduction(Memory target_mem,
-                                              FieldID fid,
-                                              bool reduction_list,
-                                              ReductionOpID redop,
-                                              Operation *op,
-                                              UniqueID context_uid,
-                                              bool &remote_creation);
       virtual void send_node(AddressSpaceID target);
       static void handle_node_creation(RegionTreeForest *context,
                             Deserializer &derez, AddressSpaceID source);
@@ -1916,7 +1879,7 @@ namespace Legion {
       void find_field_descriptors(ContextID ctx, Event term_event,
                                   const RegionUsage &usage,
                                   const FieldMask &user_mask,
-                                  unsigned fid_idx, Operation *op, 
+                                  FieldID fid, Operation *op, 
                                   std::vector<FieldDataDescriptor> &field_data,
                                   std::set<Event> &preconditions,
                                   VersionInfo &version_info);
@@ -2018,19 +1981,6 @@ namespace Legion {
                                             const InstanceSet &targets,
                                             VersionInfo &version_info,
                                      const std::set<ColorPoint> &next_children);
-      virtual MaterializedView* create_instance(Memory target_mem,
-                                                const std::set<FieldID> &fields,
-                                                size_t blocking_factor,
-                                                unsigned depth, Operation *op,
-                                                UniqueID context_uid,
-                                                bool &remote);
-      virtual ReductionView* create_reduction(Memory target_mem,
-                                              FieldID fid,
-                                              bool reduction_list,
-                                              ReductionOpID redop,
-                                              Operation *op,
-                                              UniqueID context_uid,
-                                              bool &remote_creation);
       virtual void send_node(AddressSpaceID target);
     public:
       LogicalView* convert_reference_partition(PhysicalManager *manager,

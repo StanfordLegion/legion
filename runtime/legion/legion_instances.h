@@ -38,20 +38,12 @@ namespace Legion {
      */
     class LayoutDescription : public Collectable {
     public:
-      struct OffsetEntry {
-      public:
-        OffsetEntry(void) { }
-        OffsetEntry(const FieldMask &m,
-                    const std::vector<Domain::CopySrcDstField> &f)
-          : offset_mask(m), offsets(f) { }
-      public:
-        FieldMask offset_mask;
-        std::vector<Domain::CopySrcDstField> offsets;
-      };
-    public:
-      LayoutDescription(const FieldMask &mask,
+      LayoutDescription(FieldSpaceNode *owner,
+                        const FieldMask &mask,
                         LayoutConstraints *constraints,
-                        FieldSpaceNode *owner);
+                        const std::vector<unsigned> &mask_index_map,
+                        const std::vector<CustomSerdezID> &serdez,
+          const std::vector<std::pair<FieldID,size_t> > &field_sizes);
       LayoutDescription(const LayoutDescription &rhs);
       ~LayoutDescription(void);
     public:
@@ -72,18 +64,14 @@ namespace Legion {
       void has_fields(std::map<FieldID,bool> &fields) const;
       void remove_space_fields(std::set<FieldID> &fields) const;
     public:
-      void add_field_info(FieldID fid, unsigned index,
-                          size_t offset, size_t field_size,
-                          CustomSerdezID serdez_id);
       const Domain::CopySrcDstField& find_field_info(FieldID fid) const;
       size_t get_total_field_size(void) const;
       void get_fields(std::vector<FieldID>& fields) const;
     public:
-      bool match_layout(const FieldMask &mask,
-                        const LayoutConstraintSet &constraints) const;
+      bool match_layout(const LayoutConstraintSet &constraints) const;
       bool match_layout(LayoutDescription *rhs) const;
     public:
-      void set_descriptor(FieldDataDescriptor &desc, unsigned fid_idx) const;
+      void set_descriptor(FieldDataDescriptor &desc, FieldID fid) const;
     public:
       void pack_layout_description(Serializer &rez, AddressSpaceID target);
       void unpack_layout_description(Deserializer &derez);
@@ -91,23 +79,26 @@ namespace Legion {
       static LayoutDescription* handle_unpack_layout_description(
           Deserializer &derez, AddressSpaceID source, RegionNode *node);
     public:
-      static size_t compute_layout_volume(const Domain &d);
+      // This is the shit right here!
+      template<unsigned LOG2MAX>
+      static void compress_mask(FieldMask &x, FieldMask m);
     public:
       const FieldMask allocated_fields;
       LayoutConstraints *const constraints;
       FieldSpaceNode *const owner;
     protected:
-      std::map<FieldID,Domain::CopySrcDstField> field_infos;
-      // Remember these indexes are only good on the local node and
-      // have to be transformed when the manager is sent remotely
-      std::map<unsigned/*index*/,FieldID> field_indexes;
-    protected:
-      // Memoized value for matching physical instances
-      std::map<unsigned/*offset*/,unsigned/*size*/> offset_size_map;
+      // In order by index of bit mask
+#ifdef NEW_INSTANCE_CREATION
+      std::vector<Domain::CopySrcDstFieldInfo> field_infos;
+#else
+      std::vector<Domain::CopySrcDstField> field_infos;
+#endif
+      // A mapping from FieldIDs to indexes into our field_infos
+      std::map<FieldID,unsigned/*index*/> field_indexes;
     protected:
       Reservation layout_lock; 
       std::map<LEGION_FIELD_MASK_FIELD_TYPE,
-               LegionVector<OffsetEntry>::aligned > memoized_offsets;
+               LegionList<std::pair<FieldMask,FieldMask> >::aligned> comp_cache;
       NodeSet known_nodes;
     };
  
@@ -121,7 +112,8 @@ namespace Legion {
       PhysicalManager(RegionTreeForest *ctx, MemoryManager *memory_manager,
                       DistributedID did, AddressSpaceID owner_space, 
                       AddressSpaceID local_space, RegionNode *node,
-                      PhysicalInstance inst, bool register_now);
+                      PhysicalInstance inst, const Domain &intance_domain,
+                      bool own_domain, bool register_now);
       virtual ~PhysicalManager(void);
     public:
       virtual LegionRuntime::Accessor::RegionAccessor<
@@ -178,8 +170,10 @@ namespace Legion {
       RegionTreeForest *const context;
       MemoryManager *const memory_manager;
       RegionNode *const region_node;
+      const PhysicalInstance instance;
+      const Domain instance_domain;
+      const bool own_domain;
     protected:
-      PhysicalInstance instance;
       std::map<UniqueID,LogicalView*> top_views;
     };
 
@@ -199,8 +193,9 @@ namespace Legion {
       InstanceManager(RegionTreeForest *ctx, DistributedID did,
                       AddressSpaceID owner_space, AddressSpaceID local_space,
                       MemoryManager *memory, PhysicalInstance inst, 
+                      const Domain &instance_domain, bool own_domain,
                       RegionNode *node, LayoutDescription *desc, 
-                      Event use_event, unsigned depth, bool register_now,
+                      Event use_event, bool register_now,
                       InstanceFlag flag = NO_INSTANCE_FLAG);
       InstanceManager(const InstanceManager &rhs);
       virtual ~InstanceManager(void);
@@ -221,7 +216,7 @@ namespace Legion {
     public:
       inline Event get_use_event(void) const { return use_event; }
     public:
-      MaterializedView* create_top_view(unsigned depth, UniqueID context_uid);
+      MaterializedView* create_top_view(UniqueID context_uid);
       void compute_copy_offsets(const FieldMask &copy_mask,
                                 std::vector<Domain::CopySrcDstField> &fields);
       void compute_copy_offsets(FieldID fid, 
@@ -250,7 +245,6 @@ namespace Legion {
       // Event that needs to trigger before we can start using
       // this physical instance.
       const Event use_event;
-      const unsigned depth;
     protected:
       // This is monotonic variable that once it becomes true
       // will remain true for the duration of the instance lifetime.
@@ -269,6 +263,7 @@ namespace Legion {
       ReductionManager(RegionTreeForest *ctx, DistributedID did, FieldID fid,
                        AddressSpaceID owner_space, AddressSpaceID local_space,
                        MemoryManager *mem, PhysicalInstance inst, 
+                       const Domain &inst_domain, bool own_domain,
                        RegionNode *region_node, ReductionOpID redop, 
                        const ReductionOp *op, bool register_now);
       virtual ~ReductionManager(void);
@@ -330,6 +325,7 @@ namespace Legion {
                            AddressSpaceID owner_space, 
                            AddressSpaceID local_space,
                            MemoryManager *mem, PhysicalInstance inst, 
+                           const Domain &inst_domain, bool own_domain,
                            RegionNode *node, ReductionOpID redop, 
                            const ReductionOp *op, Domain dom, bool reg_now);
       ListReductionManager(const ListReductionManager &rhs);
@@ -375,6 +371,7 @@ namespace Legion {
                            AddressSpaceID owner_space, 
                            AddressSpaceID local_space,
                            MemoryManager *mem, PhysicalInstance inst, 
+                           const Domain &inst_dom, bool own_dom,
                            RegionNode *node, ReductionOpID redop, 
                            const ReductionOp *op, Event use_event,
                            bool register_now);
@@ -417,10 +414,10 @@ namespace Legion {
     public:
       InstanceBuilder(const std::vector<LogicalRegion> &regs,
                       const LayoutConstraintSet &cons,
-                      MemoryManager *memory)
+                      MemoryManager *memory, UniqueID cid)
         : regions(regs), constraints(cons), memory_manager(memory),
-          ancestor(NULL), instance_domain(Domain::NO_DOMAIN), 
-          own_domain(false), valid(false) { }
+          creator_id(cid), ancestor(NULL), instance_domain(Domain::NO_DOMAIN), 
+          own_domain(false), redop_id(0), reduction_op(NULL), valid(false) { }
     public:
       size_t compute_needed_size(RegionTreeForest *forest);
       PhysicalManager* create_physical_instance(RegionTreeForest *forest);
@@ -433,18 +430,22 @@ namespace Legion {
       void compute_old_parameters(void);
     protected:
       const std::vector<LogicalRegion> &regions;
-      const LayoutConstraintSet &constraints;
+      LayoutConstraintSet constraints;
       MemoryManager *const memory_manager;
+      const UniqueID creator_id;
     protected:
       RegionNode *ancestor;
       Domain instance_domain;
       bool own_domain;
-#ifdef NEW_INSTANCE_CREATION
-
-#else
-      std::vector<size_t> field_sizes;
-      size_t block_size;
+      std::vector<std::pair<FieldID,size_t> > field_sizes;
+      std::vector<unsigned> mask_index_map;
+      std::vector<CustomSerdezID> serdez;
+      FieldMask instance_mask;
       ReductionOpID redop_id;
+      const ReductionOp *reduction_op;
+#ifndef NEW_INSTANCE_CREATION
+      std::vector<size_t> sizes_only;
+      size_t block_size;
 #endif
     public:
       bool valid;

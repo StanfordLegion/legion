@@ -771,6 +771,8 @@ namespace Legion {
       virtual void trigger_remote_state_analysis(UserEvent ready_event);
       virtual void report_interfering_requirements(unsigned idx1,unsigned idx2);
       virtual void report_interfering_close_requirement(unsigned idx);
+      virtual std::map<PhysicalManager*,unsigned>*
+                                       get_acquired_instances_ref(void);
     public:
       virtual void resolve_false(void);
       virtual bool early_map_task(void);
@@ -857,6 +859,7 @@ namespace Legion {
       std::map<AddressSpaceID,RemoteTask*> remote_instances;
     protected:
       std::set<Event> map_applied_conditions;
+      std::map<PhysicalManager*,unsigned> acquired_instances;
     };
 
     /**
@@ -912,6 +915,8 @@ namespace Legion {
       virtual void find_enclosing_local_fields(
           LegionDeque<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::tracked &infos);
       virtual void perform_inlining(SingleTask *ctx, VariantImpl *variant);
+      virtual std::map<PhysicalManager*,unsigned>*
+                                       get_acquired_instances_ref(void);
     public:
       virtual void handle_future(const void *res, 
                                  size_t res_size, bool owned);
@@ -1190,6 +1195,8 @@ namespace Legion {
       virtual const std::vector<PhysicalRegion>& begin_inline_task(void);
       virtual void end_inline_task(const void *result, 
                                    size_t result_size, bool owned);
+      virtual std::map<PhysicalManager*,unsigned>*
+                                       get_acquired_instances_ref(void);
     public:
       virtual SliceTask* clone_as_slice_task(const Domain &d,
           Processor p, bool recurse, bool stealable,
@@ -1241,6 +1248,7 @@ namespace Legion {
       std::deque<SliceTask*> locally_mapped_slices;
     protected:
       std::set<Event> map_applied_conditions;
+      std::map<PhysicalManager*,unsigned> acquired_instances;
     };
 
     /**
@@ -1294,6 +1302,7 @@ namespace Legion {
       void enumerate_points(void);
       void prewalk_slice(void);
       void apply_local_version_infos(std::set<Event> &map_conditions);
+      std::map<PhysicalManager*,unsigned>* get_acquired_instances_ref(void);
     protected:
       virtual void trigger_task_complete(void);
       virtual void trigger_task_commit(void);
@@ -1337,6 +1346,7 @@ namespace Legion {
       // Temporary storage for future results
       std::map<DomainPoint,std::pair<void*,size_t> > temporary_futures;
       std::deque<InstanceRef> temporary_virtual_refs;
+      std::map<PhysicalManager*,unsigned> acquired_instances;
     };
 
     /**

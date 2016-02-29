@@ -178,8 +178,8 @@ namespace Legion {
       MaterializedView(RegionTreeForest *ctx, DistributedID did,
                        AddressSpaceID owner_proc, AddressSpaceID local_proc,
                        RegionTreeNode *node, InstanceManager *manager,
-                       MaterializedView *parent, unsigned depth,
-                       bool register_now, UniqueID context_uid = 0);
+                       MaterializedView *parent, bool register_now, 
+                       UniqueID context_uid = 0);
       MaterializedView(const MaterializedView &rhs);
       virtual ~MaterializedView(void);
     public:
@@ -335,7 +335,7 @@ namespace Legion {
       void find_atomic_reservations(const FieldMask &mask, 
                                     Operation *op, bool exclusive);
     public:
-      void set_descriptor(FieldDataDescriptor &desc, unsigned fid_idx) const;
+      void set_descriptor(FieldDataDescriptor &desc, FieldID field_id) const;
     public:
       void send_back_atomic_reservations(
           const std::vector<std::pair<FieldID,Reservation> > &send_back);
@@ -350,7 +350,6 @@ namespace Legion {
     public:
       InstanceManager *const manager;
       MaterializedView *const parent;
-      const unsigned depth;
     protected:
       // Keep track of the locks used for managing atomic coherence
       // on individual fields of this materialized view. Only the
@@ -625,13 +624,13 @@ namespace Legion {
       virtual void find_field_descriptors(Event term_event,
                                           const RegionUsage &usage,
                                           const FieldMask &user_mask,
-                                          unsigned fid_idx, Operation *op,
+                                          FieldID field_id, Operation *op,
                                   std::vector<FieldDataDescriptor> &field_data,
                                           std::set<Event> &preconditions) = 0;
       virtual bool find_field_descriptors(Event term_event,
                                           const RegionUsage &usage,
                                           const FieldMask &user_mask,
-                                          unsigned fid_idx, Operation *op,
+                                          FieldID field_id, Operation *op,
                                           Realm::IndexSpace target,
                                           Event target_precondition,
                                   std::vector<FieldDataDescriptor> &field_data,

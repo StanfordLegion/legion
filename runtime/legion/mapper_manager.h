@@ -107,15 +107,14 @@ namespace Legion {
     class MappingCallInfo {
     public:
       MappingCallInfo(MapperManager *man, MappingCallKind k,
-                      std::map<PhysicalManager*,unsigned> *instances = NULL)
-        : manager(man), resume(UserEvent::NO_USER_EVENT), 
-          kind(k), acquired_instances(instances) { }
+                      Operation *op = NULL); 
     public:
       MapperManager*const               manager;
       UserEvent                         resume;
       MappingCallKind                   kind;
+      Operation*                        operation;
       std::map<PhysicalManager*,
-               unsigned/*count*/>*const acquired_instances;
+               unsigned/*count*/>*      acquired_instances;
     };
 
     /**
@@ -279,7 +278,7 @@ namespace Legion {
       virtual void disable_reentrant(MappingCallInfo *info) = 0;
     protected:
       virtual MappingCallInfo* begin_mapper_call(MappingCallKind kind,
-                bool first_invocation, Event &precondition) = 0;
+                Operation *op, bool first_invocation, Event &precondition) = 0;
       virtual void pause_mapper_call(MappingCallInfo *info) = 0;
       virtual void resume_mapper_call(MappingCallInfo *info) = 0;
       virtual void finish_mapper_call(MappingCallInfo *info) = 0;
@@ -419,7 +418,8 @@ namespace Legion {
                                                     LogicalRegion handle);
     protected:
       // Both these must be called while holding the lock
-      MappingCallInfo* allocate_call_info(MappingCallKind kind, bool need_lock);
+      MappingCallInfo* allocate_call_info(MappingCallKind kind, 
+                                          Operation *op, bool need_lock);
       void free_call_info(MappingCallInfo *info, bool need_lock);
     public:
       static const char* get_mapper_call_name(MappingCallKind kind);
@@ -459,7 +459,7 @@ namespace Legion {
       virtual void disable_reentrant(MappingCallInfo *info);
     protected:
       virtual MappingCallInfo* begin_mapper_call(MappingCallKind kind,
-                bool first_invocation, Event &precondition);
+                Operation *op, bool first_invocation, Event &precondition);
       virtual void pause_mapper_call(MappingCallInfo *info);
       virtual void resume_mapper_call(MappingCallInfo *info);
       virtual void finish_mapper_call(MappingCallInfo *info);
@@ -509,7 +509,7 @@ namespace Legion {
       virtual void disable_reentrant(MappingCallInfo *info);
     protected:
       virtual MappingCallInfo* begin_mapper_call(MappingCallKind kind,
-                bool first_invocation, Event &precondition);
+                Operation *op, bool first_invocation, Event &precondition);
       virtual void pause_mapper_call(MappingCallInfo *info);
       virtual void resume_mapper_call(MappingCallInfo *info);
       virtual void finish_mapper_call(MappingCallInfo *info);

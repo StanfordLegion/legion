@@ -207,6 +207,8 @@ namespace Legion {
       // This means that region == parent and the
       // coherence mode is exclusive
       static void localize_region_requirement(RegionRequirement &req);
+      static void release_acquired_instances(
+             std::map<PhysicalManager*,unsigned> &acquired_instances);
     public:
       // Initialize this operation in a new parent context
       // along with the number of regions this task has
@@ -276,6 +278,9 @@ namespace Legion {
       virtual void select_sources(const InstanceRef &target,
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking);
+      // Get a reference to our data structure for tracking acquired instances
+      virtual std::map<PhysicalManager*,unsigned>*
+                                       get_acquired_instances_ref(void);
       // Update the set of atomic locks for this operation
       virtual void update_atomic_locks(Reservation lock, bool exclusive);
     public:
@@ -606,6 +611,8 @@ namespace Legion {
       virtual void select_sources(const InstanceRef &target,
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking);
+      virtual std::map<PhysicalManager*,unsigned>*
+                   get_acquired_instances_ref(void);
       virtual void update_atomic_locks(Reservation lock, bool exclusive);
     public:
       virtual UniqueID get_unique_id(void) const;
@@ -623,6 +630,7 @@ namespace Legion {
       RegionTreePath privilege_path;
       unsigned parent_req_index;
       VersionInfo version_info;
+      std::map<PhysicalManager*,unsigned> acquired_instances;
       std::map<Reservation,bool> atomic_locks;
     protected:
       MapperManager *mapper;
@@ -672,6 +680,8 @@ namespace Legion {
       virtual void select_sources(const InstanceRef &target,
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking);
+      virtual std::map<PhysicalManager*,unsigned>*
+                   get_acquired_instances_ref(void);
       virtual void update_atomic_locks(Reservation lock, bool exclusive);
     public:
       virtual UniqueID get_unique_id(void) const;
@@ -699,6 +709,7 @@ namespace Legion {
       unsigned                    current_index;
       bool                        current_src;
     protected:
+      std::map<PhysicalManager*,unsigned> acquired_instances;
       std::vector<std::map<Reservation,bool> > atomic_locks;
     protected:
       Mapper::CopyProfilingInfo   profiling_results;
@@ -964,12 +975,15 @@ namespace Legion {
       virtual void select_sources(const InstanceRef &target,
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking);
+      virtual std::map<PhysicalManager*,unsigned>*
+                   get_acquired_instances_ref(void);
     protected:
       int invoke_mapper(const InstanceSet &valid_instances,
                               InstanceSet &chosen_instances);
       void report_profiling_results(void);
     protected:
       unsigned parent_req_index;
+      std::map<PhysicalManager*,unsigned> acquired_instances;
     protected:
       MapperManager *mapper;
     protected:
@@ -1040,10 +1054,13 @@ namespace Legion {
       virtual void select_sources(const InstanceRef &target,
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking);
+      virtual std::map<PhysicalManager*,unsigned>*
+                   get_acquired_instances_ref(void);
     protected:
       void report_profiling_results(void);
     protected:
       unsigned parent_idx;
+      std::map<PhysicalManager*,unsigned> acquired_instances;
     protected:
       MapperManager *mapper;
     protected:
@@ -1114,6 +1131,8 @@ namespace Legion {
       virtual bool speculate(bool &value);
       virtual void trigger_commit(void);
       virtual unsigned find_parent_index(unsigned idx);
+      virtual std::map<PhysicalManager*,unsigned>*
+                   get_acquired_instances_ref(void);
     public: 
       virtual UniqueID get_unique_id(void) const;
       virtual int get_depth(void) const;
@@ -1129,6 +1148,7 @@ namespace Legion {
       RegionTreePath    privilege_path;
       VersionInfo       version_info;
       unsigned          parent_req_index;
+      std::map<PhysicalManager*,unsigned> acquired_instances;
     protected:
       MapperManager*    mapper;
     protected:
@@ -1173,6 +1193,8 @@ namespace Legion {
       virtual void select_sources(const InstanceRef &target,
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking);
+      virtual std::map<PhysicalManager*,unsigned>*
+                   get_acquired_instances_ref(void);
     public:
       virtual UniqueID get_unique_id(void) const;
       virtual int get_depth(void) const;
@@ -1188,6 +1210,7 @@ namespace Legion {
       RegionTreePath    privilege_path;
       VersionInfo       version_info;
       unsigned          parent_req_index;
+      std::map<PhysicalManager*,unsigned> acquired_instances;
     protected:
       MapperManager*    mapper;
     protected:
@@ -1945,7 +1968,7 @@ namespace Legion {
       virtual void trigger_commit(void);
     public:
       PhysicalInstance create_instance(const Domain &dom,
-                                       const std::vector<size_t> &field_sizes);
+        const std::vector<size_t> &field_sizes, LayoutConstraintSet &cons);
     protected:
       void check_privilege(void);
       void compute_parent_index(void);

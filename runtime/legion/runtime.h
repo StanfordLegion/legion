@@ -624,26 +624,28 @@ namespace Legion {
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, MapperID mapper_id,
                                     Processor processor, bool acquire, 
-                                    GCPriority priority, bool remote = false);
+                                    GCPriority priority, UniqueID creator_id,
+                                    bool remote = false);
       bool create_physical_instance(LayoutConstraints *constraints,
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, MapperID mapper_id,
                                     Processor processor, bool acquire, 
-                                    GCPriority priority, bool remote = false);
+                                    GCPriority priority, UniqueID creator_id,
+                                    bool remote = false);
       bool find_or_create_physical_instance(
                                     const LayoutConstraintSet &constraints,
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, bool &created, 
                                     MapperID mapper_id, Processor processor,
                                     bool acquire, GCPriority priority, 
-                                    bool remote = false);
+                                    UniqueID creator_id, bool remote = false);
       bool find_or_create_physical_instance(
                                     LayoutConstraints *constraints,
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, bool &created, 
                                     MapperID mapper_id, Processor processor,
                                     bool acquire, GCPriority priority, 
-                                    bool remote = false);
+                                    UniqueID creator_id, bool remote = false);
       bool find_physical_instance(  const LayoutConstraintSet &constraints,
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, bool acquire,
@@ -686,7 +688,8 @@ namespace Legion {
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, bool acquire,
                                     MapperID mapper_id, Processor p,
-                                    GCPriority priority, bool remote);
+                                    GCPriority priority, UniqueID creator_id,
+                                    bool remote);
       void record_created_instance( PhysicalManager *manager, bool acquire,
                                     MapperID mapper_id, Processor proc,
                                     GCPriority priority, bool remote);
@@ -1130,6 +1133,9 @@ namespace Legion {
       LayoutConstraints(LayoutConstraintID layout_id, 
                         DistributedID did, Runtime *runtime, 
                         const LayoutConstraintRegistrar &registrar);
+      LayoutConstraints(LayoutConstraintID layout_id, DistributedID did,
+                        Runtime *runtime, const LayoutConstraintSet &cons,
+                        FieldSpace handle);
       LayoutConstraints(const LayoutConstraints &rhs);
       virtual ~LayoutConstraints(void);
     public:
@@ -2001,25 +2007,27 @@ namespace Legion {
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, MapperID mapper_id,
                                     Processor processor, bool acquire, 
-                                    GCPriority priority);
+                                    GCPriority priority, UniqueID creator_id);
       bool create_physical_instance(Memory target_memory, 
                                     LayoutConstraintID layout_id,
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, MapperID mapper_id,
                                     Processor processor, bool acquire, 
-                                    GCPriority priority);
+                                    GCPriority priority, UniqueID creator_id);
       bool find_or_create_physical_instance(Memory target_memory,
                                     const LayoutConstraintSet &constraints,
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, bool &created, 
                                     MapperID mapper_id, Processor processor,
-                                    bool acquire, GCPriority priority);
+                                    bool acquire, GCPriority priority,
+                                    UniqueID creator_id);
       bool find_or_create_physical_instance(Memory target_memory,
                                     LayoutConstraintID layout_id,
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, bool &created, 
                                     MapperID mapper_id, Processor processor,
-                                    bool acquire, GCPriority priority);
+                                    bool acquire, GCPriority priority,
+                                    UniqueID creator_id);
       bool find_physical_instance(Memory target_memory,
                                     const LayoutConstraintSet &constraints,
                                     const std::vector<LogicalRegion> &regions,
@@ -2489,6 +2497,8 @@ namespace Legion {
       LayoutConstraintID register_layout(
           const LayoutConstraintRegistrar &registrar, 
           LayoutConstraintID id);
+      LayoutConstraints* register_layout(FieldSpace handle,
+                                         const LayoutConstraintSet &cons);
       bool register_layout(LayoutConstraints *new_constraints, bool needs_lock);
       void release_layout(LayoutConstraintID layout_id);
       void unregister_layout(LayoutConstraintID layout_id);

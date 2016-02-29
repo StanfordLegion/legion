@@ -594,17 +594,16 @@ namespace Legion {
       RegionNode *top_node = get_node(req.region);
       FieldSpaceNode *field_space = top_node->get_column_source();
       // Get the index for the field
-      unsigned fid_idx = 
-        field_space->get_field_index(*(req.privilege_fields.begin()));
+      FieldID field_id = *(req.privilege_fields.begin());
       // Traverse the target node and get all the field data descriptors
       std::set<Event> preconditions;
       std::vector<FieldDataDescriptor> field_data;
       {
         FieldMask user_mask;
-        user_mask.set_bit(fid_idx);
+        user_mask.set_bit(field_space->get_field_index(field_id));
         RegionUsage usage(req);
         top_node->find_field_descriptors(ctx.get_id(), term_event, usage,
-                                       user_mask, fid_idx, op,
+                                       user_mask, field_id, op,
                                        field_data, preconditions, version_info);
       }
       // Enumerate the color space so we can get back a different index
@@ -650,8 +649,7 @@ namespace Legion {
       PartitionNode *projection_node = get_node(req.partition);
       FieldSpaceNode *field_space = projection_node->get_column_source();
       // Get the index for the field
-      unsigned fid_idx = 
-        field_space->get_field_index(*(req.privilege_fields.begin()));
+      FieldID field_id = *(req.privilege_fields.begin());
       // Traverse the target node and get all the field data descriptors
       // Get all the index spaces from the color space in the projection
       std::set<Event> preconditions;
@@ -660,7 +658,7 @@ namespace Legion {
       for (Domain::DomainPointIterator itr(color_space); itr; itr++)
       {
         FieldMask user_mask;
-        user_mask.set_bit(fid_idx);
+        user_mask.set_bit(field_space->get_field_index(field_id));
         ColorPoint child_color(itr.p);
         // Open up the child on the partition node
         projection_node->open_physical_child(ctx.get_id(), child_color, 
@@ -669,7 +667,7 @@ namespace Legion {
         // Get the field data on this child node
         RegionUsage usage(req);
         child_node->find_field_descriptors(ctx.get_id(), term_event, usage,
-                                            user_mask, fid_idx, op,
+                                            user_mask, field_id, op,
                                        field_data, preconditions, version_info);
         Event child_pre;
         const Domain &child_dom = 
@@ -719,17 +717,16 @@ namespace Legion {
       RegionNode *top_node = get_node(req.region);
       FieldSpaceNode *field_space = top_node->get_column_source();
       // Get the index for the field
-      unsigned fid_idx = 
-        field_space->get_field_index(*(req.privilege_fields.begin()));
+      FieldID field_id = *(req.privilege_fields.begin());
       // Traverse the target node and get all the field data structures
       std::set<Event> preconditions;
       std::vector<FieldDataDescriptor> field_data;
       {
         FieldMask user_mask;
-        user_mask.set_bit(fid_idx);
+        user_mask.set_bit(field_space->get_field_index(field_id));
         RegionUsage usage(req);
         top_node->find_field_descriptors(ctx.get_id(), term_event, usage,
-                                         user_mask, fid_idx, op,
+                                         user_mask, field_id, op,
                                        field_data, preconditions, version_info);
       }
       // Get all the index spaces from the color space in the projection
@@ -1690,7 +1687,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void RegionTreeForest::initialize_current_context(RegionTreeContext ctx,
                     const RegionRequirement &req, const InstanceSet &sources,
-                    Event term_event, unsigned depth, UniqueID context_uid,
+                    Event term_event, UniqueID context_uid,
                     std::map<PhysicalManager*,InstanceView*> &top_views)
     //--------------------------------------------------------------------------
     {
@@ -1743,7 +1740,7 @@ namespace Legion {
           {
             InstanceManager *inst_manager = manager->as_instance_manager();
             MaterializedView *new_view = 
-              inst_manager->create_top_view(depth, context_uid);
+              inst_manager->create_top_view(context_uid);
             top_views[manager] = new_view;
             // See if we need to get the appropriate subview
             if (top_node != manager->region_node)
@@ -3750,48 +3747,20 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhysicalInstance RegionTreeForest::create_instance(const Domain &dom,
-                               Memory target, size_t field_size, UniqueID op_id)
-    //--------------------------------------------------------------------------
-    {
-      if (runtime->profiler != NULL)
-      {
-        Realm::ProfilingRequestSet requests;
-        runtime->profiler->add_inst_request(requests, op_id);
-        return dom.create_instance(target, field_size, requests);
-      }
-      else
-        return dom.create_instance(target, field_size);
-    }
-
-    //--------------------------------------------------------------------------
-    PhysicalInstance RegionTreeForest::create_instance(const Domain &dom,
-                          Memory target, const std::vector<size_t> &field_sizes, 
-                          size_t blocking_factor, UniqueID op_id)
+                    Memory target, const std::vector<size_t> &field_sizes, 
+                    size_t blocking_factor, ReductionOpID redop, UniqueID op_id)
     //--------------------------------------------------------------------------
     {
       if (runtime->profiler != NULL)
       {
         Realm::ProfilingRequestSet reqs;
         runtime->profiler->add_inst_request(reqs, op_id);
-        return dom.create_instance(target, field_sizes, blocking_factor, reqs);
+        return dom.create_instance(target, field_sizes, 
+                                   blocking_factor, reqs, redop);
       }
       else
-        return dom.create_instance(target, field_sizes, blocking_factor);
-    }
-
-    //--------------------------------------------------------------------------
-    PhysicalInstance RegionTreeForest::create_instance(const Domain &dom,
-          Memory target, size_t field_size, ReductionOpID redop, UniqueID op_id)
-    //--------------------------------------------------------------------------
-    {
-      if (runtime->profiler != NULL)
-      {
-        Realm::ProfilingRequestSet requests;
-        runtime->profiler->add_inst_request(requests, op_id);
-        return dom.create_instance(target, field_size, requests, redop);
-      }
-      else
-        return dom.create_instance(target, field_size, redop);
+        return dom.create_instance(target, field_sizes, 
+                                   blocking_factor, redop);
     }
 
     //--------------------------------------------------------------------------
@@ -8912,429 +8881,40 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void FieldSpaceNode::compute_create_offsets(
-                                        const std::set<FieldID> &create_fields, 
-                                        std::vector<size_t> &field_sizes,
-                                        std::vector<unsigned> &indexes,
-                                        std::vector<CustomSerdezID> &serdez)
+                                      const std::vector<FieldID> &create_fields,
+                           std::vector<std::pair<FieldID,size_t> > &field_sizes,
+                                      std::vector<unsigned> &mask_index_map,
+                                      std::vector<CustomSerdezID> &serdez,
+                                      FieldMask &mask)
     //--------------------------------------------------------------------------
     {
-      // Need to hold the lock when accessing field infos
-      AutoLock n_lock(node_lock,1,false/*exclusive*/);
-      unsigned idx = 0;
-      for (std::set<FieldID>::const_iterator it = 
-            create_fields.begin(); it != create_fields.end(); it++,idx++)
-      {
-        std::map<FieldID,FieldInfo>::const_iterator finder = fields.find(*it);
 #ifdef DEBUG_HIGH_LEVEL
-        assert(finder != fields.end());
+      assert(field_sizes.size() == create_fields.size());
+      assert(mask_index_map.size() == create_fields.size());
+      assert(serdez.size() == create_fields.size());
 #endif
-        field_sizes[idx] = finder->second.field_size;
-        indexes[idx] = finder->second.idx;
-        serdez[idx] = finder->second.serdez_id;
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    InstanceManager* FieldSpaceNode::create_instance(Memory location,
-                                                     Domain domain,
-                                       const std::set<FieldID> &create_fields,
-                                                     size_t blocking_factor,
-                                                     unsigned depth,
-                                                     RegionNode *node,
-                                                     DistributedID result_did,
-                                                     UniqueID op_id, 
-                                                     bool &remote_creation)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(this->context, CREATE_INSTANCE_CALL);
-#endif
-#ifdef DEBUG_HIGH_LEVEL
-      assert(!create_fields.empty());
-#endif
-      // First check to see if the memory is even local, if not we
-      // need to send a message to the local address space because 
-      // the low-level has a nasty habit of blocking for remote 
-      // instance creation
-      AddressSpaceID local_space = 
-        context->runtime->find_address_space(location);
-      if (local_space != context->runtime->address_space)
+      std::map<unsigned/*mask index*/,unsigned/*layout index*/> index_map;
       {
-        // Create a wait event and then send the message 
-        UserEvent wait_on = UserEvent::create_user_event();
-        Serializer rez; 
+        // Need to hold the lock when accessing field infos
+        AutoLock n_lock(node_lock,1,false/*exclusive*/);
+        for (unsigned idx = 0; idx < create_fields.size(); idx++)
         {
-          RezCheck z(rez);
-          rez.serialize(location);
-          rez.serialize(domain);
-          rez.serialize<size_t>(create_fields.size());
-          for (std::set<FieldID>::const_iterator it = create_fields.begin();
-                it != create_fields.end(); it++)
-          {
-            rez.serialize(*it);
-          }
-          rez.serialize(blocking_factor);
-          rez.serialize(depth);
-          rez.serialize(node->handle);
-          rez.serialize(result_did);
-          rez.serialize(op_id);
-          rez.serialize(wait_on);
-        }
-        context->runtime->send_remote_instance_creation_request(local_space, 
-                                                                rez);
-        wait_on.wait();
-        // When we wake up, see if we can find the distributed ID
-        // if not then we failed, otherwise we succeeded
-        DistributedCollectable *dc = 
-          context->runtime->weak_find_distributed_collectable(result_did);
-        if (dc == NULL)
-          return NULL;
-#ifdef DEBUG_HIGH_LEVEL
-        InstanceManager *result = dynamic_cast<InstanceManager*>(dc);
-        assert(result != NULL);
-#else
-        InstanceManager *result = static_cast<InstanceManager*>(dc);
-#endif
-        remote_creation = true;
-        return result;
-      }
-      InstanceManager *result = NULL;
-      if (create_fields.size() == 1)
-      {
-        FieldID fid = *create_fields.begin();
-        size_t field_size;
-        unsigned field_index;
-        CustomSerdezID serdez_id;
-        {
-          // Need to hold the field lock when accessing field infos
-          AutoLock n_lock(node_lock,1,false/*exclusive*/);
+          FieldID fid = create_fields[idx];
           std::map<FieldID,FieldInfo>::const_iterator finder = fields.find(fid);
 #ifdef DEBUG_HIGH_LEVEL
           assert(finder != fields.end());
 #endif
-          field_size = finder->second.field_size;
-          field_index = finder->second.idx;
-          serdez_id = finder->second.serdez_id;
-        }
-        // First see if we can recycle a physical instance
-        Event use_event = Event::NO_EVENT;
-        PhysicalInstance inst = 
-          context->create_instance(domain, location, field_size, op_id);
-        if (inst.exists())
-        {
-          FieldMask inst_mask = get_field_mask(create_fields);
-          // See if we can find a layout description object
-          LayoutDescription *layout = 
-            ind_layout_description(inst_mask, domain, blocking_factor);
-          if (layout == NULL)
-          {
-            // Now we need to make a layout
-            std::vector<size_t> field_sizes(1);
-            std::vector<unsigned> indexes(1);
-            std::vector<CustomSerdezID> serdez(1);
-            field_sizes[0] = field_size;
-            indexes[0] = field_index;
-            serdez[0] = serdez_id;
-            layout = create_layout_description(inst_mask, domain,
-                                               blocking_factor, 
-                                               create_fields,
-                                               field_sizes,
-                                               indexes, serdez);
-          }
-#ifdef DEBUG_HIGH_LEVEL
-          assert(layout != NULL);
-#endif
-          result = legion_new<InstanceManager>(context, result_did, 
-                                       context->runtime->address_space,
-                                       context->runtime->address_space,
-                                       location, inst, node, layout, 
-                                       use_event, depth, true/*reg now*/);
-#ifdef DEBUG_HIGH_LEVEL
-          assert(result != NULL);
-#endif
+          field_sizes[idx] = 
+            std::pair<FieldID,size_t>(fid, finder->second.field_size);
+          mask_index_map[finder->second.idx] = idx;
+          serdez[idx] = finder->second.serdez_id;
+          mask.set_bit(finder->second.idx);
         }
       }
-      else
-      {
-        std::vector<size_t> field_sizes(create_fields.size());
-        std::vector<unsigned> indexes(create_fields.size());
-        std::vector<CustomSerdezID> serdez(create_fields.size());
-        compute_create_offsets(create_fields, field_sizes, indexes, serdez);
-        // First see if we can recycle a physical instance
-        Event use_event = Event::NO_EVENT;
-        PhysicalInstance inst = 
-          context->create_instance(domain, location, field_sizes, 
-                                   blocking_factor, op_id);
-        if (inst.exists())
-        {
-          FieldMask inst_mask = get_field_mask(create_fields);
-          LayoutDescription *layout = 
-            find_layout_description(inst_mask, domain, blocking_factor);
-          if (layout == NULL)
-          {
-            // We couldn't find one so make one
-            layout = create_layout_description(inst_mask, domain,
-                                               blocking_factor,
-                                               create_fields,
-                                               field_sizes,
-                                               indexes, serdez);
-          }
-#ifdef DEBUG_HIGH_LEVEL
-          assert(layout != NULL);
-#endif
-          result = legion_new<InstanceManager>(context, result_did,
-                                       context->runtime->address_space,
-                                       context->runtime->address_space,
-                                       location, inst, node, layout, 
-                                       use_event, depth, true/*reg now*/);
-#ifdef DEBUG_HIGH_LEVEL
-          assert(result != NULL);
-#endif
-        }
-      }
-      remote_creation = false;
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void FieldSpaceNode::handle_remote_instance_creation(
-           RegionTreeForest *forest, Deserializer &derez, AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      Memory location;
-      derez.deserialize(location);
-      Domain domain;
-      derez.deserialize(domain);
-      size_t num_fields;
-      derez.deserialize(num_fields);
-      std::set<FieldID> fields;
-      for (unsigned idx = 0; idx < num_fields; idx++)
-      {
-        FieldID fid;
-        derez.deserialize(fid);
-        fields.insert(fid);
-      }
-      size_t blocking_factor;
-      derez.deserialize(blocking_factor);
-      unsigned depth;
-      derez.deserialize(depth);
-      LogicalRegion handle;
-      derez.deserialize(handle);
-      DistributedID did;
-      derez.deserialize(did);
-      UniqueID op_id;
-      derez.deserialize(op_id);
-      UserEvent done_event;
-      derez.deserialize(done_event);
-
-      RegionNode *region_node = forest->get_node(handle);
-      FieldSpaceNode *target = region_node->column_source;
-
-      // Try to make the manager
-      bool remote_creation;
-      InstanceManager *result = target->create_instance(location, domain,
-                                          fields, blocking_factor, depth,
-                                          region_node, did, op_id,
-                                          remote_creation);
-#ifdef DEBUG_HIGH_LEVEL
-      assert(!remote_creation);
-#endif
-      // If we succeeded, send the manager back
-      if (result != NULL)
-      {
-        // Before sending the result add a valid reference. This
-        // will get removed by created_instances state in PhysicalState
-        // see PhysicalState::apply_state
-        result->add_base_valid_ref(INITIAL_CREATION_REF);
-        result->send_manager(source);
-      }
-      // No matter what send the notification
-      Serializer rez;
-      rez.serialize(done_event);
-      forest->runtime->send_remote_creation_response(source, rez);
-    }
-
-    //--------------------------------------------------------------------------
-    ReductionManager* FieldSpaceNode::create_reduction(Memory location,
-                                                       Domain domain,
-                                                       FieldID fid,
-                                                       bool reduction_list,
-                                                       RegionNode *node,
-                                                       ReductionOpID redop,
-                                                       DistributedID result_did,
-                                                       UniqueID op_id,
-                                                       bool &remote_creation)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(this->context, CREATE_REDUCTION_CALL);
-#endif
-#ifdef DEBUG_HIGH_LEVEL
-      assert(redop > 0);
-#endif
-      // First check to see if the memory is even local, if not we
-      // need to send a message to the local address space because 
-      // the low-level has a nasty habit of blocking for remote 
-      // instance creation
-      AddressSpaceID local_space = 
-        context->runtime->find_address_space(location);
-      if (local_space != context->runtime->address_space)
-      {
-        // Create a wait event and then send the message 
-        UserEvent wait_on = UserEvent::create_user_event();
-        Serializer rez; 
-        {
-          RezCheck z(rez);
-          rez.serialize(location);
-          rez.serialize(domain);
-          rez.serialize(fid);
-          rez.serialize(reduction_list);
-          rez.serialize(node->handle);
-          rez.serialize(redop);
-          rez.serialize(result_did);
-          rez.serialize(op_id);
-          rez.serialize(wait_on);
-        }
-        context->runtime->send_remote_reduction_creation_request(local_space, 
-                                                                 rez);
-        wait_on.wait();
-        // When we wake up, see if we can find the distributed ID
-        // if not then we failed, otherwise we succeeded
-        DistributedCollectable *dc = 
-          context->runtime->weak_find_distributed_collectable(result_did);
-        if (dc == NULL)
-          return NULL;
-#ifdef DEBUG_HIGH_LEVEL
-        ReductionManager *result = dynamic_cast<ReductionManager*>(dc);
-        assert(result != NULL);
-#else
-        ReductionManager *result = static_cast<ReductionManager*>(dc);
-#endif
-        remote_creation = true;
-        return result;
-      }
-      ReductionManager *result = NULL;
-      // Find the reduction operation for this instance
-      const ReductionOp *reduction_op = Runtime::get_reduction_op(redop);
-#ifdef DEBUG_HIGH_LEVEL
-      std::map<FieldID,FieldInfo>::const_iterator finder =
-#endif
-        fields.find(fid);
-#ifdef DEBUG_HIGH_LEVEL
-      assert(finder != fields.end());
-#endif
-      if (reduction_list)
-      {
-        // We need a new index space for handling the sparse reductions
-        // TODO: allow users to specify the max number of reductions.  Otherwise
-        // for right now we'll just over approximate with the number of elements
-        // in the handle index space since ideally reduction lists are sparse
-        // and will have less than one reduction per point.
-        const size_t num_elmts = node->row_source->get_num_elmts();
-        Domain ptr_space = 
-          Domain(Realm::IndexSpace::create_index_space(num_elmts));
-        std::vector<size_t> element_sizes;
-        element_sizes.push_back(sizeof(ptr_t)); // pointer types
-        element_sizes.push_back(reduction_op->sizeof_rhs);
-        // Don't give the reduction op here since this is a list instance and we
-        // don't want to initialize any of the fields
-        PhysicalInstance inst = context->create_instance(ptr_space, location,
-                                          element_sizes, 1/*true list*/, op_id);
-        if (inst.exists())
-        {
-          result = legion_new<ListReductionManager>(context, result_did,
-                                            context->runtime->address_space,
-                                            context->runtime->address_space, 
-                                            location, inst, node, 
-                                            redop, reduction_op, 
-                                            ptr_space, true/*reg now*/);
-#ifdef DEBUG_HIGH_LEVEL
-          assert(result != NULL);
-#endif
-        }
-      }
-      else
-      {
-        // Easy case of making a foldable reduction
-        PhysicalInstance inst = context->create_instance(domain, location,
-                                        reduction_op->sizeof_rhs, redop, op_id);
-        if (inst.exists())
-        {
-          // Issue the fill operation to fill in the init values for the field
-          std::vector<Domain::CopySrcDstField> init(1);
-          Domain::CopySrcDstField &dst = init[0];
-          dst.inst = inst;
-          dst.offset = 0;
-          dst.size = reduction_op->sizeof_rhs;
-          // Get the initial value
-          void *init_value = malloc(reduction_op->sizeof_rhs);
-          reduction_op->init(init_value, 1);
-          Event ready_event = context->issue_fill(domain, op_id, init, 
-                                      init_value, reduction_op->sizeof_rhs);
-          free(init_value);
-          result = legion_new<FoldReductionManager>(context, result_did,
-                                            context->runtime->address_space,
-                                            context->runtime->address_space, 
-                                            location, inst, node, redop, 
-                                            reduction_op, ready_event, 
-                                            true/*register now*/);
-#ifdef DEBUG_HIGH_LEVEL
-          assert(result != NULL);
-#endif
-        }
-      }
-      remote_creation = false;
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void FieldSpaceNode::handle_remote_reduction_creation(
-           RegionTreeForest *forest, Deserializer &derez, AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      Memory location;
-      derez.deserialize(location);
-      Domain domain;
-      derez.deserialize(domain);
-      FieldID fid;
-      derez.deserialize(fid);
-      bool reduction_list;
-      derez.deserialize(reduction_list);
-      LogicalRegion handle;
-      derez.deserialize(handle);
-      ReductionOpID redop;
-      derez.deserialize(redop);
-      DistributedID did;
-      derez.deserialize(did);
-      UniqueID op_id;
-      derez.deserialize(op_id);
-      UserEvent done_event;
-      derez.deserialize(done_event);
-
-      RegionNode *region_node = forest->get_node(handle);
-      FieldSpaceNode *target = region_node->column_source;
-
-      bool remote_creation;
-      ReductionManager *result = target->create_reduction(location, domain,
-                                          fid, reduction_list, region_node,
-                                          redop, did, op_id, remote_creation);
-#ifdef DEBUG_HIGH_LEVEL
-      assert(!remote_creation);
-#endif
-      if (result != NULL)
-      {
-        // Before sending the result add a valid reference. This
-        // will get removed by created_instances state in PhysicalState
-        // see PhysicalState::apply_state
-        result->add_base_valid_ref(INITIAL_CREATION_REF);
-        result->send_manager(source);
-      }
-      // No matter what send the notification
-      Serializer rez;
-      rez.serialize(done_event);
-      forest->runtime->send_remote_creation_response(source, rez);
+      // Now we can linearize the index map without holding the lock
+      for (std::map<unsigned,unsigned>::const_iterator it = 
+            index_map.begin(); it != index_map.end(); it++)
+        mask_index_map[it->first] = it->second;
     }
 
     //--------------------------------------------------------------------------
@@ -9344,34 +8924,42 @@ namespace Legion {
                                          RegionNode *node, AttachOp *attach_op)
     //--------------------------------------------------------------------------
     {
-      std::vector<size_t> field_sizes(create_fields.size());
-      std::vector<unsigned> indexes(create_fields.size());
+      std::vector<FieldID> field_set(create_fields.begin(),create_fields.end());
+      std::vector<std::pair<FieldID,size_t> > field_sizes;
+      std::vector<unsigned> mask_index_map(create_fields.size());
       std::vector<CustomSerdezID> serdez(create_fields.size());
-      compute_create_offsets(create_fields, field_sizes, indexes, serdez);
+      FieldMask file_mask;
+      compute_create_offsets(field_set, field_sizes, 
+                             mask_index_map, serdez, file_mask);
       // Now make the instance, this should always succeed
+      std::vector<size_t> only_sizes(field_sizes.size());
+      for (unsigned idx = 0; idx < field_sizes.size(); idx++)
+        only_sizes[idx] = field_sizes[idx].second;
+      LayoutConstraintSet constraints;
       const Domain &dom = node->get_domain_blocking();
-      PhysicalInstance inst = attach_op->create_instance(dom, field_sizes);
-      // Assume that everything is SOA for files right now
-      size_t blocking_factor = dom.get_volume();
+      PhysicalInstance inst = 
+        attach_op->create_instance(dom, only_sizes, constraints);
       // Get the layout
       LayoutDescription *layout = 
-        find_layout_description(attach_mask, dom, blocking_factor);
+        find_layout_description(file_mask, constraints);
       if (layout == NULL)
-        layout = create_layout_description(attach_mask, dom,
-                                           blocking_factor,
-                                           create_fields,
-                                           field_sizes,
-                                           indexes, serdez);
+      {
+        LayoutConstraints *layout_constraints = 
+          context->runtime->register_layout(handle, constraints);
+        layout = create_layout_description(file_mask, layout_constraints, 
+                                           mask_index_map, serdez, field_sizes);
+      }
 #ifdef DEBUG_HIGH_LEVEL
       assert(layout != NULL);
 #endif
       DistributedID did = context->runtime->get_available_distributed_id(false);
-      Memory location = inst.get_location();
+      MemoryManager *memory = 
+        context->runtime->find_memory_manager(inst.get_location());
       InstanceManager *result = legion_new<InstanceManager>(context, did, 
                                          context->runtime->address_space,
                                          context->runtime->address_space,
-                                         location, inst, node, layout,
-                                         Event::NO_EVENT, node->get_depth(),
+                                         memory, inst, dom, false/*own*/,
+                                         node, layout, Event::NO_EVENT,
                                          true/*register now*/,
                                          InstanceManager::ATTACH_FILE_FLAG);
 #ifdef DEBUG_HIGH_LEVEL
@@ -9382,49 +8970,78 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     LayoutDescription* FieldSpaceNode::find_layout_description(
-        const FieldMask &mask, const Domain &domain, size_t blocking_factor)
+                  const FieldMask &mask, const LayoutConstraintSet &constraints)
     //--------------------------------------------------------------------------
     {
-      uint64_t hash_key = mask.get_hash_key();
-      AutoLock n_lock(node_lock,1,false/*exclusive*/);
-      std::map<LEGION_FIELD_MASK_FIELD_TYPE,LegionList<LayoutDescription*,
-        LAYOUT_DESCRIPTION_ALLOC>::tracked>::const_iterator finder = 
-                                                    layouts.find(hash_key);
-      if (finder == layouts.end())
+      std::deque<LayoutDescription*> candidates;
+      {
+        uint64_t hash_key = mask.get_hash_key();
+        AutoLock n_lock(node_lock,1,false/*exclusive*/);
+        std::map<LEGION_FIELD_MASK_FIELD_TYPE,LegionList<LayoutDescription*,
+          LAYOUT_DESCRIPTION_ALLOC>::tracked>::const_iterator finder = 
+                                                      layouts.find(hash_key);
+        if (finder == layouts.end())
+          return NULL;
+        // Get the ones with a matching mask
+        for (std::list<LayoutDescription*>::const_iterator it = 
+              finder->second.begin(); it != finder->second.end(); it++)
+        {
+          if ((*it)->allocated_fields == mask)
+            candidates.push_back(*it);
+        }
+      }
+      if (candidates.empty())
         return NULL;
       // First go through the existing descriptions and see if we find
       // one that matches the existing layout
-      for (std::list<LayoutDescription*>::const_iterator it = 
-            finder->second.begin(); it != finder->second.end(); it++)
+      for (std::deque<LayoutDescription*>::const_iterator it = 
+            candidates.begin(); it != candidates.end(); it++)
       {
-        if ((*it)->match_layout(mask, domain, blocking_factor))
+        if ((*it)->match_layout(constraints))
           return (*it);
       }
       return NULL;
     }
 
     //--------------------------------------------------------------------------
+    LayoutDescription* FieldSpaceNode::find_layout_description(
+                          const FieldMask &mask, LayoutConstraints *constraints)
+    //--------------------------------------------------------------------------
+    {
+      // This one better work
+      uint64_t hash_key = mask.get_hash_key();
+      AutoLock n_lock(node_lock,1,false/*exclusive*/);
+      std::map<LEGION_FIELD_MASK_FIELD_TYPE,LegionList<LayoutDescription*,
+        LAYOUT_DESCRIPTION_ALLOC>::tracked>::const_iterator finder = 
+                                                    layouts.find(hash_key);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(finder != layouts.end());
+#endif
+      for (std::list<LayoutDescription*>::const_iterator it = 
+            finder->second.begin(); it != finder->second.end(); it++)
+      {
+        if ((*it)->constraints != constraints)
+          continue;
+        if ((*it)->allocated_fields != mask)
+          continue;
+        return (*it);
+      }
+      assert(false);
+      return NULL;
+    }
+
+    //--------------------------------------------------------------------------
     LayoutDescription* FieldSpaceNode::create_layout_description(
-        const FieldMask &mask, const Domain &domain, size_t blocking_factor,
-                                     const std::set<FieldID> &create_fields,
-                                     const std::vector<size_t> &field_sizes, 
-                                     const std::vector<unsigned> &indexes,
-                                     const std::vector<CustomSerdezID> &serdez)
+                                     const FieldMask &layout_mask,
+                                     LayoutConstraints *constraints,
+                                   const std::vector<unsigned> &mask_index_map,
+                                   const std::vector<CustomSerdezID> &serdez,
+                    const std::vector<std::pair<FieldID,size_t> > &field_sizes)
     //--------------------------------------------------------------------------
     {
       // Make the new field description and then register it
-      LayoutDescription *result = new LayoutDescription(mask, domain,
-                                                        blocking_factor, this);
-      unsigned idx = 0;
-      size_t accum_offset = 0;
-      for (std::set<FieldID>::const_iterator it = create_fields.begin();
-            it != create_fields.end(); it++, idx++)
-      {
-        result->add_field_info((*it), indexes[idx],
-                               accum_offset, field_sizes[idx], serdez[idx]);
-        accum_offset += field_sizes[idx];
-      }
-      // Now we can register it
+      LayoutDescription *result = new LayoutDescription(this, layout_mask, 
+                        constraints, mask_index_map, serdez, field_sizes);
       return register_layout_description(result);
     }
 
@@ -14730,79 +14347,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    MaterializedView* RegionNode::create_instance(Memory target_mem,
-                                                const std::set<FieldID> &fields,
-                                                size_t blocking_factor,
-                                                unsigned depth, Operation *op, 
-                                                UniqueID context_uid,
-                                                bool &remote_creation)
-    //--------------------------------------------------------------------------
-    {
-      DistributedID did = context->runtime->get_available_distributed_id(false);
-      UniqueID op_id = (op == NULL) ? 0 : op->get_unique_op_id();
-      InstanceManager *manager = column_source->create_instance(target_mem,
-                                      row_source->get_domain_blocking(),
-                                      fields, blocking_factor, depth, this, 
-                                      did, op_id, remote_creation);
-      // See if we made the instance
-      MaterializedView *result = NULL;
-      if (manager != NULL)
-      {
-        result = manager->create_top_view(depth, context_uid);
-#ifdef DEBUG_HIGH_LEVEL
-        assert(result != NULL);
-#endif
-#ifdef LEGION_SPY
-        LegionSpy::log_physical_instance(manager->get_instance().id,
-            manager->memory.id, handle.index_space.id,
-            handle.field_space.id, handle.tree_id, blocking_factor);
-        for (std::set<FieldID>::const_iterator it = fields.begin();
-             it != fields.end(); ++it)
-          LegionSpy::log_instance_field(manager->get_instance().id, *it);
-#endif
-      }
-      else
-        context->runtime->free_distributed_id(did);
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    ReductionView* RegionNode::create_reduction(Memory target_mem, FieldID fid,
-                                                bool reduction_list,
-                                                ReductionOpID redop,
-                                                Operation *op, 
-                                                UniqueID context_uid,
-                                                bool &remote_creation)
-    //--------------------------------------------------------------------------
-    {
-      DistributedID did = context->runtime->get_available_distributed_id(false);
-      UniqueID op_id = (op == NULL) ? 0 : op->get_unique_op_id();
-      ReductionManager *manager = column_source->create_reduction(target_mem,
-                                      row_source->get_domain_blocking(),
-                                      fid, reduction_list, this, redop, 
-                                      did, op_id, remote_creation);
-      ReductionView *result = NULL;
-      if (manager != NULL)
-      {
-        result = manager->create_view(context_uid); 
-#ifdef DEBUG_HIGH_LEVEL
-        assert(result != NULL);
-#endif
-#ifdef LEGION_SPY
-        Domain ptr_space = manager->get_pointer_space();
-        LegionSpy::log_physical_reduction(manager->get_instance().id,
-            manager->memory.id, handle.index_space.id,
-            handle.field_space.id, handle.tree_id, !reduction_list,
-            ptr_space.exists() ? ptr_space.get_index_space().id : 0);
-        LegionSpy::log_instance_field(manager->get_instance().id, fid);
-#endif
-      }
-      else
-        context->runtime->free_distributed_id(did);
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
     void RegionNode::send_node(AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
@@ -15242,7 +14786,7 @@ namespace Legion {
     void RegionNode::find_field_descriptors(ContextID ctx, Event term_event,
                                             const RegionUsage &usage,
                                             const FieldMask &user_mask,
-                                            unsigned fid_idx, Operation *op,
+                                            FieldID field_id, Operation *op,
                                   std::vector<FieldDataDescriptor> &field_data,
                                             std::set<Event> &preconditions,
                                             VersionInfo &version_info)
@@ -15260,7 +14804,7 @@ namespace Legion {
             it != state->valid_views.end(); it++)
       {
         // Check to see if the instance is valid for our target field
-        if (it->second.is_set(fid_idx))
+        if (!!(it->second & user_mask))
         {
           // See if this is a composite view or not
           if (it->first->is_instance_view())
@@ -15272,7 +14816,7 @@ namespace Legion {
               it->first->as_instance_view()->as_materialized_view(); 
             // Record the instance and its information
             field_data.push_back(FieldDataDescriptor());
-            view->set_descriptor(field_data.back(), fid_idx);
+            view->set_descriptor(field_data.back(), field_id);
             // Register ourselves as user of this instance
             Event ready_event = view->add_user(usage, term_event,
                                                user_mask, op, version_info);
@@ -15301,7 +14845,7 @@ namespace Legion {
         if (!deferred_view->is_composite_view())
           assert(false); // TODO: implement this
         deferred_view->find_field_descriptors(term_event, usage, 
-                                              user_mask, fid_idx, op, 
+                                              user_mask, field_id, op, 
                                               field_data, preconditions);
       }
     }
@@ -15344,8 +14888,7 @@ namespace Legion {
                                             attach_mask, this, attach_op);
       // Wrap it in a view
       UniqueID context_uid = attach_op->get_parent()->get_context_uid();
-      MaterializedView *view = manager->create_top_view(row_source->depth,
-                                                        context_uid);
+      MaterializedView *view = manager->create_top_view(context_uid);
 #ifdef DEBUG_HIGH_LEVEL
       assert(view != NULL);
 #endif
@@ -16458,45 +16001,6 @@ namespace Legion {
         // reducing directly to a partition object anyway
         return closer.get_termination_event();
       }
-    }
-
-    //--------------------------------------------------------------------------
-    MaterializedView* PartitionNode::create_instance(Memory target_mem,
-                                                const std::set<FieldID> &fields,
-                                                size_t blocking_factor,
-                                                unsigned depth, Operation *op,
-                                                UniqueID context_uid,
-                                                bool &remote_creation)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(parent != NULL);
-#endif
-      MaterializedView *result = parent->create_instance(target_mem, 
-                                                         fields, 
-                                                         blocking_factor,
-                                                         depth, op, context_uid,
-                                                         remote_creation);
-      if (result != NULL)
-      {
-        result = result->get_materialized_subview(row_source->color);
-      }
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    ReductionView* PartitionNode::create_reduction(Memory target_mem, 
-                                            FieldID fid, bool reduction_list,
-                                            ReductionOpID redop, Operation *op,
-                                            UniqueID context_uid,
-                                            bool &remote_creation)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(parent != NULL);
-#endif
-      return parent->create_reduction(target_mem, fid, reduction_list, 
-                                      redop, op, context_uid, remote_creation);
     }
 
     //--------------------------------------------------------------------------

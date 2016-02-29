@@ -1308,22 +1308,17 @@ namespace Legion {
         const LayoutConstraintSet &index_constraints = 
                         mapper_rt_find_layout_constraints(ctx, lay_it->second);
         std::vector<FieldID> overlaping_fields;
-        // See which of the missing fields we overlap with if any
-        for (std::vector<FieldConstraint>::const_iterator it = 
-              index_constraints.field_constraints.begin(); it !=
-              index_constraints.field_constraints.begin(); it++)
+        const std::vector<FieldID> &constraint_fields = 
+          index_constraints.field_constraint.get_field_set();
+        for (unsigned idx = 0; idx < constraint_fields.size(); idx++)
         {
-          const std::vector<FieldID> &constraint_fields = it->get_field_set();
-          for (unsigned idx = 0; idx < constraint_fields.size(); idx++)
+          FieldID fid = constraint_fields[idx];
+          std::set<FieldID>::iterator finder = needed_fields.find(fid);
+          if (finder != needed_fields.end())
           {
-            FieldID fid = constraint_fields[idx];
-            std::set<FieldID>::iterator finder = needed_fields.find(fid);
-            if (finder != needed_fields.end())
-            {
-              overlaping_fields.push_back(fid);
-              // Remove from the needed fields since we're going to handle it
-              needed_fields.erase(finder);
-            }
+            overlaping_fields.push_back(fid);
+            // Remove from the needed fields since we're going to handle it
+            needed_fields.erase(finder);
           }
         }
         // If we don't have any overlapping fields, then keep going
@@ -1438,8 +1433,7 @@ namespace Legion {
           return finder->second;
         LayoutConstraintSet constraints;
         default_policy_fill_constraints(ctx, constraints, target_memory, req);
-        LayoutConstraintID result = 
-          mapper_rt_register_layout_constraints(ctx, constraints);
+        LayoutConstraintID result = mapper_rt_register_layout(ctx, constraints);
         // Save the result
         reduction_constraint_cache[constraint_key] = result;
         return result;
@@ -1463,9 +1457,8 @@ namespace Legion {
         const LayoutConstraintSet &old_constraints =
                       mapper_rt_find_layout_constraints(ctx, finder->second);
         // Should be only one unless things have changed
-        assert(old_constraints.field_constraints.size() == 1);
         const std::vector<FieldID> &old_set = 
-                          old_constraints.field_constraints[0].get_field_set();
+                          old_constraints.field_constraint.get_field_set();
         // Check to make sure the field sets are still the same
         std::vector<FieldID> new_fields;
         mapper_rt_get_field_space_fields(ctx, constraint_key.second,new_fields);
@@ -1491,8 +1484,7 @@ namespace Legion {
       LayoutConstraintSet constraints;
       default_policy_fill_constraints(ctx, constraints, target_memory, req);
       // Do the registration
-      LayoutConstraintID result = 
-        mapper_rt_register_layout_constraints(ctx, constraints);
+      LayoutConstraintID result = mapper_rt_register_layout(ctx, constraints);
       // Record our results, there is a benign race here as another mapper
       // call could have registered the exact same registration constraints
       // here if we were preempted during the registration call. The 
@@ -1549,13 +1541,16 @@ namespace Legion {
       LogicalRegion target_region = 
         default_policy_select_instance_region(ctx, target_memory, req,
                                     constraints, force_new, meets, reduction);
+      // TODO: deal with task layout constraints that require multiple
+      // region requirements to be mapped to the same instance
+      std::vector<LogicalRegion> target_regions(1, target_region);
       if (force_new) {
         if (!mapper_rt_create_physical_instance(ctx, target_memory, constraints,
-                                                target_region, result))
+                                                target_regions, result))
           return false;
       } else {
         if (!mapper_rt_find_or_create_physical_instance(ctx, target_memory, 
-                                constraints, target_region, result, created))
+                                constraints, target_regions, result, created))
           return false;
       }
       if (created)

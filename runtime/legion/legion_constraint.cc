@@ -442,7 +442,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     OrderingConstraint::OrderingConstraint(
                            const std::vector<DimensionKind> &order, bool contig)
-      : contiguous(contig), ordering(order) 
+      : ordering(order), contiguous(contig)
     //--------------------------------------------------------------------------
     {
     }
@@ -692,7 +692,7 @@ namespace Legion {
                                            const OrderingConstraint &constraint)
     //--------------------------------------------------------------------------
     {
-      ordering_constraints.push_back(constraint);
+      ordering_constraint = constraint;
       return *this;
     }
 
@@ -710,7 +710,7 @@ namespace Legion {
                                               const FieldConstraint &constraint)
     //--------------------------------------------------------------------------
     {
-      field_constraints.push_back(constraint);
+      field_constraint = constraint;
       return *this;
     }
 
@@ -755,8 +755,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       specialized_constraint.serialize(rez);
+      field_constraint.serialize(rez);
       memory_constraint.serialize(rez);
       pointer_constraint.serialize(rez);
+      ordering_constraint.serialize(rez);
 #define PACK_CONSTRAINTS(Type, constraints)                             \
       rez.serialize<size_t>(constraints.size());                        \
       for (std::vector<Type>::const_iterator it = constraints.begin();  \
@@ -764,9 +766,7 @@ namespace Legion {
       {                                                                 \
         it->serialize(rez);                                             \
       }
-      PACK_CONSTRAINTS(OrderingConstraint, ordering_constraints)
       PACK_CONSTRAINTS(SplittingConstraint, splitting_constraints)
-      PACK_CONSTRAINTS(FieldConstraint, field_constraints)
       PACK_CONSTRAINTS(DimensionConstraint, dimension_constraints)
       PACK_CONSTRAINTS(AlignmentConstraint, alignment_constraints)
       PACK_CONSTRAINTS(OffsetConstraint, offset_constraints)
@@ -791,9 +791,7 @@ namespace Legion {
           it->deserialize(derez);                                   \
         }                                                           \
       }
-      UNPACK_CONSTRAINTS(OrderingConstraint, ordering_constraints)
       UNPACK_CONSTRAINTS(SplittingConstraint, splitting_constraints)
-      UNPACK_CONSTRAINTS(FieldConstraint, field_constraints)
       UNPACK_CONSTRAINTS(DimensionConstraint, dimension_constraints)
       UNPACK_CONSTRAINTS(AlignmentConstraint, alignment_constraints)
       UNPACK_CONSTRAINTS(OffsetConstraint, offset_constraints)
