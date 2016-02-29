@@ -270,9 +270,15 @@ class TaskRange(TimeRange):
 
     def update_task_stats(self, stat):
         exec_time = self.total_time()
+        last_time = self.start_time
         for subrange in self.subranges:
             subrange.update_task_stats(stat)
-            exec_time -= subrange.total_time()
+            if last_time > subrange.start_time:
+                exec_time -= subrange.stop_time - last_time
+            else:
+                exec_time -= subrange.total_time()
+            last_time = max(last_time, subrange.stop_time)
+        assert exec_time >= 0
         if self.task.is_task:
             stat.record_task(self.task, exec_time)
 
@@ -1190,7 +1196,7 @@ class State(object):
         meta.create = create
         assert create <= ready
         meta.ready = ready
-        #assert ready <= start
+        assert ready <= start
         meta.start = start
         assert start <= stop
         meta.stop = stop
