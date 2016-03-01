@@ -184,13 +184,7 @@ create_cross_product(HighLevelRuntime *runtime,
     Color lh_color = lh_dp.p.get_point<1>()[0];
     IndexSpace lh_space = runtime->get_index_subspace(ctx, lhs, lh_color);
 
-    std::set<ptr_t> lh_points;
-    for (IndexIterator lh_it(runtime, ctx, lh_space); lh_it.has_next();) {
-      lh_points.insert(lh_it.next());
-    }
-
     Coloring lh_coloring;
-
     for (Domain::DomainPointIterator rh_dp(rhs_colors); rh_dp; rh_dp++) {
       Color rh_color = rh_dp.p.get_point<1>()[0];
       IndexSpace rh_space = runtime->get_index_subspace(ctx, rhs, rh_color);
@@ -198,11 +192,25 @@ create_cross_product(HighLevelRuntime *runtime,
       // Ensure the color exists.
       lh_coloring[rh_color];
 
-      for (IndexIterator rh_it(runtime, ctx, rh_space); rh_it.has_next();) {
-        ptr_t rh_ptr = rh_it.next();
+      for (IndexIterator lh_it(runtime, ctx, lh_space); lh_it.has_next();) {
+        size_t lh_count = 0;
+        ptr_t lh_ptr = lh_it.next_span(lh_count);
+        ptr_t lh_end = lh_ptr.value + lh_count - 1;
 
-        if (lh_points.count(rh_ptr)) {
-          lh_coloring[rh_color].points.insert(rh_ptr);
+        for (IndexIterator rh_it(runtime, ctx, rh_space, lh_ptr); rh_it.has_next();) {
+          size_t rh_count = 0;
+          ptr_t rh_ptr = rh_it.next_span(rh_count);
+          ptr_t rh_end = rh_ptr.value + rh_count - 1;
+          if (rh_ptr.value > lh_end.value) {
+            break;
+          }
+
+          if (rh_end.value > lh_end.value) {
+            lh_coloring[rh_color].ranges.insert(std::pair<ptr_t, ptr_t>(rh_ptr, lh_end));
+            break;
+          }
+
+          lh_coloring[rh_color].ranges.insert(std::pair<ptr_t, ptr_t>(rh_ptr, rh_end));
         }
       }
     }
