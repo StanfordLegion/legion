@@ -696,7 +696,7 @@ namespace Realm {
       {
         fprintf(stderr,"ERROR: Launched %d nodes, but runtime is configured "
                        "for at most %d nodes. Update the 'MAX_NUM_NODES' macro "
-                       "in legion_types.h", gasnet_nodes(), MAX_NUM_NODES);
+                       "in legion_config.h", gasnet_nodes(), MAX_NUM_NODES);
         gasnet_exit(1);
       }
       if (gasnet_nodes() > ((1 << ID::NODE_BITS) - 1))
