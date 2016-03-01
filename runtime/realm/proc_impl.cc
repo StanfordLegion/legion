@@ -93,6 +93,7 @@ namespace Realm {
       }
 
       assert(0);
+      return Processor::NO_PROC;
     }
 
     void Processor::get_group_members(std::vector<Processor>& members)
@@ -192,8 +193,10 @@ namespace Realm {
       get_runtime()->optable.add_local_operation(finish_event, tro);
       // we haven't told anybody about this operation yet, so cancellation really shouldn't
       //  be possible
-      bool ok_to_run = (tro->mark_ready() &&
-			tro->mark_started());
+#ifndef NDEBUG
+      bool ok_to_run =
+#endif
+	(tro->mark_ready() && tro->mark_started());
       assert(ok_to_run);
 
       std::vector<Processor> local_procs;
@@ -280,8 +283,10 @@ namespace Realm {
       get_runtime()->optable.add_local_operation(finish_event, tro);
       // we haven't told anybody about this operation yet, so cancellation really shouldn't
       //  be possible
-      bool ok_to_run = (tro->mark_ready() &&
-			tro->mark_started());
+#ifndef NDEBUG
+      bool ok_to_run =
+#endif
+	(tro->mark_ready() && tro->mark_started());
       assert(ok_to_run);
 
       // do local processors first
@@ -484,8 +489,11 @@ namespace Realm {
       if(poisoned) {
 	// cancel the task - this has to work
 	log_poison.info() << "cancelling poisoned task - task=" << task << " after=" << task->get_finish_event();
-	bool did_cancel = task->attempt_cancellation(Realm::Faults::ERROR_POISONED_PRECONDITION,
-						     &e, sizeof(e));	
+#ifndef NDEBUG
+	bool did_cancel =
+#endif
+	  task->attempt_cancellation(Realm::Faults::ERROR_POISONED_PRECONDITION,
+				     &e, sizeof(e));	
 	assert(did_cancel);
 	task->mark_finished(false);
 	return true;
@@ -588,9 +596,10 @@ namespace Realm {
     ByteArray userdata;
 
     Serialization::FixedBufferDeserializer fbd(data, datalen);
-    bool ok = ((fbd >> procs) &&
-	       (fbd >> codedesc) &&
-	       (fbd >> userdata));
+#ifndef NDEBUG
+    bool ok =
+#endif
+      ((fbd >> procs) && (fbd >> codedesc) && (fbd >> userdata));
     assert(ok && (fbd.bytes_left() == 0));
 
     if(procs.empty()) {

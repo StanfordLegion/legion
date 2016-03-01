@@ -1631,6 +1631,7 @@ namespace Realm {
 	return get_barrier_impl(e);
       default:
 	assert(0);
+	return 0;
       }
     }
 
@@ -1679,6 +1680,7 @@ namespace Realm {
 
       default:
 	assert(0);
+	return 0;
       }
     }
 
@@ -1701,6 +1703,7 @@ namespace Realm {
 
       default:
 	assert(0);
+	return 0;
       }
     }
 

@@ -8046,6 +8046,7 @@ namespace LegionRuntime {
     {
       // should never be called
       assert(false);
+      return *this;
     }
 
     //--------------------------------------------------------------------------

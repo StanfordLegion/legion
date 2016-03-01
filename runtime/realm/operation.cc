@@ -112,9 +112,12 @@ namespace Realm {
   void Operation::mark_terminated(int error_code, const ByteArray& details)
   {
     // attempt to switch from RUNNING -> TERMINATED_EARLY
-    Status::Result prev = __sync_val_compare_and_swap(&status.result,
-						      Status::RUNNING,
-						      Status::TERMINATED_EARLY);
+#ifndef NDEBUG
+    Status::Result prev = 
+#endif
+      __sync_val_compare_and_swap(&status.result,
+				  Status::RUNNING,
+				  Status::TERMINATED_EARLY);
     assert(prev == Status::RUNNING);
 
     status.error_code = error_code;
@@ -145,9 +148,12 @@ namespace Realm {
     Status::Result newresult = ((failed_work_items == 0) ?
   				  Status::COMPLETED_SUCCESSFULLY :
 				  Status::COMPLETED_WITH_ERRORS);
-    Status::Result prev = __sync_val_compare_and_swap(&status.result,
-						      Status::RUNNING,
-						      newresult);
+#ifndef NDEBUG
+    Status::Result prev =
+#endif
+      __sync_val_compare_and_swap(&status.result,
+				  Status::RUNNING,
+				  newresult);
     assert((prev == Status::RUNNING) ||
 	   (prev == Status::TERMINATED_EARLY) ||
 	   (prev == Status::CANCELLED));
