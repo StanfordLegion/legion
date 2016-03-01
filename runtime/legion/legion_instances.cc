@@ -149,7 +149,7 @@ namespace Legion {
       {
         compressed = copy_mask;
         compress_mask<STATIC_LOG2(MAX_FIELDS)>(compressed, allocated_fields);
-        // Save the result in the cache
+        // Save the result in the cache, duplicates from races here are benign
         AutoLock o_lock(layout_lock);
         comp_cache[hash_key].push_back(
             std::pair<FieldMask,FieldMask>(copy_mask,compressed));
@@ -180,7 +180,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       FieldMask mk, mp, mv, t;
-
+      // See hacker's delight 7-4
       x = x & m;
       mk = ~m << 1;
       for (unsigned i = 0; i < LOG2MAX; i++)
@@ -329,15 +329,6 @@ namespace Legion {
         return false;
       return true;
     }
-
-#if 0
-    //--------------------------------------------------------------------------
-    bool LayoutDescription::match_layout(LayoutDescription *rhs) const
-    //--------------------------------------------------------------------------
-    {
-      return match_layout(rhs->allocated_fields, *rhs->constraints); 
-    }
-#endif
 
     //--------------------------------------------------------------------------
     void LayoutDescription::set_descriptor(FieldDataDescriptor &desc,
