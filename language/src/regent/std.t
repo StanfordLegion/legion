@@ -3008,9 +3008,11 @@ function std.saveobj(main_task, filename, filetype)
   local main, names = std.setup(main_task)
   local lib_dir = os.getenv("LG_RT_DIR") .. "/../bindings/terra"
 
-  terralib.saveobj(
-    filename, filetype, names,
-    {"-L" .. lib_dir, "-llegion_terra"})
+  if filetype ~= nil then
+    terralib.saveobj(filename, filetype, names, {"-L" .. lib_dir, "-llegion_terra"})
+  else
+    terralib.saveobj(filename, names, {"-L" .. lib_dir, "-llegion_terra"})
+  end
 end
 
 -- #####################################
