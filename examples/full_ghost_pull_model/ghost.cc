@@ -41,7 +41,12 @@ enum {
 
 enum {
     GHOST_LEFT = 0,
-    GHOST_RIGHT,
+    GHOST_RIGHT
+};
+
+enum {
+    NEIGHBOR_LEFT = 0,
+    NEIGHBOR_RIGHT
 };
 
 struct SPMDArgs 
@@ -53,7 +58,6 @@ public:
     PhaseBarrier wait_empty[2];
 
     int num_elements;
-    int num_subregions;
     int num_steps;
 };
 
@@ -192,22 +196,26 @@ void top_level_task(const Task *task,
         // barriers.  Assume periodic boundary conditions.
         for (int my_color = 0; my_color < num_subregions; my_color++)
         {            
-            int  left_ghost_color = (my_color == 0) ? num_subregions-1 : my_color-1;
-            int right_ghost_color = (my_color == num_subregions-1) ? 0 : my_color+1;
+            int  left_neighbor_color = (my_color == 0) ? num_subregions-1 : my_color-1;
+            int right_neighbor_color = (my_color == num_subregions-1) ? 0 : my_color+1;
+
+            /* set some arguments that will be needed by the spmd shards */
 
             args[my_color].num_elements = num_elements;
-            args[my_color].num_subregions = num_subregions;
             args[my_color].num_steps = num_steps;
 
-            args[my_color].notify_empty[GHOST_LEFT]  = left_empty_barriers[my_color];
-            args[my_color].notify_empty[GHOST_RIGHT] = right_empty_barriers[my_color];
-            args[my_color].wait_ready[GHOST_LEFT]    = left_ready_barriers[my_color];
-            args[my_color].wait_ready[GHOST_RIGHT]   = right_ready_barriers[my_color];
+            /* Specify which phase barriers we should use */
 
-            args[my_color].wait_empty[GHOST_LEFT]    = right_empty_barriers[left_ghost_color];
-            args[my_color].wait_empty[GHOST_RIGHT]   = left_empty_barriers[right_ghost_color];
-            args[my_color].notify_ready[GHOST_LEFT]  = right_ready_barriers[right_ghost_color];
-            args[my_color].notify_ready[GHOST_RIGHT] = left_ready_barriers[right_ghost_color];
+            args[my_color].notify_empty[NEIGHBOR_LEFT]  = left_empty_barriers[my_color];
+            args[my_color].wait_ready[NEIGHBOR_LEFT]    = left_ready_barriers[my_color];
+            args[my_color].notify_ready[NEIGHBOR_LEFT]  = right_ready_barriers[left_neighbor_color];
+            args[my_color].wait_empty[NEIGHBOR_LEFT]    = right_empty_barriers[left_neighbor_color];
+
+
+            args[my_color].notify_empty[NEIGHBOR_RIGHT] = right_empty_barriers[my_color];
+            args[my_color].wait_ready[NEIGHBOR_RIGHT]   = right_ready_barriers[my_color];
+            args[my_color].notify_ready[NEIGHBOR_RIGHT] = left_ready_barriers[right_neighbor_color];
+            args[my_color].wait_empty[NEIGHBOR_RIGHT]   = left_empty_barriers[right_neighbor_color];
 
 
             TaskLauncher spmd_launcher(SPMD_TASK_ID,
@@ -218,30 +226,27 @@ void top_level_task(const Task *task,
             /* Region the task will use */
             region_requirement = RegionRequirement(disjoint_subregions[my_color],
                                                   READ_WRITE, SIMULTANEOUS, 
-                                                  disjoint_subregions[my_color]/*parent */);
+                                                  disjoint_subregions[my_color]);
             spmd_launcher.add_region_requirement(region_requirement);
 
             /* let each task know about the neighbor subregions */
-            region_requirement = RegionRequirement(disjoint_subregions[left_ghost_color],
+            region_requirement = RegionRequirement(disjoint_subregions[left_neighbor_color],
                                                   READ_ONLY, SIMULTANEOUS, 
-                                                  disjoint_subregions[left_ghost_color]/*parent */);
+                                                  disjoint_subregions[left_neighbor_color]);
             region_requirement.flags |= NO_ACCESS_FLAG;
             spmd_launcher.add_region_requirement(region_requirement);
 
-            region_requirement = RegionRequirement(disjoint_subregions[right_ghost_color],
+            region_requirement = RegionRequirement(disjoint_subregions[right_neighbor_color],
                                                   READ_ONLY, SIMULTANEOUS, 
-                                                  disjoint_subregions[right_ghost_color]/*parent */);
+                                                  disjoint_subregions[right_neighbor_color]);
             region_requirement.flags |= NO_ACCESS_FLAG;
             spmd_launcher.add_region_requirement(region_requirement);
 
-            // TODO: what does this do?
-            spmd_launcher.add_field(0, FID_VAL);
-            spmd_launcher.add_field(0, FID_DERIV);
-            spmd_launcher.add_field(1, FID_VAL);
-            spmd_launcher.add_field(1, FID_DERIV);
-            spmd_launcher.add_field(2, FID_VAL);
-            spmd_launcher.add_field(2, FID_DERIV);
-
+            /* Add the fields we will access to the launcher */
+            for (unsigned rr = 0; rr < spmd_launcher.region_requirements.size(); rr++) {
+                spmd_launcher.add_field(rr, FID_VAL);
+                spmd_launcher.add_field(rr, FID_DERIV);
+            }
 
 
             DomainPoint point(my_color);
@@ -263,6 +268,8 @@ void top_level_task(const Task *task,
         runtime->destroy_phase_barrier(ctx, right_ready_barriers[idx]);
     for (unsigned idx = 0; idx < right_empty_barriers.size(); idx++)
         runtime->destroy_phase_barrier(ctx, right_empty_barriers[idx]);
+
+    disjoint_subregions.clear();
     left_ready_barriers.clear();
     left_empty_barriers.clear();
     right_ready_barriers.clear();
@@ -276,11 +283,17 @@ void spmd_task(const Task *task,
                Context ctx, HighLevelRuntime *runtime)
 {
     // Unmap all the regions we were given since we won't actually use them
-    runtime->unmap_all_regions(ctx); // TODO: do I remove this? What does this do?
-    // unmap means I won't access the physical regions, so remove my access to it.
-    // otherwise there will be a bunch of unmap and remap calls, or accesses will
+    // 
+    // Unmapping means I won't access the physical regions, so remove my access to it.
+    // Otherwise there will be a bunch of unmap and remap calls, and accesses will
     // be serialized
- 
+
+    runtime->unmap_all_regions(ctx);
+
+
+    /* Dereference the regions passed to the task */
+
+
     SPMDArgs *args = (SPMDArgs*)task->args;
 
     int color = task->index_point.get_index();
@@ -291,9 +304,13 @@ void spmd_task(const Task *task,
     neighbor_lrs[GHOST_LEFT] = task->regions[1].region;
     neighbor_lrs[GHOST_RIGHT] = task->regions[2].region;
 
-    LogicalRegion neighbor_ghost_lrs[2];
+    /* Instantiate the ghost regions we will create locally */
+    LogicalRegion ghost_lrs[2];
 
-    // Now create the local ghost regions
+    /* 
+     * Create the field space the ghost region will use. In the GHOST field, we will
+     * copy over the VAL field from the neighbor regions. 
+     */
 
     FieldSpace ghost_fs = runtime->create_field_space(ctx);
     runtime->attach_name(ghost_fs, "ghost_fs");
@@ -304,69 +321,43 @@ void spmd_task(const Task *task,
         runtime->attach_name(ghost_fs, FID_GHOST, "GHOST");
     }
 
-    char buf[64];
+    char buf[64];  const char* parts[2] = {"left", "right"};
 
-    // Create the ghost regions we will access from the neighbors. TODO: easier way to do this?
+    // Create the ghost regions we will access from the neighbors.
 
-    // The left neighbor needs a right ghost
-    //------------------------------------------------------------------------------------------------
-    Domain left_neighbor_ghost_domain = Domain::from_point<1>(Point<1>(GHOST_RIGHT));
+    for (unsigned neighbor = NEIGHBOR_LEFT; neighbor <= NEIGHBOR_RIGHT; neighbor++)
+    {
+        // The left neighbor needs a right ghost and the right neighbor needs a left ghost
+        unsigned ghost = (neighbor == NEIGHBOR_LEFT) ? GHOST_RIGHT : GHOST_LEFT;
 
-    // Get the index space
-    IndexSpace left_neighbor_is = neighbor_lrs[GHOST_LEFT].get_index_space();
-    //sprintf(buf, "left_neighbor_is_of_%d", color);
-    //runtime->attach_name(left_neighbor_is, buf);
-    Domain left_neighbor_dom = runtime->get_index_space_domain(ctx, left_neighbor_is);
+        Domain ghost_domain = Domain::from_point<1>(Point<1>(ghost));
 
-    DomainColoring left_neighbor_ghost_coloring;
-    Rect<1> left_neighbor_rect = left_neighbor_dom.get_rect<1>();
-    left_neighbor_ghost_coloring[GHOST_RIGHT] = 
-        Domain::from_rect<1>(Rect<1>(left_neighbor_rect.hi[0]-(ORDER-1),left_neighbor_rect.hi));
-    IndexPartition left_neighbor_ghost_ip = 
-        runtime->create_index_partition(ctx, left_neighbor_is, left_neighbor_ghost_domain,
-                                        left_neighbor_ghost_coloring, true/*disjoint*/);
-    //sprintf(buf, "left_neighbor_ghost_ip_of_%d", color);
-    //runtime->attach_name(left_neighbor_ghost_ip, buf);
-    
-    // create the logical region
-    IndexSpace left_neighbor_ghost_is = runtime->get_index_subspace(ctx, left_neighbor_ghost_ip, GHOST_RIGHT);
-    neighbor_ghost_lrs[GHOST_LEFT] =
-        runtime->create_logical_region(ctx, left_neighbor_ghost_is, ghost_fs);
-    //sprintf(buf, "left_neighbor_ghost_lr_of_%d", color);
-    //runtime->attach_name(neighbor_ghost_lrs[GHOST_LEFT], buf);
+        // Get the index space and domain
+        IndexSpace neighbor_is = neighbor_lrs[neighbor].get_index_space();
+        Domain neighbor_dom = runtime->get_index_space_domain(ctx, neighbor_is);
 
-    // The right neighbor needs a left ghost
-    //------------------------------------------------------------------------------------------------
-    Domain right_neighbor_ghost_domain = Domain::from_point<1>(Point<1>(GHOST_LEFT));
+        // now create the partitioning
 
-    // Get the index space
-    IndexSpace right_neighbor_is = neighbor_lrs[GHOST_RIGHT].get_index_space();
-    //sprintf(buf, "right_neighbor_is_of_%d", color);
-    //runtime->attach_name(right_neighbor_is, buf);
-    Domain right_neighbor_dom = runtime->get_index_space_domain(ctx, right_neighbor_is);
+        DomainColoring ghost_coloring;
+        Rect<1> rect = neighbor_dom.get_rect<1>();
 
-    DomainColoring right_neighbor_ghost_coloring;
-    Rect<1> right_neighbor_rect = right_neighbor_dom.get_rect<1>();
-    right_neighbor_ghost_coloring[GHOST_LEFT] = 
-        Domain::from_rect<1>(Rect<1>(right_neighbor_rect.lo, right_neighbor_rect.lo[0]+(ORDER-1)));
-    IndexPartition right_neighbor_ghost_ip = 
-        runtime->create_index_partition(ctx, right_neighbor_is, right_neighbor_ghost_domain,
-                                        right_neighbor_ghost_coloring, true/*disjoint*/);
-    //sprintf(buf, "right_neighbor_ghost_ip_of_%d", color);
-    //runtime->attach_name(right_neighbor_ghost_ip, buf);
-    
-    // create the logical region
-    IndexSpace right_neighbor_ghost_is = runtime->get_index_subspace(ctx, right_neighbor_ghost_ip, GHOST_LEFT);
-    neighbor_ghost_lrs[GHOST_RIGHT] =
-        runtime->create_logical_region(ctx, right_neighbor_ghost_is, ghost_fs);
-    //sprintf(buf, "right_neighbor_ghost_lr_of_%d", color);
-    //runtime->attach_name(neighbor_ghost_lrs[GHOST_RIGHT], buf);
+        if (neighbor == NEIGHBOR_LEFT) 
+            ghost_coloring[ghost] = Domain::from_rect<1>(Rect<1>(rect.hi[0]-(ORDER-1),rect.hi));
+        else
+            ghost_coloring[ghost] = Domain::from_rect<1>(Rect<1>(rect.lo, rect.lo[0]+(ORDER-1)));
 
-    // TODO: HOW DO I COMMUNICATE THE PHASE BARRIERS ACROSS? HOW DOES THE RUNTIME KNOW WHICH PHASE
-    // BARRIERS ARE WHICH?
+        IndexPartition ghost_ip =  runtime->create_index_partition(ctx, neighbor_is, ghost_domain,
+                                                                   ghost_coloring, true/*disjoint*/);
 
-    //printf("%d: 1\n", color);
-    //fflush(stdout);
+        sprintf(buf, "%s_neighbor_ghost_ip_of_%d", parts[neighbor], color);
+        runtime->attach_name(ghost_ip, buf);
+        
+        // create the logical region
+        IndexSpace ghost_is = runtime->get_index_subspace(ctx, ghost_ip, ghost);
+        ghost_lrs[neighbor] = runtime->create_logical_region(ctx, ghost_is, ghost_fs);
+        sprintf(buf, "%s_neighbor_ghost_lr_of_%d", parts[neighbor], color);
+        runtime->attach_name(ghost_lrs[neighbor], buf);
+    }
 
     // Run a bunch of steps
     for (int s = 0; s < args->num_steps; s++)
@@ -382,7 +373,7 @@ void spmd_task(const Task *task,
         runtime->execute_task(ctx, init_launcher);
 
         // Issue explicit region-to-region copies
-        for (unsigned idx = GHOST_LEFT; idx <= GHOST_RIGHT; idx++)
+        for (unsigned idx = NEIGHBOR_LEFT; idx <= NEIGHBOR_RIGHT; idx++)
         {
             /* Pull the neighbor's data over to the ghost */
 
@@ -390,19 +381,17 @@ void spmd_task(const Task *task,
             copy_launcher.add_copy_requirements(
                 RegionRequirement(neighbor_lrs[idx], READ_ONLY,
                                   EXCLUSIVE, neighbor_lrs[idx]),
-                RegionRequirement(neighbor_ghost_lrs[idx], WRITE_DISCARD,
-                                  EXCLUSIVE, neighbor_ghost_lrs[idx]));
+                RegionRequirement(ghost_lrs[idx], WRITE_DISCARD,
+                                  EXCLUSIVE, ghost_lrs[idx]));
 
             copy_launcher.add_src_field(0, FID_VAL);
             copy_launcher.add_dst_field(0, FID_GHOST);
-            // It's not safe to issue the copy until we know
+
+            // It's not safe to issue the pull until we know
             // that the neighbor has written to the ghost region
-
-            //printf("%d: 3\n", color);
-            //fflush(stdout);
-
             // advance the barrier first - we're waiting for the next phase
             //  to start
+
             if (s > 0)
             {
                 args->wait_ready[idx] = 
@@ -410,22 +399,18 @@ void spmd_task(const Task *task,
                 copy_launcher.add_wait_barrier(args->wait_ready[idx]);
             }
 
-            // When we are done with the copy, signal that we've read it
+            // When we are done with the pull, signal that we've read it
             copy_launcher.add_arrival_barrier(args->notify_empty[idx]);
-
-            //printf("%d: 4\n", color);
-            //fflush(stdout);
 
             runtime->issue_copy_operation(ctx, copy_launcher);
 
-            runtime->issue_execution_fence(ctx);
- 
             // Once we've issued our copy operation, advance both of
             // the barriers to the next generation.
             args->notify_empty[idx] = 
                 runtime->advance_phase_barrier(ctx, args->notify_empty[idx]);
         }
 
+        // TODO: Do we want to keep the acquire/release?
         // Acquire coherence on our left and right ghost regions
         //for (unsigned idx = GHOST_LEFT; idx <= GHOST_RIGHT; idx++)
         //{
@@ -443,8 +428,6 @@ void spmd_task(const Task *task,
         //    runtime->issue_acquire(ctx, acquire_launcher);
         //}
 
-        //printf("%d: 6\n", color);
-        //fflush(stdout);
         // Run the stencil computation
         TaskLauncher stencil_launcher(STENCIL_TASK_ID,
                                       TaskArgument(NULL, 0));
@@ -455,16 +438,21 @@ void spmd_task(const Task *task,
             RegionRequirement(local_lr, READ_ONLY, EXCLUSIVE, local_lr));
         stencil_launcher.add_field(1, FID_VAL);
 
-        for (unsigned idx = GHOST_LEFT; idx <= GHOST_RIGHT; idx++)
+        for (unsigned idx = NEIGHBOR_LEFT; idx <= NEIGHBOR_RIGHT; idx++)
         {
+            // We need to wait for the ghost data to be consumed by another
+            // task before writing over the data
             args->wait_empty[idx] = 
                 runtime->advance_phase_barrier(ctx, args->wait_empty[idx]);
             stencil_launcher.add_wait_barrier(args->wait_empty[idx]);
 
             stencil_launcher.add_region_requirement(
-                RegionRequirement(neighbor_ghost_lrs[idx], READ_ONLY, EXCLUSIVE, neighbor_ghost_lrs[idx]));
+                RegionRequirement(ghost_lrs[idx], READ_ONLY, EXCLUSIVE, ghost_lrs[idx]));
             stencil_launcher.add_field(idx+2, FID_GHOST);
 
+            // signal that the data is ready to be consumed on all but the last 
+            // iteration. TODO: is this correct? how does the runtime 
+            // know to do this AFTER the computation is done?
             if (s < (args->num_steps-1))
                 stencil_launcher.add_arrival_barrier(args->notify_ready[idx]);
 
@@ -472,7 +460,7 @@ void spmd_task(const Task *task,
 
         runtime->execute_task(ctx, stencil_launcher).get_void_result();
 
-        for (unsigned idx = GHOST_LEFT; idx <= GHOST_RIGHT; idx++)
+        for (unsigned idx = NEIGHBOR_LEFT; idx <= NEIGHBOR_RIGHT; idx++)
         {
             if (s < (args->num_steps-1))
                 args->notify_ready[idx] = 
@@ -729,8 +717,4 @@ int main(int argc, char **argv)
 
   return HighLevelRuntime::start(argc, argv);
 }
-
-// add arrival barrier to stencil launcher
-// add wait barrier to copy launcher
-
 
