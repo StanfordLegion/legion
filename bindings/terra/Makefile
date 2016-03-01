@@ -34,7 +34,7 @@ ALT_MAPPERS     ?= 0		# Include alternative mappers (not recommended)
 # to include and link against Terra/Lua itself. This is required for
 # use of the Lua bindings, but not for Regent and Terra-based programs
 # which do not use the Lua API wrappers.
-BINDINGS_USE_TERRA ?= 1
+BINDINGS_USE_TERRA ?= 0
 
 # Put the binary file name here
 OUTFILE		?= liblegion_terra.so

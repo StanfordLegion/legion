@@ -1,1 +1,0 @@
-../../bindings/terra/examples/lua/02_index_tasks/index_tasks.t
