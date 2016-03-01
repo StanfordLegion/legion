@@ -7767,7 +7767,7 @@ namespace LegionRuntime {
     InstanceRef PointTask::find_restricted_instance(unsigned index)
     //--------------------------------------------------------------------------
     {
-      return slice_owner->find_restricted_instance(index);
+      return slice_owner->find_restricted_instance(index,regions[index].region);
     }
 
     //--------------------------------------------------------------------------
@@ -9544,7 +9544,8 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    InstanceRef IndexTask::find_restricted_instance(unsigned index)
+    InstanceRef IndexTask::find_restricted_instance(unsigned index, 
+                                                    LogicalRegion target)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -9554,7 +9555,12 @@ namespace LegionRuntime {
       InstanceRef parent_ref = 
         parent_ctx->get_local_reference(parent_req_indexes[index]);
       // Now get the proper sub-view for our privilege path
-      return privilege_paths[index].translate_ref(parent_ref);
+      // Translate down from where the parent task had privileges
+      // down to where the target region is
+      RegionTreePath translate_path;
+      runtime->forest->initialize_path(target.get_index_space(),
+                     regions[index].parent.get_index_space(), translate_path);
+      return translate_path.translate_ref(parent_ref);
     }
 
     //--------------------------------------------------------------------------
@@ -10463,7 +10469,8 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    InstanceRef SliceTask::find_restricted_instance(unsigned index)
+    InstanceRef SliceTask::find_restricted_instance(unsigned index,
+                                                    LogicalRegion target)
     //--------------------------------------------------------------------------
     {
       if (is_remote())
@@ -10474,7 +10481,7 @@ namespace LegionRuntime {
       }
       else
       {
-        return index_owner->find_restricted_instance(index);
+        return index_owner->find_restricted_instance(index, target);
       }
     }
 

@@ -15439,6 +15439,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(view != NULL);
       assert(view->is_instance_view());
+      assert(view->logical_node == this);
 #endif
       InstanceView *inst_view = view->as_instance_view();
       // This mirrors the if-else statement in MappingTraverser::visit_region

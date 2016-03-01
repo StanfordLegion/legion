@@ -1160,7 +1160,7 @@ namespace LegionRuntime {
       virtual void handle_future(const DomainPoint &point, const void *result,
                                  size_t result_size, bool owner);
     public:
-      InstanceRef find_restricted_instance(unsigned index);
+      InstanceRef find_restricted_instance(unsigned index,LogicalRegion target);
     public:
       virtual void register_must_epoch(void);
     public:
@@ -1252,7 +1252,7 @@ namespace LegionRuntime {
       virtual void handle_future(const DomainPoint &point, const void *result,
                                  size_t result_size, bool owner);
     public:
-      InstanceRef find_restricted_instance(unsigned index);
+      InstanceRef find_restricted_instance(unsigned index,LogicalRegion target);
     public:
       virtual void register_must_epoch(void);
       PointTask* clone_as_point_task(const DomainPoint &p,
