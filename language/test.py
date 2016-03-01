@@ -129,7 +129,7 @@ tests = [
       os.path.join('examples'),)),
 ]
 
-def run_all_tests(thread_count, debug, verbose):
+def run_all_tests(thread_count, debug, verbose, quiet):
     thread_pool = multiprocessing.Pool(thread_count)
     results = []
 
@@ -166,7 +166,8 @@ def run_all_tests(thread_count, debug, verbose):
             if len(saved_temps) > 0:
                 all_saved_temps.append((test_name, filename, saved_temps))
             if outcome == PASS:
-                print '[%sPASS%s] (%s) %s' % (green, clear, test_name, filename)
+                if (not quiet) or (output is not None):
+                    print '[%sPASS%s] (%s) %s' % (green, clear, test_name, filename)
                 if output is not None: print output
                 test_counters[test_name].passed += 1
             elif outcome == FAIL:
@@ -230,12 +231,17 @@ def test_driver(argv):
                         action = 'store_true',
                         help = 'display verbose output',
                         dest = 'verbose')
+    parser.add_argument('-q',
+                        action = 'store_true',
+                        help = 'suppress passing test results',
+                        dest = 'quiet')
     args = parser.parse_args(argv[1:])
 
     run_all_tests(
         args.thread_count,
         args.debug,
-        args.verbose)
+        args.verbose,
+        args.quiet)
 
 if __name__ == '__main__':
     test_driver(sys.argv)
