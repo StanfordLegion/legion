@@ -17,10 +17,6 @@ ifndef LG_RT_DIR
 $(error LG_RT_DIR variable is not defined, aborting build)
 endif
 
-ifndef TERRA_DIR
-$(error TERRA_DIR variable is not defined, aborting build)
-endif
-
 # Flags for directing the runtime makefile what to include
 DEBUG           ?= 1		# Include debugging symbols
 OUTPUT_LEVEL    ?= LEVEL_DEBUG	# Compile time logging level
@@ -35,6 +31,12 @@ ALT_MAPPERS     ?= 0		# Include alternative mappers (not recommended)
 # use of the Lua bindings, but not for Regent and Terra-based programs
 # which do not use the Lua API wrappers.
 BINDINGS_USE_TERRA ?= 0
+
+ifeq ($(strip $(BINDINGS_USE_TERRA)),1)
+ifndef TERRA_DIR
+$(error TERRA_DIR variable is not defined, aborting build)
+endif
+endif
 
 # Put the binary file name here
 OUTFILE		?= liblegion_terra.so
