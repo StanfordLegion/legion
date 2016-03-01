@@ -58,13 +58,19 @@ INC_FLAGS ?=
 ifeq ($(strip $(BINDINGS_USE_TERRA)),1)
 INC_FLAGS += -I$(TERRA_DIR)/release/include/terra -I$(TERRA_DIR)/include/terra
 endif
-LD_FLAGS += -Wl,--whole-archive -llegion -Wl,--no-whole-archive
+LD_FLAGS ?=
 
 CC_FLAGS += -fPIC -DASSUME_UNALLOCABLE
 ifeq ($(shell uname), Darwin)
 	LD_FLAGS += -dynamiclib -single_module -undefined dynamic_lookup -fPIC
 else
 	LD_FLAGS += -shared
+endif
+
+ifeq ($(shell uname), Darwin)
+	LD_FLAGS += -Wl,-force_load,-llegion
+else
+	LD_FLAGS += -Wl,--whole-archive -llegion -Wl,--no-whole-archive
 endif
 
 ###########################################################################
