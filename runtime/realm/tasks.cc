@@ -405,8 +405,8 @@ namespace Realm {
 	Thread *yield_to = resumable_workers.get(0); // we don't care about priority
 	// first check - is this US?  if so, we're done
 	if(yield_to == thread) {
-	  printf("resuming ourselves!\n");
-	  return;
+	  printf("resuming ourselves! (%d)\n", thread->get_state());
+	  continue;
 	}
 	// this preserves active and unassigned counts
 	update_worker_count(0, 0);
