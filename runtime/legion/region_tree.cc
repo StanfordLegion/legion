@@ -14020,6 +14020,7 @@ namespace LegionRuntime {
           assert(!(finder->second - (*it)->as_instance_view()->
                 as_materialized_view()->manager->layout->allocated_fields));
         }
+        assert((*it)->logical_node == this);
 #endif
       }
     }
@@ -14060,6 +14061,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
         finder = state->valid_views.find(*it);
         assert(!(finder->second - (*it)->manager->layout->allocated_fields));
+        assert((*it)->logical_node == this);
 #endif
       }
     }
