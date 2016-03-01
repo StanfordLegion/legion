@@ -126,6 +126,7 @@ namespace LegionRuntime {
       NEW_OPAQUE_WRAPPER(legion_context_t, CContext *);
       NEW_OPAQUE_WRAPPER(legion_coloring_t, Coloring *);
       NEW_OPAQUE_WRAPPER(legion_domain_coloring_t, DomainColoring *);
+      NEW_OPAQUE_WRAPPER(legion_multi_domain_point_coloring_t, MultiDomainPointColoring *);
       NEW_OPAQUE_WRAPPER(legion_index_space_allocator_t, IndexSpaceAllocator *);
       NEW_OPAQUE_WRAPPER(legion_field_allocator_t, FieldAllocator *);
       NEW_OPAQUE_WRAPPER(legion_argument_map_t, ArgumentMap *);

@@ -49,6 +49,7 @@ extern "C" {
   NEW_OPAQUE_TYPE(legion_context_t);
   NEW_OPAQUE_TYPE(legion_coloring_t);
   NEW_OPAQUE_TYPE(legion_domain_coloring_t);
+  NEW_OPAQUE_TYPE(legion_multi_domain_point_coloring_t);
   NEW_OPAQUE_TYPE(legion_index_space_allocator_t);
   NEW_OPAQUE_TYPE(legion_field_allocator_t);
   NEW_OPAQUE_TYPE(legion_argument_map_t);
@@ -541,6 +542,36 @@ extern "C" {
   legion_domain_coloring_get_color_space(legion_domain_coloring_t handle);
 
   // -----------------------------------------------------------------------
+  // Multi-Domain Coloring Operations
+  // -----------------------------------------------------------------------
+
+  /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see LegionRuntime::HighLevel::MultiDomainPointColoring
+   */
+  legion_multi_domain_point_coloring_t
+  legion_multi_domain_point_coloring_create(void);
+
+  /**
+   * @param handle Caller must have ownership of parameter `handle`.
+   *
+   * @see LegionRuntime::HighLevel::MultiDomainPointColoring
+   */
+  void
+  legion_multi_domain_point_coloring_destroy(
+    legion_multi_domain_point_coloring_t handle);
+
+  /**
+   * @see LegionRuntime::HighLevel::MultiDomainPointColoring
+   */
+  void
+  legion_multi_domain_point_coloring_color_domain(
+    legion_multi_domain_point_coloring_t handle,
+    legion_color_t color,
+    legion_domain_t domain);
+
+  // -----------------------------------------------------------------------
   // Index Space Operations
   // ----------------------------------------------------------------------
 
@@ -635,6 +666,21 @@ extern "C" {
     bool disjoint,
     int part_color /* = AUTO_GENERATE_ID */);
 
+  /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see LegionRuntime::HighLevel::Runtime::create_index_partition(
+   *        Context, IndexSpace, Domain, DomainColoring, bool, int)
+   */
+  legion_index_partition_t
+  legion_index_partition_create_multi_domain_point_coloring(
+    legion_runtime_t runtime,
+    legion_context_t ctx,
+    legion_index_space_t parent,
+    legion_domain_t color_space,
+    legion_multi_domain_point_coloring_t coloring,
+    legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
+    int color /* = AUTO_GENERATE_ID */);
 
   /**
    * @return Caller takes ownership of return value.
