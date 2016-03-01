@@ -93,6 +93,7 @@ namespace Realm {
       }
 
       assert(0);
+      return Processor::NO_PROC;
     }
 
     void Processor::get_group_members(std::vector<Processor>& members)
@@ -192,8 +193,10 @@ namespace Realm {
       get_runtime()->optable.add_local_operation(finish_event, tro);
       // we haven't told anybody about this operation yet, so cancellation really shouldn't
       //  be possible
-      bool ok_to_run = (tro->mark_ready() &&
-			tro->mark_started());
+#ifndef NDEBUG
+      bool ok_to_run =
+#endif
+	(tro->mark_ready() && tro->mark_started());
       assert(ok_to_run);
 
       std::vector<Processor> local_procs;
@@ -280,8 +283,10 @@ namespace Realm {
       get_runtime()->optable.add_local_operation(finish_event, tro);
       // we haven't told anybody about this operation yet, so cancellation really shouldn't
       //  be possible
-      bool ok_to_run = (tro->mark_ready() &&
-			tro->mark_started());
+#ifndef NDEBUG
+      bool ok_to_run =
+#endif
+	(tro->mark_ready() && tro->mark_started());
       assert(ok_to_run);
 
       // do local processors first
@@ -484,8 +489,11 @@ namespace Realm {
       if(poisoned) {
 	// cancel the task - this has to work
 	log_poison.info() << "cancelling poisoned task - task=" << task << " after=" << task->get_finish_event();
-	bool did_cancel = task->attempt_cancellation(Realm::Faults::ERROR_POISONED_PRECONDITION,
-						     &e, sizeof(e));	
+#ifndef NDEBUG
+	bool did_cancel =
+#endif
+	  task->attempt_cancellation(Realm::Faults::ERROR_POISONED_PRECONDITION,
+				     &e, sizeof(e));	
 	assert(did_cancel);
 	task->mark_finished(false);
 	return true;
@@ -588,9 +596,10 @@ namespace Realm {
     ByteArray userdata;
 
     Serialization::FixedBufferDeserializer fbd(data, datalen);
-    bool ok = ((fbd >> procs) &&
-	       (fbd >> codedesc) &&
-	       (fbd >> userdata));
+#ifndef NDEBUG
+    bool ok =
+#endif
+      ((fbd >> procs) && (fbd >> codedesc) && (fbd >> userdata));
     assert(ok && (fbd.bytes_left() == 0));
 
     if(procs.empty()) {
@@ -806,23 +815,24 @@ namespace Realm {
     Processor::TaskFuncPtr fnptr;
     const FunctionPointerImplementation *fpi = codedesc.find_impl<FunctionPointerImplementation>();
 
-    while(!fpi) {
-#ifdef REALM_USE_DLFCN
-      // can we make it from a DSO reference?
-      const DSOReferenceImplementation *dsoref = codedesc.find_impl<DSOReferenceImplementation>();
-      if(dsoref) {
-        FunctionPointerImplementation *newfpi = cvt_dsoref_to_fnptr(dsoref);
-	if(newfpi) {
-	  codedesc.add_implementation(newfpi);
-	  fpi = newfpi;
-	  continue;
-        }
-      }
-#endif
-
-      // no other options?  give up
-      assert(0);
+    // if we don't have a function pointer implementation, see if we can make one
+    if(!fpi) {
+      const std::vector<CodeTranslator *>& translators = get_runtime()->get_code_translators();
+      for(std::vector<CodeTranslator *>::const_iterator it = translators.begin();
+	  it != translators.end();
+	  it++)
+	if((*it)->can_translate<FunctionPointerImplementation>(codedesc)) {
+	  FunctionPointerImplementation *newfpi = (*it)->translate<FunctionPointerImplementation>(codedesc);
+	  if(newfpi) {
+	    log_taskreg.info() << "function pointer created: trans=" << (*it)->name << " fnptr=" << (void *)(newfpi->fnptr);
+	    codedesc.add_implementation(newfpi);
+	    fpi = newfpi;
+	    break;
+	  }
+	}
     }
+
+    assert(fpi != 0);
 
     fnptr = (Processor::TaskFuncPtr)(fpi->fnptr);
 
@@ -849,7 +859,7 @@ namespace Realm {
 
     const TaskTableEntry& tte = it->second;
 
-    log_taskreg.debug() << "task " << func_id << " executing on " << me << ": " << tte.fnptr;
+    log_taskreg.debug() << "task " << func_id << " executing on " << me << ": " << ((void *)(tte.fnptr));
 
     (tte.fnptr)(task_args.base(), task_args.size(),
 		tte.user_data.base(), tte.user_data.size(),

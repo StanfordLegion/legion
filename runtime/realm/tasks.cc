@@ -252,7 +252,10 @@ namespace Realm {
     //  each wait
     while(__sync_fetch_and_add(&counter, 0) == old_counter) {
       // sanity-check
-      long long wv_check = __sync_fetch_and_add(&wait_value, 0);
+#ifndef NDEBUG
+      long long wv_check =
+#endif
+	__sync_fetch_and_add(&wait_value, 0);
 #ifdef DEBUG_WORK_COUNTER
       printf("WC(%p) wait %lld (%lld)\n", this, old_counter, wv_check);
 #endif

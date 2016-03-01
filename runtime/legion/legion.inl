@@ -1667,6 +1667,19 @@ namespace LegionRuntime {
                          Context, Runtime*, const UDT&)>
       static void legion_udt_task_wrapper(const void*, size_t, 
                                           const void*, size_t, Processor);
+
+    public:
+      // Do-it-yourself pre/post-ambles for code generators
+      static void legion_task_preamble(const void *data,
+				       size_t datalen,
+				       Processor p,
+				       const Task *& task,
+				       const std::vector<PhysicalRegion> *& regionsptr,
+				       Context& ctx,
+				       Runtime *& runtime);
+      static void legion_task_postamble(Runtime *runtime, Context ctx,
+					const void *retvalptr = NULL,
+					size_t retvalsize = 0);
     };
     
     //--------------------------------------------------------------------------
@@ -2150,6 +2163,38 @@ namespace LegionRuntime {
       unsigned r = static_cast<unsigned>(right);
       l ^= r;
       return left = static_cast<AllocateMode>(l);
+    }
+
+    //--------------------------------------------------------------------------
+    inline std::ostream& operator<<(std::ostream& os, const LogicalRegion& lr)
+    //--------------------------------------------------------------------------
+    {
+      os << "LogicalRegion(" << lr.tree_id << "," << lr.index_space << "," << lr.field_space << ")";
+      return os;
+    }
+
+    //--------------------------------------------------------------------------
+    inline std::ostream& operator<<(std::ostream& os, const IndexSpace& is)
+    //--------------------------------------------------------------------------
+    {
+      os << "IndexSpace(" << is.id << "," << is.tid << ")";
+      return os;
+    }
+
+    //--------------------------------------------------------------------------
+    inline std::ostream& operator<<(std::ostream& os, const FieldSpace& fs)
+    //--------------------------------------------------------------------------
+    {
+      os << "FieldSpace(" << fs.id << ")";
+      return os;
+    }
+
+    //--------------------------------------------------------------------------
+    inline std::ostream& operator<<(std::ostream& os, const PhaseBarrier& pb)
+    //--------------------------------------------------------------------------
+    {
+      os << "PhaseBarrier(" << pb.phase_barrier << ")";
+      return os;
     }
 
   };

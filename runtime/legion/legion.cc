@@ -691,6 +691,13 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    bool PhaseBarrier::operator!=(const PhaseBarrier &rhs) const
+    //--------------------------------------------------------------------------
+    {
+      return (phase_barrier != rhs.phase_barrier);
+    }
+
+    //--------------------------------------------------------------------------
     void PhaseBarrier::arrive(unsigned count /*=1*/)
     //--------------------------------------------------------------------------
     {
@@ -3982,6 +3989,36 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    VariantID Runtime::register_task_variant(const TaskVariantRegistrar &registrar,
+		  const CodeDescriptor &codedesc,
+		  const void *user_data /*= NULL*/,
+		  size_t user_len /*= 0*/)
+    //--------------------------------------------------------------------------
+    {
+      // if this needs to be correct, we need two versions...
+      bool has_return = false;
+      CodeDescriptor *realm_desc = new CodeDescriptor(codedesc);
+      return register_variant(registrar, has_return, user_data, user_len,
+                              realm_desc);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ VariantID Runtime::preregister_task_variant(
+              const TaskVariantRegistrar &registrar,
+	      const CodeDescriptor &codedesc,
+	      const void *user_data /*= NULL*/,
+	      size_t user_len /*= 0*/,
+	      const char *task_name /*= NULL*/)
+    //--------------------------------------------------------------------------
+    {
+      // if this needs to be correct, we need two versions...
+      bool has_return = false;
+      CodeDescriptor *realm_desc = new CodeDescriptor(codedesc);
+      return preregister_variant(registrar, user_data, user_len,
+				 realm_desc, has_return, task_name);
+    }
+
+    //--------------------------------------------------------------------------
     VariantID Runtime::register_variant(const TaskVariantRegistrar &registrar,
                   bool has_return, const void *user_data, size_t user_data_size,
                   CodeDescriptor *realm)
@@ -4344,6 +4381,44 @@ namespace LegionRuntime {
       return runtime->runtime->sample_unmapped_tasks(proc, 
                                                      const_cast<Mapper*>(this));
     } 
+
+    /////////////////////////////////////////////////////////////
+    // LegionTaskWrapper
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    /*static*/ void LegionTaskWrapper::legion_task_preamble(
+                  const void *data,
+		  size_t datalen,
+		  Processor p,
+		  const Task *& task,
+		  const std::vector<PhysicalRegion> *& regionsptr,
+		  Context& ctx,
+		  Runtime *& runtime)
+    //--------------------------------------------------------------------------
+    {
+      // Get the high level runtime
+      runtime = Runtime::get_runtime(p);
+
+      // Read the context out of the buffer
+#ifdef DEBUG_HIGH_LEVEL
+      assert(datalen == sizeof(Context));
+#endif
+      ctx = *((const Context*)data);
+      task = reinterpret_cast<Task*>(ctx);
+
+      regionsptr = &runtime->begin_task(ctx);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void LegionTaskWrapper::legion_task_postamble(
+                  Runtime *runtime, Context ctx,
+		  const void *retvalptr /*= NULL*/,
+		  size_t retvalsize /*= 0*/)
+    //--------------------------------------------------------------------------
+    {
+      runtime->end_task(ctx, retvalptr, retvalsize);
+    }
 
   }; // namespace HighLevel
 }; // namespace LegionRuntime

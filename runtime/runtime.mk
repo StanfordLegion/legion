@@ -134,6 +134,24 @@ LEGION_LD_FLAGS += -ldl -Wl,-export_dynamic
 endif
 endif
 
+USE_LLVM ?= 0
+ifeq ($(strip $(USE_LLVM)),1)
+  # prefer 3.5 (actually, require it right now)
+  LLVM_CONFIG ?= $(shell which llvm-config-3.5 llvm-config | head -1)
+  ifeq ($(LLVM_CONFIG),)
+    $(error cannot find llvm-config-* - set with LLVM_CONFIG if not in path)
+  endif
+  CC_FLAGS += -DREALM_USE_LLVM
+  # NOTE: do not use these for all source files - just the ones that include llvm include files
+  LLVM_CXXFLAGS ?= -std=c++11 -I$(shell $(LLVM_CONFIG) --includedir)
+  LEGION_LD_FLAGS += $(shell $(LLVM_CONFIG) --ldflags --libs irreader jit mcjit x86)
+  # llvm-config --system-libs gives you all the libraries you might need for anything,
+  #  which includes things we don't need, and might not be installed
+  # by default, filter out libedit
+  LLVM_SYSTEM_LIBS ?= $(filter-out -ledit,$(shell $(LLVM_CONFIG) --system-libs))
+  LEGION_LD_FLAGS += $(LLVM_SYSTEM_LIBS)
+endif
+
 # Flags for running in the general low-level runtime
 ifeq ($(strip $(SHARED_LOWLEVEL)),0)
 
@@ -307,6 +325,10 @@ ifeq ($(strip $(USE_CUDA)),1)
 LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/cuda/cuda_module.cc \
 		   $(LG_RT_DIR)/realm/cuda/cudart_hijack.cc
 endif
+ifeq ($(strip $(USE_LLVM)),1)
+LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/llvmjit/llvmjit_module.cc \
+                   $(LG_RT_DIR)/realm/llvmjit/llvmjit_internal.cc
+endif
 ifeq ($(strip $(USE_GASNET)),1)
 LOW_RUNTIME_SRC += $(LG_RT_DIR)/activemsg.cc
 endif
@@ -427,3 +449,7 @@ clean::
 
 endif
 
+ifeq ($(strip $(USE_LLVM)),1)
+llvmjit_internal.o : CC_FLAGS += $(LLVM_CXXFLAGS)
+%/llvmjit_internal.o : CC_FLAGS += $(LLVM_CXXFLAGS)
+endif

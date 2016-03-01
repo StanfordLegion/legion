@@ -380,7 +380,7 @@ namespace Realm {
 	    break;
 	  }
 
-	default: assert(0);
+	default: assert(0); return RegionInstance::NO_INST;
 	}
 
 	num_elements = inst_extent.volume();
@@ -596,7 +596,7 @@ namespace Realm {
 	    break;
 	  }
 
-	default: assert(0);
+	default: assert(0); return RegionInstance::NO_INST;
 	}
 
 	num_elements = inst_extent.volume();

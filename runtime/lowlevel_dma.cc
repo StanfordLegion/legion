@@ -535,8 +535,11 @@ namespace LegionRuntime {
       if(poisoned) {
 	Realm::log_poison.info() << "cancelling poisoned dma operation - op=" << req << " after=" << req->get_finish_event();
 	// cancel the dma operation - this has to work
-	bool did_cancel = req->attempt_cancellation(Realm::Faults::ERROR_POISONED_PRECONDITION,
-						    &e, sizeof(e));	
+#ifndef NDEBUG
+	bool did_cancel =
+#endif
+	  req->attempt_cancellation(Realm::Faults::ERROR_POISONED_PRECONDITION,
+				    &e, sizeof(e));	
 	assert(did_cancel);
 	return false;
       }
@@ -1934,7 +1937,10 @@ namespace LegionRuntime {
       struct iocb *cbs[1];
       cbs[0] = &cb;
       log_aio.debug("write issued: op=%p cb=%p", this, &cb);
-      int ret = io_submit(ctx, 1, cbs);
+#ifndef NDEBUG
+      int ret =
+#endif
+	io_submit(ctx, 1, cbs);
       assert(ret == 1);
     }
 
@@ -1976,7 +1982,10 @@ namespace LegionRuntime {
       struct iocb *cbs[1];
       cbs[0] = &cb;
       log_aio.debug("read issued: op=%p cb=%p", this, &cb);
-      int ret = io_submit(ctx, 1, cbs);
+#ifndef NDEBUG
+      int ret =
+#endif
+	io_submit(ctx, 1, cbs);
       assert(ret == 1);
     }
 
@@ -2113,7 +2122,10 @@ namespace LegionRuntime {
     {
 #ifdef REALM_USE_KERNEL_AIO
       aio_ctx = 0;
-      int ret = io_setup(max_depth, &aio_ctx);
+#ifndef NDEBUG
+      int ret =
+#endif
+	io_setup(max_depth, &aio_ctx);
       assert(ret == 0);
 #endif
     }
@@ -2123,7 +2135,10 @@ namespace LegionRuntime {
       assert(pending_operations.empty());
       assert(launched_operations.empty());
 #ifdef REALM_USE_KERNEL_AIO
-      int ret = io_destroy(aio_ctx);
+#ifndef NDEBUG
+      int ret =
+#endif
+	io_destroy(aio_ctx);
       assert(ret == 0);
 #endif
     }
@@ -3503,6 +3518,7 @@ namespace LegionRuntime {
 	return true;
 
       assert(0);
+      return false;
     }
 
     template <unsigned DIM>
@@ -4723,6 +4739,8 @@ namespace Realm {
       assert(redop_id == 0);
 
       assert(0);
+      log_dma.warning("ignoring copy\n");
+      return Event::NO_EVENT;
     }
 
     Event Domain::copy_indirect(const CopySrcDstField& idx,
@@ -4735,6 +4753,8 @@ namespace Realm {
       assert(redop_id == 0);
 
       assert(0);
+      log_dma.warning("ignoring copy\n");
+      return Event::NO_EVENT;
     }
 
 };
