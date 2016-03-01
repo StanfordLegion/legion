@@ -451,6 +451,7 @@ namespace LegionRuntime {
       assert(impl != NULL);
 #endif
       const size_t result_size = impl->get_untyped_size();
+#ifdef PERFORM_PREDICATE_SIZE_CHECKS
       if (result_size != variants->return_size)
       {
         log_run.error("Predicated task launch for task %s "
@@ -465,6 +466,7 @@ namespace LegionRuntime {
 #endif
         exit(ERROR_PREDICATE_RESULT_SIZE_MISMATCH);
       }
+#endif
       return result_size;
     }
 
@@ -6256,6 +6258,7 @@ namespace LegionRuntime {
           }
           else
           {
+#ifdef PERFORM_PREDICATE_SIZE_CHECKS
             if (predicate_false_size != variants->return_size)
             {
               log_run.error("Predicated task launch for task %s "
@@ -6270,6 +6273,7 @@ namespace LegionRuntime {
 #endif
               exit(ERROR_PREDICATE_RESULT_SIZE_MISMATCH);
             }
+#endif
 #ifdef DEBUG_HIGH_LEVEL
             assert(predicate_false_result == NULL);
 #endif
@@ -8804,6 +8808,7 @@ namespace LegionRuntime {
         }
         else
         {
+#ifdef PERFORM_PREDICATE_SIZE_CHECKS
           if (predicate_false_size != variants->return_size)
           {
             log_run.error("Predicated index task launch for task %s "
@@ -8818,6 +8823,7 @@ namespace LegionRuntime {
 #endif
             exit(ERROR_PREDICATE_RESULT_SIZE_MISMATCH);
           }
+#endif
 #ifdef DEBUG_HIGH_LEVEL
           assert(predicate_false_result == NULL);
 #endif
