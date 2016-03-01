@@ -2975,12 +2975,6 @@ function std.setup(main_task)
   end
 
   local names = {main = main}
-  for _, task in ipairs(tasks) do
-    local name = tostring(task:getname())
-    assert(not names[name])
-    names[name] = task:getdefinition()
-  end
-
   return main, names
 end
 
