@@ -88,7 +88,9 @@ REALM_LIB := librealm.a
 run_all : $(TESTS:%=run_%)
 
 run_% : %
-	$(call LAUNCHER, ./$*) $(TESTARGS_$*)
+	# this echos exactly once, even if -s was specified
+	@echo $(call LAUNCHER, ./$*) $(TESTARGS_$*)
+	@$(call LAUNCHER, ./$*) $(TESTARGS_$*)
 
 build : $(TESTS)
 
@@ -100,7 +102,7 @@ $(TESTS) : % : %.cc librealm.a
 
 $(REALM_LIB) : $(REALM_OBJS)
 	rm -f $(REALM_LIB)
-	ar rcv $(REALM_LIB) $(REALM_OBJS)
+	ar rc $(REALM_LIB) $(REALM_OBJS)
 
 %.o : %.cc
 	$(CXX) -fPIC -o $@ -c $< $(INC_FLAGS) $(CC_FLAGS)
