@@ -30,25 +30,35 @@ USE_GASNET      ?= 0		# Include GASNet support (requires GASNet)
 USE_HDF         ?= 0		# Include HDF5 support (requires HDF5)
 ALT_MAPPERS     ?= 0		# Include alternative mappers (not recommended)
 
+# The following flag controls whether the binding library is allowed
+# to include and link against Terra/Lua itself. This is required for
+# use of the Lua bindings, but not for Regent and Terra-based programs
+# which do not use the Lua API wrappers.
+BINDINGS_USE_TERRA ?= 1
+
 # Put the binary file name here
 OUTFILE		?= liblegion_terra.so
 # List all the application source files here
-GEN_SRC		?= \
-  legion_terra.cc lua_mapper_wrapper.cc \
-  legion_terra_partitions.cc \
-  bishop_mapper.cc bishop_c.cc
+GEN_SRC		?= legion_terra.cc legion_terra_partitions.cc bishop_mapper.cc bishop_c.cc
   # .cc files
 GEN_GPU_SRC	?=		# .cu files
+
+ifeq ($(strip $(BINDINGS_USE_TERRA)),1)
+GEN_SRC += lua_mapper_wrapper.cc legion_terra_tasks.cc
+endif
 
 ifeq ($(strip $(USE_CUDA)),1)
 GEN_SRC += legion_terra_cudart_hijack.cc
 endif
 
-CC_FLAGS ?= #-DPROF_BINDING #-DPOINTER_CHECKS #-DLEGION_SPY
+CC_FLAGS ?= #-DPROF_BINDING #-DBOUNDS_CHECKS #-DLEGION_SPY
 NVCC_FLAGS ?=
 GASNET_FLAGS ?=
+INC_FLAGS ?=
+ifeq ($(strip $(BINDINGS_USE_TERRA)),1)
 INC_FLAGS += -I$(TERRA_DIR)/release/include/terra -I$(TERRA_DIR)/include/terra
-LD_FLAGS +=
+endif
+LD_FLAGS += -Wl,--whole-archive -llegion -Wl,--no-whole-archive
 
 CC_FLAGS += -fPIC -DASSUME_UNALLOCABLE
 ifeq ($(shell uname), Darwin)
