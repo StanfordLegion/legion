@@ -331,6 +331,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool LayoutDescription::match_layout(const LayoutDescription *layout) const
+    //--------------------------------------------------------------------------
+    {
+      if (layout->allocated_fields != allocated_fields)
+        return false;
+      if (!constraints->equal(*(layout->constraints)))
+        return false;
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
     void LayoutDescription::set_descriptor(FieldDataDescriptor &desc,
                                            FieldID fid) const
     //--------------------------------------------------------------------------

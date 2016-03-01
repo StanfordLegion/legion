@@ -69,6 +69,7 @@ namespace Legion {
       void get_fields(std::vector<FieldID>& fields) const;
     public:
       bool match_layout(const LayoutConstraintSet &constraints) const;
+      bool match_layout(const LayoutDescription *layout) const;
     public:
       void set_descriptor(FieldDataDescriptor &desc, FieldID fid) const;
     public:

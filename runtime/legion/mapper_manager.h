@@ -288,6 +288,28 @@ namespace Legion {
       void broadcast(MappingCallInfo *info, const void *message, 
                      size_t message_size, int radix);
     public:
+      void find_valid_variants(MappingCallInfo *ctx, TaskID task_id,
+                               std::vector<VariantID> &valid_variants,
+                               Processor::Kind kind);
+      bool is_leaf_variant(MappingCallInfo *ctx, TaskID task_id, 
+                           VariantID variant_id);
+      bool is_inner_variant(MappingCallInfo *ctx, TaskID task_id, 
+                            VariantID variant_id);
+      bool is_idempotent_variant(MappingCallInfo *ctx,
+                                 TaskID task_id, VariantID variant_id);
+    public:
+      void filter_variants(MappingCallInfo *ctx, const Task &task,
+            const std::vector<std::vector<PhysicalInstance> > &chosen_instances,
+                           std::vector<VariantID> &variants);
+      void filter_instances(MappingCallInfo *ctx, const Task &task,
+                            VariantID chosen_variant,
+                  std::vector<std::vector<PhysicalInstance> > &chosen_instances,
+                  std::vector<std::set<FieldID> > &missing_fields);
+      void filter_instances(MappingCallInfo *ctx, const Task &task,
+                            unsigned index, VariantID chosen_variant,
+                            std::vector<PhysicalInstance> &instances,
+                            std::set<FieldID> &misssing_fields);
+    public:
       bool create_physical_instance(MappingCallInfo *ctx, Memory target_memory,
                                     const LayoutConstraintSet &constraints, 
                                     const std::vector<LogicalRegion> &regions,

@@ -1010,6 +1010,8 @@ namespace Legion {
     public:
       void add_variant(VariantImpl *impl);
       VariantImpl* find_variant_impl(VariantID variant_id, bool can_fail);
+      void find_valid_variants(std::vector<VariantID> &valid_variants, 
+                               Processor::Kind kind) const;
     public:
       const char* get_name(bool needs_lock = true) const;
       void attach_semantic_information(SemanticTag tag, AddressSpaceID source,

@@ -5388,6 +5388,34 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void TaskImpl::find_valid_variants(std::vector<VariantID> &valid_variants,
+                                       Processor::Kind kind) const
+    //--------------------------------------------------------------------------
+    {
+      if (kind == Processor::NO_KIND)
+      {
+        AutoLock t_lock(task_lock,1,false/*exclusive*/);
+        valid_variants.resize(variants.size());
+        unsigned idx = 0;
+        for (std::map<VariantID,VariantImpl*>::const_iterator it = 
+              variants.begin(); it != variants.end(); it++, idx++)
+        {
+          valid_variants[idx] = it->first; 
+        }
+      }
+      else
+      {
+        AutoLock t_lock(task_lock,1,false/*exclusive*/);
+        for (std::map<VariantID,VariantImpl*>::const_iterator it = 
+              variants.begin(); it != variants.end(); it++)
+        {
+          if (kind == it->second->get_processor_kind(false/*warn*/))
+            valid_variants.push_back(it->first);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
     const char* TaskImpl::get_name(bool needs_lock /*= true*/) const
     //--------------------------------------------------------------------------
     {

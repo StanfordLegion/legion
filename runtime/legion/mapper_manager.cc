@@ -939,6 +939,96 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void MapperManager::find_valid_variants(MappingCallInfo *ctx,TaskID task_id,
+                                         std::vector<VariantID> &valid_variants,
+                                         Processor::Kind kind)
+    //--------------------------------------------------------------------------
+    {
+      pause_mapper_call(ctx);
+      TaskImpl *task_impl = runtime->find_or_create_task_impl(task_id);
+      task_impl->find_valid_variants(valid_variants, kind);
+      resume_mapper_call(ctx);
+    }
+    
+    //--------------------------------------------------------------------------
+    bool MapperManager::is_leaf_variant(MappingCallInfo *ctx,
+                                        TaskID task_id, VariantID variant_id)
+    //--------------------------------------------------------------------------
+    {
+      pause_mapper_call(ctx);
+      VariantImpl *impl = runtime->find_variant_impl(task_id, variant_id);
+      bool result = impl->is_leaf();
+      resume_mapper_call(ctx);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    bool MapperManager::is_inner_variant(MappingCallInfo *ctx,
+                                         TaskID task_id, VariantID variant_id)
+    //--------------------------------------------------------------------------
+    {
+      pause_mapper_call(ctx);
+      VariantImpl *impl = runtime->find_variant_impl(task_id, variant_id);
+      bool result = impl->is_inner();
+      resume_mapper_call(ctx);
+      return result;
+    }
+    
+    //--------------------------------------------------------------------------
+    bool MapperManager::is_idempotent_variant(MappingCallInfo *ctx,
+                                           TaskID task_id, VariantID variant_id)
+    //--------------------------------------------------------------------------
+    {
+      pause_mapper_call(ctx);
+      VariantImpl *impl = runtime->find_variant_impl(task_id, variant_id);
+      bool result = impl->is_idempotent();
+      resume_mapper_call(ctx);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    void MapperManager::filter_variants(MappingCallInfo *ctx, const Task &task,
+            const std::vector<std::vector<PhysicalInstance> > &chosen_instances,
+                                        std::vector<VariantID> &variants)
+    //--------------------------------------------------------------------------
+    {
+      pause_mapper_call(ctx);
+
+      resume_mapper_call(ctx);
+    }
+
+    //--------------------------------------------------------------------------
+    void MapperManager::filter_instances(MappingCallInfo *ctx, const Task &task,
+                                         VariantID chosen_variant,
+                  std::vector<std::vector<PhysicalInstance> > &chosen_instances,
+                  std::vector<std::set<FieldID> > &missing_fields)
+    //--------------------------------------------------------------------------
+    {
+      pause_mapper_call(ctx);
+      VariantImpl *impl = runtime->find_variant_impl(task.task_id, 
+                                                     chosen_variant);
+      const TaskLayoutConstraintSet &layout_constraints = 
+                                        impl->get_layout_constraints();
+      for (unsigned idx = 0; idx < task.regions.size(); idx++)
+      {
+
+      }
+      resume_mapper_call(ctx);
+    }
+    
+    //--------------------------------------------------------------------------
+    void MapperManager::filter_instances(MappingCallInfo *ctx, const Task &task,
+                            unsigned index, VariantID chosen_variant,
+                            std::vector<PhysicalInstance> &instances,
+                            std::set<FieldID> &misssing_fields)
+    //--------------------------------------------------------------------------
+    {
+      pause_mapper_call(ctx);
+
+      resume_mapper_call(ctx);
+    }
+
+    //--------------------------------------------------------------------------
     bool MapperManager::create_physical_instance(
                                     MappingCallInfo *ctx, Memory target_memory,
                                     const LayoutConstraintSet &constraints, 

@@ -1213,28 +1213,30 @@ namespace Legion {
       void mapper_rt_find_valid_variants(MapperContext ctx, TaskID task_id, 
                                          std::vector<VariantID> &valid_variants,
                                Processor::Kind kind = Processor::NO_KIND) const;
-      bool mapper_rt_is_leaf_variant(VariantID variant_id) const;
-      bool mapper_rt_is_inner_variant(VariantID variant_id) const;
-      bool mapper_rt_is_idempotent_variant(VariantID variant_id) const;
+      bool mapper_rt_is_leaf_variant(MapperContext ctx, TaskID task_id,
+                                     VariantID variant_id) const;
+      bool mapper_rt_is_inner_variant(MapperContext ctx, TaskID task_id,
+                                      VariantID variant_id)const;
+      bool mapper_rt_is_idempotent_variant(MapperContext ctx, TaskID task_id,
+                                           VariantID variant_id) const;
     protected:
       //------------------------------------------------------------------------
       // Methods for accelerating mapping decisions
       //------------------------------------------------------------------------
       // Filter variants based on the chosen instances
       void mapper_rt_filter_variants(MapperContext ctx, const Task &task,
-                                  const std::vector<VariantID>        &variants,
              const std::vector<std::vector<PhysicalInstance> > &chosen_intances,
-                           std::vector<VariantID>              &results);
+                           std::vector<VariantID>              &variants);
       // Filter instances based on a chosen variant
       void mapper_rt_filter_instances(MapperContext ctx, const Task &task,
                                       VariantID chosen_variant, 
-                   const std::vector<std::vector<PhysicalInstance> > &instances,
+                        std::vector<std::vector<PhysicalInstance> > &instances,
                                std::vector<std::set<FieldID> > &missing_fields);
       // Filter a specific set of instances for one region requirement
       void mapper_rt_filter_instances(MapperContext ctx, const Task &task,
                                       unsigned index, VariantID chosen_variant,
-                                const std::vector<PhysicalInstance> &instances,
-                               std::vector<std::set<FieldID> > &missing_fields);
+                                      std::vector<PhysicalInstance> &instances,
+                                      std::set<FieldID> &missing_fields);
     protected:
       //------------------------------------------------------------------------
       // Methods for managing physical instances 

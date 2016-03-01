@@ -211,6 +211,70 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Mapper::mapper_rt_find_valid_variants(MapperContext ctx,TaskID task_id,
+                                         std::vector<VariantID> &valid_variants,
+                                         Processor::Kind kind) const
+    //--------------------------------------------------------------------------
+    {
+      ctx->manager->find_valid_variants(ctx,task_id,valid_variants,kind);
+    }
+
+    //--------------------------------------------------------------------------
+    bool Mapper::mapper_rt_is_leaf_variant(MapperContext ctx, TaskID task_id,
+                                           VariantID variant_id) const
+    //--------------------------------------------------------------------------
+    {
+      return ctx->manager->is_leaf_variant(ctx, task_id, variant_id);
+    }
+
+    //--------------------------------------------------------------------------
+    bool Mapper::mapper_rt_is_inner_variant(MapperContext ctx, TaskID task_id,
+                                            VariantID variant_id) const
+    //--------------------------------------------------------------------------
+    {
+      return ctx->manager->is_inner_variant(ctx, task_id, variant_id);
+    }
+
+    //--------------------------------------------------------------------------
+    bool Mapper::mapper_rt_is_idempotent_variant(MapperContext ctx, 
+                                     TaskID task_id, VariantID variant_id) const
+    //--------------------------------------------------------------------------
+    {
+      return ctx->manager->is_idempotent_variant(ctx, task_id, variant_id);
+    }
+
+    //--------------------------------------------------------------------------
+    void Mapper::mapper_rt_filter_variants(MapperContext ctx, const Task &task,
+             const std::vector<std::vector<PhysicalInstance> > &chosen_intances,
+                                           std::vector<VariantID> &variants)
+    //--------------------------------------------------------------------------
+    {
+      ctx->manager->filter_variants(ctx, task, chosen_instances, variants);
+    }
+
+    //--------------------------------------------------------------------------
+    void Mapper::mapper_rt_filter_instances(MapperContext ctx, const Task &task,
+                                      VariantID chosen_variant, 
+                        std::vector<std::vector<PhysicalInstance> > &instances,
+                               std::vector<std::set<FieldID> > &missing_fields)
+    //--------------------------------------------------------------------------
+    {
+      ctx->manager->filter_instances(ctx, task, chosen_variant, 
+                                     instances, missing_fields);
+    }
+
+    //--------------------------------------------------------------------------
+    void Mapper::mapper_rt_filter_instances(MapperContext ctx, const Task &task,
+                                      unsigned index, VariantID chosen_variant,
+                                      std::vector<PhysicalInstance> &instances,
+                                      std::set<FieldID> &missing_fields)
+    //--------------------------------------------------------------------------
+    {
+      ctx->manager->filter_instances(ctx, task, index, chosen_variant,
+                                     instances, missing_fields);
+    }
+
+    //--------------------------------------------------------------------------
     bool Mapper::mapper_rt_create_physical_instance(
                                     MapperContext ctx, Memory target_memory,
                                     const LayoutConstraintSet &constraints, 

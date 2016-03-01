@@ -7056,6 +7056,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void IndividualTask::perform_physical_traversal(unsigned idx, 
+                                      RegionTreeContext ctx, InstanceSet &valid)
+    //--------------------------------------------------------------------------
+    {
+      runtime->forest->physical_traverse_path(ctx, privilege_paths[idx],
+                                              regions[idx], version_infos[idx],
+                                              this, true/*find valid*/, valid
+#ifdef DEBUG_HIGH_LEVEL
+                                              , idx, get_logging_name() 
+                                              , get_unique_id()
+#endif
+                                              );
+    }
+
+    //--------------------------------------------------------------------------
     bool IndividualTask::pack_task(Serializer &rez, Processor target)
     //--------------------------------------------------------------------------
     {
@@ -7640,6 +7655,31 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void PointTask::perform_physical_traversal(unsigned idx,
+                                      RegionTreeContext ctx, InstanceSet &valid)
+    //--------------------------------------------------------------------------
+    {
+      // We only need to traverse from the upper bound region because our
+      // slice already traversed down to the upper bound for all points
+      RegionTreePath traversal_path;
+      const RegionRequirement &orig_req = slice_owner->regions[idx];
+      if (orig_req.handle_type == PART_PROJECTION)
+        runtime->forest->initialize_path(regions[idx].region.get_index_space(),
+            orig_req.partition.get_index_partition(), traversal_path);
+      else
+        runtime->forest->initialize_path(regions[idx].region.get_index_space(),
+            orig_req.region.get_index_space(), traversal_path);
+      runtime->forest->physical_traverse_path(ctx, traversal_path, regions[idx],
+                                             slice_owner->get_version_info(idx),
+                                             this, true/*find valid*/, valid
+#ifdef DEBUG_HIGH_LEVEL
+                                             , idx, get_logging_name()
+                                             , get_unique_id()
+#endif
+                                             );
+    }
+
+    //--------------------------------------------------------------------------
     bool PointTask::pack_task(Serializer &rez, Processor target)
     //--------------------------------------------------------------------------
     {
@@ -7842,6 +7882,15 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void WrapperTask::trigger_task_commit(void)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void WrapperTask::perform_physical_traversal(unsigned idx,
+                                      RegionTreeContext ctx, InstanceSet &valid)
     //--------------------------------------------------------------------------
     {
       // should never be called

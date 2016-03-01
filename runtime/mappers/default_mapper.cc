@@ -457,7 +457,8 @@ namespace Legion {
         // a variant for a specific kind
         if (cache_result)
         {
-          result.is_inner = mapper_rt_is_inner_variant(result.variant);
+          result.is_inner = mapper_rt_is_inner_variant(ctx, task.task_id,
+                                                       result.variant);
           preferred_variants[task.task_id] = result;
         }
         return result;
