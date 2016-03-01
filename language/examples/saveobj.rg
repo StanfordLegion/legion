@@ -23,9 +23,12 @@ end
 task main()
   hello()
 end
-regentlib.saveobj(main, "saveobj", "executable")
+
+local exe = os.tmpname()
+regentlib.saveobj(main, exe, "executable")
+print("Saved executable to " .. exe)
 -- If this were using regentlib.start, there's no way you'd ever call
 -- main() three times. (Legion is not re-entrant.)
-assert(os.execute("./saveobj") == 0)
-assert(os.execute("./saveobj") == 0)
-assert(os.execute("./saveobj") == 0)
+assert(os.execute(exe) == 0)
+assert(os.execute(exe) == 0)
+assert(os.execute(exe) == 0)
