@@ -1935,8 +1935,10 @@ namespace LegionRuntime {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    IndexIterator::IndexIterator(const Domain &dom)
-      : enumerator(dom.get_index_space().get_valid_mask().enumerate_enabled())
+    IndexIterator::IndexIterator(const Domain &dom, ptr_t start)
+      : enumerator(dom
+		   .get_index_space().get_valid_mask()
+		   .enumerate_enabled(start.value))
     //--------------------------------------------------------------------------
     {
       finished = !(enumerator->get_next(current_pointer,remaining_elmts));
@@ -1944,21 +1946,23 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     IndexIterator::IndexIterator(Runtime *rt, Context ctx,
-                                 IndexSpace space)
+                                 IndexSpace space, ptr_t start)
     //--------------------------------------------------------------------------
     {
       Domain dom = rt->get_index_space_domain(ctx, space);
-      enumerator = dom.get_index_space().get_valid_mask().enumerate_enabled();
+      enumerator = dom.get_index_space().get_valid_mask()
+ 	              .enumerate_enabled(start.value);
       finished = !(enumerator->get_next(current_pointer,remaining_elmts));
     }
 
     //--------------------------------------------------------------------------
     IndexIterator::IndexIterator(Runtime *rt, Context ctx,
-                                 LogicalRegion handle)
+                                 LogicalRegion handle, ptr_t start)
     //--------------------------------------------------------------------------
     {
       Domain dom = rt->get_index_space_domain(ctx, handle.get_index_space());
-      enumerator = dom.get_index_space().get_valid_mask().enumerate_enabled();
+      enumerator = dom.get_index_space().get_valid_mask()
+	              .enumerate_enabled(start.value);
       finished = !(enumerator->get_next(current_pointer,remaining_elmts));
     }
 
