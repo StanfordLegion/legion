@@ -157,6 +157,51 @@ public:
 #undef NEW_OPAQUE_WRAPPER
 };
 
+#if !USE_LEGION_CROSS_PRODUCT
+static void
+create_cross_product_coloring(HighLevelRuntime *runtime,
+                              Context ctx,
+                              IndexPartition lhs,
+                              IndexPartition rhs,
+                              std::map<Color, Coloring> &coloring)
+{
+  Domain lhs_colors = runtime->get_index_partition_color_space(ctx, lhs);
+  Domain rhs_colors = runtime->get_index_partition_color_space(ctx, rhs);
+
+  for (Domain::DomainPointIterator lh_dp(lhs_colors); lh_dp; lh_dp++) {
+    Color lh_color = lh_dp.p.get_point<1>()[0];
+    IndexSpace lh_space = runtime->get_index_subspace(ctx, lhs, lh_color);
+
+    for (Domain::DomainPointIterator rh_dp(rhs_colors); rh_dp; rh_dp++) {
+      Color rh_color = rh_dp.p.get_point<1>()[0];
+      IndexSpace rh_space = runtime->get_index_subspace(ctx, rhs, rh_color);
+
+      for (IndexIterator lh_it(runtime, ctx, lh_space); lh_it.has_next();) {
+        size_t lh_count = 0;
+        ptr_t lh_ptr = lh_it.next_span(lh_count);
+        ptr_t lh_end = lh_ptr.value + lh_count - 1;
+
+        for (IndexIterator rh_it(runtime, ctx, rh_space, lh_ptr); rh_it.has_next();) {
+          size_t rh_count = 0;
+          ptr_t rh_ptr = rh_it.next_span(rh_count);
+          ptr_t rh_end = rh_ptr.value + rh_count - 1;
+          if (rh_ptr.value > lh_end.value) {
+            break;
+          }
+
+          if (rh_end.value > lh_end.value) {
+            coloring[lh_color][rh_color].ranges.insert(std::pair<ptr_t, ptr_t>(rh_ptr, lh_end));
+            break;
+          }
+
+          coloring[lh_color][rh_color].ranges.insert(std::pair<ptr_t, ptr_t>(rh_ptr, rh_end));
+        }
+      }
+    }
+  }
+}
+#endif
+
 void
 create_cross_product(HighLevelRuntime *runtime,
                      Context ctx,
@@ -180,39 +225,54 @@ create_cross_product(HighLevelRuntime *runtime,
   Domain lhs_colors = runtime->get_index_partition_color_space(ctx, lhs);
   Domain rhs_colors = runtime->get_index_partition_color_space(ctx, rhs);
 
+  // The efficiency of this algorithm depends heavily on how many
+  // spans are in lhs and rhs. Since it is *MUCH* better to have a
+  // smaller number of spans on lhs, it is worth spending a little
+  // time here estimating which will have fewer spans.
+
+  bool flip = false;
+  for (Domain::DomainPointIterator lh_dp(lhs_colors), rh_dp(rhs_colors); lh_dp && rh_dp;) {
+    Color lh_color = lh_dp.p.get_point<1>()[0];
+    IndexSpace lh_space = runtime->get_index_subspace(ctx, lhs, lh_color);
+    Color rh_color = rh_dp.p.get_point<1>()[0];
+    IndexSpace rh_space = runtime->get_index_subspace(ctx, rhs, rh_color);
+
+    IndexIterator lh_it(runtime, ctx, lh_space);
+    IndexIterator rh_it(runtime, ctx, rh_space);
+    for (; lh_it.has_next() && rh_it.has_next();) {
+      size_t lh_count = 0;
+      lh_it.next_span(lh_count);
+      size_t rh_count = 0;
+      rh_it.next_span(rh_count);
+    }
+
+    flip = lh_it.has_next() && !rh_it.has_next();
+    break;
+  }
+
+  std::map<Color, Coloring> coloring;
+  if (flip) {
+    create_cross_product_coloring(runtime, ctx, rhs, lhs, coloring);
+  } else {
+    create_cross_product_coloring(runtime, ctx, lhs, rhs, coloring);
+  }
+
   for (Domain::DomainPointIterator lh_dp(lhs_colors); lh_dp; lh_dp++) {
     Color lh_color = lh_dp.p.get_point<1>()[0];
     IndexSpace lh_space = runtime->get_index_subspace(ctx, lhs, lh_color);
 
-    Coloring lh_coloring;
+    Coloring empty; // Make sure this stays on the stack while we need it...
+    Coloring &lh_coloring = flip ? empty : coloring[lh_color];
     for (Domain::DomainPointIterator rh_dp(rhs_colors); rh_dp; rh_dp++) {
       Color rh_color = rh_dp.p.get_point<1>()[0];
-      IndexSpace rh_space = runtime->get_index_subspace(ctx, rhs, rh_color);
+
+      // Flip order of coloring.
+      if (flip) {
+        lh_coloring[rh_color] = coloring[rh_color][lh_color];
+      }
 
       // Ensure the color exists.
       lh_coloring[rh_color];
-
-      for (IndexIterator lh_it(runtime, ctx, lh_space); lh_it.has_next();) {
-        size_t lh_count = 0;
-        ptr_t lh_ptr = lh_it.next_span(lh_count);
-        ptr_t lh_end = lh_ptr.value + lh_count - 1;
-
-        for (IndexIterator rh_it(runtime, ctx, rh_space, lh_ptr); rh_it.has_next();) {
-          size_t rh_count = 0;
-          ptr_t rh_ptr = rh_it.next_span(rh_count);
-          ptr_t rh_end = rh_ptr.value + rh_count - 1;
-          if (rh_ptr.value > lh_end.value) {
-            break;
-          }
-
-          if (rh_end.value > lh_end.value) {
-            lh_coloring[rh_color].ranges.insert(std::pair<ptr_t, ptr_t>(rh_ptr, lh_end));
-            break;
-          }
-
-          lh_coloring[rh_color].ranges.insert(std::pair<ptr_t, ptr_t>(rh_ptr, rh_end));
-        }
-      }
     }
 
     runtime->create_index_partition(
