@@ -382,6 +382,11 @@ namespace Realm {
     if(!really_blocked)
       return;
 
+#ifdef DEBUG_THREAD_SCHEDULER
+    assert(blocked_workers.count(thread) == 0);
+#endif
+    blocked_workers.insert(thread);
+
     log_sched.debug() << "scheduler worker blocking: sched=" << this << " worker=" << thread;
 
     while(thread->get_state() != Thread::STATE_READY) {
@@ -452,6 +457,11 @@ namespace Realm {
       //  it's better than a tight spin)
       wait_for_work(old_work_counter);
     }
+
+#ifdef DEBUG_THREAD_SCHEDULER
+    assert(blocked_workers.count(thread) == 1);
+#endif
+    blocked_workers.erase(thread);
   }
 
   void ThreadedTaskScheduler::thread_ready(Thread *thread)
@@ -461,6 +471,11 @@ namespace Realm {
     // TODO: might be nice to do this in a lock-free way, since this is called by
     //  some other thread
     AutoHSLLock al(lock);
+
+    // it may be that the thread has noticed that it is ready already, in
+    //  which case it'll no longer be blocked and we don't want to resume it
+    if(blocked_workers.count(thread) == 0)
+      return;
 
     // this had better not be after shutdown was initiated
     if(shutdown_flag) {
