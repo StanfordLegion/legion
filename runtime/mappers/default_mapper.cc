@@ -415,9 +415,14 @@ namespace LegionRuntime {
 	  // respect restricted regions' current placement
 	  if (task->regions[idx].restricted)
 	  {
-	    assert(task->regions[idx].current_instances.size() == 1);
-	    task->regions[idx].target_ranking.push_back(
-	      (task->regions[idx].current_instances.begin())->first);
+            // There is only one choice anyway, so let the runtime find
+            // it. Currently, the runtime will fail to notify the mapper
+            // of existing instances for reduction copies, so this
+            // assertion may fail spuriously.
+
+	    // assert(task->regions[idx].current_instances.size() == 1);
+	    // task->regions[idx].target_ranking.push_back(
+	    //   (task->regions[idx].current_instances.begin())->first);
 	  }
 	  else
 	  {
@@ -501,9 +506,14 @@ namespace LegionRuntime {
         }
         else
         {
-          assert(task->regions[idx].current_instances.size() == 1);
-          Memory target = (task->regions[idx].current_instances.begin())->first;
-          task->regions[idx].target_ranking.push_back(target);
+          // There is only one choice anyway, so let the runtime find
+          // it. Currently, the runtime will fail to notify the mapper
+          // of existing instances for reduction copies, so this
+          // assertion may fail spuriously.
+
+          // assert(task->regions[idx].current_instances.size() == 1);
+          // Memory target = (task->regions[idx].current_instances.begin())->first;
+          // task->regions[idx].target_ranking.push_back(target);
         }
         task->regions[idx].virtual_map = false;
         task->regions[idx].enable_WAR_optimization = war_enabled;
@@ -626,10 +636,15 @@ namespace LegionRuntime {
       }
       else
       {
-        assert(inline_op->requirement.current_instances.size() == 1);
-        Memory target = 
-          (inline_op->requirement.current_instances.begin())->first;
-        inline_op->requirement.target_ranking.push_back(target);
+        // There is only one choice anyway, so let the runtime find
+        // it. Currently, the runtime will fail to notify the mapper
+        // of existing instances for reduction copies, so this
+        // assertion may fail spuriously.
+
+        // assert(inline_op->requirement.current_instances.size() == 1);
+        // Memory target =
+        //   (inline_op->requirement.current_instances.begin())->first;
+        // inline_op->requirement.target_ranking.push_back(target);
       }
       if (local_kind == Processor::LOC_PROC)
         // Elliott needs SOA for the compiler.
