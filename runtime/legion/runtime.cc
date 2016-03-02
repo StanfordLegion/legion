@@ -6738,19 +6738,21 @@ namespace LegionRuntime {
           if (result == Realm::ElementMask::OVERLAP_YES)
           {
             log_run.error("ERROR: colors %d and %d of partition %d "
-                            "are not disjoint when they were claimed to be!",
-                      it1->first.get_index(), it2->first.get_index(), pid.id);
+                          "are not disjoint when they were claimed to be!",
+                          (int)it1->first.get_index(),
+                          (int)it2->first.get_index(), pid.id);
             assert(false);
             exit(ERROR_DISJOINTNESS_TEST_FAILURE);
           }
           else if (result == Realm::ElementMask::OVERLAP_MAYBE)
           {
             log_run.warning("WARNING: colors %d and %d of partition "
-                        "%d may not be disjoint when they were claimed to be!"
-                        "(At least according to the low-level runtime.  You "
-                        "might also try telling the the low-level runtime "
-                        "to stop being lazy and try harder.)", 
-                      it1->first.get_index(), it2->first.get_index(), pid.id);
+                          "%d may not be disjoint when they were claimed to be!"
+                           "(At least according to the low-level runtime.  You "
+                            "might also try telling the the low-level runtime "
+                            "to stop being lazy and try harder.)",
+                            (int)it1->first.get_index(),
+                            (int)it2->first.get_index(), pid.id);
           }
         }
       }
@@ -6783,7 +6785,7 @@ namespace LegionRuntime {
                   log_run.error("ERROR: colors %d and %d of "
                                        "partition %d are not disjoint "
                                        "when they are claimed to be!",
-                                  it1->first[0], it2->first[0], pid.id);
+                                (int)it1->first[0], (int)it2->first[0], pid.id);
                   assert(false);
                   exit(ERROR_DISJOINTNESS_TEST_FAILURE);
                 }
@@ -6799,8 +6801,8 @@ namespace LegionRuntime {
                                       "(%d,%d) of partition %d are "
                                       "not disjoint when they are "
                                       "claimed to be!",
-                            it1->first[0], it1->first[1],
-                            it2->first[0], it2->first[1], pid.id);
+                            (int)it1->first[0], (int)it1->first[1],
+                            (int)it2->first[0], (int)it2->first[1], pid.id);
                   assert(false);
                   exit(ERROR_DISJOINTNESS_TEST_FAILURE);
                 }
@@ -6816,8 +6818,12 @@ namespace LegionRuntime {
                                        "(%d,%d,%d) of partition %d are "
                                        "not disjoint when they are "
                                        "claimed to be!",
-                            it1->first[0], it1->first[1], it1->first[2],
-                    it2->first[0], it2->first[1], it2->first[2], pid.id);
+                                       (int)it1->first[0],
+                                       (int)it1->first[1],
+                                       (int)it1->first[2],
+                                       (int)it2->first[0],
+                                       (int)it2->first[1],
+                                       (int)it2->first[2], pid.id);
                   assert(false);
                   exit(ERROR_DISJOINTNESS_TEST_FAILURE);
                 }
@@ -6864,7 +6870,8 @@ namespace LegionRuntime {
                                            "multi-domain partition %d are "
                                            "not disjoint when they are "
                                            "claimed to be!", 
-                                         it1->first[0], it2->first[0], pid.id);
+                                           (int)it1->first[0],
+                                           (int)it2->first[0], pid.id);
                       assert(false);
                       exit(ERROR_DISJOINTNESS_TEST_FAILURE);
                     }
@@ -6880,8 +6887,10 @@ namespace LegionRuntime {
                                            "of multi-domain partition %d are "
                                            "not disjoint when they are "
                                            "claimed to be!", 
-                                         it1->first[0], it1->first[1],
-                                         it2->first[0], it2->first[1], pid.id);
+                                           (int)it1->first[0],
+                                           (int)it1->first[1],
+                                           (int)it2->first[0],
+                                           (int)it2->first[1], pid.id);
                       assert(false);
                       exit(ERROR_DISJOINTNESS_TEST_FAILURE);
                     }
@@ -6897,8 +6906,12 @@ namespace LegionRuntime {
                                            "(%d,%d,%d) of multi-domain "
                                            "partition %d are not disjoint "
                                            "when they are claimed to be!", 
-                           it1->first[0], it1->first[1], it1->first[2], 
-                           it2->first[0], it2->first[1], it2->first[2], pid.id);
+                                           (int)it1->first[0],
+                                           (int)it1->first[1],
+                                           (int)it1->first[2],
+                                           (int)it2->first[0],
+                                           (int)it2->first[1],
+                                           (int)it2->first[2], pid.id);
                       assert(false);
                       exit(ERROR_DISJOINTNESS_TEST_FAILURE);
                     }
@@ -8002,16 +8015,16 @@ namespace LegionRuntime {
           case 0:
           case 1:
             log_index.error("Invalid color %d for get index partitions", 
-                                    color.point_data[0]);
+                            (int)color.point_data[0]);
             break;
           case 2:
             log_index.error("Invalid color (%d,%d) for get index partitions", 
-                                    color.point_data[0], color.point_data[1]);
+                            (int)color.point_data[0], (int)color.point_data[1]);
             break;
           case 3:
             log_index.error("Invalid color (%d,%d,%d) for get index "
-                            "partitions", color.point_data[0], 
-                            color.point_data[1], color.point_data[2]);
+                            "partitions", (int)color.point_data[0], 
+                            (int)color.point_data[1], (int)color.point_data[2]);
             break;
         }
         assert(false);
@@ -8077,16 +8090,18 @@ namespace LegionRuntime {
         {
           case 0:
           case 1:
-            log_index.error("Invalid color %d for get index subspace", 
-                                    color.point_data[0]);
+            log_index.error("Invalid color %d for get index subspace",
+                            (int)color.point_data[0]);
             break;
           case 2:
-            log_index.error("Invalid color (%d,%d) for get index subspace", 
-                                    color.point_data[0], color.point_data[1]);
+            log_index.error("Invalid color (%d,%d) for get index subspace",
+                            (int)color.point_data[0], (int)color.point_data[1]);
             break;
           case 3:
             log_index.error("Invalid color (%d,%d,%d) for get index subspace",
-              color.point_data[0], color.point_data[1], color.point_data[2]);
+                            (int)color.point_data[0],
+                            (int)color.point_data[1],
+                            (int)color.point_data[2]);
             break;
         }
         assert(false);

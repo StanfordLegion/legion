@@ -1477,23 +1477,24 @@ namespace LegionRuntime {
                 case 1:
                   fprintf(stderr, "ERROR: colors %d and %d of partition %d are "
                                   "not disjoint rectangles as they should be!",
-                                   (it1->first)[0], (it2->first)[0], result.id);
+                                   (int)(it1->first)[0],
+                                   (int)(it2->first)[0], result.id);
                   break;
                 case 2:
                   fprintf(stderr, "ERROR: colors (%d, %d) and (%d, %d) of "
                                   "partition %d are not disjoint rectangles "
                                   "as they should be!",
-                                  (it1->first)[0], (it1->first)[1],
-                                  (it2->first)[0], (it2->first)[1],
+                                  (int)(it1->first)[0], (int)(it1->first)[1],
+                                  (int)(it2->first)[0], (int)(it2->first)[1],
                                   result.id);
                   break;
                 case 3:
                   fprintf(stderr, "ERROR: colors (%d, %d, %d) and (%d, %d, %d) "
                                   "of partition %d are not disjoint rectangles "
                                   "as they should be!",
-                                  (it1->first)[0], (it1->first)[1],
-                                  (it1->first)[2], (it2->first)[0],
-                                  (it2->first)[1], (it2->first)[2],
+                                  (int)(it1->first)[0], (int)(it1->first)[1],
+                                  (int)(it1->first)[2], (int)(it2->first)[0],
+                                  (int)(it2->first)[1], (int)(it2->first)[2],
                                   result.id);
                   break;
                 default:

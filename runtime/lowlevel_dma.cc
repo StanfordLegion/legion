@@ -1082,18 +1082,18 @@ namespace LegionRuntime {
 
       virtual ~RemoteWriteInstPairCopier(void) { }
 
-      virtual void copy_field(int src_index, int dst_index, int elem_count,
+      virtual void copy_field(off_t src_index, off_t dst_index, off_t elem_count,
                               unsigned offset_index)
       {
-        unsigned src_offset = oas_vec[offset_index].src_offset;
-        unsigned dst_offset = oas_vec[offset_index].dst_offset;
+        off_t src_offset = oas_vec[offset_index].src_offset;
+        off_t dst_offset = oas_vec[offset_index].dst_offset;
         unsigned bytes = oas_vec[offset_index].size;
 	char buffer[1024];
 
 	for(int i = 0; i < elem_count; i++) {
 	  src_acc.read_untyped(ptr_t(src_index + i), buffer, bytes, src_offset);
           if(0 && i == 0) {
-            printf("remote write: (%d:%d->%d:%d) %d bytes:",
+            printf("remote write: (%ld:%ld->%ld:%ld) %d bytes:",
                    src_index + i, src_offset, dst_index + i, dst_offset, bytes);
             for(unsigned j = 0; j < bytes; j++)
               printf(" %02x", (unsigned char)(buffer[j]));
@@ -2365,19 +2365,19 @@ namespace LegionRuntime {
           delete inst_copier;
         }
 
-        virtual void copy_field(int src_index, int dst_index, int elem_count,
+        virtual void copy_field(off_t src_index, off_t dst_index, off_t elem_count,
                                 unsigned offset_index)
         {
           inst_copier->copy_field(src_index, dst_index, elem_count, offset_index);
         }
 
-        virtual void copy_all_fields(int src_index, int dst_index, int elem_count)
+        virtual void copy_all_fields(off_t src_index, off_t dst_index, off_t elem_count)
         {
           inst_copier->copy_all_fields(src_index, dst_index, elem_count);
         }
 
-        virtual void copy_all_fields(int src_index, int dst_index, int count_per_line,
-  				   int src_stride, int dst_stride, int lines)
+        virtual void copy_all_fields(off_t src_index, off_t dst_index, off_t count_per_line,
+  				     off_t src_stride, off_t dst_stride, off_t lines)
         {
           inst_copier->copy_all_fields(src_index, dst_index, count_per_line, src_stride, dst_stride, lines);
         }
@@ -2460,19 +2460,19 @@ namespace LegionRuntime {
           delete inst_copier;
         }
 
-        virtual void copy_field(int src_index, int dst_index, int elem_count,
+        virtual void copy_field(off_t src_index, off_t dst_index, off_t elem_count,
                                 unsigned offset_index)
         {
           inst_copier->copy_field(src_index, dst_index, elem_count, offset_index);
         }
 
-        virtual void copy_all_fields(int src_index, int dst_index, int elem_count)
+        virtual void copy_all_fields(off_t src_index, off_t dst_index, off_t elem_count)
         {
           inst_copier->copy_all_fields(src_index, dst_index, elem_count);
         }
 
-        virtual void copy_all_fields(int src_index, int dst_index, int count_per_line,
-  				   int src_stride, int dst_stride, int lines)
+        virtual void copy_all_fields(off_t src_index, off_t dst_index, off_t count_per_line,
+  				     off_t src_stride, off_t dst_stride, off_t lines)
         {
           inst_copier->copy_all_fields(src_index, dst_index, count_per_line, src_stride, dst_stride, lines);
         }
@@ -2718,13 +2718,13 @@ namespace LegionRuntime {
 	  }
 
       int curdim = -1;
-      int exp1 = 0, exp2 = 0;
+      coord_t exp1 = 0, exp2 = 0;
 
       // now go through dimensions, collapsing each if it matches the expected stride for
       //  both sets (can't collapse for first)
       for(unsigned i = 0; i < DIM; i++) {
 	unsigned d = stride_order[i];
-	unsigned e = r.dim_size(d);
+	coord_t e = r.dim_size(d);
 	if(i && (exp1 == in1[d][0]) && (exp2 == in2[d][0])) {
 	  // collapse and grow extent
 	  extents.x[curdim] *= e;

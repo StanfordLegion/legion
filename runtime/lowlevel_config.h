@@ -34,6 +34,14 @@
 typedef unsigned long long legion_lowlevel_id_t;
 #define IDFMT "%llx"
 
+#ifdef POINTS_ARE_64BIT
+typedef ptrdiff_t coord_t;
+#define PTFMT "%ld"
+#else
+typedef int coord_t;
+#define PTFMT "%d"
+#endif
+
 typedef unsigned int legion_lowlevel_address_space_t;
 typedef unsigned legion_lowlevel_task_func_id_t;
 typedef int legion_lowlevel_reduction_op_id_t;

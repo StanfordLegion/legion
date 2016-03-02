@@ -75,6 +75,12 @@ extern "C" {
   NEW_OPAQUE_TYPE(legion_machine_query_interface_t);
 #undef NEW_OPAQUE_TYPE
 
+#ifdef POINTS_ARE_64BIT
+    typedef ptrdiff_t coord_t;
+#else
+    typedef int coord_t;
+#endif
+
   /**
    * @see ptr_t
    */
@@ -82,7 +88,13 @@ extern "C" {
     unsigned value;
   } legion_ptr_t;
 
-#define NEW_POINT_TYPE(T, DIM) typedef struct T { int x[DIM]; } T
+#ifdef POINTS_ARE_64BIT
+typedef ptrdiff_t coord_t;
+#else
+typedef int coord_t;
+#endif
+
+#define NEW_POINT_TYPE(T, DIM) typedef struct T { coord_t x[DIM]; } T
   NEW_POINT_TYPE(legion_point_1d_t, 1);
   NEW_POINT_TYPE(legion_point_2d_t, 2);
   NEW_POINT_TYPE(legion_point_3d_t, 3);
@@ -106,7 +118,7 @@ extern "C" {
   typedef struct legion_domain_t {
     legion_lowlevel_id_t is_id;
     int dim;
-    int rect_data[2 * MAX_RECT_DIM];
+    coord_t rect_data[2 * MAX_RECT_DIM];
   } legion_domain_t;
 
   /**
@@ -114,7 +126,7 @@ extern "C" {
    */
   typedef struct legion_domain_point_t {
     int dim;
-    int point_data[MAX_POINT_DIM];
+    coord_t point_data[MAX_POINT_DIM];
   } legion_domain_point_t;
 
   /**

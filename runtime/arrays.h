@@ -40,11 +40,17 @@ CUDAPREFIX static inline int imax(int a, int b) { return (a > b) ? a : b; }
 
 namespace LegionRuntime {
   namespace Arrays {
+#ifdef POINTS_ARE_64BIT
+    typedef ptrdiff_t coord_t;
+#else
+    typedef int coord_t;
+#endif
+
     template <unsigned DIM>
     class Point {
     public:
       CUDAPREFIX Point(void) {}
-      CUDAPREFIX Point(const int *vals) { for(unsigned i = 0; i < DIM; i++) x[i] = vals[i]; }
+      CUDAPREFIX Point(const coord_t *vals) { for(unsigned i = 0; i < DIM; i++) x[i] = vals[i]; }
       CUDAPREFIX Point(const Point<DIM>& other) { for(unsigned i = 0; i < DIM; i++) x[i] = other.x[i]; }
 
       CUDAPREFIX Point& operator=(const Point<DIM>& other) 
@@ -53,7 +59,7 @@ namespace LegionRuntime {
 	return *this;
       }
 
-      CUDAPREFIX void to_array(int *vals) const { for(unsigned i = 0; i < DIM; i++) vals[i] = x[i]; }
+      CUDAPREFIX void to_array(coord_t *vals) const { for(unsigned i = 0; i < DIM; i++) vals[i] = x[i]; }
 
       CUDAPREFIX bool operator==(const Point<DIM>& other) const
       { 
@@ -88,7 +94,7 @@ namespace LegionRuntime {
 	}
       };
 
-      CUDAPREFIX int operator[](unsigned idx) const { return x[idx]; }
+      CUDAPREFIX coord_t operator[](unsigned idx) const { return x[idx]; }
   
       CUDAPREFIX static Point<DIM> ZEROES(void)
       {
@@ -157,7 +163,7 @@ namespace LegionRuntime {
 	return res;
       }
 
-      CUDAPREFIX static int dot(const Point<DIM> a, const Point<DIM> b)
+      CUDAPREFIX static coord_t dot(const Point<DIM> a, const Point<DIM> b)
       {
 	int v = 0;
         for(unsigned i = 0; i < DIM; i++)
@@ -167,13 +173,13 @@ namespace LegionRuntime {
   
       CUDAPREFIX int dot(const Point<DIM> other) const
       {
-        int v = 0;
+        coord_t v = 0;
         for(unsigned i = 0; i < DIM; i++) v += x[i] * other.x[i];
         return v;
       }
   
     public:
-      int x[DIM];
+      coord_t x[DIM];
     };
   
     template <>
@@ -181,8 +187,8 @@ namespace LegionRuntime {
     public:
       enum { DIM = 1 };
       CUDAPREFIX Point(void) {}
-      CUDAPREFIX Point(int val) { x[0] = val; }
-      CUDAPREFIX Point(const int *vals) { for(unsigned i = 0; i < DIM; i++) x[i] = vals[i]; }
+      CUDAPREFIX Point(coord_t val) { x[0] = val; }
+      CUDAPREFIX Point(const coord_t *vals) { for(unsigned i = 0; i < DIM; i++) x[i] = vals[i]; }
       CUDAPREFIX Point(const Point<1>& other) { for(unsigned i = 0; i < DIM; i++) x[i] = other.x[i]; }
 
       CUDAPREFIX Point& operator=(const Point<1>& other) 
@@ -191,9 +197,9 @@ namespace LegionRuntime {
 	return *this;
       }
 
-      CUDAPREFIX void to_array(int *vals) const { for(unsigned i = 0; i < DIM; i++) vals[i] = x[i]; }
+      CUDAPREFIX void to_array(coord_t *vals) const { for(unsigned i = 0; i < DIM; i++) vals[i] = x[i]; }
   
-      CUDAPREFIX int operator[](unsigned idx) const { return x[0]; }
+      CUDAPREFIX coord_t operator[](unsigned idx) const { return x[0]; }
       CUDAPREFIX operator int(void) const { return x[0]; }
       
       CUDAPREFIX bool operator==(const Point<DIM> &other) const
@@ -251,7 +257,7 @@ namespace LegionRuntime {
 	return res;
       }
 
-      CUDAPREFIX static int dot(const Point<DIM> a, const Point<DIM> b)
+      CUDAPREFIX static coord_t dot(const Point<DIM> a, const Point<DIM> b)
       {
 	int v = 0;
         for(unsigned i = 0; i < DIM; i++)
@@ -292,20 +298,20 @@ namespace LegionRuntime {
 	return res;
       }
 
-      CUDAPREFIX int dot(const Point<DIM> other) const { return dot(*this, other); }
+      CUDAPREFIX coord_t dot(const Point<DIM> other) const { return dot(*this, other); }
   
     public:
-      int x[1];
+      coord_t x[1];
     };
 
-    CUDAPREFIX inline Point<1> make_point(int x)
+    CUDAPREFIX inline Point<1> make_point(coord_t x)
     {
       Point<1> p;
       p.x[0] = x;
       return p;
     }
 
-    CUDAPREFIX inline Point<2> make_point(int x, int y)
+    CUDAPREFIX inline Point<2> make_point(coord_t x, coord_t y)
     {
       Point<2> p;
       p.x[0] = x;
@@ -313,7 +319,7 @@ namespace LegionRuntime {
       return p;
     }
 
-    CUDAPREFIX inline Point<3> make_point(int x, int y, int z)
+    CUDAPREFIX inline Point<3> make_point(coord_t x, coord_t y, coord_t z)
     {
       Point<3> p;
       p.x[0] = x;
@@ -336,7 +342,7 @@ namespace LegionRuntime {
     class Rect {
     public:
       CUDAPREFIX Rect(void) {}
-      CUDAPREFIX explicit Rect(const int *vals) : lo(vals), hi(vals + DIM) {}
+      CUDAPREFIX explicit Rect(const coord_t *vals) : lo(vals), hi(vals + DIM) {}
       CUDAPREFIX Rect(const Point<DIM> _lo, const Point<DIM> _hi) : lo(_lo), hi(_hi) {}
       CUDAPREFIX Rect(const Rect<DIM>& other) : lo(other.lo), hi(other.hi) {}
 
@@ -347,7 +353,7 @@ namespace LegionRuntime {
 	return *this;
       }
 
-      CUDAPREFIX void to_array(int *vals) const { lo.to_array(vals); hi.to_array(vals + DIM); }
+      CUDAPREFIX void to_array(coord_t *vals) const { lo.to_array(vals); hi.to_array(vals + DIM); }
 
       CUDAPREFIX bool operator==(const Rect<DIM>& other)
       {
@@ -390,7 +396,7 @@ namespace LegionRuntime {
 	return v;
       }
 
-      CUDAPREFIX int dim_size(int dim) const
+      CUDAPREFIX coord_t dim_size(int dim) const
       {
         assert(dim >= 0);
         assert(dim < int(DIM));
@@ -718,7 +724,7 @@ namespace LegionRuntime {
     class Translation {
     public:
       enum { IDIM = DIM, ODIM = DIM };
-      Translation(void) : offset(0) {}
+      Translation(void) : offset((coord_t)0) {}
       Translation(const Point<DIM> _offset) : offset(_offset) {}
   
       Point<ODIM> image(const Point<IDIM> p) const
@@ -747,7 +753,7 @@ namespace LegionRuntime {
 	subrect = r;
 	for(unsigned i = 0; i < DIM; i++) {
 	  // strides are unit vectors
-	  strides[i] = 0;
+	  strides[i] = (coord_t)0;
 	  strides[i].x[i] = 1;
 	}
 	return r.lo + offset;
@@ -772,7 +778,7 @@ namespace LegionRuntime {
     protected:
       Linearization(void) {}
       Point<DIM> strides;
-      int offset;
+      coord_t offset;
     public:
       enum { IDIM = DIM, ODIM = 1 };
       typedef GenericDenseSubrectIterator<Linearization<DIM> > DenseSubrectIterator;
@@ -790,8 +796,8 @@ namespace LegionRuntime {
   
       Rect<1> image_convex(const Rect<IDIM> r) const
       {
-        int lo = offset;
-        int hi = offset;
+        coord_t lo = offset;
+        coord_t hi = offset;
         for(int i = 0; i < IDIM; i++)
   	if(strides[i] > 0) {
   	  lo += strides[i] * r.lo[i];
@@ -807,7 +813,7 @@ namespace LegionRuntime {
       {
         // not the most efficient, but should work: see if size of convex image is product of dimensions
         Rect<1> convex = image_convex(r);
-        int prod = 1;
+        coord_t prod = 1;
         for(int i = 0; i < IDIM; i++) {
   	prod *= 1 + (r.hi[i] - r.lo[i]);
         }
@@ -816,7 +822,7 @@ namespace LegionRuntime {
 
       Rect<ODIM> image_dense_subrect(const Rect<IDIM> r, Rect<IDIM>& subrect) const
       {
-	int count = 1;
+	coord_t count = 1;
 	Rect<IDIM> s(r.lo, r.lo);
 	for(unsigned i = 0; i < IDIM; i++) {
 	  bool found = false;

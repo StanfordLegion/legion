@@ -1468,7 +1468,7 @@ namespace LegionRuntime {
       Arrays::Mapping<DIM, 1> *mapping = impl->metadata.linearization.get_mapping<DIM>();
 
       Point<1> strides[DIM];
-      int index = mapping->image_linear_subrect(r, subrect, strides);
+      coord_t index = mapping->image_linear_subrect(r, subrect, strides);
 
       off_t offset = impl->metadata.alloc_offset;
       off_t elmt_stride;
@@ -1481,8 +1481,8 @@ namespace LegionRuntime {
 	int field_size;
 	Realm::find_field_start(impl->metadata.field_sizes, field_offset, 1, field_start, field_size);
 
-	int block_num = index / impl->metadata.block_size;
-	int block_ofs = index % impl->metadata.block_size;
+	size_t block_num = index / impl->metadata.block_size;
+	size_t block_ofs = index % impl->metadata.block_size;
 
 	offset += (((impl->metadata.elmt_size * block_num + field_start) * impl->metadata.block_size) + 
 		   (field_size * block_ofs) +
