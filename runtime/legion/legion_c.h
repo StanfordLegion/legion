@@ -75,12 +75,6 @@ extern "C" {
   NEW_OPAQUE_TYPE(legion_machine_query_interface_t);
 #undef NEW_OPAQUE_TYPE
 
-#ifdef POINTS_ARE_64BIT
-    typedef ptrdiff_t coord_t;
-#else
-    typedef int coord_t;
-#endif
-
   /**
    * @see ptr_t
    */
