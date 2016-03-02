@@ -596,6 +596,24 @@ namespace Realm {
     return *this;
   }
 
+  Machine::MemoryQuery& Machine::MemoryQuery::has_affinity_to(Processor p,
+							      unsigned min_bandwidth /*= 0*/,
+							      unsigned max_latency /*= 0*/)
+  {
+    impl = ((MemoryQueryImpl *)impl)->writeable_reference();
+    ((MemoryQueryImpl *)impl)->add_predicate(new MemoryHasProcAffinityPredicate(p, min_bandwidth, max_latency));
+    return *this;
+  }
+
+  Machine::MemoryQuery& Machine::MemoryQuery::best_affinity_to(Processor p,
+							       int bandwidth_weight /*= 1*/,
+							       int latency_weight /*= 0*/)
+  {
+    impl = ((MemoryQueryImpl *)impl)->writeable_reference();
+    ((MemoryQueryImpl *)impl)->add_predicate(new MemoryBestProcAffinityPredicate(p, bandwidth_weight, latency_weight));
+    return *this;
+  }
+
   size_t Machine::MemoryQuery::count(void) const
   {
     return ((MemoryQueryImpl *)impl)->count_matches();
