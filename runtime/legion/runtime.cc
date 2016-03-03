@@ -4712,11 +4712,25 @@ namespace LegionRuntime {
       }
       else
         user_data = NULL;
-      // Perform the registration
-      Realm::ProfilingRequestSet profiling_requests;
-      ready_event = Processor::register_task_by_kind(
-          get_processor_kind(true), false/*global*/, vid, *realm_descriptor,
-          profiling_requests, user_data, user_data_size);
+      // Perform the registration, the normal case is not to have separate
+      // runtime instances, but if we do have them, we only register on
+      // the local processor
+      if (!Internal::separate_runtime_instances)
+      {
+        Realm::ProfilingRequestSet profiling_requests;
+        ready_event = Processor::register_task_by_kind(
+            get_processor_kind(true), false/*global*/, vid, *realm_descriptor,
+            profiling_requests, user_data, user_data_size);
+      }
+      else
+      {
+        // This is a debug case for when we have one runtime instance
+        // for each processor
+        Processor proc = Processor::get_executing_processor();
+        Realm::ProfilingRequestSet profiling_requests;
+        ready_event = proc.register_task(vid, *realm_descriptor,
+            profiling_requests, user_data, user_data_size);
+      }
       // If we have a variant name, then record it
       if (registrar.task_variant_name == NULL)
       {
@@ -5340,9 +5354,13 @@ namespace LegionRuntime {
               pending_variants.begin(); it != pending_variants.end(); it++)
         {
           (*it)->perform_registration(this);
-          delete *it;
+          // avoid races on seaparte runtime instances
+          if (!Internal::separate_runtime_instances)
+            delete *it;
         }
-        pending_variants.clear();
+        // avoid races on separate runtime instances
+        if (!Internal::separate_runtime_instances)
+          pending_variants.clear();
       }
       // All the runtime instances registered the static variants
       // starting at 1 and counting by 1, so just increment our
@@ -5367,7 +5385,9 @@ namespace LegionRuntime {
         {
           register_layout(it->second, it->first);
         }
-        pending_constraints.clear();
+        // avoid races if we are doing separate runtime creation
+        if (!Internal::separate_runtime_instances)
+          pending_constraints.clear();
       } 
 
       // Before launching the top level task, see if the user requested
