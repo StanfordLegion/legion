@@ -445,7 +445,7 @@ namespace Realm {
     if(active) {
       char msg[256];
       vsnprintf(msg, 256, fmt, args);
-      oss << msg;
+      (*oss) << msg;
     }
     return *this;
   }
