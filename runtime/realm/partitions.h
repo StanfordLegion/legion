@@ -37,8 +37,7 @@ namespace Realm {
   //  following type lists, using a bunch of helper stuff from dynamic_templates.h
 
   typedef DynamicTemplates::IntList<1, 3> DIMCOUNTS;
-  typedef DynamicTemplates::TypeList<int>::TL DIMTYPES;
-  //typedef DynamicTemplates::TypeList<int, long long>::TL DIMTYPES;
+  typedef DynamicTemplates::TypeList<int, long long>::TL DIMTYPES;
   typedef DynamicTemplates::TypeList<int, bool>::TL FLDTYPES;
 
   class PartitioningMicroOp;
