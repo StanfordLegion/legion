@@ -245,7 +245,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void Mapper::mapper_rt_filter_variants(MapperContext ctx, const Task &task,
-             const std::vector<std::vector<PhysicalInstance> > &chosen_intances,
+            const std::vector<std::vector<PhysicalInstance> > &chosen_instances,
                                            std::vector<VariantID> &variants)
     //--------------------------------------------------------------------------
     {

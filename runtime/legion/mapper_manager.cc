@@ -988,7 +988,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void MapperManager::filter_variants(MappingCallInfo *ctx, const Task &task,
-            const std::vector<std::vector<PhysicalInstance> > &chosen_instances,
+            const std::vector<std::vector<MappingInstance> > &chosen_instances,
                                         std::vector<VariantID> &variants)
     //--------------------------------------------------------------------------
     {
@@ -1000,18 +1000,41 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void MapperManager::filter_instances(MappingCallInfo *ctx, const Task &task,
                                          VariantID chosen_variant,
-                  std::vector<std::vector<PhysicalInstance> > &chosen_instances,
+                  std::vector<std::vector<MappingInstance> > &chosen_instances,
                   std::vector<std::set<FieldID> > &missing_fields)
     //--------------------------------------------------------------------------
     {
       pause_mapper_call(ctx);
+      missing_fields.resize(task.regions.size());
       VariantImpl *impl = runtime->find_variant_impl(task.task_id, 
                                                      chosen_variant);
       const TaskLayoutConstraintSet &layout_constraints = 
                                         impl->get_layout_constraints();
       for (unsigned idx = 0; idx < task.regions.size(); idx++)
       {
+        if (idx >= chosen_instances.size())
+          continue;
+        std::set<FieldID> &missing = missing_fields[idx];
+        missing = task.regions[idx].privilege_fields;
+        std::vector<PhysicalInstance> &instances = chosen_instances[idx]; 
+        // Get the constraints for these instances
+        std::vector<LayoutConstraints*> constraints(instances.size(),NULL);
+        for (unsigned idx2 = 0; idx2 < instances.size(); idx2++)
+        {
+          PhysicalManager *manager = instances[idx2].impl;
+          if (manager == NULL)
+            continue;
+          constraints[idx2] = manager->layout->constraints;
+        }
+        // Iterate over the layout constraints and filter them
+        // We know that instance constraints are complete (all dimensions
+        // are fully constrainted), therefore we only need to test for conflicts
+        for (std::multimap<unsigned,LayoutConstraintID>::const_iterator it = 
+              layout_constraints.layouts.lower_bound(idx); it != 
+              layout_constraints.layouts.upper_bound(idx); it++)
+        {
 
+        }
       }
       resume_mapper_call(ctx);
     }
@@ -1019,7 +1042,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void MapperManager::filter_instances(MappingCallInfo *ctx, const Task &task,
                             unsigned index, VariantID chosen_variant,
-                            std::vector<PhysicalInstance> &instances,
+                            std::vector<MappingInstance> &instances,
                             std::set<FieldID> &misssing_fields)
     //--------------------------------------------------------------------------
     {

@@ -299,15 +299,15 @@ namespace Legion {
                                  TaskID task_id, VariantID variant_id);
     public:
       void filter_variants(MappingCallInfo *ctx, const Task &task,
-            const std::vector<std::vector<PhysicalInstance> > &chosen_instances,
+            const std::vector<std::vector<MappingInstance> > &chosen_instances,
                            std::vector<VariantID> &variants);
       void filter_instances(MappingCallInfo *ctx, const Task &task,
                             VariantID chosen_variant,
-                  std::vector<std::vector<PhysicalInstance> > &chosen_instances,
+                  std::vector<std::vector<MappingInstance> > &chosen_instances,
                   std::vector<std::set<FieldID> > &missing_fields);
       void filter_instances(MappingCallInfo *ctx, const Task &task,
                             unsigned index, VariantID chosen_variant,
-                            std::vector<PhysicalInstance> &instances,
+                            std::vector<MappingInstance> &instances,
                             std::set<FieldID> &misssing_fields);
     public:
       bool create_physical_instance(MappingCallInfo *ctx, Memory target_memory,

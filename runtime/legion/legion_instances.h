@@ -149,6 +149,7 @@ namespace Legion {
       // This is the common case method so make it fast
       LogicalView* find_logical_top_view(UniqueID context_uid) const;
     public:
+      bool meets_region_tree(const std::vector<LogicalRegion> &regions) const;
       bool meets_regions(const std::vector<LogicalRegion> &regions) const;
       bool entails(const LayoutConstraintSet &constraints) const;
       bool entails(LayoutConstraints *constraints) const;

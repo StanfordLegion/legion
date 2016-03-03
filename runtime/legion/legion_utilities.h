@@ -571,6 +571,7 @@ namespace Legion {
       inline bool is_set(unsigned bit) const;
       inline int find_first_set(void) const;
       inline int find_index_set(int index) const;
+      inline int find_next_set(int start) const;
       inline void clear(void);
     public:
       inline bool operator==(const BitMask &rhs) const;
@@ -649,6 +650,7 @@ namespace Legion {
       inline bool is_set(unsigned bit) const;
       inline int find_first_set(void) const;
       inline int find_index_set(int index) const;
+      inline int find_next_set(int start) const;
       inline void clear(void);
     public:
       inline bool operator==(const TLBitMask &rhs) const;
@@ -720,6 +722,7 @@ namespace Legion {
       inline bool is_set(unsigned bit) const;
       inline int find_first_set(void) const;
       inline int find_index_set(int index) const;
+      inline int find_next_set(int index) const;
       inline void clear(void);
     public:
       inline bool operator==(const SSEBitMask &rhs) const;
@@ -790,6 +793,7 @@ namespace Legion {
       inline bool is_set(unsigned bit) const;
       inline int find_first_set(void) const;
       inline int find_index_set(int index) const;
+      inline int find_next_set(int index) const;
       inline void clear(void);
     public:
       inline bool operator==(const SSETLBitMask &rhs) const;
@@ -864,6 +868,7 @@ namespace Legion {
       inline bool is_set(unsigned bit) const;
       inline int find_first_set(void) const;
       inline int find_index_set(int index) const;
+      inline int find_next_set(int start) const;
       inline void clear(void);
     public:
       inline bool operator==(const AVXBitMask &rhs) const;
@@ -937,6 +942,7 @@ namespace Legion {
       inline bool is_set(unsigned bit) const;
       inline int find_first_set(void) const;
       inline int find_index_set(int index) const;
+      inline int find_next_set(int start) const;
       inline void clear(void);
     public:
       inline bool operator==(const AVXTLBitMask &rhs) const;
@@ -1011,6 +1017,7 @@ namespace Legion {
       inline bool is_set(unsigned bit) const;
       inline int find_first_set(void) const;
       inline int find_index_set(int index) const;
+      inline int find_next_set(int index) const;
       inline void clear(void);
     public:
       inline bool operator==(const CompoundBitMask &rhs) const;
@@ -2072,6 +2079,41 @@ namespace Legion {
     }
 
     //-------------------------------------------------------------------------
+    template<typename T, unsigned int MAX, unsigned SHIFT, unsigned MASK>
+    inline int BitMask<T,MAX,SHIFT,MASK>::find_next_set(int start) const
+    //-------------------------------------------------------------------------
+    {
+      if (start < 0)
+        start = 0;
+      int idx = start / ELEMENT_SIZE; // truncate
+      int offset = idx * ELEMENT_SIZE; 
+      int j = start % ELEMENT_SIZE;
+      if (j > 0) // if we are already in the middle of element search it
+      {
+        for ( ; j < ELEMENT_SIZE; j++)
+        {
+          if (bit_vector[idx] & (1ULL << j))
+            return (offset + j);
+        }
+        idx++;
+        offset += ELEMENT_SIZE;
+      }
+      for ( ; idx < BIT_ELMTS; idx++)
+      {
+        if (bit_vector[idx] > 0) // if it has any valid entries, find the next
+        {
+          for (j = 0; j < ELEMENT_SIZE; j++)
+          {
+            if (bit_vector[idx] & (1ULL << j))
+              return (offset + j);
+          }
+        }
+        offset += ELEMENT_SIZE;
+      }
+      return -1;
+    }
+
+    //-------------------------------------------------------------------------
     template<typename T, unsigned MAX, unsigned SHIFT, unsigned MASK>
     inline void BitMask<T,MAX,SHIFT,MASK>::clear(void)
     //-------------------------------------------------------------------------
@@ -2710,6 +2752,41 @@ namespace Legion {
           }
         }
         index -= local;
+        offset += ELEMENT_SIZE;
+      }
+      return -1;
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename T, unsigned int MAX, unsigned SHIFT, unsigned MASK>
+    inline int TLBitMask<T,MAX,SHIFT,MASK>::find_next_set(int start) const
+    //-------------------------------------------------------------------------
+    {
+      if (start < 0)
+        start = 0;
+      int idx = start / ELEMENT_SIZE; // truncate
+      int offset = idx * ELEMENT_SIZE; 
+      int j = start % ELEMENT_SIZE;
+      if (j > 0) // if we are already in the middle of element search it
+      {
+        for ( ; j < ELEMENT_SIZE; j++)
+        {
+          if (bit_vector[idx] & (1ULL << j))
+            return (offset + j);
+        }
+        idx++;
+        offset += ELEMENT_SIZE;
+      }
+      for ( ; idx < BIT_ELMTS; idx++)
+      {
+        if (bit_vector[idx] > 0) // if it has any valid entries, find the next
+        {
+          for (j = 0; j < ELEMENT_SIZE; j++)
+          {
+            if (bit_vector[idx] & (1ULL << j))
+              return (offset + j);
+          }
+        }
         offset += ELEMENT_SIZE;
       }
       return -1;
@@ -3394,6 +3471,41 @@ namespace Legion {
 
     //-------------------------------------------------------------------------
     template<unsigned int MAX>
+    inline int SSEBitMask<MAX>::find_next_set(int start) const
+    //-------------------------------------------------------------------------
+    {
+      if (start < 0)
+        start = 0;
+      int idx = start / ELEMENT_SIZE; // truncate
+      int offset = idx * ELEMENT_SIZE; 
+      int j = start % ELEMENT_SIZE;
+      if (j > 0) // if we are already in the middle of element search it
+      {
+        for ( ; j < ELEMENT_SIZE; j++)
+        {
+          if (bits.bit_vector[idx] & (1ULL << j))
+            return (offset + j);
+        }
+        idx++;
+        offset += ELEMENT_SIZE;
+      }
+      for ( ; idx < BIT_ELMTS; idx++)
+      {
+        if (bits.bit_vector[idx] > 0) // if it has any valid entries, find next
+        {
+          for (j = 0; j < ELEMENT_SIZE; j++)
+          {
+            if (bits.bit_vector[idx] & (1ULL << j))
+              return (offset + j);
+          }
+        }
+        offset += ELEMENT_SIZE;
+      }
+      return -1;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
     inline void SSEBitMask<MAX>::clear(void)
     //-------------------------------------------------------------------------
     {
@@ -3992,6 +4104,41 @@ namespace Legion {
           }
         }
         index -= local;
+        offset += ELEMENT_SIZE;
+      }
+      return -1;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline int SSETLBitMask<MAX>::find_next_set(int start) const
+    //-------------------------------------------------------------------------
+    {
+      if (start < 0)
+        start = 0;
+      int idx = start / ELEMENT_SIZE; // truncate
+      int offset = idx * ELEMENT_SIZE; 
+      int j = start % ELEMENT_SIZE;
+      if (j > 0) // if we are already in the middle of element search it
+      {
+        for ( ; j < ELEMENT_SIZE; j++)
+        {
+          if (bits.bit_vector[idx] & (1ULL << j))
+            return (offset + j);
+        }
+        idx++;
+        offset += ELEMENT_SIZE;
+      }
+      for ( ; idx < BIT_ELMTS; idx++)
+      {
+        if (bits.bit_vector[idx] > 0) // if it has any valid entries, find next
+        {
+          for (j = 0; j < ELEMENT_SIZE; j++)
+          {
+            if (bits.bit_vector[idx] & (1ULL << j))
+              return (offset + j);
+          }
+        }
         offset += ELEMENT_SIZE;
       }
       return -1;
@@ -4664,6 +4811,41 @@ namespace Legion {
           }
         }
         index -= local;
+        offset += ELEMENT_SIZE;
+      }
+      return -1;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline int AVXBitMask<MAX>::find_next_set(int start) const
+    //-------------------------------------------------------------------------
+    {
+      if (start < 0)
+        start = 0;
+      int idx = start / ELEMENT_SIZE; // truncate
+      int offset = idx * ELEMENT_SIZE; 
+      int j = start % ELEMENT_SIZE;
+      if (j > 0) // if we are already in the middle of element search it
+      {
+        for ( ; j < ELEMENT_SIZE; j++)
+        {
+          if (bits.bit_vector[idx] & (1ULL << j))
+            return (offset + j);
+        }
+        idx++;
+        offset += ELEMENT_SIZE;
+      }
+      for ( ; idx < BIT_ELMTS; idx++)
+      {
+        if (bits.bit_vector[idx] > 0) // if it has any valid entries, find next
+        {
+          for (j = 0; j < ELEMENT_SIZE; j++)
+          {
+            if (bits.bit_vector[idx] & (1ULL << j))
+              return (offset + j);
+          }
+        }
         offset += ELEMENT_SIZE;
       }
       return -1;
@@ -5358,6 +5540,41 @@ namespace Legion {
           }
         }
         index -= local;
+        offset += ELEMENT_SIZE;
+      }
+      return -1;
+    }
+
+    //-------------------------------------------------------------------------
+    template<unsigned int MAX>
+    inline int AVXTLBitMask<MAX>::find_next_set(int start) const
+    //-------------------------------------------------------------------------
+    {
+      if (start < 0)
+        start = 0;
+      int idx = start / ELEMENT_SIZE; // truncate
+      int offset = idx * ELEMENT_SIZE; 
+      int j = start % ELEMENT_SIZE;
+      if (j > 0) // if we are already in the middle of element search it
+      {
+        for ( ; j < ELEMENT_SIZE; j++)
+        {
+          if (bits.bit_vector[idx] & (1ULL << j))
+            return (offset + j);
+        }
+        idx++;
+        offset += ELEMENT_SIZE;
+      }
+      for ( ; idx < BIT_ELMTS; idx++)
+      {
+        if (bits.bit_vector[idx] > 0) // if it has any valid entries, find next
+        {
+          for (j = 0; j < ELEMENT_SIZE; j++)
+          {
+            if (bits.bit_vector[idx] & (1ULL << j))
+              return (offset + j);
+          }
+        }
         offset += ELEMENT_SIZE;
       }
       return -1;
@@ -6236,6 +6453,36 @@ namespace Legion {
           }
         case COMPOUND_DENSE:
           return mask.dense->find_index_set(index);
+      }
+      return -1;
+    }
+
+    //-------------------------------------------------------------------------
+    template<typename BITMASK>
+    inline int CompoundBitMask<BITMASK>::find_next_set(int start) const
+    //-------------------------------------------------------------------------
+    {
+      switch (tag)
+      {
+        case COMPOUND_SINGLE:
+        {
+          if (start <= mask.index)
+            return mask.index;
+          break;
+        }
+        case COMPOUND_SPARSE:
+        {
+          for (std::set<unsigned>::const_iterator it = mask.sparse->begin();
+                it != mask.sparse->end(); it++)
+          {
+            if ((*it) < start)
+              continue;
+            return (*it);
+          }
+          break;
+        }
+        case COMPOUND_DENSE:
+          return mask.dense->find_next_set(start);
       }
       return -1;
     }

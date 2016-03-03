@@ -675,6 +675,16 @@ namespace Legion {
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, 
                                     bool acquire, bool remote);
+      bool find_satisfying_instance(const LayoutConstraintSet &constraints,
+                                    const std::vector<LogicalRegion> &regions,
+                                    MappingInstance &result, 
+                                    std::set<PhysicalManager*> &candidates,
+                                    bool acquire, bool remote);
+      bool find_satisfying_instance(LayoutConstraints *constraints,
+                                    const std::vector<LogicalRegion> &regions,
+                                    MappingInstance &result, 
+                                    std::set<PhysicalManager*> &candidates,
+                                    bool acquire, bool remote);
       bool find_valid_instance(     const LayoutConstraintSet &constraints,
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, 
@@ -684,11 +694,23 @@ namespace Legion {
                                     MappingInstance &result, 
                                     bool acquire, bool remote);
     protected:
-      bool allocate_physical_instance(const LayoutConstraintSet &constraints,
+      PhysicalManager* allocate_physical_instance(
+                                    const LayoutConstraintSet &constraints,
                                     const std::vector<LogicalRegion> &regions,
-                                    MappingInstance &result, bool acquire,
-                                    MapperID mapper_id, Processor p,
-                                    GCPriority priority, UniqueID creator_id,
+                                    UniqueID creator_id);
+      PhysicalManager* find_and_record(PhysicalManager *manager, 
+                                    const LayoutConstraintSet &constraints,
+                                    const std::vector<LogicalRegion> &regions,
+                                    const std::set<PhysicalManager*> &cands,
+                                    bool acquire, MapperID mapper_id, 
+                                    Processor proc, GCPriority priority,
+                                    bool remote);
+      PhysicalManager* find_and_record(PhysicalManager *manager, 
+                                    LayoutConstraints *constraints,
+                                    const std::vector<LogicalRegion> &regions,
+                                    const std::set<PhysicalManager*> &cands,
+                                    bool acquire, MapperID mapper_id, 
+                                    Processor proc, GCPriority priority,
                                     bool remote);
       void record_created_instance( PhysicalManager *manager, bool acquire,
                                     MapperID mapper_id, Processor proc,
@@ -698,12 +720,8 @@ namespace Legion {
                      std::set<CollectableInfo<true> > &smaller_instances,
                      std::set<CollectableInfo<false> > &larger_instances) const;
       template<bool SMALLER>
-      bool delete_and_allocate(     InstanceBuilder &builder, 
-                                    MappingInstance &result, bool acquire,
-                                    MapperID mapper_id, Processor p,
-                                    GCPriority priority, bool remote, 
-                                    size_t needed_size, 
-                                    size_t &total_bytes_deleted,
+      PhysicalManager* delete_and_allocate(InstanceBuilder &builder, 
+                            size_t needed_size, size_t &total_bytes_deleted,
                       const std::set<CollectableInfo<SMALLER> > &instances);
     public:
       // The memory that we are managing

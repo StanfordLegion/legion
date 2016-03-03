@@ -164,13 +164,16 @@ namespace Legion {
 #endif
       unsigned offset = fields.size();
       fields.resize(offset + pop_count);
+      int next_start = 0;
       for (int idx = 0; idx < pop_count; idx++)
       {
-        int index = compressed.find_index_set(idx);
+        int index = compressed.find_next_set(next_start);
         Domain::CopySrcDstField &field = fields[offset+idx];
         field = field_infos[index];
         // Our field infos are annonymous so specify the instance now
         field.inst = instance;
+        // We'll start looking again at the next index after this one
+        next_start = index + 1;
       }
     }
 
@@ -633,7 +636,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool PhysicalManager::meets_regions(
+    bool PhysicalManager::meets_region_tree(
                                 const std::vector<LogicalRegion> &regions) const
     //--------------------------------------------------------------------------
     {
@@ -643,7 +646,19 @@ namespace Legion {
         // Check to see if the region tree IDs are the same
         if (it->get_tree_id() != region_node->handle.get_tree_id())
           return false;
-        // Same region tree
+      }
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    bool PhysicalManager::meets_regions(
+                                const std::vector<LogicalRegion> &regions) const
+    //--------------------------------------------------------------------------
+    {
+      for (std::vector<LogicalRegion>::const_iterator it = 
+            regions.begin(); it != regions.end(); it++)
+      {
+        // We already know it is the same region tree (see above function) 
         RegionNode *handle_node = context->get_node(*it);
         // Same node and we are done
         if (handle_node == region_node)

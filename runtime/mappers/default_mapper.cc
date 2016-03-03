@@ -1300,7 +1300,6 @@ namespace Legion {
                            needs_field_constraint_check, force_new_instances);
       const LayoutConstraintSet &our_constraints = 
                         mapper_rt_find_layout_constraints(ctx, our_layout_id);
-      // Find the goal memory given our target processor
       for (std::multimap<unsigned,LayoutConstraintID>::const_iterator lay_it =
             layout_constraints.layouts.lower_bound(index); lay_it !=
             layout_constraints.layouts.upper_bound(index); lay_it++)
