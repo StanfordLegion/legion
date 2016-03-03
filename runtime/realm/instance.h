@@ -100,7 +100,10 @@ namespace Realm {
 					   ptrdiff_t field_offset, size_t field_size);
     void get_strided_access_parameters(size_t start, size_t count,
 				       ptrdiff_t field_offset, size_t field_size,
-				       intptr_t& base, ptrdiff_t& stride);
+                                       intptr_t& base, ptrdiff_t& stride);
+
+    void report_instance_fault(int reason,
+			       const void *reason_data, size_t reason_size) const;
   };
 
   std::ostream& operator<<(std::ostream& os, RegionInstance r);

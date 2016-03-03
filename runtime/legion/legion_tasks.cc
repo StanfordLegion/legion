@@ -451,6 +451,7 @@ namespace LegionRuntime {
       assert(impl != NULL);
 #endif
       const size_t result_size = impl->get_untyped_size();
+#ifdef PERFORM_PREDICATE_SIZE_CHECKS
       if (result_size != variants->return_size)
       {
         log_run.error("Predicated task launch for task %s "
@@ -465,6 +466,7 @@ namespace LegionRuntime {
 #endif
         exit(ERROR_PREDICATE_RESULT_SIZE_MISMATCH);
       }
+#endif
       return result_size;
     }
 
@@ -584,6 +586,15 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    bool TaskOp::is_inline_task(void) const
+    //--------------------------------------------------------------------------
+    {
+      // should never be called except by inherited types
+      assert(false);
+      return false;
     }
 
     //--------------------------------------------------------------------------
@@ -6035,8 +6046,13 @@ namespace LegionRuntime {
 #endif
       // Perform the reduction, see if we have to do serdez reductions
       if (serdez_redop_fns != NULL)
+      {
+        // Need to hold the lock to make the serialize/deserialize
+        // process atomic
+        AutoLock o_lock(op_lock);
         (*(serdez_redop_fns->fold_fn))(reduction_op, reduction_state,
-                                       reduction_state_size, result, exclusive);
+                                       reduction_state_size, result);
+      }
       else
         reduction_op->fold(reduction_state, result, 1, exclusive);
 
@@ -6116,6 +6132,7 @@ namespace LegionRuntime {
       remote_unique_id = get_unique_task_id();
       sent_remotely = false;
       top_level_task = false;
+      is_inline = false;
       has_remote_subtasks = false;
     }
 
@@ -6241,6 +6258,7 @@ namespace LegionRuntime {
           }
           else
           {
+#ifdef PERFORM_PREDICATE_SIZE_CHECKS
             if (predicate_false_size != variants->return_size)
             {
               log_run.error("Predicated task launch for task %s "
@@ -6255,6 +6273,7 @@ namespace LegionRuntime {
 #endif
               exit(ERROR_PREDICATE_RESULT_SIZE_MISMATCH);
             }
+#endif
 #ifdef DEBUG_HIGH_LEVEL
             assert(predicate_false_result == NULL);
 #endif
@@ -6714,7 +6733,6 @@ namespace LegionRuntime {
             // Only need to send back the pointer to the task instance
             rez.serialize(orig_task);
             rez.serialize(applied_condition);
-            rez.serialize<size_t>(0);
             runtime->send_individual_remote_mapped(orig_proc, rez);
           }
           // Mark that we have completed mapping
@@ -7195,8 +7213,17 @@ namespace LegionRuntime {
       Processor current = parent_ctx->get_executing_processor();
       // Set the context to be the current inline context
       parent_ctx = ctx;
+      // Mark that we are an inline task
+      is_inline = true;
       variant->dispatch_inline(current, this); 
     }  
+
+    //--------------------------------------------------------------------------
+    bool IndividualTask::is_inline_task(void) const
+    //--------------------------------------------------------------------------
+    {
+      return is_inline;
+    }
 
     //--------------------------------------------------------------------------
     const std::vector<PhysicalRegion>& IndividualTask::begin_inline_task(void)
@@ -7553,6 +7580,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    bool PointTask::is_inline_task(void) const
+    //--------------------------------------------------------------------------
+    {
+      // We are never an inline task
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
     Event PointTask::get_task_completion(void) const
     //--------------------------------------------------------------------------
     {
@@ -7732,7 +7767,7 @@ namespace LegionRuntime {
     InstanceRef PointTask::find_restricted_instance(unsigned index)
     //--------------------------------------------------------------------------
     {
-      return slice_owner->find_restricted_instance(index);
+      return slice_owner->find_restricted_instance(index,regions[index].region);
     }
 
     //--------------------------------------------------------------------------
@@ -8773,6 +8808,7 @@ namespace LegionRuntime {
         }
         else
         {
+#ifdef PERFORM_PREDICATE_SIZE_CHECKS
           if (predicate_false_size != variants->return_size)
           {
             log_run.error("Predicated index task launch for task %s "
@@ -8787,6 +8823,7 @@ namespace LegionRuntime {
 #endif
             exit(ERROR_PREDICATE_RESULT_SIZE_MISMATCH);
           }
+#endif
 #ifdef DEBUG_HIGH_LEVEL
           assert(predicate_false_result == NULL);
 #endif
@@ -9431,6 +9468,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    bool IndexTask::is_inline_task(void) const
+    //--------------------------------------------------------------------------
+    {
+      // We are always an inline task if we are getting called here
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
     const std::vector<PhysicalRegion>& IndexTask::begin_inline_task(void)
     //--------------------------------------------------------------------------
     {
@@ -9499,7 +9544,8 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    InstanceRef IndexTask::find_restricted_instance(unsigned index)
+    InstanceRef IndexTask::find_restricted_instance(unsigned index, 
+                                                    LogicalRegion target)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -9509,7 +9555,12 @@ namespace LegionRuntime {
       InstanceRef parent_ref = 
         parent_ctx->get_local_reference(parent_req_indexes[index]);
       // Now get the proper sub-view for our privilege path
-      return privilege_paths[index].translate_ref(parent_ref);
+      // Translate down from where the parent task had privileges
+      // down to where the target region is
+      RegionTreePath translate_path;
+      runtime->forest->initialize_path(target.get_index_space(),
+                     regions[index].parent.get_index_space(), translate_path);
+      return translate_path.translate_ref(parent_ref);
     }
 
     //--------------------------------------------------------------------------
@@ -10418,7 +10469,8 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    InstanceRef SliceTask::find_restricted_instance(unsigned index)
+    InstanceRef SliceTask::find_restricted_instance(unsigned index,
+                                                    LogicalRegion target)
     //--------------------------------------------------------------------------
     {
       if (is_remote())
@@ -10429,7 +10481,7 @@ namespace LegionRuntime {
       }
       else
       {
-        return index_owner->find_restricted_instance(index);
+        return index_owner->find_restricted_instance(index, target);
       }
     }
 

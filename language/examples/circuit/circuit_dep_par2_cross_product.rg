@@ -176,9 +176,9 @@ task toplevel()
   var pn_top_private = cross_product(pn_top, pn_private)
   var pn_top_shared = cross_product(pn_top, pn_shared)
   var pn_top_ghost = cross_product(pn_top, pn_ghost)
-  var pn_sub_private = pn_top_private[1].partition
-  var pn_sub_shared = pn_top_shared[0].partition
-  var pn_sub_ghost = pn_top_ghost[0+0].partition -- Hack: force dynamic lookup
+  var pn_sub_private = pn_top_private[1]
+  var pn_sub_shared = pn_top_shared[0]
+  var pn_sub_ghost = pn_top_ghost[0]
 
   if true or conf.dump_graph then
     helper.dump_graph(conf, rn, rw,

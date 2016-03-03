@@ -77,12 +77,9 @@
       var profilingData = {
         items: [],
         visibility: [],
-        visibleLeft: 0,
-        visibleRight: 0
       };
 
-      var zoom = 1.0;
-      var maxZoom = 1000.0
+      var maxZoom = 10000.0
       var margin_left = 300;
       var margin_right = 50;
       var margin_bottom = 50;
@@ -92,9 +89,12 @@
       var end = %d * 1.01;
       var max_level = %d;
       var scale = width / (end - start);
+      var zoom = 1.0;
       var thickness = Math.max(height / max_level, 20);
       var baseThickness = height / max_level;
       height = max_level * thickness;
+      var min_feature_width = 3; // width in pixels of the smallest thing we want people to be able to see
+      var min_gap_width = 1; // width in pixels of the smallest gap we want to show
 
       var mouseX = 0;
       var rangeZoom = true;
@@ -241,10 +241,10 @@
         var prevZoom = zoom;
         var selectWidth = parseInt(select_block.attr("width"));
         var svgWidth = timelineSvg.attr("width");
-        if (rangeZoom && selectWidth > 10 && svgWidth / selectWidth <= maxZoom) {
+        if (rangeZoom && selectWidth > 10) {
           var x = select_block.attr("x");
           showLoaderIcon();
-          adjustZoom(svgWidth / selectWidth, false);
+          adjustZoom(Math.min(svgWidth / selectWidth, maxZoom), false);
           $("#timeline").scrollLeft(x / prevZoom * zoom);
           hideLoaderIcon();
         }
@@ -348,7 +348,12 @@
               return d.color;
             else return "#ff0000";
           })
-          .attr("width", function(d) { return (d.end - d.start) * scale; })
+          .attr("width", function(d) {
+            if (searchEnabled && searchRegex[currentPos].exec(d.title) != null)
+              return Math.max(min_feature_width / zoom, (d.end - d.start) * scale);
+            else
+              return (d.end - d.start) * scale;
+           })
           .attr("height", thickness)
           .style("opacity", function(d) {
             if (!searchEnabled ||
@@ -552,18 +557,80 @@
         }
       }
 
-      function filterOnlyVisibleData(profilingData, zoom, scale) {
+      function updateURL(zoom, scale) {
         var windowStart = $("#timeline").scrollLeft();
-        var windowEnd = windowStart + $(window).width();
+        var windowEnd = windowStart + $("#timeline").width();
+        var start_time = windowStart / zoom / scale;
+        var end_time = windowEnd / zoom / scale;
+        var url = window.location.href.split('?')[0];
+        url += "?start=" + start_time;
+        url += "&end=" + end_time;
+        if (searchEnabled)
+          url += "&search=" + searchRegex[currentPos].source;
+        window.history.replaceState("", "", url);
+      }
+
+      function filterOnlyVisibleData(profilingData, zoom, scale) {
+        updateURL(zoom, scale);
+        var windowStart = $("#timeline").scrollLeft();
+        var windowEnd = windowStart + $("#timeline").width();
         var filteredData = Array();
         var items = profilingData.items;
         var f = scale * zoom;
-        for (var i = 0; i < items.length; ++i) {
-          var d = items[i];
-          var start = d.start;
-          var end = d.end;
-          if ((end - start) * f >= 1.0 && end * f >= windowStart && start * f <= windowEnd)
-            filteredData.push(d);
+        var min_feature_time = min_feature_width / f;
+        var min_gap_time = min_gap_width / f;
+        for (var level in items) {
+          for (var i = 0; i < items[level].length; ++i) {
+            var d = items[level][i];
+            var start = d.start;
+            var end = d.end;
+            if ((start * f) > windowEnd) continue;
+            if ((end * f) < windowStart) continue;
+            // is this block too narrow?
+            if ((end - start) < min_feature_time) {
+              // see how many more after this are also too narrow and too close to us
+              var count = 1;
+              // don't do this if we're the subject of the current search and don't merge with
+              // something that is
+              if (!searchEnabled || searchRegex[currentPos].exec(d.title) == null) {
+                while (((i + count) < items[level].length) && 
+                       ((items[level][i + count].start - end) < min_gap_time) &&
+                       ((items[level][i + count].end - items[level][i + count].start) < min_feature_time) &&
+                       (!searchEnabled || searchRegex[currentPos].exec(items[level][i + count].title) == null)) {
+                  end = items[level][i + count].end;
+                  count++;
+                }
+              }
+              // are we still too narrow?  if so, bloat, but make sure we don't overlap something later
+	      if ((end - start) < min_feature_time) {
+                end = start + min_feature_time;                   
+                if (((i + count) < items[level].length) && (items[level][i + count].start < end))
+                  end = items[level][i + count].start;
+              }
+              if (count > 1) {
+                filteredData.push({
+                  id: d.id,
+    		  level: d.level,
+                  start: d.start,
+                  end: end,
+                  color: "#808080",
+                  title: count + " merged tasks"
+                });
+		i += (count - 1);
+              } else {
+                filteredData.push({
+                  id: d.id,
+    		  level: d.level,
+                  start: d.start,
+                  end: d.end,
+                  color: d.color,
+                  title: d.title + " (expanded for visibility)"
+                });
+              }
+            } else {
+              filteredData.push(d);
+            }
+          }
         }
         return filteredData;
       }
@@ -853,8 +920,8 @@
             return {
               id: i,
               level: d.level,
-              start: d.start,
-              end: d.end,
+              start: parseFloat(d.start),
+              end: parseFloat(d.end),
               color: d.color,
               title: d.title
             };
@@ -864,14 +931,22 @@
               .attr("id", "timeline")
               .attr("transform", "scale(" + zoom +", 1.0)");
 
-          profilingData.items = data;
-          profilingData.visibleLeft = 0;
-          profilingData.visibleRight = data.length - 1;
+          // split profiling items by which level they're on
+          profilingData.items = {};
+          for(var i = 0; i < data.length; i++) {
+            var d = data[i];
+            if (d.level in profilingData.items) {
+              profilingData.items[d.level].push(d);
+            } else {
+              profilingData.items[d.level] = [d];
+            }
+          }
 
-          var scrollLeft = $("#timeline").scrollLeft();
+          $("#timeline").scrollLeft(0);
+	  parseURLParameters();
+
           var filteredData = filterOnlyVisibleData(profilingData, zoom, scale);
           drawTimeline(timelineGroup, filteredData, zoom, scale, thickness);
-          $("#timeline").scrollLeft(0);
 
           var windowCenterY = $(window).height() / 2;
           $(window).scroll(function() {
@@ -905,6 +980,44 @@
             drawProcessors(profilingData.processors);
           }
       );
+
+      function parseURLParameters() {
+        var match,
+        pl     = /\+/g,  // Regex for replacing addition symbol with a space
+        search = /([^&=]+)=?([^&]*)/g,
+        decode = function (s) { return decodeURIComponent(s.replace(pl, " ")); },
+        query  = window.location.search.substring(1);
+
+        var urlParams = {};
+        while (match = search.exec(query))
+          urlParams[decode(match[1])] = decode(match[2]);
+
+        // adjust zoom
+        var zstart = start;
+        if ("start" in urlParams)
+          zstart = Math.max(start, parseFloat(urlParams["start"]));
+
+        var zend = end;
+        if ("end" in urlParams)
+          zend = Math.min(end, parseFloat(urlParams["end"]));
+
+        if(zstart < zend) {
+          // set zoom to get: (zend - start) * zoom * scale = $("#timeline").width()
+          adjustZoom($("#timeline").width() / scale / (zend - zstart), false);
+
+          // set scrollLeft to get:  zstart * zoom * scale = scrollLeft()
+          $("#timeline").scrollLeft(zstart * zoom * scale);
+        }
+
+	if ("search" in urlParams) {
+          searchEnabled = true;
+	  searchRegex = new Array(sizeHistory);
+          currentPos = 0;
+          nextPos = 1;
+          searchRegex[currentPos] = new RegExp(urlParams["search"]);
+        }
+      }
+
       hideLoaderIcon();
     </script>
   </body>

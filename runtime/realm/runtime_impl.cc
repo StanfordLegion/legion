@@ -60,7 +60,9 @@ namespace Realm {
 namespace Realm {
 
   Logger log_runtime("realm");
+  Logger log_collective("collective");
   extern Logger log_task; // defined in proc_impl.cc
+  extern Logger log_taskreg; // defined in proc_impl.cc
   
   ////////////////////////////////////////////////////////////////////////
   //
@@ -132,7 +134,9 @@ namespace Realm {
 	events.insert(e);
       }
 
-      Event::merge_events(events).wait();
+      Event merged = Event::merge_events(events);
+      log_taskreg.info() << "waiting on event: " << merged;
+      merged.wait();
       return true;
 #if 0
       if(((RuntimeImpl *)impl)->task_table.count(taskid) > 0)
@@ -165,6 +169,25 @@ namespace Realm {
       return true;
     }
 
+    Event Runtime::collective_spawn(Processor target_proc, Processor::TaskFuncID task_id, 
+				    const void *args, size_t arglen,
+				    Event wait_on /*= Event::NO_EVENT*/, int priority /*= 0*/)
+    {
+      return ((RuntimeImpl *)impl)->collective_spawn(target_proc, task_id, args, arglen,
+						     wait_on, priority);
+    }
+
+    Event Runtime::collective_spawn_by_kind(Processor::Kind target_kind, Processor::TaskFuncID task_id, 
+					    const void *args, size_t arglen,
+					    bool one_per_node /*= false*/,
+					    Event wait_on /*= Event::NO_EVENT*/, int priority /*= 0*/)
+    {
+      return ((RuntimeImpl *)impl)->collective_spawn_by_kind(target_kind, task_id,
+							     args, arglen,
+							     one_per_node,
+							     wait_on, priority);
+    }
+
     void Runtime::run(Processor::TaskFuncID task_id /*= 0*/,
 		      RunStyle style /*= ONE_TASK_ONLY*/,
 		      const void *args /*= 0*/, size_t arglen /*= 0*/,
@@ -173,9 +196,49 @@ namespace Realm {
       ((RuntimeImpl *)impl)->run(task_id, style, args, arglen, background);
     }
 
-    void Runtime::shutdown(void)
+    class DeferredShutdown : public EventWaiter {
+    public:
+      DeferredShutdown(RuntimeImpl *_runtime);
+      virtual ~DeferredShutdown(void);
+
+      virtual bool event_triggered(Event e, bool poisoned);
+      virtual void print(std::ostream& os) const;
+
+    protected:
+      RuntimeImpl *runtime;
+    };
+
+    DeferredShutdown::DeferredShutdown(RuntimeImpl *_runtime)
+      : runtime(_runtime)
+    {}
+
+    DeferredShutdown::~DeferredShutdown(void)
+    {}
+
+    bool DeferredShutdown::event_triggered(Event e, bool poisoned)
     {
-      ((RuntimeImpl *)impl)->shutdown(true); // local request
+      // no real good way to deal with a poisoned shutdown precondition
+      if(poisoned) {
+	log_poison.fatal() << "HELP!  poisoned precondition for runtime shutdown";
+	assert(false);
+      }
+      log_runtime.info() << "triggering deferred shutdown";
+      runtime->shutdown(true);
+      return true; // go ahead and delete us
+    }
+
+    void DeferredShutdown::print(std::ostream& os) const
+    {
+      os << "deferred shutdown";
+    }
+
+    void Runtime::shutdown(Event wait_on /*= Event::NO_EVENT*/)
+    {
+      log_runtime.info() << "shutdown requested - wait_on=" << wait_on;
+      if(wait_on.has_triggered())
+	((RuntimeImpl *)impl)->shutdown(true); // local request
+      else
+	EventImpl::add_waiter(wait_on, new DeferredShutdown((RuntimeImpl *)impl));
     }
 
     void Runtime::wait_for_shutdown(void)
@@ -437,7 +500,9 @@ namespace Realm {
   {
     Module::create_code_translators(runtime);
 
-    // no code translators
+#ifdef REALM_USE_DLFCN
+    runtime->add_code_translator(new DSOCodeTranslator);
+#endif
   }
 
   // clean up any common resources created by the module - this will be called
@@ -468,8 +533,9 @@ namespace Realm {
 	nodes(0), global_memory(0),
 	local_event_free_list(0), local_barrier_free_list(0),
 	local_reservation_free_list(0), local_index_space_free_list(0),
-	local_proc_group_free_list(0), local_sparsity_map_free_list(0),
-	background_pthread(0),
+	local_proc_group_free_list(0),
+	local_sparsity_map_free_list(0),
+	run_method_called(false),
 	shutdown_requested(false), shutdown_condvar(shutdown_mutex),
 	num_local_memories(0), num_local_processors(0),
 	module_registrar(this)
@@ -521,6 +587,11 @@ namespace Realm {
       dma_channels.push_back(c);
     }
 
+    void RuntimeImpl::add_code_translator(CodeTranslator *t)
+    {
+      code_translators.push_back(t);
+    }
+
     void RuntimeImpl::add_proc_mem_affinity(const Machine::ProcessorMemoryAffinity& pma)
     {
       machine->add_proc_mem_affinity(pma);
@@ -539,6 +610,11 @@ namespace Realm {
     const std::vector<DMAChannel *>& RuntimeImpl::get_dma_channels(void) const
     {
       return dma_channels;
+    }
+
+    const std::vector<CodeTranslator *>& RuntimeImpl::get_code_translators(void) const
+    {
+      return code_translators;
     }
 
     static void add_proc_mem_affinities(MachineImpl *machine,
@@ -600,19 +676,18 @@ namespace Realm {
       //  spawners (e.g. the ssh spawner for gasnetrun_ibv) start with bogus args and
       //  fetch the real ones from somewhere during gasnet_init()
 
-      //GASNetNode::my_node = new GASNetNode(argc, argv, this);
+#ifdef USE_GASNET
       // SJT: WAR for issue on Titan with duplicate cookies on Gemini
       //  communication domains
       char *orig_pmi_gni_cookie = getenv("PMI_GNI_COOKIE");
       if(orig_pmi_gni_cookie) {
-        char *new_pmi_gni_cookie = (char *)malloc(256);
-        sprintf(new_pmi_gni_cookie, "PMI_GNI_COOKIE=%d", 1+atoi(orig_pmi_gni_cookie));
-        //printf("changing PMI cookie to: '%s'\n", new_pmi_gni_cookie);
-        putenv(new_pmi_gni_cookie);  // libc now owns the memory
+	char new_pmi_gni_cookie[32];
+	snprintf(new_pmi_gni_cookie, 32, "%d", 1+atoi(orig_pmi_gni_cookie));
+	setenv("PMI_GNI_COOKIE", new_pmi_gni_cookie, 1 /*overwrite*/);
       }
       // SJT: another GASNET workaround - if we don't have GASNET_IB_SPAWNER set, assume it was MPI
       if(!getenv("GASNET_IB_SPAWNER"))
-	putenv(strdup("GASNET_IB_SPAWNER=mpi"));
+	setenv("GASNET_IB_SPAWNER", "mpi", 0 /*no overwrite*/);
 
       // and one more... disable GASNet's probing of pinnable memory - it's
       //  painfully slow on most systems (the gemini conduit doesn't probe
@@ -633,14 +708,23 @@ namespace Realm {
 	const char *e = getenv("GASNET_PHYSMEM_NOPROBE");
 	if(!e || (atoi(e) > 0)) {
 	  if(!e)
-	    putenv(strdup("GASNET_PHYSMEM_NOPROBE=1"));
+	    setenv("GASNET_PHYSMEM_NOPROBE", "1", 0 /*no overwrite*/);
 	  if(!getenv("GASNET_PHYSMEM_MAX")) {
 	    // just because it's fun to read things like this 20 years later:
 	    // "nobody will ever build a system with more than 1 TB of RAM..."
-	    putenv(strdup("GASNET_PHYSMEM_MAX=1T"));
+	    setenv("GASNET_PHYSMEM_MAX", "1T", 0 /*no overwrite*/);
 	  }
 	}
       }
+
+      // and yet another GASNet workaround: the Infiniband conduit seems to
+      //  have a problem with AMRDMA mode, consuming receive buffers even for
+      //  request targets that are in AMRDMA mode - disable the mode by default
+#ifdef GASNET_CONDUIT_IBV
+      if(!getenv("GASNET_AMRDMA_MAX_PEERS"))
+        setenv("GASNET_AMRDMA_MAX_PEERS", "0", 0 /*no overwrite*/);
+#endif
+#endif
 
 #ifdef DEBUG_REALM_STARTUP
       { // we don't have rank IDs yet, so everybody gets to spew
@@ -776,22 +860,14 @@ namespace Realm {
       {
         fprintf(stderr,"ERROR: Launched %d nodes, but runtime is configured "
                        "for at most %d nodes. Update the 'MAX_NUM_NODES' macro "
-                       "in legion_types.h", gasnet_nodes(), MAX_NUM_NODES);
+                       "in legion_config.h", gasnet_nodes(), MAX_NUM_NODES);
         gasnet_exit(1);
       }
       if (gasnet_nodes() > ((1 << ID::NODE_BITS) - 1))
       {
-#ifdef LEGION_IDS_ARE_64BIT
         fprintf(stderr,"ERROR: Launched %d nodes, but low-level IDs are only "
                        "configured for at most %d nodes. Update the allocation "
                        "of bits in ID", gasnet_nodes(), (1 << ID::NODE_BITS) - 1);
-#else
-        fprintf(stderr,"ERROR: Launched %d nodes, but low-level IDs are only "
-                       "configured for at most %d nodes.  Update the allocation "
-                       "of bits in ID or switch to 64-bit IDs with the "
-                       "-DLEGION_IDS_ARE_64BIT compile-time flag",
-                       gasnet_nodes(), (1 << ID::NODE_BITS) - 1);
-#endif
         gasnet_exit(1);
       }
 
@@ -807,6 +883,7 @@ namespace Realm {
       hcount += LockGrantMessage::Message::add_handler_entries(&handlers[hcount], "Lock Grant AM");
       hcount += EventSubscribeMessage::Message::add_handler_entries(&handlers[hcount], "Event Subscribe AM");
       hcount += EventTriggerMessage::Message::add_handler_entries(&handlers[hcount], "Event Trigger AM");
+      hcount += EventUpdateMessage::Message::add_handler_entries(&handlers[hcount], "Event Update AM");
       hcount += RemoteMemAllocRequest::Request::add_handler_entries(&handlers[hcount], "Remote Memory Allocation Request AM");
       hcount += RemoteMemAllocRequest::Response::add_handler_entries(&handlers[hcount], "Remote Memory Allocation Response AM");
       hcount += CreateInstanceRequest::Request::add_handler_entries(&handlers[hcount], "Create Instance Request AM");
@@ -867,6 +944,12 @@ namespace Realm {
 		     gasnet_mem_size_in_mb, reg_mem_size_in_mb,
 		     core_reservations,
 		     *argc, (const char **)*argv);
+
+#ifdef USE_GASNET
+      // this needs to happen after init_endpoints
+      gasnet_coll_init(0, 0, 0, 0, 0);
+#endif
+
 #ifndef USE_GASNET
       // network initialization is also responsible for setting the "zero_time"
       //  for relative timing - no synchronization necessary in non-gasnet case
@@ -1001,6 +1084,11 @@ namespace Realm {
 	  it != modules.end();
 	  it++)
 	(*it)->create_dma_channels(this);
+
+      for(std::vector<Module *>::const_iterator it = modules.begin();
+	  it != modules.end();
+	  it++)
+	(*it)->create_code_translators(this);
 
       // now that we've created all the processors/etc., we can try to come up with core
       //  allocations that satisfy everybody's requirements - this will also start up any
@@ -1229,16 +1317,6 @@ namespace Realm {
       return true;
     }
 
-    struct MachineRunArgs {
-      RuntimeImpl *r;
-      Processor::TaskFuncID task_id;
-      Runtime::RunStyle style;
-      const void *args;
-      size_t arglen;
-    };  
-
-    static bool running_as_background_thread = false;
-
   template <typename T>
   void spawn_on_all(const T& container_of_procs,
 		    Processor::TaskFuncID func_id,
@@ -1252,6 +1330,240 @@ namespace Realm {
       (*it)->me.spawn(func_id, args, arglen, ProfilingRequestSet(), start_event, priority);
   }
 
+  struct CollectiveSpawnInfo {
+    Processor target_proc;
+    Processor::TaskFuncID task_id;
+    Event wait_on;
+    int priority;
+  };
+
+#define DEBUG_COLLECTIVES
+
+#if defined(USE_GASNET) && defined(DEBUG_COLLECTIVES)
+  static const int GASNET_COLL_FLAGS = GASNET_COLL_IN_MYSYNC | GASNET_COLL_OUT_MYSYNC | GASNET_COLL_LOCAL;
+  
+  template <typename T>
+  static void broadcast_check(const T& val, const char *name)
+  {
+    T bval;
+    gasnet_coll_broadcast(GASNET_TEAM_ALL, &bval, 0, const_cast<T *>(&val), sizeof(T), GASNET_COLL_FLAGS);
+    if(val != bval) {
+      log_collective.fatal() << "collective mismatch on node " << gasnet_mynode() << " for " << name << ": " << val << " != " << bval;
+      assert(false);
+    }
+  }
+#endif
+
+    Event RuntimeImpl::collective_spawn(Processor target_proc, Processor::TaskFuncID task_id, 
+					const void *args, size_t arglen,
+					Event wait_on /*= Event::NO_EVENT*/, int priority /*= 0*/)
+    {
+      log_collective.info() << "collective spawn: proc=" << target_proc << " func=" << task_id << " priority=" << priority << " before=" << wait_on;
+
+#ifdef USE_GASNET
+#ifdef DEBUG_COLLECTIVES
+      broadcast_check(target_proc, "target_proc");
+      broadcast_check(task_id, "task_id");
+      broadcast_check(priority, "priority");
+#endif
+
+      // root node will be whoever owns the target proc
+      int root = ID(target_proc).node();
+
+      if(gasnet_mynode() == root) {
+	// ROOT NODE
+
+	// step 1: receive wait_on from every node
+	Event *all_events = 0;
+	all_events = new Event[gasnet_nodes()];
+	gasnet_coll_gather(GASNET_TEAM_ALL, root, all_events, &wait_on, sizeof(Event), GASNET_COLL_FLAGS);
+
+	// step 2: merge all the events
+	std::set<Event> event_set;
+	for(int i = 0; i < gasnet_nodes(); i++) {
+	  //log_collective.info() << "ev " << i << ": " << all_events[i];
+	  if(all_events[i].exists())
+	    event_set.insert(all_events[i]);
+	}
+	delete[] all_events;
+
+	Event merged_event = Event::merge_events(event_set);
+	log_collective.info() << "merged precondition: proc=" << target_proc << " func=" << task_id << " priority=" << priority << " before=" << merged_event;
+
+	// step 3: run the task
+	Event finish_event = target_proc.spawn(task_id, args, arglen, merged_event, priority);
+
+	// step 4: broadcast the finish event to everyone
+	gasnet_coll_broadcast(GASNET_TEAM_ALL, &finish_event, root, &finish_event, sizeof(Event), GASNET_COLL_FLAGS);
+
+	log_collective.info() << "collective spawn: proc=" << target_proc << " func=" << task_id << " priority=" << priority << " after=" << finish_event;
+
+	return finish_event;
+      } else {
+	// NON-ROOT NODE
+
+	// step 1: send our wait_on to the root for merging
+	gasnet_coll_gather(GASNET_TEAM_ALL, root, 0, &wait_on, sizeof(Event), GASNET_COLL_FLAGS);
+
+	// steps 2 and 3: twiddle thumbs
+
+	// step 4: receive finish event
+	Event finish_event;
+	gasnet_coll_broadcast(GASNET_TEAM_ALL, &finish_event, root, 0, sizeof(Event), GASNET_COLL_FLAGS);
+
+	log_collective.info() << "collective spawn: proc=" << target_proc << " func=" << task_id << " priority=" << priority << " after=" << finish_event;
+
+	return finish_event;
+      }
+#else
+      // no GASNet, so a collective spawn is the same as a regular spawn
+      Event finish_event = target_proc.spawn(task_id, args, arglen, wait_on, priority);
+
+      log_collective.info() << "collective spawn: proc=" << target_proc << " func=" << task_id << " priority=" << priority << " after=" << finish_event;
+
+      return finish_event;
+#endif
+    }
+
+    Event RuntimeImpl::collective_spawn_by_kind(Processor::Kind target_kind, Processor::TaskFuncID task_id, 
+						const void *args, size_t arglen,
+						bool one_per_node /*= false*/,
+						Event wait_on /*= Event::NO_EVENT*/, int priority /*= 0*/)
+    {
+      log_collective.info() << "collective spawn: kind=" << target_kind << " func=" << task_id << " priority=" << priority << " before=" << wait_on;
+
+#ifdef USE_GASNET
+#ifdef DEBUG_COLLECTIVES
+      broadcast_check(target_kind, "target_kind");
+      broadcast_check(task_id, "task_id");
+      broadcast_check(one_per_node, "one_per_node");
+      broadcast_check(priority, "priority");
+#endif
+
+      // every node is involved in this one, so the root is arbitrary - we'll pick node 0
+
+      Event merged_event;
+
+      if(gasnet_mynode() == 0) {
+	// ROOT NODE
+
+	// step 1: receive wait_on from every node
+	Event *all_events = 0;
+	all_events = new Event[gasnet_nodes()];
+	gasnet_coll_gather(GASNET_TEAM_ALL, 0, all_events, &wait_on, sizeof(Event), GASNET_COLL_FLAGS);
+
+	// step 2: merge all the events
+	std::set<Event> event_set;
+	for(int i = 0; i < gasnet_nodes(); i++) {
+	  //log_collective.info() << "ev " << i << ": " << all_events[i];
+	  if(all_events[i].exists())
+	    event_set.insert(all_events[i]);
+	}
+	delete[] all_events;
+
+	merged_event = Event::merge_events(event_set);
+
+	// step 3: broadcast the merged event back to everyone
+	gasnet_coll_broadcast(GASNET_TEAM_ALL, &merged_event, 0, &merged_event, sizeof(Event), GASNET_COLL_FLAGS);
+      } else {
+	// NON-ROOT NODE
+
+	// step 1: send our wait_on to the root for merging
+	gasnet_coll_gather(GASNET_TEAM_ALL, 0, 0, &wait_on, sizeof(Event), GASNET_COLL_FLAGS);
+
+	// step 2: twiddle thumbs
+
+	// step 3: receive merged wait_on event
+	gasnet_coll_broadcast(GASNET_TEAM_ALL, &merged_event, 0, 0, sizeof(Event), GASNET_COLL_FLAGS);
+      }
+#else
+      // no GASNet, so our precondition is the only one
+      Event merged_event = wait_on;
+#endif
+
+      // now spawn 0 or more local tasks
+      std::set<Event> event_set;
+
+      const std::vector<ProcessorImpl *>& local_procs = nodes[gasnet_mynode()].processors;
+
+      for(std::vector<ProcessorImpl *>::const_iterator it = local_procs.begin();
+	  it != local_procs.end();
+	  it++)
+	if((target_kind == Processor::NO_KIND) || ((*it)->kind == target_kind)) {
+	  Event e = (*it)->me.spawn(task_id, args, arglen, ProfilingRequestSet(),
+				    merged_event, priority);
+	  log_collective.info() << "spawn by kind: proc=" << (*it)->me << " func=" << task_id << " before=" << merged_event << " after=" << e;
+	  if(e.exists())
+	    event_set.insert(e);
+
+	  if(one_per_node)
+	    break;
+	}
+
+      // local merge
+      Event my_finish = Event::merge_events(event_set);
+
+#ifdef USE_GASNET
+      if(gasnet_mynode() == 0) {
+	// ROOT NODE
+
+	// step 1: receive wait_on from every node
+	Event *all_events = 0;
+	all_events = new Event[gasnet_nodes()];
+	gasnet_coll_gather(GASNET_TEAM_ALL, 0, all_events, &my_finish, sizeof(Event), GASNET_COLL_FLAGS);
+
+	// step 2: merge all the events
+	std::set<Event> event_set;
+	for(int i = 0; i < gasnet_nodes(); i++) {
+	  //log_collective.info() << "ev " << i << ": " << all_events[i];
+	  if(all_events[i].exists())
+	    event_set.insert(all_events[i]);
+	}
+	delete[] all_events;
+
+	Event merged_finish = Event::merge_events(event_set);
+
+	// step 3: broadcast the merged event back to everyone
+	gasnet_coll_broadcast(GASNET_TEAM_ALL, &merged_finish, 0, &merged_finish, sizeof(Event), GASNET_COLL_FLAGS);
+
+	log_collective.info() << "collective spawn: kind=" << target_kind << " func=" << task_id << " priority=" << priority << " after=" << merged_finish;
+
+	return merged_finish;
+      } else {
+	// NON-ROOT NODE
+
+	// step 1: send our wait_on to the root for merging
+	gasnet_coll_gather(GASNET_TEAM_ALL, 0, 0, &my_finish, sizeof(Event), GASNET_COLL_FLAGS);
+
+	// step 2: twiddle thumbs
+
+	// step 3: receive merged wait_on event
+	Event merged_finish;
+	gasnet_coll_broadcast(GASNET_TEAM_ALL, &merged_finish, 0, 0, sizeof(Event), GASNET_COLL_FLAGS);
+
+	log_collective.info() << "collective spawn: kind=" << target_kind << " func=" << task_id << " priority=" << priority << " after=" << merged_finish;
+
+	return merged_finish;
+      }
+#else
+      // no GASNet, so just return our locally merged event
+      log_collective.info() << "collective spawn: kind=" << target_kind << " func=" << task_id << " priority=" << priority << " after=" << my_finish;
+
+      return my_finish;
+#endif
+    }
+
+#if 0
+    struct MachineRunArgs {
+      RuntimeImpl *r;
+      Processor::TaskFuncID task_id;
+      Runtime::RunStyle style;
+      const void *args;
+      size_t arglen;
+    };  
+
+    static bool running_as_background_thread = false;
+
     static void *background_run_thread(void *data)
     {
       MachineRunArgs *args = (MachineRunArgs *)data;
@@ -1261,12 +1573,16 @@ namespace Realm {
       delete args;
       return 0;
     }
+#endif
 
     void RuntimeImpl::run(Processor::TaskFuncID task_id /*= 0*/,
 			  Runtime::RunStyle style /*= ONE_TASK_ONLY*/,
 			  const void *args /*= 0*/, size_t arglen /*= 0*/,
 			  bool background /*= false*/)
     { 
+      // trigger legacy behavior (e.g. calling shutdown task on all processors)
+      run_method_called = true;
+#if 0
       if(background) {
         log_runtime.info("background operation requested\n");
 	fflush(stdout);
@@ -1288,61 +1604,35 @@ namespace Realm {
 #endif
 	return;
       }
+#endif
 
-      const std::vector<ProcessorImpl *>& local_procs = nodes[gasnet_mynode()].processors;
-
-      // now that we've got the machine description all set up, we can start
-      //  the worker threads for local processors, which'll probably ask the
-      //  high-level runtime to set itself up
-      if(true) { // TODO: SEP task_table.count(Processor::TASK_ID_PROCESSOR_INIT) > 0) {
-	log_task.info("spawning processor init task on local cpus");
-
-	spawn_on_all(local_procs, Processor::TASK_ID_PROCESSOR_INIT, 0, 0,
-		     Event::NO_EVENT,
-		     INT_MAX); // runs with max priority
+      // step 1: a collective spawn to run the init task on all processors that care
+      Event init_event = collective_spawn_by_kind(Processor::NO_KIND, Processor::TASK_ID_PROCESSOR_INIT, 0, 0,
+						  false /*run on all procs*/,
+						  Event::NO_EVENT,
+						  INT_MAX); // runs with max priority
+      
+      Event main_event;
+      if(task_id != 0) {
+	if(style == Runtime::ONE_TASK_ONLY) {
+	  // everybody needs to agree on this...
+	  Processor p = nodes[0].processors[0]->me;
+	  main_event = collective_spawn(p, task_id, args, arglen, init_event);
+	} else {
+	  main_event = collective_spawn_by_kind(Processor::NO_KIND, task_id, args, arglen,
+						(style == Runtime::ONE_TASK_PER_NODE),
+						init_event, 0 /*priority*/);
+	}
       } else {
-	log_task.info("no processor init task");
+	// no main task!?
+	main_event = init_event;
       }
 
-      if(task_id != 0 && 
-	 ((style != Runtime::ONE_TASK_ONLY) || 
-	  (gasnet_mynode() == 0))) {//(gasnet_nodes()-1)))) {
-	for(std::vector<ProcessorImpl *>::const_iterator it = local_procs.begin();
-	    it != local_procs.end();
-	    it++) {
-	  (*it)->me.spawn(task_id, args, arglen, ProfilingRequestSet(),
-			  Event::NO_EVENT, 0/*priority*/);
-	  if(style != Runtime::ONE_TASK_PER_PROC) break;
-	}
-      }
+      // if we're in background mode, we just return to the caller now
+      if(background)
+	return;
 
-#ifdef TRACE_RESOURCES
-      RuntimeImpl *rt = get_runtime();
-#endif
-#ifdef OLD_WAIT_LOOP
-      // wait for idle-ness somehow?
-      int timeout = -1;
-      while(running_proc_count.get() > 0) {
-	if(timeout >= 0) {
-	  timeout--;
-	  if(timeout == 0) {
-	    printf("TIMEOUT!\n");
-	    exit(1);
-	  }
-	}
-	fflush(stdout);
-	sleep(1);
-
-#ifdef TRACE_RESOURCES
-        log_runtime.info("total events: %d", rt->local_event_free_list->next_alloc);
-        log_runtime.info("total reservations: %d", rt->local_reservation_free_list->next_alloc);
-        log_runtime.info("total index spaces: %d", rt->local_index_space_free_list->next_alloc);
-        log_runtime.info("total proc groups: %d", rt->local_proc_group_free_list->next_alloc);
-#endif
-      }
-      log_runtime.info("running proc count is now zero - terminating\n");
-#endif
-      // sleep until shutdown has been requested by somebody
+      // otherwise, sleep until shutdown has been requested by somebody
       {
 	AutoHSLLock al(shutdown_mutex);
 	while(!shutdown_requested)
@@ -1350,92 +1640,31 @@ namespace Realm {
 	log_runtime.info("shutdown request received - terminating\n");
       }
 
-#ifdef REPORT_REALM_RESOURCE_USAGE
-      {
-        RuntimeImpl *rt = get_runtime();
-        printf("node %d realm resource usage: ev=%d, rsrv=%d, idx=%d, pg=%d\n",
-               gasnet_mynode(),
-               rt->local_event_free_list->next_alloc,
-               rt->local_reservation_free_list->next_alloc,
-               rt->local_index_space_free_list->next_alloc,
-               rt->local_proc_group_free_list->next_alloc);
-      }
-#endif
-#ifdef EVENT_GRAPH_TRACE
-      {
-        //FILE *log_file = Logger::get_log_file();
-        show_event_waiters(/*log_file*/);
-      }
-#endif
-
-      // Shutdown all the threads
-      for(std::vector<ProcessorImpl *>::const_iterator it = local_procs.begin();
-	  it != local_procs.end();
-	  it++)
-	(*it)->shutdown();
-
-      // delete processors, memories, nodes, etc.
-      {
-	for(gasnet_node_t i = 0; i < gasnet_nodes(); i++) {
-	  Node& n = nodes[i];
-
-	  delete_container_contents(n.memories);
-	  delete_container_contents(n.processors);
-	}
-	
-	delete[] nodes;
-	delete global_memory;
-	delete local_event_free_list;
-	delete local_barrier_free_list;
-	delete local_reservation_free_list;
-	delete local_index_space_free_list;
-	delete local_proc_group_free_list;
-	delete local_sparsity_map_free_list;
-
-	// delete all the DMA channels that we were given
-	delete_container_contents(dma_channels);
-
-	for(std::vector<Module *>::iterator it = modules.begin();
-	    it != modules.end();
-	    it++) {
-	  (*it)->cleanup();
-	  delete (*it);
-	}
-
-	module_registrar.unload_module_sofiles();
-      }
-
-      // need to kill other threads too so we can actually terminate process
-      // Exit out of the thread
-      PartitioningOpQueue::stop_worker_threads();
-      LegionRuntime::LowLevel::stop_dma_worker_threads();
-      stop_activemsg_threads();
-
-      // if we are running as a background thread, just terminate this thread
-      // if not, do a full process exit - gasnet may have started some threads we don't have handles for,
-      //   and if they're left running, the app will hang
-      if(running_as_background_thread) {
-	pthread_exit(0);
-      } else {
-	// not strictly necessary, but helps us find memory leaks
-	runtime_singleton = 0;
-	delete this;
-	exit(0);
-      }
+      wait_for_shutdown();
+      exit(0);
     }
+
+    // this is not member data of RuntimeImpl because we don't want use-after-free problems
+    static int shutdown_count = 0;
 
     void RuntimeImpl::shutdown(bool local_request /*= true*/)
     {
+      // filter out duplicate requests
+      bool already_started = (__sync_fetch_and_add(&shutdown_count, 1) > 0);
+      if(already_started)
+	return;
+
       if(local_request) {
-	log_runtime.info("shutdown request - notifying other nodes\n");
+	log_runtime.info("shutdown request - notifying other nodes");
 	for(unsigned i = 0; i < gasnet_nodes(); i++)
 	  if(i != gasnet_mynode())
 	    RuntimeShutdownMessage::send_request(i);
       }
 
-      log_runtime.info("shutdown request - cleaning up local processors\n");
+      log_runtime.info("shutdown request - cleaning up local processors");
 
-      if(true) { // TODO: SEP task_table.count(Processor::TASK_ID_PROCESSOR_SHUTDOWN) > 0) {
+      if(run_method_called) {
+	// legacy shutdown - call shutdown task on processors
 	log_task.info("spawning processor shutdown task on local cpus");
 
 	const std::vector<ProcessorImpl *>& local_procs = nodes[gasnet_mynode()].processors;
@@ -1443,8 +1672,6 @@ namespace Realm {
 	spawn_on_all(local_procs, Processor::TASK_ID_PROCESSOR_SHUTDOWN, 0, 0,
 		     Event::NO_EVENT,
 		     INT_MIN); // runs with lowest priority
-      } else {
-	log_task.info("no processor shutdown task");
       }
 
       {
@@ -1456,6 +1683,7 @@ namespace Realm {
 
     void RuntimeImpl::wait_for_shutdown(void)
     {
+#if 0
       bool exit_process = true;
       if (background_pthread != 0)
       {
@@ -1466,6 +1694,36 @@ namespace Realm {
         // Set this to null so we don't wait anymore
         background_pthread = 0;
         exit_process = false;
+      }
+#endif
+
+      // sleep until shutdown has been requested by somebody
+      {
+	AutoHSLLock al(shutdown_mutex);
+	while(!shutdown_requested)
+	  shutdown_condvar.wait();
+	log_runtime.info("shutdown request received - terminating");
+      }
+
+#ifdef USE_GASNET
+      // don't start tearing things down until all processes agree
+      gasnet_barrier_notify(0, GASNET_BARRIERFLAG_ANONYMOUS);
+      gasnet_barrier_wait(0, GASNET_BARRIERFLAG_ANONYMOUS);
+#endif
+
+      // Shutdown all the threads
+
+      // threads that cause inter-node communication have to stop first
+      PartitioningOpQueue::stop_worker_threads();
+      LegionRuntime::LowLevel::stop_dma_worker_threads();
+      stop_activemsg_threads();
+
+      {
+	std::vector<ProcessorImpl *>& local_procs = nodes[gasnet_mynode()].processors;
+	for(std::vector<ProcessorImpl *>::const_iterator it = local_procs.begin();
+	    it != local_procs.end();
+	    it++)
+	  (*it)->shutdown();
       }
 
 #ifdef EVENT_TRACING
@@ -1486,10 +1744,61 @@ namespace Realm {
       }
 #endif
 
+#ifdef REPORT_REALM_RESOURCE_USAGE
+      {
+        RuntimeImpl *rt = get_runtime();
+        printf("node %d realm resource usage: ev=%d, rsrv=%d, idx=%d, pg=%d\n",
+               gasnet_mynode(),
+               rt->local_event_free_list->next_alloc,
+               rt->local_reservation_free_list->next_alloc,
+               rt->local_index_space_free_list->next_alloc,
+               rt->local_proc_group_free_list->next_alloc);
+      }
+#endif
+#ifdef EVENT_GRAPH_TRACE
+      {
+        //FILE *log_file = Logger::get_log_file();
+        show_event_waiters(/*log_file*/);
+      }
+#endif
+
+      // delete processors, memories, nodes, etc.
+      {
+	for(gasnet_node_t i = 0; i < gasnet_nodes(); i++) {
+	  Node& n = nodes[i];
+
+	  delete_container_contents(n.memories);
+	  delete_container_contents(n.processors);
+	}
+	
+	delete[] nodes;
+	delete global_memory;
+	delete local_event_free_list;
+	delete local_barrier_free_list;
+	delete local_reservation_free_list;
+	delete local_index_space_free_list;
+	delete local_proc_group_free_list;
+
+	// delete all the DMA channels that we were given
+	delete_container_contents(dma_channels);
+
+	// same for code translators
+	delete_container_contents(code_translators);
+
+	for(std::vector<Module *>::iterator it = modules.begin();
+	    it != modules.end();
+	    it++) {
+	  (*it)->cleanup();
+	  delete (*it);
+	}
+
+	module_registrar.unload_module_sofiles();
+      }
+
       // this terminates the process, so control never gets back to caller
       // would be nice to fix this...
-      if (exit_process)
-        gasnet_exit(0);
+      //if (exit_process)
+      //  gasnet_exit(0);
     }
 
     EventImpl *RuntimeImpl::get_event_impl(Event e)
@@ -1502,6 +1811,7 @@ namespace Realm {
 	return get_barrier_impl(e);
       default:
 	assert(0);
+	return 0;
       }
     }
 
@@ -1513,12 +1823,6 @@ namespace Realm {
       Node *n = &nodes[id.node()];
       GenEventImpl *impl = n->events.lookup_entry(id.index(), id.node());
       assert(impl->me == id);
-
-      // check to see if this is for a generation more than one ahead of what we
-      //  know of - this should only happen for remote events, but if it does it means
-      //  there are some generations we don't know about yet, so we can catch up (and
-      //  notify any local waiters right away)
-      impl->check_for_catchup(e.gen - 1);
 
       return impl;
     }
@@ -1564,6 +1868,7 @@ namespace Realm {
 
       default:
 	assert(0);
+	return 0;
       }
     }
 
@@ -1586,6 +1891,7 @@ namespace Realm {
 
       default:
 	assert(0);
+	return 0;
       }
     }
 

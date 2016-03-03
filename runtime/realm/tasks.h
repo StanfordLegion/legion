@@ -40,11 +40,18 @@ namespace Realm {
 	   Event _before_event,
 	   Event _finish_event, int _priority);
 
+    protected:
+      // deletion performed when reference count goes to zero
       virtual ~Task(void);
 
-      virtual void mark_ready(void);
-      virtual void mark_started(void);
+    public:
+      virtual bool mark_ready(void);
+      virtual bool mark_started(void);
 
+      virtual void print(std::ostream& os) const;
+
+      virtual bool attempt_cancellation(int error_code, const void *reason_data, size_t reason_size);
+      
       void execute_on_processor(Processor p);
 
       Processor proc;
@@ -55,6 +62,8 @@ namespace Realm {
 
     protected:
       virtual void mark_completed(void);
+
+      Thread *executing_thread;
     };
 
     // a task scheduler in which one or more worker threads execute tasks from one
@@ -99,6 +108,7 @@ namespace Realm {
       GASNetHSL lock;
       std::vector<TaskQueue *> task_queues;
       std::vector<Thread *> idle_workers;
+      std::set<Thread *> blocked_workers;
 
       typedef PriorityQueue<Thread *, DummyLock> ResumableQueue;
       ResumableQueue resumable_workers;
@@ -251,6 +261,9 @@ namespace Realm {
 
       std::set<Thread *> all_hosts;
       std::set<Thread *> all_workers;
+
+      int host_startups_remaining;
+      GASNetCondVar host_startup_condvar;
 
     public:
       int cfg_num_host_threads;

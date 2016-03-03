@@ -355,6 +355,46 @@ namespace Realm {
     // TODO: serialization/deserialization stuff
   };
 
+  // abstract class that describes a code translator that can convert a code implementation
+  //  of one type into one of another type - in order to be extensible by add-on modules, it
+  //  uses c++ dynamic type info support
+  class CodeTranslator {
+  protected:
+    CodeTranslator(const std::string& _name);
+
+  public:
+    virtual ~CodeTranslator(void);
+
+    virtual bool can_translate(const std::type_info& source_impl_type,
+			       const std::type_info& target_impl_type) = 0;
+
+    // default version just iterates over all the implementations in the source
+    virtual bool can_translate(const CodeDescriptor& source_codedesc,
+			       const std::type_info& target_impl_type);
+
+    virtual CodeImplementation *translate(const CodeImplementation *source,
+					  const std::type_info& target_impl_type) = 0;
+
+    // default version just iterates over all the implementations in the source
+    virtual CodeImplementation *translate(const CodeDescriptor& source_codedesc,
+					  const std::type_info& target_impl_type);
+
+    // template versions when target type is statically known
+    template <typename TARGET_TYPE>
+    bool can_translate(const std::type_info& source_impl_type);
+
+    template <typename TARGET_TYPE>
+    bool can_translate(const CodeDescriptor& source_codedesc);
+
+    template <typename TARGET_TYPE>
+    TARGET_TYPE *translate(const CodeImplementation *source);
+
+    template <typename TARGET_TYPE>
+    TARGET_TYPE *translate(const CodeDescriptor& source_codedesc);
+
+    std::string name;
+  };
+
   // two simple implementations:
   // 1) raw function pointers - non-portable
   // 2) DSO references (i.e. name of shared object, name of symbol) - portable
@@ -416,16 +456,32 @@ namespace Realm {
 
     virtual void print(std::ostream& os) const;
 
+#ifdef REALM_USE_DLADDR
+    friend class CodeDescriptor;
+    static DSOReferenceImplementation *cvt_fnptr_to_dsoref(const FunctionPointerImplementation *fpi,
+                                                           bool quiet = false);
+#endif
   public:
     std::string dso_name, symbol_name;
   };
 
-  // TODO: encapsulate these as "code translations"
+  // converts DSOReferenceImplementation -> FunctionPointerImplementation and
+  //  (if dladdr is available) the reverse
+  class DSOCodeTranslator : public CodeTranslator {
+  public:
+    DSOCodeTranslator(void);
 
-  FunctionPointerImplementation *cvt_dsoref_to_fnptr(const DSOReferenceImplementation *dso);
-#ifdef REALM_USE_DLADDR
-  DSOReferenceImplementation *cvt_fnptr_to_dsoref(const FunctionPointerImplementation *fpi, bool quiet = false);
-#endif
+    virtual ~DSOCodeTranslator(void);
+
+    virtual bool can_translate(const std::type_info& source_impl_type,
+                               const std::type_info& target_impl_type);
+
+    virtual CodeImplementation *translate(const CodeImplementation *source,
+					  const std::type_info& target_impl_type);
+
+  protected:
+    std::map<std::string, void *> modules_loaded;
+  };
 #endif
 
 }; // namespace Realm

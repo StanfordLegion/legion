@@ -508,7 +508,9 @@ function optimize_inlines.stat_task(cx, node)
 end
 
 function optimize_inlines.stat_top(cx, node)
-  if node:is(ast.typed.stat.Task) then
+  if node:is(ast.typed.stat.Task) and
+     not node.config_options.inner
+  then
     return optimize_inlines.stat_task(cx, node)
 
   else

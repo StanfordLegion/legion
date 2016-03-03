@@ -186,7 +186,9 @@ def generate_html_instance_label(title, instance, color, verbose):
             '</table>'
 
 def compute_dependence_type(req1, req2):
-    if req1.is_read_only() and req2.is_read_only():
+    if req1.is_no_access() or req2.is_no_access():
+        return NO_DEPENDENCE
+    elif req1.is_read_only() and req2.is_read_only():
         return NO_DEPENDENCE
     elif req1.is_reduce() and req2.is_reduce():
         if req1.redop == req2.redop:
@@ -2046,8 +2048,11 @@ class Requirement(object):
         assert fid not in self.fields
         self.fields.append(fid)
 
+    def is_no_access(self):
+        return self.priv == NO_ACCESS
+
     def is_read_only(self):
-        return (self.priv == NO_ACCESS) or (self.priv == READ_ONLY)
+        return self.priv == READ_ONLY
 
     def has_write(self):
         return (self.priv == READ_WRITE) or (self.priv == REDUCE) or (self.priv == WRITE_ONLY)
@@ -3202,6 +3207,8 @@ class State(object):
         if (e1, e2) not in self.copies:
             return False
         copy = self.copies[(e1, e2)]
+        if not self.instances[iid][-1].add_op_user(copy, index):
+            return False
         copy.add_instance(index, self.instances[iid][-1])
         return True
 
@@ -3428,6 +3435,7 @@ class State(object):
     def check_instance_dependences(self):
         for versions in self.instances.itervalues():
             for instance in versions:
+                # TODO: deal with simultaneous properly
                 if instance.is_simultaneous():
                     continue
                 print "Checking physical instance "+hex(instance.iid)+"..."
@@ -3436,6 +3444,8 @@ class State(object):
                         for req1 in reqs1:
                             for op2, reqs2 in op_users.iteritems():
                                 for req2 in reqs2:
+                                    if ((field == 145) and (instance.iid == 16140901064495857727L) and ((op1.uid == 77) or (op2.uid == 77))):
+                                        print "HELLO THERE"
                                     if op1 != op2 and \
                                             self.compute_dependence(req1, req2) in \
                                             (TRUE_DEPENDENCE, ANTI_DEPENDENCE):
@@ -3444,7 +3454,8 @@ class State(object):
                                                 return False
                                             return True
                                         def traverse_op(node, traverser):
-                                            traverser.found = traverser.target == node or traverser.found
+                                            if traverser.target == node or traverser.found:
+                                                traverser.found = True
                                             return not traverser.found
                                         def post_traverse(node, traverser):
                                             pass

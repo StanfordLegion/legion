@@ -121,7 +121,7 @@ bool CircuitMapper::map_inline(Inline *inline_operation)
   req.target_ranking.push_back(sysmem);
 
   log_circuit.debug(
-    "inline mapping region (%d,%d,%d) target ranking front %d (size %lu)",
+    "inline mapping region (%d,%d,%d) target ranking front " IDFMT " (size %lu)",
     req.region.get_index_space().get_id(),
     req.region.get_field_space().get_id(),
     req.region.get_tree_id(),
@@ -150,7 +150,7 @@ void CircuitMapper::notify_mapping_failed(const Mappable *mappable)
       RegionRequirement &req = _inline->requirement;
       LogicalRegion region = req.region;
       log_circuit.warning(
-        "mapping %s on inline region (%d,%d,%d) memory %d",
+        "mapping %s on inline region (%d,%d,%d) memory " IDFMT,
         (req.mapping_failed ? "failed" : "succeeded"),
         region.get_index_space().get_id(),
         region.get_field_space().get_id(),

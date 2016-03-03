@@ -227,6 +227,12 @@ namespace LegionRuntime {
           restrictions[it->first] = overlap;
         }
       }
+      inline void populate_restrict_fields(FieldMask &to_fill) const
+      {
+        for (LegionMap<LogicalRegion,FieldMask>::aligned::const_iterator it = 
+              restrictions.begin(); it != restrictions.end(); it++)
+          to_fill |= it->second;
+      }
     public:
       void pack_info(Serializer &rez);
       void unpack_info(Deserializer &derez, AddressSpaceID source, 

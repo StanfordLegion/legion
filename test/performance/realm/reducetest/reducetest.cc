@@ -189,7 +189,7 @@ static void run_case(const char *name, int task_id,
 
     if(it == all_procs.end()) it = all_procs.begin();
     Processor tgt = *(it++);
-    log_app.debug("sending batch %d to processor %x\n", i, tgt.id);
+    log_app.debug("sending batch %d to processor " IDFMT "\n", i, tgt.id);
 
     Event wait_for;
     if(use_lock)
@@ -257,7 +257,7 @@ void top_level_task(const void *args, size_t arglen,
   Reservation lock = Reservation::create_reservation();
 
   Memory m = farthest_memory(p);
-  printf("placing master instance in memory %x\n", m.id);
+  printf("placing master instance in memory " IDFMT "\n", m.id);
   RegionInstance hist_inst(Domain(hist_region).create_instance(m, sizeof(BucketType)));
   assert(hist_inst.exists());
 
@@ -332,8 +332,6 @@ void top_level_task(const void *args, size_t arglen,
   printf("done\n");
   printf("ELAPSED = %f\n", end_time - start_time);
 #endif
-
-  Runtime::get_runtime().shutdown();
 }
 
 static unsigned myrand(unsigned long long ival,
@@ -517,9 +515,30 @@ int main(int argc, char **argv)
   get_input_args().argv = argv;
   get_input_args().argc = argc;
 
-  // We should never return from this call
-  r.run(TOP_LEVEL_TASK, Runtime::ONE_TASK_ONLY, 0, 0, false/*!background*/);
+  // select a processor to run the top level task on
+  Processor p = Processor::NO_PROC;
+  {
+    std::set<Processor> all_procs;
+    Machine::get_machine().get_all_processors(all_procs);
+    for(std::set<Processor>::const_iterator it = all_procs.begin();
+	it != all_procs.end();
+	it++)
+      if(it->kind() == Processor::LOC_PROC) {
+	p = *it;
+	break;
+      }
+  }
+  assert(p.exists());
 
-  return -1;
+  // collective launch of a single task - everybody gets the same finish event
+  Event e = r.collective_spawn(p, TOP_LEVEL_TASK, 0, 0);
+
+  // request shutdown once that task is complete
+  r.shutdown(e);
+
+  // now sleep this thread until that shutdown actually happens
+  r.wait_for_shutdown();
+  
+  return 0;
 }
 

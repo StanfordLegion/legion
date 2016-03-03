@@ -23,14 +23,14 @@
 #include "processor.h"
 #include "memory.h"
 
+#include <iterator>
+
 namespace Realm {
 
     class Runtime;
 
     class Machine {
     protected:
-      void *impl;  // hidden internal implementation - this is NOT a transferrable handle
-
       friend class Runtime;
       explicit Machine(void *_impl) : impl(_impl) {}
 
@@ -40,6 +40,19 @@ namespace Realm {
       ~Machine(void) {}
 
       static Machine get_machine(void);
+
+      class ProcessorQuery;
+      class MemoryQuery;
+
+      struct AffinityDetails {
+	unsigned bandwidth;
+	unsigned latency;
+      };
+
+      bool has_affinity(Processor p, Memory m, AffinityDetails *details = 0) const;
+      bool has_affinity(Memory m1, Memory m2, AffinityDetails *details = 0) const;
+
+      // older queries, to be deprecated
 
       void get_all_memories(std::set<Memory>& mset) const;
       void get_all_processors(std::set<Processor>& pset) const;
@@ -80,11 +93,195 @@ namespace Realm {
       int get_mem_mem_affinity(std::vector<MemoryMemoryAffinity>& result,
 			       Memory restrict_mem1 = Memory::NO_MEMORY,
 			       Memory restrict_mem2 = Memory::NO_MEMORY) const;
+
+      // subscription interface for dynamic machine updates
+      class MachineUpdateSubscriber {
+      public:
+       virtual ~MachineUpdateSubscriber(void) {}
+
+       enum UpdateType { THING_ADDED,
+                         THING_REMOVED,
+                         THING_UPDATED
+       };
+
+       // callbacks occur on a thread that belongs to the runtime - please defer any
+       //  complicated processing if possible
+       virtual void processor_updated(Processor p, UpdateType update_type, 
+                                      const void *payload, size_t payload_size) = 0;
+
+       virtual void memory_updated(Memory m, UpdateType update_type,
+                                   const void *payload, size_t payload_size) = 0;
+      };
+
+      // subscriptions are encouraged to use a query which filters which processors or
+      //  memories cause notifications
+      void add_subscription(MachineUpdateSubscriber *subscriber);
+      void add_subscription(MachineUpdateSubscriber *subscriber,
+			    const ProcessorQuery &query);
+      void add_subscription(MachineUpdateSubscriber *subscriber,
+			    const MemoryQuery &query);
+
+      void remove_subscription(MachineUpdateSubscriber *subscriber);
+
+      void *impl;  // hidden internal implementation - this is NOT a transferrable handle
     };
+
+    template <typename QT, typename RT> class MachineQueryIterator;
+
+    class Machine::ProcessorQuery {
+    public:
+      explicit ProcessorQuery(const Machine& m);
+      ProcessorQuery(const ProcessorQuery& q);
+
+      ~ProcessorQuery(void);
+
+      ProcessorQuery& operator=(const ProcessorQuery& q);
+
+      bool operator==(const ProcessorQuery& compare_to) const;
+      bool operator!=(const ProcessorQuery& compare_to) const;
+
+      // filter predicates (returns self-reference for chaining)
+      // if multiple predicates are used, they must all match (i.e. the intersection is returned)
+
+      // restrict to just those of the specified 'kind'
+      ProcessorQuery& only_kind(Processor::Kind kind);
+
+      // restrict to those managed by this address space
+      ProcessorQuery& local_address_space(void);
+
+      // restrict to those in same address space as specified Processor or Memory
+      ProcessorQuery& same_address_space_as(Processor p);
+      ProcessorQuery& same_address_space_as(Memory m);
+      
+      // restrict to those that have affinity to a given memory
+      ProcessorQuery& has_affinity_to(Memory m, unsigned min_bandwidth = 0, unsigned max_latency = 0);
+
+      // restrict to those whose best affinity is to the given memory
+      ProcessorQuery& best_affinity_to(Memory m, int bandwidth_weight = 1, int latency_weight = 0);
+
+      // results - a query may be executed multiple times - when the machine model is
+      //  dynamic, there is no guarantee that the results of any two executions will be consistent
+
+      // return the number of matched processors
+      size_t count(void) const;
+
+      // return the first matched processor, or NO_PROC
+      Processor first(void) const;
+
+      // return the next matched processor after the one given, or NO_PROC
+      Processor next(Processor after) const;
+
+      // return a random matched processor, or NO_PROC if none exist
+      Processor random(void) const;
+
+      typedef MachineQueryIterator<ProcessorQuery, Processor> iterator;
+
+      // return an iterator that allows enumerating all matched processors
+      iterator begin(void) const;
+      iterator end(void) const;
+      
+    protected:
+      void *impl;
+    };
+
+    class Machine::MemoryQuery {
+    public:
+      explicit MemoryQuery(const Machine& m);
+      MemoryQuery(const MemoryQuery& q);
+
+      ~MemoryQuery(void);
+
+      MemoryQuery& operator=(const MemoryQuery& q);
+
+      bool operator==(const MemoryQuery& compare_to) const;
+      bool operator!=(const MemoryQuery& compare_to) const;
+
+      // filter predicates (returns self-reference for chaining)
+      // if multiple predicates are used, they must all match (i.e. the intersection is returned)
+
+      // restrict to just those of the specified 'kind'
+      MemoryQuery& only_kind(Memory::Kind kind);
+
+      // restrict to those managed by this address space
+      MemoryQuery& local_address_space(void);
+
+      // restrict to those in same address space as specified Processor or Memory
+      MemoryQuery& same_address_space_as(Processor p);
+      MemoryQuery& same_address_space_as(Memory m);
+      
+      // restrict to those that have affinity to a given processor or memory
+      MemoryQuery& has_affinity_to(Processor p, unsigned min_bandwidth = 0, unsigned max_latency = 0);
+      MemoryQuery& has_affinity_to(Memory m, unsigned min_bandwidth = 0, unsigned max_latency = 0);
+
+      // restrict to those whose best affinity is to the given processor or memory
+      MemoryQuery& best_affinity_to(Processor p, int bandwidth_weight = 1, int latency_weight = 0);
+      MemoryQuery& best_affinity_to(Memory m, int bandwidth_weight = 1, int latency_weight = 0);
+
+      // results - a query may be executed multiple times - when the machine model is
+      //  dynamic, there is no guarantee that the results of any two executions will be consistent
+
+      // return the number of matched processors
+      size_t count(void) const;
+
+      // return the first matched processor, or NO_PROC
+      Memory first(void) const;
+
+      // return the next matched processor after the one given, or NO_PROC
+      Memory next(Memory after) const;
+
+      // return a random matched processor, or NO_PROC if none exist
+      Memory random(void) const;
+
+      typedef MachineQueryIterator<MemoryQuery, Memory> iterator;
+
+      // return an iterator that allows enumerating all matched processors
+      iterator begin(void) const;
+      iterator end(void) const;
+      
+    protected:
+      void *impl;
+    };
+
+    template <typename QT, typename RT>
+    class MachineQueryIterator : public std::iterator<std::input_iterator_tag, RT> {
+      // would like this constructor to be protected and have QT be a friend, but that requires
+      //  C++11 (or a compiler like g++ that supports it even without -std=c++11)
+#if __cplusplus >= 201103L
+    protected:
+      friend QT;
+#else
+    public:
+#endif
+      MachineQueryIterator(const QT& _query, RT _result);
+
+    protected:
+      QT query;
+      RT result;
+
+    public:
+      MachineQueryIterator(const MachineQueryIterator<QT,RT>& copy_from);
+      ~MachineQueryIterator(void);
+	
+      MachineQueryIterator<QT,RT>& operator=(const MachineQueryIterator<QT,RT>& copy_from);
+	
+      bool operator==(const MachineQueryIterator<QT,RT>& compare_to) const;
+      bool operator!=(const MachineQueryIterator<QT,RT>& compare_to) const;
+	
+      RT operator*(void);
+      const RT *operator->(void);
+	
+      MachineQueryIterator<QT,RT>& operator++(/*prefix*/);
+      MachineQueryIterator<QT,RT> operator++(int /*postfix*/);
+
+      // in addition to testing an iterator against .end(), you can also cast to bool, allowing
+      // for(iterator it = q.begin(); q; ++q) ...
+      operator bool(void) const;
+    };
+      
 	
 }; // namespace Realm
 
-//include "machine.inl"
+#include "machine.inl"
 
 #endif // ifndef REALM_MACHINE_H
 

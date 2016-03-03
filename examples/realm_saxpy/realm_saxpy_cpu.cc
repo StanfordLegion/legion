@@ -252,9 +252,6 @@ void top_level_task(const void *args, size_t arglen,
                                 sizeof(saxpy_args), z_ready); 
   printf("Done Event is (" IDFMT ",%d)\n\n", done.id, done.gen);
   done.wait();
-
-  Runtime rt = Runtime::get_runtime();
-  rt.shutdown();
 }
 
 void cpu_saxpy_task(const void *args, size_t arglen,
@@ -263,20 +260,19 @@ void cpu_saxpy_task(const void *args, size_t arglen,
   assert(arglen == sizeof(SaxpyArgs));
   const SaxpyArgs *saxpy_args = (const SaxpyArgs*)args;
   printf("Running CPU Saxpy Task\n\n");
-  Rect<1> actual_bounds;
-  ByteOffset offsets;
-  const float *x_ptr = (const float*)saxpy_args->x_inst.get_accessor().
-          raw_dense_ptr<1>(saxpy_args->bounds, actual_bounds, offsets);
-  assert(actual_bounds == saxpy_args->bounds);
-  const float *y_ptr = (const float*)saxpy_args->y_inst.get_accessor().
-          raw_dense_ptr<1>(saxpy_args->bounds, actual_bounds, offsets);
-  assert(actual_bounds == saxpy_args->bounds);
-  float *z_ptr = (float*)saxpy_args->z_inst.get_accessor().
-          raw_dense_ptr<1>(saxpy_args->bounds, actual_bounds, offsets);
-  size_t num_elements = actual_bounds.volume();
-  // Here is the actual saxpy code
-  for (unsigned idx = 0; idx < num_elements; idx++)
-    z_ptr[idx] = saxpy_args->alpha * x_ptr[idx] + y_ptr[idx];
+
+  // get the generic accessors for each of our three instances
+  RegionAccessor<AccessorType::Generic> ra_xg = saxpy_args->x_inst.get_accessor();
+  RegionAccessor<AccessorType::Generic> ra_yg = saxpy_args->y_inst.get_accessor();
+  RegionAccessor<AccessorType::Generic> ra_zg = saxpy_args->z_inst.get_accessor();
+
+  // now convert them to typed, "affine" accessors that we can use like arrays
+  RegionAccessor<AccessorType::Affine<1>, float> ra_x = ra_xg.typeify<float>().convert<AccessorType::Affine<1> >();
+  RegionAccessor<AccessorType::Affine<1>, float> ra_y = ra_yg.typeify<float>().convert<AccessorType::Affine<1> >();
+  RegionAccessor<AccessorType::Affine<1>, float> ra_z = ra_zg.typeify<float>().convert<AccessorType::Affine<1> >();
+
+  for(GenericPointInRectIterator<1> pir(saxpy_args->bounds); pir; ++pir)
+    ra_z[pir.p] = saxpy_args->alpha * ra_x[pir.p] + ra_y[pir.p];
 }
 
 void check_result_task(const void *args, size_t arglen,
@@ -285,28 +281,29 @@ void check_result_task(const void *args, size_t arglen,
   assert(arglen == sizeof(SaxpyArgs));
   const SaxpyArgs *saxpy_args = (const SaxpyArgs*)args;
   printf("Running Checking Task...");
-  Rect<1> actual_bounds;
-  ByteOffset offsets;
-  const float *x_ptr = (const float*)saxpy_args->x_inst.get_accessor().
-          raw_dense_ptr<1>(saxpy_args->bounds, actual_bounds, offsets);
-  assert(actual_bounds == saxpy_args->bounds);
-  const float *y_ptr = (const float*)saxpy_args->y_inst.get_accessor().
-          raw_dense_ptr<1>(saxpy_args->bounds, actual_bounds, offsets);
-  assert(actual_bounds == saxpy_args->bounds);
-  const float *z_ptr = (const float*)saxpy_args->z_inst.get_accessor().
-          raw_dense_ptr<1>(saxpy_args->bounds, actual_bounds, offsets);
-  size_t num_elements = actual_bounds.volume();
+
+  // get the generic accessors for each of our three instances
+  RegionAccessor<AccessorType::Generic> ra_xg = saxpy_args->x_inst.get_accessor();
+  RegionAccessor<AccessorType::Generic> ra_yg = saxpy_args->y_inst.get_accessor();
+  RegionAccessor<AccessorType::Generic> ra_zg = saxpy_args->z_inst.get_accessor();
+
+  // now convert them to typed, "affine" accessors that we can use like arrays
+  RegionAccessor<AccessorType::Affine<1>, float> ra_x = ra_xg.typeify<float>().convert<AccessorType::Affine<1> >();
+  RegionAccessor<AccessorType::Affine<1>, float> ra_y = ra_yg.typeify<float>().convert<AccessorType::Affine<1> >();
+  RegionAccessor<AccessorType::Affine<1>, float> ra_z = ra_zg.typeify<float>().convert<AccessorType::Affine<1> >();
+
   bool success = true;
-  for (unsigned idx = 0; idx < num_elements; idx++)
-  {
-    float expected = saxpy_args->alpha * x_ptr[idx] + y_ptr[idx];
-    float actual = z_ptr[idx];
+  for(GenericPointInRectIterator<1> pir(saxpy_args->bounds); pir; ++pir) {
+    float expected = saxpy_args->alpha * ra_x[pir.p] + ra_y[pir.p];
+    float actual = ra_z[pir.p];
+
     // FMAs are too acurate
     float diff = (actual >= expected) ? actual - expected : expected - actual;
     float relative = diff / expected;
-    if (relative > 1e-6)
-    {
-      printf("Expected: %.8g Actual: %.8g\n", expected, actual);
+    if (relative < 1e-6) {
+      // ok
+    } else {
+      printf("Index: %d Expected: %.8g Actual: %.8g\n", pir.p.x[0], expected, actual);
       success = false;
       break;
     }
@@ -335,7 +332,29 @@ int main(int argc, char **argv)
 #endif
   rt.register_task(CHECK_RESULT_TASK, check_result_task);
   
-  // Never return from this call
-  rt.run(TOP_LEVEL_TASK, Runtime::ONE_TASK_ONLY);
+  // select a processor to run the top level task on
+  Processor p = Processor::NO_PROC;
+  {
+    std::set<Processor> all_procs;
+    Machine::get_machine().get_all_processors(all_procs);
+    for(std::set<Processor>::const_iterator it = all_procs.begin();
+	it != all_procs.end();
+	it++)
+      if(it->kind() == Processor::LOC_PROC) {
+	p = *it;
+	break;
+      }
+  }
+  assert(p.exists());
+
+  // collective launch of a single task - everybody gets the same finish event
+  Event e = rt.collective_spawn(p, TOP_LEVEL_TASK, 0, 0);
+
+  // request shutdown once that task is complete
+  rt.shutdown(e);
+
+  // now sleep this thread until that shutdown actually happens
+  rt.wait_for_shutdown();
+  
   return 0;
 }

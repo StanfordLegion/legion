@@ -620,7 +620,7 @@ namespace Realm {
     {
       const char *type_name = typeid(obj).name();
       assert(get_subclasses().by_typename.count(type_name) != 0);
-      const PolymorphicSerdezIntfc<T> *sc = get_subclasses().by_typename[typeid(obj).name()];
+      const PolymorphicSerdezIntfc<T> *sc = get_subclasses().by_typename[type_name];
       return (serializer << sc->tag) && sc->serialize(serializer, obj);
     }
 
@@ -629,7 +629,7 @@ namespace Realm {
     {
       const char *type_name = typeid(obj).name();
       assert(get_subclasses().by_typename.count(type_name) != 0);
-      const PolymorphicSerdezIntfc<T> *sc = get_subclasses().by_typename[typeid(obj).name()];
+      const PolymorphicSerdezIntfc<T> *sc = get_subclasses().by_typename[type_name];
       return (serializer << sc->tag) && sc->serialize(serializer, obj);
     }
 
@@ -638,7 +638,7 @@ namespace Realm {
     {
       const char *type_name = typeid(obj).name();
       assert(get_subclasses().by_typename.count(type_name) != 0);
-      const PolymorphicSerdezIntfc<T> *sc = get_subclasses().by_typename[typeid(obj).name()];
+      const PolymorphicSerdezIntfc<T> *sc = get_subclasses().by_typename[type_name];
       return (serializer << sc->tag) && sc->serialize(serializer, obj);
     }
 

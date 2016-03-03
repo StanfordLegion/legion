@@ -1,1 +1,0 @@
-../../bindings/terra/examples/lua/04_logical_regions/logical_regions.t

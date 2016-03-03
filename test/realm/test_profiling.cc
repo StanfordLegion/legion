@@ -14,6 +14,8 @@ using namespace Realm;
 using namespace Realm::ProfilingMeasurements;
 using namespace LegionRuntime::LowLevel;
 
+Logger log_app("app");
+
 // Task IDs, some IDs are reserved so start at first available number
 enum {
   TOP_LEVEL_TASK = Processor::TASK_ID_FIRST_AVAILABLE+0,
@@ -29,8 +31,7 @@ void sigalrm_handler(int sig)
 }
 
 // some of the code in here needs the fault-tolerance stuff in Realm to show up
-#define NO_TRACK_MACHINE_UPDATES
-#define NO_TEST_FAULTS
+#define TRACK_MACHINE_UPDATES
 
 #ifdef TRACK_MACHINE_UPDATES
 class MyMachineUpdateTracker : public Machine::MachineUpdateSubscriber {
@@ -60,12 +61,24 @@ public:
 MyMachineUpdateTracker tracker;
 #endif
 
+struct ChildTaskArgs {
+  bool inject_fault;
+  bool hang;
+  int sleep_useconds;
+};
+
 void child_task(const void *args, size_t arglen, 
 		const void *userdata, size_t userlen, Processor p)
 {
-  printf("starting task on processor " IDFMT "\n", p.id);
-  sleep(1);
-#ifdef TEST_FAULTS
+  log_app.print() << "starting task on processor " << p;
+  assert(arglen == sizeof(ChildTaskArgs));
+  const ChildTaskArgs& cargs = *(const ChildTaskArgs *)args;
+  if(cargs.hang) {
+    // create a user event and wait on it - hangs unless somebody cancels us
+    UserEvent::create_user_event().wait();
+  } else
+    usleep(cargs.sleep_useconds);
+#ifdef REALM_USE_EXCEPTIONS
   bool inject_fault = *(const bool *)args;
   if(inject_fault) {
     int buffer[4];
@@ -73,21 +86,24 @@ void child_task(const void *args, size_t arglen,
     buffer[1] = 22;
     buffer[2] = 33;
     buffer[3] = 44;
+    // this causes a fatal error if Realm doesn't have exception support, so don't
+    //  do it in that case
     Processor::report_execution_fault(44, buffer, 4*sizeof(int));
   }
 #endif
-  printf("ending task on processor " IDFMT "\n", p.id);
+  log_app.print() << "ending task on processor " << p;
 }
 
 Barrier response_counter;
-int expected_responses_remaining;
+int expected_responses_remaining = 0;
 
 void response_task(const void *args, size_t arglen,
 		   const void *userdata, size_t userlen, Processor p)
 {
+  log_app.print() << "profiling response task on processor " << p;
   printf("got profiling response - %zd bytes\n", arglen);
   printf("Bytes:");
-  for(size_t i = 0; i < arglen; i++)
+  for(size_t i = 0; (i < arglen) && (i < 256); i++)
     printf(" %02x", ((unsigned char *)args)[i]);
   printf("\n");
 
@@ -116,6 +132,12 @@ void response_task(const void *args, size_t arglen,
     delete op_timeline;
   } else
     printf("no timeline\n");
+
+  if(0&&pr.has_measurement<OperationBacktrace>()) {
+    OperationBacktrace *op_backtrace = pr.get_measurement<OperationBacktrace>();
+    std::cout << "op backtrace = " << op_backtrace->backtrace;
+    delete op_backtrace;
+  }
 
   if(pr.user_data_size() > 0) {
     printf("user data = %zd (", pr.user_data_size());
@@ -166,47 +188,72 @@ void top_level_task(const void *args, size_t arglen,
     bool poisoned;
     Event::NO_EVENT.has_triggered_faultaware(poisoned);
     Event::NO_EVENT.wait_faultaware(poisoned);
-    Processor::cancel_task(Event::NO_EVENT);
-    Domain::cancel_copy(Event::NO_EVENT);
-    UserEvent::create_user_event().cancel();
+    Event::NO_EVENT.external_wait_faultaware(poisoned);
+    Event::NO_EVENT.cancel_operation(0, 0);
   }
 #endif
   
   // launch a child task and perform some measurements on it
   // choose the last cpu, which is likely to be on a different node
+  Processor profile_cpu = all_cpus.front();
   Processor first_cpu = all_cpus.back();
   ProfilingRequestSet prs;
-  prs.add_request(first_cpu, RESPONSE_TASK, &first_cpu, sizeof(first_cpu))
+  prs.add_request(profile_cpu, RESPONSE_TASK, &first_cpu, sizeof(first_cpu))
     .add_measurement<OperationStatus>()
-    .add_measurement<OperationTimeline>();
+    .add_measurement<OperationTimeline>()
+    .add_measurement<OperationBacktrace>();
 
   // we expect (exactly) three responses
-  response_counter = Barrier::create_barrier(3);
-  expected_responses_remaining = 3;
+  response_counter = Barrier::create_barrier(5);
+  expected_responses_remaining = 5;
 
-  bool inject_fault = false;
-  Event e1 = first_cpu.spawn(CHILD_TASK, &inject_fault, sizeof(inject_fault), prs);
-  inject_fault = true;
-  Event e2 = first_cpu.spawn(CHILD_TASK, &inject_fault, sizeof(inject_fault), prs, e1);
-  inject_fault = false;
-  Event e3 = first_cpu.spawn(CHILD_TASK, &inject_fault, sizeof(inject_fault), prs, e2);
+  // give ourselves 15 seconds for the tasks, and their profiling responses, to finish
+  alarm(15);
 
-  // give ourselves 5 seconds for the tasks, and their profiling responses, to finish
-  alarm(5);
+  ChildTaskArgs cargs;
+  cargs.inject_fault = false;
+  cargs.sleep_useconds = 100000;
+  cargs.hang = false;
+  Event e1 = first_cpu.spawn(CHILD_TASK, &cargs, sizeof(cargs), prs);
 
-  bool poisoned = false;
-#ifdef TEST_FAULTS
-  e3.wait_faultaware(poisoned);
-#else
-  e3.wait();
-#endif
-  printf("done! (poisoned=%d)\n", poisoned);
+  cargs.inject_fault = true;
+  Event e2 = first_cpu.spawn(CHILD_TASK, &cargs, sizeof(cargs), prs, e1);
+  cargs.inject_fault = false;
+  Event e3 = first_cpu.spawn(CHILD_TASK, &cargs, sizeof(cargs), prs, e2);
+
+  {
+    bool poisoned = false;
+    e3.wait_faultaware(poisoned);
+    printf("e3 done! (poisoned=%d)\n", poisoned);
+  }
+
+  // test cancellation - first of a task that is "running"
+  {
+    cargs.sleep_useconds = 5000000;
+    Event e4 = first_cpu.spawn(CHILD_TASK, &cargs, sizeof(cargs), prs);
+    sleep(2);
+    int info = 111;
+    e4.cancel_operation(&info, sizeof(info));
+    bool poisoned = false;
+    e4.wait_faultaware(poisoned);
+    assert(poisoned);
+  }
+
+  // now cancellatin of an event that is blocked on some event
+  {
+    cargs.hang = true;
+    Event e5 = first_cpu.spawn(CHILD_TASK, &cargs, sizeof(cargs), prs);
+    sleep(2);
+    int info = 112;
+    e5.cancel_operation(&info, sizeof(info));
+    bool poisoned = false;
+    e5.wait_faultaware(poisoned);
+    assert(poisoned);
+  }
 
   printf("waiting for profiling responses...\n");
   response_counter.wait();
   printf("all profiling responses received\n");
-
-  Runtime::get_runtime().shutdown();
 }
 
 int main(int argc, char **argv)
@@ -221,11 +268,40 @@ int main(int argc, char **argv)
 
   signal(SIGALRM, sigalrm_handler);
 
-  // Start the machine running
-  // Control never returns from this call
-  // Note we only run the top level task on one processor
-  // You can also run the top level task on all processors or one processor per node
-  rt.run(TOP_LEVEL_TASK, Runtime::ONE_TASK_ONLY);
+#ifdef TRACK_MACHINE_UPDATES
+  MyMachineUpdateTracker *tracker = new MyMachineUpdateTracker;
+  Machine::get_machine().add_subscription(tracker);
+#endif
 
+  // select a processor to run the top level task on
+  Processor p = Processor::NO_PROC;
+  {
+    std::set<Processor> all_procs;
+    Machine::get_machine().get_all_processors(all_procs);
+    for(std::set<Processor>::const_iterator it = all_procs.begin();
+	it != all_procs.end();
+	it++)
+      if(it->kind() == Processor::LOC_PROC) {
+	p = *it;
+	break;
+      }
+  }
+  assert(p.exists());
+
+  // collective launch of a single task - everybody gets the same finish event
+  Event e = rt.collective_spawn(p, TOP_LEVEL_TASK, 0, 0);
+
+  // request shutdown once that task is complete
+  rt.shutdown(e);
+
+  // now sleep this thread until that shutdown actually happens
+  rt.wait_for_shutdown();
+
+#ifdef TRACK_MACHINE_UPDATES
+  // the machine is gone at this point, so no need to remove ourselves explicitly
+  //Machine::get_machine().remove_subscription(tracker);
+  delete tracker;
+#endif
+  
   return 0;
 }

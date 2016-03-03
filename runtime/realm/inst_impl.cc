@@ -34,18 +34,26 @@ namespace Realm {
       DeferredInstDestroy(RegionInstanceImpl *i) : impl(i) { }
       virtual ~DeferredInstDestroy(void) { }
     public:
-      virtual bool event_triggered(void)
+      virtual bool event_triggered(Event e, bool poisoned)
       {
-        log_inst.info("instance destroyed: space=" IDFMT " id=" IDFMT "",
-                 impl->metadata.is.id, impl->me.id);
-        get_runtime()->get_memory_impl(impl->memory)->destroy_instance(impl->me, true); 
+	// if input event is poisoned, do not attempt to destroy the lock
+	// we don't have an output event here, so this may result in a leak if nobody is
+	//  paying attention
+	if(poisoned) {
+	  log_poison.info() << "poisoned deferred instance destruction skipped - POSSIBLE LEAK - inst=" << impl->me;
+	} else {
+	  log_inst.info("instance destroyed: space=" IDFMT " id=" IDFMT "",
+			impl->metadata.is.id, impl->me.id);
+	  get_runtime()->get_memory_impl(impl->memory)->destroy_instance(impl->me, true); 
+	}
         return true;
       }
 
-      virtual void print_info(FILE *f)
+      virtual void print(std::ostream& os) const
       {
-        fprintf(f,"deferred instance destruction\n");
+        os << "deferred instance destruction";
       }
+
     protected:
       RegionInstanceImpl *impl;
     };
@@ -167,6 +175,14 @@ namespace Realm {
       base = reinterpret_cast<intptr_t>(orig_base);
       stride = orig_stride;
     }
+
+    void RegionInstance::report_instance_fault(int reason,
+					       const void *reason_data,
+					       size_t reason_size) const
+    {
+      assert(0);
+    }
+
   
   ////////////////////////////////////////////////////////////////////////
   //
@@ -293,7 +309,7 @@ namespace Realm {
 	assert(dl.get_dim() == 1);
 
 	LegionRuntime::Arrays::Mapping<1, 1> *mapping = dl.get_mapping<1>();
-	Rect<1> preimage = mapping->preimage(0);
+	Rect<1> preimage = mapping->preimage((coord_t)0);
 	assert(preimage.lo == preimage.hi);
 	// double-check that whole range maps densely
 	preimage.hi.x[0] += 1; // not perfect, but at least detects non-unit-stride case

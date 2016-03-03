@@ -38,8 +38,8 @@ namespace LegionRuntime {
     }
 
     // default implementation is just to iterate over lines
-    inline void InstPairCopier::copy_all_fields(int src_index, int dst_index, int count_per_line,
-						int src_stride, int dst_stride, int lines)
+    inline void InstPairCopier::copy_all_fields(off_t src_index, off_t dst_index, off_t count_per_line,
+						off_t src_stride, off_t dst_stride, off_t lines)
     {
       for(int i = 0; i < lines; i++) {
 	copy_all_fields(src_index, dst_index, count_per_line);
@@ -95,8 +95,8 @@ namespace LegionRuntime {
     static inline int min(int a, int b) { return (a < b) ? a : b; }
 
     template <typename T>
-    void SpanBasedInstPairCopier<T>::copy_field(int src_index, int dst_index,
-						int elem_count, unsigned offset_index)
+    void SpanBasedInstPairCopier<T>::copy_field(off_t src_index, off_t dst_index,
+						off_t elem_count, unsigned offset_index)
     {
       off_t src_offset = oas_vec[offset_index].src_offset;
       off_t dst_offset = oas_vec[offset_index].dst_offset;
@@ -121,9 +121,9 @@ namespace LegionRuntime {
 	// let's see how many we can copy
 	int done = 0;
 	while(done < elem_count) {
-	  int src_in_this_block = src_inst->metadata.block_size - ((src_index + done) % src_inst->metadata.block_size);
-	  int dst_in_this_block = dst_inst->metadata.block_size - ((dst_index + done) % dst_inst->metadata.block_size);
-	  int todo = min(elem_count - done, min(src_in_this_block, dst_in_this_block));
+	  off_t src_in_this_block = src_inst->metadata.block_size - ((src_index + done) % src_inst->metadata.block_size);
+	  off_t dst_in_this_block = dst_inst->metadata.block_size - ((dst_index + done) % dst_inst->metadata.block_size);
+	  off_t todo = min(elem_count - done, min(src_in_this_block, dst_in_this_block));
 
 	  //printf("copying range of %d elements (%d, %d, %d)\n", todo, src_index, dst_index, done);
 
@@ -164,7 +164,7 @@ namespace LegionRuntime {
     }
 
     template <typename T>
-    void SpanBasedInstPairCopier<T>::copy_all_fields(int src_index, int dst_index, int elem_count)
+    void SpanBasedInstPairCopier<T>::copy_all_fields(off_t src_index, off_t dst_index, off_t elem_count)
     {
       // first check - if the span we're copying straddles a block boundary
       //  go back to old way - block size of 1 is ok only if both are
@@ -192,14 +192,14 @@ namespace LegionRuntime {
 
       while(field_idx < oas_vec.size()) {
 	// get information about the first field
-	unsigned src_offset = oas_vec[field_idx].src_offset;
-	unsigned dst_offset = oas_vec[field_idx].dst_offset;
+	off_t src_offset = oas_vec[field_idx].src_offset;
+	off_t dst_offset = oas_vec[field_idx].dst_offset;
 	unsigned bytes = oas_vec[field_idx].size;
 
 	// if src and/or dst aren't a full field, fall back to the old way for this field
-	int src_field_start = src_start[field_idx];
+	off_t src_field_start = src_start[field_idx];
 	int src_field_size = src_size[field_idx];
-	int dst_field_start = dst_start[field_idx];
+	off_t dst_field_start = dst_start[field_idx];
 	int dst_field_size = dst_size[field_idx];
 
 	if(partial_field[field_idx]) {
@@ -262,17 +262,18 @@ namespace LegionRuntime {
 				       dst_inst->metadata.block_size, dst_index);
 
 	// AOS merging doesn't work if we don't end up with the full element
-	if((src_bsize == 1) && 
-	   ((total_bytes < src_inst->metadata.elmt_size) || (total_bytes < dst_inst->metadata.elmt_size)) &&
-	   (elem_count > 1)) {
-	  log_dma.error() << "help: AOS tried to merge subset of fields with multiple elements - not contiguous!";
-	  assert(0);
-	}
-
-	span_copier->copy_span(src_start, dst_start, elem_count * total_bytes,
-			       src_fstride * src_bsize,
-			       dst_fstride * dst_bsize,
-			       total_lines);
+	if((src_bsize == 1) &&
+	   ((total_bytes < src_inst->metadata.elmt_size) || (total_bytes < dst_inst->metadata.elmt_size))) {
+          // AOS copy doesn't include all fields in source and/or dest, so we have to turn it into a
+          //  "2-D" copy in which each element is a "line"
+          span_copier->copy_span(src_start, dst_start, total_bytes,
+                                 src_fstride, dst_fstride, elem_count);
+        } else {
+	  span_copier->copy_span(src_start, dst_start, elem_count * total_bytes,
+	                        src_fstride * src_bsize,
+	                        dst_fstride * dst_bsize,
+			                    total_lines);
+        }
 
 	// continue with the first field we couldn't take for this pass
 	field_idx = field_idx2;
@@ -280,8 +281,8 @@ namespace LegionRuntime {
     }
 
     template <typename T>
-    void SpanBasedInstPairCopier<T>::copy_all_fields(int src_index, int dst_index, int count_per_line,
-						     int src_stride, int dst_stride, int lines)
+    void SpanBasedInstPairCopier<T>::copy_all_fields(off_t src_index, off_t dst_index, off_t count_per_line,
+						     off_t src_stride, off_t dst_stride, off_t lines)
     {
       // first check - if the span we're copying straddles a block boundary
       //  go back to old way - block size of 1 is ok only if both are
@@ -291,8 +292,8 @@ namespace LegionRuntime {
       size_t src_bsize = src_inst->metadata.block_size;
       size_t dst_bsize = dst_inst->metadata.block_size;
       
-      int src_last = src_index + (count_per_line - 1) + (lines - 1) * src_stride;
-      int dst_last = dst_index + (count_per_line - 1) + (lines - 1) * dst_stride;
+      off_t src_last = src_index + (count_per_line - 1) + (lines - 1) * src_stride;
+      off_t dst_last = dst_index + (count_per_line - 1) + (lines - 1) * dst_stride;
 
       if(((src_bsize == 1) != (dst_bsize == 1)) ||
 	 ((src_bsize > 1) && ((src_index / src_bsize) != (src_last / src_bsize))) ||
@@ -314,14 +315,14 @@ namespace LegionRuntime {
 
       while(field_idx < oas_vec.size()) {
 	// get information about the first field
-	unsigned src_offset = oas_vec[field_idx].src_offset;
-	unsigned dst_offset = oas_vec[field_idx].dst_offset;
+	off_t src_offset = oas_vec[field_idx].src_offset;
+	off_t dst_offset = oas_vec[field_idx].dst_offset;
 	unsigned bytes = oas_vec[field_idx].size;
 
 	// if src and/or dst aren't a full field, fall back to the old way for this field
-	int src_field_start = src_start[field_idx];
+	off_t src_field_start = src_start[field_idx];
 	int src_field_size = src_size[field_idx];
-	int dst_field_start = dst_start[field_idx];
+	off_t dst_field_start = dst_start[field_idx];
 	int dst_field_size = dst_size[field_idx];
 
 	if(partial_field[field_idx]) {

@@ -70,6 +70,7 @@ void top_level_task(const void *args, size_t arglen,
 		    const void *userdata, size_t userlen, Processor p)
 {
   int errors = 0;
+  bool top_level_proc_reused = false;
 
   printf("top level task - getting machine and list of CPUs\n");
 
@@ -87,8 +88,10 @@ void top_level_task(const void *args, size_t arglen,
     }
   }
   // if this is the ONLY processor, go ahead and add it back in
-  if(all_cpus.empty())
+  if(all_cpus.empty()) {
     all_cpus.push_back(p);
+    top_level_proc_reused = true;
+  }
   int num_cpus = all_cpus.size();
 
   printf("creating processor group for all CPUs...\n");
@@ -125,10 +128,19 @@ void top_level_task(const void *args, size_t arglen,
   //
   // execution order in Realm should be 1, 3, 4, 2
   // NOTE: the shared LLR implements processor groups differently and gets 1, 3, 2, 4
+  // NOTE2: if the processor our top-level task is running on is the only one, we'll
+  //   get 3, 1, 4, 2
+  int expected_order[4];
 #ifdef SHARED_LOWLEVEL
-  const int expected_order[4] = { 1, 3, 2, 4 };
+  expected_order[0] = 1;
+  expected_order[1] = 3;
+  expected_order[2] = 2;
+  expected_order[3] = 4;
 #else
-  const int expected_order[4] = { 1, 3, 4, 2 };
+  expected_order[0] = top_level_proc_reused ? 3 : 1;
+  expected_order[1] = top_level_proc_reused ? 1 : 3;
+  expected_order[2] = 4;
+  expected_order[3] = 2;
 #endif
   
   int total_tasks = 4 * num_cpus;
@@ -204,8 +216,6 @@ void top_level_task(const void *args, size_t arglen,
   }
 
   printf("done!\n");
-
-  Runtime::get_runtime().shutdown();
 }
 
 int main(int argc, char **argv)
@@ -217,11 +227,29 @@ int main(int argc, char **argv)
   rt.register_task(TOP_LEVEL_TASK, top_level_task);
   rt.register_task(DELAY_TASK, delay_task);
 
-  // Start the machine running
-  // Control never returns from this call
-  // Note we only run the top level task on one processor
-  // You can also run the top level task on all processors or one processor per node
-  rt.run(TOP_LEVEL_TASK, Runtime::ONE_TASK_ONLY);
+  // select a processor to run the top level task on
+  Processor p = Processor::NO_PROC;
+  {
+    std::set<Processor> all_procs;
+    Machine::get_machine().get_all_processors(all_procs);
+    for(std::set<Processor>::const_iterator it = all_procs.begin();
+	it != all_procs.end();
+	it++)
+      if(it->kind() == Processor::LOC_PROC) {
+	p = *it;
+	break;
+      }
+  }
+  assert(p.exists());
 
+  // collective launch of a single task - everybody gets the same finish event
+  Event e = rt.collective_spawn(p, TOP_LEVEL_TASK, 0, 0);
+
+  // request shutdown once that task is complete
+  rt.shutdown(e);
+
+  // now sleep this thread until that shutdown actually happens
+  rt.wait_for_shutdown();
+  
   return 0;
 }

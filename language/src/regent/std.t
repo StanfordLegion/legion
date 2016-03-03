@@ -23,8 +23,6 @@ local std = {}
 
 std.config, std.args = config.parse_args()
 
-if std.config["cuda"] then cudahelper = require("regent/cudahelper") end
-
 -- #####################################
 -- ## Legion Bindings
 -- #################
@@ -38,6 +36,8 @@ local c = terralib.includecstring([[
 #include <stdlib.h>
 ]])
 std.c = c
+
+if std.config["cuda"] then cudahelper = require("regent/cudahelper") end
 
 -- #####################################
 -- ## Utilities
@@ -124,6 +124,8 @@ function std.copy_privileges(cx, from_region, to_region)
 end
 
 function std.add_constraint(cx, lhs, rhs, op, symmetric)
+  if std.is_cross_product(lhs) then lhs = lhs:partition() end
+  if std.is_cross_product(rhs) then rhs = rhs:partition() end
   assert(std.type_supports_constraints(lhs))
   assert(std.type_supports_constraints(rhs))
   if not cx.constraints[op] then
@@ -259,6 +261,7 @@ function std.check_constraint(cx, constraint)
   elseif terralib.issymbol(lhs) then
     lhs = lhs.type
   end
+  if std.is_cross_product(lhs) then lhs = lhs:partition() end
   assert(std.type_supports_constraints(lhs))
 
   local rhs = constraint.rhs
@@ -267,6 +270,7 @@ function std.check_constraint(cx, constraint)
   elseif terralib.issymbol(rhs) then
     rhs = rhs.type
   end
+  if std.is_cross_product(rhs) then rhs = rhs:partition() end
   assert(std.type_supports_constraints(rhs))
 
   local constraint = {
@@ -567,6 +571,10 @@ function std.is_list_of_regions(t)
   return std.is_list(t) and t:is_list_of_regions()
 end
 
+function std.is_list_of_partitions(t)
+  return std.is_list(t) and t:is_list_of_partitions()
+end
+
 function std.is_list_of_phase_barriers(t)
   return std.is_list(t) and t:is_list_of_phase_barriers()
 end
@@ -585,7 +593,7 @@ end
 
 function std.type_supports_constraints(t)
   return std.is_region(t) or std.is_partition(t) or
-    std.is_list_of_regions(t)
+    std.is_list_of_regions(t) or std.is_list_of_partitions(t)
 end
 
 function std.is_ctor(t)
@@ -1692,58 +1700,6 @@ function std.ispace(index_type)
   st.index_type = index_type
   st.dim = index_type.dim
 
-  -- Ispace types can have an optional partition. This is used by
-  -- cross_product to enable patterns like prod[i][j]. Of course, the
-  -- ispace can have other partitions as well. This is simply used as
-  -- the default partition when attempting to access something out of
-  -- a ispace.
-  function st:set_default_partition(partition)
-    local previous_default = rawget(self, "partition")
-    if previous_default and previous_default ~= partition then
-      assert(false, "Ispace type can only have one default partition")
-    end
-    if not (std.is_partition(partition) or std.is_cross_product(partition)) then
-      assert(false, "Ispace type requires default partition to be a partition or cross product")
-    end
-    if partition:parent_ispace() ~= self then
-      assert(false, "Ispace type requires default partition to be a partition of self")
-    end
-    self.partition = partition
-  end
-
-  function st:has_default_partition()
-    return rawget(self, "partition")
-  end
-
-  function st:default_partition()
-    local partition = rawget(self, "partition")
-    if not partition then
-      assert(false, "Ispace type has no default partition")
-    end
-    return partition
-  end
-
-  -- Methods for the partition API:
-  function st:is_disjoint()
-    return self:default_partition():is_disjoint()
-  end
-
-  function st:parent_ispace()
-    return self
-  end
-
-  function st:subispace_constant(i)
-    return self:default_partition():subispace_constant(i)
-  end
-
-  function st:subispaces_constant()
-    return self:default_partition():subispaces_constant()
-  end
-
-  function st:subispace_dynamic(i)
-    return self:default_partition():subispace_dynamic(i)
-  end
-
   function st:force_cast(from, to, expr)
     assert(std.is_ispace(from) and std.is_ispace(to))
     return `([to] { impl = [expr].impl })
@@ -1756,6 +1712,7 @@ function std.ispace(index_type)
   return st
 end
 
+local next_region_id = 1
 function std.region(ispace_symbol, fspace_type)
   if fspace_type == nil then
     fspace_type = ispace_symbol
@@ -1795,84 +1752,6 @@ function std.region(ispace_symbol, fspace_type)
     return 0
   end
 
-  -- Region types can have an optional partition. This is used by
-  -- cross_product to enable patterns like prod[i][j]. Of course, the
-  -- region can have other partitions as well. This is simply used as
-  -- the default partition when attempting to access something out of
-  -- a region.
-  function st:set_default_partition(partition)
-    local previous_default = rawget(self, "partition")
-    if previous_default and previous_default ~= partition then
-      assert(false, "Region type can only have one default partition")
-    end
-    if not std.is_partition(partition) then
-      assert(false, "Region type requires default partition to be a partition")
-    end
-    if partition:parent_region() ~= self then
-      assert(false, "Region type requires default partition to be a partition of self")
-    end
-    self.partition = partition
-  end
-
-  function st:has_default_partition()
-    return rawget(self, "partition")
-  end
-
-  function st:default_partition()
-    local partition = rawget(self, "partition")
-    if not partition then
-      assert(false, "Region type has no default partition")
-    end
-    return partition
-  end
-
-  function st:set_default_product(product)
-    local previous_default = rawget(self, "product")
-    if previous_default and previous_default ~= product then
-      assert(false, "Region type can only have one default product")
-    end
-    if not std.is_cross_product(product) then
-      assert(false, "Region type requires default product to be a cross product")
-    end
-    if product:parent_region() ~= self then
-      assert(false, "Region type requires default product to be a partition of self")
-    end
-    self.product = product
-  end
-
-  function st:has_default_product()
-    return rawget(self, "product")
-  end
-
-  function st:default_product()
-    local product = rawget(self, "product")
-    if not product then
-      assert(false, "Region type has no default product")
-    end
-    return product
-  end
-
-  -- Methods for the partition API:
-  function st:is_disjoint()
-    return self:default_partition():is_disjoint()
-  end
-
-  function st:parent_region()
-    return self
-  end
-
-  function st:subregion_constant(i)
-    return self:default_partition():subregion_constant(i)
-  end
-
-  function st:subregions_constant()
-    return self:default_partition():subregions_constant()
-  end
-
-  function st:subregion_dynamic(i)
-    return self:default_partition():subregion_dynamic(i)
-  end
-
   function st:force_cast(from, to, expr)
     assert(std.is_region(from) and std.is_region(to))
     return `([to] { impl = [expr].impl })
@@ -1882,7 +1761,13 @@ function std.region(ispace_symbol, fspace_type)
     return self
   end
 
-  if not std.config["debug"] then
+  if std.config["debug"] then
+    local id = next_region_id
+    next_region_id = next_region_id + 1
+    function st.metamethods.__typename(st)
+      return "region#" .. tostring(id) .. "(" .. tostring(st.fspace_type) .. ")"
+    end
+  else
     function st.metamethods.__typename(st)
       return "region(" .. tostring(st.fspace_type) .. ")"
     end
@@ -1961,8 +1846,16 @@ function std.partition(disjointness, region)
     return self
   end
 
-  function st.metamethods.__typename(st)
-    return "partition(" .. tostring(st.disjointness) .. ", " .. tostring(st.parent_region_symbol) .. ")"
+  if std.config["debug"] then
+    local id = next_region_id
+    next_region_id = next_region_id + 1
+    function st.metamethods.__typename(st)
+      return "partition#" .. tostring(id) .. "(" .. tostring(st.disjointness) .. ", " .. tostring(st.parent_region_symbol) .. ")"
+    end
+  else
+    function st.metamethods.__typename(st)
+      return "partition(" .. tostring(st.disjointness) .. ", " .. tostring(st.parent_region_symbol) .. ")"
+    end
   end
 
   return st
@@ -2006,6 +1899,10 @@ function std.cross_product(...)
     return self:partitions()[i or 1]
   end
 
+  function st:fspace()
+    return self:partition():fspace()
+  end
+
   function st:is_disjoint()
     return self:partition():is_disjoint()
   end
@@ -2016,15 +1913,6 @@ function std.cross_product(...)
 
   function st:subregion_constant(i)
     local region_type = self:partition():subregion_constant(i)
-    local partition_type = self:subpartition_constant(i, region_type)
-    if std.is_cross_product(partition_type) then
-      region_type:set_default_partition(partition_type:partition())
-      region_type:set_default_product(partition_type)
-    elseif std.is_partition(partition_type) then
-      region_type:set_default_partition(partition_type)
-    else
-      assert(false)
-    end
     return region_type
   end
 
@@ -2032,29 +1920,23 @@ function std.cross_product(...)
     return self:partition():subregions_constant()
   end
 
-  function st:subregion_dynamic(i)
-    local region_type = self:partition():subregion_dynamic(i)
-    local partition_type = self:subpartition_dynamic(i, region_type)
-    if std.is_cross_product(partition_type) then
-      region_type:set_default_partition(partition_type:partition())
-      region_type:set_default_product(partition_type)
-    elseif std.is_partition(partition_type) then
-      region_type:set_default_partition(partition_type)
-    else
-      assert(false)
-    end
+  function st:subregion_dynamic()
+    local region_type = self:partition():subregion_dynamic()
     return region_type
   end
 
-  function st:subpartition_constant(i, region_type)
+  function st:subpartition_constant(i)
+    local region_type = self:subregion_constant(i)
     if not self.subpartitions[i] then
-      local partition = st:subpartition_dynamic(i, region_type)
+      local partition = st:subpartition_dynamic(region_type)
       self.subpartitions[i] = partition
     end
     return self.subpartitions[i]
   end
 
-  function st:subpartition_dynamic(i, region_type)
+  function st:subpartition_dynamic(region_type)
+    region_type = region_type or self:subregion_dynamic()
+    assert(std.is_region(region_type))
     local region_symbol = terralib.newsymbol(region_type)
     local partition = std.partition(self:partition(2).disjointness, region_symbol)
     if #partition_symbols > 2 then
@@ -2292,6 +2174,11 @@ std.list = terralib.memoize(function(element_type, partition_type, privilege_dep
       std.is_list_of_regions(self.element_type)
   end
 
+  function st:is_list_of_partitions()
+    return std.is_partition(self.element_type) or
+      std.is_list_of_partitions(self.element_type)
+  end
+
   function st:is_list_of_phase_barriers()
     return std.is_phase_barrier(self.element_type) or
       std.is_list_of_phase_barriers(self.element_type)
@@ -2316,41 +2203,56 @@ std.list = terralib.memoize(function(element_type, partition_type, privilege_dep
     return self.element_type
   end
 
-  function st:region()
-    assert(std.is_list_of_regions(self))
+  function st:base_type()
     if std.is_list(self.element_type) then
-      return self.element_type:region()
+      return self.element_type:base_type()
     end
     return self.element_type
   end
 
   function st:ispace()
     assert(std.is_list_of_regions(self))
-    return self.element_type:ispace()
+    return self:base_type():ispace()
   end
 
   function st:fspace()
-    assert(std.is_list_of_regions(self))
-    return self.element_type:fspace()
+    assert(std.is_list_of_regions(self) or std.is_list_of_partitions(self))
+    return self:base_type():fspace()
   end
 
   function st:subregion_dynamic()
     assert(std.is_list_of_regions(self))
     local ispace = terralib.newsymbol(
       std.ispace(self:ispace().index_type),
-      self:region().ispace_symbol.displayname)
+      self:base_type().ispace_symbol.displayname)
     return std.region(ispace, self:fspace())
+  end
+
+  function st:subpartition_dynamic()
+    assert(std.is_list_of_partitions(self))
+    return std.partition(
+      self:base_type().disjointness, self:base_type().parent_region_symbol)
   end
 
   function st:slice(strip_levels)
     if strip_levels == nil then strip_levels = 0 end
-    assert(std.is_list_of_regions(self))
-    local slice_type = self:subregion_dynamic()
-    for i = 1 + strip_levels, self:list_depth() do
-      slice_type = std.list(
-        slice_type, self:partition(), self.privilege_depth)
+    if std.is_list_of_regions(self) then
+      local slice_type = self:subregion_dynamic()
+      for i = 1 + strip_levels, self:list_depth() do
+        slice_type = std.list(
+          slice_type, self:partition(), self.privilege_depth)
+      end
+      return slice_type
+    elseif std.is_list_of_partitions(self) then
+      local slice_type = self:subpartition_dynamic()
+      for i = 1 + strip_levels, self:list_depth() do
+        slice_type = std.list(
+          slice_type, self:partition(), self.privilege_depth)
+      end
+      return slice_type
+    else
+      assert(false)
     end
-    return slice_type
   end
 
   -- FIXME: Make the compiler manage cleanups, including lists.
@@ -2707,10 +2609,6 @@ function task:get_config_options()
   return self.config_options
 end
 
-function task:settaskid(taskid)
-  self.taskid = taskid
-end
-
 function task:gettaskid()
   return self.taskid
 end
@@ -2790,17 +2688,22 @@ function task:__tostring()
   return tostring(self:getname())
 end
 
-function std.newtask(name)
-  assert(data.is_tuple(name))
-  local terra proto
-  proto.name = name:mkstring(".")
-  return setmetatable({
-    definition = proto,
-    taskid = terralib.global(c.legion_task_id_t),
-    name = name,
-    cuda = false,
-    inline = false,
-  }, task)
+do
+  local next_task_id = 1
+  function std.newtask(name)
+    assert(data.is_tuple(name))
+    local terra proto
+    proto.name = name:mkstring(".")
+    local task_id = next_task_id
+    next_task_id = next_task_id + 1
+    return setmetatable({
+      definition = proto,
+      taskid = terralib.constant(c.legion_task_id_t, task_id),
+      name = name,
+      cuda = false,
+      inline = false,
+    }, task)
+  end
 end
 
 function std.is_task(x)
@@ -3008,21 +2911,10 @@ do
   end
 end
 
-function std.start(main_task)
+function std.setup(main_task)
   assert(std.is_task(main_task))
-  local next_task_id = 0
   local task_registrations = tasks:map(
     function(task)
-      local task_id
-      if not task:is_variant_task() then
-        next_task_id = next_task_id + 1
-        task_id = next_task_id
-        task:gettaskid():set(task_id)
-      else
-        local source_variant = task:get_source_variant()
-        task_id = source_variant:gettaskid():get()
-      end
-
       local return_type = task:getdefinition():gettype().returntype
       local result_type_bucket = std.type_size_bucket_name(return_type)
       local register = c["legion_runtime_register_task" .. result_type_bucket]
@@ -3033,7 +2925,7 @@ function std.start(main_task)
       if task:getcuda() then proc_type = c.TOC_PROC end
 
       return quote [register](
-        task_id,
+        [task:gettaskid()],
         proc_type,
         true,
         true,
@@ -3075,6 +2967,20 @@ function std.start(main_task)
     end
   end
 
+  local terra main(argc : int, argv : &rawstring)
+    [task_registrations];
+    [reduction_registrations]
+    c.legion_runtime_set_top_level_task_id([main_task:gettaskid()])
+    return c.legion_runtime_start(argc, argv, false)
+  end
+
+  local names = {main = main}
+  return main, names
+end
+
+function std.start(main_task)
+  local main = std.setup(main_task)
+
   local args = std.args
   local argc = #args
   local argv = terralib.newsymbol((&int8)[argc], "argv")
@@ -3085,14 +2991,22 @@ function std.start(main_task)
     end)
   end
 
-  local terra main()
+  local terra wrapper()
     [argv_setup];
-    [task_registrations];
-    [reduction_registrations]
-    c.legion_runtime_set_top_level_task_id([main_task:gettaskid()])
-    return c.legion_runtime_start(argc, argv, false)
+    return main([argc], [argv])
   end
-  main()
+  wrapper()
+end
+
+function std.saveobj(main_task, filename, filetype)
+  local main, names = std.setup(main_task)
+  local lib_dir = os.getenv("LG_RT_DIR") .. "/../bindings/terra"
+
+  if filetype ~= nil then
+    terralib.saveobj(filename, filetype, names, {"-L" .. lib_dir, "-llegion_terra"})
+  else
+    terralib.saveobj(filename, names, {"-L" .. lib_dir, "-llegion_terra"})
+  end
 end
 
 -- #####################################

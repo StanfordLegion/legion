@@ -1786,6 +1786,8 @@ namespace LegionRuntime {
                       LogicalRegion parent, 
                       const std::set<FieldID> &fields, const Future &f,
                       const Predicate &pred, bool check_privileges);
+      void initialize(SingleTask *ctx, const FillLauncher &launcher,
+                      bool check_privileges);
       void perform_logging(void);
       inline const RegionRequirement& get_requirement(void) const 
         { return requirement; }
@@ -1808,6 +1810,7 @@ namespace LegionRuntime {
     public:
       void check_fill_privilege(void);
       void compute_parent_index(void);
+      Event compute_sync_precondition(void) const;
     protected:
       RegionRequirement requirement;
       RegionTreePath privilege_path;
@@ -1817,6 +1820,10 @@ namespace LegionRuntime {
       void *value;
       size_t value_size;
       Future future;
+    protected:
+      std::vector<Grant>        grants;
+      std::vector<PhaseBarrier> wait_barriers;
+      std::vector<PhaseBarrier> arrive_barriers;
     };
 
     /**

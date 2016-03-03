@@ -54,6 +54,14 @@ namespace Realm {
       return get_runtime()->get_memory_impl(*this)->size;
     }
 
+    // reports a problem with a memory in general (this is primarily for fault injection)
+    void Memory::report_memory_fault(int reason,
+				     const void *reason_data,
+				     size_t reason_size) const
+    {
+      assert(0);
+    }
+
     /*static*/ const Memory Memory::NO_MEMORY = { 0 };
 
 
@@ -1387,6 +1395,11 @@ namespace Realm {
   {
     // ignored
   }
+
+  void RemoteWriteFence::print(std::ostream& os) const
+  {
+    os << "RemoteWriteFence";
+  }
   
 
   ////////////////////////////////////////////////////////////////////////
@@ -1472,7 +1485,7 @@ namespace Realm {
     log_copy.debug("remote write fence ack: fence = %p",
 		   args.fence);
 
-    args.fence->mark_finished();
+    args.fence->mark_finished(true /*successful*/);
   }
 
   /*static*/ void RemoteWriteFenceAckMessage::send_request(gasnet_node_t target,

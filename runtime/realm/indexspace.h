@@ -358,13 +358,13 @@ namespace Realm {
         return false;
       }
 
-      int& operator[](unsigned index)
+      coord_t& operator[](unsigned index)
       {
         assert(index < MAX_POINT_DIM);
         return point_data[index];
       }
 
-      const int& operator[](unsigned index) const
+      const coord_t& operator[](unsigned index) const
       {
         assert(index < MAX_POINT_DIM);
         return point_data[index];
@@ -393,7 +393,7 @@ namespace Realm {
 	return dp;
       }
 
-      int get_index(void) const
+      coord_t get_index(void) const
       {
 	assert(dim == 0);
 	return point_data[0];
@@ -411,7 +411,7 @@ namespace Realm {
     protected:
     public:
       int dim;
-      int point_data[MAX_POINT_DIM];
+      coord_t point_data[MAX_POINT_DIM];
     };
 
     class DomainLinearization {
@@ -695,6 +695,44 @@ namespace Realm {
         return IndexSpace::NO_SPACE;
       }
 
+      bool is_valid(void) const
+      {
+        switch (dim)
+        {
+          case -1:
+            return false;
+          case 0:
+            {
+              if (is_id)
+              {
+                IndexSpace is;
+                is.id = static_cast<IDType>(is_id);
+                return is.exists();
+              }
+              return false;
+            }
+          case 3:
+            {
+              if (rect_data[4] > rect_data[5])
+                return false;
+            }
+          case 2:
+            {
+              if (rect_data[2] > rect_data[3])
+                return false;
+            }
+          case 1:
+            {
+              if (rect_data[0] > rect_data[1])
+                return false;
+              break;
+            }
+          default:
+            assert(false);
+        }
+        return true;
+      }
+
       bool contains(DomainPoint point) const
       {
         bool result = false;
@@ -903,7 +941,7 @@ namespace Realm {
     public:
       IDType is_id;
       int dim;
-      int rect_data[2 * MAX_RECT_DIM];
+      coord_t rect_data[2 * MAX_RECT_DIM];
 
     public:
       // simple instance creation for the lazy

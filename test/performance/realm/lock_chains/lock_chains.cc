@@ -210,9 +210,7 @@ void top_level_task(const void *args, size_t arglen,
     fprintf(stdout,"Reservation Grants/s (in Thousands): %7.3f\n", grants_per_sec);
   }
   
-  // Tell everyone to shutdown
   fprintf(stdout,"Cleaning up...\n");
-  Runtime::get_runtime().shutdown(); 
 }
 
 void make_locks_task(const void *args, size_t arglen, 
@@ -321,9 +319,30 @@ int main(int argc, char **argv)
   get_input_args().argv = argv;
   get_input_args().argc = argc;
 
-  // We should never return from this call
-  r.run(TOP_LEVEL_TASK, Runtime::ONE_TASK_ONLY, 0, 0, false/*!background*/);
+  // select a processor to run the top level task on
+  Processor p = Processor::NO_PROC;
+  {
+    std::set<Processor> all_procs;
+    Machine::get_machine().get_all_processors(all_procs);
+    for(std::set<Processor>::const_iterator it = all_procs.begin();
+	it != all_procs.end();
+	it++)
+      if(it->kind() == Processor::LOC_PROC) {
+	p = *it;
+	break;
+      }
+  }
+  assert(p.exists());
 
-  return -1;
+  // collective launch of a single task - everybody gets the same finish event
+  Event e = r.collective_spawn(p, TOP_LEVEL_TASK, 0, 0);
+
+  // request shutdown once that task is complete
+  r.shutdown(e);
+
+  // now sleep this thread until that shutdown actually happens
+  r.wait_for_shutdown();
+  
+  return 0;
 }
 

@@ -2199,16 +2199,18 @@ namespace LegionRuntime {
       for (unsigned idx = 0; idx < grants.size(); idx++)
         grants[idx].impl->register_operation(completion_event);
       wait_barriers = launcher.wait_barriers;
+#ifdef LEGION_SPY
       for (std::vector<PhaseBarrier>::const_iterator it = 
             launcher.arrive_barriers.begin(); it != 
             launcher.arrive_barriers.end(); it++)
       {
         arrive_barriers.push_back(*it);
-#ifdef LEGION_SPY
         LegionSpy::log_event_dependence(it->phase_barrier,
             arrive_barriers.back().phase_barrier);
-#endif
       }
+#else
+      arrive_barriers = launcher.arrive_barriers;
+#endif
       map_id = launcher.map_id;
       tag = launcher.tag;
       if (check_privileges)
@@ -4694,16 +4696,18 @@ namespace LegionRuntime {
       for (unsigned idx = 0; idx < grants.size(); idx++)
         grants[idx].impl->register_operation(completion_event);
       wait_barriers = launcher.wait_barriers;
+#ifdef LEGION_SPY
       for (std::vector<PhaseBarrier>::const_iterator it = 
             launcher.arrive_barriers.begin(); it != 
             launcher.arrive_barriers.end(); it++)
       {
         arrive_barriers.push_back(*it);
-#ifdef LEGION_SPY
         LegionSpy::log_event_dependence(it->phase_barrier,
                                 arrive_barriers.back().phase_barrier);
-#endif
       }
+#else
+      arrive_barriers = launcher.arrive_barriers;
+#endif
       map_id = launcher.map_id;
       tag = launcher.tag;
       if (check_privileges)
@@ -5294,16 +5298,18 @@ namespace LegionRuntime {
       for (unsigned idx = 0; idx < grants.size(); idx++)
         grants[idx].impl->register_operation(completion_event);
       wait_barriers = launcher.wait_barriers;
+#ifdef LEGION_SPY
       for (std::vector<PhaseBarrier>::const_iterator it = 
             launcher.arrive_barriers.begin(); it != 
             launcher.arrive_barriers.end(); it++)
       {
         arrive_barriers.push_back(*it);
-#ifdef LEGION_SPY
         LegionSpy::log_event_dependence(it->phase_barrier,
                                 arrive_barriers.back().phase_barrier);
-#endif
       }
+#else
+      arrive_barriers = launcher.arrive_barriers;
+#endif
       map_id = launcher.map_id;
       tag = launcher.tag;
       if (check_privileges)
@@ -6965,6 +6971,16 @@ namespace LegionRuntime {
 #endif
           exit(ERROR_MUST_EPOCH_FAILURE);
         }
+        if (!(*it)->additional_procs.empty())
+        {
+          log_run.error("MUST EPOCH ERROR: Task %s (ID %lld) "
+              "has requested additional processors!",
+              (*it)->variants->name, (*it)->get_unique_task_id());
+#ifdef DEBUG_HIGH_LEVEL
+          assert(false);
+#endif
+          exit(ERROR_MUST_EPOCH_FAILURE);
+        }
         target_procs[(*it)->target_proc] = *it;
       }
 
@@ -8030,6 +8046,7 @@ namespace LegionRuntime {
     {
       // should never be called
       assert(false);
+      return *this;
     }
 
     //--------------------------------------------------------------------------
@@ -8549,6 +8566,35 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void FillOp::initialize(SingleTask *ctx, const FillLauncher &launcher,
+                            bool check_privileges)
+    //--------------------------------------------------------------------------
+    {
+      parent_ctx = ctx;
+      initialize_speculation(ctx, true/*track*/, 1, launcher.predicate);
+      requirement = RegionRequirement(launcher.handle, WRITE_DISCARD,
+                                      EXCLUSIVE, launcher.parent);
+      requirement.privilege_fields = launcher.fields;
+      requirement.initialize_mapping_fields();
+      value_size = launcher.argument.get_size();
+      if (value_size > 0)
+      {
+        value = malloc(value_size);
+        memcpy(value, launcher.argument.get_ptr(), value_size);
+      }
+      else
+        future = launcher.future;
+      grants = launcher.grants;
+      wait_barriers = launcher.wait_barriers;
+      arrive_barriers = launcher.arrive_barriers;
+      if (check_privileges)
+        check_fill_privilege();
+      initialize_privilege_path(privilege_path, requirement);
+      if (Internal::legion_spy_enabled)
+        perform_logging();
+    }
+
+    //--------------------------------------------------------------------------
     void FillOp::perform_logging(void)
     //--------------------------------------------------------------------------
     {
@@ -8589,6 +8635,9 @@ namespace LegionRuntime {
       version_info.clear();
       future = Future();
       restrict_info.clear();
+      grants.clear();
+      wait_barriers.clear();
+      arrive_barriers.clear();
       runtime->free_fill_op(this);
     }
 
@@ -8695,7 +8744,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
         assert(requirement.premapped);
 #endif
-      }
+      } 
       
       // Tell the region tree forest to fill in this field
       // Note that the forest takes ownership of the value buffer
@@ -8704,8 +8753,31 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
         assert(value != NULL);
 #endif
-        runtime->forest->fill_fields(physical_ctx, requirement,
-                                     value, value_size, version_info);
+        MappingRef map_ref;
+        if (restrict_info.has_restrictions())
+        {
+          InstanceRef restrict_inst = privilege_path.translate_ref(
+              parent_ctx->get_local_reference(parent_req_index));
+          Processor local_proc = parent_ctx->get_executing_processor();
+          map_ref = runtime->forest->map_restricted_region(physical_ctx,
+                                                           requirement,
+                                                           0/*idx*/,
+                                                           version_info,
+                                                           local_proc,
+                                                           restrict_inst 
+#ifdef DEBUG_HIGH_LEVEL
+                                                           , get_logging_name()
+                                                           , unique_op_id
+#endif
+                                                           );
+#ifdef DEBUG_HIGH_LEVEL
+          assert(map_ref.has_ref());
+#endif
+        }
+        Event sync_precondition = compute_sync_precondition();
+        Event done_event = 
+          runtime->forest->fill_fields(physical_ctx, this, requirement, value,
+           value_size, version_info, restrict_info, map_ref, sync_precondition);
         std::set<Event> applied_conditions;
         version_info.apply_mapping(physical_ctx.get_id(),
                                    runtime->address_space, applied_conditions);
@@ -8717,7 +8789,16 @@ namespace LegionRuntime {
           complete_mapping(Event::merge_events(applied_conditions));
         else
           complete_mapping();
-        complete_execution();
+        // See if we have any arrivals to trigger
+        if (!arrive_barriers.empty())
+        {
+          for (std::vector<PhaseBarrier>::const_iterator it = 
+                arrive_barriers.begin(); it != arrive_barriers.end(); it++)
+          {
+            it->phase_barrier.arrive(1/*count*/, completion_event);
+          }
+        }
+        complete_execution(done_event);
       }
       else
       {
@@ -8752,8 +8833,31 @@ namespace LegionRuntime {
       memcpy(result, future.impl->get_untyped_result(), result_size);
       RegionTreeContext physical_ctx = 
         parent_ctx->find_enclosing_context(parent_req_index);
-      runtime->forest->fill_fields(physical_ctx, requirement, 
-                                   result, result_size, version_info);
+      MappingRef map_ref;
+      if (restrict_info.has_restrictions())
+      {
+        InstanceRef restrict_inst = privilege_path.translate_ref(
+            parent_ctx->get_local_reference(parent_req_index));
+        Processor local_proc = parent_ctx->get_executing_processor();
+        map_ref = runtime->forest->map_restricted_region(physical_ctx,
+                                                         requirement,
+                                                         0/*idx*/,
+                                                         version_info,
+                                                         local_proc,
+                                                         restrict_inst 
+#ifdef DEBUG_HIGH_LEVEL
+                                                         , get_logging_name()
+                                                         , unique_op_id
+#endif
+                                                         );
+#ifdef DEBUG_HIGH_LEVEL
+        assert(map_ref.has_ref());
+#endif
+      }
+      Event sync_precondition = compute_sync_precondition();
+      Event done_event = 
+        runtime->forest->fill_fields(physical_ctx, this, requirement, result,
+          result_size, version_info, restrict_info, map_ref, sync_precondition);
       std::set<Event> applied_conditions;
       version_info.apply_mapping(physical_ctx.get_id(),
                                  runtime->address_space, applied_conditions);
@@ -8761,7 +8865,16 @@ namespace LegionRuntime {
         complete_mapping(Event::merge_events(applied_conditions));
       else
         complete_mapping();
-      complete_execution();
+      // See if we have any arrivals to trigger
+      if (!arrive_barriers.empty())
+      {
+        for (std::vector<PhaseBarrier>::const_iterator it = 
+              arrive_barriers.begin(); it != arrive_barriers.end(); it++)
+        {
+          it->phase_barrier.arrive(1/*count*/, completion_event);
+        }
+      }
+      complete_execution(done_event);
     }
     
     //--------------------------------------------------------------------------
@@ -8935,6 +9048,34 @@ namespace LegionRuntime {
       }
       else
         parent_req_index = unsigned(parent_index);
+    }
+
+    //--------------------------------------------------------------------------
+    Event FillOp::compute_sync_precondition(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (wait_barriers.empty() && grants.empty())
+        return Event::NO_EVENT;
+      std::set<Event> sync_preconditions;
+      if (!wait_barriers.empty())
+      {
+        for (std::vector<PhaseBarrier>::const_iterator it = 
+              wait_barriers.begin(); it != wait_barriers.end(); it++)
+        {
+          Event e = it->phase_barrier.get_previous_phase();
+          sync_preconditions.insert(e);
+        }
+      }
+      if (!grants.empty())
+      {
+        for (std::vector<Grant>::const_iterator it = grants.begin();
+              it != grants.end(); it++)
+        {
+          Event e = it->impl->acquire_grant();
+          sync_preconditions.insert(e);
+        }
+      }
+      return Event::merge_events(sync_preconditions);
     }
 
     ///////////////////////////////////////////////////////////// 

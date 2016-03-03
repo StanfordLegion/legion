@@ -794,6 +794,7 @@ namespace LegionRuntime {
       void send_response(void);
       bool handle_response(AddressSpaceID sender, bool result);
       void record_outstanding_tasks(void);
+      void record_outstanding_profiling_requests(void);
       void finalize(void);
     public:
       Internal *const runtime;
@@ -895,7 +896,6 @@ namespace LegionRuntime {
                                  const TaskVariantRegistrar &registrar,
                                  const void *user_data, size_t user_data_size,
                                  CodeDescriptor *realm_desc, 
-                                 CodeDescriptor *inline_desc,
                                  const char *task_name);
       PendingVariantRegistration(const PendingVariantRegistration &rhs);
       ~PendingVariantRegistration(void);
@@ -911,7 +911,6 @@ namespace LegionRuntime {
       void *user_data;
       size_t user_data_size;
       CodeDescriptor *realm_desc; 
-      CodeDescriptor *inline_desc;
       char *logical_task_name; // optional semantic info to attach to the task
     };
 
@@ -947,13 +946,16 @@ namespace LegionRuntime {
     public:
       const char* get_name(bool needs_lock = true) const;
       void attach_semantic_information(SemanticTag tag, AddressSpaceID source,
-                             const void *buffer, size_t size, bool is_mutable);
-      void retrieve_semantic_information(SemanticTag tag,
-                                         const void *&buffer, size_t &size);
+         const void *buffer, size_t size, bool is_mutable, bool send_to_owner);
+      bool retrieve_semantic_information(SemanticTag tag,
+                                         const void *&buffer, size_t &size,
+                                         bool can_fail, bool wait_until);
       void send_semantic_info(AddressSpaceID target, SemanticTag tag,
                               const void *value, size_t size, bool is_mutable);
-      void send_semantic_request(AddressSpaceID target, SemanticTag tag);
-      void process_semantic_request(SemanticTag tag, AddressSpaceID target);
+      void send_semantic_request(AddressSpaceID target, SemanticTag tag, 
+                               bool can_fail, bool wait_until, UserEvent ready);
+      void process_semantic_request(SemanticTag tag, AddressSpaceID target, 
+                               bool can_fail, bool wait_until, UserEvent ready);
     public:
       inline AddressSpaceID get_owner_space(void) const
         { return get_owner_space(task_id, runtime); }
@@ -992,7 +994,7 @@ namespace LegionRuntime {
     public:
       VariantImpl(Internal *runtime, VariantID vid, TaskImpl *owner, 
                   const TaskVariantRegistrar &registrar, bool ret_val, 
-                  CodeDescriptor *realm_desc, CodeDescriptor *inline_desc,
+                  CodeDescriptor *realm_desc,
                   const void *user_data = NULL, size_t user_data_size = 0);
       VariantImpl(const VariantImpl &rhs);
       ~VariantImpl(void);
@@ -1007,7 +1009,7 @@ namespace LegionRuntime {
       Event dispatch_task(Processor target, SingleTask *task, 
                           Event precondition, int priority,
                           Realm::ProfilingRequestSet &requests);
-      void dispatch_inline(Processor current, Task *task);
+      void dispatch_inline(Processor current, TaskOp *task);
     public:
       Processor::Kind get_processor_kind(bool warn) const;
     public:
@@ -1024,7 +1026,6 @@ namespace LegionRuntime {
       const bool has_return_value; // has a return value
     public:
       CodeDescriptor *const realm_descriptor;
-      CodeDescriptor *const inline_descriptor;
     private:
       ExecutionConstraintSet execution_constraints;
       TaskLayoutConstraintSet   layout_constraints;
@@ -1161,15 +1162,14 @@ namespace LegionRuntime {
                const std::set<Processor> &local_procs,
                const std::set<Processor> &local_util_procs,
                const std::set<AddressSpaceID> &address_spaces,
-               const std::map<Processor,AddressSpaceID> &proc_spaces,
-               Processor cleanup, Processor gc, Processor message);
+               const std::map<Processor,AddressSpaceID> &proc_spaces);
       Internal(const Internal &rhs);
       ~Internal(void);
     public:
       Internal& operator=(const Internal&rhs);
     public:
       void construct_mpi_rank_tables(Processor proc, int rank);
-      void launch_top_level_task(Processor proc);
+      void launch_top_level_task(Processor target);
       Event launch_mapper_task(Mapper *mapper, Processor proc, 
                                Processor::TaskFuncID tid,
                                const TaskArgument &arg, MapperID map_id);
@@ -1499,6 +1499,7 @@ namespace LegionRuntime {
                        LogicalRegion parent,
                        const std::set<FieldID> &fields,
                        Future f, const Predicate &pred);
+      void fill_fields(Context ctx, const FillLauncher &launcher);
     public:
       PhysicalRegion attach_hdf5(Context ctx, const char *file_name,
                                  LogicalRegion handle, LogicalRegion parent,
@@ -1570,6 +1571,9 @@ namespace LegionRuntime {
       const std::map<int,AddressSpace>& find_forward_MPI_mapping(void);
       const std::map<AddressSpace,int>& find_reverse_MPI_mapping(void);
     public:
+      MapperID generate_dynamic_mapper_id(void);
+      static MapperID& get_current_static_mapper_id(void);
+      static MapperID generate_static_mapper_id(void);
       void add_mapper(MapperID map_id, Mapper *mapper, Processor proc);
       void replace_default_mapper(Mapper *mapper, Processor proc);
     public:
@@ -1578,7 +1582,8 @@ namespace LegionRuntime {
       ProjectionFunctor* find_projection_functor(ProjectionID pid);
     public:
       void attach_semantic_information(TaskID task_id, SemanticTag,
-                       const void *buffer, size_t size, bool is_mutable);
+                                   const void *buffer, size_t size, 
+                                   bool is_mutable, bool send_to_owner = true);
       void attach_semantic_information(IndexSpace handle, SemanticTag tag,
                        const void *buffer, size_t size, bool is_mutable);
       void attach_semantic_information(IndexPartition handle, SemanticTag tag,
@@ -1593,21 +1598,28 @@ namespace LegionRuntime {
       void attach_semantic_information(LogicalPartition handle, SemanticTag tag,
                        const void *buffer, size_t size, bool is_mutable);
     public:
-      void retrieve_semantic_information(TaskID task_id, SemanticTag tag,
-                                         const void *&result, size_t &size);
-      void retrieve_semantic_information(IndexSpace handle, SemanticTag tag,
-                                         const void *&result, size_t &size);
-      void retrieve_semantic_information(IndexPartition handle, SemanticTag tag,
-                                         const void *&result, size_t &size);
-      void retrieve_semantic_information(FieldSpace handle, SemanticTag tag,
-                                         const void *&result, size_t &size);
-      void retrieve_semantic_information(FieldSpace handle, FieldID fid,
+      bool retrieve_semantic_information(TaskID task_id, SemanticTag tag,
+                                         const void *&result, size_t &size,
+                                         bool can_fail, bool wait_until);
+      bool retrieve_semantic_information(IndexSpace handle, SemanticTag tag,
+                                         const void *&result, size_t &size,
+                                         bool can_fail, bool wait_until);
+      bool retrieve_semantic_information(IndexPartition handle, SemanticTag tag,
+                                         const void *&result, size_t &size,
+                                         bool can_fail, bool wait_until);
+      bool retrieve_semantic_information(FieldSpace handle, SemanticTag tag,
+                                         const void *&result, size_t &size,
+                                         bool can_fail, bool wait_until);
+      bool retrieve_semantic_information(FieldSpace handle, FieldID fid,
                                          SemanticTag tag,
-                                         const void *&result, size_t &size);
-      void retrieve_semantic_information(LogicalRegion handle, SemanticTag tag,
-                                         const void *&result, size_t &size);
-      void retrieve_semantic_information(LogicalPartition part, SemanticTag tag,
-                                         const void *&result, size_t &size);
+                                         const void *&result, size_t &size,
+                                         bool can_fail, bool wait_until);
+      bool retrieve_semantic_information(LogicalRegion handle, SemanticTag tag,
+                                         const void *&result, size_t &size,
+                                         bool can_fail, bool wait_until);
+      bool retrieve_semantic_information(LogicalPartition part, SemanticTag tag,
+                                         const void *&result, size_t &size,
+                                         bool can_fail, bool wait_until);
     public:
       FieldID allocate_field(Context ctx, FieldSpace space, 
                              size_t field_size, FieldID fid, 
@@ -1620,16 +1632,15 @@ namespace LegionRuntime {
       void free_fields(Context ctx, FieldSpace space, 
                        const std::set<FieldID> &to_free);
     public:
-      const std::vector<PhysicalRegion>& begin_task(Context ctx);
-      const std::vector<PhysicalRegion>& begin_inline_task(Context ctx);
-      void end_task(Context ctx, const void *result, size_t result_size,
+      const std::vector<PhysicalRegion>& begin_task(TaskOp *task);
+      void end_task(TaskOp *task, const void *result, size_t result_size,
                     bool owned);
-      void end_inline_task(Context ctx, const void *result, size_t result_size,
-                           bool owned);
+      TaskID generate_dynamic_task_id(void);
       VariantID register_variant(const TaskVariantRegistrar &registrar,
                                  const void *user_data, size_t user_data_size,
-                                 CodeDescriptor *realm, CodeDescriptor *indesc,
-                                 bool ret, VariantID vid = AUTO_GENERATE_ID);
+                                 CodeDescriptor *realm,
+                                 bool ret, VariantID vid = AUTO_GENERATE_ID,
+                                 bool check_task_id = true);
       TaskImpl* find_or_create_task_impl(TaskID task_id);
       TaskImpl* find_task_impl(TaskID task_id);
       VariantImpl* find_variant_impl(TaskID task_id, VariantID variant_id);
@@ -1666,6 +1677,8 @@ namespace LegionRuntime {
       void send_index_partition_node(AddressSpaceID target, Serializer &rez);
       void send_index_partition_request(AddressSpaceID target, Serializer &rez);
       void send_index_partition_return(AddressSpaceID target, Serializer &rez);
+      void send_index_partition_child_request(AddressSpaceID target,
+                                              Serializer &rez);
       void send_field_space_node(AddressSpaceID target, Serializer &rez);
       void send_field_space_request(AddressSpaceID target, Serializer &rez);
       void send_field_space_return(AddressSpaceID target, Serializer &rez);
@@ -1784,6 +1797,7 @@ namespace LegionRuntime {
       void handle_index_partition_request(Deserializer &derez,
                                           AddressSpaceID source);
       void handle_index_partition_return(Deserializer &derez);
+      void handle_index_partition_child_request(Deserializer &derez);
       void handle_field_space_node(Deserializer &derez, AddressSpaceID source);
       void handle_field_space_request(Deserializer &derez,
                                       AddressSpaceID source);
@@ -1907,12 +1921,6 @@ namespace LegionRuntime {
       inline unsigned get_context_count(void) { return total_contexts; }
       inline unsigned get_start_color(void) const { return address_space; }
       inline unsigned get_color_modulus(void) const { return runtime_stride; }
-#ifdef SPECIALIZED_UTIL_PROCS
-    public:
-      Processor get_cleanup_proc(Processor p) const;
-      Processor get_gc_proc(Processor p) const;
-      Processor get_message_proc(Processor p) const;
-#endif
 #ifdef HANG_TRACE
     public:
       void dump_processor_states(FILE *target);
@@ -1990,7 +1998,8 @@ namespace LegionRuntime {
       Event issue_runtime_meta_task(const void *args, size_t arglen,
                                     HLRTaskID tid, Operation *op = NULL,
                                     Event precondition = Event::NO_EVENT, 
-                                    int priority = 0,
+                                    int priority = 0, 
+                                    bool holds_reservation = false,
                                     Processor proc = Processor::NO_PROC);
     public:
       void allocate_context(SingleTask *task);
@@ -2026,6 +2035,7 @@ namespace LegionRuntime {
       void issue_runtime_shutdown_attempt(void);
       void attempt_runtime_shutdown(void);
       void initiate_runtime_shutdown(AddressSpaceID source);
+      void finalize_runtime_shutdown(void);
     public:
       bool has_outstanding_tasks(void);
       inline void increment_total_outstanding_tasks(void)
@@ -2190,6 +2200,10 @@ namespace LegionRuntime {
                           const void *args, size_t arglen, 
 			  const void *userdata, size_t userlen,
 			  Processor p);
+      static void launch_top_level(
+                          const void *args, size_t arglen, 
+			  const void *userdata, size_t userlen,
+			  Processor p);
     protected:
       // Internal runtime methods invoked by the above static methods
       // after the find the right runtime instance to call
@@ -2212,11 +2226,9 @@ namespace LegionRuntime {
       unsigned outstanding_top_level_tasks;
       ShutdownManager *shutdown_manager;
       Reservation shutdown_lock;
-#ifdef SPECIALIZED_UTIL_PROCS
+#ifdef DEBUG_SHUTDOWN_HANG
     public:
-      const Processor cleanup_proc;
-      const Processor gc_proc;
-      const Processor message_proc;
+      std::vector<int> outstanding_counts;
 #endif
     protected:
       // Internal runtime state 
@@ -2273,6 +2285,8 @@ namespace LegionRuntime {
       unsigned unique_field_id; 
       unsigned unique_variant_id;
       unsigned unique_constraint_id;
+      unsigned unique_task_id;
+      unsigned unique_mapper_id;
     protected:
       std::map<ProjectionID,ProjectionFunctor*> projection_functors;
     protected:
@@ -2452,11 +2466,13 @@ namespace LegionRuntime {
                                 get_pending_variant_table(void);
       static std::map<LayoutConstraintID,LayoutConstraintRegistrar>&
                                 get_pending_constraint_table(void);
+      static TaskID& get_current_static_task_id(void);
+      static TaskID generate_static_task_id(void);
       static VariantID preregister_variant(
                       const TaskVariantRegistrar &registrar,
                       const void *user_data, size_t user_data_size,
-                      CodeDescriptor *realm_desc, CodeDescriptor *inline_desc,
-                      bool has_ret, const char *task_name);
+                      CodeDescriptor *realm_desc,
+                      bool has_ret, const char *task_name,bool check_id = true);
       static PartitionProjectionFnptr 
                     find_partition_projection_function(ProjectionID pid);
       static RegionProjectionFnptr
@@ -2471,17 +2487,11 @@ namespace LegionRuntime {
       static void check_bounds(void *impl, const DomainPoint &dp);
 #endif
     private:
-      static int* get_startup_arrivals(void);
       static RegionProjectionTable& get_region_projection_table(void);
       static PartitionProjectionTable& get_partition_projection_table(void);
       static Event register_runtime_tasks(RealmRuntime &realm);
       static Processor::TaskFuncID get_next_available_id(void);
       static void log_machine(Machine machine);
-#ifdef SPECIALIZED_UTIL_PROCS
-      static void get_utility_processor_mapping(
-          const std::set<Processor> &util_procs, Processor &cleanup_proc,
-          Processor &gc_proc, Processor &message_proc);
-#endif
     public:
       // Static member variables
       static Internal *runtime_map[(MAX_NUM_PROCS+1/*+1 for NO_PROC*/)];
@@ -2494,6 +2504,7 @@ namespace LegionRuntime {
       static unsigned max_message_size;
       static unsigned gc_epoch_size;
       static bool runtime_started;
+      static bool runtime_backgrounded;
       static bool separate_runtime_instances;
       static bool record_registration;
       static bool stealing_disabled;
@@ -2501,7 +2512,6 @@ namespace LegionRuntime {
       static bool unsafe_launch;
       static bool dynamic_independence_tests;
       static bool legion_spy_enabled;
-      static unsigned shutdown_counter;
       static int mpi_rank;
       static unsigned mpi_rank_table[MAX_NUM_NODES];
       static unsigned remaining_mpi_notifications;

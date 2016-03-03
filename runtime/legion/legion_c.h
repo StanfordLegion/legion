@@ -29,6 +29,7 @@
 // ******************** IMPORTANT **************************
 
 #include "legion_config.h"
+#include "lowlevel_config.h"
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -48,10 +49,11 @@ extern "C" {
   NEW_OPAQUE_TYPE(legion_context_t);
   NEW_OPAQUE_TYPE(legion_coloring_t);
   NEW_OPAQUE_TYPE(legion_domain_coloring_t);
+  NEW_OPAQUE_TYPE(legion_multi_domain_point_coloring_t);
   NEW_OPAQUE_TYPE(legion_index_space_allocator_t);
+  NEW_OPAQUE_TYPE(legion_field_allocator_t);
   NEW_OPAQUE_TYPE(legion_argument_map_t);
   NEW_OPAQUE_TYPE(legion_predicate_t);
-  NEW_OPAQUE_TYPE(legion_phase_barrier_t);
   NEW_OPAQUE_TYPE(legion_future_t);
   NEW_OPAQUE_TYPE(legion_future_map_t);
   NEW_OPAQUE_TYPE(legion_task_launcher_t);
@@ -80,7 +82,13 @@ extern "C" {
     unsigned value;
   } legion_ptr_t;
 
-#define NEW_POINT_TYPE(T, DIM) typedef struct T { int x[DIM]; } T
+#ifdef POINTS_ARE_64BIT
+typedef ptrdiff_t coord_t;
+#else
+typedef int coord_t;
+#endif
+
+#define NEW_POINT_TYPE(T, DIM) typedef struct T { coord_t x[DIM]; } T
   NEW_POINT_TYPE(legion_point_1d_t, 1);
   NEW_POINT_TYPE(legion_point_2d_t, 2);
   NEW_POINT_TYPE(legion_point_3d_t, 3);
@@ -104,7 +112,7 @@ extern "C" {
   typedef struct legion_domain_t {
     legion_lowlevel_id_t is_id;
     int dim;
-    int rect_data[2 * MAX_RECT_DIM];
+    coord_t rect_data[2 * MAX_RECT_DIM];
   } legion_domain_t;
 
   /**
@@ -112,7 +120,7 @@ extern "C" {
    */
   typedef struct legion_domain_point_t {
     int dim;
-    int point_data[MAX_POINT_DIM];
+    coord_t point_data[MAX_POINT_DIM];
   } legion_domain_point_t;
 
   /**
@@ -145,15 +153,6 @@ extern "C" {
   typedef struct legion_field_space_t {
     legion_field_space_id_t id;
   } legion_field_space_t;
-
-  /**
-   * @see LegionRuntime::HighLevel::FieldAllocator
-   */
-  typedef struct legion_field_allocator_t {
-    legion_field_space_t field_space;
-    legion_context_t parent;
-    legion_runtime_t runtime;
-  } legion_field_allocator_t;
 
   /**
    * @see LegionRuntime::HighLevel::LogicalRegion
@@ -238,6 +237,17 @@ extern "C" {
   } legion_domain_split_t;
 
   /**
+   * @see LegionRuntime::HighLevel::PhaseBarrier
+   */
+  typedef struct legion_phase_barrier_t {
+    // From Realm::Event
+    legion_lowlevel_id_t id;
+    legion_lowlevel_event_gen_t gen;
+    // From Realm::Barrier
+    legion_lowlevel_barrier_timestamp_t timestamp;
+  } legion_phase_barrier_t;
+
+  /**
    * Interface for a Legion C registration callback.
    */
   typedef
@@ -291,6 +301,12 @@ extern "C" {
       unsigned /* num_regions */,
       legion_context_t /* ctx */,
       legion_runtime_t /* runtime */);
+
+  /**
+   * Interface for a Legion C task that is wrapped (i.e. this is the Realm
+   * task interface)
+   */
+  typedef legion_lowlevel_task_pointer_t legion_task_pointer_wrapped_t;
 
   /**
    * Interface for a Legion C projection functor (Logical Region
@@ -532,6 +548,36 @@ extern "C" {
   legion_domain_coloring_get_color_space(legion_domain_coloring_t handle);
 
   // -----------------------------------------------------------------------
+  // Multi-Domain Coloring Operations
+  // -----------------------------------------------------------------------
+
+  /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see LegionRuntime::HighLevel::MultiDomainPointColoring
+   */
+  legion_multi_domain_point_coloring_t
+  legion_multi_domain_point_coloring_create(void);
+
+  /**
+   * @param handle Caller must have ownership of parameter `handle`.
+   *
+   * @see LegionRuntime::HighLevel::MultiDomainPointColoring
+   */
+  void
+  legion_multi_domain_point_coloring_destroy(
+    legion_multi_domain_point_coloring_t handle);
+
+  /**
+   * @see LegionRuntime::HighLevel::MultiDomainPointColoring
+   */
+  void
+  legion_multi_domain_point_coloring_color_domain(
+    legion_multi_domain_point_coloring_t handle,
+    legion_color_t color,
+    legion_domain_t domain);
+
+  // -----------------------------------------------------------------------
   // Index Space Operations
   // ----------------------------------------------------------------------
 
@@ -626,6 +672,21 @@ extern "C" {
     bool disjoint,
     int part_color /* = AUTO_GENERATE_ID */);
 
+  /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see LegionRuntime::HighLevel::Runtime::create_index_partition(
+   *        Context, IndexSpace, Domain, DomainColoring, bool, int)
+   */
+  legion_index_partition_t
+  legion_index_partition_create_multi_domain_point_coloring(
+    legion_runtime_t runtime,
+    legion_context_t ctx,
+    legion_index_space_t parent,
+    legion_domain_t color_space,
+    legion_multi_domain_point_coloring_t coloring,
+    legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
+    int color /* = AUTO_GENERATE_ID */);
 
   /**
    * @return Caller takes ownership of return value.
@@ -1017,6 +1078,19 @@ extern "C" {
     legion_context_t ctx,
     legion_logical_partition_t parent,
     legion_color_t c);
+
+  /**
+   * @return Caller does **NOT** take ownership of return value.
+   *
+   * @see LegionRuntime::HighLevel::Runtime::get_logical_subregion_by_tree()
+   */
+  legion_logical_region_t
+  legion_logical_partition_get_logical_subregion_by_tree(
+    legion_runtime_t runtime,
+    legion_context_t ctx,
+    legion_index_space_t handle,
+    legion_field_space_t fspace,
+    legion_region_tree_id_t tid);
 
   /**
    * @see LegionRuntime::HighLevel::Runtime::get_parent_logical_region()
@@ -1424,13 +1498,15 @@ extern "C" {
   /**
    * @param handle Caller must have ownership of parameter `handle`.
    *
-   * @see LegionRuntime::HighLevel::PhaseBarrier::~PhaseBarrier()
+   * @see LegionRuntime::HighLevel::PhaseBarrier::destroy_phase_barrier()
    */
   void
-  legion_phase_barrier_destroy(legion_phase_barrier_t handle);
+  legion_phase_barrier_destroy(legion_runtime_t runtime,
+                               legion_context_t ctx,
+                               legion_phase_barrier_t handle);
 
   /**
-   * @return Caller takes ownership of return value.
+   * @return Caller does **NOT** take ownership of return value.
    *
    * @see LegionRuntime::HighLevel::HighLevelRuntime::advance_phase_barrier()
    */
@@ -1506,6 +1582,12 @@ extern "C" {
    */
   uint64_t
   legion_future_get_result_uint64(legion_future_t handle);
+
+  /**
+   * @see LegionRuntime::HighLevel::Future::get_untyped_pointer()
+   */
+  void
+  legion_future_get_result_bytes(legion_future_t handle_, void *buffer, size_t size);
 
   /**
    * @see LegionRuntime::HighLevel::Future::is_empty()
@@ -1641,6 +1723,22 @@ extern "C" {
                                  unsigned idx,
                                  legion_field_id_t fid,
                                  bool inst /* = true */);
+
+  /**
+   * @see LegionRuntime::HighLevel::RegionRequirement::add_flags()
+   */
+  void
+  legion_task_launcher_add_flags(legion_task_launcher_t launcher,
+                                 unsigned idx,
+                                 enum legion_region_flags_t flags);
+
+  /**
+   * @see LegionRuntime::HighLevel::RegionRequirement::flags
+   */
+  void
+  legion_task_launcher_intersect_flags(legion_task_launcher_t launcher,
+                                       unsigned idx,
+                                       enum legion_region_flags_t flags);
 
   /**
    * @see LegionRuntime::HighLevel::TaskLauncher::add_index_requirement()
@@ -1783,6 +1881,22 @@ extern "C" {
                                  unsigned idx,
                                  legion_field_id_t fid,
                                  bool inst /* = true */);
+
+  /**
+   * @see LegionRuntime::HighLevel::RegionRequirement::add_flags()
+   */
+  void
+  legion_index_launcher_add_flags(legion_index_launcher_t launcher,
+                                  unsigned idx,
+                                  enum legion_region_flags_t flags);
+
+  /**
+   * @see LegionRuntime::HighLevel::RegionRequirement::flags
+   */
+  void
+  legion_index_launcher_intersect_flags(legion_index_launcher_t launcher,
+                                        unsigned idx,
+                                        enum legion_region_flags_t flags);
 
   /**
    * @see LegionRuntime::HighLevel::IndexLauncher::add_index_requirement()
@@ -2153,6 +2267,14 @@ extern "C" {
    */
   legion_logical_region_t
   legion_physical_region_get_logical_region(legion_physical_region_t handle);
+
+  /**
+   * @see LegionRuntime::HighLevel::PhysicalRegion::get_fields()
+   */
+  size_t
+  legion_physical_region_get_field_count(legion_physical_region_t handle);
+  legion_field_id_t
+  legion_physical_region_get_field_id(legion_physical_region_t handle, size_t index);
 
   /**
    * Safe for use only with instances with a single field.
@@ -2567,6 +2689,81 @@ extern "C" {
     legion_task_config_options_t options,
     const char *task_name /* = NULL*/,
     legion_task_pointer_uint64_t task_pointer);
+
+  /**
+   * @see LegionRuntime::HighLevel::Runtime::register_task_variant()
+   */
+  legion_task_id_t
+  legion_runtime_register_task_variant_fnptr(
+    legion_runtime_t runtime,
+    legion_task_id_t id,
+    legion_processor_kind_t proc_kind,
+    legion_task_config_options_t options,
+    const char *task_name,
+    const void *userdata,
+    size_t userlen,
+    legion_task_pointer_wrapped_t wrapped_task_pointer);
+
+  legion_task_id_t
+  legion_runtime_register_task_variant_llvmir(
+    legion_runtime_t runtime,
+    legion_task_id_t id,
+    legion_processor_kind_t proc_kind,
+    bool global,
+    legion_task_config_options_t options,
+    const char *task_name,
+    const void *userdata,
+    size_t userlen,
+    const char *llvmir,
+    const char *entry_symbol);
+
+  /**
+   * @see LegionRuntime::HighLevel::Runtime::preregister_task_variant()
+   */
+  legion_task_id_t
+  legion_runtime_preregister_task_variant_fnptr(
+    legion_task_id_t id,
+    legion_processor_kind_t proc_kind,
+    legion_task_config_options_t options,
+    const char *task_name,
+    const void *userdata,
+    size_t userlen,
+    legion_task_pointer_wrapped_t wrapped_task_pointer);
+
+  legion_task_id_t
+  legion_runtime_preregister_task_variant_llvmir(
+    legion_task_id_t id,
+    legion_processor_kind_t proc_kind,
+    legion_task_config_options_t options,
+    const char *task_name,
+    const void *userdata,
+    size_t userlen,
+    const char *llvmir,
+    const char *entry_symbol);
+
+  /**
+   * @see LegionRuntime::LegionTaskWrapper::legion_task_preamble()
+   */
+  void
+  legion_task_preamble(
+    const void *data,
+    size_t datalen,
+    legion_lowlevel_id_t proc_id,
+    legion_task_t *taskptr,
+    const legion_physical_region_t **regionptr,
+    unsigned * num_regions_ptr,
+    legion_context_t * ctxptr,
+    legion_runtime_t * runtimeptr);
+
+  /**
+   * @see LegionRuntime::LegionTaskWrapper::legion_task_postamble()
+   */
+  void
+  legion_task_postamble(
+    legion_runtime_t runtime,
+    legion_context_t ctx,
+    const void *retval,
+    size_t retsize);
 
   /**
    * @see LegionRuntime::HighLevel::Runtime::register_projection_functor()

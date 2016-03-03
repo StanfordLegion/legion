@@ -16,6 +16,9 @@
 #ifndef RUNTIME_LOWLEVEL_CONFIG_H
 #define RUNTIME_LOWLEVEL_CONFIG_H
 
+// for size_t
+#include <stddef.h>
+
 // ******************** IMPORTANT **************************
 //
 // This file is PURE C, **NOT** C++. Keep any C++-isms in
@@ -27,18 +30,16 @@
 // LegionRuntime::LowLevel. These versions are here to facilitate the
 // C API. If you are writing C++ code, use the namespaced versions.
 
-#ifdef LEGION_IDS_ARE_64BIT
+#define REALM_IDS_ARE_64BIT
 typedef unsigned long long legion_lowlevel_id_t;
 #define IDFMT "%llx"
-#else
-typedef unsigned legion_lowlevel_id_t;
-#define IDFMT "%x"
-#endif
 
 typedef unsigned int legion_lowlevel_address_space_t;
 typedef unsigned legion_lowlevel_task_func_id_t;
 typedef int legion_lowlevel_reduction_op_id_t;
 typedef int legion_lowlevel_custom_serdez_id_t;
+typedef unsigned legion_lowlevel_event_gen_t;
+typedef unsigned long long legion_lowlevel_barrier_timestamp_t;
 
 // Different Processor types
 // Keep this in sync with Processor::Kind in lowlevel.h
@@ -79,5 +80,14 @@ typedef enum legion_lowlevel_domain_max_rect_dim_t {
   MAX_POINT_DIM = 3,
   MAX_RECT_DIM = 3,
 } legion_lowlevel_domain_max_rect_dim_t;
+
+// Prototype for a Realm task
+typedef
+  void (*legion_lowlevel_task_pointer_t)(
+    const void * /*data*/,
+    size_t /*datalen*/,
+    const void * /*userdata*/,
+    size_t /*userlen*/,
+    legion_lowlevel_id_t /*proc_id*/);
 
 #endif

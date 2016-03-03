@@ -1619,12 +1619,10 @@ namespace Realm {
     }
 
     if(trigger_approx.exists())
-      get_runtime()->get_genevent_impl(trigger_approx)->trigger(trigger_approx.gen,
-								gasnet_mynode());
+      GenEventImpl::trigger(trigger_approx, false /*!poisoned*/);
 
     if(trigger_precise.exists())
-      get_runtime()->get_genevent_impl(trigger_precise)->trigger(trigger_precise.gen,
-								 gasnet_mynode());
+      GenEventImpl::trigger(trigger_precise, false /*!poisoned*/);
   }
 
 
@@ -1777,6 +1775,11 @@ namespace Realm {
     // ignored
   }
 
+  void AsyncMicroOp::print(std::ostream& os) const
+  {
+    os << "AsyncMicroOp(" << (void *)uop << ")";
+  }
+
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -1801,7 +1804,7 @@ namespace Realm {
   {
     if(async_microop) {
       if(requestor == gasnet_mynode())
-	async_microop->mark_finished();
+	async_microop->mark_finished(true /*successful*/);
       else
 	RemoteMicroOpCompleteMessage::send_request(requestor, async_microop);
     }
@@ -3640,7 +3643,7 @@ namespace Realm {
   /*static*/ void RemoteMicroOpCompleteMessage::handle_request(RequestArgs args)
   {
     log_part.info() << "received remote micro op complete message: " << args.async_microop;
-    args.async_microop->mark_finished();
+    args.async_microop->mark_finished(true /*successful*/);
   }
 
   /*static*/ void RemoteMicroOpCompleteMessage::send_request(gasnet_node_t target,
@@ -3818,9 +3821,17 @@ namespace Realm {
   public:
     DeferredPartitioningOp(PartitioningOperation *_op) : op(_op) {}
 
-    virtual bool event_triggered(void) { op_queue->enqueue_partitioning_operation(op); return true; }
+    virtual bool event_triggered(Event e, bool poisoned)
+    {
+      assert(!poisoned); // TODO: POISON_FIXME
+      op_queue->enqueue_partitioning_operation(op);
+      return true;
+    }
 
-    virtual void print_info(FILE *f) {}
+    virtual void print(std::ostream& os) const
+    {
+      os << "DeferredPartitioningOp(" << (void *)op << ")";
+    }
 
   protected:
     PartitioningOperation *op;
@@ -3907,6 +3918,12 @@ namespace Realm {
       //uop.set_value_set(colors);
       uop->dispatch(this, true /* ok to run in this thread */);
     }
+  }
+
+  template <int N, typename T, typename FT>
+  void ByFieldOperation<N,T,FT>::print(std::ostream& os) const
+  {
+    os << "ByFieldOperation(" << parent << ")";
   }
 
 
@@ -4077,6 +4094,12 @@ namespace Realm {
     }
   }
 
+  template <int N, typename T, int N2, typename T2>
+  void ImageOperation<N,T,N2,T2>::print(std::ostream& os) const
+  {
+    os << "ImageOperation(" << parent << ")";
+  }
+
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -4213,7 +4236,7 @@ namespace Realm {
 	  log_part.info() << contrib_counts[j] << " total contributors to preimage " << j;
 	  SparsityMapImpl<N,T>::lookup(preimages[j])->set_contributor_count(contrib_counts[j]);
 	}
-	dummy_overlap_uop->mark_finished();
+	dummy_overlap_uop->mark_finished(true /*successful*/);
       }
     }
   }
@@ -4262,9 +4285,15 @@ namespace Realm {
 	  log_part.info() << contrib_counts[j] << " total contributors to preimage " << j;
 	  SparsityMapImpl<N,T>::lookup(preimages[j])->set_contributor_count(contrib_counts[j]);
 	}
-	dummy_overlap_uop->mark_finished();
+	dummy_overlap_uop->mark_finished(true /*successful*/);
       }
     }
+  }
+
+  template <int N, typename T, int N2, typename T2>
+  void PreimageOperation<N,T,N2,T2>::print(std::ostream& os) const
+  {
+    os << "PreimageOperation(" << parent << ")";
   }
 
 
@@ -4389,6 +4418,12 @@ namespace Realm {
     }
   }
 
+  template <int N, typename T>
+  void UnionOperation<N,T>::print(std::ostream& os) const
+  {
+    os << "UnionOperation";
+  }
+
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -4508,6 +4543,12 @@ namespace Realm {
     }
   }
 
+  template <int N, typename T>
+  void IntersectionOperation<N,T>::print(std::ostream& os) const
+  {
+    os << "IntersectionOperation";
+  }
+
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -4583,6 +4624,12 @@ namespace Realm {
       uop->add_sparsity_output(outputs[i]);
       uop->dispatch(this, true /* ok to run in this thread */);
     }
+  }
+
+  template <int N, typename T>
+  void DifferenceOperation<N,T>::print(std::ostream& os) const
+  {
+    os << "DifferenceOperation";
   }
 
 
@@ -4694,7 +4741,7 @@ namespace Realm {
 	    p_op->mark_started();
 	    p_op->execute();
 	    log_part.info() << "worker " << this << " finished op " << p_op;
-	    p_op->mark_finished();
+	    p_op->mark_finished(true /*successful*/);
 	    break;
 	  }
 	case MICROOP_PRIORITY:

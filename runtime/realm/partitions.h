@@ -231,6 +231,8 @@ namespace Realm {
     
     virtual void request_cancellation(void);
       
+    virtual void print(std::ostream& os) const;
+
   protected:
     PartitioningMicroOp *uop;
   };
@@ -563,6 +565,8 @@ namespace Realm {
 
     virtual void execute(void);
 
+    virtual void print(std::ostream& os) const;
+
   protected:
     ZIndexSpace<N,T> parent;
     std::vector<FieldDataDescriptor<ZIndexSpace<N,T>,FT> > field_data;
@@ -585,6 +589,8 @@ namespace Realm {
                                                 const ZIndexSpace<N,T>& diff_rhs);
 
     virtual void execute(void);
+
+    virtual void print(std::ostream& os) const;
 
     virtual void set_overlap_tester(void *tester);
 
@@ -609,6 +615,8 @@ namespace Realm {
     ZIndexSpace<N,T> add_target(const ZIndexSpace<N2,T2>& target);
 
     virtual void execute(void);
+
+    virtual void print(std::ostream& os) const;
 
     virtual void set_overlap_tester(void *tester);
 
@@ -640,6 +648,8 @@ namespace Realm {
 
     virtual void execute(void);
 
+    virtual void print(std::ostream& os) const;
+
   protected:
     std::vector<std::vector<ZIndexSpace<N,T> > > inputs;
     std::vector<SparsityMap<N,T> > outputs;
@@ -658,6 +668,8 @@ namespace Realm {
 
     virtual void execute(void);
 
+    virtual void print(std::ostream& os) const;
+
   protected:
     std::vector<std::vector<ZIndexSpace<N,T> > > inputs;
     std::vector<SparsityMap<N,T> > outputs;
@@ -674,6 +686,8 @@ namespace Realm {
     ZIndexSpace<N,T> add_difference(const ZIndexSpace<N,T>& lhs, const ZIndexSpace<N,T>& rhs);
 
     virtual void execute(void);
+
+    virtual void print(std::ostream& os) const;
 
   protected:
     std::vector<ZIndexSpace<N,T> > lhss, rhss;

@@ -22,7 +22,7 @@ from getopt import getopt
 from cgi import escape
 
 prefix = r'\[(?P<node>[0-9]+) - (?P<thread>[0-9a-f]+)\] \{\w+\}\{legion_prof\}: '
-task_info_pat = re.compile(prefix + r'Prof Task Info (?P<tid>[0-9]+) (?P<fid>[0-9]+) (?P<pid>[a-f0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)')
+task_info_pat = re.compile(prefix + r'Prof Task Info (?P<opid>[0-9]+) (?P<vid>[0-9]+) (?P<pid>[a-f0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)')
 meta_info_pat = re.compile(prefix + r'Prof Meta Info (?P<opid>[0-9]+) (?P<hlr>[0-9]+) (?P<pid>[a-f0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)')
 copy_info_pat = re.compile(prefix + r'Prof Copy Info (?P<opid>[0-9]+) (?P<src>[a-f0-9]+) (?P<dst>[a-f0-9]+) (?P<size>[0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)')
 copy_info_old_pat = re.compile(prefix + r'Prof Copy Info (?P<opid>[0-9]+) (?P<src>[a-f0-9]+) (?P<dst>[a-f0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)')
@@ -30,7 +30,7 @@ fill_info_pat = re.compile(prefix + r'Prof Fill Info (?P<opid>[0-9]+) (?P<dst>[a
 inst_info_pat = re.compile(prefix + r'Prof Inst Info (?P<opid>[0-9]+) (?P<inst>[a-f0-9]+) (?P<mem>[a-f0-9]+) (?P<bytes>[0-9]+) (?P<create>[0-9]+) (?P<destroy>[0-9]+)')
 user_info_pat = re.compile(prefix + r'Prof User Info (?P<pid>[a-f0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+) (?P<name>[a-zA-Z0-9_]+)')
 kind_pat = re.compile(prefix + r'Prof Task Kind (?P<tid>[0-9]+) (?P<name>[a-zA-Z0-9_<>.]+)')
-variant_pat = re.compile(prefix + r'Prof Task Variant (?P<fid>[0-9]+) (?P<name>[a-zA-Z0-9_<>.]+)')
+variant_pat = re.compile(prefix + r'Prof Task Variant (?P<tid>[0-9]+) (?P<vid>[0-9]+) (?P<name>[a-zA-Z0-9_<>.]+)')
 operation_pat = re.compile(prefix + r'Prof Operation (?P<opid>[0-9]+) (?P<kind>[0-9]+)')
 multi_pat = re.compile(prefix + r'Prof Multi (?P<opid>[0-9]+) (?P<tid>[0-9]+)')
 meta_desc_pat = re.compile(prefix + r'Prof Meta Desc (?P<hlr>[0-9]+) (?P<kind>[a-zA-Z0-9_ ]+)')
@@ -43,10 +43,10 @@ message_info_pat = re.compile(prefix + r'Prof Message Info (?P<mid>[0-9]+) (?P<p
 
 # Make sure this is up to date with lowlevel.h
 processor_kinds = {
-    0 : 'GPU',
-    1 : 'CPU',
-    2 : 'Utility',
-    3 : 'I/O',
+    1 : 'GPU',
+    2 : 'CPU',
+    3 : 'Utility',
+    4 : 'I/O',
 }
 
 # Make sure this is up to date with lowlevel.h
@@ -270,9 +270,15 @@ class TaskRange(TimeRange):
 
     def update_task_stats(self, stat):
         exec_time = self.total_time()
+        last_time = self.start_time
         for subrange in self.subranges:
             subrange.update_task_stats(stat)
-            exec_time -= subrange.total_time()
+            if last_time > subrange.start_time:
+                exec_time -= subrange.stop_time - last_time
+            else:
+                exec_time -= subrange.total_time()
+            last_time = max(last_time, subrange.stop_time)
+        assert exec_time >= 0
         if self.task.is_task:
             stat.record_task(self.task, exec_time)
 
@@ -356,34 +362,55 @@ class Processor(object):
         self.kind = kind
         self.app_ranges = list()
         self.full_range = None
+        self.tasks = list()
+        self.max_levels = 0
+        self.time_points = list()
 
     def add_task(self, task):
-        self.app_ranges.append(TaskRange(task))
+        self.tasks.append(TaskRange(task))
 
     def add_message(self, message):
-        self.app_ranges.append(MessageRange(message))
+        # treating messages like any other task
+        self.tasks.append(MessageRange(message))
 
     def init_time_range(self, last_time):
         self.full_range = BaseRange(0L, last_time, self)
 
     def sort_time_range(self):
-        for r in self.app_ranges:
-            self.full_range.add_range(r)
-        self.full_range.sort_range()
+        time_points = list()
+        for task in self.tasks:
+            self.time_points.append(TimePoint(task.start_time, task, True))
+            self.time_points.append(TimePoint(task.stop_time, task, False))
+        self.time_points.sort(key=lambda p: p.time_key)
+        free_levels = set()
+        for point in self.time_points:
+            if point.first:
+                if free_levels:
+                    point.thing.level = min(free_levels)
+                    free_levels.remove(point.thing.level)
+                else:
+                    self.max_levels += 1
+                    point.thing.level = self.max_levels
+            else:
+                free_levels.add(point.thing.level)
 
     def emit_svg(self, printer):
-        max_levels = self.full_range.max_levels()
         # Skip any empty processors
-        if max_levels > 1:
-            # First figure out the max number of levels + 1 for padding
-            printer.init_chunk(max_levels+1)
-            self.full_range.emit_svg_range(printer)
+        if self.max_levels > 0:
+            printer.init_chunk(self.max_levels + 1)
+            title = repr(self)
+            printer.emit_time_line(0, 0, self.full_range.stop_time, title)
+            # iterate over tasks in start time order
+            for point in self.time_points:
+                if point.first:
+                    point.thing.emit_svg(printer, point.thing.level)
 
     def emit_tsv(self, tsv_file, base_level):
-        max_levels = self.full_range.max_levels()
-        if max_levels > 1:
-            self.full_range.emit_tsv_range(tsv_file, base_level, max_levels)
-        return base_level + max_levels
+        # iterate over tasks in start time order
+        for point in self.time_points:
+            if point.first:
+                point.thing.emit_tsv(tsv_file, base_level, self.max_levels + 1, point.thing.level)
+        return base_level + max(self.max_levels, 1) + 1
 
     def print_stats(self):
         total_time = self.full_range.total_time()
@@ -615,13 +642,11 @@ class TaskKind(object):
         return self.name
 
 class Variant(object):
-    def __init__(self, func_id, name):
-        self.func_id = func_id
-        if name <> None:
-            self.name = 'Task "'+name+'"'
-        else:
-            self.name = 'Task "'+str(func_id)+'"'
-        self.tasks = list()
+    def __init__(self, variant_id, name):
+        self.variant_id = variant_id
+        self.name = name
+        self.op = None
+        self.task = None
         self.color = None
         self.total_calls = 0
         self.total_execution_time = 0
@@ -629,8 +654,9 @@ class Variant(object):
         self.max_call = None
         self.min_call = None
 
-    def add_task(self, task):
-        self.tasks.append(task)
+    def set_task(self, task):
+        assert self.task == None
+        self.task = task
 
     def compute_color(self, step, num_steps):
         assert self.color is None
@@ -717,7 +743,10 @@ class Operation(object):
     def __repr__(self):
         if self.is_task:
             assert self.variant is not None
-            return self.variant.name+' '+self.get_info()
+            title = self.variant.task.name
+            if self.variant.name <> None and self.variant.name.find("unnamed") > 0:
+                title += ' ['+self.variant.name+']'
+            return title+' '+self.get_info()
         elif self.is_multi:
             assert self.task_kind is not None
             return self.task_kind.name+' '+self.get_info()
@@ -1036,8 +1065,8 @@ class State(object):
                 matches += 1  
                 m = task_info_pat.match(line)
                 if m is not None:
-                    self.log_task_info(long(m.group('tid')),
-                                       int(m.group('fid')),
+                    self.log_task_info(long(m.group('opid')),
+                                       int(m.group('vid')),
                                        int(m.group('pid'),16),
                                        read_time(m.group('create')),
                                        read_time(m.group('ready')),
@@ -1108,7 +1137,8 @@ class State(object):
                     continue
                 m = variant_pat.match(line)
                 if m is not None:
-                    self.log_variant(int(m.group('fid')),
+                    self.log_variant(int(m.group('tid')),
+                                     int(m.group('vid')),
                                      m.group('name'))
                     continue
                 m = operation_pat.match(line)
@@ -1163,10 +1193,10 @@ class State(object):
                 print 'Skipping line: %s' % line.strip()
         return matches
 
-    def log_task_info(self, task_id, func_id, proc_id,
+    def log_task_info(self, op_id, variant_id, proc_id,
                       create, ready, start, stop):
-        variant = self.find_variant(func_id)
-        task = self.find_task(task_id, variant)
+        variant = self.find_variant(variant_id)
+        task = self.find_task(op_id, variant)
         task.create = create
         assert create <= ready
         task.ready = ready
@@ -1187,7 +1217,7 @@ class State(object):
         meta.create = create
         assert create <= ready
         meta.ready = ready
-        #assert ready <= start
+        assert ready <= start
         meta.start = start
         assert start <= stop
         meta.stop = stop
@@ -1256,12 +1286,17 @@ class State(object):
     def log_kind(self, task_id, name):
         if task_id not in self.task_kinds:
             self.task_kinds[task_id] = TaskKind(task_id, name)
-
-    def log_variant(self, func_id, name):
-        if func_id not in self.variants:
-            self.variants[func_id] = Variant(func_id, name)
         else:
-            self.variants[func_id].name = name
+            self.task_kinds[task_id].name = name
+
+    def log_variant(self, task_id, variant_id, name):
+        assert task_id in self.task_kinds
+        task = self.task_kinds[task_id]
+        if variant_id not in self.variants:
+            self.variants[variant_id] = Variant(variant_id, name)
+        else:
+            self.variants[variant_id].name = name
+        self.variants[variant_id].task = task
 
     def log_operation(self, op_id, kind):
         op = self.find_op(op_id)
@@ -1333,10 +1368,10 @@ class State(object):
                 self.channels[dst] = Channel(None,dst)
             return self.channels[dst]
 
-    def find_variant(self, func_id):
-        if func_id not in self.variants:
-            self.variants[func_id] = Variant(func_id, None)
-        return self.variants[func_id]
+    def find_variant(self, variant_id):
+        if variant_id not in self.variants:
+            self.variants[variant_id] = Variant(variant_id, None)
+        return self.variants[variant_id]
 
     def find_meta_variant(self, hlr_id):
         if hlr_id not in self.meta_variants:
@@ -1348,19 +1383,19 @@ class State(object):
             self.operations[op_id] = Operation(op_id) 
         return self.operations[op_id]
 
-    def find_task(self, task_id, variant):
-        task = self.find_op(task_id)
+    def find_task(self, op_id, variant):
+        task = self.find_op(op_id)
         # Upgrade this operation to a task if necessary
         if not task.is_task:
             task.is_task = True
-            task.name = 'Task '+str(task_id) 
+            task.name = 'Task '+str(op_id) 
             task.variant = variant
-            variant.add_task(task)
+            variant.op = task
         return task
 
     def create_meta(self, variant, op):
         result = MetaTask(variant, op)
-        variant.add_task(result)
+        variant.op = result
         return result
 
     def create_copy(self, src, dst, op):
@@ -1440,17 +1475,17 @@ class State(object):
         for variant in self.variants.itervalues():
             variant.compute_color(lsfr.get_next(), num_colors)
         for variant in self.meta_variants.itervalues():
-            if variant.func_id == 1: # Remote message
+            if variant.variant_id == 1: # Remote message
                 variant.assign_color('#006600') # Evergreen
-            elif variant.func_id == 2: # Post-Execution
+            elif variant.variant_id == 2: # Post-Execution
                 variant.assign_color('#333399') # Deep Purple
-            elif variant.func_id == 6: # Garbage Collection
+            elif variant.variant_id == 6: # Garbage Collection
                 variant.assign_color('#990000') # Crimson
-            elif variant.func_id == 7: # Logical Dependence Analysis
+            elif variant.variant_id == 7: # Logical Dependence Analysis
                 variant.assign_color('#0000FF') # Duke Blue
-            elif variant.func_id == 8: # Operation Physical Analysis
+            elif variant.variant_id == 8: # Operation Physical Analysis
                 variant.assign_color('#009900') # Green
-            elif variant.func_id == 9: # Task Physical Analysis
+            elif variant.variant_id == 9: # Task Physical Analysis
                 variant.assign_color('#009900') #Green
             else:
                 variant.compute_color(lsfr.get_next(), num_colors)

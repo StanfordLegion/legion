@@ -57,7 +57,7 @@ namespace Realm {
     protected:
       GASNetHSL mutex;
       State state;  // current state
-      GenEventImpl *valid_event_impl; // event to track receipt of in-flight request (if any)
+      Event valid_event;
       NodeSet remote_copies;
     };
 

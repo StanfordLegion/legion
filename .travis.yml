@@ -7,10 +7,10 @@ compiler:
   - gcc
   - clang
 env:
-  - CC_FLAGS=
-  - CC_FLAGS="-DPRIVILEGE_CHECKS -DBOUNDS_CHECKS"
-  - CC_FLAGS=-DLEGION_SPY
-  - CC_FLAGS=-std=c++0x
+  - WARNINGS_ARE_ERRORS=1 CC_FLAGS=
+  - WARNINGS_ARE_ERRORS=1 CC_FLAGS="-DPRIVILEGE_CHECKS -DBOUNDS_CHECKS"
+  - WARNINGS_ARE_ERRORS=1 CC_FLAGS=-DLEGION_SPY
+  - WARNINGS_ARE_ERRORS=1 CC_FLAGS=-std=c++0x
 matrix:
   exclude:
     - os: osx
@@ -49,10 +49,7 @@ before_install:
   - export TERRA_LINK="$CXX"
 script:
   - ./language/travis.py
-  - make -C test/realm LG_RT_DIR=../../runtime DEBUG=0 SHARED_LOWLEVEL=1 run_all
-  - make -C test/realm LG_RT_DIR=../../runtime DEBUG=0 SHARED_LOWLEVEL=1 clean
-  - make -C test/realm LG_RT_DIR=../../runtime DEBUG=0 SHARED_LOWLEVEL=0 USE_CUDA=0 USE_GASNET=0 run_all
-  - make -C test/performance/realm LG_RT_DIR=../../../runtime SHARED_LOWLEVEL=1 clean_all
-  - make -C test/performance/realm LG_RT_DIR=../../../runtime SHARED_LOWLEVEL=1 run_all
-  - make -C test/performance/realm LG_RT_DIR=../../../runtime SHARED_LOWLEVEL=0 clean_all
-  - make -C test/performance/realm LG_RT_DIR=../../../runtime SHARED_LOWLEVEL=0 run_all
+  - make -s -C test/realm LG_RT_DIR=../../runtime DEBUG=0 SHARED_LOWLEVEL=0 USE_CUDA=0 USE_GASNET=0 clean
+  - make -s -C test/realm LG_RT_DIR=../../runtime DEBUG=0 SHARED_LOWLEVEL=0 USE_CUDA=0 USE_GASNET=0 run_all
+  - make -s -C test/performance/realm LG_RT_DIR=../../../runtime SHARED_LOWLEVEL=0 clean_all
+  - make -s -C test/performance/realm LG_RT_DIR=../../../runtime SHARED_LOWLEVEL=0 run_all
