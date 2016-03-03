@@ -35,7 +35,8 @@ namespace Realm {
 	     Event _before_event,
 	     Event _finish_event, int _priority)
     : Operation(_finish_event, reqs), proc(_proc), func_id(_func_id),
-      args(_args, _arglen), priority(_priority)
+      args(_args, _arglen), priority(_priority),
+      executing_thread(0)
   {
     log_task.info() << "task " << this << " created: func=" << func_id
 		    << " proc=" << _proc << " arglen=" << _arglen
@@ -75,6 +76,28 @@ namespace Realm {
     Operation::mark_completed();
   }
 
+  bool Task::attempt_cancellation(int error_code, const void *reason_data, size_t reason_size)
+  {
+    // let the base class handle the easy cases
+    if(Operation::attempt_cancellation(error_code, reason_data, reason_size))
+      return true;
+
+    // for a running task, see if we can signal it to stop
+    if(__sync_bool_compare_and_swap(&status.result,
+				    Status::RUNNING,
+				    Status::INTERRUPT_REQUESTED)) {
+      status.error_code = error_code;
+      status.error_details.set(reason_data, reason_size);
+      Thread *t = executing_thread;
+      assert(t != 0);
+      t->signal(Thread::TSIG_INTERRUPT, true /*async*/);
+      return true;
+    }
+
+    // let our caller try more ideas if it has any
+    return false;
+  }
+
   void Task::execute_on_processor(Processor p)
   {
     // if the processor isn't specified, use what's in the task object
@@ -103,6 +126,11 @@ namespace Realm {
       measurements.add_measurement(opu);
     }
 
+    // indicate which thread will be running this task before we mark it running
+    Thread *thread = Thread::self();
+    executing_thread = thread;
+    thread->start_operation(this);
+
     // mark that we're starting the task, checking for cancellation
     bool ok_to_run = mark_started();
 
@@ -117,10 +145,12 @@ namespace Realm {
 	try {
 	  Thread::ExceptionHandlerPresence ehp;
 	  get_runtime()->get_processor_impl(p)->execute_task(func_id, args);
+	  thread->stop_operation(this);
 	  mark_finished(true /*successful*/);
 	}
 	catch (const ExecutionException& e) {
 	  e.populate_profiling_measurements(measurements);
+	  thread->stop_operation(this);
 	  mark_terminated(e.error_code, e.details);
 	}
       } else
@@ -128,7 +158,7 @@ namespace Realm {
       {
 	// just run the task - if it completes, we assume it was successful
 	get_runtime()->get_processor_impl(p)->execute_task(func_id, args);
-
+	thread->stop_operation(this);
 	mark_finished(true /*successful*/);
       }
 
@@ -145,6 +175,7 @@ namespace Realm {
 #endif
     } else {
       // !ok_to_run
+      thread->stop_operation(this);
       mark_finished(false /*!successful*/);
     }
   }
@@ -351,9 +382,23 @@ namespace Realm {
     if(!really_blocked)
       return;
 
+#ifdef DEBUG_THREAD_SCHEDULER
+    assert(blocked_workers.count(thread) == 0);
+#endif
+    blocked_workers.insert(thread);
+
     log_sched.debug() << "scheduler worker blocking: sched=" << this << " worker=" << thread;
 
-    while(true) {
+    while(thread->get_state() != Thread::STATE_READY) {
+      bool alerted = try_update_thread_state(thread,
+					     Thread::STATE_ALERTED,
+					     Thread::STATE_BLOCKED);
+      if(alerted) {
+	log_sched.debug() << "thread alerted while blocked: sched=" << this << " worker=" << thread;
+	thread->process_signals();
+	continue;
+      }
+
       // let's try to find something better to do than spin our wheels
 
       // remember the work counter value before we start so that we don't iterate
@@ -365,13 +410,14 @@ namespace Realm {
 	Thread *yield_to = resumable_workers.get(0); // we don't care about priority
 	// first check - is this US?  if so, we're done
 	if(yield_to == thread) {
-	  printf("resuming ourselves!\n");
-	  return;
+	  printf("resuming ourselves! (%d)\n", thread->get_state());
+	  continue;
 	}
 	// this preserves active and unassigned counts
 	update_worker_count(0, 0);
-	worker_sleep(yield_to);  // returns only when we're ready
-	break;
+	worker_sleep(yield_to);
+	// go back around in case this was just an alert
+	continue;
       }
 
       // next choice - if we're above the min active count AND there's at least one
@@ -380,8 +426,9 @@ namespace Realm {
 	 (unassigned_worker_count > 0)) {
 	// this reduces the active worker count by one
 	update_worker_count(-1, 0);
-	worker_sleep(0);  // returns only when we're ready
-	break;
+	worker_sleep(0);
+	// go back around in case this was just an alert
+	continue;
       }
 
       // next choice - is there an idle worker we can yield to?
@@ -390,8 +437,9 @@ namespace Realm {
 	idle_workers.pop_back();
 	// this preserves the active count, increased unassigned by 1
 	update_worker_count(0, +1);
-	worker_sleep(yield_to);  // returns only when we're ready
-	break;
+	worker_sleep(yield_to);
+	// go back around in case this was just an alert
+	continue;
       }
 	
       // last choice - create a new worker to mind the store
@@ -400,14 +448,20 @@ namespace Realm {
 	Thread *yield_to = worker_create(false);
 	// this preserves the active count, increased unassigned by 1
 	update_worker_count(0, +1);
-	worker_sleep(yield_to);  // returns only when we're ready
-	break;
+	worker_sleep(yield_to);
+	// go back around in case this was just an alert
+	continue;
       }
 
       // wait at least until some new work shows up (even if we don't end up getting it,
       //  it's better than a tight spin)
       wait_for_work(old_work_counter);
     }
+
+#ifdef DEBUG_THREAD_SCHEDULER
+    assert(blocked_workers.count(thread) == 1);
+#endif
+    blocked_workers.erase(thread);
   }
 
   void ThreadedTaskScheduler::thread_ready(Thread *thread)
@@ -417,6 +471,11 @@ namespace Realm {
     // TODO: might be nice to do this in a lock-free way, since this is called by
     //  some other thread
     AutoHSLLock al(lock);
+
+    // it may be that the thread has noticed that it is ready already, in
+    //  which case it'll no longer be blocked and we don't want to resume it
+    if(blocked_workers.count(thread) == 0)
+      return;
 
     // this had better not be after shutdown was initiated
     if(shutdown_flag) {
@@ -941,6 +1000,7 @@ namespace Realm {
 
   void UserThreadTaskScheduler::host_thread_loop(void)
   {
+    log_sched.debug() << "host thread started: sched=" << this << " thread=" << Thread::self();
     AutoHSLLock al(lock);
 
     // create a user worker thread - it won't start right away
@@ -964,6 +1024,7 @@ namespace Realm {
       update_worker_count(+1, +1);
       worker = worker_create(false);
     }
+    log_sched.debug() << "host thread finished: sched=" << this << " thread=" << Thread::self();
   }
 
   void UserThreadTaskScheduler::thread_starting(Thread *thread)

@@ -76,6 +76,11 @@ namespace Realm {
       mark_completed();
   }
 
+  inline bool Operation::cancellation_requested(void) const
+  {
+    return status.result == Status::INTERRUPT_REQUESTED;
+  }
+
 
   ////////////////////////////////////////////////////////////////////////
   //

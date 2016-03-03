@@ -261,7 +261,7 @@ namespace Realm {
 
   void Event::cancel_operation(const void *reason_data, size_t reason_len) const
   {
-    assert(0 && "TODO: faults");
+    get_runtime()->optable.request_cancellation(*this, reason_data, reason_len);
   }
 
 
