@@ -1750,6 +1750,13 @@ namespace LegionRuntime {
   namespace Arrays {
     //template<> class Mapping<1,1>;
     template <unsigned IDIM, unsigned ODIM>
-    MappingRegistry<IDIM, ODIM> Mapping<IDIM, ODIM>::registry;
+    /*static*/ MappingRegistry<IDIM, ODIM>& Mapping<IDIM, ODIM>::registry(void)
+    {
+      static MappingRegistry<IDIM, ODIM> singleton;
+      return singleton;
+    }
+    template class Mapping<1,1>;
+    template class Mapping<2,1>;
+    template class Mapping<3,1>;
   };
 };

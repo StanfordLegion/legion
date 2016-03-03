@@ -489,17 +489,17 @@ namespace LegionRuntime {
       typedef GenericPointInRectIterator<IDIM> PointInInputRectIterator;
       typedef GenericPointInRectIterator<ODIM> PointInOutputRectIterator;
 
-      static MappingRegistry<IDIM_, ODIM_> registry;
+      static MappingRegistry<IDIM_, ODIM_>& registry(void);
 
       template <class T>
       static void register_mapping(void)
       {
-	registry.template register_mapping<T>();
+	registry().template register_mapping<T>();
       }
 
       static Mapping<IDIM, ODIM> *deserialize_mapping(const int *data)
       {
-	typename MappingRegistry<IDIM, ODIM>::MappingDeserializerFn fnptr = registry.get_fnptr(data[0]);
+	typename MappingRegistry<IDIM, ODIM>::MappingDeserializerFn fnptr = registry().get_fnptr(data[0]);
 	return (*fnptr)(data);
       }
 
@@ -546,7 +546,7 @@ namespace LegionRuntime {
 
       virtual void serialize_mapping(int *data) const
       {
-	data[0] = Mapping<T::IDIM, T::ODIM>::registry.template get_id<DynamicMapping<T> >();
+	data[0] = Mapping<T::IDIM, T::ODIM>::registry().template get_id<DynamicMapping<T> >();
 	memcpy(data + 1, &t, sizeof(T));
       }
 
@@ -555,7 +555,7 @@ namespace LegionRuntime {
 #ifndef NDEBUG
 	int id = 
 #endif
-          Mapping<T::IDIM, T::ODIM>::registry.template get_id<DynamicMapping<T> >();
+          Mapping<T::IDIM, T::ODIM>::registry().template get_id<DynamicMapping<T> >();
 	assert(data[0] == id);
 	DynamicMapping<T> *m = new DynamicMapping<T>();
 	memcpy(&(m->t), data + 1, sizeof(T));
