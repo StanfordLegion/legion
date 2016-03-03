@@ -25,18 +25,9 @@ struct t {
   c : int,
 }
 
-local use_reductions = os.getenv('USE_REDUCTIONS') == '1'
-if use_reductions then
-  task inc_ba(r : region(t)) where reads(r.b), reduces +(r.a) do
-    for x in r do
-      x.a += x.b
-    end
-  end
-else
-  task inc_ba(r : region(t)) where reads(r.b), reads writes(r.a) do
-    for x in r do
-      x.a += x.b
-    end
+task inc_ba(r : region(t)) where reads(r.b), reduces +(r.a) do
+  for x in r do
+    x.a += x.b
   end
 end
 
