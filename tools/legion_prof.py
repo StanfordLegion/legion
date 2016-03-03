@@ -362,34 +362,55 @@ class Processor(object):
         self.kind = kind
         self.app_ranges = list()
         self.full_range = None
+        self.tasks = list()
+        self.max_levels = 0
+        self.time_points = list()
 
     def add_task(self, task):
-        self.app_ranges.append(TaskRange(task))
+        self.tasks.append(TaskRange(task))
 
     def add_message(self, message):
-        self.app_ranges.append(MessageRange(message))
+        # treating messages like any other task
+        self.tasks.append(MessageRange(message))
 
     def init_time_range(self, last_time):
         self.full_range = BaseRange(0L, last_time, self)
 
     def sort_time_range(self):
-        for r in self.app_ranges:
-            self.full_range.add_range(r)
-        self.full_range.sort_range()
+        time_points = list()
+        for task in self.tasks:
+            self.time_points.append(TimePoint(task.start_time, task, True))
+            self.time_points.append(TimePoint(task.stop_time, task, False))
+        self.time_points.sort(key=lambda p: p.time_key)
+        free_levels = set()
+        for point in self.time_points:
+            if point.first:
+                if free_levels:
+                    point.thing.level = min(free_levels)
+                    free_levels.remove(point.thing.level)
+                else:
+                    self.max_levels += 1
+                    point.thing.level = self.max_levels
+            else:
+                free_levels.add(point.thing.level)
 
     def emit_svg(self, printer):
-        max_levels = self.full_range.max_levels()
         # Skip any empty processors
-        if max_levels > 1:
-            # First figure out the max number of levels + 1 for padding
-            printer.init_chunk(max_levels+1)
-            self.full_range.emit_svg_range(printer)
+        if self.max_levels > 0:
+            printer.init_chunk(self.max_levels + 1)
+            title = repr(self)
+            printer.emit_time_line(0, 0, self.full_range.stop_time, title)
+            # iterate over tasks in start time order
+            for point in self.time_points:
+                if point.first:
+                    point.thing.emit_svg(printer, point.thing.level)
 
     def emit_tsv(self, tsv_file, base_level):
-        max_levels = self.full_range.max_levels()
-        if max_levels > 1:
-            self.full_range.emit_tsv_range(tsv_file, base_level, max_levels)
-        return base_level + max_levels
+        # iterate over tasks in start time order
+        for point in self.time_points:
+            if point.first:
+                point.thing.emit_tsv(tsv_file, base_level, self.max_levels + 1, point.thing.level)
+        return base_level + max(self.max_levels, 1) + 1
 
     def print_stats(self):
         total_time = self.full_range.total_time()
