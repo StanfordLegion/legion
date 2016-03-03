@@ -132,6 +132,8 @@ namespace LegionRuntime {
       children_commit_invoked = false;
       local_cached = false;
       arg_manager = NULL;
+      must_epoch = NULL;
+      must_epoch_index = 0;
       orig_proc = Processor::NO_PROC; // for is_remote
     }
 
@@ -178,6 +180,21 @@ namespace LegionRuntime {
       deleted_field_spaces.clear();
       deleted_index_spaces.clear();
       parent_req_indexes.clear();
+    }
+
+    //--------------------------------------------------------------------------
+    void TaskOp::set_must_epoch(MustEpochOp *epoch, unsigned index,
+                                bool do_registration)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(must_epoch == NULL);
+      assert(epoch != NULL);
+#endif
+      must_epoch = epoch;
+      must_epoch_index = index;
+      if (do_registration)
+        must_epoch->register_subop(this);
     }
 
     //--------------------------------------------------------------------------
@@ -1511,8 +1528,10 @@ namespace LegionRuntime {
     {
       // From Operation
       this->parent_ctx = rhs->parent_ctx;
+      // Don't register this an operation when setting the must epoch info
       if (rhs->must_epoch != NULL)
-        this->set_must_epoch(rhs->must_epoch, this->must_epoch_index);
+        this->set_must_epoch(rhs->must_epoch, rhs->must_epoch_index,
+                             false/*do registration*/);
       // From Task
       this->task_id = rhs->task_id;
       this->indexes = rhs->indexes;
@@ -6390,7 +6409,7 @@ namespace LegionRuntime {
       // Top-level tasks never do dependence analysis, so we
       // need to complete those stages now
       resolve_speculation();
-    }
+    } 
 
     //--------------------------------------------------------------------------
     void IndividualTask::trigger_dependence_analysis(void)
@@ -6928,6 +6947,8 @@ namespace LegionRuntime {
           children_commit_invoked = true;
         }
       }
+      if (must_epoch != NULL)
+        must_epoch->notify_subop_complete(this);
       // Mark that this operation is complete
       complete_operation();
       if (need_commit)
@@ -6950,6 +6971,8 @@ namespace LegionRuntime {
       {
         it->release();
       }
+      if (must_epoch != NULL)
+        must_epoch->notify_subop_commit(this);
       commit_operation();
       // Finally we can deactivate this task now that it has commited
       deactivate();
@@ -9342,7 +9365,8 @@ namespace LegionRuntime {
       }
       else
         future_map.impl->complete_all_futures();
-
+      if (must_epoch != NULL)
+        must_epoch->notify_subop_complete(this);
       complete_operation();
       if (speculation_state == RESOLVE_FALSE_STATE)
         trigger_children_committed();
@@ -9358,6 +9382,8 @@ namespace LegionRuntime {
       {
         it->release();
       }
+      if (must_epoch != NULL)
+        must_epoch->notify_subop_commit(this);
       // Mark that this operation is now committed
       commit_operation();
       // Now we get to deactivate this task
@@ -9567,8 +9593,7 @@ namespace LegionRuntime {
     void IndexTask::register_must_epoch(void)
     //--------------------------------------------------------------------------
     {
-      // should never be called
-      assert(false);
+      // Intentionally do nothing
     }
 
     //--------------------------------------------------------------------------

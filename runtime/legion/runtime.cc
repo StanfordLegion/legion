@@ -5744,19 +5744,27 @@ namespace LegionRuntime {
         legion_delete(it->second);
       }
       task_table.clear();
-      for (std::deque<VariantImpl*>::const_iterator it = 
-            variant_table.begin(); it != variant_table.end(); it++)
+      // Skip this if we are in separate runtime mode
+      if (!Internal::separate_runtime_instances)
       {
-        legion_delete(*it);
+        for (std::deque<VariantImpl*>::const_iterator it = 
+              variant_table.begin(); it != variant_table.end(); it++)
+        {
+          legion_delete(*it);
+        }
       }
       variant_table.clear();
       task_variant_lock.destroy_reservation();
       task_variant_lock = Reservation::NO_RESERVATION;
-      for (std::map<LayoutConstraintID,LayoutConstraints*>::const_iterator
-            it = layout_constraints_table.begin(); it != 
-            layout_constraints_table.end(); it++)
+      // Skip this if we are in separate runtime mode
+      if (!Internal::separate_runtime_instances)
       {
-        legion_delete(it->second);
+        for (std::map<LayoutConstraintID,LayoutConstraints*>::const_iterator
+              it = layout_constraints_table.begin(); it != 
+              layout_constraints_table.end(); it++)
+        {
+          legion_delete(it->second);
+        }
       }
       layout_constraints_lock.destroy_reservation();
       layout_constraints_lock = Reservation::NO_RESERVATION;
@@ -15416,7 +15424,18 @@ namespace LegionRuntime {
                        continuation(this, epoch_op_lock);
         return continuation.get_result();
       }
-      return get_available(epoch_op_lock, available_epoch_ops, has_lock);
+      MustEpochOp *result = 
+        get_available(epoch_op_lock, available_epoch_ops, has_lock);
+#ifdef DEBUG_HIGH_LEVEL
+      if (!has_lock)
+      {
+        AutoLock e_lock(epoch_op_lock);
+        out_must_epoch.insert(result);
+      }
+      else
+        out_must_epoch.insert(result);
+#endif
+      return result;
     }
 
     //--------------------------------------------------------------------------

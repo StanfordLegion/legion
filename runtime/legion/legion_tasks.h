@@ -58,9 +58,10 @@ namespace LegionRuntime {
       inline bool is_stolen(void) const { return (steal_count > 0); }
       inline bool is_locally_mapped(void) const { return map_locally; }
       inline bool is_premapped(void) const { return premapped; }
-    protected:
       void activate_task(void);
       void deactivate_task(void);
+      void set_must_epoch(MustEpochOp *epoch, unsigned index,
+                          bool do_registration);
     protected:
       void pack_base_task(Serializer &derez, AddressSpaceID target);
       void unpack_base_task(Deserializer &derez);
@@ -216,6 +217,11 @@ namespace LegionRuntime {
       mutable bool local_cached;
     protected:
       AllocManager *arg_manager;
+    protected:
+      // Support for must epoch op if we have one
+      MustEpochOp *must_epoch;
+      // Index for this must epoch op
+      unsigned must_epoch_index;
     public:
       // Static methods
       static void process_unpack_task(Internal *rt,
@@ -822,7 +828,7 @@ namespace LegionRuntime {
       bool has_remote_subtasks;
       std::map<AddressSpaceID,RemoteTask*> remote_instances;
     protected:
-      std::set<Event> map_applied_conditions;
+      std::set<Event> map_applied_conditions; 
     };
 
     /**

@@ -214,7 +214,8 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Operation::set_must_epoch(MustEpochOp *epoch, unsigned index)
+    void Operation::set_must_epoch(MustEpochOp *epoch, unsigned index,
+                                   bool do_registration)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -223,7 +224,8 @@ namespace LegionRuntime {
 #endif
       must_epoch = epoch;
       must_epoch_index = index;
-      must_epoch->register_subop(this);
+      if (do_registration)
+        must_epoch->register_subop(this);
     }
 
     //--------------------------------------------------------------------------
@@ -6691,7 +6693,7 @@ namespace LegionRuntime {
         indiv_tasks[idx] = runtime->get_available_individual_task(true);
         indiv_tasks[idx]->initialize_task(ctx, launcher.single_tasks[idx],
                                           check_privileges, false/*track*/);
-        indiv_tasks[idx]->set_must_epoch(this, idx);
+        indiv_tasks[idx]->set_must_epoch(this, idx, true/*register*/);
         // If we have a trace, set it for this operation as well
         if (trace != NULL)
           indiv_tasks[idx]->set_trace(trace, !trace->is_fixed());
@@ -6704,7 +6706,8 @@ namespace LegionRuntime {
         index_tasks[idx] = runtime->get_available_index_task(true);
         index_tasks[idx]->initialize_task(ctx, launcher.index_tasks[idx],
                                           check_privileges, false/*track*/);
-        index_tasks[idx]->set_must_epoch(this, indiv_tasks.size()+idx);
+        index_tasks[idx]->set_must_epoch(this, indiv_tasks.size()+idx, 
+                                         true/*register*/);
         if (trace != NULL)
           index_tasks[idx]->set_trace(trace, !trace->is_fixed());
         index_tasks[idx]->must_parallelism = true;

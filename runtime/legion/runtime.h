@@ -2420,6 +2420,7 @@ namespace LegionRuntime {
       std::set<PointTask*>      out_point_tasks;
       std::set<IndexTask*>      out_index_tasks;
       std::set<SliceTask*>      out_slice_tasks;
+      std::set<MustEpochOp*>    out_must_epoch;
     public:
       // These are debugging method for the above data
       // structures.  They are not called anywhere in
