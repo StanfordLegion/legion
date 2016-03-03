@@ -144,7 +144,8 @@ namespace LegionRuntime {
     public:
       void merge(const VersionInfo &rhs, const FieldMask &mask);
       void apply_mapping(ContextID ctx, AddressSpaceID target,
-                         std::set<Event> &applied_conditions);
+                         std::set<Event> &applied_conditions,
+			 bool copy_previous = false);
       void apply_close(ContextID ctx, AddressSpaceID target,
              const LegionMap<ColorPoint,FieldMask>::aligned &closed_children,
                        std::set<Event> &applied_conditions); 

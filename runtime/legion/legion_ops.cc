@@ -2519,6 +2519,7 @@ namespace LegionRuntime {
       // execution and mapping indicating that we are done
       // Do it in this order to avoid calling 'execute_trigger'
       complete_execution();
+      assert(0 && "TODO: advance mapping states if you care");
       complete_mapping();
     }
 
@@ -4838,6 +4839,7 @@ namespace LegionRuntime {
     {
       // Clean up this operation
       complete_execution();
+      assert(0 && "TODO: advance mapping states if you care");
       complete_mapping();
     }
 
@@ -5441,6 +5443,7 @@ namespace LegionRuntime {
     {
       // Clean up this operation
       complete_execution();
+      assert(0 && "TODO: advance mapping states if you care");
       complete_mapping();
     }
 
@@ -8717,6 +8720,7 @@ namespace LegionRuntime {
       // execution and mapping indicating that we are done
       // Do it in this order to avoid calling 'execute_trigger'
       complete_execution();
+      assert(0 && "TODO: advance mapping states if you care");
       complete_mapping();
     }
 

@@ -6655,6 +6655,22 @@ namespace LegionRuntime {
       // Then clean up this task instance
       if (trigger)
         complete_execution();
+      // "mapping" does not change the physical state
+      for (unsigned idx = 0; idx < regions.size(); idx++)
+      {
+        RegionRequirement &req = regions[idx];
+	VersionInfo &version_info = version_infos[idx];
+	RegionTreeContext req_ctx =
+	  parent_ctx->find_enclosing_context(parent_req_indexes[idx]);
+	// don't bother if this wasn't going to change mapping state anyway
+	// only requirements with write privileges bump version numbers
+	if(!IS_WRITE(req))
+	  continue;
+	version_info.apply_mapping(req_ctx.get_id(),
+				   runtime->address_space,
+				   map_applied_conditions,
+				   true /*copy previous*/);
+      }      
       complete_mapping();
       trigger_children_complete();
     }
@@ -9213,6 +9229,7 @@ namespace LegionRuntime {
       // Then clean up this task execution
       if (trigger)
         complete_execution();
+      assert(0 && "TODO: advance mapping states if you care");
       complete_mapping();
       trigger_children_complete();
     }
