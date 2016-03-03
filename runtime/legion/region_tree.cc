@@ -11457,9 +11457,8 @@ namespace LegionRuntime {
                     // Create a new FieldState open in whatever mode is
                     // appropriate based on the usage
                     FieldState new_state(closer.user, already_open, next_child);
-                    // Note if it is another reduction in the same child
-                    if (IS_REDUCE(closer.user.usage))
-                      new_state.open_state = OPEN_READ_WRITE;
+                    // We always have to go to read-write mode here
+                    new_state.open_state = OPEN_READ_WRITE;
                     new_states.push_back(new_state);
                   }
                 }
