@@ -51,6 +51,7 @@ namespace Realm {
 	COMPLETED_SUCCESSFULLY,
 	COMPLETED_WITH_ERRORS,
 	RUNNING,
+	INTERRUPT_REQUESTED,  // running, but a cancellation requested
 	TERMINATED_EARLY,
 	WAITING,
 	READY,
