@@ -198,21 +198,29 @@ namespace Realm {
 
   // default constructor makes an inactive message
   inline LoggerMessage::LoggerMessage(void)
-    : logger(0), active(false), level(Logger::LEVEL_NONE)
+    : logger(0), active(false), level(Logger::LEVEL_NONE), oss(0)
   {}
 
   inline LoggerMessage::LoggerMessage(Logger *_logger, bool _active, Logger::LoggingLevel _level)
-    : logger(_logger), active(_active), level(_level)
-  {}
+    : logger(_logger), active(_active), level(_level), oss(0)
+  {
+    if(active)
+      oss = new std::ostringstream;
+  }
 
   inline LoggerMessage::LoggerMessage(const LoggerMessage& to_copy)
-    : logger(to_copy.logger), active(to_copy.active), level(to_copy.level)
-  {}
+    : logger(to_copy.logger), active(to_copy.active), level(to_copy.level), oss(0)
+  {
+    if(active)
+      oss = new std::ostringstream;
+  }
 
   inline LoggerMessage::~LoggerMessage(void)
   {
-    if(active)
-      logger->log_msg(level, oss.str());
+    if(active) {
+      logger->log_msg(level, oss->str());
+      delete oss;
+    }
   }
       
   template <typename T>
@@ -220,7 +228,7 @@ namespace Realm {
   {
     // send through to normal ostringstream formatting routines if active
     if(active)
-      oss << val;
+      (*oss) << val;
     return *this;
   }
 

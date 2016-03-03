@@ -126,7 +126,7 @@ namespace Realm {
     Logger *logger;
     bool active;
     Logger::LoggingLevel level;
-    std::ostringstream oss;
+    std::ostringstream *oss;
   };
 
 }; // namespace Realm
