@@ -3028,14 +3028,20 @@ namespace LegionRuntime {
               // First we should make sure destination instance space's index space match what we're copying
               IndexSpaceImpl *ispace = get_runtime()->get_index_space_impl(domain.get_index_space());
               assert(get_runtime()->get_instance_impl(dst_inst)->metadata.is_valid());
-              assert(ispace->me == get_runtime()->get_instance_impl(dst_inst)->metadata.is);
-              Realm::StaticAccess<IndexSpaceImpl> data(ispace);
-              assert(data->num_elmts > 0);
-              Rect<1> new_rect(make_point(data->first_elmt), make_point(data->last_elmt));
-              Domain new_domain = Domain::from_rect<1>(new_rect);
-              create_xfer_des<1>(this, gasnet_mynode(), xd_guid, pre_xd_guid, next_xd_guid,
+              if (ispace->me == get_runtime()->get_instance_impl(dst_inst)->metadata.is) {
+                // perform a 1D copy from first_element to last_element
+                Realm::StaticAccess<IndexSpaceImpl> data(ispace);
+                assert(data->num_elmts > 0);
+                Rect<1> new_rect(make_point(data->first_elmt), make_point(data->last_elmt));
+                Domain new_domain = Domain::from_rect<1>(new_rect);
+                create_xfer_des<1>(this, gasnet_mynode(), xd_guid, pre_xd_guid, next_xd_guid,
                                    pre_buf, cur_buf, new_domain, oasvec_src, 1024 * 1024/*max_req_size*/,
                                    100/*max_nr*/, priority, order, kind, complete_fence, hdf_inst);
+              } else {
+                create_xfer_des<0>(this, gasnet_mynode(), xd_guid, pre_xd_guid, next_xd_guid,
+                                   pre_buf, cur_buf, domain, oasvec_src, 1024 * 1024 /*max_req_size*/,
+                                   100/*max_nr*/, priority, order, kind, complete_fence, hdf_inst);
+              }
             }
             else {
               create_xfer_des<DIM>(this, gasnet_mynode(), xd_guid, pre_xd_guid, next_xd_guid,

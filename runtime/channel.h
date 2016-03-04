@@ -49,7 +49,7 @@ namespace LegionRuntime{
     typedef Realm::Cuda::GPU GPU;
     typedef Realm::Cuda::GPUFBMemory GPUFBMemory;
 #endif
-    
+
     class Buffer {
     public:
       enum MemoryKind {
@@ -294,6 +294,8 @@ namespace LegionRuntime{
       virtual void print(std::ostream& os) const { os << "XferDesFence"; }
     };
 
+    class MaskEnumerator;
+
     class XferDes {
     public:
       enum XferKind {
@@ -385,11 +387,14 @@ namespace LegionRuntime{
 
       virtual long get_requests(Request** requests, long nr) = 0;
 
+      bool simple_get_mask_request(off_t &src_start, off_t &dst_start, size_t &nbytes,
+                                   MaskEnumerator* me,
+                                   int &offset_idx, int available_slots);
+
       template<unsigned DIM>
       bool simple_get_request(off_t &src_start, off_t &dst_start, size_t &nbytes,
                               Layouts::GenericLayoutIterator<DIM>* li,
                               int &offset_idx, int available_slots);
-
 
       template<unsigned DIM>
       bool simple_get_request(off_t &src_start, off_t &dst_start, size_t &nbytes,
@@ -610,7 +615,11 @@ namespace LegionRuntime{
         while (!available_reqs.empty()) {
           available_reqs.pop();
         }
-        delete li;
+        if (DIM == 0) {
+          delete me;
+        } else {
+          delete li;
+        }
         free(requests);
         // trigger complete event
         //if (complete_event.exists()) {
@@ -632,6 +641,7 @@ namespace LegionRuntime{
       MemcpyRequest* requests;
       //std::map<int64_t, uint64_t> segments_read, segments_write;
       Layouts::GenericLayoutIterator<DIM>* li;
+      MaskEnumerator* me;
       int offset_idx;
       const char *src_buf_base, *dst_buf_base;
     };
@@ -652,7 +662,11 @@ namespace LegionRuntime{
         while (!available_reqs.empty()) {
           available_reqs.pop();
         }
-        delete li;
+        if (DIM == 0) {
+          delete me;
+        } else {
+          delete li;
+        }
         free(requests);
         // trigger completion event
         //if (complete_event.exists()) {
@@ -674,6 +688,7 @@ namespace LegionRuntime{
       Request* requests;
       //std::map<int64_t, uint64_t> segments_read, segments_write;
       Layouts::GenericLayoutIterator<DIM>* li;
+      MaskEnumerator* me;
       int offset_idx;
       const char *buf_base;
     };
@@ -694,7 +709,11 @@ namespace LegionRuntime{
         while (!available_reqs.empty()) {
           available_reqs.pop();
         }
-        delete li;
+        if (DIM == 0) {
+          delete me;
+        } else {
+          delete li;
+        }
         free(requests);
         //if (complete_event.exists()) {
           //get_runtime()->get_genevent_impl(complete_event)->trigger(complete_event.gen, gasnet_mynode());
@@ -715,6 +734,7 @@ namespace LegionRuntime{
       RemoteWriteRequest* requests;
       //std::map<int64_t, uint64_t> segments_read, segments_write;
       Layouts::GenericLayoutIterator<DIM>* li;
+      MaskEnumerator* me;
       int offset_idx;
       const char *src_buf_base, *dst_buf_base;
       MemoryImpl *dst_mem_impl;
@@ -736,7 +756,11 @@ namespace LegionRuntime{
         while (!available_reqs.empty()) {
           available_reqs.pop();
         }
-        delete li;
+        if (DIM == 0) {
+          delete me;
+        } else {
+          delete li;
+        }
         free(requests);
         // trigger complete event
         //if (complete_event.exists()) {
@@ -759,6 +783,7 @@ namespace LegionRuntime{
       Request* requests;
       //std::map<int64_t, uint64_t> segments_read, segments_write;
       Layouts::GenericLayoutIterator<DIM>* li;
+      MaskEnumerator* me;
       int offset_idx;
       const char *buf_base;
     };
@@ -781,7 +806,11 @@ namespace LegionRuntime{
           delete req;
           available_reqs.pop();
         }
-        delete li;
+        if (DIM == 0) {
+          delete me;
+        } else {
+          delete li;
+        }
         //free(requests);
         // trigger complete event
         //if (complete_event.exists()) {
@@ -803,6 +832,7 @@ namespace LegionRuntime{
       //Request* requests;
       //std::map<int64_t, uint64_t> segments_read, segments_write;
       Layouts::GenericLayoutIterator<DIM>* li;
+      MaskEnumerator* me;
       int offset_idx;
       char *src_buf_base;
       char *dst_buf_base;

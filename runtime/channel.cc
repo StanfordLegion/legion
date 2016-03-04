@@ -70,6 +70,90 @@ namespace LegionRuntime {
         }
       }
 
+      class MaskEnumerator {
+      public:
+        MaskEnumerator(IndexSpace _is, Mapping<1, 1> *src_m, Mapping<1, 1> *dst_m, XferOrder::Type order)
+          : is(_is), src_mapping(src_m), dst_mapping(dst_m), iter_order(order), rstart(0), rlen(0), rleft(0) {
+          e = get_runtime()->get_index_space_impl(is)->valid_mask->enumerate_enabled();
+        };
+
+        ~MaskEnumerator() {
+          delete e;
+        }
+
+        int continuous_steps(int &src_idx, int &dst_idx) {
+          if (rleft == 0) {
+            e->get_next(rstart, rlen);
+            rleft = rlen;
+          }
+          src_idx = src_mapping->image(rstart + rlen - rleft);
+          dst_idx = dst_mapping->image(rstart + rlen - rleft);
+          return rleft;
+        }
+
+        void reset() {
+          delete e;
+          e = get_runtime()->get_index_space_impl(is)->valid_mask->enumerate_enabled();
+          rleft = 0;
+        };
+
+        bool any_left() {
+          int rstart2, rlen2;
+          return (e->peek_next(rstart2, rlen2) || (rleft > 0));
+        };
+
+        void move(int steps) {
+          assert(steps < rleft);
+          rleft -= steps;
+        };
+      private:
+        IndexSpace is;
+        ElementMask::Enumerator* e;
+        Mapping<1, 1> *src_mapping, *dst_mapping;
+        XferOrder::Type iter_order;
+        int rstart, rlen, rleft;
+      };
+
+      bool XferDes::simple_get_mask_request(off_t &src_start, off_t &dst_start, size_t &nbytes,
+                                            MaskEnumerator* me,
+                                            int &offset_idx, int available_slots)
+      {
+        assert((size_t) offset_idx < oas_vec.size());
+        assert(me->any_left());
+        nbytes = 0;
+        int src_idx, dst_idx;
+        // cannot exceed the max_req_size
+        int todo = min(max_req_size / oas_vec[offset_idx].size, me->continuous_steps(src_idx, dst_idx));
+        int src_in_block = src_buf.block_size - src_idx % src_buf.block_size;
+        int dst_in_block = dst_buf.block_size - dst_idx % dst_buf.block_size;
+        todo = min(todo, min(src_in_block, dst_in_block));
+        src_start = calc_mem_loc(0, oas_vec[offset_idx].src_offset, oas_vec[offset_idx].size,
+                                 src_buf.elmt_size, src_buf.block_size, src_idx);
+        dst_start = calc_mem_loc(0, oas_vec[offset_idx].dst_offset, oas_vec[offset_idx].size,
+                                 dst_buf.elmt_size, dst_buf.block_size, dst_idx);
+        bool scatter_src_ib = false, scatter_dst_ib = false;
+        // make sure we have source data ready
+        if (src_buf.is_ib) {
+          todo = min(todo, max(0, pre_bytes_write - src_start) / oas_vec[offset_idx].size);
+          scatter_src_ib = scatter_ib(src_start, todo * oas_vec[offset_idx].size, src_buf.buf_size);
+        }
+        // make sure there are enough space in destination
+        if (dst_buf.is_ib) {
+          todo = min(todo, max(0, next_bytes_read + dst_buf.buf_size - dst_start) / oas_vec[offset_idx].size);
+          scatter_dst_ib = scatter_ib(dst_start, todo * oas_vec[offset_idx].size, dst_buf.buf_size);
+        }
+        if((scatter_src_ib && scatter_dst_ib && available_slots < 3)
+        ||((scatter_src_ib || scatter_dst_ib) && available_slots < 2))
+          return false; // case we don't have enough slots
+
+        nbytes = todo * oas_vec[offset_idx].size;
+        me->move(todo);
+        if (!me->any_left()) {
+          me->reset();
+          offset_idx ++;
+        }
+        return true;
+      }
 
       template<unsigned DIM>
       bool XferDes::simple_get_request(off_t &src_start, off_t &dst_start, size_t &nbytes,
@@ -329,8 +413,16 @@ namespace LegionRuntime {
         }
         bytes_total = total_field_size * domain.get_volume();
         pre_bytes_write = (pre_xd_guid == XFERDES_NO_GUID) ? bytes_total : 0;
-        li = new Layouts::GenericLayoutIterator<DIM>(domain.get_rect<DIM>(), src_buf.linearization.get_mapping<DIM>(),
-                                                     dst_buf.linearization.get_mapping<DIM>(), order);
+        if (DIM == 0) {
+          li = NULL;
+          // index space instances use 1D linearizations for translation
+          me = new MaskEnumerator(domain.get_index_space(), src_buf.linearization.get_mapping<1>(),
+                                  dst_buf.linearization.get_mapping<1>(), order);
+        } else {
+          li = new Layouts::GenericLayoutIterator<DIM>(domain.get_rect<DIM>(), src_buf.linearization.get_mapping<DIM>(),
+                                                       dst_buf.linearization.get_mapping<DIM>(), order);
+          me = NULL;
+        }
         offset_idx = 0;
         requests = (MemcpyRequest*) calloc(max_nr, sizeof(MemcpyRequest));
         for (int i = 0; i < max_nr; i++) {
@@ -347,7 +439,11 @@ namespace LegionRuntime {
         while (idx < nr && !available_reqs.empty() && offset_idx < oas_vec.size()) {
           off_t src_start, dst_start;
           size_t nbytes;
-          simple_get_request<DIM>(src_start, dst_start, nbytes, li, offset_idx, min(available_reqs.size(), nr - idx));
+          if (DIM == 0) {
+            simple_get_mask_request(src_start, dst_start, nbytes, me, offset_idx, min(available_reqs.size(), nr - idx));
+          } else {
+            simple_get_request<DIM>(src_start, dst_start, nbytes, li, offset_idx, min(available_reqs.size(), nr - idx));
+          }
           //printf("[MemcpyXferDes] offset_idx = %d, oas_vec.size() = %lu, nbytes = %lu\n", offset_idx, oas_vec.size(), nbytes);
           if (nbytes == 0)
             break;
@@ -418,8 +514,16 @@ namespace LegionRuntime {
         }
         bytes_total = total_field_size * domain.get_volume();
         pre_bytes_write = (pre_xd_guid == XFERDES_NO_GUID) ? bytes_total : 0;
-        li = new Layouts::GenericLayoutIterator<DIM>(domain.get_rect<DIM>(), src_buf.linearization.get_mapping<DIM>(),
-                                                     dst_buf.linearization.get_mapping<DIM>(), order);
+        if (DIM == 0) {
+          li = NULL;
+          // index space instances use 1D linearizations for translation
+          me = new MaskEnumerator(domain.get_index_space(), src_buf.linearization.get_mapping<1>(),
+                                  dst_buf.linearization.get_mapping<1>(), order);
+        } else {
+          li = new Layouts::GenericLayoutIterator<DIM>(domain.get_rect<DIM>(), src_buf.linearization.get_mapping<DIM>(),
+                                                       dst_buf.linearization.get_mapping<DIM>(), order);
+          me = NULL;
+        }
         offset_idx = 0;
 
         switch (kind) {
@@ -463,7 +567,11 @@ namespace LegionRuntime {
         while (idx < nr && !available_reqs.empty() && offset_idx < oas_vec.size()) {
           off_t src_start, dst_start;
           size_t nbytes;
-          simple_get_request<DIM>(src_start, dst_start, nbytes, li, offset_idx, min(available_reqs.size(), nr - idx));
+          if (DIM == 0) {
+            simple_get_mask_request(src_start, dst_start, nbytes, me, offset_idx, min(available_reqs.size(), nr - idx));
+          } else {
+            simple_get_request<DIM>(src_start, dst_start, nbytes, li, offset_idx, min(available_reqs.size(), nr - idx));
+          }
           //printf("done = %d, offset_idx = %d\n", done, offset_idx);
           if (nbytes == 0)
             break;
@@ -585,10 +693,16 @@ namespace LegionRuntime {
         }
         bytes_total = total_field_size * domain.get_volume();
         pre_bytes_write = (pre_xd_guid==XFERDES_NO_GUID) ? bytes_total : 0;
-        li = new Layouts::GenericLayoutIterator<DIM>(domain.get_rect<DIM>(),
-                                                     src_buf.linearization.get_mapping<DIM>(),
-                                                     dst_buf.linearization.get_mapping<DIM>(),
-                                                     order);
+        if (DIM == 0) {
+          li = NULL;
+          // index space instances use 1D linearizations for translation
+          me = new MaskEnumerator(domain.get_index_space(), src_buf.linearization.get_mapping<1>(),
+                                  dst_buf.linearization.get_mapping<1>(), order);
+        } else {
+          li = new Layouts::GenericLayoutIterator<DIM>(domain.get_rect<DIM>(), src_buf.linearization.get_mapping<DIM>(),
+                                                       dst_buf.linearization.get_mapping<DIM>(), order);
+          me = NULL;
+        }
         offset_idx = 0;
         requests = (RemoteWriteRequest*) calloc(max_nr, sizeof(RemoteWriteRequest));
         for (int i = 0; i < max_nr; i++) {
@@ -606,7 +720,11 @@ namespace LegionRuntime {
         while (idx < nr && !available_reqs.empty() && offset_idx < oas_vec.size()) {
           off_t src_start, dst_start;
           size_t nbytes;
-          simple_get_request<DIM>(src_start, dst_start, nbytes, li, offset_idx, min(available_reqs.size(), nr - idx));
+          if (DIM == 0) {
+            simple_get_mask_request(src_start, dst_start, nbytes, me, offset_idx, min(available_reqs.size(), nr - idx));
+          } else {
+            simple_get_request<DIM>(src_start, dst_start, nbytes, li, offset_idx, min(available_reqs.size(), nr - idx));
+          }
           if (nbytes == 0)
             break;
           while (nbytes > 0) {
@@ -688,8 +806,16 @@ namespace LegionRuntime {
         }
         bytes_total = total_field_size * domain.get_volume();
         pre_bytes_write = (pre_xd_guid == XFERDES_NO_GUID) ? bytes_total : 0;
-        li = new Layouts::GenericLayoutIterator<DIM>(domain.get_rect<DIM>(), src_buf.linearization.get_mapping<DIM>(),
-                                                     dst_buf.linearization.get_mapping<DIM>(), order);
+        if (DIM == 0) {
+          li = NULL;
+          // index space instances use 1D linearizations for translation
+          me = new MaskEnumerator(domain.get_index_space(), src_buf.linearization.get_mapping<1>(),
+                                  dst_buf.linearization.get_mapping<1>(), order);
+        } else {
+          li = new Layouts::GenericLayoutIterator<DIM>(domain.get_rect<DIM>(), src_buf.linearization.get_mapping<DIM>(),
+                                                       dst_buf.linearization.get_mapping<DIM>(), order);
+          me = NULL;
+        }
         offset_idx = 0;
 
         switch (kind) {
@@ -735,7 +861,11 @@ namespace LegionRuntime {
         while (idx < nr && !available_reqs.empty() && offset_idx < oas_vec.size()) {
           off_t src_start, dst_start;
           size_t nbytes;
-          simple_get_request<DIM>(src_start, dst_start, nbytes, li, offset_idx, min(available_reqs.size(), nr - idx));
+          if (DIM == 0) {
+            simple_get_mask_request(src_start, dst_start, nbytes, me, offset_idx, min(available_reqs.size(), nr - idx));
+          } else {
+            simple_get_request<DIM>(src_start, dst_start, nbytes, li, offset_idx, min(available_reqs.size(), nr - idx));
+          }
           //printf("done = %d, offset_idx = %d\n", done, offset_idx);
           if (nbytes == 0)
             break;
@@ -855,8 +985,16 @@ namespace LegionRuntime {
         }
         bytes_total = total_field_size * domain.get_volume();
         pre_bytes_write = (pre_xd_guid == XFERDES_NO_GUID) ? bytes_total : 0;
-        li = new Layouts::GenericLayoutIterator<DIM>(domain.get_rect<DIM>(), src_buf.linearization.get_mapping<DIM>(),
-                                                     dst_buf.linearization.get_mapping<DIM>(), order);
+        if (DIM == 0) {
+          li = NULL;
+          // index space instances use 1D linearizations for translation
+          me = new MaskEnumerator(domain.get_index_space(), src_buf.linearization.get_mapping<1>(),
+                                  dst_buf.linearization.get_mapping<1>(), order);
+        } else {
+          li = new Layouts::GenericLayoutIterator<DIM>(domain.get_rect<DIM>(), src_buf.linearization.get_mapping<DIM>(),
+                                                       dst_buf.linearization.get_mapping<DIM>(), order);
+          me = NULL;
+        }
         offset_idx = 0;
 
         switch (kind) {
@@ -944,7 +1082,11 @@ namespace LegionRuntime {
         while (idx < nr && !available_reqs.empty() && offset_idx < oas_vec.size()) {
           off_t src_start, dst_start;
           size_t nbytes;
-          simple_get_request<DIM>(src_start, dst_start, nbytes, li, offset_idx, min(available_reqs.size(), nr - idx));
+          if (DIM == 0) {
+            simple_get_mask_request(src_start, dst_start, nbytes, me, offset_idx, min(available_reqs.size(), nr - idx));
+          } else {
+            simple_get_request<DIM>(src_start, dst_start, nbytes, li, offset_idx, min(available_reqs.size(), nr - idx));
+          }
           if (nbytes == 0)
             break;
           while (nbytes > 0) {
@@ -1939,8 +2081,11 @@ namespace LegionRuntime {
         dst_buf.memory = args.dst_mem;
         switch(payload->domain.dim) {
         case 0:
-          fprintf(stderr, "Currently we doesn't support unstructured data...To be implemented\n");
-          assert(0);
+          create_xfer_des<0>(payload->dma_request, payload->launch_node,
+                             payload->guid, payload->pre_xd_guid, payload->next_xd_guid,
+                             src_buf, dst_buf, payload->domain, oas_vec,
+                             payload->max_req_size, payload->max_nr, payload->priority,
+                             payload->order, payload->kind, args.fence, args.inst);
           break;
         case 1:
           create_xfer_des<1>(payload->dma_request, payload->launch_node,
@@ -2279,7 +2424,7 @@ namespace LegionRuntime {
       template class HDFXferDes<2>;
       template class HDFXferDes<3>;
 #endif
-  } // namespace LowLevel
+ } // namespace LowLevel
 } // namespace LegionRuntime
 
 #ifdef DEADCODE
