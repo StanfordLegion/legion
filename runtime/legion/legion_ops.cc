@@ -91,7 +91,6 @@ namespace LegionRuntime {
       trace = NULL;
       tracing = false;
       must_epoch = NULL;
-      must_epoch_index = 0;
 #ifdef DEBUG_HIGH_LEVEL
       assert(mapped_event.exists());
       assert(resolved_event.exists());
@@ -214,8 +213,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void Operation::set_must_epoch(MustEpochOp *epoch, unsigned index,
-                                   bool do_registration)
+    void Operation::set_must_epoch(MustEpochOp *epoch, bool do_registration)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -223,7 +221,6 @@ namespace LegionRuntime {
       assert(epoch != NULL);
 #endif
       must_epoch = epoch;
-      must_epoch_index = index;
       if (do_registration)
         must_epoch->register_subop(this);
     }
@@ -495,8 +492,6 @@ namespace LegionRuntime {
       }
       if (need_completion_trigger)
         completion_event.trigger(); 
-      if (must_epoch != NULL)
-        must_epoch->notify_subop_complete(this);
       // finally notify all the operations we dependended on
       // that we validated their regions note we don't need
       // the lock since this was all set when we did our mapping analysis
@@ -535,8 +530,6 @@ namespace LegionRuntime {
 #endif
         committed = true;
       } 
-      if (must_epoch != NULL)
-        must_epoch->notify_subop_commit(this);
       // Trigger the commit event
       if (Internal::resilient_mode)
         commit_event.trigger();

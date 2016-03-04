@@ -133,7 +133,6 @@ namespace LegionRuntime {
       local_cached = false;
       arg_manager = NULL;
       must_epoch = NULL;
-      must_epoch_index = 0;
       orig_proc = Processor::NO_PROC; // for is_remote
     }
 
@@ -187,14 +186,8 @@ namespace LegionRuntime {
                                 bool do_registration)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(must_epoch == NULL);
-      assert(epoch != NULL);
-#endif
-      must_epoch = epoch;
+      Operation::set_must_epoch(epoch, do_registration);
       must_epoch_index = index;
-      if (do_registration)
-        must_epoch->register_subop(this);
     }
 
     //--------------------------------------------------------------------------
@@ -9610,7 +9603,8 @@ namespace LegionRuntime {
     void IndexTask::register_must_epoch(void)
     //--------------------------------------------------------------------------
     {
-      // Intentionally do nothing
+      // should never be called
+      assert(false);
     }
 
     //--------------------------------------------------------------------------

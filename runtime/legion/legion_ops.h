@@ -193,8 +193,7 @@ namespace LegionRuntime {
                                    const RegionRequirement &req,
                                    LogicalPartition start_node);
       void set_trace(LegionTrace *trace, bool is_tracing);
-      void set_must_epoch(MustEpochOp *epoch, unsigned index,
-                          bool do_registration);
+      void set_must_epoch(MustEpochOp *epoch, bool do_registration);
     public:
       // Localize a region requirement to its parent context
       // This means that region == parent and the
@@ -420,8 +419,6 @@ namespace LegionRuntime {
       bool tracing;
       // Our must epoch if we have one
       MustEpochOp *must_epoch;
-      // The index in the must epoch
-      unsigned must_epoch_index;
       // A set list or recorded dependences during logical traversal
       LegionList<LogicalUser,LOGICAL_REC_ALLOC>::track_aligned logical_records;
       // A dependence tracker for this operation

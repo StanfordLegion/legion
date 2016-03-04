@@ -60,7 +60,7 @@ namespace LegionRuntime {
       inline bool is_premapped(void) const { return premapped; }
       void activate_task(void);
       void deactivate_task(void);
-      void set_must_epoch(MustEpochOp *epoch, unsigned index,
+      void set_must_epoch(MustEpochOp *epoch, unsigned index, 
                           bool do_registration);
     protected:
       void pack_base_task(Serializer &derez, AddressSpaceID target);
@@ -218,8 +218,6 @@ namespace LegionRuntime {
     protected:
       AllocManager *arg_manager;
     protected:
-      // Support for must epoch op if we have one
-      MustEpochOp *must_epoch;
       // Index for this must epoch op
       unsigned must_epoch_index;
     public:
