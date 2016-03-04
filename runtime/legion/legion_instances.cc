@@ -324,6 +324,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void LayoutDescription::compute_destroyed_fields(
+             std::vector<PhysicalInstance::DestroyedField> &serdez_fields) const
+    //--------------------------------------------------------------------------
+    {
+      // See if we have any special fields which need serdez deletion
+      for (std::vector<Domain::CopySrcDstField>::const_iterator it = 
+            field_infos.begin(); it != field_infos.end(); it++)
+      {
+        if (it->serdez_id > 0)
+          serdez_fields.push_back(PhysicalInstance::DestroyedField(it->offset, 
+                                                    it->size, it->serdez_id));
+      }
+    }
+
+    //--------------------------------------------------------------------------
     bool LayoutDescription::match_layout(
                          const LayoutConstraintSet &candidate_constraints) const
     //--------------------------------------------------------------------------
@@ -465,8 +480,11 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    PhysicalManager::PhysicalManager(RegionTreeForest *ctx, 
-                                     MemoryManager *memory, DistributedID did,
+    PhysicalManager::PhysicalManager(RegionTreeForest *ctx,
+                                     MemoryManager *memory, 
+                                     LayoutDescription *desc,
+                                     const PointerConstraint &constraint,
+                                     DistributedID did,
                                      AddressSpaceID owner_space,
                                      AddressSpaceID local_space,
                                      RegionNode *node,
@@ -474,8 +492,9 @@ namespace Legion {
                                      bool own, bool register_now)
       : DistributedCollectable(ctx->runtime, did, owner_space, 
                                local_space, register_now), 
-        context(ctx), memory_manager(memory), region_node(node), 
-        instance(inst), instance_domain(d), own_domain(own)
+        context(ctx), memory_manager(memory), region_node(node), layout(desc),
+        instance(inst), instance_domain(d), 
+        own_domain(own), pointer_constraint(constraint)
     //--------------------------------------------------------------------------
     {
       if (register_now)
@@ -736,7 +755,12 @@ namespace Legion {
       log_garbage.info("Deleting physical instance " IDFMT " in memory " 
                        IDFMT "", instance.id, memory_manager->memory.id);
 #ifndef DISABLE_GC
-      instance.destroy(deferred_event);
+      std::vector<PhysicalInstance::DestroyedField> serdez_fields;
+      layout->compute_destroyed_fields(serdez_fields); 
+      if (!serdez_fields.empty())
+        instance.destroy(serdez_fields, deferred_event);
+      else
+        instance.destroy(deferred_event);
 #endif
     }
 
@@ -777,11 +801,12 @@ namespace Legion {
                                      MemoryManager *mem, PhysicalInstance inst,
                                      const Domain &instance_domain, bool own,
                                      RegionNode *node, LayoutDescription *desc, 
+                                     const PointerConstraint &constraint,
                                      Event u_event, bool reg_now, 
                                      InstanceFlag flags)
-      : PhysicalManager(ctx, mem, did, owner_space, local_space,
-                        node, inst, instance_domain, own, reg_now), 
-        layout(desc), use_event(u_event), instance_flags(flags)
+      : PhysicalManager(ctx, mem, desc, constraint, did, owner_space, 
+                        local_space, node, inst, instance_domain, own, reg_now),
+        use_event(u_event), instance_flags(flags)
     //--------------------------------------------------------------------------
     {
       // Add a reference to the layout
@@ -794,10 +819,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     InstanceManager::InstanceManager(const InstanceManager &rhs)
-      : PhysicalManager(NULL, NULL, 0, 0, 0, NULL, 
+      : PhysicalManager(NULL, NULL, NULL, rhs.pointer_constraint, 0, 0, 0, NULL,
                         PhysicalInstance::NO_INST, 
                         Domain::NO_DOMAIN, false, false),
-        layout(NULL), use_event(Event::NO_EVENT)
+        use_event(Event::NO_EVENT)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -974,6 +999,7 @@ namespace Legion {
           rez.serialize(use_event);
           rez.serialize(instance_flags);
           layout->pack_layout_description(rez, target);
+          pointer_constraint.serialize(rez);
         }
         context->runtime->send_instance_manager(target, rez);
         update_remote_instances(target);
@@ -1011,12 +1037,15 @@ namespace Legion {
       LayoutDescription *layout = 
         LayoutDescription::handle_unpack_layout_description(derez, source, 
                                                             target_node);
+      PointerConstraint pointer_constraint;
+      pointer_constraint.deserialize(derez);
       MemoryManager *memory = runtime->find_memory_manager(mem);
       InstanceManager *inst_manager = legion_new<InstanceManager>(
                                         runtime->forest, did, owner_space,
                                         runtime->address_space, memory, inst,
                                         inst_domain, false/*owns*/,
-                                        target_node, layout, use_event,
+                                        target_node, layout, 
+                                        pointer_constraint, use_event,
                                         false/*reg now*/, flags);
       if (!target_node->register_physical_manager(inst_manager))
       {
@@ -1046,11 +1075,13 @@ namespace Legion {
                                        FieldID f, AddressSpaceID owner_space, 
                                        AddressSpaceID local_space,
                                        MemoryManager *mem,PhysicalInstance inst,
+                                       LayoutDescription *desc, 
+                                       const PointerConstraint &constraint,
                                        const Domain &inst_domain, bool own_dom,
                                        RegionNode *node, ReductionOpID red, 
                                        const ReductionOp *o, bool reg_now)
-      : PhysicalManager(ctx, mem, did, owner_space, local_space,
-                        node, inst, inst_domain, own_dom, reg_now), 
+      : PhysicalManager(ctx, mem, desc, constraint, did, owner_space, 
+                        local_space, node, inst, inst_domain, own_dom, reg_now),
         op(o), redop(red), logical_field(f)
     //--------------------------------------------------------------------------
     { 
@@ -1139,6 +1170,8 @@ namespace Legion {
           rez.serialize<bool>(is_foldable());
           rez.serialize(get_pointer_space());
           rez.serialize(get_use_event());
+          layout->pack_layout_description(rez, target);
+          pointer_constraint.serialize(rez);
         }
         // Now send the message
         context->runtime->send_reduction_manager(target, rez);
@@ -1175,8 +1208,12 @@ namespace Legion {
       derez.deserialize(ptr_space);
       Event use_event;
       derez.deserialize(use_event);
-
       RegionNode *target_node = runtime->forest->get_node(handle);
+      LayoutDescription *layout = 
+        LayoutDescription::handle_unpack_layout_description(derez, source, 
+                                                            target_node);
+      PointerConstraint pointer_constraint;
+      pointer_constraint.deserialize(derez);
       MemoryManager *memory = runtime->find_memory_manager(mem);
       const ReductionOp *op = Runtime::get_reduction_op(redop);
       if (foldable)
@@ -1185,8 +1222,9 @@ namespace Legion {
                         legion_new<FoldReductionManager>(
                                             runtime->forest, did, logical_field,
                                             owner_space, runtime->address_space,
-                                            memory, inst, inst_dom,false/*own*/,
-                                            target_node, redop, op,
+                                            memory, inst, layout,
+                                            pointer_constraint, inst_dom,
+                                            false/*own*/, target_node, redop,op,
                                             use_event, false/*register now*/);
         if (!target_node->register_physical_manager(manager))
           legion_delete(manager);
@@ -1202,8 +1240,9 @@ namespace Legion {
                         legion_new<ListReductionManager>(
                                             runtime->forest, did, logical_field,
                                             owner_space, runtime->address_space,
-                                            memory, inst, inst_dom,false/*own*/,
-                                            target_node, redop, op,
+                                            memory, inst, layout, 
+                                            pointer_constraint, inst_dom, 
+                                            false/*own*/, target_node, redop,op,
                                             ptr_space, false/*register now*/);
         if (!target_node->register_physical_manager(manager))
           legion_delete(manager);
@@ -1241,13 +1280,15 @@ namespace Legion {
                                                AddressSpaceID local_space,
                                                MemoryManager *mem,
                                                PhysicalInstance inst, 
+                                               LayoutDescription *desc,
+                                               const PointerConstraint &cons,
                                                const Domain &d, bool own_dom,
                                                RegionNode *node,
                                                ReductionOpID red,
                                                const ReductionOp *o, 
                                                Domain dom, bool reg_now)
       : ReductionManager(ctx, did, f, owner_space, local_space, mem, 
-                         inst, d, own_dom, node, red, o, reg_now),
+                         inst, desc, cons, d, own_dom, node, red, o, reg_now),
         ptr_space(dom)
     //--------------------------------------------------------------------------
     {
@@ -1260,7 +1301,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ListReductionManager::ListReductionManager(const ListReductionManager &rhs)
       : ReductionManager(NULL, 0, 0, 0, 0, NULL,
-                         PhysicalInstance::NO_INST, 
+                         PhysicalInstance::NO_INST, NULL,rhs.pointer_constraint,
                          Domain::NO_DOMAIN, false, NULL, 0, NULL, false),
         ptr_space(Domain::NO_DOMAIN)
     //--------------------------------------------------------------------------
@@ -1419,14 +1460,16 @@ namespace Legion {
                                                AddressSpaceID local_space,
                                                MemoryManager *mem,
                                                PhysicalInstance inst, 
+                                               LayoutDescription *desc,
+                                               const PointerConstraint &cons,
                                                const Domain &d, bool own_dom,
                                                RegionNode *node,
                                                ReductionOpID red,
                                                const ReductionOp *o,
                                                Event u_event,
                                                bool register_now)
-      : ReductionManager(ctx, did, f, owner_space, local_space, mem, 
-                         inst, d, own_dom, node, red, o, register_now), 
+      : ReductionManager(ctx, did, f, owner_space, local_space, mem, inst, 
+                         desc, cons, d, own_dom, node, red, o,register_now),
         use_event(u_event)
     //--------------------------------------------------------------------------
     {
@@ -1439,7 +1482,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FoldReductionManager::FoldReductionManager(const FoldReductionManager &rhs)
       : ReductionManager(NULL, 0, 0, 0, 0, NULL,
-                         PhysicalInstance::NO_INST, 
+                         PhysicalInstance::NO_INST, NULL,rhs.pointer_constraint,
                          Domain::NO_DOMAIN, false, NULL, 0, NULL, false),
         use_event(Event::NO_EVENT)
     //--------------------------------------------------------------------------
@@ -1612,29 +1655,37 @@ namespace Legion {
       PhysicalManager *result = NULL;
       DistributedID did = forest->runtime->get_available_distributed_id(false);
       AddressSpaceID local_space = forest->runtime->address_space;
+      FieldSpaceNode *field_node = ancestor->column_source;
+      // Important implementation detail here: we pull the pointer constraint
+      // out of the set of constraints here and don't include it in the layout
+      // constraints so we can abstract over lots of different layouts. We'll
+      // store the pointer constraint separately in the physical instance
+      PointerConstraint pointer_constraint = constraints.pointer_constraint;
+      constraints.pointer_constraint = PointerConstraint();
+      // Now let's find the layout constraints to use for this instance
+      LayoutDescription *layout = 
+        field_node->find_layout_description(instance_mask, constraints);
+      // If we couldn't find one then we make one
+      if (layout == NULL)
+      {
+        // First make a new layout constraint
+        LayoutConstraints *layout_constraints = 
+         forest->runtime->register_layout(field_node->handle,constraints);
+        // Then make our description
+        layout = field_node->create_layout_description(instance_mask,
+                 layout_constraints, mask_index_map, serdez, field_sizes);
+      }
       switch (constraints.specialized_constraint.get_kind())
       {
         case SpecializedConstraint::NORMAL_SPECIALIZE:
           {
-            FieldSpaceNode *field_node = ancestor->column_source;
-            // Now let's find the layout constraints to use for this instance
-            LayoutDescription *layout = 
-              field_node->find_layout_description(instance_mask, constraints);
-            // If we couldn't find one then we make one
-            if (layout == NULL)
-            {
-              // First make a new layout constraint
-              LayoutConstraints *layout_constraints = 
-               forest->runtime->register_layout(field_node->handle,constraints);
-              // Then make our description
-              layout = field_node->create_layout_description(instance_mask,
-                       layout_constraints, mask_index_map, serdez, field_sizes);
-            }
+            
             // Now we can make the manager
             result = legion_new<InstanceManager>(forest, did, local_space,
                                                  local_space, memory_manager,
-                                                 instance, instance_domain,
-                                                 own_domain, ancestor, layout,
+                                                 instance, instance_domain, 
+                                                 own_domain, ancestor, layout, 
+                                                 pointer_constraint,
                                                  ready, true/*register now*/);
             break;
           }
@@ -1644,13 +1695,14 @@ namespace Legion {
             assert(field_sizes.size() == 1);
 #endif
             result = legion_new<FoldReductionManager>(forest, did, 
-                                                      field_sizes[0].first,
-                                                      local_space, local_space,
-                                                      memory_manager, instance,
-                                                      instance_domain, own_domain,
-                                                      ancestor, redop_id,
-                                                      reduction_op, ready, 
-                                                      true/*register now*/);
+                                              field_sizes[0].first, local_space,
+                                              local_space, memory_manager, 
+                                              instance, layout, 
+                                              pointer_constraint, 
+                                              instance_domain, own_domain,
+                                              ancestor, redop_id,
+                                              reduction_op, ready, 
+                                              true/*register now*/);
             break;
           }
         case SpecializedConstraint::REDUCTION_LIST_SPECIALIZE:

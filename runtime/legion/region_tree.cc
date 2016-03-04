@@ -8939,6 +8939,10 @@ namespace Legion {
       const Domain &dom = node->get_domain_blocking();
       PhysicalInstance inst = 
         attach_op->create_instance(dom, only_sizes, constraints);
+      // Pull out the pointer constraint so that we can use it separately
+      // and not have it included in the layout constraints
+      PointerConstraint pointer_constraint = constraints.pointer_constraint;
+      constraints.pointer_constraint = PointerConstraint();
       // Get the layout
       LayoutDescription *layout = 
         find_layout_description(file_mask, constraints);
@@ -8959,7 +8963,8 @@ namespace Legion {
                                          context->runtime->address_space,
                                          context->runtime->address_space,
                                          memory, inst, dom, false/*own*/,
-                                         node, layout, Event::NO_EVENT,
+                                         node, layout, pointer_constraint,
+                                         Event::NO_EVENT,
                                          true/*register now*/,
                                          InstanceManager::ATTACH_FILE_FLAG);
 #ifdef DEBUG_HIGH_LEVEL

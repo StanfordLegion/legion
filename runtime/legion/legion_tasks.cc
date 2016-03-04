@@ -2458,6 +2458,71 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    VariantImpl* SingleTask::select_inline_variant(TaskOp *child)
+    //--------------------------------------------------------------------------
+    {
+      Mapper::SelectVariantInput input;
+      Mapper::SelectVariantOutput output;
+      input.processor = current_proc;
+      input.chosen_instances.resize(child->regions.size());
+      // Find the instances for this child
+      for (unsigned idx = 0; idx < child->regions.size(); idx++)
+      {
+        unsigned local_index = child->find_parent_index(idx); 
+        InstanceSet &instances = physical_instances[local_index]; 
+        std::vector<MappingInstance> &mapping_instances = 
+          input.chosen_instances[idx];
+        mapping_instances.resize(instances.size());
+        for (unsigned idx2 = 0; idx2 < instances.size(); idx2++)
+        {
+          mapping_instances[idx2] = 
+            MappingInstance(instances[idx2].get_manager());
+        }
+      }
+      output.chosen_variant = 0;
+      // Always do this with the child mapper
+      MapperManager *child_mapper = runtime->find_mapper(current_proc, 
+                                                         child->map_id);
+      child_mapper->invoke_select_task_variant(child, &input, &output);
+      VariantImpl *variant_impl= runtime->find_variant_impl(child->task_id,
+                                  output.chosen_variant, true/*can fail*/);
+      if (variant_impl == NULL)
+      {
+        log_run.error("Invalid mapper output from invoction of "
+                      "'select_task_variant' on mapper %s. Mapper selected "
+                      "an invalidate variant ID %ld for inlining of task %s "
+                      "(UID %lld).", child_mapper->get_mapper_name(),
+                      output.chosen_variant, child->get_task_name(), 
+                      child->get_unique_id());
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_INVALID_MAPPER_OUTPUT);
+      }
+      if (!Runtime::unsafe_mapper)
+      {
+        int bad_index = validate_variant_selection(variant_impl,
+                                                   input.chosen_instances);
+        if (bad_index >= 0)
+        {
+          log_run.error("Invalid mapper output. Mapper selected variant %ld in "
+                        "'select_task_variant' on mapper %s for task %s "
+                        "(UID %lld). The layout constraints for index %d of "
+                        "this variant conflict with the layouts of the chosen "
+                        "instance(s) resulting in an invalid mapping.",
+                        variant_impl->vid, child_mapper->get_mapper_name(),
+                        child->get_task_name(), child->get_unique_id(), 
+                        bad_index);
+#ifdef DEBUG_HIGH_LEVEL
+          assert(false);
+#endif
+          exit(ERROR_INVALID_MAPPER_OUTPUT);
+        }
+      }
+      return variant_impl;
+    }
+
+    //--------------------------------------------------------------------------
     void SingleTask::inline_child_task(TaskOp *child)
     //--------------------------------------------------------------------------
     {
@@ -4713,7 +4778,24 @@ namespace Legion {
       }
       // Now that we know which variant to use, we can validate it
       if (!Runtime::unsafe_mapper)
-        validate_variant_selection(variant_impl);
+      {
+        int bad_index = validate_variant_selection(variant_impl,
+                                                   output.chosen_instances);
+        if (bad_index >= 0)
+        {
+          log_run.error("Invalid mapper output. Mapper selected variant %ld in "
+                        "'map_task' on mapper %s for task %s "
+                        "(UID %lld). The layout constraints for index %d of "
+                        "this variant conflict with the layouts of the chosen "
+                        "instance(s) resulting in an invalid mapping.",
+                        variant_impl->vid, mapper->get_mapper_name(),
+                        get_task_name(), get_unique_id(), bad_index);
+#ifdef DEBUG_HIGH_LEVEL
+          assert(false);
+#endif
+          exit(ERROR_INVALID_MAPPER_OUTPUT);
+        }
+      }
       // Record anything else that needs to be recorded 
       selected_variant = output.chosen_variant;
       task_priority = output.task_priority;

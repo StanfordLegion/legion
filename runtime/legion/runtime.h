@@ -1089,6 +1089,10 @@ namespace Legion {
       inline bool is_inner(void) const { return inner_variant; }
       inline bool is_idempotent(void) const { return idempotent_variant; }
       inline bool returns_value(void) const { return has_return_value; }
+      inline const ExecutionConstraintSet&
+        get_execution_constraints(void) const { return execution_constraints; }
+      inline const TaskLayoutConstraintSet& 
+        get_layout_constraints(void) const { return layout_constraints; } 
     public:
       Event dispatch_task(Processor target, SingleTask *task, 
                           Event precondition, int priority,

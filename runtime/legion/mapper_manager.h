@@ -308,7 +308,7 @@ namespace Legion {
       void filter_instances(MappingCallInfo *ctx, const Task &task,
                             unsigned index, VariantID chosen_variant,
                             std::vector<MappingInstance> &instances,
-                            std::set<FieldID> &misssing_fields);
+                            std::set<FieldID> &missing_fields);
     public:
       bool create_physical_instance(MappingCallInfo *ctx, Memory target_memory,
                                     const LayoutConstraintSet &constraints, 

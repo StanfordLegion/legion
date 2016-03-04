@@ -67,6 +67,8 @@ namespace Legion {
       const Domain::CopySrcDstField& find_field_info(FieldID fid) const;
       size_t get_total_field_size(void) const;
       void get_fields(std::vector<FieldID>& fields) const;
+      void compute_destroyed_fields(
+          std::vector<PhysicalInstance::DestroyedField> &serdez_fields) const;
     public:
       bool match_layout(const LayoutConstraintSet &constraints) const;
       bool match_layout(const LayoutDescription *layout) const;
@@ -110,6 +112,7 @@ namespace Legion {
     class PhysicalManager : public DistributedCollectable {
     public:
       PhysicalManager(RegionTreeForest *ctx, MemoryManager *memory_manager,
+                      LayoutDescription *layout, const PointerConstraint &cons,
                       DistributedID did, AddressSpaceID owner_space, 
                       AddressSpaceID local_space, RegionNode *node,
                       PhysicalInstance inst, const Domain &intance_domain,
@@ -153,6 +156,7 @@ namespace Legion {
       bool meets_regions(const std::vector<LogicalRegion> &regions) const;
       bool entails(const LayoutConstraintSet &constraints) const;
       bool entails(LayoutConstraints *constraints) const;
+      bool conflicts(LayoutConstraints *constraints) const;
     public:
       inline PhysicalInstance get_instance(void) const
       {
@@ -171,9 +175,11 @@ namespace Legion {
       RegionTreeForest *const context;
       MemoryManager *const memory_manager;
       RegionNode *const region_node;
+      LayoutDescription *const layout;
       const PhysicalInstance instance;
       const Domain instance_domain;
       const bool own_domain;
+      const PointerConstraint pointer_constraint;
     protected:
       std::map<UniqueID,LogicalView*> top_views;
     };
@@ -196,6 +202,7 @@ namespace Legion {
                       MemoryManager *memory, PhysicalInstance inst, 
                       const Domain &instance_domain, bool own_domain,
                       RegionNode *node, LayoutDescription *desc, 
+                      const PointerConstraint &constraint,
                       Event use_event, bool register_now,
                       InstanceFlag flag = NO_INSTANCE_FLAG);
       InstanceManager(const InstanceManager &rhs);
@@ -242,7 +249,6 @@ namespace Legion {
     public:
       bool is_attached_file(void) const;
     public:
-      LayoutDescription *const layout;
       // Event that needs to trigger before we can start using
       // this physical instance.
       const Event use_event;
@@ -264,6 +270,8 @@ namespace Legion {
       ReductionManager(RegionTreeForest *ctx, DistributedID did, FieldID fid,
                        AddressSpaceID owner_space, AddressSpaceID local_space,
                        MemoryManager *mem, PhysicalInstance inst, 
+                       LayoutDescription *description,
+                       const PointerConstraint &constraint,
                        const Domain &inst_domain, bool own_domain,
                        RegionNode *region_node, ReductionOpID redop, 
                        const ReductionOp *op, bool register_now);
@@ -326,6 +334,8 @@ namespace Legion {
                            AddressSpaceID owner_space, 
                            AddressSpaceID local_space,
                            MemoryManager *mem, PhysicalInstance inst, 
+                           LayoutDescription *description,
+                           const PointerConstraint &constraint,
                            const Domain &inst_domain, bool own_domain,
                            RegionNode *node, ReductionOpID redop, 
                            const ReductionOp *op, Domain dom, bool reg_now);
@@ -372,6 +382,8 @@ namespace Legion {
                            AddressSpaceID owner_space, 
                            AddressSpaceID local_space,
                            MemoryManager *mem, PhysicalInstance inst, 
+                           LayoutDescription *description,
+                           const PointerConstraint &constraint,
                            const Domain &inst_dom, bool own_dom,
                            RegionNode *node, ReductionOpID redop, 
                            const ReductionOp *op, Event use_event,

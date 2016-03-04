@@ -993,7 +993,56 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       pause_mapper_call(ctx);
-
+      std::map<LayoutConstraintID,LayoutConstraints*> layout_cache;
+      for (std::vector<VariantID>::iterator var_it = variants.begin();
+            var_it != variants.end(); /*nothing*/)
+      {
+        VariantImpl *impl = runtime->find_variant_impl(task.task_id, *var_it,
+                                                       true/*can_fail*/);
+        // Not a valid variant
+        if (impl == NULL)
+        {
+          var_it = variants.erase(var_it);
+          continue;
+        }
+        const TaskLayoutConstraintSet &layout_constraints = 
+                                        impl->get_layout_constraints();
+        bool conflicts = false;
+        for (std::multimap<unsigned,LayoutConstraintID>::const_iterator 
+              lay_it = layout_constraints.layouts.begin(); 
+              lay_it != layout_constraints.layouts.end(); lay_it++)
+        {
+          LayoutConstraints *constraints;
+          std::map<LayoutConstraintID,LayoutConstraints*>::const_iterator
+            finder = layout_cache.find(lay_it->second);
+          if (finder == layout_cache.end())
+          {
+            constraints = runtime->find_layout_constraints(lay_it->second);
+            layout_cache[lay_it->second] = constraints;
+          }
+          else
+            constraints = finder->second;
+          const std::vector<MappingInstance> &instances = 
+                                       chosen_instances[lay_it->first];
+          for (unsigned idx = 0; idx < instances.size(); idx++)
+          {
+            PhysicalManager *manager = instances[idx].impl;
+            if (manager == NULL)
+              continue;
+            if (manager->conflicts(constraints))
+            {
+              conflicts = true;
+              break;
+            }
+          }
+          if (conflicts)
+            break;
+        }
+        if (conflicts)
+          var_it = variants.erase(var_it);
+        else
+          var_it++;
+      }
       resume_mapper_call(ctx);
     }
 
@@ -1014,26 +1063,45 @@ namespace Legion {
       {
         if (idx >= chosen_instances.size())
           continue;
-        std::set<FieldID> &missing = missing_fields[idx];
-        missing = task.regions[idx].privilege_fields;
-        std::vector<PhysicalInstance> &instances = chosen_instances[idx]; 
-        // Get the constraints for these instances
-        std::vector<LayoutConstraints*> constraints(instances.size(),NULL);
-        for (unsigned idx2 = 0; idx2 < instances.size(); idx2++)
-        {
-          PhysicalManager *manager = instances[idx2].impl;
-          if (manager == NULL)
-            continue;
-          constraints[idx2] = manager->layout->constraints;
-        }
+        std::vector<MappingInstance> &instances = chosen_instances[idx]; 
         // Iterate over the layout constraints and filter them
         // We know that instance constraints are complete (all dimensions
         // are fully constrainted), therefore we only need to test for conflicts
-        for (std::multimap<unsigned,LayoutConstraintID>::const_iterator it = 
-              layout_constraints.layouts.lower_bound(idx); it != 
-              layout_constraints.layouts.upper_bound(idx); it++)
+        for (std::multimap<unsigned,LayoutConstraintID>::const_iterator lay_it =
+              layout_constraints.layouts.lower_bound(idx); lay_it != 
+              layout_constraints.layouts.upper_bound(idx); lay_it++)
         {
-
+          LayoutConstraints *constraints = 
+            runtime->find_layout_constraints(lay_it->second);
+          for (std::vector<MappingInstance>::iterator it = 
+                instances.begin(); it != instances.end(); /*nothing*/)
+          {
+            PhysicalManager *manager = it->impl;
+            if (manager == NULL)
+            {
+              it++;
+              continue;
+            }
+            if (manager->conflicts(constraints))
+              it = instances.erase(it);
+            else
+              it++;
+          }
+          if (instances.empty())
+            break;
+        }
+        // Now figure out which fields are missing
+        std::set<FieldID> &missing = missing_fields[idx];
+        missing = task.regions[idx].privilege_fields;
+        for (std::vector<MappingInstance>::const_iterator it = 
+              instances.begin(); it != instances.end(); it++)
+        {
+          PhysicalManager *manager = it->impl;
+          if (manager == NULL)
+            continue;
+          manager->remove_space_fields(missing);
+          if (missing.empty())
+            break;
         }
       }
       resume_mapper_call(ctx);
@@ -1043,11 +1111,52 @@ namespace Legion {
     void MapperManager::filter_instances(MappingCallInfo *ctx, const Task &task,
                             unsigned index, VariantID chosen_variant,
                             std::vector<MappingInstance> &instances,
-                            std::set<FieldID> &misssing_fields)
+                            std::set<FieldID> &missing_fields)
     //--------------------------------------------------------------------------
     {
       pause_mapper_call(ctx);
-
+      VariantImpl *impl = runtime->find_variant_impl(task.task_id, 
+                                                     chosen_variant);
+      const TaskLayoutConstraintSet &layout_constraints = 
+                                        impl->get_layout_constraints();
+      // Iterate over the layout constraints and filter them
+      // We know that instance constraints are complete (all dimensions
+      // are fully constrainted), therefore we only need to test for conflicts
+      for (std::multimap<unsigned,LayoutConstraintID>::const_iterator lay_it =
+            layout_constraints.layouts.lower_bound(index); lay_it != 
+            layout_constraints.layouts.upper_bound(index); lay_it++)
+      {
+        LayoutConstraints *constraints = 
+          runtime->find_layout_constraints(lay_it->second);
+        for (std::vector<MappingInstance>::iterator it = 
+              instances.begin(); it != instances.end(); /*nothing*/)
+        {
+          PhysicalManager *manager = it->impl;
+          if (manager == NULL)
+          {
+            it++;
+            continue;
+          }
+          if (manager->conflicts(constraints))
+            it = instances.erase(it);
+          else
+            it++;
+        }
+        if (instances.empty())
+          break;
+      }
+      // Now see which fields we are missing
+      missing_fields = task.regions[index].privilege_fields;
+      for (std::vector<MappingInstance>::const_iterator it = 
+            instances.begin(); it != instances.end(); it++)
+      {
+        PhysicalManager *manager = it->impl;
+        if (manager == NULL)
+          continue;
+        manager->remove_space_fields(missing_fields);
+        if (missing_fields.empty())
+          break;
+      }
       resume_mapper_call(ctx);
     }
 

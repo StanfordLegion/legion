@@ -2230,7 +2230,7 @@ namespace Legion {
         // Copy the results over and make sure they are still good 
         const size_t num_instances = constraint_mapping.size();
         assert(num_instances > 0);
-        std::vector<std::set<FieldID> > missing_fields;
+        std::set<FieldID> missing_fields;
         mapper_rt_filter_instances(ctx, *constraint.t2, constraint.idx2,
                      info2.variant, constraint_mapping, missing_fields);
         if (num_instances != constraint_mapping.size())

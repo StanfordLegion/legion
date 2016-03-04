@@ -380,9 +380,8 @@ namespace Legion {
        * then this call will be invoked to select the correct variant.
        */
       struct SelectVariantInput {
-        std::vector<Processor>                          target_procs;
+        Processor                                       processor;
         std::vector<std::vector<PhysicalInstance> >     chosen_instances;
-        std::vector<VariantID>                          variant_options;
       };
       struct SelectVariantOutput {
         VariantID                                       chosen_variant;

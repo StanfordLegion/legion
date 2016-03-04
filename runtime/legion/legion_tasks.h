@@ -484,7 +484,8 @@ namespace Legion {
     protected: // mapper helper calls
       void validate_target_processors(const std::vector<Processor> &prcs) const;
       void find_visible_memories(std::set<Memory> &visible_memories) const;
-      void validate_variant_selection(VariantImpl *impl) const; 
+      int validate_variant_selection(VariantImpl *impl,
+          const std::vector<std::vector<MappingInstance> > &instances) const; 
     protected:
       void invoke_mapper(MustEpochOp *must_epoch_owner,
           const std::vector<RegionTreeContext> &enclosing_contexts);
