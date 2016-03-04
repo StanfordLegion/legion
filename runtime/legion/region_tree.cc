@@ -12141,6 +12141,8 @@ namespace LegionRuntime {
             if (!overlap)
               continue;
             num_states++;
+            // Add a valid reference for when it is in transit
+            it->first->add_base_valid_ref(REMOTE_DID_REF);
             state_rez.serialize(it->first->did);
             state_rez.serialize(it->first->owner_space);
             state_rez.serialize(overlap);
@@ -12171,6 +12173,8 @@ namespace LegionRuntime {
             if (!overlap)
               continue;
             num_states++;
+            // Add a valid reference for when it is in transit
+            it->first->add_base_valid_ref(REMOTE_DID_REF);
             state_rez.serialize(it->first->did);
             state_rez.serialize(it->first->owner_space);
             state_rez.serialize(overlap);
@@ -12269,6 +12273,8 @@ namespace LegionRuntime {
           else
             finder->second |= state_mask;
           info.valid_fields |= state_mask;
+          // No matter what remove our base valid reference
+          version_state->send_remote_valid_update(source, 1, false/*add*/);
         }
       }
       unsigned num_previous;
@@ -12301,6 +12307,8 @@ namespace LegionRuntime {
           else
             finder->second |= state_mask;
           info.valid_fields |= state_mask;
+          // No matter what remove our base valid reference
+          version_state->send_remote_valid_update(source, 1, false/*add*/);
         }
       }
       unsigned num_reduc;
