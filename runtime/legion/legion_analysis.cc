@@ -6778,8 +6778,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    InstanceRef::InstanceRef(const FieldMask &mask)
+      : valid_fields(mask), ready_event(Event::NO_EVENT), 
+        composite(true), local(true)
+    //--------------------------------------------------------------------------
+    {
+      ptr.manager = NULL;
+    }
+
+    //--------------------------------------------------------------------------
     InstanceRef::InstanceRef(PhysicalManager *man, const FieldMask &m, Event r)
-      : valid_fields(m), ready_event(r), composite(false)
+      : valid_fields(m), ready_event(r), composite(false), local(true)
     //--------------------------------------------------------------------------
     {
       ptr.manager = man;
@@ -6870,6 +6879,16 @@ namespace Legion {
       assert(ptr.view != NULL);
 #endif     
       return ptr.view;
+    }
+
+    //--------------------------------------------------------------------------
+    MappingInstance InstanceRef::get_mapping_instance(void) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(!composite);
+#endif
+      return MappingInstance(ptr.manager);
     }
 
     //--------------------------------------------------------------------------

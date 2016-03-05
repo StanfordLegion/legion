@@ -1178,6 +1178,10 @@ namespace Legion {
       void update_constraints(Deserializer &derez);
     public:
       bool equal(const LayoutConstraintSet &other_constraints) const;
+      bool entails(const LayoutConstraintSet &other_constraints) const;
+      bool conflicts(const LayoutConstraintSet &other_constraints) const;
+      bool entails(LayoutConstraints *other_constraints);
+      bool conflicts(LayoutConstraints *other_constraints);
     public:
       static AddressSpaceID get_owner_space(LayoutConstraintID layout_id,
                                             Runtime *runtime);
@@ -2533,7 +2537,8 @@ namespace Legion {
       void get_layout_constraints(LayoutConstraintID layout_id,
                                   LayoutConstraintSet &layout_constraints);
       const char* get_layout_constraints_name(LayoutConstraintID layout_id);
-      LayoutConstraints* find_layout_constraints(LayoutConstraintID layout_id);
+      LayoutConstraints* find_layout_constraints(LayoutConstraintID layout_id,
+                                                 bool can_fail = false);
     public:
       // Static methods for start-up and callback phases
       static int start(int argc, char **argv, bool background);

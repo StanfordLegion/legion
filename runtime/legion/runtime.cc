@@ -6604,8 +6604,14 @@ namespace Legion {
       derez.deserialize(lay_id);
       UserEvent done_event;
       derez.deserialize(done_event);
-      LayoutConstraints *constraints = runtime->find_layout_constraints(lay_id);
-      constraints->send_constraint_response(source, done_event);
+      bool can_fail;
+      derez.deserialize(can_fail);
+      LayoutConstraints *constraints = 
+        runtime->find_layout_constraints(lay_id, can_fail);
+      if (can_fail && (constraints == NULL))
+        done_event.trigger();
+      else
+        constraints->send_constraint_response(source, done_event);
     }
 
     //--------------------------------------------------------------------------
@@ -17755,7 +17761,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     LayoutConstraints* Runtime::find_layout_constraints(
-                                                   LayoutConstraintID layout_id)
+                        LayoutConstraintID layout_id, bool can_fail /*= false*/)
     //--------------------------------------------------------------------------
     {
       // See if we can find it first
@@ -17773,7 +17779,8 @@ namespace Legion {
           // See if a request has already been issued
           std::map<LayoutConstraintID,Event>::const_iterator
             wait_on_finder = pending_constraint_requests.find(layout_id);
-          if (wait_on_finder == pending_constraint_requests.end())
+          if (can_fail || 
+              (wait_on_finder == pending_constraint_requests.end()))
           {
             // Ask for the constraints
             AddressSpaceID target = 
@@ -17784,11 +17791,13 @@ namespace Legion {
               RezCheck z(rez);
               rez.serialize(layout_id);
               rez.serialize(to_trigger);
+              rez.serialize(can_fail);
             }
             // Send the message
             send_constraint_request(target, rez);
-            // Save the even to wait on
-            pending_constraint_requests[layout_id] = to_trigger;
+            // Only save the event to wait on if this can't fail
+            if (!can_fail)
+              pending_constraint_requests[layout_id] = to_trigger;
             wait_on = to_trigger;
           }
           else
@@ -17801,9 +17810,14 @@ namespace Legion {
       AutoLock l_lock(layout_constraints_lock);
       std::map<LayoutConstraintID,LayoutConstraints*>::const_iterator
           finder = layout_constraints_table.find(layout_id);
+      if (finder == layout_constraints_table.end())
+      {
+        if (can_fail)
+          return NULL;
 #ifdef DEBUG_HIGH_LEVEL
-      assert(finder != layout_constraints_table.end());
+        assert(finder != layout_constraints_table.end());
 #endif
+      }
       return finder->second;
     }
 

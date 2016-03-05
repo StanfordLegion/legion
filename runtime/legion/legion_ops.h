@@ -693,7 +693,7 @@ namespace Legion {
       template<bool IS_SRC>
       int perform_conversion(unsigned idx, const RegionRequirement &req,
                              std::vector<MappingInstance> &output,
-                             const InstanceSet &valid, InstanceSet &targets);
+                             InstanceSet &targets);
       inline void set_mapping_state(unsigned idx, bool is_src) 
         { current_index = idx; current_src = is_src; }
       void report_profiling_results(void);

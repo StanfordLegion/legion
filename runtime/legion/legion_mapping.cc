@@ -211,6 +211,65 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    const ExecutionConstraintSet& Mapper::mapper_rt_find_execution_constraints(
+                         MapperContext ctx, TaskID task_id, VariantID vid) const
+    //--------------------------------------------------------------------------
+    {
+      return ctx->manager->find_execution_constraints(ctx, task_id, vid);
+    }
+
+    //--------------------------------------------------------------------------
+    const TaskLayoutConstraintSet& 
+      Mapper::mapper_rt_find_task_layout_constraints(MapperContext ctx, 
+                                            TaskID task_id, VariantID vid) const
+    //--------------------------------------------------------------------------
+    {
+      return ctx->manager->find_task_layout_constraints(ctx, task_id, vid);
+    }
+
+    //--------------------------------------------------------------------------
+    const LayoutConstraintSet&
+      Mapper::mapper_rt_find_layout_constraints(MapperContext ctx, 
+                                                LayoutConstraintID id) const
+    //--------------------------------------------------------------------------
+    {
+      return ctx->manager->find_layout_constraints(ctx, id); 
+    }
+
+    //--------------------------------------------------------------------------
+    LayoutConstraintID Mapper::mapper_rt_register_layout(MapperContext ctx,
+                                   const LayoutConstraintSet &constraints,
+                                   FieldSpace handle) const
+    //--------------------------------------------------------------------------
+    {
+      return ctx->manager->register_layout(ctx, constraints, handle);
+    }
+
+    //--------------------------------------------------------------------------
+    void Mapper::mapper_rt_release_layout(MapperContext ctx,
+                                          LayoutConstraintID layout_id) const
+    //--------------------------------------------------------------------------
+    {
+      ctx->manager->release_layout(ctx, layout_id);
+    }
+
+    //--------------------------------------------------------------------------
+    bool Mapper::mapper_rt_do_constraints_conflict(MapperContext ctx,
+        LayoutConstraintID set1, LayoutConstraintID set2) const
+    //--------------------------------------------------------------------------
+    {
+      return ctx->manager->do_constraints_conflict(ctx, set1, set2);
+    }
+
+    //--------------------------------------------------------------------------
+    bool Mapper::mapper_rt_do_constraints_entail(MapperContext ctx,
+        LayoutConstraintID source, LayoutConstraintID target) const
+    //--------------------------------------------------------------------------
+    {
+      return ctx->manager->do_constraints_entail(ctx, source, target);
+    }
+
+    //--------------------------------------------------------------------------
     void Mapper::mapper_rt_find_valid_variants(MapperContext ctx,TaskID task_id,
                                          std::vector<VariantID> &valid_variants,
                                          Processor::Kind kind) const

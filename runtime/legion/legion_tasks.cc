@@ -1779,7 +1779,7 @@ namespace Legion {
           }
           std::vector<FieldID> missing_fields;
           int composite_index = runtime->forest->physical_convert_mapping(
-              regions[must_premap[idx]], finder->second, valid_instances[idx],
+              regions[must_premap[idx]], finder->second, 
               chosen_instances, missing_fields);
           if (composite_index >= 0)
           {
@@ -2458,7 +2458,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    VariantImpl* SingleTask::select_inline_variant(TaskOp *child)
+    VariantImpl* SingleTask::select_inline_variant(TaskOp *child,
+                                                   InlineTask *inline_task)
     //--------------------------------------------------------------------------
     {
       Mapper::SelectVariantInput input;
@@ -2500,25 +2501,8 @@ namespace Legion {
         exit(ERROR_INVALID_MAPPER_OUTPUT);
       }
       if (!Runtime::unsafe_mapper)
-      {
-        int bad_index = validate_variant_selection(variant_impl,
-                                                   input.chosen_instances);
-        if (bad_index >= 0)
-        {
-          log_run.error("Invalid mapper output. Mapper selected variant %ld in "
-                        "'select_task_variant' on mapper %s for task %s "
-                        "(UID %lld). The layout constraints for index %d of "
-                        "this variant conflict with the layouts of the chosen "
-                        "instance(s) resulting in an invalid mapping.",
-                        variant_impl->vid, child_mapper->get_mapper_name(),
-                        child->get_task_name(), child->get_unique_id(), 
-                        bad_index);
-#ifdef DEBUG_HIGH_LEVEL
-          assert(false);
-#endif
-          exit(ERROR_INVALID_MAPPER_OUTPUT);
-        }
-      }
+        inline_task->validate_variant_selection(child_mapper, variant_impl, 
+                                                "select_task_variant");
       return variant_impl;
     }
 
@@ -2554,7 +2538,7 @@ namespace Legion {
       unsigned orig_child_regions = inline_task->regions.size();
 
       // Pick a variant to use for executing this task
-      VariantImpl *variant = select_inline_variant(child);    
+      VariantImpl *variant = select_inline_variant(child, inline_task);    
       
       // Do the inlining
       child->perform_inlining(inline_task, variant);
@@ -4573,12 +4557,40 @@ namespace Legion {
       // owner then we also know there is only one valid choice
       if (must_epoch_owner == NULL)
       {
+        if (output.target_procs.empty())
+        {
+          log_run.warning("Empty output target_procs from call to 'map_task' "
+                          "by mapper %s for task %s (ID %lld). Adding the "
+                          "'target_proc' " IDFMT " as the default.",
+                          mapper->get_mapper_name(), get_task_name(),
+                          get_unique_id(), this->target_proc.id);
+          output.target_procs.push_back(this->target_proc);
+        }
         if (!Runtime::unsafe_mapper)
           validate_target_processors(output.target_procs);
         target_processors = output.target_procs;
       }
       else
       {
+        if (output.target_procs.size() > 1)
+        {
+          log_run.warning("Ignoring suprious additional target processors "
+                          "requested in 'map_task' for task %s (ID %lld) "
+                          "by mapper %s because task is part of a must "
+                          "epoch launch.", get_task_name(), get_unique_id(),
+                          mapper->get_mapper_name());
+        }
+        if (!output.target_procs.empty() && 
+                 (output.target_procs[0] != this->target_proc))
+        {
+          log_run.warning("Ignoring processor request of " IDFMT " for "
+                          "task %s (ID %lld) by mapper %s because task "
+                          "has already been mapped to processor " IDFMT
+                          " as part of a must epoch launch.", 
+                          output.target_procs[0].id, get_task_name(), 
+                          get_unique_id(), mapper->get_mapper_name(),
+                          this->target_proc.id);
+        }
         // Only one valid choice in this case, ignore everything else
         target_processors.push_back(this->target_proc);
       }
@@ -4650,8 +4662,7 @@ namespace Legion {
         std::vector<FieldID> missing_fields;
         int composite_idx = 
           runtime->forest->physical_convert_mapping(regions[idx],
-                                output.chosen_instances[idx], valid[idx], 
-                                result, missing_fields);
+                          output.chosen_instances[idx], result, missing_fields);
         if (composite_idx >= 0)
         {
           // Everything better be all virtual or all real
@@ -4778,28 +4789,205 @@ namespace Legion {
       }
       // Now that we know which variant to use, we can validate it
       if (!Runtime::unsafe_mapper)
+        validate_variant_selection(mapper, variant_impl, "map_task"); 
+      // Record anything else that needs to be recorded 
+      selected_variant = output.chosen_variant;
+      task_priority = output.task_priority;
+      perform_postmap = output.postmap_task;
+    }
+
+    //--------------------------------------------------------------------------
+    void SingleTask::validate_target_processors(
+                                 const std::vector<Processor> &processors) const
+    //--------------------------------------------------------------------------
+    {
+      // Make sure that they are all on the same node and of the same kind
+      Processor::Kind kind = this->target_proc.kind();
+      AddressSpace space = this->target_proc.address_space();
+      for (unsigned idx = 0; idx < processors.size(); idx++)
       {
-        int bad_index = validate_variant_selection(variant_impl,
-                                                   output.chosen_instances);
-        if (bad_index >= 0)
+        const Processor &proc = processors[idx];
+        if (proc.kind() != kind)
         {
-          log_run.error("Invalid mapper output. Mapper selected variant %ld in "
-                        "'map_task' on mapper %s for task %s "
-                        "(UID %lld). The layout constraints for index %d of "
-                        "this variant conflict with the layouts of the chosen "
-                        "instance(s) resulting in an invalid mapping.",
-                        variant_impl->vid, mapper->get_mapper_name(),
-                        get_task_name(), get_unique_id(), bad_index);
+          log_run.error("Invalid mapper output. Mapper %s requested processor "
+                        IDFMT " which is of kind %s when mapping task %s "
+                        "(ID %lld), but the target processor " IDFMT " has "
+                        "kind %s. Only one kind of processor is permitted.",
+                        mapper->get_mapper_name(), proc.id, 
+                        Processor::get_kind_name(proc.kind()), get_task_name(),
+                        get_unique_id(), this->target_proc.id, 
+                        Processor::get_kind_name(kind));
+#ifdef DEBUG_HIGH_LEVEL
+          assert(false);
+#endif
+          exit(ERROR_INVALID_MAPPER_OUTPUT);
+        }
+        if (proc.address_space() != space)
+        {
+          log_run.error("Invalid mapper output. Mapper %s requested processor "
+                        IDFMT " which is in address space %d when mapping "
+                        "task %s (ID %lld) but the target processor " IDFMT 
+                        "is in address space %d. All target processors must "
+                        "be in the same address space.", 
+                        mapper->get_mapper_name(), proc.id,
+                        proc.address_space(), get_task_name(), get_unique_id(), 
+                        this->target_proc.id, space);
 #ifdef DEBUG_HIGH_LEVEL
           assert(false);
 #endif
           exit(ERROR_INVALID_MAPPER_OUTPUT);
         }
       }
-      // Record anything else that needs to be recorded 
-      selected_variant = output.chosen_variant;
-      task_priority = output.task_priority;
-      perform_postmap = output.postmap_task;
+    }
+
+    //--------------------------------------------------------------------------
+    void SingleTask::find_visible_memories(std::set<Memory> &visible_mems) const
+    //--------------------------------------------------------------------------
+    {
+      // See if our target processor is local or remote
+      if (!runtime->is_local(this->target_proc))
+        runtime->machine.get_visible_memories(this->target_proc, visible_mems);
+      else
+        runtime->find_visible_memories(this->target_proc, visible_mems);
+    }
+
+    //--------------------------------------------------------------------------
+    void SingleTask::validate_variant_selection(MapperManager *local_mapper,
+                          VariantImpl *impl, const char *mapper_call_name) const
+    //--------------------------------------------------------------------------
+    {
+      // Check the layout constraints first
+      const TaskLayoutConstraintSet &layout_constraints = 
+        impl->get_layout_constraints();
+      for (std::multimap<unsigned,LayoutConstraintID>::const_iterator it = 
+            layout_constraints.layouts.begin(); it != 
+            layout_constraints.layouts.end(); it++)
+      {
+        LayoutConstraints *constraints = 
+          runtime->find_layout_constraints(it->second);
+        const InstanceSet &instances = physical_instances[it->first]; 
+        for (unsigned idx = 0; idx < instances.size(); idx++)
+        {
+          PhysicalManager *manager = instances[idx].get_manager();
+          if (manager->conflicts(constraints))
+          {
+            log_run.error("Invalid mapper output. Mapper %s selected variant "
+                          "%ld for task %s (ID %lld). But instance selected "
+                          "for region requirement %d fails to satisfy the "
+                          "corresponding constraints.", 
+                          local_mapper->get_mapper_name(), impl->vid,
+                          get_task_name(), get_unique_id(), it->first);
+#ifdef DEBUG_HIGH_LEVEL
+            assert(false);
+#endif
+            exit(ERROR_INVALID_MAPPER_OUTPUT);
+          }
+        }
+      }
+
+      // Now we can test against the execution constraints
+      const ExecutionConstraintSet &execution_constraints = 
+        impl->get_execution_constraints();
+      // TODO: Check ISA, resource, and launch constraints
+      // First check the processor constraint
+      if (execution_constraints.processor_constraint.is_valid() &&
+          (execution_constraints.processor_constraint.get_kind() != 
+           this->target_proc.kind()))
+      {
+        log_run.error("Invalid mapper output. Mapper %s selected variant %ld "
+                      "for task %s (ID %lld). However, this variant has a "
+                      "processor constraint for processors of kind %s, but "
+                      "the target processor " IDFMT " is of kind %s.",
+                      local_mapper->get_mapper_name(),impl->vid,get_task_name(),
+                      get_unique_id(), Processor::get_kind_name(
+                        execution_constraints.processor_constraint.get_kind()),
+                      this->target_proc.id, Processor::get_kind_name(
+                        this->target_proc.kind()));
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_INVALID_MAPPER_OUTPUT);
+      }
+      // Then check the colocation constraints
+      for (std::vector<ColocationConstraint>::const_iterator con_it = 
+            execution_constraints.colocation_constraints.begin(); con_it !=
+            execution_constraints.colocation_constraints.end(); con_it++)
+      {
+        if (con_it->indexes.size() < 2)
+          continue;
+        if (con_it->fields.empty())
+          continue;
+        // First check to make sure that all these region requirements have
+        // the same region tree ID.
+        bool first = true;
+        FieldSpace handle = FieldSpace::NO_SPACE;
+        std::vector<InstanceSet*> instances(con_it->indexes.size());
+        unsigned idx = 0;
+        for (std::set<unsigned>::const_iterator it = con_it->indexes.begin();
+              it != con_it->indexes.end(); it++, idx++)
+        {
+#ifdef DEBUG_HIGH_LEVEL
+          assert(regions[*it].handle_type == SINGULAR);
+          for (std::set<FieldID>::const_iterator fit = con_it->fields.begin();
+                fit != con_it->fields.end(); fit++)
+          {
+            if (regions[*it].privilege_fields.find(*fit) ==
+                regions[*it].privilege_fields.end())
+            {
+              log_run.error("Invalid location constraint. Location constraint "
+                            "specifies field %d which is not included in "
+                            "region requirement %d of task %s (ID %lld).",
+                            *fit, *it, get_task_name(), get_unique_id());
+              assert(false);
+            }
+          }
+#endif
+          if (first)
+          {
+            handle = regions[*it].region.get_field_space();
+            first = false;
+          }
+          else
+          {
+            if (regions[*it].region.get_field_space() != handle)
+            {
+              log_run.error("Invalid mapper output. Mapper %s selected variant "
+                            "%ld for task %s (ID %lld). However, this variant "
+                            "has colocation constraints for indexes %d and %d "
+                            "which have region requirements with different "
+                            "field spaces which is illegal.",
+                            local_mapper->get_mapper_name(), impl->vid, 
+                            get_task_name(), get_unique_id(), 
+                            *(con_it->indexes.begin()), *it);
+#ifdef DEBUG_HIGH_LEVEL
+              assert(false);
+#endif
+              exit(ERROR_INVALID_MAPPER_OUTPUT);
+            }
+          }
+          instances[idx] = const_cast<InstanceSet*>(&physical_instances[*it]);
+        }
+        // Now do the test for colocation
+        unsigned bad1 = 0, bad2 = 0; 
+        if (!runtime->forest->are_colocated(instances, handle, 
+                                            con_it->fields, bad1, bad2))
+        {
+          // Used for translating the indexes back from their linearized form
+          std::vector<unsigned> lin_indexes(con_it->indexes.begin(),
+                                            con_it->indexes.end());
+          log_run.error("Invalid mapper output. Mapper %s selected variant "
+                        "%ld for task %s (ID %lld). However, this variant "
+                        "requires that region requirements %d and %d be "
+                        "co-located for some set of field, but they are not.",
+                        local_mapper->get_mapper_name(), impl->vid, 
+                        get_task_name(), get_unique_id(), lin_indexes[bad1],
+                        lin_indexes[bad2]);
+#ifdef DEBUG_HIGH_LEVEL
+          assert(false);
+#endif
+          exit(ERROR_INVALID_MAPPER_OUTPUT);
+        }
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -4950,7 +5138,7 @@ namespace Legion {
         InstanceSet result;
         bool had_composite = 
           runtime->forest->physical_convert_postmapping(req,
-              output.chosen_instances[idx], postmap_valid[idx], result); 
+                                      output.chosen_instances[idx], result); 
         if (had_composite)
         {
           log_run.warning("WARNING: Mapper %s requested a composite "

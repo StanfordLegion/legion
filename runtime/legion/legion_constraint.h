@@ -278,8 +278,10 @@ namespace Legion {
                                             COLOCATION_CONSTRAINT;
     public:
       ColocationConstraint(void);
-      ColocationConstraint(unsigned index1, unsigned index2);
-      ColocationConstraint(const std::vector<unsigned> &indexes);
+      ColocationConstraint(unsigned index1, unsigned index2,
+                           const std::set<FieldID> &fields);
+      ColocationConstraint(const std::vector<unsigned> &indexes,
+                           const std::set<FieldID> &fields);
     public:
       bool satisfies(const ColocationConstraint *other) const;
       bool conflicts(const ColocationConstraint *other) const;
@@ -287,6 +289,7 @@ namespace Legion {
       void serialize(Serializer &rez) const;
       void deserialize(Deserializer &derez);
     public:
+      std::set<FieldID> fields;
       std::set<unsigned> indexes;
     };
 

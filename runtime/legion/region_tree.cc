@@ -2421,6 +2421,103 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    int RegionTreeForest::physical_convert_mapping(const RegionRequirement &req,
+                                  const std::vector<MappingInstance> &chosen,
+                                  InstanceSet &result,
+                                  std::vector<FieldID> &missing_fields)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(req.handle_type == SINGULAR);
+#endif
+      RegionNode *reg_node = get_node(req.region);      
+      // Get the field mask for the fields we need
+      FieldMask needed_fields = 
+                reg_node->column_source->get_field_mask(req.privilege_fields);
+      // Iterate over each one of the chosen instances
+      bool has_composite = false;
+      for (std::vector<MappingInstance>::const_iterator it = chosen.begin();
+            it != chosen.end(); it++)
+      {
+        PhysicalManager *manager = it->impl;
+        if (manager == NULL)
+        {
+          has_composite = true;
+          continue;
+        }
+        // See which fields need to be made valid here
+        FieldMask valid_fields = 
+          manager->layout->allocated_fields & needed_fields;
+        if (!valid_fields)
+          continue;
+        result.add_instance(InstanceRef(manager, valid_fields));
+        // We can remove the update fields from the needed mask since
+        // we now have space for them
+        needed_fields -= valid_fields;
+        // If we've seen all our needed fields then we are done
+        if (!needed_fields)
+          break;
+      }
+      // If we don't have needed fields, see if we had a composite instance
+      // if we did, put all the fields in there, otherwise we put report
+      // them as missing fields figure out what field IDs they are
+      if (!!needed_fields)
+      {
+        if (has_composite)
+        {
+          int composite_idx = result.size();
+          result.add_instance(InstanceRef(needed_fields));
+          return composite_idx;
+        }
+        else
+        {
+          // This can be slow because if we get here we are just 
+          // going to be reporting an error so performance no
+          // longer matters
+          std::set<FieldID> missing;
+          reg_node->column_source->get_field_set(needed_fields, missing);
+          missing_fields.insert(missing_fields.end(), 
+                                missing.begin(), missing.end());
+        }
+      }
+      return -1; // no composite index
+    }
+
+    //--------------------------------------------------------------------------
+    bool RegionTreeForest::physical_convert_postmapping(
+                                     const RegionRequirement &req,
+                                     const std::vector<MappingInstance> &chosen,
+                                     InstanceSet &result)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(req.handle_type == SINGULAR);
+#endif
+      RegionNode *reg_node = get_node(req.region);      
+      // Get the field mask for the fields we need
+      FieldMask optional_fields = 
+                reg_node->column_source->get_field_mask(req.privilege_fields);
+      // Iterate over each one of the chosen instances
+      bool has_composite = false;
+      for (std::vector<MappingInstance>::const_iterator it = chosen.begin();
+            it != chosen.end(); it++)
+      {
+        PhysicalManager *manager = it->impl;
+        if (manager == NULL)
+        {
+          has_composite = true;
+          continue;
+        }
+        FieldMask valid_fields = 
+          manager->layout->allocated_fields & optional_fields;
+        if (!valid_fields)
+          continue;
+        result.add_instance(InstanceRef(manager, valid_fields));
+      }
+      return has_composite;
+    }
+
+    //--------------------------------------------------------------------------
     bool RegionTreeForest::is_valid_mapping(const InstanceRef &ref,
                                             const RegionRequirement &req)
     //--------------------------------------------------------------------------
@@ -2448,6 +2545,63 @@ namespace Legion {
       }
       // If they are still not the same then we know it is no good
       return (reg_node == man_node);
+    }
+
+    //--------------------------------------------------------------------------
+    bool RegionTreeForest::are_colocated(
+                            const std::vector<InstanceSet*> &instances,
+                            FieldSpace handle, const std::set<FieldID> &fields,
+                            unsigned &bad1, unsigned &bad2)
+    //--------------------------------------------------------------------------
+    {
+      FieldSpaceNode *node = get_node(handle);
+      const FieldMask coloc_mask = node->get_field_mask(fields);
+      std::map<PhysicalManager*,FieldMask> colocate_instances;
+      // Figure out the first set
+      InstanceSet &first_set = *(instances[0]);
+      for (unsigned idx = 0; idx < first_set.size(); idx++)
+      {
+        FieldMask overlap = coloc_mask & first_set[idx].get_valid_fields();
+        if (!overlap)
+          continue;
+        PhysicalManager *manager = first_set[idx].get_manager();
+        // Not allowed to have virtual views here
+        if (manager == NULL)
+        {
+          bad1 = 0;
+          bad2 = 0;
+          return false;
+        }
+        colocate_instances[manager] = overlap;
+      }
+      // Now we've got the first set, check all the rest
+      for (unsigned idx1 = 0; idx1 < instances.size(); idx1++)
+      {
+        InstanceSet &next_set = *(instances[idx1]);
+        for (unsigned idx2 = 0; idx2 < next_set.size(); idx2++)
+        {
+          FieldMask overlap = coloc_mask & next_set[idx2].get_valid_fields();
+          if (!overlap)
+            continue;
+          PhysicalManager *manager = next_set[idx2].get_manager();
+          if (manager == NULL)
+          {
+            bad1 = idx2;
+            bad2 = idx2;
+            return false;
+          }
+          std::map<PhysicalManager*,FieldMask>::const_iterator finder = 
+            colocate_instances.find(manager);
+          if ((finder == colocate_instances.end()) ||
+              (!!(overlap - finder->second)))
+          {
+            bad1 = 0;
+            bad2 = idx2;
+            return false;
+          }
+        }
+      }
+      return true;
     }
 
     //--------------------------------------------------------------------------

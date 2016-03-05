@@ -258,7 +258,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Mapper::MapperSyncModel Mapper::get_mapper_sync_model(void) const
+    Mapper::MapperSyncModel DefaultMapper::get_mapper_sync_model(void) const
     //--------------------------------------------------------------------------
     {
       // Default mapper operates with the serialized re-entrant sync model
@@ -419,15 +419,19 @@ namespace Legion {
             // for this task
             VariantID best_variant = variants[0];
             const ExecutionConstraintSet *best_execution_constraints = 
-              &(mapper_rt_find_execution_constraints(ctx, best_variant));
+              &(mapper_rt_find_execution_constraints(ctx, 
+                                            task.task_id, best_variant));
             const TaskLayoutConstraintSet *best_layout_constraints = 
-              &(mapper_rt_find_task_layout_constraints(ctx, best_variant));
+              &(mapper_rt_find_task_layout_constraints(ctx, 
+                                            task.task_id, best_variant));
             for (unsigned idx = 1; idx < variants.size(); idx++)
             {
               const ExecutionConstraintSet &next_execution_constraints = 
-                mapper_rt_find_execution_constraints(ctx, variants[idx]);
+                mapper_rt_find_execution_constraints(ctx, 
+                                            task.task_id, variants[idx]);
               const TaskLayoutConstraintSet &next_layout_constraints = 
-                mapper_rt_find_task_layout_constraints(ctx, variants[idx]);
+                mapper_rt_find_task_layout_constraints(ctx, 
+                                            task.task_id, variants[idx]);
               VariantID chosen = default_policy_select_best_variant(ctx,
                   task, best_kind, best_variant, variants[idx],
                   *best_execution_constraints, next_execution_constraints,
@@ -611,7 +615,8 @@ namespace Legion {
             std::set<FieldID> needed_fields = 
               task.regions[it->first].privilege_fields;
             const TaskLayoutConstraintSet &layout_constraints =
-              mapper_rt_find_task_layout_constraints(ctx,info.variant);
+              mapper_rt_find_task_layout_constraints(ctx,
+                                        task.task_id, info.variant);
             if (!default_create_custom_instances(ctx, task.target_proc,
                   target_memory, task.regions[it->first], it->first,
                   needed_fields, layout_constraints, true/*needs check*/,
@@ -690,7 +695,8 @@ namespace Legion {
         std::set<FieldID> needed_fields = 
           task.regions[it->first].privilege_fields;
         const TaskLayoutConstraintSet &layout_constraints =
-          mapper_rt_find_task_layout_constraints(ctx,info.variant);
+          mapper_rt_find_task_layout_constraints(ctx,
+                                    task.task_id, info.variant);
         if (!default_create_custom_instances(ctx, task.target_proc,
               target_memory, task.regions[it->first], it->first,
               needed_fields, layout_constraints, true/*needs check*/,
@@ -1069,7 +1075,8 @@ namespace Legion {
           if (has_reductions)
           {
             const TaskLayoutConstraintSet &layout_constraints =
-              mapper_rt_find_task_layout_constraints(ctx,output.chosen_variant);
+              mapper_rt_find_task_layout_constraints(ctx,
+                                  task.task_id, output.chosen_variant);
             for (unsigned idx = 0; idx < task.regions.size(); idx++)
             {
               if (task.regions[idx].privilege == REDUCE)
@@ -1116,7 +1123,8 @@ namespace Legion {
               input.premapped_regions.end(); it++)
           done_regions[*it] = true;
       const TaskLayoutConstraintSet &layout_constraints = 
-        mapper_rt_find_task_layout_constraints(ctx, output.chosen_variant);
+        mapper_rt_find_task_layout_constraints(ctx, 
+                              task.task_id, output.chosen_variant);
       // Now we need to go through and make instances for any of our
       // regions which do not have space for certain fields
       bool has_reductions = false;
@@ -1327,7 +1335,8 @@ namespace Legion {
         // Now figure out how to make an instance
         instances.resize(instances.size()+1);
         // Check to see if these constraints conflict with our constraints
-        if (mapper_rt_do_constraints_conflict(our_layout_id, lay_it->second))
+        if (mapper_rt_do_constraints_conflict(ctx, 
+                                              our_layout_id, lay_it->second))
         {
           // They conflict, so we're just going to make an instance
           // using these constraints
@@ -1336,7 +1345,8 @@ namespace Legion {
                      false/*meets*/, false/*reduction*/, req, target_proc))
             return false;
         }
-        else if (mapper_rt_do_constraints_entail(lay_it->second, our_layout_id))
+        else if (mapper_rt_do_constraints_entail(ctx, 
+                                                 lay_it->second, our_layout_id))
         {
           // These constraints do everything we want to do and maybe more
           // so we can just use them directly
@@ -2212,7 +2222,8 @@ namespace Legion {
             constraint.t2->regions[constraint.idx2].privilege_fields.begin(),
             constraint.t2->regions[constraint.idx2].privilege_fields.end());
         const TaskLayoutConstraintSet &layout_constraints1 = 
-          mapper_rt_find_task_layout_constraints(ctx, info1.variant);
+          mapper_rt_find_task_layout_constraints(ctx, 
+                                      constraint.t1->task_id, info1.variant);
         if (!default_create_custom_instances(ctx, 
               output.task_processors[index1], target_memory,
               constraint.t1->regions[constraint.idx1], constraint.idx1,

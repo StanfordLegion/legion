@@ -756,6 +756,7 @@ namespace Legion {
     friend class Internal::FoldReductionManager;            \
     friend class Internal::TreeStateLogger;                 \
     friend class Internal::MapperManager;                   \
+    friend class Internal::InstanceRef;                     \
     friend class BindingLib::Utility;                       \
     friend class CObjectWrapper;                  
 

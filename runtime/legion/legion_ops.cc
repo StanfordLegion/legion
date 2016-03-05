@@ -2252,8 +2252,7 @@ namespace Legion {
       // Also check to make sure that none of them are composite instances
       std::vector<FieldID> missing_fields;
       int composite_index = runtime->forest->physical_convert_mapping(
-          requirement, output.chosen_instances, valid_instances, 
-                              chosen_instances, missing_fields);
+        requirement, output.chosen_instances, chosen_instances, missing_fields);
       // If we are doing unsafe mapping, then we can return
       if (Runtime::unsafe_mapper)
         return;
@@ -2893,7 +2892,6 @@ namespace Legion {
           src_composite = 
             perform_conversion<true/*src*/>(idx, src_requirements[idx],
                                             output.src_instances[idx],
-                                            valid_src_instances[idx],
                                             src_targets);
           // If we have a compsite reference, we need to map it
           // as a virtual region
@@ -2942,7 +2940,6 @@ namespace Legion {
         {
           perform_conversion<false/*src*/>(idx, dst_requirements[idx],
                                            output.dst_instances[idx],
-                                           valid_dst_instances[idx],
                                            dst_targets);
           // Now do the registration
           set_mapping_state(idx, false/*src*/);
@@ -3399,13 +3396,12 @@ namespace Legion {
     template<bool IS_SRC>
     int CopyOp::perform_conversion(unsigned idx, const RegionRequirement &req,
                                    std::vector<MappingInstance> &output,
-                                   const InstanceSet &valid, 
                                    InstanceSet &targets)
     //--------------------------------------------------------------------------
     {
       std::vector<FieldID> missing_fields;
       int composite_idx = runtime->forest->physical_convert_mapping(
-                              req, output, valid, targets, missing_fields);
+                                      req, output, targets, missing_fields);
       if (Runtime::unsafe_mapper)
         return composite_idx;
       // Destination is not allowed to have composite instances
@@ -4533,8 +4529,7 @@ namespace Legion {
       // Make sure we have at least one instance for every field
       std::vector<FieldID> missing_fields;
       int composite_index = runtime->forest->physical_convert_mapping(
-            requirement, output.chosen_instances, valid_instances,
-                                chosen_instances, missing_fields);
+        requirement, output.chosen_instances, chosen_instances, missing_fields);
       if (Runtime::unsafe_mapper)
         return composite_index;
       if (!missing_fields.empty())

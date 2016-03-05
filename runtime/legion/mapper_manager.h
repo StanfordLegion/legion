@@ -288,6 +288,23 @@ namespace Legion {
       void broadcast(MappingCallInfo *info, const void *message, 
                      size_t message_size, int radix);
     public:
+      const ExecutionConstraintSet& 
+        find_execution_constraints(MappingCallInfo *ctx, 
+            TaskID task_id, VariantID vid);
+      const TaskLayoutConstraintSet&
+        find_task_layout_constraints(MappingCallInfo *ctx, 
+            TaskID task_id, VariantID vid);
+      const LayoutConstraintSet&
+        find_layout_constraints(MappingCallInfo *ctx, LayoutConstraintID id);
+      LayoutConstraintID register_layout(MappingCallInfo *ctx, 
+                                const LayoutConstraintSet &constraints,
+                                FieldSpace handle);
+      void release_layout(MappingCallInfo *ctx, LayoutConstraintID layout_id);
+      bool do_constraints_conflict(MappingCallInfo *ctx, 
+                    LayoutConstraintID set1, LayoutConstraintID set2);
+      bool do_constraints_entail(MappingCallInfo *ctx,
+                    LayoutConstraintID source, LayoutConstraintID target);
+    public:
       void find_valid_variants(MappingCallInfo *ctx, TaskID task_id,
                                std::vector<VariantID> &valid_variants,
                                Processor::Kind kind);

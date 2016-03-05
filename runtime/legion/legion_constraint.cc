@@ -178,16 +178,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ColocationConstraint::ColocationConstraint(unsigned index1, unsigned index2)
+    ColocationConstraint::ColocationConstraint(unsigned index1, unsigned index2,
+                                               const std::set<FieldID> &fids)
     //--------------------------------------------------------------------------
     {
       indexes.insert(index1);
       indexes.insert(index2);
+      fields = fids;
     }
 
     //--------------------------------------------------------------------------
-    ColocationConstraint::ColocationConstraint(const std::vector<unsigned> &idx)
-      : indexes(idx.begin(), idx.end())
+    ColocationConstraint::ColocationConstraint(const std::vector<unsigned> &idx,
+                                               const std::set<FieldID> &fids)
+      : fields(fids), indexes(idx.begin(), idx.end())
     //--------------------------------------------------------------------------
     {
     }
@@ -199,6 +202,10 @@ namespace Legion {
       rez.serialize<size_t>(indexes.size());
       for (std::set<unsigned>::const_iterator it = indexes.begin();
             it != indexes.end(); it++)
+        rez.serialize(*it);
+      rez.serialize<size_t>(fields.size());
+      for (std::set<FieldID>::const_iterator it = fields.begin();
+            it != fields.end(); it++)
         rez.serialize(*it);
     }
 
@@ -213,6 +220,14 @@ namespace Legion {
         unsigned index;
         derez.deserialize(index);
         indexes.insert(index);
+      }
+      size_t num_fields;
+      derez.deserialize(num_fields);
+      for (unsigned idx = 0; idx < num_fields; idx++)
+      {
+        FieldID fid;
+        derez.deserialize(fid);
+        fields.insert(fid);
       }
     }
 

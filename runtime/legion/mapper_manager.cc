@@ -939,6 +939,154 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    const ExecutionConstraintSet& MapperManager::find_execution_constraints(
+                            MappingCallInfo *ctx, TaskID task_id, VariantID vid)
+    //--------------------------------------------------------------------------
+    {
+      pause_mapper_call(ctx);
+      VariantImpl *impl = 
+        runtime->find_variant_impl(task_id, vid, true/*can fail*/);
+      if (impl == NULL)
+      {
+        log_run.error("Invalid mapper request: mapper %s requested execution "
+                      "constraints for variant %ld in mapper call %s, but "
+                      "that variant does not exist.", mapper->get_mapper_name(),
+                      vid, get_mapper_call_name(ctx->kind));
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_INVALID_ARGUMENTS_TO_MAPPER_RUNTIME);
+      }
+      const ExecutionConstraintSet &result = impl->get_execution_constraints();
+      resume_mapper_call(ctx);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    const TaskLayoutConstraintSet& MapperManager::find_task_layout_constraints(
+                            MappingCallInfo *ctx, TaskID task_id, VariantID vid)
+    //--------------------------------------------------------------------------
+    {
+      pause_mapper_call(ctx);
+      VariantImpl *impl = 
+        runtime->find_variant_impl(task_id, vid, true/*can fail*/);
+      if (impl == NULL)
+      {
+        log_run.error("Invalid mapper request: mapper %s requested task layout "
+                      "constraints for variant %ld in mapper call %s, but "
+                      "that variant does not exist.", mapper->get_mapper_name(),
+                      vid, get_mapper_call_name(ctx->kind));
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_INVALID_ARGUMENTS_TO_MAPPER_RUNTIME);
+      }
+      const TaskLayoutConstraintSet& result = impl->get_layout_constraints();
+      resume_mapper_call(ctx);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    const LayoutConstraintSet& MapperManager::find_layout_constraints(
+                             MappingCallInfo *ctx, LayoutConstraintID layout_id)
+    //--------------------------------------------------------------------------
+    {
+      pause_mapper_call(ctx);
+      LayoutConstraints *constraints = 
+        runtime->find_layout_constraints(layout_id, true/*can fail*/);
+      if (constraints == NULL)
+      {
+        log_run.error("Invalid mapper request: mapper %s requested layout "
+                      "constraints for layout ID %ld in mapper call %s, but "
+                      "that layout constraint ID is invalid.",
+                      mapper->get_mapper_name(), layout_id,
+                      get_mapper_call_name(ctx->kind));
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_INVALID_ARGUMENTS_TO_MAPPER_RUNTIME);
+      }
+      resume_mapper_call(ctx);
+      return *constraints;
+    }
+
+    //--------------------------------------------------------------------------
+    LayoutConstraintID MapperManager::register_layout(MappingCallInfo *ctx,
+                                    const LayoutConstraintSet &constraints,
+                                    FieldSpace handle)
+    //--------------------------------------------------------------------------
+    {
+      pause_mapper_call(ctx);
+      LayoutConstraints *cons = runtime->register_layout(handle, constraints);
+      resume_mapper_call(ctx);
+      return cons->layout_id;
+    }
+
+    //--------------------------------------------------------------------------
+    void MapperManager::release_layout(MappingCallInfo *ctx, 
+                                       LayoutConstraintID layout_id)
+    //--------------------------------------------------------------------------
+    {
+      pause_mapper_call(ctx);
+      runtime->release_layout(layout_id);
+      resume_mapper_call(ctx);
+    }
+
+    //--------------------------------------------------------------------------
+    bool MapperManager::do_constraints_conflict(MappingCallInfo *ctx,
+                               LayoutConstraintID set1, LayoutConstraintID set2)
+    //--------------------------------------------------------------------------
+    {
+      pause_mapper_call(ctx);
+      LayoutConstraints *c1 = 
+        runtime->find_layout_constraints(set1, true/*can fail*/);
+      LayoutConstraints *c2 = 
+        runtime->find_layout_constraints(set2, true/*can fail*/);
+      if ((c1 == NULL) || (c2 == NULL))
+      {
+        log_run.error("Invalid mapper request: mapper %s passed layout ID %ld "
+                      "to conflict test in mapper call %s, but that layout ID "
+                      "is invalid.", mapper->get_mapper_name(), 
+                      (c1 == NULL) ? set1 : set2, 
+                      get_mapper_call_name(ctx->kind));
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_INVALID_ARGUMENTS_TO_MAPPER_RUNTIME);
+      }
+      bool result = c1->conflicts(c2);
+      resume_mapper_call(ctx);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    bool MapperManager::do_constraints_entail(MappingCallInfo *ctx,
+                           LayoutConstraintID source, LayoutConstraintID target)
+    //--------------------------------------------------------------------------
+    {
+      pause_mapper_call(ctx);
+      LayoutConstraints *c1 = 
+        runtime->find_layout_constraints(source, true/*can fail*/);
+      LayoutConstraints *c2 = 
+        runtime->find_layout_constraints(target, true/*can fail*/);
+      if ((c1 == NULL) || (c2 == NULL))
+      {
+        log_run.error("Invalid mapper request: mapper %s passed layout ID %ld "
+                      "to entailment test in mapper call %s, but that layout "
+                      "ID is invalid.", mapper->get_mapper_name(), 
+                      (c1 == NULL) ? source : target, 
+                      get_mapper_call_name(ctx->kind));
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_INVALID_ARGUMENTS_TO_MAPPER_RUNTIME);
+      }
+      bool result = c1->entails(c2);
+      resume_mapper_call(ctx);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     void MapperManager::find_valid_variants(MappingCallInfo *ctx,TaskID task_id,
                                          std::vector<VariantID> &valid_variants,
                                          Processor::Kind kind)

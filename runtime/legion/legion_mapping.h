@@ -1193,18 +1193,20 @@ namespace Legion {
       // Methods for managing constraint information
       //------------------------------------------------------------------------
       const ExecutionConstraintSet& mapper_rt_find_execution_constraints(
-                               MapperContext ctx, VariantID vid) const;
+                       MapperContext ctx, TaskID task_id, VariantID vid) const;
       const TaskLayoutConstraintSet& mapper_rt_find_task_layout_constraints(
-                               MapperContext ctx, VariantID vid) const;
+                       MapperContext ctx, TaskID task_id, VariantID vid) const;
       const LayoutConstraintSet& mapper_rt_find_layout_constraints(
                                MapperContext ctx, LayoutConstraintID id) const;
       LayoutConstraintID mapper_rt_register_layout(MapperContext ctx, 
-                          const LayoutConstraintSet &layout_constraints) const;
-      void mapper_rt_release_layout(LayoutConstraintID layout_id) const;
-      bool mapper_rt_do_constraints_conflict(LayoutConstraintID set1,
-                                             LayoutConstraintID set2) const;
-      bool mapper_rt_do_constraints_entail(LayoutConstraintID source,
-                                           LayoutConstraintID target) const;
+                          const LayoutConstraintSet &layout_constraints,
+                          FieldSpace handle = FieldSpace::NO_SPACE) const;
+      void mapper_rt_release_layout(MapperContext ctx, 
+                                    LayoutConstraintID layout_id) const;
+      bool mapper_rt_do_constraints_conflict(MapperContext ctx,
+                       LayoutConstraintID set1, LayoutConstraintID set2) const;
+      bool mapper_rt_do_constraints_entail(MapperContext ctx,
+                   LayoutConstraintID source, LayoutConstraintID target) const;
     protected:
       //------------------------------------------------------------------------
       // Methods for manipulating variants 

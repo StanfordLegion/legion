@@ -484,8 +484,8 @@ namespace Legion {
     protected: // mapper helper calls
       void validate_target_processors(const std::vector<Processor> &prcs) const;
       void find_visible_memories(std::set<Memory> &visible_memories) const;
-      int validate_variant_selection(VariantImpl *impl,
-          const std::vector<std::vector<MappingInstance> > &instances) const; 
+      void validate_variant_selection(MapperManager *local_mapper,
+                    VariantImpl *impl, const char *call_name) const;
     protected:
       void invoke_mapper(MustEpochOp *must_epoch_owner,
           const std::vector<RegionTreeContext> &enclosing_contexts);
@@ -509,7 +509,8 @@ namespace Legion {
       void post_end_task(const void *res, size_t res_size, bool owned);
       void unmap_all_mapped_regions(void);
     public:
-      VariantImpl* select_inline_variant(TaskOp *child);
+      VariantImpl* select_inline_variant(TaskOp *child, 
+                                         InlineTask *inline_task);
       void inline_child_task(TaskOp *child);
     public:
       void restart_task(void);
