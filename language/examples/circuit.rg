@@ -12,6 +12,12 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
+-- runs-with:
+-- [
+--   ["-ll:cpu", "4"],
+--   ["-ll:cpu", "2", "-fflow-spmd-shardsize", "2"]
+-- ]
+
 import "regent"
 
 -- Compile and link circuit.cc
