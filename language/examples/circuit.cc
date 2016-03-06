@@ -40,24 +40,51 @@ public:
   virtual void select_task_variant(Task *task);
   virtual bool map_task(Task *task);
   virtual bool map_inline(Inline *inline_operation);
+  virtual bool map_copy(Copy *copy);
   virtual void notify_mapping_failed(const Mappable *mappable);
+  virtual bool map_must_epoch(const std::vector<Task*> &tasks,
+                              const std::vector<MappingConstraint> &constraints,
+                              MappingTagID tag);
 private:
   Color get_task_color_by_region(Task *task, const RegionRequirement &requirement);
+  LogicalRegion get_root_region(LogicalRegion handle);
+  LogicalRegion get_root_region(LogicalPartition handle);
 private:
-  std::map<Processor, Memory> all_sysmems;
+  std::vector<Processor> procs_list;
+  std::vector<Memory> sysmems_list;
+  std::map<Memory, std::vector<Processor> > sysmem_local_procs;
+  std::map<Processor, Memory> proc_sysmems;
+  std::map<Processor, Memory> proc_regmems;
 };
 
 CircuitMapper::CircuitMapper(Machine machine, HighLevelRuntime *rt, Processor local)
   : DefaultMapper(machine, rt, local)
 {
-  std::set<Processor> all_procs;
-	machine.get_all_processors(all_procs);
-  machine_interface.filter_processors(machine, Processor::LOC_PROC, all_procs);
+  Machine::ProcessorQuery procs =
+    Machine::ProcessorQuery(machine).only_kind(Processor::LOC_PROC);
+  procs_list.assign(procs.begin(), procs.end());
 
-  for (std::set<Processor>::iterator itr = all_procs.begin();
-       itr != all_procs.end(); ++itr) {
-    Memory sysmem = machine_interface.find_memory_kind(*itr, Memory::SYSTEM_MEM);
-    all_sysmems[*itr] = sysmem;
+  Machine::MemoryQuery sysmems =
+    Machine::MemoryQuery(machine).only_kind(Memory::SYSTEM_MEM);
+  sysmems_list.assign(sysmems.begin(), sysmems.end());
+  Machine::MemoryQuery regmems =
+    Machine::MemoryQuery(machine).only_kind(Memory::REGDMA_MEM);
+
+  for (Machine::ProcessorQuery::iterator it = procs.begin();
+       it != procs.end(); ++it) {
+    Memory sysmem = Machine::MemoryQuery(sysmems).has_affinity_to(*it).first();
+    assert(sysmem.exists());
+    proc_sysmems[*it] = sysmem;
+    Memory regmem = Machine::MemoryQuery(regmems).has_affinity_to(*it).first();
+    if (!regmem.exists()) regmem = sysmem;
+    proc_regmems[*it] = regmem;
+  }
+
+  for (Machine::MemoryQuery::iterator it = sysmems.begin();
+       it != sysmems.end(); ++it) {
+    Machine::ProcessorQuery local_procs =
+      Machine::ProcessorQuery(procs).has_affinity_to(*it);
+    sysmem_local_procs[*it].assign(local_procs.begin(), local_procs.end());
   }
 }
 
@@ -88,7 +115,12 @@ void CircuitMapper::select_task_variant(Task *task)
 
 bool CircuitMapper::map_task(Task *task)
 {
-  Memory sysmem = all_sysmems[task->target_proc];
+  task->additional_procs.clear();
+  std::vector<Processor> &local_procs = sysmem_local_procs[proc_sysmems[task->target_proc]];
+  task->additional_procs.insert(local_procs.begin(), local_procs.end());
+
+  Memory sysmem = proc_sysmems[task->target_proc];
+  assert(sysmem.exists());
   std::vector<RegionRequirement> &regions = task->regions;
   for (std::vector<RegionRequirement>::iterator it = regions.begin();
         it != regions.end(); it++) {
@@ -101,14 +133,73 @@ bool CircuitMapper::map_task(Task *task)
 
     // Place all regions in local system memory.
     req.target_ranking.push_back(sysmem);
+#if 1
+    {
+      LogicalRegion root;
+
+      if (req.handle_type == SINGULAR || req.handle_type == REG_PROJECTION) {
+        root = get_root_region(req.region);
+      } else {
+        assert(req.handle_type == PART_PROJECTION);
+        root = get_root_region(req.partition);
+      }
+
+      const char *name_;
+      runtime->retrieve_name(root, name_);
+      assert(name_);
+      std::string name(name_);
+
+      int num_fields = 0;
+      if (name == "all_nodes") {
+        num_fields = 4;
+      } else if (name == "all_wires") {
+        num_fields = 26;
+      } else {
+        assert(false);
+      }
+
+      const int base = 101;
+      for (int i = base; i < base + num_fields; i++) {
+        req.additional_fields.insert(i);
+      }
+    }
+#endif
   }
 
   return false;
 }
 
+bool CircuitMapper::map_copy(Copy *copy)
+{
+  if (strcmp(copy->parent_task->get_task_name(), "toplevel") == 0)
+  {
+    for (unsigned idx = 0; idx < copy->src_requirements.size(); ++idx)
+    {
+      RegionRequirement& src_req = copy->src_requirements[idx];
+      RegionRequirement& dst_req = copy->dst_requirements[idx];
+      Color index = get_logical_region_color(src_req.region);
+      Processor target_proc = procs_list[index % procs_list.size()];
+      Memory mem = proc_sysmems[target_proc];
+      if (dst_req.privilege_fields.size() == 1)
+        mem = proc_regmems[target_proc];
+      src_req.target_ranking.clear();
+      src_req.target_ranking.push_back(proc_sysmems[target_proc]);
+      dst_req.target_ranking.clear();
+      // dst_req.target_ranking.push_back(mem);
+      dst_req.target_ranking.push_back(proc_sysmems[target_proc]);
+      src_req.blocking_factor = src_req.max_blocking_factor;
+      dst_req.blocking_factor = dst_req.max_blocking_factor;
+    }
+    return false;
+  }
+  else {
+    return DefaultMapper::map_copy(copy);
+  }
+}
+
 bool CircuitMapper::map_inline(Inline *inline_operation)
 {
-  Memory sysmem = all_sysmems[local_proc];
+  Memory sysmem = proc_sysmems[local_proc];
   RegionRequirement &req = inline_operation->requirement;
 
   // Region options:
@@ -121,12 +212,73 @@ bool CircuitMapper::map_inline(Inline *inline_operation)
   req.target_ranking.push_back(sysmem);
 
   log_circuit.debug(
-    "inline mapping region (%d,%d,%d) target ranking front " IDFMT " (size %lu)",
+    "inline mapping region (%d,%d,%d) target ranking front " IDFMT " (size %zu)",
     req.region.get_index_space().get_id(),
     req.region.get_field_space().get_id(),
     req.region.get_tree_id(),
     req.target_ranking[0].id,
     req.target_ranking.size());
+
+  return false;
+}
+
+bool CircuitMapper::map_must_epoch(const std::vector<Task*> &tasks,
+                                    const std::vector<MappingConstraint> &constraints,
+                                    MappingTagID tag)
+{
+  unsigned tasks_per_sysmem = (tasks.size() + sysmems_list.size() - 1) / sysmems_list.size();
+  for (unsigned i = 0; i < tasks.size(); ++i)
+  {
+    Task* task = tasks[i];
+    unsigned index = task->index_point.point_data[0];
+    assert(index / tasks_per_sysmem < sysmems_list.size());
+    Memory sysmem = sysmems_list[index / tasks_per_sysmem];
+    unsigned subindex = index % tasks_per_sysmem;
+    assert(subindex < sysmem_local_procs[sysmem].size());
+    task->target_proc = sysmem_local_procs[sysmem][subindex];
+    map_task(task);
+    task->additional_procs.clear();
+  }
+
+  typedef std::map<LogicalRegion, Memory> Mapping;
+  Mapping mappings;
+  for (unsigned i = 0; i < constraints.size(); ++i)
+  {
+    const MappingConstraint& c = constraints[i];
+    if (c.t1->regions[c.idx1].flags & NO_ACCESS_FLAG &&
+        c.t2->regions[c.idx2].flags & NO_ACCESS_FLAG)
+      continue;
+
+    Memory regmem;
+    if (c.t2->regions[c.idx2].flags & NO_ACCESS_FLAG)
+      regmem = proc_sysmems[c.t1->target_proc]; // proc_regmems[c.t1->target_proc];
+    else if (c.t1->regions[c.idx1].flags & NO_ACCESS_FLAG)
+      regmem = proc_sysmems[c.t2->target_proc]; // proc_regmems[c.t2->target_proc];
+    else
+      assert(0);
+    c.t1->regions[c.idx1].target_ranking.clear();
+    c.t1->regions[c.idx1].target_ranking.push_back(regmem);
+    c.t2->regions[c.idx2].target_ranking.clear();
+    c.t2->regions[c.idx2].target_ranking.push_back(regmem);
+    mappings[c.t1->regions[c.idx1].region] = regmem;
+  }
+
+  for (unsigned i = 0; i < constraints.size(); ++i)
+  {
+    const MappingConstraint& c = constraints[i];
+    if (c.t1->regions[c.idx1].flags & NO_ACCESS_FLAG &&
+        c.t2->regions[c.idx2].flags & NO_ACCESS_FLAG)
+    {
+      Mapping::iterator it =
+        mappings.find(c.t1->regions[c.idx1].region);
+      assert(it != mappings.end());
+      Memory regmem = it->second;
+      c.t1->regions[c.idx1].target_ranking.clear();
+      c.t1->regions[c.idx1].target_ranking.push_back(regmem);
+      c.t2->regions[c.idx2].target_ranking.clear();
+      c.t2->regions[c.idx2].target_ranking.push_back(regmem);
+    }
+  }
 
   return false;
 }
@@ -178,6 +330,19 @@ Color CircuitMapper::get_task_color_by_region(Task *task, const RegionRequiremen
     return get_logical_region_color(requirement.region);
   }
   return 0;
+}
+
+LogicalRegion CircuitMapper::get_root_region(LogicalRegion handle)
+{
+  if (has_parent_logical_partition(handle)) {
+    return get_root_region(get_parent_logical_partition(handle));
+  }
+  return handle;
+}
+
+LogicalRegion CircuitMapper::get_root_region(LogicalPartition handle)
+{
+  return get_root_region(get_parent_logical_region(handle));
 }
 
 static void create_mappers(Machine machine, HighLevelRuntime *runtime, const std::set<Processor> &local_procs)

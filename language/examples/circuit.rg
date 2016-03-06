@@ -521,6 +521,7 @@ do
     c.printf("\n");
   end
 end
+
 task toplevel()
   var conf : Config
   conf.num_loops = 5
@@ -574,50 +575,53 @@ task toplevel()
 
   var rp_all_wires = partition(disjoint, all_wires, colorings.wire_owner_map)
 
-  var x = false
-  for i = 0, conf.num_pieces do
-    x = init_pointers(rp_private[i], rp_shared[i], rp_ghost[i], rp_all_wires[i])
-  end
+  -- var x = false
+  -- for i = 0, conf.num_pieces do
+  --   x = init_pointers(rp_private[i], rp_shared[i], rp_ghost[i], rp_all_wires[i])
+  -- end
 
-  -- Force all previous tasks to complete before continuing.
-  do
-    var _ = 0
-    for i = 0, conf.num_pieces do
-      _ += dummy(rp_private[i], rp_shared[i], rp_ghost[i], rp_all_wires[i])
-    end
-    wait_for(_)
-  end
+  -- -- Force all previous tasks to complete before continuing.
+  -- do
+  --   var _ = 0
+  --   for i = 0, conf.num_pieces do
+  --     _ += dummy(rp_private[i], rp_shared[i], rp_ghost[i], rp_all_wires[i])
+  --   end
+  --   wait_for(_)
+  -- end
 
   c.printf("Starting main simulation loop\n")
   var ts_start = c.legion_get_current_time_in_micros()
   var simulation_success = true
   var steps = conf.steps
-  for j = 0, conf.num_loops do
-    c.legion_runtime_begin_trace(__runtime(), __context(), 0)
+  var num_loops = conf.num_loops
+  var num_pieces = conf.num_pieces
+  __demand(__spmd)
+  for j = 0, num_loops do
+    -- c.legion_runtime_begin_trace(__runtime(), __context(), 0)
 
-    __demand(__parallel)
-    for i = 0, conf.num_pieces do
+    -- __demand(__parallel)
+    for i = 0, num_pieces do
       calculate_new_currents(steps, rp_private[i], rp_shared[i], rp_ghost[i], rp_all_wires[i])
     end
-    __demand(__parallel)
-    for i = 0, conf.num_pieces do
+    -- __demand(__parallel)
+    for i = 0, num_pieces do
       distribute_charge(rp_private[i], rp_shared[i], rp_ghost[i], rp_all_wires[i])
     end
-    __demand(__parallel)
-    for i = 0, conf.num_pieces do
+    -- __demand(__parallel)
+    for i = 0, num_pieces do
       update_voltages(rp_private[i], rp_shared[i])
     end
 
-    c.legion_runtime_end_trace(__runtime(), __context(), 0)
+    -- c.legion_runtime_end_trace(__runtime(), __context(), 0)
   end
   -- Force all previous tasks to complete before continuing.
-  do
-    var _ = 0
-    for i = 0, conf.num_pieces do
-      _ += dummy(rp_private[i], rp_shared[i], rp_ghost[i], rp_all_wires[i])
-    end
-    wait_for(_)
-  end
+  -- do
+  --   var _ = 0
+  --   for i = 0, conf.num_pieces do
+  --     _ += dummy(rp_private[i], rp_shared[i], rp_ghost[i], rp_all_wires[i])
+  --   end
+  --   wait_for(_)
+  -- end
   var ts_end = c.legion_get_current_time_in_micros()
   if simulation_success then
     c.printf("SUCCESS!\n")
@@ -645,11 +649,11 @@ task toplevel()
     c.printf("GFLOPS = %7.3f GFLOPS\n", gflops)
   end
   c.printf("simulation complete - destroying regions\n")
-  if conf.dump_values then
-    for i = 0, conf.num_pieces do
-      dump_task(rp_private[i], rp_shared[i], rp_ghost[i], rp_all_wires[i])
-    end
-  end
+  -- if conf.dump_values then
+  --   for i = 0, conf.num_pieces do
+  --     dump_task(rp_private[i], rp_shared[i], rp_ghost[i], rp_all_wires[i])
+  --   end
+  -- end
   c.free(colorings.first_wires)
 end
 
