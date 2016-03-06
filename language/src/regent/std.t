@@ -2911,7 +2911,7 @@ do
   end
 end
 
-function std.setup(main_task)
+function std.setup(main_task, extra_setup_thunk)
   assert(std.is_task(main_task))
   local task_registrations = tasks:map(
     function(task)
@@ -2967,9 +2967,17 @@ function std.setup(main_task)
     end
   end
 
+  local extra_setup = quote end
+  if extra_setup_thunk then
+    extra_setup = quote
+      [extra_setup_thunk]()
+    end
+  end
+
   local terra main(argc : int, argv : &rawstring)
     [task_registrations];
-    [reduction_registrations]
+    [reduction_registrations];
+    [extra_setup];
     c.legion_runtime_set_top_level_task_id([main_task:gettaskid()])
     return c.legion_runtime_start(argc, argv, false)
   end
