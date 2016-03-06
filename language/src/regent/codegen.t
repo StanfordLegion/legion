@@ -3659,7 +3659,13 @@ function codegen.expr_list_invert(cx, node)
 
       -- Fill sublist.
       var subslot = 0
+      std.assert(
+        [barriers.value].__size == [product.value].__size,
+        "list size mismatch in list_invert")
       for j = 0, [product.value].__size do
+        std.assert(
+          [barriers_type:data(barriers.value)][j].__size == [product_type:data(product.value)][j].__size,
+          "sublist size mismatch in list_invert")
         for k = 0, [product_type:data(product.value)][j].__size do
           var leaf = [product_type.element_type:data(
                         `([product_type:data(product.value)][j]))][k].impl
@@ -3678,6 +3684,7 @@ function codegen.expr_list_invert(cx, node)
           end
         end
       end
+      regentlib.assert(subslot == subsize, "underflowed sublist in list_invert")
     end
   end
 
@@ -3831,6 +3838,7 @@ local function expr_copy_extract_phase_barriers(index, values, value_types)
     local result_type = value_type.element_type
     local result_value = terralib.newsymbol(result_type, "condition_element")
     actions:insert(quote
+        std.assert([index] < [value].__size, "barrier index out of bounds in copy")
         var [result_value] = [value_type:data(value)][ [index] ]
     end)
     result_values:insert(result_value)
