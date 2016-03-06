@@ -48,8 +48,17 @@ namespace Legion {
     public:
       virtual bool is_instance_view(void) const = 0;
       virtual bool is_deferred_view(void) const = 0;
+#ifdef DEBUG_HIGH_LEVEL
       virtual InstanceView* as_instance_view(void) const = 0;
       virtual DeferredView* as_deferred_view(void) const = 0;
+#else
+      InstanceView* as_instance_view(void) const
+        { return static_cast<InstanceView*>(
+                  const_cast<LogicalView*>(this)); }
+      DeferredView* as_deferred_view(void) const
+        { return static_cast<DeferredView*>(
+                  const_cast<LogicalView*>(this)); }
+#endif
       virtual bool has_manager(void) const = 0;
       virtual PhysicalManager* get_manager(void) const = 0;
       virtual bool has_parent(void) const = 0;
@@ -97,12 +106,23 @@ namespace Legion {
     public:
       virtual bool is_instance_view(void) const;
       virtual bool is_deferred_view(void) const;
+#ifdef DEBUG_HIGH_LEVEL
       virtual InstanceView* as_instance_view(void) const;
       virtual DeferredView* as_deferred_view(void) const;
+#endif
       virtual bool is_materialized_view(void) const = 0;
       virtual bool is_reduction_view(void) const = 0;
+#ifdef DEBUG_HIGH_LEVEL
       virtual MaterializedView* as_materialized_view(void) const = 0;
       virtual ReductionView* as_reduction_view(void) const = 0;
+#else
+      inline MaterializedView* as_materialized_view(void) const
+        { return static_cast<MaterializedView*>(
+                  const_cast<InstanceView*>(this)); }
+      inline ReductionView* as_reduction_view(void) const
+        { return static_cast<ReductionView*>(
+                  const_cast<InstanceView*>(this)); }
+#endif
       virtual bool has_manager(void) const = 0;
       virtual PhysicalManager* get_manager(void) const = 0;
       virtual bool has_parent(void) const = 0;
@@ -192,8 +212,10 @@ namespace Legion {
     public:
       virtual bool is_materialized_view(void) const;
       virtual bool is_reduction_view(void) const;
+#ifdef DEBUG_HIGH_LEVEL
       virtual MaterializedView* as_materialized_view(void) const;
       virtual ReductionView* as_reduction_view(void) const;
+#endif
       virtual bool has_space(const FieldMask &space_mask) const;
     public:
       MaterializedView* get_materialized_subview(const ColorPoint &c);
@@ -439,8 +461,10 @@ namespace Legion {
     public:
       virtual bool is_materialized_view(void) const;
       virtual bool is_reduction_view(void) const;
+#ifdef DEBUG_HIGH_LEVEL
       virtual MaterializedView* as_materialized_view(void) const;
       virtual ReductionView* as_reduction_view(void) const;
+#endif
       virtual bool has_manager(void) const { return true; } 
       virtual PhysicalManager* get_manager(void) const;
       virtual bool has_parent(void) const { return false; }
@@ -563,14 +587,25 @@ namespace Legion {
     public:
       virtual bool is_instance_view(void) const { return false; }
       virtual bool is_deferred_view(void) const { return true; }
+#ifdef DEBUG_HIGH_LEVEL
       virtual InstanceView* as_instance_view(void) const { return NULL; }
       virtual DeferredView* as_deferred_view(void) const
         { return const_cast<DeferredView*>(this); }
+#endif
     public:
       virtual bool is_composite_view(void) const = 0;
       virtual bool is_fill_view(void) const = 0;
+#ifdef DEBUG_HIGH_LEVEL
       virtual FillView* as_fill_view(void) const = 0;
       virtual CompositeView* as_composite_view(void) const = 0;
+#else
+      inline FillView* as_fill_view(void) const
+        { return static_cast<FillView*>(
+                  const_cast<DeferredView*>(this)); }
+      inline CompositeView* as_composite_view(void) const
+        { return static_cast<CompositeView*>(
+                  const_cast<DeferredView*>(this)); }
+#endif
     public:
       void update_reduction_views(ReductionView *view, 
                                   const FieldMask &valid_mask,
@@ -691,10 +726,12 @@ namespace Legion {
     public:
       virtual bool is_composite_view(void) const { return true; }
       virtual bool is_fill_view(void) const { return false; }
+#ifdef DEBUG_HIGH_LEVEL
       virtual FillView* as_fill_view(void) const
         { return NULL; }
       virtual CompositeView* as_composite_view(void) const
         { return const_cast<CompositeView*>(this); }
+#endif
     public:
       void update_valid_mask(const FieldMask &mask);
       void flatten_composite_view(FieldMask &global_dirt,
@@ -933,9 +970,11 @@ namespace Legion {
     public:
       virtual bool is_composite_view(void) const { return false; }
       virtual bool is_fill_view(void) const { return true; }
+#ifdef DEBUG_HIGH_LEVEL
       virtual FillView* as_fill_view(void) const
         { return const_cast<FillView*>(this); }
       virtual CompositeView* as_composite_view(void) const { return NULL; }
+#endif
     public:
       virtual void update_child_reduction_views(ReductionView *view,
                                                 const FieldMask &valid_mask,

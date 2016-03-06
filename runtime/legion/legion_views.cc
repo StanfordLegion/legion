@@ -199,6 +199,7 @@ namespace Legion {
       return false;
     }
 
+#ifdef DEBUG_HIGH_LEVEL
     //--------------------------------------------------------------------------
     InstanceView* InstanceView::as_instance_view(void) const
     //--------------------------------------------------------------------------
@@ -212,6 +213,7 @@ namespace Legion {
     {
       return NULL;
     }
+#endif
 
     /////////////////////////////////////////////////////////////
     // MaterializedView 
@@ -356,6 +358,7 @@ namespace Legion {
       return false; 
     }
 
+#ifdef DEBUG_HIGH_LEVEL
     //--------------------------------------------------------------------------
     MaterializedView* MaterializedView::as_materialized_view(void) const
     //--------------------------------------------------------------------------
@@ -369,6 +372,7 @@ namespace Legion {
     {
       return NULL;
     }
+#endif
 
     //--------------------------------------------------------------------------
     bool MaterializedView::has_space(const FieldMask &space_mask) const
@@ -5694,6 +5698,7 @@ namespace Legion {
       return true;
     }
 
+#ifdef DEBUG_HIGH_LEVEL
     //--------------------------------------------------------------------------
     MaterializedView* ReductionView::as_materialized_view(void) const
     //--------------------------------------------------------------------------
@@ -5707,6 +5712,7 @@ namespace Legion {
     {
       return const_cast<ReductionView*>(this);
     }
+#endif
 
     //--------------------------------------------------------------------------
     PhysicalManager* ReductionView::get_manager(void) const

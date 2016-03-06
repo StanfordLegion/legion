@@ -1050,7 +1050,6 @@ namespace Legion {
     public:
       InstanceRef(bool composite = false);
       InstanceRef(const InstanceRef &rhs);
-      InstanceRef(const FieldMask &valid_fields);
       InstanceRef(PhysicalManager *manager, const FieldMask &valid_fields,
                   Event ready_event = Event::NO_EVENT);
       ~InstanceRef(void);

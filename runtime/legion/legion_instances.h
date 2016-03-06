@@ -44,6 +44,8 @@ namespace Legion {
                         const std::vector<unsigned> &mask_index_map,
                         const std::vector<CustomSerdezID> &serdez,
           const std::vector<std::pair<FieldID,size_t> > &field_sizes);
+      // Used only by the virtual manager
+      LayoutDescription(const FieldMask &mask, LayoutConstraints *constraints);
       LayoutDescription(const LayoutDescription &rhs);
       ~LayoutDescription(void);
     public:
@@ -127,8 +129,22 @@ namespace Legion {
           get_field_accessor(FieldID fid) const = 0;
       virtual bool is_reduction_manager(void) const = 0;
       virtual bool is_instance_manager(void) const = 0;
+      virtual bool is_virtual_manager(void) const = 0;
+#ifdef DEBUG_HIGH_LEVEL
       virtual InstanceManager* as_instance_manager(void) const = 0;
       virtual ReductionManager* as_reduction_manager(void) const = 0;
+      virtual VirtualManager* as_virtual_manager(void) const = 0;
+#else
+      inline InstanceManager* as_instance_manager(void) const
+        { return static_cast<InstanceManager*>(
+                  const_cast<PhysicalManager*>(this)); }
+      inline ReductionManager* as_reduction_manager(void) const
+        { return static_cast<ReductionManager*>(
+                 const_cast<PhysicalManager*>(this)); }
+      inline VirtualManager* as_virtual_manager(void) const
+        { return static_cast<VirtualManager*>(
+                 const_cast<PhysicalManager*>(this)); }
+#endif
       virtual size_t get_instance_size(void) const = 0;
       virtual void notify_active(void);
       virtual void notify_inactive(void);
@@ -144,6 +160,8 @@ namespace Legion {
         { return is_instance_manager(); }
       inline bool is_reduction_instance(void) const
         { return is_reduction_manager(); }
+      inline bool is_virtual_instance(void) const
+        { return is_virtual_manager(); }
     public:
       void register_logical_top_view(UniqueID context_uid, LogicalView *view);
       void unregister_logical_top_view(LogicalView *view);
@@ -154,9 +172,10 @@ namespace Legion {
     public:
       bool meets_region_tree(const std::vector<LogicalRegion> &regions) const;
       bool meets_regions(const std::vector<LogicalRegion> &regions) const;
-      bool entails(const LayoutConstraintSet &constraints) const;
       bool entails(LayoutConstraints *constraints) const;
+      bool entails(const LayoutConstraintSet &constraints) const;
       bool conflicts(LayoutConstraints *constraints) const;
+      bool conflicts(const LayoutConstraintSet &constraints) const;
     public:
       inline PhysicalInstance get_instance(void) const
       {
@@ -218,8 +237,12 @@ namespace Legion {
           get_field_accessor(FieldID fid) const;
       virtual bool is_reduction_manager(void) const;
       virtual bool is_instance_manager(void) const;
+      virtual bool is_virtual_manager(void) const;
+#ifdef DEBUG_HIGH_LEVEL
       virtual InstanceManager* as_instance_manager(void) const;
       virtual ReductionManager* as_reduction_manager(void) const;
+      virtual VirtualManager* as_virtual_manager(void) const;
+#endif
       virtual size_t get_instance_size(void) const;
     public:
       inline Event get_use_event(void) const { return use_event; }
@@ -285,8 +308,12 @@ namespace Legion {
           get_field_accessor(FieldID fid) const = 0;
       virtual bool is_reduction_manager(void) const;
       virtual bool is_instance_manager(void) const;
+      virtual bool is_virtual_manager(void) const;
+#ifdef DEBUG_HIGH_LEVEL
       virtual InstanceManager* as_instance_manager(void) const;
       virtual ReductionManager* as_reduction_manager(void) const;
+      virtual VirtualManager* as_virtual_manager(void) const;
+#endif
       virtual size_t get_instance_size(void) const = 0;
     public:
       virtual bool is_foldable(void) const = 0;
@@ -300,8 +327,17 @@ namespace Legion {
       virtual Domain get_pointer_space(void) const = 0;
     public:
       virtual bool is_list_manager(void) const = 0;
+#ifdef DEBUG_HIGH_LEVEL
       virtual ListReductionManager* as_list_manager(void) const = 0;
       virtual FoldReductionManager* as_fold_manager(void) const = 0;
+#else
+      inline ListReductionManager* as_list_manager(void) const
+        { return static_cast<ListReductionManager*>(
+                  const_cast<ReductionManager*>(this)); }
+      inline FoldReductionManager* as_fold_manager(void) const
+        { return static_cast<FoldReductionManager*>(
+                  const_cast<ReductionManager*>(this)); }
+#endif
       virtual Event get_use_event(void) const = 0;
     public:
       // Support for mapper queries
@@ -363,8 +399,10 @@ namespace Legion {
       virtual Domain get_pointer_space(void) const;
     public:
       virtual bool is_list_manager(void) const;
+#ifdef DEBUG_HIGH_LEVEL
       virtual ListReductionManager* as_list_manager(void) const;
       virtual FoldReductionManager* as_fold_manager(void) const;
+#endif
       virtual Event get_use_event(void) const;
     protected:
       const Domain ptr_space;
@@ -412,11 +450,61 @@ namespace Legion {
       virtual Domain get_pointer_space(void) const;
     public:
       virtual bool is_list_manager(void) const;
+#ifdef DEBUG_HIGH_LEVEL
       virtual ListReductionManager* as_list_manager(void) const;
       virtual FoldReductionManager* as_fold_manager(void) const;
+#endif
       virtual Event get_use_event(void) const;
     public:
       const Event use_event;
+    };
+
+    /**
+     * \class VirtualManager
+     * This is a singleton class of which there will be exactly one
+     * on every node in the machine. The virtual manager class will
+     * represent all the virtual virtual/composite instances.
+     */
+    class VirtualManager : public PhysicalManager {
+    public:
+      VirtualManager(RegionTreeForest *ctx, LayoutDescription *desc,
+                     const PointerConstraint &constraint,
+                     DistributedID did, AddressSpaceID local_space);
+      VirtualManager(const VirtualManager &rhs);
+      virtual ~VirtualManager(void);
+    public:
+      VirtualManager& operator=(const VirtualManager &rhs);
+    public:
+      virtual LegionRuntime::Accessor::RegionAccessor<
+        LegionRuntime::Accessor::AccessorType::Generic>
+          get_accessor(void) const;
+      virtual LegionRuntime::Accessor::RegionAccessor<
+        LegionRuntime::Accessor::AccessorType::Generic>
+          get_field_accessor(FieldID fid) const;
+      virtual bool is_reduction_manager(void) const;
+      virtual bool is_instance_manager(void) const;
+      virtual bool is_virtual_manager(void) const;
+#ifdef DEBUG_HIGH_LEVEL
+      virtual InstanceManager* as_instance_manager(void) const;
+      virtual ReductionManager* as_reduction_manager(void) const;
+      virtual VirtualManager* as_virtual_manager(void) const;
+#endif
+      virtual size_t get_instance_size(void) const;
+      virtual DistributedID send_manager(AddressSpaceID target);
+      virtual bool has_field(FieldID fid) const;
+      virtual void has_fields(std::map<FieldID,bool> &fields) const;
+      virtual void remove_space_fields(std::set<FieldID> &fields) const;
+    public:
+      static inline VirtualManager* get_virtual_instance(void)
+        { return get_singleton(); }
+      static void initialize_virtual_instance(Runtime *runtime,
+                                              DistributedID did);
+    protected:
+      static inline VirtualManager*& get_singleton(void)
+      {
+        static VirtualManager *singleton = NULL;
+        return singleton;
+      }
     };
 
     /**

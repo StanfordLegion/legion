@@ -1308,6 +1308,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool PhysicalRegionImpl::has_references(void) const
+    //--------------------------------------------------------------------------
+    {
+      return !references.empty();
+    }
+
+    //--------------------------------------------------------------------------
     void PhysicalRegionImpl::get_references(InstanceSet &instances) const
     //--------------------------------------------------------------------------
     {
@@ -6563,6 +6570,162 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool LayoutConstraints::entails(LayoutConstraints *constraints)
+    //--------------------------------------------------------------------------
+    {
+      // Check to see if the result is in the cache
+      {
+        AutoLock gc(gc_lock,1,false/*exclusive*/);
+        std::map<LayoutConstraintID,bool>::const_iterator finder = 
+          entailment_cache.find(constraints->layout_id);
+        if (finder != entailment_cache.end())
+          return finder->second;
+      }
+      // Didn't find it, so do the test for real
+      bool result = entails(*constraints);
+      // Save the result in the cache
+      AutoLock gc(gc_lock);
+      entailment_cache[constraints->layout_id] = result;
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    bool LayoutConstraints::entails(const LayoutConstraintSet &other) const
+    //--------------------------------------------------------------------------
+    {
+      return LayoutConstraintSet::entails(other);
+    }
+
+    //--------------------------------------------------------------------------
+    bool LayoutConstraints::conflicts(LayoutConstraints *constraints)
+    //--------------------------------------------------------------------------
+    {
+      // Check to see if the result is in the cache
+      {
+        AutoLock gc(gc_lock,1,false/*exclusive*/);
+        std::map<LayoutConstraintID,bool>::const_iterator finder = 
+          conflict_cache.find(constraints->layout_id);
+        if (finder != conflict_cache.end())
+          return finder->second;
+      }
+      // Didn't find it, so do the test for real
+      bool result = conflicts(*constraints);
+      // Save the result in the cache
+      AutoLock gc(gc_lock);
+      conflict_cache[constraints->layout_id] = result;
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    bool LayoutConstraints::conflicts(const LayoutConstraintSet &other) const
+    //--------------------------------------------------------------------------
+    {
+      return LayoutConstraintSet::conflicts(other);
+    }
+
+    //--------------------------------------------------------------------------
+    bool LayoutConstraints::entails_without_pointer(
+                                                 LayoutConstraints *constraints)
+    //--------------------------------------------------------------------------
+    {
+      // See if we have it in the cache
+      {
+        AutoLock gc(gc_lock,1,false/*exclusive*/);
+        std::map<LayoutConstraintID,bool>::const_iterator finder = 
+          no_pointer_entailment_cache.find(constraints->layout_id);
+        if (finder != no_pointer_entailment_cache.end())
+          return finder->second;
+      }
+      // Didn't find it so do the test for real
+      bool result = entails_without_pointer(*constraints);
+      // Save the result in the cache
+      AutoLock gc(gc_lock);
+      no_pointer_entailment_cache[constraints->layout_id] = result;
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    bool LayoutConstraints::entails_without_pointer(
+                                         const LayoutConstraintSet &other) const
+    //--------------------------------------------------------------------------
+    {
+      // Do all the normal entailment but don't check the pointer constraint 
+      if (!specialized_constraint.entails(other.specialized_constraint))
+        return false;
+      if (!field_constraint.entails(other.field_constraint))
+        return false;
+      if (!memory_constraint.entails(other.memory_constraint))
+        return false;
+      if (!ordering_constraint.entails(other.ordering_constraint))
+        return false;
+      for (std::vector<SplittingConstraint>::const_iterator it = 
+            other.splitting_constraints.begin(); it !=
+            other.splitting_constraints.end(); it++)
+      {
+        bool entailed = false;
+        for (unsigned idx = 0; idx < splitting_constraints.size(); idx++)
+        {
+          if (splitting_constraints[idx].entails(*it))
+          {
+            entailed = true;
+            break;
+          }
+        }
+        if (!entailed)
+          return false;
+      }
+      for (std::vector<DimensionConstraint>::const_iterator it = 
+            other.dimension_constraints.begin(); it != 
+            other.dimension_constraints.end(); it++)
+      {
+        bool entailed = false;
+        for (unsigned idx = 0; idx < dimension_constraints.size(); idx++)
+        {
+          if (dimension_constraints[idx].entails(*it))
+          {
+            entailed = true;
+            break;
+          }
+        }
+        if (!entailed)
+          return false;
+      }
+      for (std::vector<AlignmentConstraint>::const_iterator it = 
+            other.alignment_constraints.begin(); it != 
+            other.alignment_constraints.end(); it++)
+      {
+        bool entailed = false;
+        for (unsigned idx = 0; idx < alignment_constraints.size(); idx++)
+        {
+          if (alignment_constraints[idx].entails(*it))
+          {
+            entailed = true;
+            break;
+          }
+        }
+        if (!entailed)
+          return false;
+      }
+      for (std::vector<OffsetConstraint>::const_iterator it = 
+            other.offset_constraints.begin(); it != 
+            other.offset_constraints.end(); it++)
+      {
+        bool entailed = false;
+        for (unsigned idx = 0; idx < offset_constraints.size(); idx++)
+        {
+          if (offset_constraints[idx].entails(*it))
+          {
+            entailed = true;
+            break;
+          }
+        }
+        if (!entailed)
+          return false;
+      }
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ AddressSpaceID LayoutConstraints::get_owner_space(
                             LayoutConstraintID layout_id, Runtime *runtime)
     //--------------------------------------------------------------------------
@@ -6789,7 +6952,8 @@ namespace Legion {
       // Do some mixing
       for (int i = 0; i < 256; i++)
         nrand48(random_state);
-
+      // Initialize our one virtual manager
+      VirtualManager::initialize_virtual_instance(this, 0/*same across nodes*/);
 #ifdef DEBUG_HIGH_LEVEL
       if (logging_region_tree_state)
       {

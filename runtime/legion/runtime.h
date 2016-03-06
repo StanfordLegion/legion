@@ -1177,11 +1177,12 @@ namespace Legion {
       void send_constraint_response(AddressSpaceID source,UserEvent done_event);
       void update_constraints(Deserializer &derez);
     public:
-      bool equal(const LayoutConstraintSet &other_constraints) const;
-      bool entails(const LayoutConstraintSet &other_constraints) const;
-      bool conflicts(const LayoutConstraintSet &other_constraints) const;
       bool entails(LayoutConstraints *other_constraints);
+      bool entails(const LayoutConstraintSet &other) const;
       bool conflicts(LayoutConstraints *other_constraints);
+      bool conflicts(const LayoutConstraintSet &other) const;
+      bool entails_without_pointer(LayoutConstraints *other);
+      bool entails_without_pointer(const LayoutConstraintSet &other) const;
     public:
       static AddressSpaceID get_owner_space(LayoutConstraintID layout_id,
                                             Runtime *runtime);
@@ -1197,6 +1198,10 @@ namespace Legion {
       const FieldSpace handle;
     protected:
       char *constraints_name;
+    protected:
+      std::map<LayoutConstraintID,bool> conflict_cache;
+      std::map<LayoutConstraintID,bool> entailment_cache;
+      std::map<LayoutConstraintID,bool> no_pointer_entailment_cache;
     };
 
     /**

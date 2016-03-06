@@ -73,6 +73,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    LayoutDescription::LayoutDescription(const FieldMask &mask,
+                                         LayoutConstraints *con)
+      : allocated_fields(mask), constraints(con), owner(NULL)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
     LayoutDescription::LayoutDescription(const LayoutDescription &rhs)
       : allocated_fields(rhs.allocated_fields), 
         constraints(rhs.constraints), owner(rhs.owner)
@@ -343,8 +351,10 @@ namespace Legion {
                          const LayoutConstraintSet &candidate_constraints) const
     //--------------------------------------------------------------------------
     {
-      if (!constraints->equal(candidate_constraints))
+      // Layout descriptions are always complete, so just check for conflicts
+      if (constraints->conflicts(candidate_constraints))
         return false;
+      // If they don't conflict they have to be the same
       return true;
     }
 
@@ -354,8 +364,10 @@ namespace Legion {
     {
       if (layout->allocated_fields != allocated_fields)
         return false;
-      if (!constraints->equal(*(layout->constraints)))
+      // Layout descriptions are always complete so just check for conflicts
+      if (constraints->conflicts(layout->constraints))
         return false;
+      // If they don't conflict they have to be the same
       return true;
     }
 
@@ -545,7 +557,9 @@ namespace Legion {
       if (is_owner())
         assert(instance.exists());
 #endif
-      memory_manager->activate_instance(this);
+      // Will be null for virtual managers
+      if (memory_manager != NULL)
+        memory_manager->activate_instance(this);
       // If we are not the owner, send a reference
       if (!is_owner())
         send_remote_gc_update(owner_space, 1/*count*/, true/*add*/);
@@ -559,7 +573,9 @@ namespace Legion {
       if (is_owner())
         assert(instance.exists());
 #endif
-      memory_manager->deactivate_instance(this);
+      // Will be null for virtual managers
+      if (memory_manager != NULL)
+        memory_manager->deactivate_instance(this);
       if (!is_owner())
         send_remote_gc_update(owner_space, 1/*count*/, false/*add*/);
     }
@@ -573,7 +589,9 @@ namespace Legion {
       if (is_owner())
         assert(instance.exists());
 #endif
-      memory_manager->validate_instance(this);
+      // Will be null for virtual managers
+      if (memory_manager != NULL)
+        memory_manager->validate_instance(this);
       // If we are not the owner, send a reference
       if (!is_owner())
         send_remote_valid_update(owner_space, 1/*count*/, true/*add*/);
@@ -587,7 +605,9 @@ namespace Legion {
       if (is_owner())
         assert(instance.exists());
 #endif
-      memory_manager->invalidate_instance(this);
+      // Will be null for virtual managers
+      if (memory_manager != NULL)
+        memory_manager->invalidate_instance(this);
       if (!is_owner())
         send_remote_valid_update(owner_space, 1/*count*/, false/*add*/);
     }
@@ -746,6 +766,48 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool PhysicalManager::entails(LayoutConstraints *constraints) const
+    //--------------------------------------------------------------------------
+    {
+      // Always test the pointer constraint locally
+      if (!pointer_constraint.entails(constraints->pointer_constraint))
+        return false;
+      return layout->constraints->entails_without_pointer(constraints);
+    }
+
+    //--------------------------------------------------------------------------
+    bool PhysicalManager::entails(const LayoutConstraintSet &constraints) const
+    //--------------------------------------------------------------------------
+    {
+      // Always test the pointer constraint locally
+      if (!pointer_constraint.entails(constraints.pointer_constraint))
+        return false;
+      return layout->constraints->entails_without_pointer(constraints);
+    }
+
+    //--------------------------------------------------------------------------
+    bool PhysicalManager::conflicts(LayoutConstraints *constraints) const
+    //--------------------------------------------------------------------------
+    {
+      // Always test the pointer constraint locally
+      if (pointer_constraint.conflicts(constraints->pointer_constraint))
+        return true;
+      // We know our layouts don't have a pointer constraint so nothing special
+      return layout->constraints->conflicts(constraints);
+    }
+
+    //--------------------------------------------------------------------------
+    bool PhysicalManager::conflicts(const LayoutConstraintSet &constraints)const
+    //--------------------------------------------------------------------------
+    {
+      // Always test the pointer constraint locally
+      if (pointer_constraint.conflicts(constraints.pointer_constraint))
+        return true;
+      // We know our layouts don't have a pointer constraint so nothing special
+      return layout->constraints->conflicts(constraints);
+    }
+
+    //--------------------------------------------------------------------------
     void PhysicalManager::perform_deletion(Event deferred_event) const
     //--------------------------------------------------------------------------
     {
@@ -890,6 +952,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool InstanceManager::is_virtual_manager(void) const
+    //--------------------------------------------------------------------------
+    {
+      return false;
+    }
+
+#ifdef DEBUG_HIGH_LEVEL
+    //--------------------------------------------------------------------------
     InstanceManager* InstanceManager::as_instance_manager(void) const
     //--------------------------------------------------------------------------
     {
@@ -902,6 +972,14 @@ namespace Legion {
     {
       return NULL;
     }
+
+    //--------------------------------------------------------------------------
+    VirtualManager* InstanceManager::as_virtual_manager(void) const
+    //--------------------------------------------------------------------------
+    {
+      return NULL;
+    }
+#endif
 
     //--------------------------------------------------------------------------
     size_t InstanceManager::get_instance_size(void) const
@@ -1108,6 +1186,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool ReductionManager::is_virtual_manager(void) const
+    //--------------------------------------------------------------------------
+    {
+      return false;
+    }
+
+#ifdef DEBUG_HIGH_LEVEL
+    //--------------------------------------------------------------------------
     InstanceManager* ReductionManager::as_instance_manager(void) const
     //--------------------------------------------------------------------------
     {
@@ -1120,6 +1206,14 @@ namespace Legion {
     {
       return const_cast<ReductionManager*>(this);
     }
+
+    //--------------------------------------------------------------------------
+    VirtualManager* ReductionManager::as_virtual_manager(void) const
+    //--------------------------------------------------------------------------
+    {
+      return NULL;
+    }
+#endif
 
     //--------------------------------------------------------------------------
     bool ReductionManager::has_field(FieldID fid) const
@@ -1427,6 +1521,7 @@ namespace Legion {
       return true;
     }
 
+#ifdef DEBUG_HIGH_LEVEL
     //--------------------------------------------------------------------------
     ListReductionManager* ListReductionManager::as_list_manager(void) const
     //--------------------------------------------------------------------------
@@ -1440,6 +1535,7 @@ namespace Legion {
     {
       return NULL;
     }
+#endif
 
     //--------------------------------------------------------------------------
     Event ListReductionManager::get_use_event(void) const
@@ -1594,6 +1690,7 @@ namespace Legion {
       return false;
     }
 
+#ifdef DEBUG_HIGH_LEVEL
     //--------------------------------------------------------------------------
     ListReductionManager* FoldReductionManager::as_list_manager(void) const
     //--------------------------------------------------------------------------
@@ -1607,12 +1704,188 @@ namespace Legion {
     {
       return const_cast<FoldReductionManager*>(this);
     }
+#endif
 
     //--------------------------------------------------------------------------
     Event FoldReductionManager::get_use_event(void) const
     //--------------------------------------------------------------------------
     {
       return use_event;
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Virtual Manager 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    VirtualManager::VirtualManager(RegionTreeForest *ctx, 
+                                   LayoutDescription *desc,
+                                   const PointerConstraint &constraint,
+                                   DistributedID did,AddressSpaceID local_space)
+      : PhysicalManager(ctx, NULL/*memory*/, desc, constraint, did, local_space,
+                        local_space, NULL/*region*/, PhysicalInstance::NO_INST,
+                        Domain::NO_DOMAIN, false/*own domain*/,false/*reg now*/)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    VirtualManager::VirtualManager(const VirtualManager &rhs)
+      : PhysicalManager(NULL, NULL, NULL, rhs.pointer_constraint, 0, 0, 0,
+                        NULL, PhysicalInstance::NO_INST, Domain::NO_DOMAIN,
+                        false, false)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    VirtualManager::~VirtualManager(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    VirtualManager& VirtualManager::operator=(const VirtualManager &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    LegionRuntime::Accessor::RegionAccessor<
+        LegionRuntime::Accessor::AccessorType::Generic>
+          VirtualManager::get_accessor(void) const
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return PhysicalInstance::NO_INST.get_accessor();
+    }
+
+    //--------------------------------------------------------------------------
+    LegionRuntime::Accessor::RegionAccessor<
+        LegionRuntime::Accessor::AccessorType::Generic>
+          VirtualManager::get_field_accessor(FieldID fid) const
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return PhysicalInstance::NO_INST.get_accessor();
+    }
+
+    //--------------------------------------------------------------------------
+    bool VirtualManager::is_reduction_manager(void) const
+    //--------------------------------------------------------------------------
+    {
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    bool VirtualManager::is_instance_manager(void) const
+    //--------------------------------------------------------------------------
+    {
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    bool VirtualManager::is_virtual_manager(void) const
+    //--------------------------------------------------------------------------
+    {
+      return true;
+    }
+
+#ifdef DEBUG_HIGH_LEVEL
+    //--------------------------------------------------------------------------
+    InstanceManager* VirtualManager::as_instance_manager(void) const
+    //--------------------------------------------------------------------------
+    {
+      return NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    ReductionManager* VirtualManager::as_reduction_manager(void) const
+    //--------------------------------------------------------------------------
+    {
+      return NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    VirtualManager* VirtualManager::as_virtual_manager(void) const
+    //--------------------------------------------------------------------------
+    {
+      return const_cast<VirtualManager*>(this);
+    }
+#endif
+
+    //--------------------------------------------------------------------------
+    size_t VirtualManager::get_instance_size(void) const
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return 0;
+    }
+
+    //--------------------------------------------------------------------------
+    DistributedID VirtualManager::send_manager(AddressSpaceID target)
+    //--------------------------------------------------------------------------
+    {
+      // no need to do anything
+      return did;
+    }
+
+    //--------------------------------------------------------------------------
+    bool VirtualManager::has_field(FieldID fid) const
+    //--------------------------------------------------------------------------
+    {
+      // has all fields
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    void VirtualManager::has_fields(std::map<FieldID,bool> &fields) const
+    //--------------------------------------------------------------------------
+    {
+      for (std::map<FieldID,bool>::iterator it = fields.begin();
+            it != fields.end(); it++)
+        it->second = true;
+    }
+
+    //--------------------------------------------------------------------------
+    void VirtualManager::remove_space_fields(std::set<FieldID> &fields) const
+    //--------------------------------------------------------------------------
+    {
+      fields.clear();
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void VirtualManager::initialize_virtual_instance(Runtime *rt,
+                                                              DistributedID did)
+    //--------------------------------------------------------------------------
+    {
+      VirtualManager *&singleton = get_singleton();
+      // make a layout constraints
+      LayoutConstraintSet constraint_set;
+      constraint_set.add_constraint(
+          SpecializedConstraint(SpecializedConstraint::VIRTUAL_SPECIALIZE));
+      LayoutConstraints *constraints = 
+        rt->register_layout(FieldSpace::NO_SPACE, constraint_set);
+      FieldMask all_ones(LEGION_FIELD_MASK_FIELD_ALL_ONES);
+      std::vector<unsigned> mask_index_map;
+      std::vector<CustomSerdezID> serdez;
+      std::vector<std::pair<FieldID,size_t> > field_sizes;
+      LayoutDescription *layout = new LayoutDescription(all_ones, constraints);
+      PointerConstraint pointer_constraint(Memory::NO_MEMORY, 0);
+      singleton = new VirtualManager(rt->forest, layout, pointer_constraint,
+                                     did, rt->address_space);
+      // register this with the runtime
+      rt->register_distributed_collectable(did, singleton);
+      // put a permenant resource reference on this so it is never deleted
+      singleton->add_base_resource_ref(MAX_GC_REF);
     }
 
     /////////////////////////////////////////////////////////////

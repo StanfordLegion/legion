@@ -660,6 +660,7 @@ namespace Legion {
     class ReductionManager;
     class ListReductionManager;
     class FoldReductionManager;
+    class VirtualManager;
     class ReductionView;
     class InstanceBuilder;
 

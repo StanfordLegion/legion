@@ -68,37 +68,6 @@ namespace Legion {
       OUTER_DIM_Z,
     };
 
-    // Provide a base class for all constraint types that
-    // relies on the CRTP for doing static polymorphism for
-    // all constraint kinds.  We know that constraints of 
-    // different kinds can never satisfy each other so we 
-    // can keep them in different sets.  This allows us to
-    // abstract over kinds of constraints and provide the 
-    // same interface for writing general constraint
-    // satisfaction routines.
-    //
-    // We need two routines for comparing two constraints:
-    //
-    //  1. Check if one satisfies the other
-    //  2. Check if one conflicts with the other
-    //
-    // Otherwise the constraint satisfaction routine can
-    // ignore the pair and continue.
-    template<typename T>
-    class Constraint {
-    public:
-      inline bool satisfies_constraint(const Constraint<T> *other) const  
-      {
-        return static_cast<const T*>(this)->satisfies(
-                                              static_cast<const T*>(other));
-      }
-      inline bool conflicts_constraint(const Constraint<T> *other) const
-      {
-        return static_cast<const T*>(this)->conflicts(
-                                              static_cast<const T*>(other));
-      }
-    };
-
     /**
      * \class ISAConstraint
      * ISA constraints specify the kind of instruction constraints
@@ -111,7 +80,7 @@ namespace Legion {
      * with other constraints to say specifically which target processors
      * the task can be JIT-ed to.
      */
-    class ISAConstraint : public Constraint<ISAConstraint> {
+    class ISAConstraint {
     public:
       static const ExecutionConstraintKind constraint_kind = 
                                                 ISA_CONSTRAINT;
@@ -148,8 +117,8 @@ namespace Legion {
     public:
       ISAConstraint(uint64_t prop = 0);
     public:
-      bool satisfies(const ISAConstraint *other) const;
-      bool conflicts(const ISAConstraint *other) const;
+      bool entaisl(const ISAConstraint &other) const;
+      bool conflicts(const ISAConstraint &other) const;
     public:
       void serialize(Serializer &rez) const;
       void deserialize(Deserializer &derez);
@@ -165,7 +134,7 @@ namespace Legion {
      * which can run on all x86 cores by their ISA constraints, but
      * users want to restrict their execution to just I/O processors.
      */
-    class ProcessorConstraint : public Constraint<ProcessorConstraint> {
+    class ProcessorConstraint {
     public:
       static const ExecutionConstraintKind constraint_kind = 
                                             PROCESSOR_CONSTRAINT;
@@ -176,8 +145,8 @@ namespace Legion {
       inline bool is_valid(void) const { return valid; }
       inline Processor::Kind get_kind(void) const { return kind; }
     public:
-      bool satisfies(const ProcessorConstraint *other) const;
-      bool conflicts(const ProcessorConstraint *other) const;
+      bool entails(const ProcessorConstraint &other) const;
+      bool conflicts(const ProcessorConstraint &other) const;
     public:
       void serialize(Serializer &rez) const;
       void deserialize(Deserializer &derez);
@@ -193,7 +162,7 @@ namespace Legion {
      * The target low-level processor must meet the constraint in 
      * order for the invariant to run on the target processor.
      */
-    class ResourceConstraint : public Constraint<ResourceConstraint> {
+    class ResourceConstraint {
     public:
       static const ExecutionConstraintKind constraint_kind = 
                                             RESOURCE_CONSTRAINT;
@@ -218,8 +187,8 @@ namespace Legion {
       ResourceConstraint(ResourceKind resource_kind, 
                          EqualityKind eq_kind, size_t value);
     public:
-      bool satisfies(const ResourceConstraint *other) const;
-      bool conflicts(const ResourceConstraint *other) const;
+      bool entails(const ResourceConstraint &other) const;
+      bool conflicts(const ResourceConstraint &other) const;
     public:
       void serialize(Serializer &rez) const;
       void deserialize(Deserializer &derez);
@@ -237,7 +206,7 @@ namespace Legion {
      * the future we can imagine extending this to other
      * processor kinds.
      */
-    class LaunchConstraint : public Constraint<LaunchConstraint> {
+    class LaunchConstraint {
     public:
       static const ExecutionConstraintKind constraint_kind = 
                                             LAUNCH_CONSTRAINT;
@@ -255,8 +224,8 @@ namespace Legion {
       LaunchConstraint(LaunchKind kind, size_t value);
       LaunchConstraint(LaunchKind kind, const size_t *value, int dims);
     public:
-      bool satisfies(const LaunchConstraint *other) const;
-      bool conflicts(const LaunchConstraint *other) const;
+      bool entails(const LaunchConstraint &other) const;
+      bool conflicts(const LaunchConstraint &other) const;
     public:
       void serialize(Serializer &rez) const;
       void deserialize(Deserializer &derez);
@@ -272,7 +241,7 @@ namespace Legion {
      * region requirements for a task need to be located in the 
      * same physical instance for layout purposes.
      */
-    class ColocationConstraint : public Constraint<ColocationConstraint> {
+    class ColocationConstraint {
     public:
       static const ExecutionConstraintKind constraint_kind = 
                                             COLOCATION_CONSTRAINT;
@@ -283,8 +252,8 @@ namespace Legion {
       ColocationConstraint(const std::vector<unsigned> &indexes,
                            const std::set<FieldID> &fields);
     public:
-      bool satisfies(const ColocationConstraint *other) const;
-      bool conflicts(const ColocationConstraint *other) const;
+      bool entails(const ColocationConstraint &other) const;
+      bool conflicts(const ColocationConstraint &other) const;
     public:
       void serialize(Serializer &rez) const;
       void deserialize(Deserializer &derez);
@@ -334,7 +303,7 @@ namespace Legion {
      * constructor will fall back to the normal case so this
      * kind of constraint won't need to be set in the default case.
      */
-    class SpecializedConstraint : public Constraint<SpecializedConstraint> {
+    class SpecializedConstraint {
     public:
       static const LayoutConstraintKind constraint_kind = 
                                             SPECIALIZED_CONSTRAINT;
@@ -349,8 +318,8 @@ namespace Legion {
       SpecializedConstraint(SpecializedKind kind = NORMAL_SPECIALIZE,
                             ReductionOpID redop = 0);
     public:
-      bool satisfies(const SpecializedConstraint *other) const;
-      bool conflicts(const SpecializedConstraint *other) const;
+      bool entails(const SpecializedConstraint &other) const;
+      bool conflicts(const SpecializedConstraint &other) const;
     public:
       inline SpecializedKind get_kind(void) const { return kind; }
       inline ReductionOpID get_reduction_op(void) const { return redop; }
@@ -369,7 +338,7 @@ namespace Legion {
      * ordering of memories in which the runtime should attempt
      * to create a physical instance.
      */
-    class MemoryConstraint : public Constraint<MemoryConstraint> {
+    class MemoryConstraint {
     public:
       static const LayoutConstraintKind constraint_kind = 
                                             MEMORY_CONSTRAINT;
@@ -380,8 +349,8 @@ namespace Legion {
       inline bool is_valid(void) const { return has_kind; }
       inline Memory::Kind get_kind(void) const { return kind; }
     public:
-      bool satisfies(const MemoryConstraint *other) const;
-      bool conflicts(const MemoryConstraint *other) const;
+      bool entails(const MemoryConstraint &other) const;
+      bool conflicts(const MemoryConstraint &other) const;
     public:
       void serialize(Serializer &rez) const;
       void deserialize(Deserializer &derez);
@@ -399,7 +368,7 @@ namespace Legion {
      * flag whether they want the fields to be contiguous in
      * the physical instance layout.
      */
-    class FieldConstraint : public Constraint<FieldConstraint> {
+    class FieldConstraint {
     public:
       static const LayoutConstraintKind constraint_kind = 
                                             FIELD_CONSTRAINT;
@@ -415,8 +384,8 @@ namespace Legion {
       inline const std::vector<FieldID>& get_field_set(void) const 
         { return field_set; }
     public:
-      bool satisfies(const FieldConstraint *other) const;
-      bool conflicts(const FieldConstraint *other) const;
+      bool entails(const FieldConstraint &other) const;
+      bool conflicts(const FieldConstraint &other) const;
     public:
       void serialize(Serializer &rez) const;
       void deserialize(Deserializer &derez);
@@ -450,7 +419,7 @@ namespace Legion {
      * constraint if there is an associated split constraint
      * saying how to split the logical dimension.
      */
-    class OrderingConstraint : public Constraint<OrderingConstraint> {
+    class OrderingConstraint {
     public:
       static const LayoutConstraintKind constraint_kind = 
                                             ORDERING_CONSTRAINT;
@@ -459,8 +428,8 @@ namespace Legion {
       OrderingConstraint(const std::vector<DimensionKind> &ordering,
                          bool contiguous);
     public:
-      bool satisfies(const OrderingConstraint *other) const;
-      bool conflicts(const OrderingConstraint *other) const;
+      bool entails(const OrderingConstraint &other) const;
+      bool conflicts(const OrderingConstraint &other) const;
     public:
       void serialize(Serializer &rez) const;
       void deserialize(Deserializer &derez);
@@ -479,7 +448,7 @@ namespace Legion {
      * These two constructors provide both top-down and bottom-up
      * ways of saying how to break a dimension apart.
      */
-    class SplittingConstraint : public Constraint<SplittingConstraint> {
+    class SplittingConstraint {
     public:
       static const LayoutConstraintKind constraint_kind = 
                                             SPLITTING_CONSTRAINT;
@@ -488,8 +457,8 @@ namespace Legion {
       SplittingConstraint(DimensionKind dim); // chunks
       SplittingConstraint(DimensionKind dim, size_t value);
     public:
-      bool satisfies(const SplittingConstraint *other) const;
-      bool conflicts(const SplittingConstraint *other) const;
+      bool entails(const SplittingConstraint &other) const;
+      bool conflicts(const SplittingConstraint &other) const;
     public:
       void serialize(Serializer &rez) const;
       void deserialize(Deserializer &derez);
@@ -504,7 +473,7 @@ namespace Legion {
      * Dimension constraints specify the minimum or maximum 
      * necessary size of a given dimension.
      */
-    class DimensionConstraint : public Constraint<DimensionConstraint> {
+    class DimensionConstraint {
     public:
       static const LayoutConstraintKind constraint_kind = 
                                           DIMENSION_CONSTRAINT;
@@ -512,8 +481,8 @@ namespace Legion {
       DimensionConstraint(void);
       DimensionConstraint(DimensionKind dim, EqualityKind eq, size_t value);
     public:
-      bool satisfies(const DimensionConstraint *other) const;
-      bool conflicts(const DimensionConstraint *other) const;
+      bool entails(const DimensionConstraint &other) const;
+      bool conflicts(const DimensionConstraint &other) const;
     public:
       void serialize(Serializer &rez) const;
       void deserialize(Deserializer &derez);
@@ -529,7 +498,7 @@ namespace Legion {
      * set lower or upper bounds or equality for a the 
      * byte-alignment of a given field.
      */
-    class AlignmentConstraint : public Constraint<AlignmentConstraint> {
+    class AlignmentConstraint {
     public:
       static const LayoutConstraintKind constraint_kind = 
                                             ALIGNMENT_CONSTRAINT;
@@ -538,8 +507,8 @@ namespace Legion {
       AlignmentConstraint(FieldID fid, EqualityKind kind, 
                           size_t byte_boundary);
     public:
-      bool satisfies(const AlignmentConstraint *other) const;
-      bool conflicts(const AlignmentConstraint *other) const;
+      bool entails(const AlignmentConstraint &other) const;
+      bool conflicts(const AlignmentConstraint &other) const;
     public:
       void serialize(Serializer &rez) const;
       void deserialize(Deserializer &derez);
@@ -554,7 +523,7 @@ namespace Legion {
      * Specify an offset constraint for a given field. In
      * the case of this constraint equality is implied.
      */
-    class OffsetConstraint : public Constraint<OffsetConstraint> {
+    class OffsetConstraint {
     public:
       static const LayoutConstraintKind constraint_kind = 
                                             OFFSET_CONSTRAINT;
@@ -562,8 +531,8 @@ namespace Legion {
       OffsetConstraint(void);
       OffsetConstraint(FieldID fid, size_t offset);
     public:
-      bool satisfies(const OffsetConstraint *other) const;
-      bool conflicts(const OffsetConstraint *other) const;
+      bool entails(const OffsetConstraint &other) const;
+      bool conflicts(const OffsetConstraint &other) const;
     public:
       void serialize(Serializer &rez) const;
       void deserialize(Deserializer &derez);
@@ -577,24 +546,23 @@ namespace Legion {
      * Specify the assumed pointer for a given field in
      * the physical instance.
      */
-    class PointerConstraint : public Constraint<PointerConstraint> {
+    class PointerConstraint  {
     public:
       static const LayoutConstraintKind constraint_kind = 
                                             POINTER_CONSTRAINT;
     public:
       PointerConstraint(void);
-      PointerConstraint(FieldID fid, uintptr_t ptr, Memory memory);
+      PointerConstraint(Memory memory, uintptr_t ptr);
     public:
-      bool satisfies(const PointerConstraint *other) const;
-      bool conflicts(const PointerConstraint *other) const;
+      bool entails(const PointerConstraint &other) const;
+      bool conflicts(const PointerConstraint &other) const;
     public:
       void serialize(Serializer &rez) const;
       void deserialize(Deserializer &derez);
     public:
       bool is_valid;
-      FieldID fid;
-      uintptr_t ptr;
       Memory memory;
+      uintptr_t ptr;
     };
 
     /**
@@ -623,6 +591,9 @@ namespace Legion {
         add_constraint(const OffsetConstraint &constraint);
       LayoutConstraintSet&
         add_constraint(const PointerConstraint &constraint);
+    public:
+      bool entails(const LayoutConstraintSet &other) const;
+      bool conflicts(const LayoutConstraintSet &other) const;
     public:
       void serialize(Serializer &rez) const;
       void deserialize(Deserializer &derez);

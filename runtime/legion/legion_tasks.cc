@@ -4427,7 +4427,7 @@ namespace Legion {
           else
           {
 #ifdef DEBUG_HIGH_LEVEL
-            assert(!target_processors.empty());
+            assert(target_proc.exists());
 #endif
             // See if this task is going to be sent
             // remotely in which case we need to do the
@@ -4516,7 +4516,7 @@ namespace Legion {
         if (IS_NO_ACCESS(regions[idx]) || regions[idx].privilege_fields.empty())
           continue;
         // See if we've already got an output from a must-epoch mapping
-        if (output.chosen_instances[idx].empty())
+        if (!output.chosen_instances[idx].empty())
         {
 #ifdef DEBUG_HIGH_LEVEL
           assert(must_epoch_owner != NULL);
@@ -4884,7 +4884,6 @@ namespace Legion {
           }
         }
       }
-
       // Now we can test against the execution constraints
       const ExecutionConstraintSet &execution_constraints = 
         impl->get_execution_constraints();

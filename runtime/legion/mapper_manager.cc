@@ -1175,8 +1175,6 @@ namespace Legion {
           for (unsigned idx = 0; idx < instances.size(); idx++)
           {
             PhysicalManager *manager = instances[idx].impl;
-            if (manager == NULL)
-              continue;
             if (manager->conflicts(constraints))
             {
               conflicts = true;
@@ -1225,11 +1223,6 @@ namespace Legion {
                 instances.begin(); it != instances.end(); /*nothing*/)
           {
             PhysicalManager *manager = it->impl;
-            if (manager == NULL)
-            {
-              it++;
-              continue;
-            }
             if (manager->conflicts(constraints))
               it = instances.erase(it);
             else
@@ -1245,8 +1238,6 @@ namespace Legion {
               instances.begin(); it != instances.end(); it++)
         {
           PhysicalManager *manager = it->impl;
-          if (manager == NULL)
-            continue;
           manager->remove_space_fields(missing);
           if (missing.empty())
             break;
@@ -1280,11 +1271,6 @@ namespace Legion {
               instances.begin(); it != instances.end(); /*nothing*/)
         {
           PhysicalManager *manager = it->impl;
-          if (manager == NULL)
-          {
-            it++;
-            continue;
-          }
           if (manager->conflicts(constraints))
             it = instances.erase(it);
           else
@@ -1299,8 +1285,6 @@ namespace Legion {
             instances.begin(); it != instances.end(); it++)
       {
         PhysicalManager *manager = it->impl;
-        if (manager == NULL)
-          continue;
         manager->remove_space_fields(missing_fields);
         if (missing_fields.empty())
           break;
@@ -1506,7 +1490,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       PhysicalManager *manager = instance.impl;
-      if (manager == NULL)
+      if (manager->is_virtual_manager())
         return;
       pause_mapper_call(ctx);
       manager->set_garbage_collection_priority(mapper_id, processor, priority);
@@ -1527,7 +1511,7 @@ namespace Legion {
       }
       PhysicalManager *manager = instance.impl;
       // virtual instances are easy
-      if (manager == NULL)
+      if (manager->is_virtual_manager())
         return true;
       // See if we already acquired it
       if (ctx->acquired_instances->find(manager) !=
@@ -1762,7 +1746,7 @@ namespace Legion {
       for (unsigned idx = 0; idx < instances.size(); idx++)
       {
         PhysicalManager *manager = instances[idx].impl;
-        if (manager == NULL)
+        if (manager->is_virtual_manager())
           continue;
         if (already_acquired.find(manager) != already_acquired.end())
           continue;
@@ -1899,7 +1883,7 @@ namespace Legion {
                                                  PhysicalManager *manager)
     //--------------------------------------------------------------------------
     {
-      if (manager == NULL)
+      if (manager->is_virtual_manager())
         return;
 #ifdef DEBUG_HIGH_LEVEL
       assert(ctx->acquired_instances != NULL);
@@ -1918,7 +1902,7 @@ namespace Legion {
                                                   PhysicalManager *manager)
     //--------------------------------------------------------------------------
     {
-      if (manager == NULL)
+      if (manager->is_virtual_manager())
         return;
 #ifdef DEBUG_HIGH_LEVEL
       assert(ctx->acquired_instances != NULL);

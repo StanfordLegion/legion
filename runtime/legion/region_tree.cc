@@ -2441,6 +2441,8 @@ namespace Legion {
       {
         PhysicalManager *manager = it->impl;
         if (manager == NULL)
+          continue;
+        if (manager->is_virtual_manager())
         {
           has_composite = true;
           continue;
@@ -2466,7 +2468,8 @@ namespace Legion {
         if (has_composite)
         {
           int composite_idx = result.size();
-          result.add_instance(InstanceRef(needed_fields));
+          result.add_instance(
+            InstanceRef(VirtualManager::get_virtual_instance(), needed_fields));
           return composite_idx;
         }
         else
@@ -2504,6 +2507,8 @@ namespace Legion {
       {
         PhysicalManager *manager = it->impl;
         if (manager == NULL)
+          continue;
+        if (manager->is_virtual_manager())
         {
           has_composite = true;
           continue;
@@ -2566,7 +2571,7 @@ namespace Legion {
           continue;
         PhysicalManager *manager = first_set[idx].get_manager();
         // Not allowed to have virtual views here
-        if (manager == NULL)
+        if (manager->is_virtual_manager())
         {
           bad1 = 0;
           bad2 = 0;
@@ -2584,7 +2589,7 @@ namespace Legion {
           if (!overlap)
             continue;
           PhysicalManager *manager = next_set[idx2].get_manager();
-          if (manager == NULL)
+          if (manager->is_virtual_manager())
           {
             bad1 = idx2;
             bad2 = idx2;

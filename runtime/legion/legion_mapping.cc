@@ -143,7 +143,9 @@ namespace Legion {
     bool PhysicalInstance::is_virtual_instance(void) const
     //--------------------------------------------------------------------------
     {
-      return (impl == NULL);
+      if (impl == NULL)
+        return false;
+      return impl->is_virtual_instance();
     }
 
     //--------------------------------------------------------------------------
@@ -159,7 +161,7 @@ namespace Legion {
     /*static*/ PhysicalInstance PhysicalInstance::get_virtual_instance(void)
     //--------------------------------------------------------------------------
     {
-      return PhysicalInstance();
+      return PhysicalInstance(Internal::VirtualManager::get_virtual_instance());
     }
 
     //--------------------------------------------------------------------------
