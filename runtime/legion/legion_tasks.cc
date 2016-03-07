@@ -2688,7 +2688,7 @@ namespace Legion {
       // If we are performing a trace mark that the child has a trace
       if (current_trace != NULL)
         op->set_trace(current_trace, !current_trace->is_fixed());
-      int outstanding_count = 
+      unsigned outstanding_count = 
         __sync_add_and_fetch(&outstanding_children_count,1);
       // Only need to check if we are not tracing by frames
       if ((context_configuration.max_outstanding_frames <= 0) && 

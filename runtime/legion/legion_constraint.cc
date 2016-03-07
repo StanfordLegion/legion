@@ -689,7 +689,7 @@ namespace Legion {
           {
             if (previous != -1)
             {
-              if ((previous+1) != (*it))
+              if ((previous+1) != int(*it))
                 return false;
             }
             previous = (*it); 
@@ -888,7 +888,7 @@ namespace Legion {
           if (previous != -1)
           {
             // Not contiguous
-            if ((previous+1) != (*it))
+            if ((previous+1) != int(*it))
               return false;
           }
           previous = (*it);

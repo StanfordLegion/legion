@@ -200,7 +200,7 @@ namespace Legion {
       // Initialize our random number generator
       const size_t short_bits = 8*sizeof(unsigned short);
       long long short_mask = 0;
-      for (int i = 0; i < short_bits; i++)
+      for (unsigned i = 0; i < short_bits; i++)
         short_mask |= (1LL << i);
       for (int i = 0; i < 3; i++)
         random_number_generator[i] = (unsigned short)((local_proc.id & 
@@ -542,12 +542,12 @@ namespace Legion {
           std::set<Memory> visible_memories;
           machine.get_visible_memories(task.target_proc, visible_memories);
           Memory global_memory = Memory::NO_MEMORY;
-          for (std::set<Memory>::const_iterator it = visible_memories.begin();
-                it != visible_memories.end(); it++)
+          for (std::set<Memory>::const_iterator vit = visible_memories.begin();
+                vit != visible_memories.end(); vit++)
           {
-            if (it->kind() == Memory::GLOBAL_MEM)
+            if (vit->kind() == Memory::GLOBAL_MEM)
             {
-              global_memory = *it;
+              global_memory = *vit;
               break;
             }
           }
@@ -1203,7 +1203,7 @@ namespace Legion {
         // their garbage collection priorities since we are no
         // longer caching the results
         std::deque<PhysicalInstance> to_downgrade;
-        for (std::list<CachedTaskMapping>::const_iterator it = 
+        for (std::list<CachedTaskMapping>::iterator it = 
               finder->second.begin(); it != finder->second.end(); it++)
         {
           if ((it->variant == chosen_variant) &&

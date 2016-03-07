@@ -47,7 +47,8 @@ namespace Legion {
       // Switch data structures from layout by field order to order
       // of field locations in the bit mask
 #ifdef DEBUG_HIGH_LEVEL
-      assert(mask_index_map.size() == FieldMask::pop_count(allocated_fields));
+      assert(mask_index_map.size() == 
+                size_t(FieldMask::pop_count(allocated_fields)));
 #endif
 #ifndef NEW_INSTANCE_CREATION
       std::vector<size_t> offsets(field_sizes.size(),0);

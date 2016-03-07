@@ -1985,7 +1985,7 @@ namespace Legion {
       if (composite_index >= 0)
       {
 #ifdef DEBUG_HIGH_LEVEL
-        assert(composite_index < targets.size());    
+        assert(size_t(composite_index) < targets.size());    
 #endif
         const InstanceRef &comp_ref = targets[composite_index];
         const FieldMask &comp_mask = comp_ref.get_valid_fields();

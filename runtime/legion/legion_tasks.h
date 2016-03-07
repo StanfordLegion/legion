@@ -592,7 +592,7 @@ namespace Legion {
       Mapper::TaskProfilingInfo             profiling_info;
     protected:
       // Track whether this task has finished executing
-      int outstanding_children_count;
+      unsigned outstanding_children_count;
       bool task_executed;
       LegionSet<Operation*,EXECUTING_CHILD_ALLOC>::tracked executing_children;
       LegionSet<Operation*,EXECUTED_CHILD_ALLOC>::tracked executed_children;
