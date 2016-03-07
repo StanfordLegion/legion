@@ -7388,11 +7388,13 @@ namespace Legion {
       variant_table.clear();
       task_variant_lock.destroy_reservation();
       task_variant_lock = Reservation::NO_RESERVATION;
-      for (std::map<LayoutConstraintID,LayoutConstraints*>::const_iterator
-            it = layout_constraints_table.begin(); it != 
-            layout_constraints_table.end(); it++)
+      while (!layout_constraints_table.empty())
       {
-        legion_delete(it->second);
+        std::map<LayoutConstraintID,LayoutConstraints*>::iterator next_it = 
+          layout_constraints_table.begin();
+        LayoutConstraints *next = next_it->second;
+        layout_constraints_table.erase(next_it);
+        legion_delete(next);
       }
       layout_constraints_lock.destroy_reservation();
       layout_constraints_lock = Reservation::NO_RESERVATION;
