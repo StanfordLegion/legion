@@ -109,6 +109,7 @@ namespace Realm {
 		 STATE_ALERTED,
 		 STATE_READY,
 		 STATE_FINISHED,
+		 STATE_DELETED,
                  };
 
     State get_state(void);
