@@ -939,6 +939,28 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void MapperManager::send_message(MappingCallInfo *ctx, Processor target,
+                                     const void *message, size_t message_size)
+    //--------------------------------------------------------------------------
+    {
+      pause_mapper_call(ctx);
+      runtime->process_mapper_message(target, mapper_id, processor,
+                                      message, message_size);
+      resume_mapper_call(ctx);
+    }
+
+    //--------------------------------------------------------------------------
+    void MapperManager::broadcast(MappingCallInfo *ctx, const void *message,
+                                  size_t message_size, int radix)
+    //--------------------------------------------------------------------------
+    {
+      pause_mapper_call(ctx);
+      runtime->process_mapper_broadcast(mapper_id, processor, message,
+                                        message_size, radix, 1/*index*/);
+      resume_mapper_call(ctx);
+    }
+
+    //--------------------------------------------------------------------------
     const ExecutionConstraintSet& MapperManager::find_execution_constraints(
                             MappingCallInfo *ctx, TaskID task_id, VariantID vid)
     //--------------------------------------------------------------------------

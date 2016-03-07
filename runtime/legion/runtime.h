@@ -1779,6 +1779,12 @@ namespace Legion {
       MessageManager* find_messenger(AddressSpaceID sid);
       MessageManager* find_messenger(Processor target);
       AddressSpaceID find_address_space(Processor target) const;
+    public:
+      void process_mapper_message(Processor target, MapperID map_id,
+                Processor source, const void *message, size_t message_size);
+      void process_mapper_broadcast(MapperID map_id, Processor source,
+                const void *message, size_t message_size, int radix, int index);
+    public:
       void send_task(TaskOp *task);
       void send_tasks(Processor target, const std::set<TaskOp*> &tasks);
       void send_steal_request(const std::multimap<Processor,MapperID> &targets,

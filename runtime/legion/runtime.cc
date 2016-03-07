@@ -4822,12 +4822,12 @@ namespace Legion {
             }
           case SEND_MAPPER_MESSAGE:
             {
-              // TODO
+              runtime->handle_mapper_message(derez);
               break;
             }
           case SEND_MAPPER_BROADCAST:
             {
-              // TODO
+              runtime->handle_mapper_broadcast(derez);
               break;
             }
           case SEND_TASK_IMPL_SEMANTIC_REQ:
@@ -13438,6 +13438,82 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::process_mapper_message(Processor target, MapperID map_id,
+                     Processor source, const void *message, size_t message_size)
+    //--------------------------------------------------------------------------
+    {
+      if (is_local(target))
+      {
+        Mapper::MapperMessage message_args;
+        message_args.sender = source;
+        message_args.message = message;
+        message_args.size = message_size;
+        message_args.broadcast = false;
+        MapperManager *mapper = find_mapper(target, map_id);
+        mapper->invoke_handle_message(&message_args);
+      }
+      else
+      {
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(target);
+          rez.serialize(map_id);
+          rez.serialize(source);
+          rez.serialize(message_size);
+          rez.serialize(message, message_size);
+        }
+        send_mapper_message(find_address_space(target), rez);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::process_mapper_broadcast(MapperID map_id, Processor source, 
+                 const void *message, size_t message_size, int radix, int index)
+    //--------------------------------------------------------------------------
+    {
+      // First forward the message onto any remote nodes
+      int base = index * radix;
+      int init = source.address_space();
+      // The runtime stride is the same as the number of nodes
+      const int total_nodes = runtime_stride;
+      for (int r = 0; r < radix; r++)
+      {
+        int offset = base + r;
+        // If we've handled all of our nodes then we are done
+        if (offset > total_nodes)
+          break;
+        AddressSpaceID target = (init + offset - 1) % total_nodes;
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(map_id);
+          rez.serialize(source);
+          rez.serialize(radix);
+          rez.serialize(offset);
+          rez.serialize(message_size);
+          rez.serialize(message, message_size);
+        }
+        send_mapper_broadcast(target, rez);
+      }
+      // Then send it to all our local mappers, set will deduplicate
+      std::set<MapperManager*> managers;
+      for (std::map<Processor,ProcessorManager*>::const_iterator it = 
+            proc_managers.begin(); it != proc_managers.end(); it++)
+      {
+        managers.insert(it->second->find_mapper(map_id));
+      }
+      Mapper::MapperMessage message_args;
+      message_args.sender = source;
+      message_args.message = message;
+      message_args.size = message_size;
+      message_args.broadcast = true;
+      for (std::set<MapperManager*>::const_iterator it = 
+            managers.begin(); it != managers.end(); it++)
+        (*it)->invoke_handle_message(&message_args);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_task(TaskOp *task)
     //--------------------------------------------------------------------------
     {
@@ -14883,7 +14959,17 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
-      // TODO 
+      Processor target;
+      derez.deserialize(target);
+      MapperID map_id;
+      derez.deserialize(map_id);
+      Processor source;
+      derez.deserialize(source);
+      size_t message_size;
+      derez.deserialize(message_size);
+      const void *message = derez.get_current_pointer();
+      derez.advance_pointer(message_size);
+      process_mapper_message(target, map_id, source, message, message_size);
     }
 
     //--------------------------------------------------------------------------
@@ -14891,7 +14977,20 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
-      // TODO 
+      MapperID map_id;
+      derez.deserialize(map_id);
+      Processor source;
+      derez.deserialize(source);
+      int radix;
+      derez.deserialize(radix);
+      int index;
+      derez.deserialize(index);
+      size_t message_size;
+      derez.deserialize(message_size);
+      const void *message = derez.get_current_pointer();
+      derez.advance_pointer(message_size);
+      process_mapper_broadcast(map_id, source, message, 
+                               message_size, radix, index);
     }
 
     //--------------------------------------------------------------------------

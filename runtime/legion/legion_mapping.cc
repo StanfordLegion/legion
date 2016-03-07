@@ -213,6 +213,64 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool Mapper::mapper_rt_is_locked(MapperContext ctx) const
+    //--------------------------------------------------------------------------
+    {
+      return ctx->manager->is_locked(ctx);
+    }
+
+    //--------------------------------------------------------------------------
+    void Mapper::mapper_rt_lock_mapper(MapperContext ctx, bool read_only) const
+    //--------------------------------------------------------------------------
+    {
+      ctx->manager->lock_mapper(ctx, read_only);
+    }
+
+    //--------------------------------------------------------------------------
+    void Mapper::mapper_rt_unlock_mapper(MapperContext ctx) const
+    //--------------------------------------------------------------------------
+    {
+      ctx->manager->unlock_mapper(ctx);
+    }
+
+    //--------------------------------------------------------------------------
+    bool Mapper::mapper_rt_is_reentrant(MapperContext ctx) const
+    //--------------------------------------------------------------------------
+    {
+      return ctx->manager->is_reentrant(ctx);
+    }
+
+    //--------------------------------------------------------------------------
+    void Mapper::mapper_rt_enable_reentrant(MapperContext ctx) const
+    //--------------------------------------------------------------------------
+    {
+      ctx->manager->enable_reentrant(ctx);
+    }
+
+    //--------------------------------------------------------------------------
+    void Mapper::mapper_rt_disable_reentrant(MapperContext ctx) const
+    //--------------------------------------------------------------------------
+    {
+      ctx->manager->disable_reentrant(ctx);
+    }
+
+    //--------------------------------------------------------------------------
+    void Mapper::mapper_rt_send_message(MapperContext ctx, Processor target,
+                                 const void *message, size_t message_size) const
+    //--------------------------------------------------------------------------
+    {
+      ctx->manager->send_message(ctx, target, message, message_size);
+    }
+
+    //--------------------------------------------------------------------------
+    void Mapper::mapper_rt_broadcast(MapperContext ctx, const void *message,
+                                           size_t message_size, int radix) const
+    //--------------------------------------------------------------------------
+    {
+      ctx->manager->broadcast(ctx, message, message_size, radix);
+    }
+
+    //--------------------------------------------------------------------------
     const ExecutionConstraintSet& Mapper::mapper_rt_find_execution_constraints(
                          MapperContext ctx, TaskID task_id, VariantID vid) const
     //--------------------------------------------------------------------------
