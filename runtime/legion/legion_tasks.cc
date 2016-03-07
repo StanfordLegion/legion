@@ -91,9 +91,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Always clear target_proc and the mapper when setting a new current proc
-      target_proc = Processor::NO_PROC;
       mapper = NULL;
       current_proc = current;
+      target_proc = current;
     }
 
     //--------------------------------------------------------------------------
