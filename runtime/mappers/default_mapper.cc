@@ -2298,11 +2298,11 @@ namespace Legion {
       else
       {
         // Find the depth of the deepest task
-        unsigned max_depth = 0;
+        int max_depth = 0;
         for (std::list<const Task*>::const_iterator it = 
               input.ready_tasks.begin(); it != input.ready_tasks.end(); it++)
         {
-          unsigned depth = (*it)->get_depth();
+          int depth = (*it)->get_depth();
           if (depth > max_depth)
             max_depth = depth;
         }
