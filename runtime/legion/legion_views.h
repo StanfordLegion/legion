@@ -52,12 +52,8 @@ namespace Legion {
       virtual InstanceView* as_instance_view(void) const = 0;
       virtual DeferredView* as_deferred_view(void) const = 0;
 #else
-      InstanceView* as_instance_view(void) const
-        { return static_cast<InstanceView*>(
-                  const_cast<LogicalView*>(this)); }
-      DeferredView* as_deferred_view(void) const
-        { return static_cast<DeferredView*>(
-                  const_cast<LogicalView*>(this)); }
+      InstanceView* as_instance_view(void) const;
+      DeferredView* as_deferred_view(void) const;
 #endif
       virtual bool has_manager(void) const = 0;
       virtual PhysicalManager* get_manager(void) const = 0;
@@ -116,12 +112,8 @@ namespace Legion {
       virtual MaterializedView* as_materialized_view(void) const = 0;
       virtual ReductionView* as_reduction_view(void) const = 0;
 #else
-      inline MaterializedView* as_materialized_view(void) const
-        { return static_cast<MaterializedView*>(
-                  const_cast<InstanceView*>(this)); }
-      inline ReductionView* as_reduction_view(void) const
-        { return static_cast<ReductionView*>(
-                  const_cast<InstanceView*>(this)); }
+      inline MaterializedView* as_materialized_view(void) const;
+      inline ReductionView* as_reduction_view(void) const;
 #endif
       virtual bool has_manager(void) const = 0;
       virtual PhysicalManager* get_manager(void) const = 0;
@@ -599,12 +591,8 @@ namespace Legion {
       virtual FillView* as_fill_view(void) const = 0;
       virtual CompositeView* as_composite_view(void) const = 0;
 #else
-      inline FillView* as_fill_view(void) const
-        { return static_cast<FillView*>(
-                  const_cast<DeferredView*>(this)); }
-      inline CompositeView* as_composite_view(void) const
-        { return static_cast<CompositeView*>(
-                  const_cast<DeferredView*>(this)); }
+      inline FillView* as_fill_view(void) const;
+      inline CompositeView* as_composite_view(void) const;
 #endif
     public:
       void update_reduction_views(ReductionView *view, 
@@ -1024,6 +1012,51 @@ namespace Legion {
       // Keep track of the child views
       std::map<ColorPoint,FillView*> children;
     };
+
+    // Some inline definitions for non-debug mode
+#ifndef DEBUG_HIGH_LEVEL
+    //--------------------------------------------------------------------------
+    inline InstanceView* LogicalView::as_instance_view(void) const
+    //--------------------------------------------------------------------------
+    {
+      return static_cast<InstanceView*>(const_cast<LogicalView*>(this));
+    }
+
+    //--------------------------------------------------------------------------
+    inline DeferredView* LogicalView::as_deferred_view(void) const
+    //--------------------------------------------------------------------------
+    {
+      return static_cast<DeferredView*>(const_cast<LogicalView*>(this));
+    }
+
+    //--------------------------------------------------------------------------
+    inline MaterializedView* InstanceView::as_materialized_view(void) const
+    //--------------------------------------------------------------------------
+    {
+      return static_cast<MaterializedView*>(const_cast<InstanceView*>(this));
+    }
+
+    //--------------------------------------------------------------------------
+    inline ReductionView* InstanceView::as_reduction_view(void) const
+    //--------------------------------------------------------------------------
+    {
+      return static_cast<ReductionView*>(const_cast<InstanceView*>(this));
+    }
+
+    //--------------------------------------------------------------------------
+    inline FillView* DeferredView::as_fill_view(void) const
+    //--------------------------------------------------------------------------
+    {
+      return static_cast<FillView*>(const_cast<DeferredView*>(this));
+    }
+
+    //--------------------------------------------------------------------------
+    inline CompositeView* DeferredView::as_composite_view(void) const
+    //--------------------------------------------------------------------------
+    {
+      return static_cast<CompositeView*>(const_cast<DeferredView*>(this));
+    }
+#endif
 
   }; // namespace Internal 
 }; // namespace Legion 

@@ -135,15 +135,9 @@ namespace Legion {
       virtual ReductionManager* as_reduction_manager(void) const = 0;
       virtual VirtualManager* as_virtual_manager(void) const = 0;
 #else
-      inline InstanceManager* as_instance_manager(void) const
-        { return static_cast<InstanceManager*>(
-                  const_cast<PhysicalManager*>(this)); }
-      inline ReductionManager* as_reduction_manager(void) const
-        { return static_cast<ReductionManager*>(
-                 const_cast<PhysicalManager*>(this)); }
-      inline VirtualManager* as_virtual_manager(void) const
-        { return static_cast<VirtualManager*>(
-                 const_cast<PhysicalManager*>(this)); }
+      inline InstanceManager* as_instance_manager(void) const;
+      inline ReductionManager* as_reduction_manager(void) const;
+      inline VirtualManager* as_virtual_manager(void) const;
 #endif
       virtual size_t get_instance_size(void) const = 0;
       virtual void notify_active(void);
@@ -336,12 +330,8 @@ namespace Legion {
       virtual ListReductionManager* as_list_manager(void) const = 0;
       virtual FoldReductionManager* as_fold_manager(void) const = 0;
 #else
-      inline ListReductionManager* as_list_manager(void) const
-        { return static_cast<ListReductionManager*>(
-                  const_cast<ReductionManager*>(this)); }
-      inline FoldReductionManager* as_fold_manager(void) const
-        { return static_cast<FoldReductionManager*>(
-                  const_cast<ReductionManager*>(this)); }
+      inline ListReductionManager* as_list_manager(void) const;
+      inline FoldReductionManager* as_fold_manager(void) const;
 #endif
       virtual Event get_use_event(void) const = 0;
     public:
@@ -557,6 +547,46 @@ namespace Legion {
     public:
       bool valid;
     };
+
+    // Some inline implementations for non-debug mode
+#ifndef DEBUG_HIGH_LEVEL
+    //--------------------------------------------------------------------------
+    inline InstanceManager* PhysicalManager::as_instance_manager(void) const
+    //--------------------------------------------------------------------------
+    {
+      return static_cast<InstanceManager*>(const_cast<PhysicalManager*>(this));
+    }
+
+    //--------------------------------------------------------------------------
+    inline ReductionManager* PhysicalManager::as_reduction_manager(void) const
+    //--------------------------------------------------------------------------
+    {
+      return static_cast<ReductionManager*>(const_cast<PhysicalManager*>(this));
+    }
+
+    //--------------------------------------------------------------------------
+    inline VirtualManager* PhysicalManager::as_virtual_manager(void) const
+    //--------------------------------------------------------------------------
+    {
+      return static_cast<VirtualManager*>(const_cast<PhysicalManager*>(this));
+    }
+
+    //--------------------------------------------------------------------------
+    inline ListReductionManager* ReductionManager::as_list_manager(void) const
+    //--------------------------------------------------------------------------
+    {
+      return static_cast<ListReductionManager*>(
+              const_cast<ReductionManager*>(this));
+    }
+
+    //--------------------------------------------------------------------------
+    inline FoldReductionManager* ReductionManager::as_fold_manager(void) const
+    //--------------------------------------------------------------------------
+    {
+      return static_cast<FoldReductionManager*>(
+              const_cast<ReductionManager*>(this));
+    }
+#endif
 
   }; // namespace Internal 
 }; // namespace Legion

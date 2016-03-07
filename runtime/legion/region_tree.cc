@@ -14707,12 +14707,9 @@ namespace Legion {
 #ifdef DEBUG_HIGH_LEVEL
             assert(new_views[idx]->is_instance_view());
             assert(new_views[idx]->as_instance_view()->is_materialized_view());
+#endif
             MaterializedView *view = 
               new_views[idx]->as_instance_view()->as_materialized_view();
-#else
-            MaterializedView *view = 
-              static_cast<MaterializedView>(new_views[idx]);
-#endif
             // See if this instance is valid already 
             LegionMap<LogicalView*,FieldMask>::aligned::const_iterator
               finder = state->valid_views.find(view);
