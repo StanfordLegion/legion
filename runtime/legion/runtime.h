@@ -1847,6 +1847,7 @@ namespace Legion {
       void send_reduction_update(AddressSpaceID target, Serializer &rez);
       void send_instance_manager(AddressSpaceID target, Serializer &rez);
       void send_reduction_manager(AddressSpaceID target, Serializer &rez);
+      void send_create_top_view_request(AddressSpaceID target, Serializer &rez);
       void send_future(AddressSpaceID target, Serializer &rez);
       void send_future_result(AddressSpaceID target, Serializer &rez);
       void send_future_subscription(AddressSpaceID target, Serializer &rez);
@@ -1972,6 +1973,8 @@ namespace Legion {
                                         AddressSpaceID source);
       void handle_send_reduction_manager(Deserializer &derez,
                                          AddressSpaceID source);
+      void handle_create_top_view_request(Deserializer &derez,
+                                          AddressSpaceID source);
       void handle_future_send(Deserializer &derez, AddressSpaceID source);
       void handle_future_result(Deserializer &derez);
       void handle_future_subscription(Deserializer &derez);

@@ -1714,9 +1714,8 @@ namespace Legion {
             finder = top_views.find(manager);
           if (finder == top_views.end())
           {
-            ReductionManager *reduc_manager = manager->as_reduction_manager();
             ReductionView *new_view = 
-              reduc_manager->create_view(context_uid);
+             manager->create_logical_top_view(context_uid)->as_reduction_view();
             top_views[manager] = new_view;
             corresponding[idx] = new_view;
           }
@@ -1738,9 +1737,9 @@ namespace Legion {
             finder = top_views.find(manager);
           if (finder == top_views.end())
           {
-            InstanceManager *inst_manager = manager->as_instance_manager();
             MaterializedView *new_view = 
-              inst_manager->create_top_view(context_uid);
+              manager->create_logical_top_view(context_uid)
+                     ->as_materialized_view();
             top_views[manager] = new_view;
             // See if we need to get the appropriate subview
             if (top_node != manager->region_node)
@@ -13454,7 +13453,7 @@ namespace Legion {
 #endif
       // If we're at the root, get the view we need for this context
       if (manager->region_node == this)
-        return manager->find_logical_top_view(ctx_uid);
+        return manager->find_or_create_logical_top_view(ctx_uid);
       // If we didn't find it immediately, switch over to the explicit
       // versions that don't have so many virtual function calls
       if (is_region())
@@ -15052,7 +15051,8 @@ namespace Legion {
                                             attach_mask, this, attach_op);
       // Wrap it in a view
       UniqueID context_uid = attach_op->get_parent()->get_context_uid();
-      MaterializedView *view = manager->create_top_view(context_uid);
+      MaterializedView *view = 
+        manager->create_logical_top_view(context_uid)->as_materialized_view();
 #ifdef DEBUG_HIGH_LEVEL
       assert(view != NULL);
 #endif
@@ -15092,7 +15092,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (manager->region_node == this)
-        return manager->find_logical_top_view(ctx_uid);
+        return manager->find_or_create_logical_top_view(ctx_uid);
 #ifdef DEBUG_HIGH_LEVEL
       assert(parent != NULL);
 #endif

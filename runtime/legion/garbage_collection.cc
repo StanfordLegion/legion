@@ -60,7 +60,6 @@ namespace Legion {
       assert(gc_references == 0);
       assert(valid_references == 0);
       assert(resource_references == 0);
-      assert(current_state == DELETED_STATE);
 #endif
       destruction_event.trigger(Runtime::merge_events<true>(recycle_events));
       if (registered_with_runtime)

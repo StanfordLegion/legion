@@ -7302,6 +7302,8 @@ namespace Legion {
       }
       if (!is_remote())
       {
+        if (!acquired_instances.empty())
+          release_acquired_instances(acquired_instances);
         if (!map_applied_conditions.empty())
         {
           map_applied_conditions.insert(mapped_precondition);
@@ -7321,6 +7323,8 @@ namespace Legion {
       rez.serialize(applied_condition);
       runtime->send_individual_remote_mapped(orig_proc, rez);
       // Now we can complete this task
+      if (!acquired_instances.empty())
+        release_acquired_instances(acquired_instances);
       complete_mapping(applied_condition);
     }
 

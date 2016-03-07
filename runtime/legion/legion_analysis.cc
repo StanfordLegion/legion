@@ -7061,7 +7061,7 @@ namespace Legion {
         refs.single = NULL;
       else if (init_size == 1)
       {
-        refs.single = new CollectableRef();
+        refs.single = legion_new<CollectableRef>();
         refs.single->add_reference();
       }
       else
@@ -7105,7 +7105,7 @@ namespace Legion {
       if (single)
       {
         if ((refs.single != NULL) && refs.single->remove_reference())
-          delete refs.single;
+          legion_delete(refs.single);
       }
       else
       {
@@ -7122,7 +7122,7 @@ namespace Legion {
       if (single)
       {
         if ((refs.single != NULL) && refs.single->remove_reference())
-          delete refs.single;
+          legion_delete(refs.single);
       }
       else
       {
@@ -7158,16 +7158,16 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
-      assert(!shared);
+      assert(shared);
 #endif
       if (single)
       {
         if (refs.single != NULL)
         {
-          CollectableRef *next = new CollectableRef(*refs.single);
+          CollectableRef *next = legion_new<CollectableRef>(*refs.single);
           next->add_reference();
           if (refs.single->remove_reference())
-            delete refs.single;
+            legion_delete(refs.single);
           refs.single = next;
         }
       }
@@ -7287,7 +7287,7 @@ namespace Legion {
         if (new_size == 0)
         {
           if ((refs.single != NULL) && refs.single->remove_reference())
-            delete refs.single;
+            legion_delete(refs.single);
           refs.single = NULL;
           shared = false;
         }
@@ -7299,7 +7299,7 @@ namespace Legion {
           {
             next->vector[0] = *(refs.single);
             if (refs.single->remove_reference())
-              delete refs.single;
+              legion_delete(refs.single);
           }
           next->add_reference();
           refs.multi = next;
@@ -7320,9 +7320,10 @@ namespace Legion {
         }
         else if (new_size == 1)
         {
-          CollectableRef *next = new CollectableRef(refs.multi->vector[0]);
+          CollectableRef *next = 
+            legion_new<CollectableRef>(refs.multi->vector[0]);
           if (refs.multi->remove_reference())
-            delete refs.multi;
+            legion_delete(refs.multi);
           next->add_reference();
           refs.single = next;
           single = true;
@@ -7366,7 +7367,7 @@ namespace Legion {
       if (single)
       {
         if ((refs.single != NULL) && refs.single->remove_reference())
-          delete refs.single;
+          legion_delete(refs.single);
         refs.single = NULL;
       }
       else
@@ -7408,7 +7409,7 @@ namespace Legion {
           next->vector[0] = *(refs.single);
           next->vector[1] = ref;
           if (refs.single->remove_reference())
-            delete refs.single;
+            legion_delete(refs.single);
           next->add_reference();
           refs.multi = next;
           single = false;
@@ -7416,7 +7417,7 @@ namespace Legion {
         }
         else
         {
-          refs.single = new CollectableRef(ref);
+          refs.single = legion_new<CollectableRef>(ref);
           refs.single->add_reference();
         }
       }
@@ -7508,7 +7509,7 @@ namespace Legion {
         if (single)
         {
           if ((refs.single != NULL) && refs.single->remove_reference())
-            delete refs.single;
+            legion_delete(refs.single);
           refs.single = NULL;
         }
         else
@@ -7531,7 +7532,7 @@ namespace Legion {
         // Now we can unpack our reference, see if we need to make one
         if (refs.single == NULL)
         {
-          refs.single = new CollectableRef();
+          refs.single = legion_new<CollectableRef>();
           refs.single->add_reference();
         }
         refs.single->unpack_reference(runtime, derez);
@@ -7543,7 +7544,7 @@ namespace Legion {
         if (single)
         {
           if ((refs.single != NULL) && refs.single->remove_reference())
-            delete refs.single;
+            legion_delete(refs.single);
           refs.multi = new InternalSet(num_refs);
           refs.multi->add_reference();
           single = false;

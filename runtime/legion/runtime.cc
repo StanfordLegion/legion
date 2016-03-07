@@ -4799,6 +4799,12 @@ namespace Legion {
                                                      remote_address_space);
               break;
             }
+          case SEND_CREATE_TOP_VIEW_REQUEST:
+            {
+              runtime->handle_create_top_view_request(derez,
+                                                      remote_address_space);
+              break;
+            }
           case SEND_FUTURE:
             {
               runtime->handle_future_send(derez, remote_address_space);
@@ -7072,6 +7078,7 @@ namespace Legion {
         delete profiler;
         profiler = NULL;
       }
+      delete forest;
       delete external;
       for (std::map<Processor,ProcessorManager*>::const_iterator it = 
             proc_managers.begin(); it != proc_managers.end(); it++)
@@ -7088,29 +7095,7 @@ namespace Legion {
             projection_functors.begin(); it != projection_functors.end(); it++)
       {
         delete it->second;
-      }
-      memory_manager_lock.destroy_reservation();
-      memory_manager_lock = Reservation::NO_RESERVATION;
-      message_manager_lock.destroy_reservation();
-      message_manager_lock = Reservation::NO_RESERVATION;
-      memory_managers.clear();
-      projection_functors.clear();
-      available_lock.destroy_reservation();
-      available_lock = Reservation::NO_RESERVATION;
-      group_lock.destroy_reservation();
-      group_lock = Reservation::NO_RESERVATION;
-      distributed_id_lock.destroy_reservation();
-      distributed_id_lock = Reservation::NO_RESERVATION;
-      distributed_collectable_lock.destroy_reservation();
-      distributed_collectable_lock = Reservation::NO_RESERVATION;
-      gc_epoch_lock.destroy_reservation();
-      gc_epoch_lock = Reservation::NO_RESERVATION;
-      future_lock.destroy_reservation();
-      future_lock = Reservation::NO_RESERVATION;
-      remote_lock.destroy_reservation();
-      remote_lock = Reservation::NO_RESERVATION;
-      shutdown_lock.destroy_reservation();
-      shutdown_lock = Reservation::NO_RESERVATION;
+      } 
       for (std::deque<IndividualTask*>::const_iterator it = 
             available_individual_tasks.begin(); 
             it != available_individual_tasks.end(); it++)
@@ -7411,8 +7396,28 @@ namespace Legion {
       }
       layout_constraints_lock.destroy_reservation();
       layout_constraints_lock = Reservation::NO_RESERVATION;
-
-      delete forest;
+      memory_manager_lock.destroy_reservation();
+      memory_manager_lock = Reservation::NO_RESERVATION;
+      message_manager_lock.destroy_reservation();
+      message_manager_lock = Reservation::NO_RESERVATION;
+      memory_managers.clear();
+      projection_functors.clear();
+      available_lock.destroy_reservation();
+      available_lock = Reservation::NO_RESERVATION;
+      group_lock.destroy_reservation();
+      group_lock = Reservation::NO_RESERVATION;
+      distributed_id_lock.destroy_reservation();
+      distributed_id_lock = Reservation::NO_RESERVATION;
+      distributed_collectable_lock.destroy_reservation();
+      distributed_collectable_lock = Reservation::NO_RESERVATION;
+      gc_epoch_lock.destroy_reservation();
+      gc_epoch_lock = Reservation::NO_RESERVATION;
+      future_lock.destroy_reservation();
+      future_lock = Reservation::NO_RESERVATION;
+      remote_lock.destroy_reservation();
+      remote_lock = Reservation::NO_RESERVATION;
+      shutdown_lock.destroy_reservation();
+      shutdown_lock = Reservation::NO_RESERVATION;
 
 #ifdef DEBUG_HIGH_LEVEL
       if (logging_region_tree_state)
@@ -14061,6 +14066,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_create_top_view_request(AddressSpaceID target,
+                                               Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_CREATE_TOP_VIEW_REQUEST,
+                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_future(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -14831,6 +14845,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       ReductionManager::handle_send_manager(this, source, derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_create_top_view_request(Deserializer &derez,
+                                                 AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      PhysicalManager::handle_create_top_view_request(this, source, derez);
     }
 
     //--------------------------------------------------------------------------

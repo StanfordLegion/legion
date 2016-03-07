@@ -163,12 +163,12 @@ namespace Legion {
       inline bool is_virtual_instance(void) const
         { return is_virtual_manager(); }
     public:
-      void register_logical_top_view(UniqueID context_uid, LogicalView *view);
-      void unregister_logical_top_view(LogicalView *view);
-    public:
-      UniqueID find_context_uid(LogicalView *top_view) const;
-      // This is the common case method so make it fast
-      LogicalView* find_logical_top_view(UniqueID context_uid) const;
+      // Methods for creating/finding/destroying logical top views
+      void register_logical_top_view(UniqueID context_uid, InstanceView *view);
+      void unregister_logical_top_view(InstanceView *view);
+      UniqueID find_context_uid(InstanceView *top_view) const;
+      InstanceView* find_or_create_logical_top_view(UniqueID context_uid);
+      virtual InstanceView* create_logical_top_view(UniqueID context_uid) = 0;
     public:
       bool meets_region_tree(const std::vector<LogicalRegion> &regions) const;
       bool meets_regions(const std::vector<LogicalRegion> &regions) const;
@@ -191,6 +191,9 @@ namespace Legion {
                                            GCPriority priority); 
       static void delete_physical_manager(PhysicalManager *manager);
     public:
+      static void handle_create_top_view_request(Runtime *runtime,
+                              AddressSpaceID source, Deserializer &derez);
+    public:
       RegionTreeForest *const context;
       MemoryManager *const memory_manager;
       RegionNode *const region_node;
@@ -200,7 +203,9 @@ namespace Legion {
       const bool own_domain;
       const PointerConstraint pointer_constraint;
     protected:
-      std::map<UniqueID,LogicalView*> top_views;
+      std::map<UniqueID,InstanceView*> top_views;
+      std::map<InstanceView*,UniqueID> top_reverse;
+      std::map<UniqueID,UserEvent> pending_views;
     };
 
     /**
@@ -247,7 +252,7 @@ namespace Legion {
     public:
       inline Event get_use_event(void) const { return use_event; }
     public:
-      MaterializedView* create_top_view(UniqueID context_uid);
+      virtual InstanceView* create_logical_top_view(UniqueID context_uid);
       void compute_copy_offsets(const FieldMask &copy_mask,
                                 std::vector<Domain::CopySrcDstField> &fields);
       void compute_copy_offsets(FieldID fid, 
@@ -351,7 +356,7 @@ namespace Legion {
                                       AddressSpaceID source,
                                       Deserializer &derez);
     public:
-      ReductionView* create_view(UniqueID context_uid);
+      virtual InstanceView* create_logical_top_view(UniqueID context_uid);
     public:
       const ReductionOp *const op;
       const ReductionOpID redop;
@@ -494,6 +499,7 @@ namespace Legion {
       virtual bool has_field(FieldID fid) const;
       virtual void has_fields(std::map<FieldID,bool> &fields) const;
       virtual void remove_space_fields(std::set<FieldID> &fields) const;
+      virtual InstanceView* create_logical_top_view(UniqueID context_uid);
     public:
       static inline VirtualManager* get_virtual_instance(void)
         { return get_singleton(); }

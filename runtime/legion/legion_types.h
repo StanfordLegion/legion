@@ -393,6 +393,7 @@ namespace Legion {
       SEND_REDUCTION_UPDATE,
       SEND_INSTANCE_MANAGER,
       SEND_REDUCTION_MANAGER,
+      SEND_CREATE_TOP_VIEW_REQUEST,
       SEND_FUTURE,
       SEND_FUTURE_RESULT,
       SEND_FUTURE_SUBSCRIPTION,
@@ -490,6 +491,7 @@ namespace Legion {
         "Send Reduction Update",                                      \
         "Send Instance Manager",                                      \
         "Send Reduction Manager",                                     \
+        "Send Create Top View Request",                               \
         "Send Future",                                                \
         "Send Future Result",                                         \
         "Send Future Subscription",                                   \

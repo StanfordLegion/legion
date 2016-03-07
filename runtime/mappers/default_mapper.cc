@@ -911,6 +911,14 @@ namespace Legion {
                                          int factor, const Rect<DIM> &to_factor)
     //--------------------------------------------------------------------------
     {
+      if (factor == 1)
+      {
+        int result[DIM];
+        for (int i = 0; i < DIM; i++)
+          result[i] = 1;
+        return Point<DIM>(result);
+      }
+      // Fundamental theorem of arithmetic time!
       const unsigned num_primes = 32;
       const int primes[num_primes] = { 2, 3, 5, 7, 11, 13, 17, 19, 
                                        23, 29, 31, 37, 41, 43, 47, 53,

@@ -4519,7 +4519,7 @@ namespace Legion {
       Mapper::MapCloseOutput output;
       // No need to filter for close operations
       prepare_for_mapping(valid_instances, input.valid_instances);
-      if (mapper != NULL)
+      if (mapper == NULL)
       {
         Processor exec_proc = parent_ctx->get_executing_processor();
         mapper = runtime->find_mapper(exec_proc, map_id);
@@ -4558,9 +4558,9 @@ namespace Legion {
       }
       for (unsigned idx = 0; idx < chosen_instances.size(); idx++)
       {
-        const InstanceRef &ref = chosen_instances[idx];
-        if (ref.is_composite_ref())
+        if (int(idx) == composite_index)
           continue;
+        const InstanceRef &ref = chosen_instances[idx];
         if (!runtime->forest->is_valid_mapping(ref, requirement))
         {
           log_run.error("Invalid mapper output from invocation of 'map_close' "
