@@ -115,10 +115,20 @@ namespace Realm {
     Status::Result prev = __sync_val_compare_and_swap(&status.result,
 						      Status::RUNNING,
 						      Status::TERMINATED_EARLY);
-    assert(prev == Status::RUNNING);
-
-    status.error_code = error_code;
-    status.error_details = details;
+    if(prev == Status::RUNNING) {
+      status.error_code = error_code;
+      status.error_details = details;
+    } else {
+      // if that didn't work, try going from INTERRUPT_REQUESTED -> TERMINATED_EARLY
+#ifndef NDEBUG
+      prev =
+#endif
+        __sync_val_compare_and_swap(&status.result,
+				    Status::INTERRUPT_REQUESTED,
+				    Status::TERMINATED_EARLY);
+      assert(prev == Status::INTERRUPT_REQUESTED);
+      // don't update error_code/details - that was already provided in the interrupt request
+    }
 
     timeline.record_complete_time();
 
@@ -145,9 +155,12 @@ namespace Realm {
     Status::Result newresult = ((failed_work_items == 0) ?
   				  Status::COMPLETED_SUCCESSFULLY :
 				  Status::COMPLETED_WITH_ERRORS);
-    Status::Result prev = __sync_val_compare_and_swap(&status.result,
-						      Status::RUNNING,
-						      newresult);
+#ifndef NDEBUG
+    Status::Result prev =
+#endif
+      __sync_val_compare_and_swap(&status.result,
+				  Status::RUNNING,
+				  newresult);
     assert((prev == Status::RUNNING) ||
 	   (prev == Status::TERMINATED_EARLY) ||
 	   (prev == Status::CANCELLED));
@@ -178,6 +191,13 @@ namespace Realm {
 
       return true;
     }
+
+    // if the task is in a terminal state, no subclass will be able to do anything either
+    if((status.result == Status::COMPLETED_SUCCESSFULLY) ||
+       (status.result == Status::COMPLETED_WITH_ERRORS) ||
+       (status.result == Status::TERMINATED_EARLY) ||
+       (status.result == Status::CANCELLED))
+      return true;
 
     // otherwise we return false - a subclass might override and add additional ways to
     //  cancel an already-running operation

@@ -92,7 +92,7 @@ def symlink(from_path, to_path):
         os.symlink(from_path, to_path)
 
 def install_bindings(bindings_dir, runtime_dir, terra_dir, debug, general_llr,
-                     cuda, gasnet, thread_count):
+                     cuda, gasnet, clean_first, thread_count, extra_flags):
     env = dict(list(os.environ.items()) + [
         ('LG_RT_DIR', runtime_dir),
         ('TERRA_DIR', terra_dir),                           # for bindings
@@ -104,14 +104,16 @@ def install_bindings(bindings_dir, runtime_dir, terra_dir, debug, general_llr,
          'USE_CUDA=%s' % (1 if cuda else 0),
          'USE_GASNET=%s' % (1 if gasnet else 0),
          ] +
+        extra_flags +
         (['GCC=%s' % os.environ['CXX']] if 'CXX' in os.environ else []))
 
-    subprocess.check_call(
-        ['make'] +
-        flags +
-        ['clean'],
-        cwd = bindings_dir,
-        env = env)
+    if clean_first:
+        subprocess.check_call(
+            ['make'] +
+            flags +
+            ['clean'],
+            cwd = bindings_dir,
+            env = env)
     subprocess.check_call(
         ['make'] +
         flags +
@@ -161,6 +163,14 @@ def install():
         '--cuda', dest = 'cuda', action = 'store_true', required = False,
         help = 'Build Legion with CUDA.')
     parser.add_argument(
+        '--noclean', dest = 'clean_first', action = 'store_false', required = False,
+        default = True,
+        help = 'Skip "make clean" step.')
+    parser.add_argument(
+        '--extra', dest = 'extra_flags', action = 'append', required = False,
+        default = [],
+        help = 'Extra flags for make command.')
+    parser.add_argument(
         '-j', dest = 'thread_count', nargs = '?', type = int,
         help = 'Number threads used to compile.')
     args = parser.parse_args()
@@ -194,8 +204,8 @@ def install():
 
     bindings_dir = os.path.join(legion_dir, 'bindings', 'terra')
     install_bindings(bindings_dir, runtime_dir, terra_dir, args.debug,
-                     general, args.cuda, args.gasnet,
-                     thread_count)
+                     general, args.cuda, args.gasnet, args.clean_first,
+                     thread_count, args.extra_flags)
 
 if __name__ == '__main__':
     install()

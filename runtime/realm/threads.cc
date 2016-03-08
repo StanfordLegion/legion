@@ -18,6 +18,8 @@
 #include "threads.h"
 
 #include "logging.h"
+#include "faults.h"
+#include "operation.h"
 
 #ifdef DEBUG_USWITCH
 #include <stdio.h>
@@ -56,6 +58,7 @@ inline void makecontext_wrap(ucontext_t *u, void (*fn)(), int args, ...) { makec
 
 #include <string.h>
 #include <stdlib.h>
+#include <signal.h>
 #include <string>
 #include <map>
 
@@ -68,6 +71,7 @@ inline void makecontext_wrap(ucontext_t *u, void (*fn)(), int args, ...) { makec
 #endif
 #endif
 
+#ifndef CHECK_PTHREAD
 #define CHECK_PTHREAD(cmd) do { \
   int ret = (cmd); \
   if(ret != 0) { \
@@ -75,6 +79,7 @@ inline void makecontext_wrap(ucontext_t *u, void (*fn)(), int args, ...) { makec
     assert(0); \
   } \
 } while(0)
+#endif
 
 namespace Realm {
 
@@ -508,6 +513,111 @@ namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
   //
+  // class Thread
+
+  static bool handler_registered = false;
+  // Valgrind uses SIGUSR2 on Darwin
+  static int handler_signal = SIGUSR1;
+
+  static void signal_handler(int signal, siginfo_t *info, void *context)
+  {
+    if(signal == handler_signal) {
+      // somebody pinged us to look at our signals
+      Thread *t = ThreadLocal::current_thread;
+      assert(t);
+      t->process_signals();
+      return;
+    }
+    
+    Backtrace bt;
+    bt.capture_backtrace();
+    bt.lookup_symbols();
+    log_thread.error() << "received unexpected signal " << signal << " backtrace=" << bt;
+  }
+
+  static void register_handler(void)
+  {
+    if(!__sync_bool_compare_and_swap(&handler_registered, false, true)) return;
+
+    struct sigaction act;
+    bzero(&act, sizeof(act));
+    act.sa_sigaction = &signal_handler;
+    act.sa_flags = SA_SIGINFO;
+
+    int ret = sigaction(handler_signal, &act, 0);
+    assert(ret == 0);
+  }
+
+  void Thread::signal(Signal sig, bool asynchronous)
+  {
+    log_thread.info() << "sending signal: target=" << (void *)this << " signal=" << sig << " async=" << asynchronous;
+    {
+      AutoHSLLock a(signal_mutex);
+      signal_queue.push_back(sig);
+    }
+    int prev = __sync_fetch_and_add(&signal_count, 1);
+    if((prev == 0) && asynchronous)
+      alert_thread();
+  }
+
+  Thread::Signal Thread::pop_signal(void)
+  {
+    if(signal_count) {
+      Signal sig;
+      __sync_fetch_and_sub(&signal_count, 1);
+      AutoHSLLock a(signal_mutex);
+      sig = signal_queue.front();
+      signal_queue.pop_front();
+      return sig;
+    } else
+      return TSIG_NONE;
+  }
+
+  void Thread::process_signals(void)
+  {
+    // should only be called from the thread itself
+    assert(this == Thread::self());
+
+    while(signal_count > 0) {
+      Signal sig;
+      {
+	__sync_fetch_and_sub(&signal_count, 1);
+	AutoHSLLock a(signal_mutex);
+	// should never be empty, as there's no race conditions on emptying the queue
+	assert(!signal_queue.empty());
+	sig = signal_queue.front();
+	signal_queue.pop_front();
+      }
+
+      switch(sig) {
+      case Thread::TSIG_INTERRUPT: 
+	{
+	  Operation *op = current_op;
+	  if(op && op->cancellation_requested()) {
+#ifdef REALM_USE_EXCEPTIONS
+	    if(exceptions_permitted()) {
+  	      throw CancellationException();
+	    } else
+#endif
+	    {
+	      log_thread.fatal() << "no handler for TSIG_INTERRUPT: thread=" << this << " op=" << op;
+	      assert(0);
+	    }
+	  } else
+	    log_thread.warning() << "unwanted TSIG_INTERRUPT: thread=" << this << " op=" << op;
+	  break;
+	}
+      default: 
+	{
+	  assert(0);
+	}
+      }
+    }
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
   // class KernelThread
 
   class KernelThread : public Thread {
@@ -525,6 +635,8 @@ namespace Realm {
 
   protected:
     static void *pthread_entry(void *data);
+
+    virtual void alert_thread(void);
 
     void *target;
     void (*entry_wrapper)(void *);
@@ -575,6 +687,9 @@ namespace Realm {
   void KernelThread::start_thread(const ThreadLaunchParameters& params,
 				  const CoreReservation& rsrv)
   {
+    // before we create any threads, make sure we have our signal handler registered
+    register_handler();
+
     pthread_attr_t attr;
 
     CHECK_PTHREAD( pthread_attr_init(&attr) );
@@ -633,6 +748,16 @@ namespace Realm {
     ok_to_delete = true;
   }
 
+  void KernelThread::alert_thread(void)
+  {
+    // are we alerting ourself?
+    if(this->thread == pthread_self()) {
+      // just process the signals right here and now
+      process_signals();
+    } else {
+      pthread_kill(this->thread, handler_signal);
+    }
+  }
 
   // used when we don't have an allocation yet
   template <typename T>
@@ -693,16 +818,25 @@ namespace Realm {
   protected:
     static void uthread_entry(void) __attribute__((noreturn));
 
+    virtual void alert_thread(void);
+
     static const int MAGIC_VALUE = 0x11223344;
 
     void *target;
     void (*entry_wrapper)(void *);
     int magic;
+#ifndef __MACH__
     ucontext_t ctx;
+#else
+    // valgrind says Darwin's getcontext is writing past the end of ctx?
+    ucontext_t ctx;
+    int padding[512];
+#endif
     void *stack_base;
     size_t stack_size;
     bool ok_to_delete;
     bool running;
+    pthread_t host_pthread;
   };
 
   UserThread::UserThread(void *_target, void (*_entry_wrapper)(void *),
@@ -735,6 +869,7 @@ namespace Realm {
     UserThread *thread = ThreadLocal::current_user_thread;
     assert(thread != 0);
 
+    thread->host_pthread = pthread_self();
     thread->running = true;
 
     log_thread.info() << "thread " << thread << " started";
@@ -858,6 +993,7 @@ namespace Realm {
 	assert(ret == 0);
 
 	assert(switch_from->running == false);
+	switch_from->host_pthread = pthread_self();
 	switch_from->running = true;
       } else {
 	// a return of control to the host thread
@@ -874,7 +1010,29 @@ namespace Realm {
 
 	// if we get control back
 	assert(switch_from->running == false);
+	switch_from->host_pthread = pthread_self();
 	switch_from->running = true;
+      }
+    }
+  }
+
+  void UserThread::alert_thread(void)
+  {
+    if(ThreadLocal::current_thread == this) {
+      // just process the signals right here and now
+      process_signals();
+    } else {
+      // TODO: work out the race conditions inherent in this process
+      if(running) {
+	pthread_kill(host_pthread, handler_signal);
+      } else {
+        assert(scheduler != 0);
+	if(try_update_state(STATE_BLOCKED, STATE_ALERTED)) {
+          scheduler->thread_ready(this);
+        } else {
+	  log_thread.fatal()  << "HELP! couldn't alert: thread=" << this << " state=" << get_state();
+	  assert(0);
+	}
       }
     }
   }

@@ -6160,11 +6160,25 @@ namespace Legion {
       }
       else
         user_data = NULL;
-      // Perform the registration
-      Realm::ProfilingRequestSet profiling_requests;
-      ready_event = Processor::register_task_by_kind(
-          get_processor_kind(true), false/*global*/, vid, *realm_descriptor,
-          profiling_requests, user_data, user_data_size);
+      // Perform the registration, the normal case is not to have separate
+      // runtime instances, but if we do have them, we only register on
+      // the local processor
+      if (!Runtime::separate_runtime_instances)
+      {
+        Realm::ProfilingRequestSet profiling_requests;
+        ready_event = Processor::register_task_by_kind(
+            get_processor_kind(true), false/*global*/, vid, *realm_descriptor,
+            profiling_requests, user_data, user_data_size);
+      }
+      else
+      {
+        // This is a debug case for when we have one runtime instance
+        // for each processor
+        Processor proc = Processor::get_executing_processor();
+        Realm::ProfilingRequestSet profiling_requests;
+        ready_event = proc.register_task(vid, *realm_descriptor,
+            profiling_requests, user_data, user_data_size);
+      }
       // If we have a variant name, then record it
       if (registrar.task_variant_name == NULL)
       {
@@ -6844,8 +6858,8 @@ namespace Legion {
         unique_field_id((unique == 0) ? runtime_stride : unique),
         unique_variant_id((unique == 0) ? runtime_stride : unique),
         unique_constraint_id((unique == 0) ? runtime_stride : unique),
-        unique_task_id(generate_static_task_id(false/*check*/)+unique),
-        unique_mapper_id(generate_static_mapper_id(false/*check*/)+unique),
+        unique_task_id(get_current_static_task_id()+unique),
+        unique_mapper_id(get_current_static_mapper_id()+unique),
         available_lock(Reservation::create_reservation()), total_contexts(0),
         group_lock(Reservation::create_reservation()),
         distributed_id_lock(Reservation::create_reservation()),
@@ -7020,9 +7034,13 @@ namespace Legion {
               pending_variants.begin(); it != pending_variants.end(); it++)
         {
           (*it)->perform_registration(this);
-          delete *it;
+          // avoid races on seaparte runtime instances
+          if (!Runtime::separate_runtime_instances)
+            delete *it;
         }
-        pending_variants.clear();
+        // avoid races on separate runtime instances
+        if (!Runtime::separate_runtime_instances)
+          pending_variants.clear();
       }
       // All the runtime instances registered the static variants
       // starting at 1 and counting by 1, so just increment our
@@ -7047,7 +7065,9 @@ namespace Legion {
         {
           register_layout(it->second, it->first);
         }
-        pending_constraints.clear();
+        // avoid races if we are doing separate runtime creation
+        if (!Runtime::separate_runtime_instances)
+          pending_constraints.clear();
       } 
 
       // Before launching the top level task, see if the user requested
@@ -7380,21 +7400,29 @@ namespace Legion {
         legion_delete(it->second);
       }
       task_table.clear();
-      for (std::deque<VariantImpl*>::const_iterator it = 
-            variant_table.begin(); it != variant_table.end(); it++)
+      // Skip this if we are in separate runtime mode
+      if (!Runtime::separate_runtime_instances)
       {
-        legion_delete(*it);
+        for (std::deque<VariantImpl*>::const_iterator it = 
+              variant_table.begin(); it != variant_table.end(); it++)
+        {
+          legion_delete(*it);
+        }
       }
       variant_table.clear();
       task_variant_lock.destroy_reservation();
       task_variant_lock = Reservation::NO_RESERVATION;
-      while (!layout_constraints_table.empty())
+      // Skip this if we are in separate runtime mode
+      if (!Runtime::separate_runtime_instances)
       {
-        std::map<LayoutConstraintID,LayoutConstraints*>::iterator next_it = 
-          layout_constraints_table.begin();
-        LayoutConstraints *next = next_it->second;
-        layout_constraints_table.erase(next_it);
-        legion_delete(next);
+        while (!layout_constraints_table.empty())
+        {
+          std::map<LayoutConstraintID,LayoutConstraints*>::iterator next_it = 
+            layout_constraints_table.begin();
+          LayoutConstraints *next = next_it->second;
+          layout_constraints_table.erase(next_it);
+          legion_delete(next);
+        }
       }
       layout_constraints_lock.destroy_reservation();
       layout_constraints_lock = Reservation::NO_RESERVATION;
@@ -8415,19 +8443,21 @@ namespace Legion {
           if (result == Realm::ElementMask::OVERLAP_YES)
           {
             log_run.error("ERROR: colors %d and %d of partition %d "
-                            "are not disjoint when they were claimed to be!",
-                      it1->first.get_index(), it2->first.get_index(), pid.id);
+                          "are not disjoint when they were claimed to be!",
+                          (int)it1->first.get_index(),
+                          (int)it2->first.get_index(), pid.id);
             assert(false);
             exit(ERROR_DISJOINTNESS_TEST_FAILURE);
           }
           else if (result == Realm::ElementMask::OVERLAP_MAYBE)
           {
             log_run.warning("WARNING: colors %d and %d of partition "
-                        "%d may not be disjoint when they were claimed to be!"
-                        "(At least according to the low-level runtime.  You "
-                        "might also try telling the the low-level runtime "
-                        "to stop being lazy and try harder.)", 
-                      it1->first.get_index(), it2->first.get_index(), pid.id);
+                          "%d may not be disjoint when they were claimed to be!"
+                           "(At least according to the low-level runtime.  You "
+                            "might also try telling the the low-level runtime "
+                            "to stop being lazy and try harder.)",
+                            (int)it1->first.get_index(),
+                            (int)it2->first.get_index(), pid.id);
           }
         }
       }
@@ -8460,7 +8490,7 @@ namespace Legion {
                   log_run.error("ERROR: colors %d and %d of "
                                        "partition %d are not disjoint "
                                        "when they are claimed to be!",
-                                  it1->first[0], it2->first[0], pid.id);
+                                (int)it1->first[0], (int)it2->first[0], pid.id);
                   assert(false);
                   exit(ERROR_DISJOINTNESS_TEST_FAILURE);
                 }
@@ -8476,8 +8506,8 @@ namespace Legion {
                                       "(%d,%d) of partition %d are "
                                       "not disjoint when they are "
                                       "claimed to be!",
-                            it1->first[0], it1->first[1],
-                            it2->first[0], it2->first[1], pid.id);
+                            (int)it1->first[0], (int)it1->first[1],
+                            (int)it2->first[0], (int)it2->first[1], pid.id);
                   assert(false);
                   exit(ERROR_DISJOINTNESS_TEST_FAILURE);
                 }
@@ -8493,8 +8523,12 @@ namespace Legion {
                                        "(%d,%d,%d) of partition %d are "
                                        "not disjoint when they are "
                                        "claimed to be!",
-                            it1->first[0], it1->first[1], it1->first[2],
-                    it2->first[0], it2->first[1], it2->first[2], pid.id);
+                                       (int)it1->first[0],
+                                       (int)it1->first[1],
+                                       (int)it1->first[2],
+                                       (int)it2->first[0],
+                                       (int)it2->first[1],
+                                       (int)it2->first[2], pid.id);
                   assert(false);
                   exit(ERROR_DISJOINTNESS_TEST_FAILURE);
                 }
@@ -8541,7 +8575,8 @@ namespace Legion {
                                            "multi-domain partition %d are "
                                            "not disjoint when they are "
                                            "claimed to be!", 
-                                         it1->first[0], it2->first[0], pid.id);
+                                           (int)it1->first[0],
+                                           (int)it2->first[0], pid.id);
                       assert(false);
                       exit(ERROR_DISJOINTNESS_TEST_FAILURE);
                     }
@@ -8557,8 +8592,10 @@ namespace Legion {
                                            "of multi-domain partition %d are "
                                            "not disjoint when they are "
                                            "claimed to be!", 
-                                         it1->first[0], it1->first[1],
-                                         it2->first[0], it2->first[1], pid.id);
+                                           (int)it1->first[0],
+                                           (int)it1->first[1],
+                                           (int)it2->first[0],
+                                           (int)it2->first[1], pid.id);
                       assert(false);
                       exit(ERROR_DISJOINTNESS_TEST_FAILURE);
                     }
@@ -8574,8 +8611,12 @@ namespace Legion {
                                            "(%d,%d,%d) of multi-domain "
                                            "partition %d are not disjoint "
                                            "when they are claimed to be!", 
-                           it1->first[0], it1->first[1], it1->first[2], 
-                           it2->first[0], it2->first[1], it2->first[2], pid.id);
+                                           (int)it1->first[0],
+                                           (int)it1->first[1],
+                                           (int)it1->first[2],
+                                           (int)it2->first[0],
+                                           (int)it2->first[1],
+                                           (int)it2->first[2], pid.id);
                       assert(false);
                       exit(ERROR_DISJOINTNESS_TEST_FAILURE);
                     }
@@ -9586,16 +9627,16 @@ namespace Legion {
           case 0:
           case 1:
             log_index.error("Invalid color %d for get index partitions", 
-                                    color.point_data[0]);
+                            (int)color.point_data[0]);
             break;
           case 2:
             log_index.error("Invalid color (%d,%d) for get index partitions", 
-                                    color.point_data[0], color.point_data[1]);
+                            (int)color.point_data[0], (int)color.point_data[1]);
             break;
           case 3:
             log_index.error("Invalid color (%d,%d,%d) for get index "
-                            "partitions", color.point_data[0], 
-                            color.point_data[1], color.point_data[2]);
+                            "partitions", (int)color.point_data[0], 
+                            (int)color.point_data[1], (int)color.point_data[2]);
             break;
         }
         assert(false);
@@ -9661,16 +9702,18 @@ namespace Legion {
         {
           case 0:
           case 1:
-            log_index.error("Invalid color %d for get index subspace", 
-                                    color.point_data[0]);
+            log_index.error("Invalid color %d for get index subspace",
+                            (int)color.point_data[0]);
             break;
           case 2:
-            log_index.error("Invalid color (%d,%d) for get index subspace", 
-                                    color.point_data[0], color.point_data[1]);
+            log_index.error("Invalid color (%d,%d) for get index subspace",
+                            (int)color.point_data[0], (int)color.point_data[1]);
             break;
           case 3:
             log_index.error("Invalid color (%d,%d,%d) for get index subspace",
-              color.point_data[0], color.point_data[1], color.point_data[2]);
+                            (int)color.point_data[0],
+                            (int)color.point_data[1],
+                            (int)color.point_data[2]);
             break;
         }
         assert(false);
@@ -11445,8 +11488,74 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalRegion Runtime::attach_hdf5(Context ctx, 
-                                        const char *file_name,
+    void Runtime::fill_fields(Context ctx, const FillLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      FillOp *fill_op = get_available_fill_op(true);
+#ifdef DEBUG_HIGH_LEVEL
+      if (ctx == DUMMY_CONTEXT)
+      {
+        log_run.error("Illegal dummy context fill operation!");
+        assert(false);
+        exit(ERROR_DUMMY_CONTEXT_OPERATION);
+      }
+      if (ctx->is_leaf())
+      {
+        log_task.error("Illegal fill operation call performed in "
+                       "leaf task %s (ID %lld)",
+                       ctx->get_task_name(), ctx->get_unique_id());
+        assert(false);
+        exit(ERROR_LEAF_TASK_VIOLATION);
+      }
+      fill_op->initialize(ctx, launcher, check_privileges);
+      log_run.debug("Registering a fill operation in task %s (ID %lld)",
+                     ctx->get_task_name(), ctx->get_unique_id());
+#else
+      fill_op->initialize(ctx, launcher, false/*check privileges*/);
+#endif
+      Processor proc = ctx->get_executing_processor();
+      // Check to see if we need to do any unmappings and remappings
+      // before we can issue this copy operation
+      std::vector<PhysicalRegion> unmapped_regions;
+      if (!unsafe_launch)
+        ctx->find_conflicting_regions(fill_op, unmapped_regions);
+      if (!unmapped_regions.empty())
+      {
+        // Unmap any regions which are conflicting
+        for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
+        {
+          unmapped_regions[idx].impl->unmap_region();
+        }
+      }
+#ifdef INORDER_EXECUTION
+      Event term_event = fill_op->get_completion_event();
+#endif
+      // Issue the copy operation
+      add_to_dependence_queue(proc, fill_op);
+#ifdef INORDER_EXECUTION
+      if (program_order_execution && !term_event.has_triggered())
+        term_event.wait();
+#endif
+      // Remap any regions which we unmapped
+      if (!unmapped_regions.empty())
+      {
+        std::set<Event> mapped_events;
+        for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
+        {
+          MapOp *op = get_available_map_op(true);
+          op->initialize(ctx, unmapped_regions[idx]);
+          mapped_events.insert(op->get_completion_event());
+          add_to_dependence_queue(proc, op);
+        }
+        // Wait for all the re-mapping operations to complete
+        Event mapped_event = Event::merge_events(mapped_events);
+        if (!mapped_event.has_triggered())
+          mapped_event.wait();
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalRegion Runtime::attach_hdf5(Context ctx, const char *file_name,
                                         LogicalRegion handle, 
                                         LogicalRegion parent,
                                   const std::map<FieldID,const char*> field_map,
@@ -12779,11 +12888,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ MapperID Runtime::generate_static_mapper_id(bool do_check)
+    /*static*/ MapperID& Runtime::get_current_static_mapper_id(void)
     //--------------------------------------------------------------------------
     {
-      static MapperID next_mapper = MAX_APPLICATION_MAPPER_ID;
-      if (do_check && runtime_started)
+      static MapperID current_mapper_id = MAX_APPLICATION_MAPPER_ID;
+      return current_mapper_id;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ MapperID Runtime::generate_static_mapper_id(void)
+    //--------------------------------------------------------------------------
+    {
+      MapperID &next_mapper = get_current_static_mapper_id(); 
+      if (runtime_started)
       {
         log_run.error("Illegal call to 'generate_static_mapper_id' after "
                       "the runtime has been started!");
@@ -13277,6 +13394,8 @@ namespace Legion {
                                   bool check_task_id /*= true*/)
     //--------------------------------------------------------------------------
     {
+      // TODO: figure out a way to make this check safe with dynamic generation
+#if 0
       if (check_task_id && (registrar.task_id >= MAX_APPLICATION_TASK_ID))
       {
         log_run.error("Error registering task with ID %d. Exceeds the "
@@ -13289,6 +13408,7 @@ namespace Legion {
 #endif
         exit(ERROR_MAX_APPLICATION_TASK_ID_EXCEEDED);
       }
+#endif
       // See if we need to make a new variant ID
       if (vid == AUTO_GENERATE_ID) // Make a variant ID to use
         vid = get_unique_variant_id();
@@ -16666,7 +16786,18 @@ namespace Legion {
                        continuation(this, epoch_op_lock);
         return continuation.get_result();
       }
-      return get_available(epoch_op_lock, available_epoch_ops, has_lock);
+      MustEpochOp *result = 
+        get_available(epoch_op_lock, available_epoch_ops, has_lock);
+#ifdef DEBUG_HIGH_LEVEL
+      if (!has_lock)
+      {
+        AutoLock e_lock(epoch_op_lock);
+        out_must_epoch.insert(result);
+      }
+      else
+        out_must_epoch.insert(result);
+#endif
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -18799,11 +18930,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ TaskID Runtime::generate_static_task_id(bool do_check)
+    /*static*/ TaskID& Runtime::get_current_static_task_id(void)
     //--------------------------------------------------------------------------
     {
-      static TaskID next_task = MAX_APPLICATION_TASK_ID;
-      if (do_check && runtime_started)
+      static TaskID current_task_id = MAX_APPLICATION_TASK_ID;
+      return current_task_id;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ TaskID Runtime::generate_static_task_id(void)
+    //--------------------------------------------------------------------------
+    {
+      TaskID &next_task = get_current_static_task_id(); 
+      if (runtime_started)
       {
         log_run.error("Illegal call to 'generate_static_task_id' after "
                       "the runtime has been started!");
@@ -18833,7 +18972,7 @@ namespace Legion {
 #endif
         exit(ERROR_STATIC_CALL_POST_RUNTIME_START);
       }
-      if (check_id && (registrar.task_id >= MAX_APPLICATION_TASK_ID))
+      if (check_id && (registrar.task_id >= get_current_static_task_id()))
       {
         log_run.error("Error preregistering task with ID %d. Exceeds the "
                       "statically set bounds on application task IDs of %d. "

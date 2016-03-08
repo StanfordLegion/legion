@@ -385,10 +385,12 @@ namespace Legion {
                          unsigned &idx1, unsigned &idx2);
     public:
       // This takes ownership of the value buffer
-      void fill_fields(RegionTreeContext ctx,
-                       const RegionRequirement &req,
-                       const void *value, size_t value_size,
-                       VersionInfo &version_info);
+      Event fill_fields(RegionTreeContext ctx, Operation *op,
+                        const RegionRequirement &req,
+                        const void *value, size_t value_size,
+                        VersionInfo &version_info,
+                        RestrictInfo &restrict_info,
+                        InstanceSet &instances, Event precondition);
       InstanceRef attach_file(RegionTreeContext ctx,
                               const RegionRequirement &req,
                               AttachOp *attach_op,
@@ -1612,7 +1614,11 @@ namespace Legion {
       void update_valid_views(PhysicalState *state, const FieldMask &dirty_mask,
                               const std::vector<LogicalView*> &new_views,
                               const InstanceSet &corresponding_references);
-      // I hate the container problem, same as previous except MaterializedView
+      // I hate the container problem, same as previous except InstanceView 
+      void update_valid_views(PhysicalState *state, const FieldMask &dirty_mask,
+                              const std::vector<InstanceView*> &new_views,
+                              const InstanceSet &corresponding_references);
+      // More containter problems, we could use templates but whatever
       void update_valid_views(PhysicalState *state, const FieldMask &dirty_mask,
                               const std::vector<MaterializedView*> &new_views,
                               const InstanceSet &corresponding_references);
@@ -1623,13 +1629,13 @@ namespace Legion {
                             const TraversalInfo &info,
                             CopyTracker *tracker = NULL);
     public: // Help for physical analysis
-      LogicalView* convert_reference(const InstanceRef &ref, 
-                                     UniqueID ctx_uid) const;
       void find_complete_fields(const FieldMask &scope_fields,
           const LegionMap<ColorPoint,FieldMask>::aligned &children,
           FieldMask &complete_fields);
+      InstanceView* convert_reference(const InstanceRef &ref, 
+                                      UniqueID ctx_uid) const;
       void convert_target_views(const InstanceSet &targets, UniqueID ctx_uid,
-                                std::vector<LogicalView*> &target_views);
+                                std::vector<InstanceView*> &target_views); 
       // I hate the container problem, same as previous except MaterializedView
       void convert_target_views(const InstanceSet &targets, UniqueID ctx_uid,
                                 std::vector<MaterializedView*> &target_views);
@@ -1889,13 +1895,22 @@ namespace Legion {
       void fill_fields(ContextID ctx, const FieldMask &fill_mask,
                        const void *value, size_t value_size, 
                        VersionInfo &version_info);
+      Event eager_fill_fields(ContextID ctx, Operation *op,
+                              const FieldMask &fill_mask,
+                              const void *value, size_t value_size,
+                              VersionInfo &version_info, InstanceSet &instances,
+                              Event precondition);
       InstanceRef attach_file(ContextID ctx, const FieldMask &attach_mask,
                              const RegionRequirement &req, AttachOp *attach_op,
                              VersionInfo &version_info);
       Event detach_file(ContextID ctx, DetachOp *detach_op, 
                         VersionInfo &version_info, const InstanceRef &ref);
-      LogicalView* convert_reference_region(PhysicalManager *manager, 
-                                            UniqueID ctx_uid) const;
+      InstanceView* convert_reference_region(PhysicalManager *manager, 
+                                             UniqueID ctx_uid) const;
+      void convert_references_region(
+                              const std::vector<PhysicalManager*> &managers,
+                              std::vector<bool> &up_mask, UniqueID ctx_uid,
+                              std::vector<InstanceView*> &results) const;
     public:
       const LogicalRegion handle;
       PartitionNode *const parent;
@@ -1986,8 +2001,12 @@ namespace Legion {
                                      const std::set<ColorPoint> &next_children);
       virtual void send_node(AddressSpaceID target);
     public:
-      LogicalView* convert_reference_partition(PhysicalManager *manager,
-                                               UniqueID ctx_uid) const;
+      InstanceView* convert_reference_partition(PhysicalManager *manager,
+                                                UniqueID ctx_uid) const;
+      void convert_references_partition(
+                                  const std::vector<PhysicalManager*> &managers,
+                                  std::vector<bool> &up_mask, UniqueID ctx_uid,
+                                  std::vector<InstanceView*> &results) const;
     public:
       virtual void send_semantic_request(AddressSpaceID target, 
              SemanticTag tag, bool can_fail, bool wait_until, UserEvent ready);

@@ -24,6 +24,8 @@
 #include <stdlib.h>
 #include <vector>
 
+#include <sys/types.h>
+
     enum ActiveMessageIDs {
       FIRST_AVAILABLE = 140,
       NODE_ANNOUNCE_MSGID,

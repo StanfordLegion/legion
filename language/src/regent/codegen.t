@@ -2099,15 +2099,17 @@ end
 local function setup_list_of_regions_add_region(
     cx, param_type, container_type, value_type, value,
     region, parent, field_paths, add_requirement, get_requirement,
-    add_field, has_field, add_flags, requirement_args, flag, launcher)
+    add_field, has_field, add_flags, intersect_flags, requirement_args, flag, launcher)
   return quote
     var [region] = [raise_privilege_depth(cx, `([value].impl), param_type)]
     var [parent] = [raise_privilege_depth(cx, `([value].impl), container_type)]
     var requirement = [get_requirement]([launcher], [region])
     if requirement == [uint32](-1) then
       requirement = [add_requirement]([requirement_args])
+      [add_flags]([launcher], requirement, [flag])
+    else
+      [intersect_flags]([launcher], requirement, [flag])
     end
-    [add_flags]([launcher], requirement, [flag])
     [field_paths:map(
        function(field_path)
          local field_id = cx:list_of_regions(container_type):field_id(field_path)
@@ -2123,7 +2125,7 @@ end
 local function setup_list_of_regions_add_list(
     cx, param_type, container_type, value_type, value,
     region, parent, field_paths, add_requirement, get_requirement,
-    add_field, has_field, add_flags, requirement_args, flag, launcher)
+    add_field, has_field, add_flags, intersect_flags, requirement_args, flag, launcher)
   local element = terralib.newsymbol()
   if std.is_list(value_type.element_type) then
     return quote
@@ -2132,7 +2134,7 @@ local function setup_list_of_regions_add_list(
         [setup_list_of_regions_add_list(
            cx, param_type, container_type, value_type.element_type, element,
            region, parent, field_paths, add_requirement, get_requirement,
-           add_field, has_field, add_flags, requirement_args, flag, launcher)]
+           add_field, has_field, add_flags, intersect_flags, requirement_args, flag, launcher)]
       end
     end
   else
@@ -2142,7 +2144,7 @@ local function setup_list_of_regions_add_list(
         [setup_list_of_regions_add_region(
            cx, param_type, container_type, value_type.element_type, element,
            region, parent, field_paths, add_requirement, get_requirement,
-           add_field, has_field, add_flags, requirement_args, flag, launcher)]
+           add_field, has_field, add_flags, intersect_flags, requirement_args, flag, launcher)]
       end
     end
   end
@@ -2169,6 +2171,11 @@ local function expr_call_setup_list_of_regions_arg(
   local add_flags = c.legion_task_launcher_add_flags
   if index then
     add_flags = c.legion_index_launcher_add_flags
+  end
+
+  local intersect_flags = c.legion_task_launcher_intersect_flags
+  if index then
+    intersect_flags = c.legion_index_launcher_intersect_flags
   end
 
   for i, privilege in ipairs(privileges) do
@@ -2234,7 +2241,7 @@ local function expr_call_setup_list_of_regions_arg(
       setup_list_of_regions_add_list(
         cx, param_type, arg_type, arg_type, list,
         region, parent, field_paths, add_requirement, get_requirement,
-        add_field, has_field, add_flags, requirement_args, flag, launcher))
+        add_field, has_field, add_flags, intersect_flags, requirement_args, flag, launcher))
   end
 end
 
@@ -3652,7 +3659,13 @@ function codegen.expr_list_invert(cx, node)
 
       -- Fill sublist.
       var subslot = 0
+      std.assert(
+        [barriers.value].__size == [product.value].__size,
+        "list size mismatch in list_invert")
       for j = 0, [product.value].__size do
+        std.assert(
+          [barriers_type:data(barriers.value)][j].__size == [product_type:data(product.value)][j].__size,
+          "sublist size mismatch in list_invert")
         for k = 0, [product_type:data(product.value)][j].__size do
           var leaf = [product_type.element_type:data(
                         `([product_type:data(product.value)][j]))][k].impl
@@ -3671,6 +3684,7 @@ function codegen.expr_list_invert(cx, node)
           end
         end
       end
+      regentlib.assert(subslot == subsize, "underflowed sublist in list_invert")
     end
   end
 
@@ -3824,6 +3838,7 @@ local function expr_copy_extract_phase_barriers(index, values, value_types)
     local result_type = value_type.element_type
     local result_value = terralib.newsymbol(result_type, "condition_element")
     actions:insert(quote
+        std.assert([index] < [value].__size, "barrier index out of bounds in copy")
         var [result_value] = [value_type:data(value)][ [index] ]
     end)
     result_values:insert(result_value)
@@ -5044,7 +5059,6 @@ function codegen.stat_for_list_vectorized(cx, node)
         symbol = node.symbol,
         value = node.value,
         block = node.orig_block,
-        vectorize = false,
         span = node.span,
         options = node.options,
       })

@@ -113,6 +113,7 @@ namespace Legion {
       arg_manager = NULL;
       target_proc = Processor::NO_PROC;
       mapper = NULL;
+      must_epoch = NULL;
       orig_proc = Processor::NO_PROC; // for is_remote
     }
 
@@ -159,6 +160,15 @@ namespace Legion {
       deleted_field_spaces.clear();
       deleted_index_spaces.clear();
       parent_req_indexes.clear();
+    }
+
+    //--------------------------------------------------------------------------
+    void TaskOp::set_must_epoch(MustEpochOp *epoch, unsigned index,
+                                bool do_registration)
+    //--------------------------------------------------------------------------
+    {
+      Operation::set_must_epoch(epoch, do_registration);
+      must_epoch_index = index;
     }
 
     //--------------------------------------------------------------------------
@@ -407,7 +417,7 @@ namespace Legion {
       const size_t result_size = impl->get_untyped_size();
       // TODO: figure out a way to put this check back in with dynamic task
       // registration where we might not know the return size until later
-#if 0
+#ifdef PERFORM_PREDICATE_SIZE_CHECKS
       if (result_size != variants->return_size)
       {
         log_run.error("Predicated task launch for task %s "
@@ -1514,8 +1524,10 @@ namespace Legion {
     {
       // From Operation
       this->parent_ctx = rhs->parent_ctx;
+      // Don't register this an operation when setting the must epoch info
       if (rhs->must_epoch != NULL)
-        this->set_must_epoch(rhs->must_epoch, this->must_epoch_index);
+        this->set_must_epoch(rhs->must_epoch, rhs->must_epoch_index,
+                             false/*do registration*/);
       // From Task
       this->task_id = rhs->task_id;
       this->indexes = rhs->indexes;
@@ -6550,7 +6562,7 @@ namespace Legion {
           else
           {
             // TODO: Put this check back in
-#if 0
+#ifdef PERFORM_PREDICATE_SIZE_CHECKS
             if (predicate_false_size != variants->return_size)
             {
               log_run.error("Predicated task launch for task %s "
@@ -6677,7 +6689,7 @@ namespace Legion {
       // Top-level tasks never do dependence analysis, so we
       // need to complete those stages now
       resolve_speculation();
-    }
+    } 
 
     //--------------------------------------------------------------------------
     void IndividualTask::trigger_dependence_analysis(void)
@@ -6896,6 +6908,22 @@ namespace Legion {
       // Then clean up this task instance
       if (trigger)
         complete_execution();
+      // "mapping" does not change the physical state
+      for (unsigned idx = 0; idx < regions.size(); idx++)
+      {
+        RegionRequirement &req = regions[idx];
+	VersionInfo &version_info = version_infos[idx];
+	RegionTreeContext req_ctx =
+	  parent_ctx->find_enclosing_context(parent_req_indexes[idx]);
+	// don't bother if this wasn't going to change mapping state anyway
+	// only requirements with write privileges bump version numbers
+	if(!IS_WRITE(req))
+	  continue;
+	version_info.apply_mapping(req_ctx.get_id(),
+				   runtime->address_space,
+				   map_applied_conditions,
+				   true /*copy previous*/);
+      }      
       complete_mapping();
       trigger_children_complete();
     }
@@ -7194,6 +7222,8 @@ namespace Legion {
           children_commit_invoked = true;
         }
       }
+      if (must_epoch != NULL)
+        must_epoch->notify_subop_complete(this);
       // Mark that this operation is complete
       complete_operation();
       if (need_commit)
@@ -7216,6 +7246,8 @@ namespace Legion {
       {
         it->release();
       }
+      if (must_epoch != NULL)
+        must_epoch->notify_subop_commit(this);
       commit_operation(true/*deactivate*/);
     }
 
@@ -9088,7 +9120,7 @@ namespace Legion {
         else
         {
           // TODO: Reenable this error if we want to track predicate defaults
-#if 0
+#ifdef PERFORM_PREDICATE_SIZE_CHECKS
           if (predicate_false_size != variants->return_size)
           {
             log_run.error("Predicated index task launch for task %s "
@@ -9471,6 +9503,7 @@ namespace Legion {
       // Then clean up this task execution
       if (trigger)
         complete_execution();
+      assert(0 && "TODO: advance mapping states if you care");
       complete_mapping();
       trigger_children_complete();
     }
@@ -9639,7 +9672,8 @@ namespace Legion {
       }
       else
         future_map.impl->complete_all_futures();
-
+      if (must_epoch != NULL)
+        must_epoch->notify_subop_complete(this);
       complete_operation();
       if (speculation_state == RESOLVE_FALSE_STATE)
         trigger_children_committed();
@@ -9655,6 +9689,8 @@ namespace Legion {
       {
         it->release();
       }
+      if (must_epoch != NULL)
+        must_epoch->notify_subop_commit(this);
       // Mark that this operation is now committed
       commit_operation(true/*deactivate*/);
     }

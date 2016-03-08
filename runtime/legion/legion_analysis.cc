@@ -434,7 +434,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void VersionInfo::apply_mapping(ContextID ctx, AddressSpaceID target,
-                                    std::set<Event> &applied_conditions)
+                                    std::set<Event> &applied_conditions,
+				    bool copy_previous/*=false*/)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -447,11 +448,24 @@ namespace Legion {
           continue;
         // Apply path only differently
         if (it->second.path_only())
+	{
+	  // HACK: no support for predicated tasks that opened subtrees - wait
+	  //  for the new mapping API
+	  if (copy_previous)
+	    assert(0);
           it->second.physical_state->apply_path_only_state(
                     it->second.advance_mask, target, applied_conditions);
-        else
+        } else {
+	  if (copy_previous)
+	  {
+	    // we probably didn't premap, so go fetch state
+	    assert(!it->second.close_top());
+	    it->second.physical_state->capture_state(false /*!path_only*/,
+						     false /*!close_top*/);
+	  }
           it->second.physical_state->apply_state(it->second.advance_mask,
                                              target, applied_conditions);
+	}
         // Don't delete it because we need to hold onto the 
         // version manager references in case this operation
         // fails to complete

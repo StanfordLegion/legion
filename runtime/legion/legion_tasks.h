@@ -60,6 +60,9 @@ namespace Legion {
     protected:
       void activate_task(void);
       void deactivate_task(void);
+    public:
+      void set_must_epoch(MustEpochOp *epoch, unsigned index, 
+                          bool do_registration);
     protected:
       void pack_base_task(Serializer &derez, AddressSpaceID target);
       void unpack_base_task(Deserializer &derez);
@@ -233,6 +236,9 @@ namespace Legion {
     public:
       inline void set_current_mapping_index(unsigned index) 
         { current_mapping_index = index; }
+    public:
+      // Index for this must epoch op
+      unsigned must_epoch_index;
     public:
       // Static methods
       static void process_unpack_task(Runtime *rt,

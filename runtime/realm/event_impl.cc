@@ -261,7 +261,7 @@ namespace Realm {
 
   void Event::cancel_operation(const void *reason_data, size_t reason_len) const
   {
-    assert(0 && "TODO: faults");
+    get_runtime()->optable.request_cancellation(*this, reason_data, reason_len);
   }
 
 
@@ -327,6 +327,19 @@ namespace Realm {
   //
   // class Barrier
   //
+
+  namespace {
+    Barrier make_no_barrier(void)
+    {
+      Barrier b;
+      b.id = 0;
+      b.gen = 0;
+      b.timestamp = 0;
+      return b;
+    }
+  };
+
+  /*static*/ const Barrier Barrier::NO_BARRIER = make_no_barrier();
 
   /*static*/ Barrier Barrier::create_barrier(unsigned expected_arrivals,
 					     ReductionOpID redop_id /*= 0*/,

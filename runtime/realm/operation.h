@@ -54,6 +54,8 @@ namespace Realm {
     // returns false if a subclass wants to try some other means to cancel an operation
     virtual bool attempt_cancellation(int error_code, const void *reason_data, size_t reason_size);
 
+    bool cancellation_requested(void) const;
+
     virtual void print(std::ostream& os) const = 0;
 
     // abstract class to describe asynchronous work started by an operation

@@ -102,6 +102,7 @@ namespace Legion {
   struct CopyLauncher;
   struct AcquireLauncher;
   struct ReleaseLauncher;
+  struct FillLauncher;
   struct LayoutConstraintRegistrar;
   struct TaskVariantRegistrar;
   struct TaskGeneratorArguments;

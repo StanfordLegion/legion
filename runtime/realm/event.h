@@ -115,6 +115,8 @@ namespace Realm {
 
       timestamp_t timestamp;
 
+      static const Barrier NO_BARRIER;
+
       static Barrier create_barrier(unsigned expected_arrivals, ReductionOpID redop_id = 0,
 				    const void *initial_value = 0, size_t initial_value_size = 0);
       void destroy_barrier(void);

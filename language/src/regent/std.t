@@ -23,8 +23,6 @@ local std = {}
 
 std.config, std.args = config.parse_args()
 
-if std.config["cuda"] then cudahelper = require("regent/cudahelper") end
-
 -- #####################################
 -- ## Legion Bindings
 -- #################
@@ -38,6 +36,8 @@ local c = terralib.includecstring([[
 #include <stdlib.h>
 ]])
 std.c = c
+
+if std.config["cuda"] then cudahelper = require("regent/cudahelper") end
 
 -- #####################################
 -- ## Utilities
@@ -2609,10 +2609,6 @@ function task:get_config_options()
   return self.config_options
 end
 
-function task:settaskid(taskid)
-  self.taskid = taskid
-end
-
 function task:gettaskid()
   return self.taskid
 end
@@ -2692,17 +2688,22 @@ function task:__tostring()
   return tostring(self:getname())
 end
 
-function std.newtask(name)
-  assert(data.is_tuple(name))
-  local terra proto
-  proto.name = name:mkstring(".")
-  return setmetatable({
-    definition = proto,
-    taskid = terralib.global(c.legion_task_id_t),
-    name = name,
-    cuda = false,
-    inline = false,
-  }, task)
+do
+  local next_task_id = 1
+  function std.newtask(name)
+    assert(data.is_tuple(name))
+    local terra proto
+    proto.name = name:mkstring(".")
+    local task_id = next_task_id
+    next_task_id = next_task_id + 1
+    return setmetatable({
+      definition = proto,
+      taskid = terralib.constant(c.legion_task_id_t, task_id),
+      name = name,
+      cuda = false,
+      inline = false,
+    }, task)
+  end
 end
 
 function std.is_task(x)
@@ -2910,21 +2911,10 @@ do
   end
 end
 
-function std.start(main_task)
+function std.setup(main_task, extra_setup_thunk)
   assert(std.is_task(main_task))
-  local next_task_id = 0
   local task_registrations = tasks:map(
     function(task)
-      local task_id
-      if not task:is_variant_task() then
-        next_task_id = next_task_id + 1
-        task_id = next_task_id
-        task:gettaskid():set(task_id)
-      else
-        local source_variant = task:get_source_variant()
-        task_id = source_variant:gettaskid():get()
-      end
-
       local return_type = task:getdefinition():gettype().returntype
       local result_type_bucket = std.type_size_bucket_name(return_type)
       local register = c["legion_runtime_register_task" .. result_type_bucket]
@@ -2935,7 +2925,7 @@ function std.start(main_task)
       if task:getcuda() then proc_type = c.TOC_PROC end
 
       return quote [register](
-        task_id,
+        [task:gettaskid()],
         proc_type,
         true,
         true,
@@ -2977,6 +2967,28 @@ function std.start(main_task)
     end
   end
 
+  local extra_setup = quote end
+  if extra_setup_thunk then
+    extra_setup = quote
+      [extra_setup_thunk]()
+    end
+  end
+
+  local terra main(argc : int, argv : &rawstring)
+    [task_registrations];
+    [reduction_registrations];
+    [extra_setup];
+    c.legion_runtime_set_top_level_task_id([main_task:gettaskid()])
+    return c.legion_runtime_start(argc, argv, false)
+  end
+
+  local names = {main = main}
+  return main, names
+end
+
+function std.start(main_task)
+  local main = std.setup(main_task)
+
   local args = std.args
   local argc = #args
   local argv = terralib.newsymbol((&int8)[argc], "argv")
@@ -2987,14 +2999,22 @@ function std.start(main_task)
     end)
   end
 
-  local terra main()
+  local terra wrapper()
     [argv_setup];
-    [task_registrations];
-    [reduction_registrations]
-    c.legion_runtime_set_top_level_task_id([main_task:gettaskid()])
-    return c.legion_runtime_start(argc, argv, false)
+    return main([argc], [argv])
   end
-  main()
+  wrapper()
+end
+
+function std.saveobj(main_task, filename, filetype)
+  local main, names = std.setup(main_task)
+  local lib_dir = os.getenv("LG_RT_DIR") .. "/../bindings/terra"
+
+  if filetype ~= nil then
+    terralib.saveobj(filename, filetype, names, {"-L" .. lib_dir, "-llegion_terra"})
+  else
+    terralib.saveobj(filename, names, {"-L" .. lib_dir, "-llegion_terra"})
+  end
 end
 
 -- #####################################

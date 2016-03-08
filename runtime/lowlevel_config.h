@@ -16,6 +16,9 @@
 #ifndef RUNTIME_LOWLEVEL_CONFIG_H
 #define RUNTIME_LOWLEVEL_CONFIG_H
 
+// for size_t
+#include <stddef.h>
+
 // ******************** IMPORTANT **************************
 //
 // This file is PURE C, **NOT** C++. Keep any C++-isms in
@@ -77,5 +80,14 @@ typedef enum legion_lowlevel_domain_max_rect_dim_t {
   MAX_POINT_DIM = 3,
   MAX_RECT_DIM = 3,
 } legion_lowlevel_domain_max_rect_dim_t;
+
+// Prototype for a Realm task
+typedef
+  void (*legion_lowlevel_task_pointer_t)(
+    const void * /*data*/,
+    size_t /*datalen*/,
+    const void * /*userdata*/,
+    size_t /*userlen*/,
+    legion_lowlevel_id_t /*proc_id*/);
 
 #endif

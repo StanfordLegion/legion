@@ -78,6 +78,18 @@ namespace Realm {
     return !(*this == rhs);
   }
 
+  template <typename T>
+  /*static*/ Type Type::from_cpp_type(void)
+  {
+    return TypeConv::from_cpp_type<T>();
+  }
+
+  template <typename T>
+  /*static*/ Type Type::from_cpp_value(const T& value)
+  {
+    return TypeConv::from_cpp_type<T>();
+  }
+
   inline bool Type::is_valid(void) const
   {
     return (f_common.kind != InvalidKind);
@@ -607,7 +619,7 @@ namespace Realm {
     FunctionPointerImplementation *fpi = new FunctionPointerImplementation((void(*)())(fnptr));
     m_impls.push_back(fpi);
 #if defined(REALM_USE_DLFCN) && defined(REALM_USE_DLADDR)
-    DSOReferenceImplementation *dsoref = cvt_fnptr_to_dsoref(fpi, true /*quiet*/);
+    DSOReferenceImplementation *dsoref = DSOReferenceImplementation::cvt_fnptr_to_dsoref(fpi, true /*quiet*/);
     if(dsoref)
       m_impls.push_back(dsoref);
 #endif
@@ -805,6 +817,35 @@ namespace Realm {
       delete dsoref;
       return 0;
     }
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class CodeTranslator
+
+  template <typename TARGET_TYPE>
+  bool CodeTranslator::can_translate(const std::type_info& source_impl_type)
+  {
+    return can_translate(source_impl_type, typeid(TARGET_TYPE));
+  }
+
+  template <typename TARGET_TYPE>
+  bool CodeTranslator::can_translate(const CodeDescriptor& source_codedesc)
+  {
+    return can_translate(source_codedesc, typeid(TARGET_TYPE));
+  }
+
+  template <typename TARGET_TYPE>
+  TARGET_TYPE *CodeTranslator::translate(const CodeImplementation *source)
+  {
+    return static_cast<TARGET_TYPE *>(translate(source, typeid(TARGET_TYPE)));
+  }
+
+  template <typename TARGET_TYPE>
+  TARGET_TYPE *CodeTranslator::translate(const CodeDescriptor& source_codedesc)
+  {
+    return static_cast<TARGET_TYPE *>(translate(source_codedesc, typeid(TARGET_TYPE)));
   }
 
 

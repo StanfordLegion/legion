@@ -93,7 +93,8 @@
       var thickness = Math.max(height / max_level, 20);
       var baseThickness = height / max_level;
       height = max_level * thickness;
-      var min_feature_width = 5; // width in pixels of the smallest thing we want people to be able to see
+      var min_feature_width = 3; // width in pixels of the smallest thing we want people to be able to see
+      var min_gap_width = 1; // width in pixels of the smallest gap we want to show
 
       var mouseX = 0;
       var rangeZoom = true;
@@ -576,7 +577,8 @@
         var filteredData = Array();
         var items = profilingData.items;
         var f = scale * zoom;
-        var MIN_WIDTH = min_feature_width / f;
+        var min_feature_time = min_feature_width / f;
+        var min_gap_time = min_gap_width / f;
         for (var level in items) {
           for (var i = 0; i < items[level].length; ++i) {
             var d = items[level][i];
@@ -585,23 +587,23 @@
             if ((start * f) > windowEnd) continue;
             if ((end * f) < windowStart) continue;
             // is this block too narrow?
-            if ((end - start) < MIN_WIDTH) {
+            if ((end - start) < min_feature_time) {
               // see how many more after this are also too narrow and too close to us
               var count = 1;
               // don't do this if we're the subject of the current search and don't merge with
               // something that is
               if (!searchEnabled || searchRegex[currentPos].exec(d.title) == null) {
                 while (((i + count) < items[level].length) && 
-                       ((items[level][i + count].start - end) < MIN_WIDTH) &&
-                       ((items[level][i + count].end - items[level][i + count].start) < MIN_WIDTH) &&
+                       ((items[level][i + count].start - end) < min_gap_time) &&
+                       ((items[level][i + count].end - items[level][i + count].start) < min_feature_time) &&
                        (!searchEnabled || searchRegex[currentPos].exec(items[level][i + count].title) == null)) {
                   end = items[level][i + count].end;
                   count++;
                 }
               }
               // are we still too narrow?  if so, bloat, but make sure we don't overlap something later
-	      if ((end - start) < MIN_WIDTH) {
-                end = start + MIN_WIDTH;                   
+	      if ((end - start) < min_feature_time) {
+                end = start + min_feature_time;                   
                 if (((i + count) < items[level].length) && (items[level][i + count].start < end))
                   end = items[level][i + count].start;
               }

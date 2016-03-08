@@ -1619,6 +1619,7 @@ namespace Legion {
                        LogicalRegion parent,
                        const std::set<FieldID> &fields,
                        Future f, const Predicate &pred);
+      void fill_fields(Context ctx, const FillLauncher &launcher);
     public:
       PhysicalRegion attach_hdf5(Context ctx, const char *file_name,
                                  LogicalRegion handle, LogicalRegion parent,
@@ -1695,7 +1696,8 @@ namespace Legion {
       const std::map<AddressSpace,int>& find_reverse_MPI_mapping(void);
     public:
       MapperID generate_dynamic_mapper_id(void);
-      static MapperID generate_static_mapper_id(bool do_check = true);
+      static MapperID& get_current_static_mapper_id(void);
+      static MapperID generate_static_mapper_id(void);
       void add_mapper(MapperID map_id, Mapper *mapper, Processor proc);
       void replace_default_mapper(Mapper *mapper, Processor proc);
       MapperManager* find_mapper(Processor target, MapperID map_id);
@@ -2525,6 +2527,7 @@ namespace Legion {
       std::set<PointTask*>      out_point_tasks;
       std::set<IndexTask*>      out_index_tasks;
       std::set<SliceTask*>      out_slice_tasks;
+      std::set<MustEpochOp*>    out_must_epoch;
     public:
       // These are debugging method for the above data
       // structures.  They are not called anywhere in
@@ -2576,7 +2579,8 @@ namespace Legion {
                                 get_pending_variant_table(void);
       static std::map<LayoutConstraintID,LayoutConstraintRegistrar>&
                                 get_pending_constraint_table(void);
-      static TaskID generate_static_task_id(bool do_check = true);
+      static TaskID& get_current_static_task_id(void);
+      static TaskID generate_static_task_id(void);
       static VariantID preregister_variant(
                       const TaskVariantRegistrar &registrar,
                       const void *user_data, size_t user_data_size,

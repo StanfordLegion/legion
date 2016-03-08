@@ -163,6 +163,9 @@ namespace Legion {
                        std::vector<Domain::CopySrcDstField> &src_fields) = 0;
       virtual bool has_war_dependence(const RegionUsage &usage, 
                                       const FieldMask &user_mask) = 0;
+    public:
+      inline InstanceView* get_instance_subview(const ColorPoint &c) 
+        { return get_subview(c)->as_instance_view(); }
     };
 
     /**

@@ -17,6 +17,9 @@
 #ifndef __LEGION_CONFIG_H__
 #define __LEGION_CONFIG_H__
 
+// for UINT_MAX
+#include <limits.h>
+
 /**
  * \file legion_config.h
  */

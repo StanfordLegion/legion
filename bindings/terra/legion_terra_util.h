@@ -18,6 +18,14 @@
 
 #include "legion_c_util.h"
 
+#include "legion_terra_tasks.h"
+
+// These complain if not explicitly included in C mode.
+extern "C"
+{
+#include "lua.h"
+}
+
 template< typename W, typename T>
 void lua_push_opaque_object(lua_State* L, T obj)
 {
