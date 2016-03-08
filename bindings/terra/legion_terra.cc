@@ -244,10 +244,11 @@ legion_mapper_t create_mapper(const char* qualified_mapper_name,
 {
   Machine *machine = CObjectWrapper::unwrap(machine_);
   HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  (void)runtime;
   Processor proc = CObjectWrapper::unwrap(proc_);
 
-  Mapper *mapper = new LuaMapperWrapper(qualified_mapper_name,
-                                        *machine, runtime, proc);
+  Mapper *mapper = new LuaMapperWrapper(*machine, proc, 
+                                        qualified_mapper_name);
   return CObjectWrapper::wrap(mapper);
 }
 
@@ -292,7 +293,7 @@ void lua_task_wrapper_void(legion_task_t _task,
 #endif
 
   Task* task = CObjectWrapper::unwrap(_task);
-  string qualified_task_name(task->variants->name);
+  string qualified_task_name(task->get_task_name());
   unsigned n = qualified_task_name.find_last_of("/");
   string script_file = qualified_task_name.substr(0, n);
   string task_name = qualified_task_name.substr(n + 1);
@@ -343,7 +344,7 @@ legion_task_result_t lua_task_wrapper(legion_task_t _task,
 #endif
 
   Task* task = CObjectWrapper::unwrap(_task);
-  string qualified_task_name(task->variants->name);
+  string qualified_task_name(task->get_task_name());
   unsigned n1 = qualified_task_name.find_last_of("/");
   unsigned n2 = qualified_task_name.find_last_of(":");
   string script_file = qualified_task_name.substr(0, n1);
@@ -395,26 +396,26 @@ legion_task_result_t lua_task_wrapper(legion_task_t _task,
 }
 
 void
-vector_legion_domain_split_push_back(vector_legion_domain_split_t slices_,
-                                     legion_domain_split_t slice_)
+vector_legion_task_slice_push_back(vector_legion_task_slice_t slices_,
+                                     legion_task_slice_t slice_)
 {
-  vector<Mapper::DomainSplit> *slices = ObjectWrapper::unwrap(slices_);
-  Mapper::DomainSplit slice = CObjectWrapper::unwrap(slice_);
+  vector<Mapper::TaskSlice> *slices = ObjectWrapper::unwrap(slices_);
+  Mapper::TaskSlice slice = CObjectWrapper::unwrap(slice_);
   slices->push_back(slice);
 }
 
 unsigned
-vector_legion_domain_split_size(vector_legion_domain_split_t slices_)
+vector_legion_task_slice_size(vector_legion_task_slice_t slices_)
 {
-  vector<Mapper::DomainSplit> *slices = ObjectWrapper::unwrap(slices_);
+  vector<Mapper::TaskSlice> *slices = ObjectWrapper::unwrap(slices_);
   return slices->size();
 }
 
-legion_domain_split_t
-vector_legion_domain_split_get(vector_legion_domain_split_t slices_,
-                               unsigned idx)
+legion_task_slice_t
+vector_legion_task_slice_get(vector_legion_task_slice_t slices_,
+                             unsigned idx)
 {
-  vector<Mapper::DomainSplit> *slices = ObjectWrapper::unwrap(slices_);
+  vector<Mapper::TaskSlice> *slices = ObjectWrapper::unwrap(slices_);
   return CObjectWrapper::wrap((*slices)[idx]);
 }
 

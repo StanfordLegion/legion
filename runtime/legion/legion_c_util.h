@@ -506,24 +506,24 @@ namespace Legion {
         return static_cast<Memory::Kind>(options_);
       }
 
-      static legion_domain_split_t
-      wrap(Mapping::Mapper::TaskSlice domain_split) {
-        legion_domain_split_t domain_split_;
-        domain_split_.domain = wrap(domain_split.domain);
-        domain_split_.proc = wrap(domain_split.proc);
-        domain_split_.recurse = domain_split.recurse;
-        domain_split_.stealable = domain_split.stealable;
-        return domain_split_;
+      static legion_task_slice_t
+      wrap(Mapping::Mapper::TaskSlice task_slice) {
+        legion_task_slice_t task_slice_;
+        task_slice_.domain = wrap(task_slice.domain);
+        task_slice_.proc = wrap(task_slice.proc);
+        task_slice_.recurse = task_slice.recurse;
+        task_slice_.stealable = task_slice.stealable;
+        return task_slice_;
       }
 
       static Mapping::Mapper::TaskSlice
-      unwrap(legion_domain_split_t domain_split_) {
-        Mapping::Mapper::TaskSlice domain_split;
-            domain_split.domain = unwrap(domain_split_.domain);
-            domain_split.proc = unwrap(domain_split_.proc);
-            domain_split.recurse = domain_split_.recurse;
-            domain_split.stealable = domain_split_.stealable;
-        return domain_split;
+      unwrap(legion_task_slice_t task_slice_) {
+        Mapping::Mapper::TaskSlice task_slice;
+            task_slice.domain = unwrap(task_slice_.domain);
+            task_slice.proc = unwrap(task_slice_.proc);
+            task_slice.recurse = task_slice_.recurse;
+            task_slice.stealable = task_slice_.stealable;
+        return task_slice;
       }
 
       static legion_phase_barrier_t

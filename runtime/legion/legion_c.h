@@ -229,12 +229,12 @@ extern "C" {
   /**
    * @see Legion::Mapper::DomainSplit
    */
-  typedef struct legion_domain_split_t {
+  typedef struct legion_task_slice_t {
     legion_domain_t domain;
     legion_processor_t proc;
     bool recurse;
     bool stealable;
-  } legion_domain_split_t;
+  } legion_task_slice_t;
 
   /**
    * @see LegionRuntime::HighLevel::PhaseBarrier

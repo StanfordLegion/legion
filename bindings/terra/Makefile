@@ -35,7 +35,7 @@ OUTFILE		?= liblegion_terra.so
 # List all the application source files here
 GEN_SRC		?= \
   legion_terra.cc lua_mapper_wrapper.cc \
-  legion_terra_partitions.cc \
+  legion_terra_partitions.cc #\
   bishop_mapper.cc bishop_c.cc
   # .cc files
 GEN_GPU_SRC	?=		# .cu files
