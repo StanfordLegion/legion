@@ -417,7 +417,7 @@ namespace LegionRuntime {
 
       bool dominates(const Rect<DIM>& other) const
       {
-        for (int i = 0; i < DIM; i++)
+        for (unsigned i = 0; i < DIM; i++)
         {
           if (other.lo.x[i] < lo.x[i])
             return false;
