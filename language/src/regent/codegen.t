@@ -1820,7 +1820,7 @@ function codegen.expr_method_call(cx, node)
 end
 
 local function expr_call_setup_task_args(
-    cx, task, args, arg_types, param_types, params_struct_type, params_map,
+    cx, task, args, arg_types, param_types, params_struct_type, params_map, params_map_type,
     task_args, task_args_setup, task_args_cleanup)
   local size = terralib.newsymbol(c.size_t, "size")
   local buffer = terralib.newsymbol(&opaque, "buffer")
@@ -1854,22 +1854,22 @@ local function expr_call_setup_task_args(
   end)
 
   if params_map then
-    -- This all has to be done in 64-bit integers to avoid imprecision
-    -- loss due to Lua's ONLY numeric type being double. Below we use
-    -- LuaJIT's uint64_t cdata type as a replacement.
-
-    -- Beware: LuaJIT does not expose bitwise operators at the Lua
-    -- level. Below we use plus (instead of bitwise or) and
-    -- exponentiation (instead of shift).
-    local params_map_value = 0ULL
-    for i, arg_type in ipairs(arg_types) do
-      if std.is_future(arg_type) then
-        params_map_value = params_map_value + (2ULL ^ (i-1))
-      end
-    end
-
     task_args_setup:insert(quote
-      [fixed_ptr].[params_map] = [params_map_value]
+      var params_map_value : params_map_type = arrayof(
+        uint64,
+        [data.range(params_map_type.N):map(function() return 0 end)])
+      [data.mapi(
+         function(i, arg_type)
+           if std.is_future(arg_type) then
+             return quote
+               params_map_value[ [math.floor((i-1)/64)] ] =
+                 params_map_value[ [math.floor((i-1)/64)] ] + [2ULL ^ math.fmod(i-1, 64)]
+             end
+           end
+           return quote end
+         end,
+         arg_types)]
+      [fixed_ptr].[params_map] = params_map_value
     end)
   end
 
@@ -2353,7 +2353,7 @@ function codegen.expr_call(cx, node)
     local task_args_cleanup = terralib.newlist()
     expr_call_setup_task_args(
       cx, fn.value, arg_values, arg_types, param_types,
-      params_struct_type, fn.value:get_params_map(),
+      params_struct_type, fn.value:get_params_map(), fn.value:get_params_map_type(),
       task_args, task_args_setup, task_args_cleanup)
 
     local launcher = terralib.newsymbol("launcher")
@@ -5362,7 +5362,7 @@ function codegen.stat_index_launch(cx, node)
   end
   expr_call_setup_task_args(
     cx, fn.value, arg_values, arg_types, param_types,
-    params_struct_type, fn.value:get_params_map(),
+    params_struct_type, fn.value:get_params_map(), fn.value:get_params_map_type(),
     task_args, task_args_setup, task_args_cleanup)
 
   local launcher = terralib.newsymbol("launcher")
@@ -5880,10 +5880,8 @@ end
 local function get_params_map_type(params)
   if #params == 0 then
     return false
-  elseif #params <= 64 then
-    return uint64
   else
-    assert(false)
+    return uint64[math.ceil(#params/64)]
   end
 end
 
@@ -6036,7 +6034,7 @@ function codegen.stat_task(cx, node)
         `(&[data_ptr]))
       task_setup:insert(quote
         var [param] : param_type
-        if ([params_map] and [2ULL ^ (i-1)]) == 0 then
+        if ([params_map][ [math.floor((i-1)/64)] ] and [2ULL ^ math.fmod(i-1, 64)]) == 0 then
           [deser_actions]
           [param] = [deser_value]
         else
