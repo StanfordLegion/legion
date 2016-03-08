@@ -1079,51 +1079,57 @@ do
   var cycle : int64 = 0
   var dt = dtmax
   var dthydro = dtmax
-  while continue_simulation(warmup, cycle, cstop, time, tstop) do
-    if warmup and cycle > 0 then
-      wait_for(dthydro)
-      enable = true
-      warmup = false
-      time = 0.0
-      cycle = 0
-      dt = dtmax
-      dthydro = dtmax
-      start_time = c.legion_get_current_time_in_micros()/1.e6
-      last_time = start_time
-    end
 
-    c.legion_runtime_begin_trace(__runtime(), __context(), 0)
+  var npieces = conf.npieces
+  var nspans_zones = conf.nspans_zones
+  var nspans_points = conf.nspans_points
+
+  __demand(__spmd)
+  while continue_simulation(warmup, cycle, cstop, time, tstop) do
+    -- if warmup and cycle > 0 then
+    --   wait_for(dthydro)
+    --   enable = true
+    --   warmup = false
+    --   time = 0.0
+    --   cycle = 0
+    --   dt = dtmax
+    --   dthydro = dtmax
+    --   start_time = c.legion_get_current_time_in_micros()/1.e6
+    --   last_time = start_time
+    -- end
+
+    -- c.legion_runtime_begin_trace(__runtime(), __context(), 0)
 
     dt = calc_global_dt(dt, dtfac, dtinit, dtmax, dthydro, time, tstop, cycle)
 
-    if cycle > 0 and cycle % interval == 0 then
-      var current_time = c.legion_get_current_time_in_micros()/1.e6
-      c.printf("cycle %4ld    sim time %.3e    dt %.3e    time %.3e (per iteration) %.3e (total)\n",
-               cycle, time, dt, (current_time - last_time)/interval, current_time - start_time)
-      last_time = current_time
-    end
+    -- if cycle > 0 and cycle % interval == 0 then
+    --   var current_time = c.legion_get_current_time_in_micros()/1.e6
+    --   c.printf("cycle %4ld    sim time %.3e    dt %.3e    time %.3e (per iteration) %.3e (total)\n",
+    --            cycle, time, dt, (current_time - last_time)/interval, current_time - start_time)
+    --   last_time = current_time
+    -- end
 
     print_ts = conf.print_ts and cycle == 0
 
-    __demand(__parallel)
-    for i = 0, conf.npieces do
+    -- __demand(__parallel)
+    for i = 0, npieces do
       adv_pos_half(rp_all_private_p[i],
                    rp_spans_private[i],
                    dt,
-                   conf.nspans_points,
+                   nspans_points,
                    enable, print_ts)
     end
-    __demand(__parallel)
-    for i = 0, conf.npieces do
+    -- __demand(__parallel)
+    for i = 0, npieces do
       adv_pos_half(rp_all_shared_p[i],
                    rp_spans_shared[i],
                    dt,
-                   conf.nspans_points,
+                   nspans_points,
                    enable, print_ts)
     end
 
-    __demand(__parallel)
-    for i = 0, conf.npieces do
+    -- __demand(__parallel)
+    for i = 0, npieces do
       calc_everything(rz_all_p[i],
                       rp_all_private_p[i],
                       rp_all_ghost_p[i],
@@ -1132,29 +1138,29 @@ do
                       rs_spans[i],
                       alfa, gamma, ssmin, dt,
                       q1, q2,
-                      conf.nspans_zones,
+                      nspans_zones,
                       enable)
     end
 
-    __demand(__parallel)
-    for i = 0, conf.npieces do
+    -- __demand(__parallel)
+    for i = 0, npieces do
       adv_pos_full(rp_all_private_p[i],
                    rp_spans_private[i],
                    dt,
-                   conf.nspans_points,
+                   nspans_points,
                    enable)
     end
-    __demand(__parallel)
-    for i = 0, conf.npieces do
+    -- __demand(__parallel)
+    for i = 0, npieces do
       adv_pos_full(rp_all_shared_p[i],
                    rp_spans_shared[i],
                    dt,
-                   conf.nspans_points,
+                   nspans_points,
                    enable)
     end
 
-    __demand(__parallel)
-    for i = 0, conf.npieces do
+    -- __demand(__parallel)
+    for i = 0, npieces do
       calc_everything_full(rz_all_p[i],
                            rp_all_private_p[i],
                            rp_all_ghost_p[i],
@@ -1162,33 +1168,33 @@ do
                            rz_spans[i],
                            rs_spans[i],
                            dt,
-                           conf.nspans_zones,
+                           nspans_zones,
                            enable)
     end
 
     print_ts = conf.print_ts and cycle == cstop - 1
 
     dthydro = dtmax
-    __demand(__parallel)
-    for i = 0, conf.npieces do
+    -- __demand(__parallel)
+    for i = 0, npieces do
       dthydro min= calc_dt_hydro(rz_all_p[i],
                                  rz_spans[i],
                                  dt, dtmax, cfl, cflv,
-                                 conf.nspans_zones,
+                                 nspans_zones,
                                  enable, print_ts)
     end
 
     cycle += 1
     time += dt
 
-    c.legion_runtime_end_trace(__runtime(), __context(), 0)
+    -- c.legion_runtime_end_trace(__runtime(), __context(), 0)
   end
 
-  if enable then
-    wait_for(dthydro)
-    var end_time = c.legion_get_current_time_in_micros()/1.e6
-    c.printf("Elapsed time = %.6e\n", end_time - start_time)
-  end
+  -- if enable then
+  --   wait_for(dthydro)
+  --   var end_time = c.legion_get_current_time_in_micros()/1.e6
+  --   c.printf("Elapsed time = %.6e\n", end_time - start_time)
+  -- end
 
   return time
 end
