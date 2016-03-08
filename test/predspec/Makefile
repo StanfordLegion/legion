@@ -28,7 +28,7 @@ USE_HDF=0
 # Put the binary file name here
 OUTFILE		:= runtests
 # List all the application source files here
-GEN_SRC		:= runtests.cc
+GEN_SRC		:= runtests.cc testmapper.cc testtasks.cc
 GEN_SRC         += $(wildcard test_*.cc)
 GEN_GPU_SRC	:=				# .cu files
 
