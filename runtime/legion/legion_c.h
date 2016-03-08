@@ -861,6 +861,14 @@ typedef int coord_t;
                                          legion_index_partition_t handle);
 
   /**
+   * @see LegionRuntime::HighLevel::Runtime::get_index_partition_color()
+   */
+  legion_color_t
+  legion_index_partition_get_color(legion_runtime_t runtime,
+                                   legion_context_t ctx,
+                                   legion_index_partition_t handle);
+
+  /**
    * @see LegionRuntime::HighLevel::Runtime::get_parent_index_space()
    */
   legion_index_space_t

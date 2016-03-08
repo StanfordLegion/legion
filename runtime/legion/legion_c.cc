@@ -1509,6 +1509,20 @@ legion_index_partition_get_color_space(legion_runtime_t runtime_,
   return CObjectWrapper::wrap(d);
 }
 
+legion_color_t
+legion_index_partition_get_color(legion_runtime_t runtime_,
+                                 legion_context_t ctx_,
+                                 legion_index_partition_t handle_)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  IndexPartition handle = CObjectWrapper::unwrap(handle_);
+
+  Color c = runtime->get_index_partition_color(ctx, handle);
+
+  return c;
+}
+
 legion_index_space_t
 legion_index_partition_get_parent_index_space(legion_runtime_t runtime_,
                                               legion_context_t ctx_,
