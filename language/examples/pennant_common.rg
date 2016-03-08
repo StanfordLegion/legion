@@ -183,7 +183,7 @@ local config_fields_cmd = terralib.newlist({
   {field = "seq_init", type = bool, default_value = false},
   {field = "print_ts", type = bool, default_value = false},
   {field = "enable", type = bool, default_value = true},
-  {field = "warmup", type = bool, default_value = true},
+  {field = "warmup", type = bool, default_value = false},
   {field = "compact", type = bool, default_value = true},
   {field = "internal", type = bool, default_value = true},
   {field = "interior", type = bool, default_value = true},
