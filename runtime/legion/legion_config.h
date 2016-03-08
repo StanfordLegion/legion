@@ -17,7 +17,7 @@
 #ifndef __LEGION_CONFIG_H__
 #define __LEGION_CONFIG_H__
 
-// for UINT_MAX
+// for UINT_MAX, INT_MAX, INT_MIN
 #include <limits.h>
 
 /**
@@ -38,7 +38,8 @@
 //==========================================================================
 
 #define AUTO_GENERATE_ID   UINT_MAX
-#define MAX_GC_PRIORITY    UINT_MAX
+#define MIN_GC_PRIORITY    INT_MIN
+#define MAX_GC_PRIORITY    INT_MAX
 
 #ifndef MAX_RETURN_SIZE
 #define MAX_RETURN_SIZE    2048 // maximum return type size in bytes
