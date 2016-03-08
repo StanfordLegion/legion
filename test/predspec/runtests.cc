@@ -179,11 +179,36 @@ void top_level_task(const Task *task,
                     const std::vector<PhysicalRegion> &regions,
                     Context ctx, HighLevelRuntime *runtime)
 {
+  int argc = HighLevelRuntime::get_input_args().argc;
+  const char **argv = (const char **)HighLevelRuntime::get_input_args().argv;
+
   const TestInformation *test_info = test_list_head;
   while(test_info) {
-    TaskLauncher launcher(RUN_TEST_TASK_ID, TaskArgument(test_info, sizeof(TestInformation)));
-    Future f = runtime->execute_task(ctx, launcher);
-    f.get_void_result();
+    bool run_this_test = true;
+    for(int i = 1; i < argc; i++)
+      if(argv[i][0] == '-') {
+	if(!strcmp(argv[i], "-only")) {
+	  run_this_test = false; // default is now false
+	  continue;
+	}
+
+	if(!strcmp(argv[i]+1, test_info->name)) {
+	  run_this_test = false;
+	  break;
+	}
+      } else {
+	if(!strcmp(argv[i], test_info->name)) {
+	  run_this_test = true;
+	  break;
+	}
+      }
+  
+    if(run_this_test) {
+      log_app.info() << "starting test: " << test_info->name;
+      TaskLauncher launcher(RUN_TEST_TASK_ID, TaskArgument(test_info, sizeof(TestInformation)));
+      Future f = runtime->execute_task(ctx, launcher);
+      f.get_void_result();
+    }
 
     test_info = test_info->next;
   }

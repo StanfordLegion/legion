@@ -1,7 +1,8 @@
 #include "testtasks.h"
 
 SetEntry::Launcher::Launcher(LogicalRegion region, int idx, FieldID fid, int newval,
-			     Predicate pred /*= Predicate::TRUE_PRED*/)
+			     Predicate pred /*= Predicate::TRUE_PRED*/,
+			     MappingTagID tag /*= 0*/)
 {
   this->task_id = taskid;
   Args *args = new Args; // this is a memory leak for now
@@ -9,6 +10,7 @@ SetEntry::Launcher::Launcher(LogicalRegion region, int idx, FieldID fid, int new
   args->newval = newval;
   this->argument = TaskArgument(args, sizeof(Args));
   this->predicate = pred;
+  this->tag = tag;
 
   this->add_region_requirement(RegionRequirement(region, READ_WRITE, EXCLUSIVE, region)
 			       .add_field(fid));
@@ -16,9 +18,10 @@ SetEntry::Launcher::Launcher(LogicalRegion region, int idx, FieldID fid, int new
 
 Future SetEntry::run(Runtime *runtime, Context ctx,
 		     LogicalRegion region, int idx, FieldID fid, int newval,
-		     Predicate pred /*= Predicate::TRUE_PRED*/)
+		     Predicate pred /*= Predicate::TRUE_PRED*/,
+		     MappingTagID tag /*= 0*/)
 {
-  Launcher l(region, idx, fid, newval, pred);
+  Launcher l(region, idx, fid, newval, pred, tag);
   return runtime->execute_task(ctx, l);
 }
 
@@ -44,7 +47,8 @@ void SetEntry::cpu_task(const Task *task,
 }
   
 CheckEntry::Launcher::Launcher(LogicalRegion region, int idx, FieldID fid, int checkval,
-			     Predicate pred /*= Predicate::TRUE_PRED*/)
+			       Predicate pred /*= Predicate::TRUE_PRED*/,
+			       MappingTagID tag /*= 0*/)
 {
   this->task_id = taskid;
   Args *args = new Args; // this is a memory leak for now
@@ -52,16 +56,18 @@ CheckEntry::Launcher::Launcher(LogicalRegion region, int idx, FieldID fid, int c
   args->checkval = checkval;
   this->argument = TaskArgument(args, sizeof(Args));
   this->predicate = pred;
+  this->tag = tag;
 
   this->add_region_requirement(RegionRequirement(region, READ_WRITE, EXCLUSIVE, region)
 			       .add_field(fid));
 }
 
 Future CheckEntry::run(Runtime *runtime, Context ctx,
-		     LogicalRegion region, int idx, FieldID fid, int checkval,
-		     Predicate pred /*= Predicate::TRUE_PRED*/)
+		       LogicalRegion region, int idx, FieldID fid, int checkval,
+		       Predicate pred /*= Predicate::TRUE_PRED*/,
+		       MappingTagID tag /*= 0*/)
 {
-  Launcher l(region, idx, fid, checkval, pred);
+  Launcher l(region, idx, fid, checkval, pred, tag);
   return runtime->execute_task(ctx, l);
 }
 
