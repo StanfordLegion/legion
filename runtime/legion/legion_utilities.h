@@ -722,7 +722,7 @@ namespace Legion {
       inline bool is_set(unsigned bit) const;
       inline int find_first_set(void) const;
       inline int find_index_set(int index) const;
-      inline int find_next_set(int index) const;
+      inline int find_next_set(int start) const;
       inline void clear(void);
     public:
       inline bool operator==(const SSEBitMask &rhs) const;
@@ -793,7 +793,7 @@ namespace Legion {
       inline bool is_set(unsigned bit) const;
       inline int find_first_set(void) const;
       inline int find_index_set(int index) const;
-      inline int find_next_set(int index) const;
+      inline int find_next_set(int start) const;
       inline void clear(void);
     public:
       inline bool operator==(const SSETLBitMask &rhs) const;
@@ -1017,7 +1017,7 @@ namespace Legion {
       inline bool is_set(unsigned bit) const;
       inline int find_first_set(void) const;
       inline int find_index_set(int index) const;
-      inline int find_next_set(int index) const;
+      inline int find_next_set(int start) const;
       inline void clear(void);
     public:
       inline bool operator==(const CompoundBitMask &rhs) const;
@@ -2090,7 +2090,7 @@ namespace Legion {
       int j = start % ELEMENT_SIZE;
       if (j > 0) // if we are already in the middle of element search it
       {
-        for ( ; j < ELEMENT_SIZE; j++)
+        for ( ; j < int(ELEMENT_SIZE); j++)
         {
           if (bit_vector[idx] & (1ULL << j))
             return (offset + j);
@@ -2098,11 +2098,11 @@ namespace Legion {
         idx++;
         offset += ELEMENT_SIZE;
       }
-      for ( ; idx < BIT_ELMTS; idx++)
+      for ( ; idx < int(BIT_ELMTS); idx++)
       {
         if (bit_vector[idx] > 0) // if it has any valid entries, find the next
         {
-          for (j = 0; j < ELEMENT_SIZE; j++)
+          for (j = 0; j < int(ELEMENT_SIZE); j++)
           {
             if (bit_vector[idx] & (1ULL << j))
               return (offset + j);
@@ -2769,7 +2769,7 @@ namespace Legion {
       int j = start % ELEMENT_SIZE;
       if (j > 0) // if we are already in the middle of element search it
       {
-        for ( ; j < ELEMENT_SIZE; j++)
+        for ( ; j < int(ELEMENT_SIZE); j++)
         {
           if (bit_vector[idx] & (1ULL << j))
             return (offset + j);
@@ -2777,11 +2777,11 @@ namespace Legion {
         idx++;
         offset += ELEMENT_SIZE;
       }
-      for ( ; idx < BIT_ELMTS; idx++)
+      for ( ; idx < int(BIT_ELMTS); idx++)
       {
         if (bit_vector[idx] > 0) // if it has any valid entries, find the next
         {
-          for (j = 0; j < ELEMENT_SIZE; j++)
+          for (j = 0; j < int(ELEMENT_SIZE); j++)
           {
             if (bit_vector[idx] & (1ULL << j))
               return (offset + j);
@@ -3481,7 +3481,7 @@ namespace Legion {
       int j = start % ELEMENT_SIZE;
       if (j > 0) // if we are already in the middle of element search it
       {
-        for ( ; j < ELEMENT_SIZE; j++)
+        for ( ; j < int(ELEMENT_SIZE); j++)
         {
           if (bits.bit_vector[idx] & (1ULL << j))
             return (offset + j);
@@ -3489,11 +3489,11 @@ namespace Legion {
         idx++;
         offset += ELEMENT_SIZE;
       }
-      for ( ; idx < BIT_ELMTS; idx++)
+      for ( ; idx < int(BIT_ELMTS); idx++)
       {
         if (bits.bit_vector[idx] > 0) // if it has any valid entries, find next
         {
-          for (j = 0; j < ELEMENT_SIZE; j++)
+          for (j = 0; j < int(ELEMENT_SIZE); j++)
           {
             if (bits.bit_vector[idx] & (1ULL << j))
               return (offset + j);
@@ -4121,7 +4121,7 @@ namespace Legion {
       int j = start % ELEMENT_SIZE;
       if (j > 0) // if we are already in the middle of element search it
       {
-        for ( ; j < ELEMENT_SIZE; j++)
+        for ( ; j < int(ELEMENT_SIZE); j++)
         {
           if (bits.bit_vector[idx] & (1ULL << j))
             return (offset + j);
@@ -4129,11 +4129,11 @@ namespace Legion {
         idx++;
         offset += ELEMENT_SIZE;
       }
-      for ( ; idx < BIT_ELMTS; idx++)
+      for ( ; idx < int(BIT_ELMTS); idx++)
       {
         if (bits.bit_vector[idx] > 0) // if it has any valid entries, find next
         {
-          for (j = 0; j < ELEMENT_SIZE; j++)
+          for (j = 0; j < int(ELEMENT_SIZE); j++)
           {
             if (bits.bit_vector[idx] & (1ULL << j))
               return (offset + j);
@@ -4828,7 +4828,7 @@ namespace Legion {
       int j = start % ELEMENT_SIZE;
       if (j > 0) // if we are already in the middle of element search it
       {
-        for ( ; j < ELEMENT_SIZE; j++)
+        for ( ; j < int(ELEMENT_SIZE); j++)
         {
           if (bits.bit_vector[idx] & (1ULL << j))
             return (offset + j);
@@ -4836,11 +4836,11 @@ namespace Legion {
         idx++;
         offset += ELEMENT_SIZE;
       }
-      for ( ; idx < BIT_ELMTS; idx++)
+      for ( ; idx < int(BIT_ELMTS); idx++)
       {
         if (bits.bit_vector[idx] > 0) // if it has any valid entries, find next
         {
-          for (j = 0; j < ELEMENT_SIZE; j++)
+          for (j = 0; j < int(ELEMENT_SIZE); j++)
           {
             if (bits.bit_vector[idx] & (1ULL << j))
               return (offset + j);
@@ -5557,7 +5557,7 @@ namespace Legion {
       int j = start % ELEMENT_SIZE;
       if (j > 0) // if we are already in the middle of element search it
       {
-        for ( ; j < ELEMENT_SIZE; j++)
+        for ( ; j < int(ELEMENT_SIZE); j++)
         {
           if (bits.bit_vector[idx] & (1ULL << j))
             return (offset + j);
@@ -5565,11 +5565,11 @@ namespace Legion {
         idx++;
         offset += ELEMENT_SIZE;
       }
-      for ( ; idx < BIT_ELMTS; idx++)
+      for ( ; idx < int(BIT_ELMTS); idx++)
       {
         if (bits.bit_vector[idx] > 0) // if it has any valid entries, find next
         {
-          for (j = 0; j < ELEMENT_SIZE; j++)
+          for (j = 0; j < int(ELEMENT_SIZE); j++)
           {
             if (bits.bit_vector[idx] & (1ULL << j))
               return (offset + j);
