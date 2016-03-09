@@ -378,8 +378,6 @@ namespace Legion {
       bool physical_convert_postmapping(const RegionRequirement &req,
                                const std::vector<MappingInstance> &chosen,
                                InstanceSet &result);
-      bool is_valid_mapping(const InstanceRef &ref, 
-                            const RegionRequirement &req);
       bool are_colocated(const std::vector<InstanceSet*> &instances,
                          FieldSpace handle, const std::set<FieldID> &fields,
                          unsigned &idx1, unsigned &idx2);

@@ -742,10 +742,13 @@ namespace Legion {
                                 const std::vector<LogicalRegion> &regions) const
     //--------------------------------------------------------------------------
     {
+      RegionTreeID tree_id = region_node->handle.get_tree_id();
       for (std::vector<LogicalRegion>::const_iterator it = 
             regions.begin(); it != regions.end(); it++)
       {
-        // We already know it is the same region tree (see above function) 
+        // If they are not the same tree ID that is really bad
+        if (tree_id != it->get_tree_id())
+          return false;
         RegionNode *handle_node = context->get_node(*it);
         // Same node and we are done
         if (handle_node == region_node)
@@ -2090,24 +2093,59 @@ namespace Legion {
     void InstanceBuilder::compute_ancestor_and_domain(RegionTreeForest *forest)
     //--------------------------------------------------------------------------
     {
-      // First let's get the domain for this region 
-      ancestor = forest->get_node(regions[0]);
-      if (regions.size() > 1)
+      // Check to see if they are all empty, in which case we will make
+      // an empty instance with its ancestor being the root of the region
+      // tree so it can satisfy all empty regions in this region tree safely
+      std::vector<RegionNode*> non_empty_regions;
+      std::vector<const Domain*> non_empty_domains;
+      for (unsigned idx = 0; idx < regions.size(); idx++)
+      {
+        RegionNode *next = forest->get_node(regions[idx]);
+        const Domain &next_domain = next->get_domain_blocking();
+        // Check for empty
+        size_t volume = next_domain.get_volume();
+        if (volume == 0)
+        {
+          // Do something special if we know we aren't going to have
+          // any non-empty regions
+          if ((idx == (regions.size()-1)) && non_empty_regions.empty())
+          {
+            // We're going to make an empty instance which is all fine, but
+            // in order to be sound for other parts of the analysis, we need
+            // the ancestor to be the root of the region tree so that this
+            // instance can be safely used for any empty region in this tree.
+            instance_domain = next_domain;
+            while (next->parent != NULL)
+              next = next->parent->parent;
+            ancestor = next;
+            return;
+          }
+          continue;
+        }
+        non_empty_regions.push_back(next);
+        non_empty_domains.push_back(&next_domain);
+      }
+      // At this point we have at least one non-empty region
+#ifdef DEBUG_HIGH_LEVEL
+      assert(!non_empty_regions.empty());
+#endif
+      ancestor = non_empty_regions[0];
+      if (non_empty_regions.size() > 1)
       {
         // Compute an union of the all the index spaces for the basis
         // and the common ancestor of all regions
-        const Domain &first = ancestor->row_source->get_domain_blocking();
-        switch (first.get_dim())
+        const Domain *first = non_empty_domains[0];
+        switch (first->get_dim())
         {
           case 0:
             {
               Realm::ElementMask result = 
-                first.get_index_space().get_valid_mask();
-              for (unsigned idx = 1; idx < regions.size(); idx++)
+                first->get_index_space().get_valid_mask();
+              for (unsigned idx = 1; idx < non_empty_regions.size(); idx++)
               {
-                RegionNode *next = forest->get_node(regions[idx]);
-                const Domain &next_domain = next->get_domain_blocking();
-                result |= next_domain.get_index_space().get_valid_mask();
+                RegionNode *next = non_empty_regions[idx];
+                const Domain *next_domain = non_empty_domains[idx];
+                result |= next_domain->get_index_space().get_valid_mask();
                 // Find the common ancestor
                 ancestor = find_common_ancestor(ancestor, next);
               }
@@ -2118,13 +2156,13 @@ namespace Legion {
             }
           case 1:
             {
-              LegionRuntime::Arrays::Rect<1> result = first.get_rect<1>();
-              for (unsigned idx = 1; idx < regions.size(); idx++)
+              LegionRuntime::Arrays::Rect<1> result = first->get_rect<1>();
+              for (unsigned idx = 1; idx < non_empty_regions.size(); idx++)
               {
-                RegionNode *next = forest->get_node(regions[idx]);
-                const Domain &next_domain = next->get_domain_blocking();
+                RegionNode *next = non_empty_regions[idx];
+                const Domain *next_domain = non_empty_domains[idx];
                 LegionRuntime::Arrays::Rect<1> next_rect = 
-                  next_domain.get_rect<1>();
+                  next_domain->get_rect<1>();
                 result = result.convex_hull(next_rect);
                 // Find the common ancesstor
                 ancestor = find_common_ancestor(ancestor, next); 
@@ -2134,13 +2172,13 @@ namespace Legion {
             }
           case 2:
             {
-              LegionRuntime::Arrays::Rect<2> result = first.get_rect<2>();
-              for (unsigned idx = 1; idx < regions.size(); idx++)
+              LegionRuntime::Arrays::Rect<2> result = first->get_rect<2>();
+              for (unsigned idx = 1; idx < non_empty_regions.size(); idx++)
               {
-                RegionNode *next = forest->get_node(regions[idx]);
-                const Domain &next_domain = next->get_domain_blocking();
+                RegionNode *next = non_empty_regions[idx];
+                const Domain *next_domain = non_empty_domains[idx];
                 LegionRuntime::Arrays::Rect<2> next_rect = 
-                  next_domain.get_rect<2>();
+                  next_domain->get_rect<2>();
                 result = result.convex_hull(next_rect);
                 // Find the common ancesstor
                 ancestor = find_common_ancestor(ancestor, next); 
@@ -2150,13 +2188,13 @@ namespace Legion {
             }
           case 3:
             {
-              LegionRuntime::Arrays::Rect<3> result = first.get_rect<3>();
-              for (unsigned idx = 1; idx < regions.size(); idx++)
+              LegionRuntime::Arrays::Rect<3> result = first->get_rect<3>();
+              for (unsigned idx = 1; idx < non_empty_regions.size(); idx++)
               {
-                RegionNode *next = forest->get_node(regions[idx]);
-                const Domain &next_domain = next->get_domain_blocking();
+                RegionNode *next = non_empty_regions[idx];
+                const Domain *next_domain = non_empty_domains[idx]; 
                 LegionRuntime::Arrays::Rect<3> next_rect = 
-                  next_domain.get_rect<3>();
+                  next_domain->get_rect<3>();
                 result = result.convex_hull(next_rect);
                 // Find the common ancesstor
                 ancestor = find_common_ancestor(ancestor, next); 
@@ -2169,7 +2207,7 @@ namespace Legion {
         }
       }
       else
-        instance_domain = ancestor->row_source->get_domain_blocking();
+        instance_domain = *(non_empty_domains[0]);
     }
 
     //--------------------------------------------------------------------------
@@ -2242,6 +2280,11 @@ namespace Legion {
           {
             const std::vector<DimensionKind> &ordering = 
                                       constraints.ordering_constraint.ordering;
+            size_t max_block_size = instance_domain.get_volume();
+            // I hate unstructured index spaces
+            if (instance_domain.get_dim() == 0)
+              max_block_size = instance_domain.get_index_space().
+                                              get_valid_mask().get_num_elmts();
             // See if we are making an AOS or SOA instance
             if (!ordering.empty())
             {
@@ -2251,7 +2294,7 @@ namespace Legion {
               if (ordering.front() == DIM_F)
                 block_size = 1;
               else if (ordering.back() == DIM_F)
-                block_size = instance_domain.get_volume();
+                block_size = max_block_size;
               else
               {
                 for (unsigned idx = 0; idx < ordering.size(); idx++)
@@ -2259,11 +2302,11 @@ namespace Legion {
                   if (ordering[idx] == DIM_F)
                     assert(false); // need to handle this case
                 }
-                block_size = instance_domain.get_volume();
+                block_size = max_block_size;
               }
             }
             else
-              block_size = instance_domain.get_volume();
+              block_size = max_block_size;
             // redop id is already zero
             break;
           }

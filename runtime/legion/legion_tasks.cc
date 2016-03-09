@@ -114,6 +114,7 @@ namespace Legion {
       target_proc = Processor::NO_PROC;
       mapper = NULL;
       must_epoch = NULL;
+      must_epoch_task = false;
       orig_proc = Processor::NO_PROC; // for is_remote
     }
 
@@ -204,7 +205,7 @@ namespace Legion {
       rez.serialize(map_id);
       rez.serialize(tag);
       rez.serialize(is_index_space);
-      rez.serialize(must_parallelism);
+      rez.serialize(must_epoch_task);
       rez.serialize(index_domain);
       rez.serialize(index_point);
       rez.serialize(local_arglen);
@@ -297,7 +298,7 @@ namespace Legion {
       derez.deserialize(map_id);
       derez.deserialize(tag);
       derez.deserialize(is_index_space);
-      derez.deserialize(must_parallelism);
+      derez.deserialize(must_epoch_task);
       derez.deserialize(index_domain);
       derez.deserialize(index_point);
       derez.deserialize(local_arglen);
@@ -1836,11 +1837,13 @@ namespace Legion {
           }
           if (!Runtime::unsafe_mapper)
           {
+            std::vector<LogicalRegion> regions_to_check(1, 
+                                          regions[must_premap[idx]].region);
             for (unsigned check_idx = 0; 
                   check_idx < chosen_instances.size(); check_idx++)
             {
-              if (!runtime->forest->is_valid_mapping(
-                    chosen_instances[check_idx], regions[must_premap[idx]]))
+              if (!chosen_instances[check_idx].get_manager()->meets_regions(
+                                                            regions_to_check))
               {
                 log_run.error("Invalid mapper output from invocation of "
                               "'premap_task' on mapper %s. Mapper specified an "
@@ -4734,9 +4737,10 @@ namespace Legion {
         // Skip checks if the mapper promises it is safe
         if (Runtime::unsafe_mapper)
           continue;
+        std::vector<LogicalRegion> regions_to_check(1, regions[idx].region);
         for (unsigned idx2 = 0; idx2 < result.size(); idx2++)
         {
-          if (!runtime->forest->is_valid_mapping(result[idx2], regions[idx]))
+          if (!result[idx2].get_manager()->meets_regions(regions_to_check))
           {
             // Doesn't satisfy the region requirement
             log_run.error("Invalid mapper output from invocation of '%s' on "
@@ -4768,6 +4772,53 @@ namespace Legion {
               assert(false);
 #endif
               exit(ERROR_INVALID_MAPPER_OUTPUT);
+            }
+          }
+        }
+        // If this is anything other than a virtual mapping, check that
+        // the instances align with the privileges
+        if (!virtual_mapped[idx])
+        {
+          // If this is a reduction region requirement make sure all the 
+          // managers are reduction instances
+          if (IS_REDUCE(regions[idx]))
+          {
+            for (unsigned idx2 = 0; idx2 < result.size(); idx2++)
+            {
+              if (!result[idx2].get_manager()->is_reduction_manager())
+              {
+                log_run.error("Invalid mapper output from invocation of '%s' "
+                              "on mapper %s. Mapper failed to choose a "
+                              "specialized reduction instance for region "
+                              "requirement %d of task %s (ID %lld) which has "
+                              "reduction privileges.", "map_task", 
+                              mapper->get_mapper_name(), idx,
+                              get_task_name(), get_unique_id());
+#ifdef DEBUG_HIGH_LEVEL
+                assert(false);
+#endif
+                exit(ERROR_INVALID_MAPPER_OUTPUT);
+              }
+            }
+          }
+          else
+          {
+            for (unsigned idx2 = 0; idx2 < result.size(); idx2++)
+            {
+              if (!result[idx2].get_manager()->is_instance_manager())
+              {
+                log_run.error("Invalid mapper output from invocation of '%s' "
+                              "on mapper %s. Mapper selected illegal "
+                              "specialized reduction instance for region "
+                              "requirement %d of task %s (ID %lld) which "
+                              "does not have reduction privileges.", "map_task",
+                              mapper->get_mapper_name(), idx, 
+                              get_task_name(), get_unique_id());
+#ifdef DEBUG_HIGH_LEVEL
+                assert(false);
+#endif
+                exit(ERROR_INVALID_MAPPER_OUTPUT);
+              }
             }
           }
         }
@@ -5040,6 +5091,9 @@ namespace Legion {
         // See if we have to do any virtual mapping before registering
         if (virtual_mapped[idx])
         {
+          if (IS_NO_ACCESS(regions[idx]) || 
+              regions[idx].privilege_fields.empty())
+            continue;
 #ifdef DEBUG_HIGH_LEVEL
           assert(physical_instances[idx].size() == 1);
           assert(physical_instances[idx][0].is_composite_ref());
@@ -6044,7 +6098,7 @@ namespace Legion {
     {
       this->clone_task_op_from(rhs, p, stealable, false/*duplicate*/);
       this->index_domain = d;
-      this->must_parallelism = rhs->must_parallelism;
+      this->must_epoch_task = rhs->must_epoch_task;
       this->sliced = !recurse;
       this->redop = rhs->redop;
       if (this->redop != 0)
@@ -8845,7 +8899,6 @@ namespace Legion {
       map_id = launcher.map_id;
       tag = launcher.tag;
       is_index_space = true;
-      must_parallelism = launcher.must_parallelism;
       index_domain = launcher.launch_domain;
       initialize_base_task(ctx, track, launcher.predicate, task_id);
       if (launcher.predicate != Predicate::TRUE_PRED)
@@ -8906,7 +8959,6 @@ namespace Legion {
       map_id = launcher.map_id;
       tag = launcher.tag;
       is_index_space = true;
-      must_parallelism = launcher.must_parallelism;
       index_domain = launcher.launch_domain;
       redop = redop_id;
       reduction_op = Runtime::get_reduction_op(redop);
@@ -8983,7 +9035,6 @@ namespace Legion {
       map_id = mid;
       tag = t;
       is_index_space = true;
-      must_parallelism = must;
       index_domain = domain;
       initialize_base_task(ctx, true/*track*/, pred, task_id);
       if (check_privileges)
@@ -9045,7 +9096,6 @@ namespace Legion {
       map_id = mid;
       tag = t;
       is_index_space = true;
-      must_parallelism = must;
       index_domain = domain;
       redop = redop_id;
       reduction_op = Runtime::get_reduction_op(redop);
@@ -9717,17 +9767,6 @@ namespace Legion {
     void IndexTask::perform_inlining(SingleTask *ctx, VariantImpl *variant)
     //--------------------------------------------------------------------------
     {
-      // must parallelism not allowed to be inlined
-      if (must_parallelism)
-      {
-        log_task.error("Illegal attempt to inline must-parallelism "
-                       "task %s (ID %lld)",
-                       get_task_name(), get_unique_id());
-#ifdef DEBUG_HIGH_LEVEL
-        assert(false);
-#endif
-        exit(ERROR_ILLEGAL_MUST_PARALLEL_INLINE);
-      }
       // See if there is anything to wait for
       std::set<Event> wait_on_events;
       for (unsigned idx = 0; idx < futures.size(); idx++)
@@ -10798,7 +10837,7 @@ namespace Legion {
       result->clone_task_op_from(this, this->target_proc, 
                                  false/*stealable*/, true/*duplicate*/);
       result->is_index_space = true;
-      result->must_parallelism = this->must_parallelism;
+      result->must_epoch_task = this->must_epoch_task;
       result->index_domain = this->index_domain;
       result->index_point = p;
       // Now figure out our local point information

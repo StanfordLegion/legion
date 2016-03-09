@@ -139,6 +139,34 @@ namespace LegionRuntime {
 	return res;
       }
 
+      CUDAPREFIX Point<DIM>& operator+=(const Point<DIM> &other)
+      {
+        for (unsigned i = 0; i < DIM; i++)
+          x[i] += other.x[i];
+        return *this;
+      }
+
+      CUDAPREFIX Point<DIM>& operator-=(const Point<DIM> &other)
+      {
+        for (unsigned i = 0; i < DIM; i++)
+          x[i] -= other.x[i];
+        return *this;
+      }
+
+      CUDAPREFIX Point<DIM>& operator*=(const Point<DIM> &other)
+      {
+        for (unsigned i = 0; i < DIM; i++)
+          x[i] *= other.x[i];
+        return *this;
+      }
+
+      CUDAPREFIX Point<DIM>& operator/=(const Point<DIM> &other)
+      {
+        for (unsigned i = 0; i < DIM; i++)
+          x[i] /= other.x[i];
+        return *this;
+      }
+
       CUDAPREFIX static Point<DIM> sum(const Point<DIM> a, const Point<DIM> b)
       {
         Point<DIM> res;
@@ -363,6 +391,36 @@ namespace LegionRuntime {
       CUDAPREFIX bool operator!=(const Rect<DIM>& other)
       {
 	return ((lo != other.lo) || (hi != other.hi));
+      }
+
+      CUDAPREFIX Rect<DIM> operator+(const Point<DIM> &translate) const
+      {
+        Rect<DIM> result;
+        result.lo = lo + translate;
+        result.hi = hi + translate;
+        return result;
+      }
+
+      CUDAPREFIX Rect<DIM> operator-(const Point<DIM> &translate) const
+      {
+        Rect<DIM> result;
+        result.lo = lo - translate;
+        result.hi = hi - translate;
+        return result;
+      }
+
+      CUDAPREFIX Rect<DIM>& operator+=(const Point<DIM> &translate)
+      {
+        lo += translate;
+        hi += translate;
+        return *this;
+      }
+
+      CUDAPREFIX Rect<DIM>& operator-=(const Point<DIM> &translate)
+      {
+        lo += translate;
+        hi += translate;
+        return *this;
       }
 
       CUDAPREFIX bool overlaps(const Rect<DIM>& other) const

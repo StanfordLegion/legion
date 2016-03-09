@@ -1441,6 +1441,9 @@ namespace Legion {
       void must_epoch_map_task_callback(SingleTask *task, 
                                         Mapper::MapTaskInput &input,
                                         Mapper::MapTaskOutput &output);
+      // Get a reference to our data structure for tracking acquired instances
+      virtual std::map<PhysicalManager*,unsigned>*
+                                       get_acquired_instances_ref(void);
     public:
       void add_mapping_dependence(Event precondition);
       void register_single_task(SingleTask *single, unsigned index);
@@ -1484,6 +1487,8 @@ namespace Legion {
       std::vector<Mapper::MappingConstraint> constraints;
       // Used for computing the constraints
       std::vector<std::set<SingleTask*> > task_sets;
+      // Track the physical instances that we've acquired
+      std::map<PhysicalManager*,unsigned> acquired_instances;
     protected:
       std::deque<DependenceRecord> dependences;
       std::vector<unsigned> dependence_count;

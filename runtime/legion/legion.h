@@ -1777,7 +1777,7 @@ namespace Legion {
     public:
       // Index task argument information
       bool                                is_index_space;
-      bool                                must_parallelism; 
+      bool                                must_epoch_task; 
       Domain                              index_domain;
       DomainPoint                         index_point;
       void*                               local_args;

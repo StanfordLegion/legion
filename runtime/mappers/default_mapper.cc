@@ -173,7 +173,7 @@ namespace Legion {
           assert(false);
         }
       }
-      total_nodes = remote_cpus.size();
+      total_nodes = remote_cpus.size() + 1;
       if (!local_gpus.empty()) {
         for (unsigned idx = 0; idx < remote_gpus.size(); idx++) {
           if (!remote_gpus[idx].exists())
@@ -772,7 +772,7 @@ namespace Legion {
             Rect<1> point_rect = input.domain.get_rect<1>();
             if (remote.size() > 1) {
               if (total_points <= local.size()) {
-                Point<1> blocking_factor(1/*splitting factor*/);
+                Point<1> blocking_factor(total_points/*splitting factor*/);
                 default_decompose_points<1>(point_rect, local, 
                     blocking_factor, false/*recurse*/, 
                     stealing_enabled, output.slices);
@@ -795,8 +795,8 @@ namespace Legion {
             Rect<2> point_rect = input.domain.get_rect<2>();
             if (remote.size() > 1) {
               if (total_points <= local.size()) {
-                const int factors[2] = { 1, 1 };
-                Point<2> blocking_factor(factors);
+                Point<2> blocking_factor = 
+                  default_select_blocking_factor<2>(total_points, point_rect);
                 default_decompose_points<2>(point_rect, local, 
                     blocking_factor, false/*recurse*/, 
                     stealing_enabled, output.slices);
@@ -821,8 +821,8 @@ namespace Legion {
             Rect<3> point_rect = input.domain.get_rect<3>();
             if (remote.size() > 1) {
               if (total_points <= local.size()) {
-                const int factors[3] = { 1, 1, 1 };
-                Point<3> blocking_factor(factors);
+                Point<3> blocking_factor = 
+                  default_select_blocking_factor<3>(total_points, point_rect);
                 default_decompose_points<3>(point_rect, local, 
                     blocking_factor, false/*recurse*/, 
                     stealing_enabled, output.slices);
@@ -859,8 +859,7 @@ namespace Legion {
                                          std::vector<TaskSlice> &slices)
     //--------------------------------------------------------------------------
     {
-      Blockify<DIM> blocking(blocking_factor);
-      Rect<DIM> blocks = blocking.image_convex(point_rect);
+      Blockify<DIM> blocking(blocking_factor); 
       unsigned next_index = 0;
       bool is_perfect = true;
       for (int idx = 0; idx < DIM; idx++) {
@@ -869,38 +868,91 @@ namespace Legion {
           break;
         }
       }
-      if (is_perfect)
+      // We need to check to see if this point rectangle is base at the origin
+      // because the blockify operation depends on it
+      Point<DIM> origin;
+      for (int i = 0; i < DIM; i++)
+        origin.x[i] = 0;
+      if (origin == point_rect.lo)
       {
-        slices.resize(blocks.volume());
-        for (typename Blockify<DIM>::PointInOutputRectIterator 
-              pir(blocks); pir; pir++, next_index++)
+        // Simple case, rectangle is based at the origin
+        Rect<DIM> blocks = blocking.image_convex(point_rect);
+        if (is_perfect)
         {
-          Rect<DIM> slice_points = blocking.preimage(pir.p);
-          TaskSlice &slice = slices[next_index];
-          slice.domain = Domain::from_rect<DIM>(slice_points);
-          slice.proc = targets[next_index % targets.size()];
-          slice.recurse = recurse;
-          slice.stealable = stealable;
+          slices.resize(blocks.volume());
+          for (typename Blockify<DIM>::PointInOutputRectIterator 
+                pir(blocks); pir; pir++, next_index++)
+          {
+            Rect<DIM> slice_points = blocking.preimage(pir.p);
+            TaskSlice &slice = slices[next_index];
+            slice.domain = Domain::from_rect<DIM>(slice_points);
+            slice.proc = targets[next_index % targets.size()];
+            slice.recurse = recurse;
+            slice.stealable = stealable;
+          }
+        }
+        else
+        {
+          slices.reserve(blocks.volume());
+          for (typename Blockify<DIM>::PointInOutputRectIterator 
+                pir(blocks); pir; pir++)
+          {
+            Rect<DIM> upper_bound = blocking.preimage(pir.p);
+            // Check for edge cases with intersections
+            Rect<DIM> slice_points = upper_bound.intersection(point_rect);
+            if (slice_points.volume() == 0)
+              continue;
+            slices.resize(next_index+1);
+            TaskSlice &slice = slices[next_index];
+            slice.domain = Domain::from_rect<DIM>(slice_points);
+            slice.proc = targets[next_index % targets.size()];
+            slice.recurse = recurse;
+            slice.stealable = stealable;
+            next_index++;
+          }
         }
       }
       else
       {
-        slices.reserve(blocks.volume());
-        for (typename Blockify<DIM>::PointInOutputRectIterator 
-              pir(blocks); pir; pir++)
+        // Rectangle is not based at the origin so we have to 
+        // translate the point rectangle there, do the blocking, 
+        // and then translate back
+        const Point<DIM> &translation = point_rect.lo;
+        Rect<DIM> translated_rect = point_rect - translation;
+        Rect<DIM> blocks = blocking.image_convex(translated_rect);
+        if (is_perfect)
         {
-          Rect<DIM> upper_bound = blocking.preimage(pir.p);
-          // Check for edge cases with intersections
-          Rect<DIM> slice_points = upper_bound.intersection(point_rect);
-          if (slice_points.volume() == 0)
-            continue;
-          slices.resize(next_index+1);
-          TaskSlice &slice = slices[next_index];
-          slice.domain = Domain::from_rect<DIM>(slice_points);
-          slice.proc = targets[next_index % targets.size()];
-          slice.recurse = recurse;
-          slice.stealable = stealable;
-          next_index++;
+          slices.resize(blocks.volume());
+          for (typename Blockify<DIM>::PointInOutputRectIterator 
+                pir(blocks); pir; pir++, next_index++)
+          {
+            Rect<DIM> slice_points = blocking.preimage(pir.p) + translation;
+            TaskSlice &slice = slices[next_index];
+            slice.domain = Domain::from_rect<DIM>(slice_points);
+            slice.proc = targets[next_index % targets.size()];
+            slice.recurse = recurse;
+            slice.stealable = stealable;
+          }
+        }
+        else
+        {
+          slices.reserve(blocks.volume());
+          for (typename Blockify<DIM>::PointInOutputRectIterator 
+                pir(blocks); pir; pir++)
+          {
+            Rect<DIM> upper_bound = blocking.preimage(pir.p) + translation;
+            // Check for edge cases with intersections
+            Rect<DIM> slice_points = upper_bound.intersection(point_rect);
+            if (slice_points.volume() == 0)
+              continue;
+            slices.resize(next_index+1);
+            TaskSlice &slice = slices[next_index];
+            slice.domain = Domain::from_rect<DIM>(slice_points);
+            slice.proc = targets[next_index % targets.size()];
+            slice.recurse = recurse;
+            slice.stealable = stealable;
+            next_index++;
+          }
         }
       }
     }
@@ -1022,15 +1074,25 @@ namespace Legion {
             {
               // Put any of our local cpus on here
               // TODO: NUMA-ness needs to go here
-              output.target_procs.insert(output.target_procs.end(),
-                  local_cpus.begin(), local_cpus.end());
+              // If we're part of a must epoch launch, our 
+              // target proc will be sufficient
+              if (!task.must_epoch_task)
+                output.target_procs.insert(output.target_procs.end(),
+                    local_cpus.begin(), local_cpus.end());
+              else
+                output.target_procs.push_back(task.target_proc);
               break;
             }
           case Processor::IO_PROC:
             {
               // Put any of our I/O procs here
-              output.target_procs.insert(output.target_procs.end(),
-                  local_ios.begin(), local_ios.end());
+              // If we're part of a must epoch launch, our
+              // target proc will be sufficient
+              if (!task.must_epoch_task)
+                output.target_procs.insert(output.target_procs.end(),
+                    local_ios.begin(), local_ios.end());
+              else
+                output.target_procs.push_back(task.target_proc);
               break;
             }
           default:
@@ -1886,16 +1948,63 @@ namespace Legion {
       }
       for (unsigned idx = 0; idx < copy.dst_requirements.size(); idx++)
       {
+        output.dst_instances[idx] = input.dst_instances[idx];
         if (!copy.dst_requirements[idx].is_restricted())
         {
-          log_mapper.error("Default mapper error. No idea where to place "
-                           "destination regions for explicit copy operation "
-                           "in task %s (ID %lld) because the region is not "
-                           "constricted.", copy.parent_task->get_task_name(),
-                           copy.parent_task->get_unique_id());
-          assert(false);
+          // If this is not restricted, see if we have all the fields covered
+          std::set<FieldID> missing_fields = 
+            copy.dst_requirements[idx].privilege_fields;
+          for (std::vector<PhysicalInstance>::const_iterator it = 
+                output.dst_instances[idx].begin(); it !=
+                output.dst_instances[idx].end(); it++)
+          {
+            it->remove_space_fields(missing_fields);
+            if (missing_fields.empty())
+              break;
+          }
+          // If we still have fields, we need to make an instance
+          // We clearly need to take a guess, let's see if we can find
+          // one of our instances to use.
+          if (!missing_fields.empty())
+          {
+            std::set<Memory> visible_mems;
+            machine.get_visible_memories(local_proc, visible_mems);
+            for (std::set<Memory>::const_iterator it = visible_mems.begin(); 
+                  it != visible_mems.end(); it++)
+            {
+              Memory target_memory = (*it); 
+              LayoutConstraintSet constraint_set;
+              constraint_set.add_constraint(SpecializedConstraint())
+                .add_constraint(MemoryConstraint(target_memory.kind()))
+                .add_constraint(FieldConstraint(missing_fields, 
+                        false/*contiguous*/, false/*inorder*/));
+              std::vector<LogicalRegion> target_regions(1, 
+                                    copy.dst_requirements[idx].region);
+              PhysicalInstance result;
+              if (mapper_rt_find_physical_instance(ctx, target_memory,
+                                                   constraint_set,
+                                                   target_regions,
+                                                   result))
+              {
+                output.dst_instances[idx].push_back(result);
+                result.remove_space_fields(missing_fields);
+                if (missing_fields.empty())
+                  break;
+              }
+            }
+            if (!missing_fields.empty())
+            {
+              log_mapper.error("Default mapper error. No idea where to place "
+                              "destination regions for explicit copy operation "
+                              "in task %s (ID %lld) because the region is not "
+                              "constricted and we couldn't find any instances "
+                              "to use locally.", 
+                              copy.parent_task->get_task_name(),
+                              copy.parent_task->get_unique_id());
+              assert(false);
+            }
+          }
         }
-        output.dst_instances[idx] = input.dst_instances[idx];
       }
     }
 

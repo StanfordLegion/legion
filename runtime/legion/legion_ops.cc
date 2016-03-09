@@ -2316,10 +2316,11 @@ namespace Legion {
       }
       // Iterate over the instances and make sure they are all valid
       // for the given logical region which we are mapping
+      std::vector<LogicalRegion> regions_to_check(1, requirement.region);
       for (unsigned idx = 0; idx < chosen_instances.size(); idx++)
       {
-        if (!runtime->forest->is_valid_mapping(chosen_instances[idx], 
-                                               requirement))
+        if (!chosen_instances[idx].get_manager()->meets_regions(
+                                                        regions_to_check))
         {
           log_run.error("Invalid mapper output from invocation of 'map_inline' "
                         "on mapper %s. Mapper specified an instance that does "
@@ -2331,6 +2332,48 @@ namespace Legion {
           assert(false);
 #endif
           exit(ERROR_INVALID_MAPPER_OUTPUT);
+        }
+      }
+      // If this is a reduction region requirement, make sure all the
+      // chosen instances are specialized reduction instances
+      if (IS_REDUCE(requirement))
+      {
+        for (unsigned idx = 0; idx < chosen_instances.size(); idx++)
+        {
+          if (!chosen_instances[idx].get_manager()->is_reduction_manager())
+          {
+            log_run.error("Invalid mapper output from invocation of "
+                          "'map_inline' on mapper %s. Mapper failed to select "
+                          "specialized reduction instances for region "
+                          "requirement with reduction-only privileges for "
+                          "inline mapping operation in task %s (ID %lld).",
+                          mapper->get_mapper_name(),parent_ctx->get_task_name(),
+                          parent_ctx->get_unique_id());
+#ifdef DEBUG_HIGH_LEVEL
+            assert(false);
+#endif
+            exit(ERROR_INVALID_MAPPER_OUTPUT);
+          }
+        }
+      }
+      else
+      {
+        for (unsigned idx = 0; idx < chosen_instances.size(); idx++)
+        {
+          if (!chosen_instances[idx].get_manager()->is_instance_manager())
+          {
+            log_run.error("Invalid mapper output from invocation of "
+                          "'map_inline' on mapper %s. Mapper selected an "
+                          "illegal specialized reduction instance for region "
+                          "requirement without reduction privileges for "
+                          "inline mapping operation in task %s (ID %lld).",
+                          mapper->get_mapper_name(),parent_ctx->get_task_name(),
+                          parent_ctx->get_unique_id());
+#ifdef DEBUG_HIGH_LEVEL
+            assert(false);
+#endif
+            exit(ERROR_INVALID_MAPPER_OUTPUT);
+          }
         }
       }
     }
@@ -2933,6 +2976,12 @@ namespace Legion {
 #endif
                                                  );
         }
+        // Little bit of a hack here, if we are going to do a reduction
+        // explicit copy, switch the privileges to read-write when doing
+        // the registration since we know we are using normal instances
+        const bool is_reduce_req = IS_REDUCE(dst_requirements[idx]);
+        if (is_reduce_req)
+          dst_requirements[idx].privilege = READ_WRITE;
         // Common case is not restricted
         if (!dst_requirements[idx].is_restricted())
         {
@@ -2969,6 +3018,9 @@ namespace Legion {
 #endif
                                                  );
         }
+        // Switch the privileges back when we are done
+        if (is_reduce_req)
+          dst_requirements[idx].privilege = REDUCE;
         Event local_sync_precondition = sync_precondition;
         // See if we have any atomic locks we have to acquire
         if ((idx < atomic_locks.size()) && !atomic_locks[idx].empty())
@@ -3443,12 +3495,13 @@ namespace Legion {
 #endif
         exit(ERROR_INVALID_MAPPER_OUTPUT);
       }
+      std::vector<LogicalRegion> regions_to_check(1, req.region);
       for (unsigned idx = 0; idx < targets.size(); idx++)
       {
         const InstanceRef &ref = targets[idx];
         if (ref.is_composite_ref())
           continue;
-        if (!runtime->forest->is_valid_mapping(ref, req))
+        if (!ref.get_manager()->meets_regions(regions_to_check))
         {
           log_run.error("Invalid mapper output from invocation of 'map_copy' "
                         "on mapper %s. Mapper specified an instance for %s "
@@ -3458,6 +3511,28 @@ namespace Legion {
                         mapper->get_mapper_name(), 
                         IS_SRC ? "source" : "destination", idx,
                         parent_ctx->get_task_name(),
+                        parent_ctx->get_unique_id());
+#ifdef DEBUG_HIGH_LEVEL
+          assert(false);
+#endif
+          exit(ERROR_INVALID_MAPPER_OUTPUT);
+        }
+      }
+      // Make sure all the destinations are real instances, this has
+      // to be true for all kinds of explicit copies including reductions
+      for (unsigned idx = 0; idx < targets.size(); idx++)
+      {
+        if (IS_SRC && (idx == composite_idx))
+          continue;
+        if (!targets[idx].get_manager()->is_instance_manager())
+        {
+          log_run.error("Invalid mapper output from invocation of 'map_copy' "
+                        "on mapper %s. Mapper specified an illegal "
+                        "specialized instance as the target for %s"
+                        "region requirement %d of an explicit copy operation "
+                        "in task %s (ID %lld).", mapper->get_mapper_name(),
+                        IS_SRC ? "source" : "destination", idx, 
+                        parent_ctx->get_task_name(), 
                         parent_ctx->get_unique_id());
 #ifdef DEBUG_HIGH_LEVEL
           assert(false);
@@ -4554,12 +4629,13 @@ namespace Legion {
 #endif
         exit(ERROR_INVALID_MAPPER_OUTPUT);
       }
+      std::vector<LogicalRegion> regions_to_check(1, requirement.region);
       for (unsigned idx = 0; idx < chosen_instances.size(); idx++)
       {
         if (int(idx) == composite_index)
           continue;
         const InstanceRef &ref = chosen_instances[idx];
-        if (!runtime->forest->is_valid_mapping(ref, requirement))
+        if (!ref.get_manager()->meets_regions(regions_to_check))
         {
           log_run.error("Invalid mapper output from invocation of 'map_close' "
                         "on mapper %s. Mapper specified an instance which does "
@@ -7092,7 +7168,7 @@ namespace Legion {
         // If we have a trace, set it for this operation as well
         if (trace != NULL)
           indiv_tasks[idx]->set_trace(trace, !trace->is_fixed());
-        indiv_tasks[idx]->must_parallelism = true;
+        indiv_tasks[idx]->must_epoch_task = true;
       }
       indiv_triggered.resize(indiv_tasks.size(), false);
       index_tasks.resize(launcher.index_tasks.size());
@@ -7105,7 +7181,7 @@ namespace Legion {
                                          true/*register*/);
         if (trace != NULL)
           index_tasks[idx]->set_trace(trace, !trace->is_fixed());
-        index_tasks[idx]->must_parallelism = true;
+        index_tasks[idx]->must_epoch_task = true;
       }
       index_triggered.resize(index_tasks.size(), false);
       mapper_id = launcher.map_id;
@@ -7180,6 +7256,10 @@ namespace Legion {
       result_map = FutureMap();
       constraints.clear();
       task_sets.clear();
+#ifdef DEBUG_HIGH_LEVEL
+      assert(acquired_instances.empty());
+#endif
+      acquired_instances.clear();
       dependences.clear();
       mapping_dependences.clear();
       input.tasks.clear();
@@ -7454,6 +7534,8 @@ namespace Legion {
       Event all_mapped = Runtime::merge_events<true>(tasks_all_mapped);
       Event all_complete = Runtime::merge_events<false>(tasks_all_complete);
       complete_mapping(all_mapped);
+      if (!acquired_instances.empty())
+        release_acquired_instances(acquired_instances);
       complete_execution(all_complete);
       return true;
     }
@@ -7632,6 +7714,14 @@ namespace Legion {
           map_input.premapped_regions.push_back(constraint.idx2);
         }
       }
+    }
+
+    //--------------------------------------------------------------------------
+    std::map<PhysicalManager*,unsigned>*
+                                   MustEpochOp::get_acquired_instances_ref(void)
+    //--------------------------------------------------------------------------
+    {
+      return &acquired_instances; 
     }
 
     //--------------------------------------------------------------------------
