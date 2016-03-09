@@ -627,7 +627,8 @@ typedef int coord_t;
   void
   legion_index_space_attach_name(legion_runtime_t runtime,
                                  legion_index_space_t handle,
-                                 const char *name);
+                                 const char *name,
+                                 bool is_mutable /* = false */);
 
   /**
    * @see LegionRuntime::HighLevel::Runtime::retrieve_name()
@@ -892,7 +893,8 @@ typedef int coord_t;
   void
   legion_index_partition_attach_name(legion_runtime_t runtime,
                                      legion_index_partition_t handle,
-                                     const char *name);
+                                     const char *name,
+                                     bool is_mutable /* = false */);
 
   /**
    * @see LegionRuntime::HighLevel::Runtime::retrieve_name()
@@ -931,7 +933,8 @@ typedef int coord_t;
   void
   legion_field_space_attach_name(legion_runtime_t runtime,
                                  legion_field_space_t handle,
-                                 const char *name);
+                                 const char *name,
+                                 bool is_mutable /* = false */);
 
   /**
    * @see LegionRuntime::HighLevel::Runtime::retrieve_name()
@@ -948,7 +951,8 @@ typedef int coord_t;
   legion_field_id_attach_name(legion_runtime_t runtime,
                               legion_field_space_t handle,
                               legion_field_id_t id,
-                              const char *name);
+                              const char *name,
+                              bool is_mutable /* = false */);
 
   /**
    * @see LegionRuntime::HighLevel::Runtime::attach_name()
@@ -1016,7 +1020,8 @@ typedef int coord_t;
   void
   legion_logical_region_attach_name(legion_runtime_t runtime,
                                     legion_logical_region_t handle,
-                                    const char *name);
+                                    const char *name,
+                                    bool is_mutable /* = false */);
 
   /**
    * @see LegionRuntime::HighLevel::Runtime::retrieve_name()
@@ -1115,7 +1120,8 @@ typedef int coord_t;
   void
   legion_logical_partition_attach_name(legion_runtime_t runtime,
                                        legion_logical_partition_t handle,
-                                       const char *name);
+                                       const char *name,
+                                       bool is_mutable /* = false */);
 
   /**
    * @see LegionRuntime::HighLevel::Runtime::retrieve_name()
@@ -2484,6 +2490,23 @@ typedef int coord_t;
   // -----------------------------------------------------------------------
   // Task Operations
   // -----------------------------------------------------------------------
+
+  /**
+   * @see LegionRuntime::HighLevel::Runtime::attach_name()
+   */
+  void
+  legion_task_id_attach_name(legion_runtime_t runtime,
+                             legion_task_id_t task_id,
+                             const char *name,
+                             bool is_mutable /* = false */);
+
+  /**
+   * @see LegionRuntime::HighLevel::Runtime::retrieve_name()
+   */
+  void
+  legion_task_id_retrieve_name(legion_runtime_t runtime,
+                               legion_task_id_t task_id,
+                               const char **result);
 
   /**
    * @see LegionRuntime::HighLevel::Task::args
