@@ -2995,13 +2995,13 @@ function codegen.expr_region(cx, node)
   local fs_naming_actions
   if fspace_type:isstruct() then
     fs_naming_actions = quote
-      c.legion_field_space_attach_name([cx.runtime], [fs], [fspace_type.name])
+      c.legion_field_space_attach_name([cx.runtime], [fs], [fspace_type.name], false)
       [data.zip(field_paths, field_ids):map(
          function(field)
            local field_path, field_id = unpack(field)
            local field_name = field_path:mkstring("", ".", "")
            return `(c.legion_field_id_attach_name(
-                      [cx.runtime], [fs], field_id, field_name))
+                      [cx.runtime], [fs], field_id, field_name, false))
          end)]
     end
   else
@@ -3386,7 +3386,7 @@ function codegen.expr_list_duplicate_partition(cx, node)
       var name : &int8
       c.legion_logical_region_retrieve_name([cx.runtime], root, &name)
       regentlib.assert(name ~= nil, "invalid name")
-      c.legion_logical_region_attach_name([cx.runtime], new_root, name)
+      c.legion_logical_region_attach_name([cx.runtime], new_root, name, false)
 
       [expr_type:data(result)][i] = [expr_type.element_type] { impl = r }
     end
@@ -5615,17 +5615,17 @@ function codegen.stat_var(cx, node)
       if node.values[i]:is(ast.typed.expr.Ispace) then
         actions = quote
           [actions]
-          c.legion_index_space_attach_name([cx.runtime], [ rhs_values[i] ].impl, [lh.displayname])
+          c.legion_index_space_attach_name([cx.runtime], [ rhs_values[i] ].impl, [lh.displayname], false)
         end
       elseif node.values[i]:is(ast.typed.expr.Region) then
         actions = quote
           [actions]
-          c.legion_logical_region_attach_name([cx.runtime], [ rhs_values[i] ].impl, [lh.displayname])
+          c.legion_logical_region_attach_name([cx.runtime], [ rhs_values[i] ].impl, [lh.displayname], false)
         end
       elseif is_partitioning_expr(node.values[i]) then
         actions = quote
           [actions]
-          c.legion_logical_partition_attach_name([cx.runtime], [ rhs_values[i] ].impl, [lh.displayname])
+          c.legion_logical_partition_attach_name([cx.runtime], [ rhs_values[i] ].impl, [lh.displayname], false)
         end
       end
       decls:insert(quote var [lh] : types[i] = [ rhs_values[i] ] end)
