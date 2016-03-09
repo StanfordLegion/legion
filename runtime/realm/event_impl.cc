@@ -19,6 +19,7 @@
 #include "runtime_impl.h"
 #include "logging.h"
 #include "threads.h"
+#include "profiling.h"
 
 namespace Realm {
 
@@ -138,14 +139,19 @@ namespace Realm {
 
   class EventTriggeredCondition {
   public:
-    EventTriggeredCondition(EventImpl* _event, Event::gen_t _gen);
+    EventTriggeredCondition(EventImpl* _event, Event::gen_t _gen, 
+			    ProfilingMeasurements::OperationEventWaits::WaitInterval *_interval);
 
     class Callback : public EventWaiter {
     public:
+      Callback(const EventTriggeredCondition& _cond);
       virtual ~Callback(void);
       virtual bool event_triggered(Event e, bool poisoned);
       virtual void print(std::ostream& os) const;
       virtual void operator()(bool poisoned) = 0;
+
+    protected:
+      const EventTriggeredCondition& cond;
     };
 
     void add_callback(Callback& cb) const;
@@ -153,10 +159,12 @@ namespace Realm {
   protected:
     EventImpl *event;
     Event::gen_t gen;
+    ProfilingMeasurements::OperationEventWaits::WaitInterval *interval;
   };
 
-  EventTriggeredCondition::EventTriggeredCondition(EventImpl* _event, Event::gen_t _gen)
-    : event(_event), gen(_gen)
+  EventTriggeredCondition::EventTriggeredCondition(EventImpl* _event, Event::gen_t _gen, 
+						   ProfilingMeasurements::OperationEventWaits::WaitInterval *_interval)
+    : event(_event), gen(_gen), interval(_interval)
   {}
 
   void EventTriggeredCondition::add_callback(Callback& cb) const
@@ -164,12 +172,19 @@ namespace Realm {
     event->add_waiter(gen, &cb);
   }
 
+  EventTriggeredCondition::Callback::Callback(const EventTriggeredCondition& _cond)
+    : cond(_cond)
+  {
+  }
+  
   EventTriggeredCondition::Callback::~Callback(void)
   {
   }
   
   bool EventTriggeredCondition::Callback::event_triggered(Event e, bool poisoned)
   {
+    if(cond.interval)
+      cond.interval->record_wait_ready();
     (*this)(poisoned);
     // we don't manage the memory any more
     return false;
@@ -213,8 +228,17 @@ namespace Realm {
     Thread *thread = Thread::self();
     if(thread) {
       log_event.info() << "thread blocked: thread=" << thread << " event=" << *this;
+      // see if we are being asked to profile these waits
+      ProfilingMeasurements::OperationEventWaits::WaitInterval *interval = 0;
+      if(thread->get_operation() != 0) {
+	interval = thread->get_operation()->create_wait_interval(*this);
+	if(interval)
+	  interval->record_wait_start();
+      }
       // describe the condition we want the thread to wait on
-      thread->wait_for_condition(EventTriggeredCondition(e, gen), poisoned);
+      thread->wait_for_condition(EventTriggeredCondition(e, gen, interval), poisoned);
+      if(interval)
+	interval->record_wait_end();
       log_event.info() << "thread resumed: thread=" << thread << " event=" << *this << " poisoned=" << poisoned;
       return;
     }

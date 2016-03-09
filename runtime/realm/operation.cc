@@ -213,6 +213,9 @@ namespace Realm {
       if(measurements.wants_measurement<ProfilingMeasurements::OperationTimeline>())
 	measurements.add_measurement(timeline);
 
+      if(measurements.wants_measurement<ProfilingMeasurements::OperationEventWaits>())
+	measurements.add_measurement(waits);
+
       measurements.send_responses(requests);
     }
   }

@@ -65,6 +65,7 @@ struct ChildTaskArgs {
   bool inject_fault;
   bool hang;
   int sleep_useconds;
+  Event wait_on;
 };
 
 void child_task(const void *args, size_t arglen, 
@@ -73,6 +74,9 @@ void child_task(const void *args, size_t arglen,
   log_app.print() << "starting task on processor " << p;
   assert(arglen == sizeof(ChildTaskArgs));
   const ChildTaskArgs& cargs = *(const ChildTaskArgs *)args;
+  if(cargs.wait_on.exists()) {
+    cargs.wait_on.wait();
+  }
   if(cargs.hang) {
     // create a user event and wait on it - hangs unless somebody cancels us
     UserEvent::create_user_event().wait();
@@ -132,6 +136,23 @@ void response_task(const void *args, size_t arglen,
     delete op_timeline;
   } else
     printf("no timeline\n");
+
+  if(pr.has_measurement<OperationEventWaits>()) {
+    OperationEventWaits *op_waits = pr.get_measurement<OperationEventWaits>();
+    printf("op waits = %zd", op_waits->intervals.size());
+    if(!op_waits->intervals.empty()) {
+      printf(" [");
+      for(std::vector<OperationEventWaits::WaitInterval>::const_iterator it = op_waits->intervals.begin();
+	  it != op_waits->intervals.end();
+	  it++)
+	printf(" (%lld %lld %lld %llx/%d)",
+	       it->wait_start, it->wait_ready, it->wait_end, it->wait_event.id, it->wait_event.gen);
+      printf(" ]\n");
+    } else
+      printf("\n");
+    delete op_waits;
+  } else
+    printf("no event wait data\n");
 
   if(0&&pr.has_measurement<OperationBacktrace>()) {
     OperationBacktrace *op_backtrace = pr.get_measurement<OperationBacktrace>();
@@ -201,11 +222,12 @@ void top_level_task(const void *args, size_t arglen,
   prs.add_request(profile_cpu, RESPONSE_TASK, &first_cpu, sizeof(first_cpu))
     .add_measurement<OperationStatus>()
     .add_measurement<OperationTimeline>()
+    .add_measurement<OperationEventWaits>()
     .add_measurement<OperationBacktrace>();
 
   // we expect (exactly) three responses
-  response_counter = Barrier::create_barrier(5);
-  expected_responses_remaining = 5;
+  expected_responses_remaining = 7;
+  response_counter = Barrier::create_barrier(expected_responses_remaining);
 
   // give ourselves 15 seconds for the tasks, and their profiling responses, to finish
   alarm(15);
@@ -214,6 +236,7 @@ void top_level_task(const void *args, size_t arglen,
   cargs.inject_fault = false;
   cargs.sleep_useconds = 100000;
   cargs.hang = false;
+  cargs.wait_on = Event::NO_EVENT;
   Event e1 = first_cpu.spawn(CHILD_TASK, &cargs, sizeof(cargs), prs);
 
   cargs.inject_fault = true;
@@ -225,6 +248,18 @@ void top_level_task(const void *args, size_t arglen,
     bool poisoned = false;
     e3.wait_faultaware(poisoned);
     printf("e3 done! (poisoned=%d)\n", poisoned);
+  }
+
+  // test event wait profiling
+  {
+    UserEvent u = UserEvent::create_user_event();
+    cargs.wait_on = u;
+    Event e4 = first_cpu.spawn(CHILD_TASK, &cargs, sizeof(cargs), prs);
+    cargs.wait_on = Event::NO_EVENT;
+    cargs.sleep_useconds = 500000;
+    Event e5 = first_cpu.spawn(CHILD_TASK, &cargs, sizeof(cargs), prs);
+    u.trigger(e5);
+    e4.wait();
   }
 
   // test cancellation - first of a task that is "running"

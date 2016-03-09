@@ -22,6 +22,7 @@
 
 TYPE_IS_SERIALIZABLE(Realm::ProfilingMeasurementID);
 TYPE_IS_SERIALIZABLE(Realm::ProfilingMeasurements::OperationTimeline);
+TYPE_IS_SERIALIZABLE(Realm::ProfilingMeasurements::OperationEventWaits::WaitInterval);
 TYPE_IS_SERIALIZABLE(Realm::ProfilingMeasurements::OperationMemoryUsage);
 TYPE_IS_SERIALIZABLE(Realm::ProfilingMeasurements::OperationProcessorUsage);
 TYPE_IS_SERIALIZABLE(Realm::ProfilingMeasurements::InstanceMemoryUsage);
@@ -93,6 +94,39 @@ namespace Realm {
 	      (start_time != INVALID_TIMESTAMP) &&
 	      (end_time != INVALID_TIMESTAMP) &&
 	      (complete_time != INVALID_TIMESTAMP));
+    }
+
+
+    ////////////////////////////////////////////////////////////////////////
+    //
+    // struct OperationEventWaits
+    //
+
+    template <typename S>
+    bool serdez(S& serdez, const OperationEventWaits& w)
+    {
+      return (serdez & w.intervals);
+    }
+
+
+    ////////////////////////////////////////////////////////////////////////
+    //
+    // struct OperationEventWaits::WaitInterval
+    //
+
+    inline void OperationEventWaits::WaitInterval::record_wait_start(void)
+    {
+      wait_start = Clock::current_time_in_nanoseconds();
+    }
+
+    inline void OperationEventWaits::WaitInterval::record_wait_ready(void)
+    {
+      wait_ready = Clock::current_time_in_nanoseconds();
+    }
+
+    inline void OperationEventWaits::WaitInterval::record_wait_end(void)
+    {
+      wait_end = Clock::current_time_in_nanoseconds();
     }
 
 
