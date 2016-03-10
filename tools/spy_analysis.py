@@ -2695,7 +2695,7 @@ class GraphPrinter(object):
         self.filename = path+name+'.dot'
         self.out = open(self.filename,'w')
         self.depth = 0
-        self.println('digraph '+name)
+        self.println('digraph "'+name+'"')
         self.println('{')
         self.down()
         #self.println('aspect = ".00001,100";')
