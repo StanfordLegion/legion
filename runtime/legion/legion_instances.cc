@@ -750,9 +750,6 @@ namespace Legion {
         if (tree_id != it->get_tree_id())
           return false;
         RegionNode *handle_node = context->get_node(*it);
-        // Same node and we are done
-        if (handle_node == region_node)
-          continue;
         // Now check to see if our instance domain dominates the region
         IndexSpaceNode *index_node = handle_node->row_source; 
         std::vector<Domain> to_check;
