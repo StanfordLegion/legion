@@ -29,6 +29,7 @@ copy_info_old_pat = re.compile(prefix + r'Prof Copy Info (?P<opid>[0-9]+) (?P<sr
 fill_info_pat = re.compile(prefix + r'Prof Fill Info (?P<opid>[0-9]+) (?P<dst>[a-f0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)')
 inst_info_pat = re.compile(prefix + r'Prof Inst Info (?P<opid>[0-9]+) (?P<inst>[a-f0-9]+) (?P<mem>[a-f0-9]+) (?P<bytes>[0-9]+) (?P<create>[0-9]+) (?P<destroy>[0-9]+)')
 user_info_pat = re.compile(prefix + r'Prof User Info (?P<pid>[a-f0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+) (?P<name>[$()a-zA-Z0-9_]+)')
+wait_info_pat = re.compile(prefix + r'Prof Wait Info (?P<opid>[0-9]+) (?P<hlr>[0-9]+) (?P<start>[0-9]+) (?P<ready>[0-9]+) (?P<end>[0-9]+)')
 kind_pat = re.compile(prefix + r'Prof Task Kind (?P<tid>[0-9]+) (?P<name>[$()a-zA-Z0-9_<>.]+)')
 variant_pat = re.compile(prefix + r'Prof Task Variant (?P<tid>[0-9]+) (?P<vid>[0-9]+) (?P<name>[$()a-zA-Z0-9_<>.]+)')
 operation_pat = re.compile(prefix + r'Prof Operation (?P<opid>[0-9]+) (?P<kind>[0-9]+)')
@@ -261,10 +262,24 @@ class TaskRange(TimeRange):
             color = "#555555"
         else:
             color = self.task.variant.color
-        tsv_file.write("%d\t%ld\t%ld\t%s\t%s\n" % \
-                (base_level + (max_levels - level),
-                 self.start_time, self.stop_time,
-                 color,title))
+        if self.task.is_meta and len(self.task.wait_intervals) > 0:
+            start_time = self.start_time
+            cur_level = base_level + (max_levels - level)
+            for wait_interval in self.task.wait_intervals:
+                tsv_file.write("%d\t%ld\t%ld\t%s\t0.15\t%s\n" % \
+                        (cur_level,
+                         min(start_time, wait_interval.start),
+                         wait_interval.ready, color, title))
+                tsv_file.write("%d\t%ld\t%ld\t%s\t1.0\t%s\n" % \
+                        (cur_level,
+                         wait_interval.ready,
+                         min(wait_interval.end, self.stop_time), color, title))
+                start_time = max(start_time, wait_interval.end)
+        else:
+            tsv_file.write("%d\t%ld\t%ld\t%s\t1.0\t%s\n" % \
+                    (base_level + (max_levels - level),
+                     self.start_time, self.stop_time,
+                     color,title))
         for subrange in self.subranges:
             subrange.emit_tsv(tsv_file, base_level, max_levels, level + 1)
 
@@ -331,7 +346,7 @@ class MessageRange(TimeRange):
     def emit_tsv(self, tsv_file, base_level, max_levels, level):
         title = repr(self.message)
         title += (' '+self.message.get_timing())
-        tsv_file.write("%d\t%ld\t%ld\t%s\t%s\n" % \
+        tsv_file.write("%d\t%ld\t%ld\t%s\t1.0\t%s\n" % \
                 (base_level + (max_levels - level),
                  self.start_time, self.stop_time,
                  self.message.kind.color,title))
@@ -499,7 +514,7 @@ class Memory(object):
                 assert instance.create is not None
                 assert instance.destroy is not None
                 inst_name = repr(instance)
-                tsv_file.write("%d\t%ld\t%ld\t%s\t%s\n" % \
+                tsv_file.write("%d\t%ld\t%ld\t%s\t1.0\t%s\n" % \
                         (base_level + (max_levels - instance.level),
                          instance.create, instance.destroy,
                          instance.get_color(), inst_name))
@@ -633,6 +648,12 @@ class Channel(object):
         else:
             return self.src.__repr__() + ' to ' + self.dst.__repr__() + ' Channel'
 
+class WaitInterval(object):
+    def __init__(self, start, ready, end):
+        self.start = start
+        self.ready = ready
+        self.end = end
+
 class TaskKind(object):
     def __init__(self, task_id, name):
         self.task_id = task_id
@@ -645,7 +666,7 @@ class Variant(object):
     def __init__(self, variant_id, name):
         self.variant_id = variant_id
         self.name = name
-        self.op = None
+        self.op = dict()
         self.task = None
         self.color = None
         self.total_calls = 0
@@ -766,10 +787,18 @@ class MetaTask(object):
         self.ready = None
         self.start = None
         self.stop = None
+        self.wait_intervals = list()
+
+    def add_wait_interval(self, start, ready, end):
+        self.wait_intervals.append(WaitInterval(start, ready, end))
 
     def get_timing(self):
+        total_wait_time = 0
+        for interval in self.wait_intervals:
+            total_wait_time += interval.ready - interval.start
         return 'total='+str(self.stop - self.start)+' us start='+ \
-                str(self.start)+' us stop='+str(self.stop)+' us'
+                str(self.start)+' us stop='+str(self.stop)+' us'+ \
+                (' (wait for ' + str(total_wait_time) + ' us)' if total_wait_time > 0 else '')
 
     def get_initiation(self):
         return 'initiated by="'+repr(self.op)+'"'
@@ -1130,6 +1159,14 @@ class State(object):
                                        read_time(m.group('stop')),
                                        m.group('name'))
                     continue
+                m = wait_info_pat.match(line)
+                if m is not None:
+                    self.log_wait_info(long(m.group('opid')),
+                                       int(m.group('hlr')),
+                                       read_time(m.group('start')),
+                                       read_time(m.group('ready')),
+                                       read_time(m.group('end')))
+                    continue
                 m = kind_pat.match(line)
                 if m is not None:
                     self.log_kind(int(m.group('tid')),
@@ -1283,6 +1320,14 @@ class State(object):
             self.last_time = stop 
         proc.add_task(user)
 
+    def log_wait_info(self, op_id, hlr, start, ready, end):
+        op = self.find_op(op_id)
+        variant = self.find_meta_variant(hlr)
+        assert ready >= start
+        assert end >= ready
+        assert op_id in variant.op
+        variant.op[op_id].add_wait_interval(start, ready, end)
+
     def log_kind(self, task_id, name):
         if task_id not in self.task_kinds:
             self.task_kinds[task_id] = TaskKind(task_id, name)
@@ -1390,12 +1435,12 @@ class State(object):
             task.is_task = True
             task.name = 'Task '+str(op_id) 
             task.variant = variant
-            variant.op = task
+            variant.op[op_id] = task
         return task
 
     def create_meta(self, variant, op):
         result = MetaTask(variant, op)
-        variant.op = result
+        variant.op[op.op_id] = result
         return result
 
     def create_copy(self, src, dst, op):
@@ -1581,7 +1626,7 @@ class State(object):
         base_level = 0
         last_time = 0
         data_tsv_file = open(data_tsv_file_name, "w")
-        data_tsv_file.write("level\tstart\tend\tcolor\ttitle\n")
+        data_tsv_file.write("level\tstart\tend\tcolor\topacity\ttitle\n")
         if show_procs:
             for p,proc in sorted(self.processors.iteritems()):
                 base_level = proc.emit_tsv(data_tsv_file, base_level)
@@ -1630,7 +1675,7 @@ def usage():
     sys.exit(1)
 
 def main():
-    opts, args = getopt(sys.argv[1:],'pcivm:o:sCT')
+    opts, args = getopt(sys.argv[1:],'pcivm:o:sCST')
     opts = dict(opts)
     if len(args) == 0:
       usage()
@@ -1646,7 +1691,7 @@ def main():
     copy_output_prefix = 'legion_prof_copy'
     print_stats = False
     verbose = False
-    interactive_timeline = False
+    interactive_timeline = True
     if '-p' in opts:
         show_procs = True
         show_all = False
@@ -1668,8 +1713,8 @@ def main():
         copy_output_prefix = output_prefix + "_copy"
     if '-C' in opts:
         show_copy_matrix = True
-    if '-T' in opts:
-        interactive_timeline = True
+    if '-S' in opts:
+        interactive_timeline = False
     if show_all:
         show_procs = True
         show_channels = True

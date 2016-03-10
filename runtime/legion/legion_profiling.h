@@ -99,6 +99,12 @@ namespace LegionRuntime {
         size_t total_bytes;
         unsigned long long create, destroy;
       };
+      struct WaitInfo {
+      public:
+        UniqueID op_id;
+        unsigned hlr_id;
+        unsigned long long wait_start, wait_ready, wait_end;
+      };
 #ifdef LEGION_PROF_MESSAGES
       struct MessageInfo {
       public:
@@ -136,6 +142,8 @@ namespace LegionRuntime {
       void process_inst(UniqueID op_id,
                   Realm::ProfilingMeasurements::InstanceTimeline *timeline,
                   Realm::ProfilingMeasurements::InstanceMemoryUsage *usage);
+      void process_wait_intervals(size_t id, UniqueID op_id,
+                  Realm::ProfilingMeasurements::OperationEventWaits *waits);
 #ifdef LEGION_PROF_MESSAGES
     public:
       void record_message(Processor proc, MessageKind kind, 
@@ -156,6 +164,7 @@ namespace LegionRuntime {
       std::deque<CopyInfo> copy_infos;
       std::deque<FillInfo> fill_infos;
       std::deque<InstInfo> inst_infos;
+      std::deque<WaitInfo> wait_infos;
 #ifdef LEGION_PROF_MESSAGES
     private:
       std::deque<MessageInfo> message_infos;
