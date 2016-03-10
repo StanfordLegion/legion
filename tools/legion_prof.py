@@ -267,15 +267,24 @@ class TaskRange(TimeRange):
             start_time = self.start_time
             cur_level = base_level + (max_levels - level)
             for wait_interval in self.task.wait_intervals:
+                tsv_file.write("%d\t%ld\t%ld\t%s\t1.0\t%s\n" % \
+                        (cur_level,
+                         start_time,
+                         wait_interval.start, color, title))
                 tsv_file.write("%d\t%ld\t%ld\t%s\t0.15\t%s\n" % \
                         (cur_level,
-                         min(start_time, wait_interval.start),
+                         wait_interval.start,
                          wait_interval.ready, color, title))
                 tsv_file.write("%d\t%ld\t%ld\t%s\t1.0\t%s\n" % \
                         (cur_level,
                          wait_interval.ready,
-                         min(wait_interval.end, self.stop_time), color, title))
+                         wait_interval.end, color, title))
                 start_time = max(start_time, wait_interval.end)
+            if start_time < self.stop_time:
+                tsv_file.write("%d\t%ld\t%ld\t%s\t1.0\t%s\n" % \
+                        (cur_level,
+                         start_time,
+                         self.stop_time, color, title))
         else:
             tsv_file.write("%d\t%ld\t%ld\t%s\t1.0\t%s\n" % \
                     (base_level + (max_levels - level),
