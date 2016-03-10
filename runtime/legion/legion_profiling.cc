@@ -130,7 +130,8 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     void LegionProfInstance::process_task(VariantID variant_id, UniqueID op_id,
                   Realm::ProfilingMeasurements::OperationTimeline *timeline,
-                  Realm::ProfilingMeasurements::OperationProcessorUsage *usage)
+                  Realm::ProfilingMeasurements::OperationProcessorUsage *usage,
+                  Realm::ProfilingMeasurements::OperationEventWaits *waits)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -146,12 +147,25 @@ namespace LegionRuntime {
       info.start = timeline->start_time;
       // use complete_time instead of end_time to include async work
       info.stop = timeline->complete_time;
+      unsigned num_intervals = waits->intervals.size();
+      if (num_intervals > 0)
+      {
+        for (unsigned idx = 0; idx < num_intervals; ++idx)
+        {
+          info.wait_intervals.push_back(WaitInfo());
+          WaitInfo& wait_info = info.wait_intervals.back();
+          wait_info.wait_start = waits->intervals[idx].wait_start;
+          wait_info.wait_ready = waits->intervals[idx].wait_ready;
+          wait_info.wait_end = waits->intervals[idx].wait_end;
+        }
+      }
     }
 
     //--------------------------------------------------------------------------
     void LegionProfInstance::process_meta(size_t id, UniqueID op_id,
                   Realm::ProfilingMeasurements::OperationTimeline *timeline,
-                  Realm::ProfilingMeasurements::OperationProcessorUsage *usage)
+                  Realm::ProfilingMeasurements::OperationProcessorUsage *usage,
+                  Realm::ProfilingMeasurements::OperationEventWaits *waits)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -167,6 +181,18 @@ namespace LegionRuntime {
       info.start = timeline->start_time;
       // use complete_time instead of end_time to include async work
       info.stop = timeline->complete_time;
+      unsigned num_intervals = waits->intervals.size();
+      if (num_intervals > 0)
+      {
+        for (unsigned idx = 0; idx < num_intervals; ++idx)
+        {
+          info.wait_intervals.push_back(WaitInfo());
+          WaitInfo& wait_info = info.wait_intervals.back();
+          wait_info.wait_start = waits->intervals[idx].wait_start;
+          wait_info.wait_ready = waits->intervals[idx].wait_ready;
+          wait_info.wait_end = waits->intervals[idx].wait_end;
+        }
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -227,46 +253,6 @@ namespace LegionRuntime {
       info.destroy = timeline->delete_time;
     }
 
-    //--------------------------------------------------------------------------
-    void LegionProfInstance::process_task_wait_intervals(size_t variant_id,
-       UniqueID op_id, Realm::ProfilingMeasurements::OperationEventWaits *waits)
-    //--------------------------------------------------------------------------
-    {
-      typedef Realm::ProfilingMeasurements::OperationEventWaits::WaitInterval
-        interval;
-      for (std::vector<interval>::iterator it = waits->intervals.begin();
-           it != waits->intervals.end(); ++it)
-      {
-        task_wait_infos.push_back(WaitInfo());
-        WaitInfo &info = task_wait_infos.back();
-        info.op_id = op_id;
-        info.variant_id = variant_id;
-        info.wait_start = it->wait_start;
-        info.wait_ready = it->wait_ready;
-        info.wait_end = it->wait_end;
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void LegionProfInstance::process_meta_wait_intervals(size_t hlr_id,
-       UniqueID op_id, Realm::ProfilingMeasurements::OperationEventWaits *waits)
-    //--------------------------------------------------------------------------
-    {
-      typedef Realm::ProfilingMeasurements::OperationEventWaits::WaitInterval
-        interval;
-      for (std::vector<interval>::iterator it = waits->intervals.begin();
-           it != waits->intervals.end(); ++it)
-      {
-        meta_wait_infos.push_back(WaitInfo());
-        WaitInfo &info = meta_wait_infos.back();
-        info.op_id = op_id;
-        info.variant_id = hlr_id;
-        info.wait_start = it->wait_start;
-        info.wait_ready = it->wait_ready;
-        info.wait_end = it->wait_end;
-      }
-    }
-
 #ifdef LEGION_PROF_MESSAGES
     //--------------------------------------------------------------------------
     void LegionProfInstance::record_message(Processor proc, MessageKind kind, 
@@ -316,6 +302,13 @@ namespace LegionRuntime {
         log_prof.info("Prof Task Info %llu %lu " IDFMT " %llu %llu %llu %llu",
                       it->op_id, it->variant_id, it->proc.id, 
                       it->create, it->ready, it->start, it->stop);
+        for (std::deque<WaitInfo>::const_iterator wit =
+             it->wait_intervals.begin(); wit != it->wait_intervals.end(); wit++)
+        {
+          log_prof.info("Prof Task Wait Info %llu %lu %llu %llu %llu",
+                        it->op_id, it->variant_id, wit->wait_start, wit->wait_ready,
+                        wit->wait_end);
+        }
       }
       for (std::deque<MetaInfo>::const_iterator it = meta_infos.begin();
             it != meta_infos.end(); it++)
@@ -323,6 +316,13 @@ namespace LegionRuntime {
         log_prof.info("Prof Meta Info %llu %u " IDFMT " %llu %llu %llu %llu",
                       it->op_id, it->hlr_id, it->proc.id,
                       it->create, it->ready, it->start, it->stop);
+        for (std::deque<WaitInfo>::const_iterator wit =
+             it->wait_intervals.begin(); wit != it->wait_intervals.end(); wit++)
+        {
+          log_prof.info("Prof Meta Wait Info %llu %u %llu %llu %llu",
+                        it->op_id, it->hlr_id, wit->wait_start, wit->wait_ready,
+                        wit->wait_end);
+        }
       }
       for (std::deque<CopyInfo>::const_iterator it = copy_infos.begin();
             it != copy_infos.end(); it++)
@@ -346,20 +346,6 @@ namespace LegionRuntime {
                       it->op_id, it->inst.id, it->mem.id, it->total_bytes,
                       it->create, it->destroy);
       }
-      for (std::deque<WaitInfo>::const_iterator it = task_wait_infos.begin();
-            it != task_wait_infos.end(); it++)
-      {
-        log_prof.info("Prof Task Wait Info %llu %u %llu %llu %llu",
-                      it->op_id, it->variant_id, it->wait_start, it->wait_ready,
-                      it->wait_end);
-      }
-      for (std::deque<WaitInfo>::const_iterator it = meta_wait_infos.begin();
-            it != meta_wait_infos.end(); it++)
-      {
-        log_prof.info("Prof Meta Wait Info %llu %u %llu %llu %llu",
-                      it->op_id, it->variant_id, it->wait_start, it->wait_ready,
-                      it->wait_end);
-      }
 #ifdef LEGION_PROF_MESSAGES
       for (std::deque<MessageInfo>::const_iterator it = message_infos.begin();
             it != message_infos.end(); it++)
@@ -376,8 +362,6 @@ namespace LegionRuntime {
       meta_infos.clear();
       copy_infos.clear();
       inst_infos.clear();
-      task_wait_infos.clear();
-      meta_wait_infos.clear();
 #ifdef LEGION_PROF_MESSAGES
       message_infos.clear();
 #endif
@@ -740,10 +724,7 @@ namespace LegionRuntime {
               response.get_measurement<
                     Realm::ProfilingMeasurements::OperationEventWaits>();
             instances[local_id]->process_task(info->id, info->op_id,
-                                              timeline, usage);
-            instances[local_id]->process_task_wait_intervals(info->id,
-                                                             info->op_id,
-                                                             waits);
+                                              timeline, usage, waits);
             delete timeline;
             delete usage;
             decrement_total_outstanding_requests();
@@ -767,10 +748,7 @@ namespace LegionRuntime {
               response.get_measurement<
                     Realm::ProfilingMeasurements::OperationEventWaits>();
             instances[local_id]->process_meta(info->id, info->op_id,
-                                              timeline, usage);
-            instances[local_id]->process_meta_wait_intervals(info->id,
-                                                             info->op_id,
-                                                             waits);
+                                              timeline, usage, waits);
             delete timeline;
             delete usage;
             decrement_total_outstanding_requests();
