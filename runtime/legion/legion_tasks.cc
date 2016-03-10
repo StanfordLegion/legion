@@ -7448,6 +7448,10 @@ namespace LegionRuntime {
     void PointTask::deactivate(void)
     //--------------------------------------------------------------------------
     {
+      if (runtime->profiler != NULL)
+        runtime->profiler->register_slice_owner(
+            this->slice_owner->get_unique_op_id(),
+            this->get_unique_op_id());
       deactivate_single();
       if (!remote_instances.empty())
       {
@@ -9555,6 +9559,9 @@ namespace LegionRuntime {
       if (Internal::legion_spy_enabled)
         LegionSpy::log_index_slice(get_unique_task_id(), 
                                    result->get_unique_task_id());
+      if (runtime->profiler != NULL)
+        runtime->profiler->register_slice_owner(get_unique_op_id(),
+                                                result->get_unique_op_id());
       return result;
     }
 
@@ -10415,6 +10422,9 @@ namespace LegionRuntime {
         parent_ctx = remote_ctx;
       if (Internal::legion_spy_enabled)
         LegionSpy::log_slice_slice(remote_unique_id, get_unique_task_id());
+      if (runtime->profiler != NULL)
+        runtime->profiler->register_slice_owner(remote_unique_id,
+            get_unique_op_id());
       num_unmapped_points = num_points;
       num_uncomplete_points = num_points;
       num_uncommitted_points = num_points;
@@ -10462,6 +10472,9 @@ namespace LegionRuntime {
       if (Internal::legion_spy_enabled)
         LegionSpy::log_slice_slice(get_unique_task_id(), 
                                    result->get_unique_task_id());
+      if (runtime->profiler != NULL)
+        runtime->profiler->register_slice_owner(get_unique_op_id(),
+            result->get_unique_op_id());
       return result;
     }
 

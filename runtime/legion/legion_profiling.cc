@@ -128,6 +128,16 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void LegionProfInstance::register_slice_owner(UniqueID pid, UniqueID id)
+    //--------------------------------------------------------------------------
+    {
+      slice_owners.push_back(SliceOwner());
+      SliceOwner &task = slice_owners.back();
+      task.parent_id = pid;
+      task.op_id = id;
+    }
+
+    //--------------------------------------------------------------------------
     void LegionProfInstance::process_task(VariantID variant_id, UniqueID op_id,
                   Realm::ProfilingMeasurements::OperationTimeline *timeline,
                   Realm::ProfilingMeasurements::OperationProcessorUsage *usage,
@@ -295,6 +305,11 @@ namespace LegionRuntime {
             multi_tasks.begin(); it != multi_tasks.end(); it++)
       {
         log_prof.info("Prof Multi %llu %u", it->op_id, it->task_id);
+      }
+      for (std::deque<SliceOwner>::const_iterator it = 
+            slice_owners.begin(); it != slice_owners.end(); it++)
+      {
+        log_prof.info("Prof Slice Owner %llu %llu", it->parent_id, it->op_id);
       }
       for (std::deque<TaskInfo>::const_iterator it = task_infos.begin();
             it != task_infos.end(); it++)
@@ -498,6 +513,20 @@ namespace LegionRuntime {
       if (instances[local_id] == NULL)
         instances[local_id] = new LegionProfInstance(this);
       instances[local_id]->register_multi_task(op, task_id);
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfiler::register_slice_owner(UniqueID pid, UniqueID id)
+    //--------------------------------------------------------------------------
+    {
+      Processor current = Processor::get_executing_processor();
+      size_t local_id = current.local_id(); 
+#ifdef DEBUG_HIGH_LEVEL
+      assert(local_id < MAX_NUM_PROCS);
+#endif
+      if (instances[local_id] == NULL)
+        instances[local_id] = new LegionProfInstance(this);
+      instances[local_id]->register_slice_owner(pid, id);
     }
 
     //--------------------------------------------------------------------------

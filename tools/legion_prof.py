@@ -35,6 +35,7 @@ kind_pat = re.compile(prefix + r'Prof Task Kind (?P<tid>[0-9]+) (?P<name>[$()a-z
 variant_pat = re.compile(prefix + r'Prof Task Variant (?P<tid>[0-9]+) (?P<vid>[0-9]+) (?P<name>[$()a-zA-Z0-9_<>.]+)')
 operation_pat = re.compile(prefix + r'Prof Operation (?P<opid>[0-9]+) (?P<kind>[0-9]+)')
 multi_pat = re.compile(prefix + r'Prof Multi (?P<opid>[0-9]+) (?P<tid>[0-9]+)')
+owner_pat = re.compile(prefix + r'Prof Slice Owner (?P<pid>[0-9]+) (?P<opid>[0-9]+)')
 meta_desc_pat = re.compile(prefix + r'Prof Meta Desc (?P<hlr>[0-9]+) (?P<kind>[a-zA-Z0-9_ ]+)')
 op_desc_pat = re.compile(prefix + r'Prof Op Desc (?P<opkind>[0-9]+) (?P<kind>[a-zA-Z0-9_ ]+)')
 proc_desc_pat = re.compile(prefix + r'Prof Proc Desc (?P<pid>[a-f0-9]+) (?P<kind>[0-9]+)')
@@ -622,7 +623,7 @@ class Channel(object):
                 assert copy.start is not None
                 assert copy.stop is not None
                 copy_name = repr(copy)
-                tsv_file.write("%d\t%ld\t%ld\t%s\t%s\n" % \
+                tsv_file.write("%d\t%ld\t%ld\t%s\t1.0\t%s\n" % \
                         (base_level + (max_levels - copy.level),
                          copy.start, copy.stop,
                          copy.get_color(), copy_name))
@@ -667,7 +668,7 @@ class WaitInterval(object):
 class TaskKind(object):
     def __init__(self, task_id, name):
         self.task_id = task_id
-        self.name = 'Task "'+name+'"'
+        self.name = name
 
     def __repr__(self):
         return self.name
@@ -748,6 +749,7 @@ class Operation(object):
         self.stop = None
         self.color = None
         self.wait_intervals = list()
+        self.owner = None
 
     def add_wait_interval(self, start, ready, end):
         self.wait_intervals.append(WaitInterval(start, ready, end))
@@ -769,7 +771,15 @@ class Operation(object):
         return self.color
 
     def get_info(self):
-        return 'UID='+str(self.op_id)
+        info = '<'+str(self.op_id)+">"
+        if self.owner <> None:
+            prev = self.owner
+            next = prev.owner
+            while next <> None:
+                prev = next
+                next = next.owner
+            info += ' (<-' + repr(self.owner) + ')'
+        return info
 
     def get_timing(self):
         total_wait_time = 0
@@ -822,7 +832,7 @@ class MetaTask(object):
         return 'initiated by="'+repr(self.op)+'"'
 
     def __repr__(self):
-        return 'Meta '+self.variant.name
+        return self.variant.name
 
 class UserMarker(object):
     def __init__(self, name):
@@ -1214,6 +1224,11 @@ class State(object):
                     self.log_multi(long(m.group('opid')),
                                    int(m.group('tid')))
                     continue
+                m = owner_pat.match(line)
+                if m is not None:
+                    self.log_slice_owner(long(m.group('pid')),
+                                         long(m.group('opid')))
+                    continue
                 m = meta_desc_pat.match(line)
                 if m is not None:
                     self.log_meta_desc(int(m.group('hlr')),
@@ -1384,9 +1399,18 @@ class State(object):
 
     def log_multi(self, op_id, task_id):
         op = self.find_op(op_id)
+        task_kind = TaskKind(task_id, None)
         if task_id in self.task_kinds:
-            op.is_multi = True
-            op.task_kind = self.task_kinds[task_id]
+            task_kind = self.task_kinds[task_id]
+        else:
+            self.task_kinds[task_id] = task_kind
+        op.is_multi = True
+        op.task_kind = self.task_kinds[task_id]
+
+    def log_slice_owner(self, parent_id, op_id):
+        parent = self.find_op(parent_id)
+        op = self.find_op(op_id)
+        op.owner = parent
 
     def log_meta_desc(self, hlr, name):
         if hlr not in self.meta_variants:
@@ -1672,9 +1696,10 @@ class State(object):
                 last_time = max(last_time, channel.last_time)
         if show_instances:
             for m,memory in sorted(self.memories.iteritems()):
-                base_level = memory.emit_tsv(data_tsv_file, base_level)
-                memory_levels[memory] = base_level
-                last_time = max(last_time, memory.last_time)
+                if len(memory.instances) > 0:
+                    base_level = memory.emit_tsv(data_tsv_file, base_level)
+                    memory_levels[memory] = base_level
+                    last_time = max(last_time, memory.last_time)
         data_tsv_file.close()
 
         processor_tsv_file = open(processor_tsv_file_name, "w")
