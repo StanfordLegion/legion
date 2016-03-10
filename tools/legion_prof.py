@@ -29,7 +29,8 @@ copy_info_old_pat = re.compile(prefix + r'Prof Copy Info (?P<opid>[0-9]+) (?P<sr
 fill_info_pat = re.compile(prefix + r'Prof Fill Info (?P<opid>[0-9]+) (?P<dst>[a-f0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)')
 inst_info_pat = re.compile(prefix + r'Prof Inst Info (?P<opid>[0-9]+) (?P<inst>[a-f0-9]+) (?P<mem>[a-f0-9]+) (?P<bytes>[0-9]+) (?P<create>[0-9]+) (?P<destroy>[0-9]+)')
 user_info_pat = re.compile(prefix + r'Prof User Info (?P<pid>[a-f0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+) (?P<name>[$()a-zA-Z0-9_]+)')
-wait_info_pat = re.compile(prefix + r'Prof Wait Info (?P<opid>[0-9]+) (?P<hlr>[0-9]+) (?P<start>[0-9]+) (?P<ready>[0-9]+) (?P<end>[0-9]+)')
+task_wait_info_pat = re.compile(prefix + r'Prof Task Wait Info (?P<opid>[0-9]+) (?P<vid>[0-9]+) (?P<start>[0-9]+) (?P<ready>[0-9]+) (?P<end>[0-9]+)')
+meta_wait_info_pat = re.compile(prefix + r'Prof Meta Wait Info (?P<opid>[0-9]+) (?P<hlr>[0-9]+) (?P<start>[0-9]+) (?P<ready>[0-9]+) (?P<end>[0-9]+)')
 kind_pat = re.compile(prefix + r'Prof Task Kind (?P<tid>[0-9]+) (?P<name>[$()a-zA-Z0-9_<>.]+)')
 variant_pat = re.compile(prefix + r'Prof Task Variant (?P<tid>[0-9]+) (?P<vid>[0-9]+) (?P<name>[$()a-zA-Z0-9_<>.]+)')
 operation_pat = re.compile(prefix + r'Prof Operation (?P<opid>[0-9]+) (?P<kind>[0-9]+)')
@@ -262,7 +263,7 @@ class TaskRange(TimeRange):
             color = "#555555"
         else:
             color = self.task.variant.color
-        if self.task.is_meta and len(self.task.wait_intervals) > 0:
+        if len(self.task.wait_intervals) > 0:
             start_time = self.start_time
             cur_level = base_level + (max_levels - level)
             for wait_interval in self.task.wait_intervals:
@@ -737,6 +738,10 @@ class Operation(object):
         self.start = None
         self.stop = None
         self.color = None
+        self.wait_intervals = list()
+
+    def add_wait_interval(self, start, ready, end):
+        self.wait_intervals.append(WaitInterval(start, ready, end))
 
     def assign_color(self, color_map):
         assert self.color is None
@@ -758,8 +763,12 @@ class Operation(object):
         return 'UID='+str(self.op_id)
 
     def get_timing(self):
+        total_wait_time = 0
+        for interval in self.wait_intervals:
+            total_wait_time += interval.ready - interval.start
         return 'total='+str(self.stop - self.start)+' us start='+ \
-                str(self.start)+' us stop='+str(self.stop)+' us'
+                str(self.start)+' us stop='+str(self.stop)+' us'+ \
+                (' (wait for ' + str(total_wait_time) + ' us)' if total_wait_time > 0 else '')
 
     def __repr__(self):
         if self.is_task:
@@ -1159,13 +1168,21 @@ class State(object):
                                        read_time(m.group('stop')),
                                        m.group('name'))
                     continue
-                m = wait_info_pat.match(line)
+                m = task_wait_info_pat.match(line)
                 if m is not None:
-                    self.log_wait_info(long(m.group('opid')),
-                                       int(m.group('hlr')),
-                                       read_time(m.group('start')),
-                                       read_time(m.group('ready')),
-                                       read_time(m.group('end')))
+                    self.log_task_wait_info(long(m.group('opid')),
+                                            int(m.group('vid')),
+                                            read_time(m.group('start')),
+                                            read_time(m.group('ready')),
+                                            read_time(m.group('end')))
+                    continue
+                m = meta_wait_info_pat.match(line)
+                if m is not None:
+                    self.log_meta_wait_info(long(m.group('opid')),
+                                            int(m.group('hlr')),
+                                            read_time(m.group('start')),
+                                            read_time(m.group('ready')),
+                                            read_time(m.group('end')))
                     continue
                 m = kind_pat.match(line)
                 if m is not None:
@@ -1320,7 +1337,14 @@ class State(object):
             self.last_time = stop 
         proc.add_task(user)
 
-    def log_wait_info(self, op_id, hlr, start, ready, end):
+    def log_task_wait_info(self, op_id, variant_id, start, ready, end):
+        variant = self.find_variant(variant_id)
+        task = self.find_task(op_id, variant)
+        assert ready >= start
+        assert end >= ready
+        task.add_wait_interval(start, ready, end)
+
+    def log_meta_wait_info(self, op_id, hlr, start, ready, end):
         op = self.find_op(op_id)
         variant = self.find_meta_variant(hlr)
         assert ready >= start
