@@ -782,7 +782,7 @@ class Operation(object):
     def __repr__(self):
         if self.is_task:
             assert self.variant is not None
-            title = self.variant.op[self.op_id].name
+            title = self.variant.task.name
             if self.variant.name <> None and self.variant.name.find("unnamed") > 0:
                 title += ' ['+self.variant.name+']'
             return title+' '+self.get_info()
