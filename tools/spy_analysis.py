@@ -2717,13 +2717,15 @@ class GraphPrinter(object):
         pdf_file = self.name+".pdf"
         try:
             if simplify:
-                command = ['tred ' + dot_file + ' | dot -Tpdf -o '+pdf_file]
+                tred = subprocess.Popen(['tred', dot_file], stdout=subprocess.PIPE)
+                dot = subprocess.Popen(['dot', '-Tpdf', '-o', pdf_file], stdin=tred.stdout)
+                if dot.wait() != 0:
+                    raise Exception('DOT failed')
             else:
-                command = ['dot -Tpdf -o'+pdf_file+' '+dot_file]
-            subprocess.check_call(command,shell=True)
+                subprocess.check_call(['dot', '-Tpdf', '-o', pdf_file, dot_file])
         except:
             print "WARNING: DOT failure, image for graph "+str(self.name)+" not generated"
-            subprocess.call(['rm -f core '+pdf_file],shell=True)
+            subprocess.call(['rm', '-f', 'core', pdf_file])
 
     def up(self):
         assert self.depth > 0
