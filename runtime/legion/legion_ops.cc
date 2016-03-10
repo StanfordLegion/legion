@@ -2245,19 +2245,21 @@ namespace Legion {
       // Now we have to validate the output
       // Go through the instances and make sure we got one for every field
       // Also check to make sure that none of them are composite instances
+      RegionTreeID bad_tree = 0;
       std::vector<FieldID> missing_fields;
       int composite_index = runtime->forest->physical_convert_mapping(
-        requirement, output.chosen_instances, chosen_instances, missing_fields);
-      // If we are doing unsafe mapping, then we can return
-      if (Runtime::unsafe_mapper)
-        return;
-      if (composite_index >= 0)
+                                requirement, output.chosen_instances, 
+                                chosen_instances, bad_tree, missing_fields);
+      if (bad_tree > 0)
       {
         log_run.error("Invalid mapper output from invocation of 'map_inline' "
-                      "on mapper %s. Mapper requested creation of a composite "
-                      "instance for inline mapping in task %s (ID %lld).",
-                      mapper->get_mapper_name(), parent_ctx->get_task_name(),
-                      parent_ctx->get_unique_id());
+                      "on mapper %s. Mapper selected instance from region "
+                      "tree %d to satisfy a region requirement for an inline "
+                      "mapping in task %s (ID %lld) whose logical region is "
+                      "from region tree %d.", mapper->get_mapper_name(),
+                      bad_tree, parent_ctx->get_task_name(), 
+                      parent_ctx->get_unique_id(), 
+                      requirement.region.get_tree_id());
 #ifdef DEBUG_HIGH_LEVEL
         assert(false);
 #endif
@@ -2287,6 +2289,21 @@ namespace Legion {
 #endif
         exit(ERROR_INVALID_MAPPER_OUTPUT);
       }
+      if (composite_index >= 0)
+      {
+        log_run.error("Invalid mapper output from invocation of 'map_inline' "
+                      "on mapper %s. Mapper requested creation of a composite "
+                      "instance for inline mapping in task %s (ID %lld).",
+                      mapper->get_mapper_name(), parent_ctx->get_task_name(),
+                      parent_ctx->get_unique_id());
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_INVALID_MAPPER_OUTPUT);
+      } 
+      // If we are doing unsafe mapping, then we can return
+      if (Runtime::unsafe_mapper)
+        return;
       // If this requirement doesn't have a no access flag then we
       // need to check to make sure that the instances are visible
       if (!requirement.is_no_access())
@@ -3449,26 +3466,25 @@ namespace Legion {
                                    InstanceSet &targets)
     //--------------------------------------------------------------------------
     {
+      RegionTreeID bad_tree = 0;
       std::vector<FieldID> missing_fields;
       int composite_idx = runtime->forest->physical_convert_mapping(
-                                      req, output, targets, missing_fields);
-      if (Runtime::unsafe_mapper)
-        return composite_idx;
-      // Destination is not allowed to have composite instances
-      if (!IS_SRC && (composite_idx >= 0))
+                              req, output, targets, bad_tree, missing_fields);
+      if (bad_tree > 0)
       {
         log_run.error("Invalid mapper output from invocation of 'map_copy' "
-                      "on mapper %s. Mapper requested the creation of a "
-                      "composite instance for destination region requiremnt "
-                      "%d. Only source region requirements are permitted to "
-                      "be composite instances for explicit region-to-region "
-                      "copy operations. Operation was issued in task %s "
-                      "(ID %lld).", mapper->get_mapper_name(), idx,
-                      parent_ctx->get_task_name(), parent_ctx->get_unique_id());
+                      "on mapper %s. Mapper selected an instance from "
+                      "region tree %d to satisfy %s region requirement %d "
+                      "for explicit region-to_region copy in task %s (ID %lld) "
+                      "but the logical region for this requirement is from "
+                      "region tree %d.", mapper->get_mapper_name(), bad_tree,
+                      IS_SRC ? "source" : "destination", idx, 
+                      parent_ctx->get_task_name(), parent_ctx->get_unique_id(),
+                      req.region.get_tree_id());
 #ifdef DEBUG_HIGH_LEVEL
         assert(false);
 #endif
-        exit(ERROR_INVALID_MAPPER_OUTPUT); 
+        exit(ERROR_INVALID_MAPPER_OUTPUT);
       }
       if (!missing_fields.empty())
       {
@@ -3495,6 +3511,24 @@ namespace Legion {
 #endif
         exit(ERROR_INVALID_MAPPER_OUTPUT);
       }
+      // Destination is not allowed to have composite instances
+      if (!IS_SRC && (composite_idx >= 0))
+      {
+        log_run.error("Invalid mapper output from invocation of 'map_copy' "
+                      "on mapper %s. Mapper requested the creation of a "
+                      "composite instance for destination region requiremnt "
+                      "%d. Only source region requirements are permitted to "
+                      "be composite instances for explicit region-to-region "
+                      "copy operations. Operation was issued in task %s "
+                      "(ID %lld).", mapper->get_mapper_name(), idx,
+                      parent_ctx->get_task_name(), parent_ctx->get_unique_id());
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_INVALID_MAPPER_OUTPUT); 
+      }
+      if (Runtime::unsafe_mapper)
+        return composite_idx;
       std::vector<LogicalRegion> regions_to_check(1, req.region);
       for (unsigned idx = 0; idx < targets.size(); idx++)
       {
@@ -4600,11 +4634,26 @@ namespace Legion {
       mapper->invoke_map_close(this, &input, &output);
       // Now we have to validate the output
       // Make sure we have at least one instance for every field
+      RegionTreeID bad_tree = 0;
       std::vector<FieldID> missing_fields;
       int composite_index = runtime->forest->physical_convert_mapping(
-        requirement, output.chosen_instances, chosen_instances, missing_fields);
-      if (Runtime::unsafe_mapper)
-        return composite_index;
+                                  requirement, output.chosen_instances, 
+                                  chosen_instances, bad_tree, missing_fields);
+      if (bad_tree > 0)
+      {
+        log_run.error("Invalid mapper output from invocation of 'map_close' "
+                      "on mapper %s. Mapper selected a physical instance from "
+                      "region tree %d to satisfy region requirement from "
+                      "close operation in task %s (ID %lld) whose logical "
+                      "region is from region tree %d",mapper->get_mapper_name(),
+                      bad_tree, parent_ctx->get_task_name(),
+                      parent_ctx->get_unique_id(), 
+                      requirement.region.get_tree_id());
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit (ERROR_INVALID_MAPPER_OUTPUT);
+      }
       if (!missing_fields.empty())
       {
         log_run.error("Invalid mapper output from invocation of 'map_close' "
@@ -4629,6 +4678,8 @@ namespace Legion {
 #endif
         exit(ERROR_INVALID_MAPPER_OUTPUT);
       }
+      if (Runtime::unsafe_mapper)
+        return composite_index;
       std::vector<LogicalRegion> regions_to_check(1, requirement.region);
       for (unsigned idx = 0; idx < chosen_instances.size(); idx++)
       {

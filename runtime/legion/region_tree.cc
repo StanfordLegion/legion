@@ -2420,7 +2420,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     int RegionTreeForest::physical_convert_mapping(const RegionRequirement &req,
                                   const std::vector<MappingInstance> &chosen,
-                                  InstanceSet &result,
+                                  InstanceSet &result, RegionTreeID &bad_tree,
                                   std::vector<FieldID> &missing_fields)
     //--------------------------------------------------------------------------
     {
@@ -2431,6 +2431,7 @@ namespace Legion {
       // Get the field mask for the fields we need
       FieldMask needed_fields = 
                 reg_node->column_source->get_field_mask(req.privilege_fields);
+      const RegionTreeID local_tree = reg_node->handle.get_tree_id();
       // Iterate over each one of the chosen instances
       bool has_composite = false;
       for (std::vector<MappingInstance>::const_iterator it = chosen.begin();
@@ -2443,6 +2444,12 @@ namespace Legion {
         {
           has_composite = true;
           continue;
+        }
+        // Check to see if the tree IDs are the same
+        if (local_tree != manager->region_node->handle.get_tree_id())
+        {
+          bad_tree = manager->region_node->handle.get_tree_id();
+          return -1;
         }
         // See which fields need to be made valid here
         FieldMask valid_fields = 

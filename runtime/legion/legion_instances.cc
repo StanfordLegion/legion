@@ -758,13 +758,14 @@ namespace Legion {
         {
           case 0:
             {
-              const Realm::ElementMask &our_mask = 
-                instance_domain.get_index_space().get_valid_mask();
+              // For now just check to make sure we have space
+              const size_t space_size = instance_domain.get_index_space().
+                                          get_valid_mask().get_num_elmts();
               for (unsigned idx = 0; idx < to_check.size(); idx++)
               {
-                const Realm::ElementMask &other_mask = 
-                  to_check[idx].get_index_space().get_valid_mask();
-                if (!!(other_mask - our_mask))
+                const size_t other_size = to_check[idx].get_index_space().
+                                          get_valid_mask().get_num_elmts();
+                if (space_size < other_size)
                   return false;
               }
               break;

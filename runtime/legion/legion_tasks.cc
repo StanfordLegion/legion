@@ -1727,61 +1727,62 @@ namespace Legion {
       std::vector<InstanceSet> valid_instances(must_premap.size());
       std::set<Memory> visible_memories;
       runtime->machine.get_visible_memories(target_proc, visible_memories);
-      for (unsigned idx = 0; idx < must_premap.size(); idx++)
+      for (std::vector<unsigned>::const_iterator it = must_premap.begin();
+            it != must_premap.end(); it++)
       {
-        VersionInfo &version_info = get_version_info(must_premap[idx]);
-        RegionTreeContext req_ctx = get_parent_context(must_premap[idx]);
-        RegionTreePath &privilege_path = get_privilege_path(must_premap[idx]);
-        InstanceSet &valid = valid_instances[idx];    
+        VersionInfo &version_info = get_version_info(*it);
+        RegionTreeContext req_ctx = get_parent_context(*it);
+        RegionTreePath &privilege_path = get_privilege_path(*it);
+        InstanceSet &valid = valid_instances[*it];    
         // Do the premapping
         runtime->forest->physical_traverse_path(req_ctx, privilege_path,
-                                                regions[must_premap[idx]],
+                                                regions[*it],
                                                 version_info, this, 
                                                 true/*find valid*/, valid
 #ifdef DEBUG_HIGH_LEVEL
-                                                , must_premap[idx]
-                                                , get_logging_name()
+                                                , *it, get_logging_name()
                                                 , unique_op_id
 #endif
                                                 );
         // If we need visible instances, filter them as part of the conversion
-        if (regions[idx].is_no_access())
-          prepare_for_mapping(valid, input.valid_instances[must_premap[idx]]);
+        if (regions[*it].is_no_access())
+          prepare_for_mapping(valid, input.valid_instances[*it]);
         else
           prepare_for_mapping(valid, visible_memories, 
-                              input.valid_instances[must_premap[idx]]);
+                              input.valid_instances[*it]);
       }
       // Now invoke the mapper call
       if (mapper == NULL)
         mapper = runtime->find_mapper(current_proc, map_id);
       mapper->invoke_premap_task(this, &input, &output);
       // Now do the registration
-      for (unsigned idx = 0; idx < must_premap.size(); idx++)
+      for (std::vector<unsigned>::const_iterator it = must_premap.begin();
+            it != must_premap.end(); it++)
       {
-        VersionInfo &version_info = get_version_info(must_premap[idx]);
-        RegionTreeContext req_ctx = get_parent_context(must_premap[idx]);
+        VersionInfo &version_info = get_version_info(*it);
+        RegionTreeContext req_ctx = get_parent_context(*it);
         InstanceSet chosen_instances;
         // If this is restricted then we know what the answer is so
         // just ignore whatever the mapper did
-        if (regions[idx].is_restricted())
+        if (regions[*it].is_restricted())
         {
           // Since we know we are on the owner node, we know we can
           // always ask our parent context to find the restricted instances
-          parent_ctx->get_physical_references(must_premap[idx], 
-                                              chosen_instances);
+          parent_ctx->get_physical_references(
+              parent_req_indexes[*it], chosen_instances);
         }
         else
         {
           // Otherwise this was not restricted, so do what the mapper wants
           std::map<unsigned,std::vector<MappingInstance> >::const_iterator 
-            finder = output.premapped_instances.find(must_premap[idx]);
+            finder = output.premapped_instances.find(*it);
           if (finder == output.premapped_instances.end())
           {
             log_run.error("Invalid mapper output from 'premap_task' invocation "
                           "on mapper %s. Mapper failed to map required premap "
                           "region requirement %d of task %s (ID %lld) launched "
                           "in parent task %s (ID %lld).", 
-                          mapper->get_mapper_name(), must_premap[idx], 
+                          mapper->get_mapper_name(), *it, 
                           get_task_name(), get_unique_id(),
                           parent_ctx->get_task_name(), 
                           parent_ctx->get_unique_id());
@@ -1791,19 +1792,19 @@ namespace Legion {
             exit(ERROR_INVALID_MAPPER_OUTPUT);
           }
           std::vector<FieldID> missing_fields;
+          RegionTreeID bad_tree = 0;
           int composite_index = runtime->forest->physical_convert_mapping(
-              regions[must_premap[idx]], finder->second, 
-              chosen_instances, missing_fields);
-          if (composite_index >= 0)
+              regions[*it], finder->second, 
+              chosen_instances, bad_tree, missing_fields);
+          if (bad_tree > 0)
           {
             log_run.error("Invalid mapper output from 'premap_task' invocation "
-                          "on mapper %s. Mapper requested composite instance "
-                          "creation on region requirement %d of task %s "
-                          "(ID %lld) launched in parent task %s (ID %lld).",
-                          mapper->get_mapper_name(), must_premap[idx],
-                          get_task_name(), get_unique_id(),
-                          parent_ctx->get_task_name(),
-                          parent_ctx->get_unique_id());
+                          "on mapper %s. Mapper provided an instanced from "
+                          "region tree %d for use in satisfying region "
+                          "requirement %d of task %s (ID %lld) whose region "
+                          "is from region tree %d.", mapper->get_mapper_name(),
+                          bad_tree, *it, get_task_name(), get_unique_id(), 
+                          regions[*it].region.get_tree_id());
 #ifdef DEBUG_HIGH_LEVEL
             assert(false);
 #endif
@@ -1817,7 +1818,7 @@ namespace Legion {
                           "(ID %lld) launched in parent task %s (ID %lld). "
                           "The missing fields are listed below.",
                           mapper->get_mapper_name(), missing_fields.size(),
-                          must_premap[idx], get_task_name(), get_unique_id(),
+                          *it, get_task_name(), get_unique_id(),
                           parent_ctx->get_task_name(), 
                           parent_ctx->get_unique_id());
             for (std::vector<FieldID>::const_iterator it = 
@@ -1825,7 +1826,7 @@ namespace Legion {
             {
               const void *name; size_t name_size;
               runtime->retrieve_semantic_information(
-                  regions[must_premap[idx]].region.get_field_space(), *it,
+                  regions[*it].region.get_field_space(), *it,
                   NAME_SEMANTIC_TAG, name, name_size, false, false);
               log_run.error("MIssing instance for field %s (FieldID: %d)",
                             static_cast<const char*>(name), *it);
@@ -1835,10 +1836,25 @@ namespace Legion {
 #endif
             exit(ERROR_INVALID_MAPPER_OUTPUT);
           }
+          if (composite_index >= 0)
+          {
+            log_run.error("Invalid mapper output from 'premap_task' invocation "
+                          "on mapper %s. Mapper requested composite instance "
+                          "creation on region requirement %d of task %s "
+                          "(ID %lld) launched in parent task %s (ID %lld).",
+                          mapper->get_mapper_name(), *it,
+                          get_task_name(), get_unique_id(),
+                          parent_ctx->get_task_name(),
+                          parent_ctx->get_unique_id());
+#ifdef DEBUG_HIGH_LEVEL
+            assert(false);
+#endif
+            exit(ERROR_INVALID_MAPPER_OUTPUT);
+          } 
           if (!Runtime::unsafe_mapper)
           {
             std::vector<LogicalRegion> regions_to_check(1, 
-                                          regions[must_premap[idx]].region);
+                                          regions[*it].region);
             for (unsigned check_idx = 0; 
                   check_idx < chosen_instances.size(); check_idx++)
             {
@@ -1850,9 +1866,9 @@ namespace Legion {
                               "instance region requirement %d of task %s "
                               "(ID %lld) that does not meet the logical region "
                               "requirement. Task was launched in task %s "
-                              "(ID %lld).", mapper->get_mapper_name(), 
-                              must_premap[idx], get_task_name(), 
-                              get_unique_id(), parent_ctx->get_task_name(), 
+                              "(ID %lld).", mapper->get_mapper_name(), *it, 
+                              get_task_name(), get_unique_id(), 
+                              parent_ctx->get_task_name(), 
                               parent_ctx->get_unique_id());
 #ifdef DEBUG_HIGH_LEVEL
                 assert(false);
@@ -1864,14 +1880,13 @@ namespace Legion {
         }
         // Set the current mapping index before doing anything that
         // could result in the generation of a copy
-        set_current_mapping_index(must_premap[idx]);
+        set_current_mapping_index(*it);
         // Passed all the error checking tests so register it
         runtime->forest->physical_register_only(req_ctx, 
-                              regions[must_premap[idx]], version_info, 
+                              regions[*it], version_info, 
                               this, completion_event, chosen_instances
 #ifdef DEBUG_HIGH_LEVEL
-                              , must_premap[idx], get_logging_name()
-                              , unique_op_id
+                              , *it, get_logging_name(), unique_op_id
 #endif
                               );
         // Now apply our mapping
@@ -4674,10 +4689,49 @@ namespace Legion {
         }
         // Do the conversion
         InstanceSet &result = physical_instances[idx];
+        RegionTreeID bad_tree = 0;
         std::vector<FieldID> missing_fields;
         int composite_idx = 
           runtime->forest->physical_convert_mapping(regions[idx],
-                          output.chosen_instances[idx], result, missing_fields);
+                output.chosen_instances[idx], result, bad_tree, missing_fields);
+        if (bad_tree > 0)
+        {
+          log_run.error("Invalid mapper output from invocation of '%s' on "
+                        "mapper %s. Mapper specified an instance from region "
+                        "tree %d for use with region requirement %d of task "
+                        "%s (ID %lld) whose region is from tree %d.",
+                        "map_task", mapper->get_mapper_name(), bad_tree,
+                        idx, get_task_name(), get_unique_id(),
+                        regions[idx].region.get_tree_id());
+#ifdef DEBUG_HIGH_LEVEL
+          assert(false);
+#endif
+          exit(ERROR_INVALID_MAPPER_OUTPUT);
+        }
+        if (!missing_fields.empty())
+        {
+          log_run.error("Invalid mapper output from invocation of '%s' on "
+                        "mapper %s. Mapper failed to specify an instance for "
+                        "%ld fields of region requirement %d on task %s "
+                        "(ID %lld). The missing fields are listed below.",
+                        "map_task", mapper->get_mapper_name(), 
+                        missing_fields.size(), idx, get_task_name(), 
+                        get_unique_id());
+          for (std::vector<FieldID>::const_iterator it = 
+                missing_fields.begin(); it != missing_fields.end(); it++)
+          {
+            const void *name; size_t name_size;
+            runtime->retrieve_semantic_information(
+                regions[idx].region.get_field_space(), *it, NAME_SEMANTIC_TAG,
+                name, name_size, false, false);
+            log_run.error("Missing instance for field %s (FieldID: %d)",
+                          static_cast<const char*>(name), *it);
+          }
+#ifdef DEBUG_HIGH_LEVEL
+          assert(false);
+#endif
+          exit(ERROR_INVALID_MAPPER_OUTPUT);
+        }
         if (composite_idx >= 0)
         {
           // Everything better be all virtual or all real
@@ -4709,31 +4763,7 @@ namespace Legion {
             exit(ERROR_ILLEGAL_REDUCTION_VIRTUAL_MAPPING);
           }
           virtual_mapped[idx] = true;
-        }
-        if (!missing_fields.empty())
-        {
-          log_run.error("Invalid mapper output from invocation of '%s' on "
-                        "mapper %s. Mapper failed to specify an instance for "
-                        "%ld fields of region requirement %d on task %s "
-                        "(ID %lld). The missing fields are listed below.",
-                        "map_task", mapper->get_mapper_name(), 
-                        missing_fields.size(), idx, get_task_name(), 
-                        get_unique_id());
-          for (std::vector<FieldID>::const_iterator it = 
-                missing_fields.begin(); it != missing_fields.end(); it++)
-          {
-            const void *name; size_t name_size;
-            runtime->retrieve_semantic_information(
-                regions[idx].region.get_field_space(), *it, NAME_SEMANTIC_TAG,
-                name, name_size, false, false);
-            log_run.error("Missing instance for field %s (FieldID: %d)",
-                          static_cast<const char*>(name), *it);
-          }
-#ifdef DEBUG_HIGH_LEVEL
-          assert(false);
-#endif
-          exit(ERROR_INVALID_MAPPER_OUTPUT);
-        }
+        } 
         // Skip checks if the mapper promises it is safe
         if (Runtime::unsafe_mapper)
           continue;
