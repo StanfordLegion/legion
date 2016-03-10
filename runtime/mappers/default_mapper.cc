@@ -783,10 +783,17 @@ namespace Legion {
                     stealing_enabled, output.slices);
               }
             } else {
-              Point<1> blocking_factor(total_points/local.size());
-              default_decompose_points<1>(point_rect, local,
-                  blocking_factor, false/*recurse*/,
-                  stealing_enabled, output.slices);
+              if (total_points <= local.size()) {
+                Point<1> blocking_factor(total_points);
+                default_decompose_points<1>(point_rect, local,
+                    blocking_factor, false/*recurse*/,
+                    stealing_enabled, output.slices);
+              } else {
+                Point<1> blocking_factor(total_points/local.size());
+                default_decompose_points<1>(point_rect, local,
+                    blocking_factor, false/*recurse*/,
+                    stealing_enabled, output.slices);
+              }
             }
             break;
           }
@@ -808,11 +815,19 @@ namespace Legion {
                     stealing_enabled, output.slices);
               }
             } else {
-              Point<2> blocking_factor = default_select_blocking_factor<2>(
-                  total_points/local.size(), point_rect);
-              default_decompose_points<2>(point_rect, local,
-                  blocking_factor, false/*recurse*/,
-                  stealing_enabled, output.slices);
+              if (total_points <= local.size()) { 
+                Point<2> blocking_factor =
+                  default_select_blocking_factor<2>(total_points, point_rect);
+                default_decompose_points<2>(point_rect, local,
+                    blocking_factor, false/*recurse*/,
+                    stealing_enabled, output.slices);
+              } else {
+                Point<2> blocking_factor = default_select_blocking_factor<2>(
+                    total_points/local.size(), point_rect);
+                default_decompose_points<2>(point_rect, local,
+                    blocking_factor, false/*recurse*/,
+                    stealing_enabled, output.slices);
+              }
             }
             break;
           }
@@ -834,11 +849,19 @@ namespace Legion {
                     stealing_enabled, output.slices);
               }
             } else {
-              Point<3> blocking_factor = default_select_blocking_factor<3>(
-                  total_points/local.size(), point_rect);
-              default_decompose_points<3>(point_rect, local,
-                  blocking_factor, false/*recurse*/,
-                  stealing_enabled, output.slices);
+              if (total_points <= local.size()) {
+                Point<3> blocking_factor =
+                  default_select_blocking_factor<3>(total_points, point_rect);
+                default_decompose_points<3>(point_rect, local,
+                    blocking_factor, false/*recurse*/,
+                    stealing_enabled, output.slices);
+              } else {
+                Point<3> blocking_factor = default_select_blocking_factor<3>(
+                    total_points/local.size(), point_rect);
+                default_decompose_points<3>(point_rect, local,
+                    blocking_factor, false/*recurse*/,
+                    stealing_enabled, output.slices);
+              }
             }
             break;
           }
