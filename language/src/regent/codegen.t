@@ -525,8 +525,13 @@ local function unpack_region(cx, region_expr, region_type, static_region_type)
     actions = quote
       [actions]
       var [is] = [lr].index_space
-      var [isa] = c.legion_index_allocator_create(
-        [cx.runtime], [cx.context], [is])
+    end
+    if region_type:ispace().dim == 0 then
+      actions = quote
+        [actions]
+        var [isa] = c.legion_index_allocator_create(
+          [cx.runtime], [cx.context], [is])
+      end
     end
   end
 
@@ -6147,7 +6152,12 @@ function codegen.stat_task(cx, node)
       actions = quote
         [actions]
         var [is] = [r].impl.index_space
-        var [isa] = c.legion_index_allocator_create([cx.runtime], [cx.context], [is])
+      end
+      if region_type:ispace().dim == 0 then
+        actions = quote
+          [actions]
+          var [isa] = c.legion_index_allocator_create([cx.runtime], [cx.context], [is])
+        end
       end
     end
 
