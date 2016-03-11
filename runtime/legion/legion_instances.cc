@@ -742,6 +742,9 @@ namespace Legion {
                                 const std::vector<LogicalRegion> &regions) const
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(region_node != NULL); // only happens with VirtualManager
+#endif
       RegionTreeID tree_id = region_node->handle.get_tree_id();
       for (std::vector<LogicalRegion>::const_iterator it = 
             regions.begin(); it != regions.end(); it++)

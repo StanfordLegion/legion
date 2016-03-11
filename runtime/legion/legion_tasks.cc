@@ -1791,11 +1791,14 @@ namespace Legion {
 #endif
             exit(ERROR_INVALID_MAPPER_OUTPUT);
           }
-          std::vector<FieldID> missing_fields;
           RegionTreeID bad_tree = 0;
+          std::vector<FieldID> missing_fields;
+          std::vector<PhysicalManager*> unacquired;
           int composite_index = runtime->forest->physical_convert_mapping(
               regions[*it], finder->second, 
-              chosen_instances, bad_tree, missing_fields);
+              chosen_instances, bad_tree, missing_fields,
+              Runtime::unsafe_mapper ? NULL : get_acquired_instances_ref(),
+              unacquired, !Runtime::unsafe_mapper);
           if (bad_tree > 0)
           {
             log_run.error("Invalid mapper output from 'premap_task' invocation "
@@ -1828,13 +1831,46 @@ namespace Legion {
               runtime->retrieve_semantic_information(
                   regions[*it].region.get_field_space(), *it,
                   NAME_SEMANTIC_TAG, name, name_size, false, false);
-              log_run.error("MIssing instance for field %s (FieldID: %d)",
+              log_run.error("Missing instance for field %s (FieldID: %d)",
                             static_cast<const char*>(name), *it);
             }
 #ifdef DEBUG_HIGH_LEVEL
             assert(false);
 #endif
             exit(ERROR_INVALID_MAPPER_OUTPUT);
+          }
+          if (!unacquired.empty())
+          {
+            std::map<PhysicalManager*,unsigned> *acquired_instances =
+              get_acquired_instances_ref();
+            for (std::vector<PhysicalManager*>::const_iterator uit = 
+                  unacquired.begin(); uit != unacquired.end(); uit++)
+            {
+              if (acquired_instances->find(*uit) == acquired_instances->end())
+              {
+                log_run.error("Invalid mapper output from 'premap_task' "
+                              "invocation on mapper %s. Mapper selected "
+                              "physical instance for region requirement "
+                              "%d of task %s (ID %lld) which has already "
+                              "been collected. If the mapper had properly "
+                              "acquired this instance as part of the mapper "
+                              "call it would have detected this. Please "
+                              "update the mapper to abide by proper mapping "
+                              "conventions.", mapper->get_mapper_name(),
+                              (*it), get_task_name(), get_unique_id());
+#ifdef DEBUG_HIGH_LEVEL
+                assert(false);
+#endif
+                exit(ERROR_INVALID_MAPPER_OUTPUT);
+              }
+            }
+            // If we did successfully acquire them, still issue the warning
+            log_run.warning("WARNING: mapper %s failed to acquire instances "
+                            "for region requirement %d of task %s (ID %lld) "
+                            "in 'premap_task' call. You may experience "
+                            "undefined behavior as a consequence.",
+                            mapper->get_mapper_name(), *it, 
+                            get_task_name(), get_unique_id());
           }
           if (composite_index >= 0)
           {
@@ -4691,9 +4727,12 @@ namespace Legion {
         InstanceSet &result = physical_instances[idx];
         RegionTreeID bad_tree = 0;
         std::vector<FieldID> missing_fields;
+        std::vector<PhysicalManager*> unacquired;
         int composite_idx = 
           runtime->forest->physical_convert_mapping(regions[idx],
-                output.chosen_instances[idx], result, bad_tree, missing_fields);
+                output.chosen_instances[idx], result, bad_tree, missing_fields,
+                Runtime::unsafe_mapper ? NULL : get_acquired_instances_ref(),
+                unacquired, !Runtime::unsafe_mapper);
         if (bad_tree > 0)
         {
           log_run.error("Invalid mapper output from invocation of '%s' on "
@@ -4732,6 +4771,39 @@ namespace Legion {
 #endif
           exit(ERROR_INVALID_MAPPER_OUTPUT);
         }
+        if (!unacquired.empty())
+        {
+          std::map<PhysicalManager*,unsigned> *acquired_instances =
+              get_acquired_instances_ref();
+          for (std::vector<PhysicalManager*>::const_iterator it = 
+                unacquired.begin(); it != unacquired.end(); it++)
+          {
+            if (acquired_instances->find(*it) == acquired_instances->end())
+            {
+              log_run.error("Invalid mapper output from 'map_task' "
+                            "invocation on mapper %s. Mapper selected "
+                            "physical instance for region requirement "
+                            "%d of task %s (ID %lld) which has already "
+                            "been collected. If the mapper had properly "
+                            "acquired this instance as part of the mapper "
+                            "call it would have detected this. Please "
+                            "update the mapper to abide by proper mapping "
+                            "conventions.", mapper->get_mapper_name(),
+                            idx, get_task_name(), get_unique_id());
+#ifdef DEBUG_HIGH_LEVEL
+              assert(false);
+#endif
+              exit(ERROR_INVALID_MAPPER_OUTPUT);
+            }
+          }
+          // If we did successfully acquire them, still issue the warning
+          log_run.warning("WARNING: mapper %s failed to acquire instances "
+                          "for region requirement %d of task %s (ID %lld) "
+                          "in 'map_task' call. You may experience "
+                          "undefined behavior as a consequence.",
+                          mapper->get_mapper_name(), idx, 
+                          get_task_name(), get_unique_id());
+        }
         if (composite_idx >= 0)
         {
           // Everything better be all virtual or all real
@@ -4767,48 +4839,49 @@ namespace Legion {
         // Skip checks if the mapper promises it is safe
         if (Runtime::unsafe_mapper)
           continue;
-        std::vector<LogicalRegion> regions_to_check(1, regions[idx].region);
-        for (unsigned idx2 = 0; idx2 < result.size(); idx2++)
+        // If this is anything other than a virtual mapping, check that
+        // the instances align with the privileges
+        if (!virtual_mapped[idx])
         {
-          if (!result[idx2].get_manager()->meets_regions(regions_to_check))
-          {
-            // Doesn't satisfy the region requirement
-            log_run.error("Invalid mapper output from invocation of '%s' on "
-                          "mapper %s. Mapper specified instance that does "
-                          "not meet region requirement %d for task %s "
-                          "(ID %lld).", "map_task", mapper->get_mapper_name(), 
-                          idx, get_task_name(), get_unique_id());
-#ifdef DEBUG_HIGH_LEVEL
-            assert(false);
-#endif
-            exit(ERROR_INVALID_MAPPER_OUTPUT);
-          }
-        }
-        if (!regions[idx].is_no_access())
-        {
+          std::vector<LogicalRegion> regions_to_check(1, regions[idx].region);
           for (unsigned idx2 = 0; idx2 < result.size(); idx2++)
           {
-            Memory mem = result[idx2].get_memory();
-            if (visible_memories.find(mem) == visible_memories.end())
+            if (!result[idx2].get_manager()->meets_regions(regions_to_check))
             {
-              // Not visible from all target processors
+              // Doesn't satisfy the region requirement
               log_run.error("Invalid mapper output from invocation of '%s' on "
-                            "mapper %s. Mapper selected an instance for region "
-                            "requirement %d in memory " IDFMT " which is not "
-                            "visible from the target processors for task %s "
+                            "mapper %s. Mapper specified instance that does "
+                            "not meet region requirement %d for task %s "
                             "(ID %lld).", "map_task", mapper->get_mapper_name(),
-                            idx, mem.id, get_task_name(), get_unique_id());
+                            idx, get_task_name(), get_unique_id());
 #ifdef DEBUG_HIGH_LEVEL
               assert(false);
 #endif
               exit(ERROR_INVALID_MAPPER_OUTPUT);
             }
           }
-        }
-        // If this is anything other than a virtual mapping, check that
-        // the instances align with the privileges
-        if (!virtual_mapped[idx])
-        {
+          if (!regions[idx].is_no_access())
+          {
+            for (unsigned idx2 = 0; idx2 < result.size(); idx2++)
+            {
+              Memory mem = result[idx2].get_memory();
+              if (visible_memories.find(mem) == visible_memories.end())
+              {
+                // Not visible from all target processors
+                log_run.error("Invalid mapper output from invocation of '%s' "
+                              "on mapper %s. Mapper selected an instance for "
+                              "region requirement %d in memory " IDFMT " "
+                              "which is not visible from the target processors "
+                              "for task %s (ID %lld).", "map_task", 
+                              mapper->get_mapper_name(), idx, mem.id, 
+                              get_task_name(), get_unique_id());
+#ifdef DEBUG_HIGH_LEVEL
+                assert(false);
+#endif
+                exit(ERROR_INVALID_MAPPER_OUTPUT);
+              }
+            }
+          }
           // If this is a reduction region requirement make sure all the 
           // managers are reduction instances
           if (IS_REDUCE(regions[idx]))
@@ -4863,8 +4936,17 @@ namespace Legion {
       }
       else
       {
+        log_run.error("Invalid mapper output from invocation of '%s' on "
+                      "mapper %s. Mapper specified an invalid task variant "
+                      "of ID 0 for task %s (ID %lld), but Legion does not yet "
+                      "support task generators.", "map_task", 
+                      mapper->get_mapper_name(), 
+                      get_task_name(), get_unique_id());
         // TODO: invoke a generator if one exists
+#ifdef DEBUG_HIGH_LEVEL
         assert(false); 
+#endif
+        exit(ERROR_INVALID_MAPPER_OUTPUT);
       }
       if (variant_impl == NULL)
       {

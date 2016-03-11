@@ -258,6 +258,7 @@ namespace Legion {
       virtual LayoutConstraintID default_policy_select_layout_constraints(
                                     MapperContext ctx, Memory target_memory,
                                     const RegionRequirement &req,
+                                    MappingKind mapping_kind,
                                     bool needs_field_constraint_check,
                                     bool &force_new_instances);
       virtual void default_policy_fill_constraints(MapperContext ctx,

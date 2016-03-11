@@ -1398,7 +1398,7 @@ namespace Legion {
       bool force_new_instances = false;
       LayoutConstraintID our_layout_id = 
        default_policy_select_layout_constraints(ctx, target_memory, req,
-                           needs_field_constraint_check, force_new_instances);
+               TASK_MAPPING, needs_field_constraint_check, force_new_instances);
       const LayoutConstraintSet &our_constraints = 
                         mapper_rt_find_layout_constraints(ctx, our_layout_id);
       for (std::multimap<unsigned,LayoutConstraintID>::const_iterator lay_it =
@@ -1516,12 +1516,14 @@ namespace Legion {
     LayoutConstraintID DefaultMapper::default_policy_select_layout_constraints(
                                     MapperContext ctx, Memory target_memory, 
                                     const RegionRequirement &req,
+                                    MappingKind mapping_kind,
                                     bool needs_field_constraint_check,
                                     bool &force_new_instances)
     //--------------------------------------------------------------------------
     {
-      // Do something special for reductions
-      if (req.privilege == REDUCE)
+      // Do something special for reductions and 
+      // it is not an explicit region-to-region copy
+      if ((req.privilege == REDUCE) && (mapping_kind != COPY_MAPPING))
       {
         // Always make new reduction instances
         force_new_instances = true;
@@ -1607,7 +1609,7 @@ namespace Legion {
       {
         // Make reduction fold instances
         constraints.add_constraint(SpecializedConstraint(
-              SpecializedConstraint::REDUCTION_FOLD_SPECIALIZE)) 
+              SpecializedConstraint::REDUCTION_FOLD_SPECIALIZE, req.redop))
           .add_constraint(MemoryConstraint(target_memory.kind()));
       }
       else
@@ -1876,7 +1878,8 @@ namespace Legion {
       // Copy over all the valid instances, then try to do an acquire on them
       // and see which instances are no longer valid
       output.chosen_instances = input.valid_instances;
-      mapper_rt_acquire_and_filter_instances(ctx, output.chosen_instances);
+      if (!output.chosen_instances.empty())
+        mapper_rt_acquire_and_filter_instances(ctx, output.chosen_instances);
       // Now see if we have any fields which we still make space for
       std::set<FieldID> missing_fields = inline_op.requirement.privilege_fields;
       for (std::vector<PhysicalInstance>::const_iterator it = 
@@ -1897,6 +1900,7 @@ namespace Legion {
       LayoutConstraintID our_layout_id = 
        default_policy_select_layout_constraints(ctx, target_memory, 
                                              inline_op.requirement, 
+                                             INLINE_MAPPING,
                                              true/*needs check*/, 
                                              force_new_instances);
       LayoutConstraintSet creation_constraints = 
@@ -1962,69 +1966,85 @@ namespace Legion {
       // For the sources always use an existing instances and virtual
       // instances for the rest, for the destinations, hope they are
       // restricted, otherwise we really don't know what to do
+      bool has_unrestricted = false;
       for (unsigned idx = 0; idx < copy.src_requirements.size(); idx++)
       {
         output.src_instances[idx] = input.src_instances[idx];
+        if (!output.src_instances[idx].empty())
+          mapper_rt_acquire_and_filter_instances(ctx,output.src_instances[idx]);
         // Stick this on for good measure, at worst it will be ignored
         output.src_instances[idx].push_back(
             PhysicalInstance::get_virtual_instance());
-      }
-      for (unsigned idx = 0; idx < copy.dst_requirements.size(); idx++)
-      {
         output.dst_instances[idx] = input.dst_instances[idx];
+        if (!output.dst_instances[idx].empty())
+          mapper_rt_acquire_and_filter_instances(ctx,output.dst_instances[idx]);
         if (!copy.dst_requirements[idx].is_restricted())
+          has_unrestricted = true;
+      }
+      // If the destinations were all restricted we know we got everything
+      if (has_unrestricted)
+      {
+        for (unsigned idx = 0; idx < copy.dst_requirements.size(); idx++)
         {
-          // If this is not restricted, see if we have all the fields covered
-          std::set<FieldID> missing_fields = 
-            copy.dst_requirements[idx].privilege_fields;
-          for (std::vector<PhysicalInstance>::const_iterator it = 
-                output.dst_instances[idx].begin(); it !=
-                output.dst_instances[idx].end(); it++)
+          output.dst_instances[idx] = input.dst_instances[idx];
+          if (!copy.dst_requirements[idx].is_restricted())
           {
-            it->remove_space_fields(missing_fields);
-            if (missing_fields.empty())
-              break;
-          }
-          // If we still have fields, we need to make an instance
-          // We clearly need to take a guess, let's see if we can find
-          // one of our instances to use.
-          if (!missing_fields.empty())
-          {
-            std::set<Memory> visible_mems;
-            machine.get_visible_memories(local_proc, visible_mems);
-            for (std::set<Memory>::const_iterator it = visible_mems.begin(); 
-                  it != visible_mems.end(); it++)
+            // If this is not restricted, see if we have all the fields covered
+            std::set<FieldID> missing_fields = 
+              copy.dst_requirements[idx].privilege_fields;
+            for (std::vector<PhysicalInstance>::const_iterator it = 
+                  output.dst_instances[idx].begin(); it !=
+                  output.dst_instances[idx].end(); it++)
             {
-              Memory target_memory = (*it); 
-              LayoutConstraintSet constraint_set;
-              constraint_set.add_constraint(SpecializedConstraint())
-                .add_constraint(MemoryConstraint(target_memory.kind()))
-                .add_constraint(FieldConstraint(missing_fields, 
-                        false/*contiguous*/, false/*inorder*/));
-              std::vector<LogicalRegion> target_regions(1, 
-                                    copy.dst_requirements[idx].region);
-              PhysicalInstance result;
-              if (mapper_rt_find_physical_instance(ctx, target_memory,
-                                                   constraint_set,
-                                                   target_regions,
-                                                   result))
-              {
-                output.dst_instances[idx].push_back(result);
-                result.remove_space_fields(missing_fields);
-                if (missing_fields.empty())
-                  break;
-              }
+              it->remove_space_fields(missing_fields);
+              if (missing_fields.empty())
+                break;
             }
+            // If we still have fields, we need to make an instance
+            // We clearly need to take a guess, let's see if we can find
+            // one of our instances to use.
             if (!missing_fields.empty())
             {
-              log_mapper.error("Default mapper error. No idea where to place "
-                              "destination regions for explicit copy operation "
-                              "in task %s (ID %lld) because the region is not "
-                              "constricted and we couldn't find any instances "
-                              "to use locally.", 
-                              copy.parent_task->get_task_name(),
-                              copy.parent_task->get_unique_id());
-              assert(false);
+              Memory target_memory = default_policy_select_target_memory(ctx,
+                                                copy.parent_task->current_proc);
+              bool force_new_instances = false;
+              LayoutConstraintID our_layout_id = 
+               default_policy_select_layout_constraints(ctx, target_memory, 
+                                                     copy.dst_requirements[idx],
+                                                     COPY_MAPPING,
+                                                     true/*needs check*/, 
+                                                     force_new_instances);
+              LayoutConstraintSet creation_constraints = 
+                          mapper_rt_find_layout_constraints(ctx, our_layout_id);
+              creation_constraints.add_constraint(
+                  FieldConstraint(missing_fields,
+                                  false/*contig*/, false/*inorder*/));
+              output.dst_instances[idx].resize(
+                                          output.dst_instances[idx].size() + 1);
+              if (!default_make_instance(ctx, target_memory, 
+                    creation_constraints, output.dst_instances[idx].back(), 
+                    COPY_MAPPING, force_new_instances, true/*meets*/, 
+                    false/*reduction*/, copy.dst_requirements[idx], 
+                    copy.parent_task->current_proc))
+              {
+                // If we failed to make it that is bad
+                log_mapper.error("Default mapper failed allocation for "
+                               "destination region requirement %d of explicit "
+                               "region-to-region copy operation in task %s "
+                               "(ID %lld) in memory " IDFMT " for processor "
+                               IDFMT ". This means the working set of your "
+                               "application is too big for the allotted "
+                               "capacity of the given memory under the default "
+                               "mapper's mapping scheme. You have three "
+                               "choices: ask Realm to allocate more memory, "
+                               "write a custom mapper to better manage working "
+                               "sets, or find a bigger machine. Good luck!",
+                               idx, copy.parent_task->get_task_name(),
+                               copy.parent_task->get_unique_id(),
+                               copy.parent_task->current_proc.id, 
+                               target_memory.id);
+                assert(false);
+              }
             }
           }
         }
@@ -2077,6 +2097,8 @@ namespace Legion {
       // Simple heuristic for closes, if we have an instance use it,
       // otherwise just make a virtual instance
       output.chosen_instances = input.valid_instances;
+      if (!output.chosen_instances.empty())
+        mapper_rt_acquire_and_filter_instances(ctx, output.chosen_instances);
       output.chosen_instances.push_back(
                                 PhysicalInstance::get_virtual_instance());
     }

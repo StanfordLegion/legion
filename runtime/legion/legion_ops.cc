@@ -2247,9 +2247,12 @@ namespace Legion {
       // Also check to make sure that none of them are composite instances
       RegionTreeID bad_tree = 0;
       std::vector<FieldID> missing_fields;
+      std::vector<PhysicalManager*> unacquired;
       int composite_index = runtime->forest->physical_convert_mapping(
                                 requirement, output.chosen_instances, 
-                                chosen_instances, bad_tree, missing_fields);
+                                chosen_instances, bad_tree, missing_fields,
+                                &acquired_instances, unacquired, 
+                                !Runtime::unsafe_mapper);
       if (bad_tree > 0)
       {
         log_run.error("Invalid mapper output from invocation of 'map_inline' "
@@ -2288,6 +2291,36 @@ namespace Legion {
         assert(false);
 #endif
         exit(ERROR_INVALID_MAPPER_OUTPUT);
+      }
+      if (!unacquired.empty())
+      {
+        for (std::vector<PhysicalManager*>::const_iterator it = 
+              unacquired.begin(); it != unacquired.end(); it++)
+        {
+          if (acquired_instances.find(*it) == acquired_instances.end())
+          {
+            log_run.error("Invalid mapper output from 'map_inline' invocation "
+                        "on mapper %s. Mapper selected physical instance for "
+                        "inline mapping in task %s (ID %lld) which has already "
+                        "been collected. If the mapper had properly acquired "
+                        "this instance as part of the mapper call it would "
+                        "have detected this. Please update the mapper to abide "
+                        "by proper mapping conventions.", 
+                        mapper->get_mapper_name(), parent_ctx->get_task_name(),
+                        parent_ctx->get_unique_id());
+#ifdef DEBUG_HIGH_LEVEL
+            assert(false);
+#endif
+            exit(ERROR_INVALID_MAPPER_OUTPUT);
+          }
+        }
+        // If we did successfully acquire them, still issue the warning
+        log_run.warning("WARNING: mapper %s faield to acquire instance "
+                        "for inline mapping operation in task %s (ID %lld) "
+                        "in 'map_inline' call. You may experience undefined "
+                        "behavior as a consequence.", mapper->get_mapper_name(),
+                        parent_ctx->get_task_name(), 
+                        parent_ctx->get_unique_id());
       }
       if (composite_index >= 0)
       {
@@ -3468,8 +3501,11 @@ namespace Legion {
     {
       RegionTreeID bad_tree = 0;
       std::vector<FieldID> missing_fields;
+      std::vector<PhysicalManager*> unacquired;
       int composite_idx = runtime->forest->physical_convert_mapping(
-                              req, output, targets, bad_tree, missing_fields);
+                              req, output, targets, bad_tree, missing_fields,
+                              &acquired_instances, unacquired, 
+                              !Runtime::unsafe_mapper);
       if (bad_tree > 0)
       {
         log_run.error("Invalid mapper output from invocation of 'map_copy' "
@@ -3510,6 +3546,41 @@ namespace Legion {
         assert(false);
 #endif
         exit(ERROR_INVALID_MAPPER_OUTPUT);
+      }
+      if (!unacquired.empty())
+      {
+        for (std::vector<PhysicalManager*>::const_iterator it = 
+              unacquired.begin(); it != unacquired.end(); it++)
+        {
+          if (acquired_instances.find(*it) == acquired_instances.end())
+          {
+            log_run.error("Invalid mapper output from 'map_copy' invocation "
+                          "on mapper %s. Mapper selected physical instance "
+                          "for %s region requirement %d of explicit region-to-"
+                          "region copy in task %s (ID %lld) which has already "
+                          "been collected. If the mapper had properly acquired "
+                          "this instance as part of the mapper call it would "
+                          "have detected this. Please update the mapper to "
+                          "abide by proper mapping conventions.",
+                          mapper->get_mapper_name(), 
+                          IS_SRC ? "source" : "destination", idx,
+                          parent_ctx->get_task_name(),
+                          parent_ctx->get_unique_id());
+#ifdef DEBUG_HIGH_LEVEL
+            assert(false);
+#endif
+            exit(ERROR_INVALID_MAPPER_OUTPUT);
+          }
+        }
+        // If we did successfully acquire them, still issue the warning
+        log_run.warning("WARNING: mapper %s failed to acquire instances "
+                        "for %s region requirement %d of explicit region-to-"
+                        "region copy in task %s (ID %lld) in 'map_copy' call. "
+                        "You may experience undefined behavior as a "
+                        "consequence.", mapper->get_mapper_name(),
+                        IS_SRC ? "source" : "destination", idx,
+                        parent_ctx->get_task_name(),
+                        parent_ctx->get_unique_id());
       }
       // Destination is not allowed to have composite instances
       if (!IS_SRC && (composite_idx >= 0))
@@ -4636,9 +4707,12 @@ namespace Legion {
       // Make sure we have at least one instance for every field
       RegionTreeID bad_tree = 0;
       std::vector<FieldID> missing_fields;
+      std::vector<PhysicalManager*> unacquired;
       int composite_index = runtime->forest->physical_convert_mapping(
                                   requirement, output.chosen_instances, 
-                                  chosen_instances, bad_tree, missing_fields);
+                                  chosen_instances, bad_tree, missing_fields,
+                                  &acquired_instances, unacquired, 
+                                  !Runtime::unsafe_mapper);
       if (bad_tree > 0)
       {
         log_run.error("Invalid mapper output from invocation of 'map_close' "
@@ -4677,6 +4751,36 @@ namespace Legion {
         assert(false);
 #endif
         exit(ERROR_INVALID_MAPPER_OUTPUT);
+      }
+      if (!unacquired.empty())
+      {
+        for (std::vector<PhysicalManager*>::const_iterator it = 
+              unacquired.begin(); it != unacquired.end(); it++)
+        {
+          if (acquired_instances.find(*it) == acquired_instances.end())
+          { 
+            log_run.error("Invalid mapper output from 'map_close' invocation "
+                          "on mapper %s. Mapper selected physical instance for "
+                          "close operation in task %s (ID %lld) which has "
+                          "already been collected. If the mapper had properly "
+                          "acquired this instance as part of the mapper call "
+                          "it would have detected this. Please update the "
+                          "mapper to abide by proper mapping conventions.",
+                          mapper->get_mapper_name(),parent_ctx->get_task_name(),
+                          parent_ctx->get_unique_id());
+#ifdef DEBUG_HIGH_LEVEL
+            assert(false);
+#endif
+            exit(ERROR_INVALID_MAPPER_OUTPUT);
+          }
+        }
+        // If we did successfully acquire them, still issue the warning
+        log_run.warning("WARNING: mapper %s failed to acquire instance "
+                        "for close operation in task %s (ID %lld) in "
+                        "'map_close' call. You may experience undefined "
+                        "behavior as a consequence.", mapper->get_mapper_name(),
+                        parent_ctx->get_task_name(), 
+                        parent_ctx->get_unique_id());
       }
       if (Runtime::unsafe_mapper)
         return composite_index;

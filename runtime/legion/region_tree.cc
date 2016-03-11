@@ -2421,7 +2421,10 @@ namespace Legion {
     int RegionTreeForest::physical_convert_mapping(const RegionRequirement &req,
                                   const std::vector<MappingInstance> &chosen,
                                   InstanceSet &result, RegionTreeID &bad_tree,
-                                  std::vector<FieldID> &missing_fields)
+                                  std::vector<FieldID> &missing_fields,
+                                  std::map<PhysicalManager*,unsigned> *acquired,
+                                  std::vector<PhysicalManager*> &unacquired,
+                                  const bool do_acquire_checks)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -2451,6 +2454,9 @@ namespace Legion {
           bad_tree = manager->region_node->handle.get_tree_id();
           return -1;
         }
+        // See if we should be checking the acquired sets
+        if (do_acquire_checks && (acquired->find(manager) == acquired->end()))
+          unacquired.push_back(manager);
         // See which fields need to be made valid here
         FieldMask valid_fields = 
           manager->layout->allocated_fields & needed_fields;
@@ -2485,6 +2491,67 @@ namespace Legion {
           reg_node->column_source->get_field_set(needed_fields, missing);
           missing_fields.insert(missing_fields.end(), 
                                 missing.begin(), missing.end());
+        }
+      }
+      // We'll only run this code when we're checking for errors
+      if (!unacquired.empty())
+      {
+        // This code is very similar to what we see in the memory managers
+        std::map<MemoryManager*,MapperManager::AcquireStatus> remote_acquires;
+        // Try and do the acquires for any instances that weren't acquired
+        for (std::vector<PhysicalManager*>::const_iterator it = 
+              unacquired.begin(); it != unacquired.end(); it++)
+        {
+          if ((*it)->try_add_base_valid_ref(MAPPING_ACQUIRE_REF,
+                                              !(*it)->is_owner()))
+          {
+            acquired->insert(std::pair<PhysicalManager*,unsigned>(*it,1));
+            continue;
+          }
+          // If we failed on the ownr node, it will never work
+          // otherwise, we want to try to do a remote acquire
+          else if ((*it)->is_owner())
+            continue;
+          remote_acquires[(*it)->memory_manager].instances.insert(*it);
+        }
+        if (!remote_acquires.empty())
+        {
+          std::set<Event> done_events;
+          for (std::map<MemoryManager*,MapperManager::AcquireStatus>::iterator
+                it = remote_acquires.begin(); it != remote_acquires.end(); it++)
+          {
+            Event wait_on = it->first->acquire_instances(it->second.instances,
+                                                         it->second.results);
+            if (wait_on.exists())
+              done_events.insert(wait_on);
+          }
+          if (!done_events.empty())
+          {
+            Event ready = Runtime::merge_events<true>(done_events);
+            ready.wait();
+          }
+          // Now figure out which ones we successfully acquired and which 
+          // ones failed to be acquired
+          for (std::map<MemoryManager*,MapperManager::AcquireStatus>::iterator
+                req_it = remote_acquires.begin(); 
+                req_it != remote_acquires.end(); req_it++)
+          {
+            unsigned idx = 0;
+            for (std::set<PhysicalManager*>::const_iterator it = 
+                  req_it->second.instances.begin(); it !=
+                  req_it->second.instances.end(); it++, idx++)
+            {
+              if (req_it->second.results[idx])
+              {
+                acquired->insert(std::pair<PhysicalManager*,unsigned>(*it,1));
+                // make the reference a local reference and 
+                // remove our remote did reference
+                (*it)->add_base_valid_ref(MAPPING_ACQUIRE_REF);
+                (*it)->send_remote_valid_update(req_it->first->owner_space,
+                                            1, false/*add*/);
+              }
+            }
+          }
         }
       }
       return -1; // no composite index

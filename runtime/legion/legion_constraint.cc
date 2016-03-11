@@ -496,6 +496,30 @@ namespace Legion {
       : kind(k), redop(r)
     //--------------------------------------------------------------------------
     {
+      if (redop == 0)
+      {
+        if ((kind != NORMAL_SPECIALIZE) && (kind != VIRTUAL_SPECIALIZE))
+        {
+          fprintf(stderr,"Illegal specialize constraint with reduction op %d."
+                         "Only reduction specialized constraints are "
+                         "permitted to have non-zero reduction operators.",
+                         redop);
+          assert(false);
+        }
+      }
+      else
+      {
+        if ((kind != REDUCTION_FOLD_SPECIALIZE) && 
+            (kind != REDUCTION_LIST_SPECIALIZE))
+        {
+          fprintf(stderr,"Illegal %s reduction specialized constraint with "
+                         "reduction op '0'. Zero is a reserved reduction "
+                         "operator ID and cannot be used for any reductions "
+                         "and therefore is an invalid constraint.",
+                         (kind == REDUCTION_FOLD_SPECIALIZE) ? "fold" : "list");
+          assert(false);
+        }
+      }
     }
 
     //--------------------------------------------------------------------------

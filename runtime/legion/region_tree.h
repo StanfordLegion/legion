@@ -374,7 +374,10 @@ namespace Legion {
       int physical_convert_mapping(const RegionRequirement &req,
                                const std::vector<MappingInstance> &chosen,
                                InstanceSet &result, RegionTreeID &bad_tree,
-                               std::vector<FieldID> &missing_fields);
+                               std::vector<FieldID> &missing_fields,
+                               std::map<PhysicalManager*,unsigned> *acquired,
+                               std::vector<PhysicalManager*> &unacquired,
+                               const bool do_acquire_checks);
       bool physical_convert_postmapping(const RegionRequirement &req,
                                const std::vector<MappingInstance> &chosen,
                                InstanceSet &result);
