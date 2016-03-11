@@ -374,7 +374,11 @@ function pretty.expr_list_duplicate_partition(cx, node)
 end
 
 function pretty.expr_list_slice_cross_product(cx, node)
-  assert(false, "unimplemented")
+  return join({
+      "list_slice_cross_product(",
+      commas({pretty.expr(cx, node.product),
+              pretty.expr(cx, node.indices)}),
+      ")"})
 end
 
 function pretty.expr_list_cross_product(cx, node)
