@@ -1138,7 +1138,7 @@ namespace Legion {
       struct InternalSet : public Collectable {
       public:
         InternalSet(size_t size = 0)
-          { vector.reserve(size); }
+          { if (size > 0) vector.resize(size); }
         InternalSet(const InternalSet &rhs) : vector(rhs.vector) { }
         ~InternalSet(void) { }
       public:
