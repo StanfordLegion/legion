@@ -1288,7 +1288,8 @@ namespace Legion {
                                         CompositeNode *parent);
       CompositeView* create_valid_view(PhysicalState *state,
                                       CompositeNode *root,
-                                      const FieldMask &closed_mask,
+                                      const FieldMask &valid_mask,
+                                      const FieldMask &dirty_mask,
                                       bool register_view);
       void capture_physical_state(CompositeNode *target,
                                   RegionTreeNode *node,

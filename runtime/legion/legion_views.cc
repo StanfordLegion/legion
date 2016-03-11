@@ -3040,6 +3040,9 @@ namespace Legion {
         parent(par), valid_mask(mask)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(!!valid_mask);
+#endif
       // If we are either not a parent or we are a remote parent add 
       // a resource reference to avoid being collected
       if (parent != NULL)

@@ -5208,7 +5208,8 @@ namespace Legion {
             continue;
 #ifdef DEBUG_HIGH_LEVEL
           assert(physical_instances[idx].size() == 1);
-          assert(physical_instances[idx][0].is_composite_ref());
+          assert(physical_instances[idx][0].get_manager()->
+                                      is_virtual_instance());
 #endif
           runtime->forest->map_virtual_region(enclosing_contexts[idx],
                                               regions[idx],
@@ -5313,9 +5314,61 @@ namespace Legion {
         }
         // Convert the post-mapping  
         InstanceSet result;
+        RegionTreeID bad_tree = 0;
+        std::vector<PhysicalManager*> unacquired;
         bool had_composite = 
           runtime->forest->physical_convert_postmapping(req,
-                                      output.chosen_instances[idx], result); 
+                              output.chosen_instances[idx], result, bad_tree,
+                              Runtime::unsafe_mapper ? NULL : 
+                                get_acquired_instances_ref(),
+                              unacquired, !Runtime::unsafe_mapper);
+        if (bad_tree > 0)
+        {
+          log_run.error("Invalid mapper output from 'postmap_task' invocation "
+                        "on mapper %s. Mapper provided an instance from region "
+                        "tree %d for use in satisfying region requirement %d "
+                        "of task %s (ID %lld) whose region is from region tree "
+                        "%d.", mapper->get_mapper_name(), bad_tree, idx,
+                        get_task_name(), get_unique_id(), 
+                        regions[idx].region.get_tree_id());
+#ifdef DEBUG_HIGH_LEVEL
+          assert(false);
+#endif
+          exit(ERROR_INVALID_MAPPER_OUTPUT);
+        }
+        if (!unacquired.empty())
+        {
+          std::map<PhysicalManager*,unsigned> *acquired_instances =
+            get_acquired_instances_ref();
+          for (std::vector<PhysicalManager*>::const_iterator uit = 
+                unacquired.begin(); uit != unacquired.end(); uit++)
+          {
+            if (acquired_instances->find(*uit) == acquired_instances->end())
+            {
+              log_run.error("Invalid mapper output from 'postmap_task' "
+                            "invocation on mapper %s. Mapper selected "
+                            "physical instance for region requirement "
+                            "%d of task %s (ID %lld) which has already "
+                            "been collected. If the mapper had properly "
+                            "acquired this instance as part of the mapper "
+                            "call it would have detected this. Please "
+                            "update the mapper to abide by proper mapping "
+                            "conventions.", mapper->get_mapper_name(),
+                            idx, get_task_name(), get_unique_id());
+#ifdef DEBUG_HIGH_LEVEL
+              assert(false);
+#endif
+              exit(ERROR_INVALID_MAPPER_OUTPUT);
+            }
+          }
+          // If we did successfully acquire them, still issue the warning
+          log_run.warning("WARNING: mapper %s failed to acquires instances "
+                          "for region requirement %d of task %s (ID %lld) "
+                          "in 'postmap_task' call. You may experience "
+                          "undefined behavior as a consequence.",
+                          mapper->get_mapper_name(), idx, 
+                          get_task_name(), get_unique_id());
+        }
         if (had_composite)
         {
           log_run.warning("WARNING: Mapper %s requested a composite "
@@ -5325,6 +5378,28 @@ namespace Legion {
                           mapper->get_mapper_name(), idx,
                           get_task_name(), get_unique_id());
           continue;
+        }
+        if (!Runtime::unsafe_mapper)
+        {
+          std::vector<LogicalRegion> regions_to_check(1, 
+                                        regions[idx].region);
+          for (unsigned check_idx = 0; check_idx < result.size(); check_idx++)
+          {
+            if (!result[check_idx].get_manager()->meets_regions(
+                                                      regions_to_check))
+            {
+              log_run.error("Invalid mapper output from invocation of "
+                            "'postmap_task' on mapper %s. Mapper specified an "
+                            "instance region requirement %d of task %s "
+                            "(ID %lld) that does not meet the logical region "
+                            "requirement.", mapper->get_mapper_name(), idx, 
+                            get_task_name(), get_unique_id()); 
+#ifdef DEBUG_HIGH_LEVEL
+              assert(false);
+#endif
+              exit(ERROR_INVALID_MAPPER_OUTPUT);
+            }
+          }
         }
         // Register this with a no-event so that the instance can
         // be used as soon as it is valid from the copy to it

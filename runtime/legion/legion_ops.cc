@@ -3604,9 +3604,10 @@ namespace Legion {
       for (unsigned idx = 0; idx < targets.size(); idx++)
       {
         const InstanceRef &ref = targets[idx];
-        if (ref.is_composite_ref())
+        PhysicalManager *manager = ref.get_manager();
+        if (manager->is_virtual_instance())
           continue;
-        if (!ref.get_manager()->meets_regions(regions_to_check))
+        if (!manager->meets_regions(regions_to_check))
         {
           log_run.error("Invalid mapper output from invocation of 'map_copy' "
                         "on mapper %s. Mapper specified an instance for %s "

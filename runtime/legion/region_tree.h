@@ -380,7 +380,15 @@ namespace Legion {
                                const bool do_acquire_checks);
       bool physical_convert_postmapping(const RegionRequirement &req,
                                const std::vector<MappingInstance> &chosen,
-                               InstanceSet &result);
+                               InstanceSet &result, RegionTreeID &bad_tree,
+                               std::map<PhysicalManager*,unsigned> *acquired,
+                               std::vector<PhysicalManager*> &unacquired,
+                               const bool do_acquire_checks);
+    protected: // helper method for the above two methods
+      void perform_missing_acquires(
+                               std::map<PhysicalManager*,unsigned> &acquired,
+                               const std::vector<PhysicalManager*> &unacquired);
+    public:
       bool are_colocated(const std::vector<InstanceSet*> &instances,
                          FieldSpace handle, const std::set<FieldID> &fields,
                          unsigned &idx1, unsigned &idx2);
@@ -1635,6 +1643,7 @@ namespace Legion {
           FieldMask &complete_fields);
       InstanceView* convert_reference(const InstanceRef &ref, 
                                       UniqueID ctx_uid) const;
+      CompositeView* convert_reference(const InstanceRef &ref) const;
       void convert_target_views(const InstanceSet &targets, UniqueID ctx_uid,
                                 std::vector<InstanceView*> &target_views); 
       // I hate the container problem, same as previous except MaterializedView
@@ -1876,7 +1885,7 @@ namespace Legion {
                                        VersionInfo &version_info);
       void register_region(const TraversalInfo &info, Event term_event,
                            const RegionUsage &usage, InstanceSet &targets);
-      void register_virtual(ContextID ctx, CompositeView *view,
+      void register_virtual(ContextID ctx, const InstanceRef &ref,
                             VersionInfo &version_info,
                             const FieldMask &composite_mask);
       void seed_state(ContextID ctx, Event term_event,
@@ -1908,6 +1917,7 @@ namespace Legion {
                         VersionInfo &version_info, const InstanceRef &ref);
       InstanceView* convert_reference_region(PhysicalManager *manager, 
                                              UniqueID ctx_uid) const;
+      CompositeView* convert_view_region(CompositeView *view) const;
       void convert_references_region(
                               const std::vector<PhysicalManager*> &managers,
                               std::vector<bool> &up_mask, UniqueID ctx_uid,
@@ -2004,6 +2014,7 @@ namespace Legion {
     public:
       InstanceView* convert_reference_partition(PhysicalManager *manager,
                                                 UniqueID ctx_uid) const;
+      CompositeView* convert_view_partition(CompositeView *view) const;
       void convert_references_partition(
                                   const std::vector<PhysicalManager*> &managers,
                                   std::vector<bool> &up_mask, UniqueID ctx_uid,

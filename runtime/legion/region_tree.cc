@@ -1899,7 +1899,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
-      assert(composite_ref.is_composite_ref());
+      assert(composite_ref.is_composite_ref() || 
+              composite_ref.get_manager()->is_virtual_instance());
       assert(req.handle_type == SINGULAR);
 #endif
       RegionNode *child_node = get_node(req.region);
@@ -1927,6 +1928,7 @@ namespace Legion {
 #ifdef DEBUG_HIGH_LEVEL
       assert(ctx.exists());
       assert(req.handle_type == SINGULAR);
+      assert(!targets.empty());
 #endif
       RegionNode *child_node = get_node(req.region);
       FieldMask user_mask = 
@@ -1941,8 +1943,17 @@ namespace Legion {
                                      false/*closing*/, false/*logical*/,
                      FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES), user_mask);
 #endif
-      // Perform the registration
-      child_node->register_region(info, term_event, usage, targets); 
+      // Perform the registration, see if we have a virtual instance or not
+      if (targets[0].is_composite_ref())
+      {
+#ifdef DEBUG_HIGH_LEVEL
+        assert(targets.size() == 1); // better only be one
+#endif
+        child_node->register_virtual(ctx.get_id(), targets[0], 
+                                     version_info, user_mask);
+      }
+      else // this is the normal path
+        child_node->register_region(info, term_event, usage, targets); 
 #ifdef DEBUG_HIGH_LEVEL 
       TreeStateLogger::capture_state(runtime, &req, index, log_name, uid,
                                      child_node, ctx.get_id(), 
@@ -2496,63 +2507,10 @@ namespace Legion {
       // We'll only run this code when we're checking for errors
       if (!unacquired.empty())
       {
-        // This code is very similar to what we see in the memory managers
-        std::map<MemoryManager*,MapperManager::AcquireStatus> remote_acquires;
-        // Try and do the acquires for any instances that weren't acquired
-        for (std::vector<PhysicalManager*>::const_iterator it = 
-              unacquired.begin(); it != unacquired.end(); it++)
-        {
-          if ((*it)->try_add_base_valid_ref(MAPPING_ACQUIRE_REF,
-                                              !(*it)->is_owner()))
-          {
-            acquired->insert(std::pair<PhysicalManager*,unsigned>(*it,1));
-            continue;
-          }
-          // If we failed on the ownr node, it will never work
-          // otherwise, we want to try to do a remote acquire
-          else if ((*it)->is_owner())
-            continue;
-          remote_acquires[(*it)->memory_manager].instances.insert(*it);
-        }
-        if (!remote_acquires.empty())
-        {
-          std::set<Event> done_events;
-          for (std::map<MemoryManager*,MapperManager::AcquireStatus>::iterator
-                it = remote_acquires.begin(); it != remote_acquires.end(); it++)
-          {
-            Event wait_on = it->first->acquire_instances(it->second.instances,
-                                                         it->second.results);
-            if (wait_on.exists())
-              done_events.insert(wait_on);
-          }
-          if (!done_events.empty())
-          {
-            Event ready = Runtime::merge_events<true>(done_events);
-            ready.wait();
-          }
-          // Now figure out which ones we successfully acquired and which 
-          // ones failed to be acquired
-          for (std::map<MemoryManager*,MapperManager::AcquireStatus>::iterator
-                req_it = remote_acquires.begin(); 
-                req_it != remote_acquires.end(); req_it++)
-          {
-            unsigned idx = 0;
-            for (std::set<PhysicalManager*>::const_iterator it = 
-                  req_it->second.instances.begin(); it !=
-                  req_it->second.instances.end(); it++, idx++)
-            {
-              if (req_it->second.results[idx])
-              {
-                acquired->insert(std::pair<PhysicalManager*,unsigned>(*it,1));
-                // make the reference a local reference and 
-                // remove our remote did reference
-                (*it)->add_base_valid_ref(MAPPING_ACQUIRE_REF);
-                (*it)->send_remote_valid_update(req_it->first->owner_space,
-                                            1, false/*add*/);
-              }
-            }
-          }
-        }
+#ifdef DEBUG_HIGH_LEVEL
+        assert(acquired != NULL);
+#endif
+        perform_missing_acquires(*acquired, unacquired); 
       }
       return -1; // no composite index
     }
@@ -2561,7 +2519,10 @@ namespace Legion {
     bool RegionTreeForest::physical_convert_postmapping(
                                      const RegionRequirement &req,
                                      const std::vector<MappingInstance> &chosen,
-                                     InstanceSet &result)
+                                     InstanceSet &result,RegionTreeID &bad_tree,
+                                  std::map<PhysicalManager*,unsigned> *acquired,
+                                     std::vector<PhysicalManager*> &unacquired,
+                                     const bool do_acquire_checks)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -2571,6 +2532,7 @@ namespace Legion {
       // Get the field mask for the fields we need
       FieldMask optional_fields = 
                 reg_node->column_source->get_field_mask(req.privilege_fields);
+      const RegionTreeID local_tree = reg_node->handle.get_tree_id();
       // Iterate over each one of the chosen instances
       bool has_composite = false;
       for (std::vector<MappingInstance>::const_iterator it = chosen.begin();
@@ -2584,13 +2546,94 @@ namespace Legion {
           has_composite = true;
           continue;
         }
+        // Check to see if the tree IDs are the same
+        if (local_tree != manager->region_node->handle.get_tree_id())
+        {
+          bad_tree = manager->region_node->handle.get_tree_id();
+          return -1;
+        }
+        // See if we should be checking the acquired sets
+        if (do_acquire_checks && (acquired->find(manager) == acquired->end()))
+          unacquired.push_back(manager);
         FieldMask valid_fields = 
           manager->layout->allocated_fields & optional_fields;
         if (!valid_fields)
           continue;
         result.add_instance(InstanceRef(manager, valid_fields));
       }
+      if (!unacquired.empty())
+      {
+#ifdef DEBUG_HIGH_LEVEL
+        assert(acquired != NULL);
+#endif
+        perform_missing_acquires(*acquired, unacquired);
+      }
       return has_composite;
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeForest::perform_missing_acquires(
+                                std::map<PhysicalManager*,unsigned> &acquired,
+                                const std::vector<PhysicalManager*> &unacquired)
+    //--------------------------------------------------------------------------
+    {
+      // This code is very similar to what we see in the memory managers
+      std::map<MemoryManager*,MapperManager::AcquireStatus> remote_acquires;
+      // Try and do the acquires for any instances that weren't acquired
+      for (std::vector<PhysicalManager*>::const_iterator it = 
+            unacquired.begin(); it != unacquired.end(); it++)
+      {
+        if ((*it)->try_add_base_valid_ref(MAPPING_ACQUIRE_REF,
+                                            !(*it)->is_owner()))
+        {
+          acquired.insert(std::pair<PhysicalManager*,unsigned>(*it,1));
+          continue;
+        }
+        // If we failed on the ownr node, it will never work
+        // otherwise, we want to try to do a remote acquire
+        else if ((*it)->is_owner())
+          continue;
+        remote_acquires[(*it)->memory_manager].instances.insert(*it);
+      }
+      if (!remote_acquires.empty())
+      {
+        std::set<Event> done_events;
+        for (std::map<MemoryManager*,MapperManager::AcquireStatus>::iterator
+              it = remote_acquires.begin(); it != remote_acquires.end(); it++)
+        {
+          Event wait_on = it->first->acquire_instances(it->second.instances,
+                                                       it->second.results);
+          if (wait_on.exists())
+            done_events.insert(wait_on);
+        }
+        if (!done_events.empty())
+        {
+          Event ready = Runtime::merge_events<true>(done_events);
+          ready.wait();
+        }
+        // Now figure out which ones we successfully acquired and which 
+        // ones failed to be acquired
+        for (std::map<MemoryManager*,MapperManager::AcquireStatus>::iterator
+              req_it = remote_acquires.begin(); 
+              req_it != remote_acquires.end(); req_it++)
+        {
+          unsigned idx = 0;
+          for (std::set<PhysicalManager*>::const_iterator it = 
+                req_it->second.instances.begin(); it !=
+                req_it->second.instances.end(); it++, idx++)
+          {
+            if (req_it->second.results[idx])
+            {
+              acquired.insert(std::pair<PhysicalManager*,unsigned>(*it,1));
+              // make the reference a local reference and 
+              // remove our remote did reference
+              (*it)->add_base_valid_ref(MAPPING_ACQUIRE_REF);
+              (*it)->send_remote_valid_update(req_it->first->owner_space,
+                                          1, false/*add*/);
+            }
+          }
+        }
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -12246,7 +12289,8 @@ namespace Legion {
       // and then create a composite view
       closer.capture_physical_state(root, this, state, 
                                     capture_mask, dirty_mask);
-      return closer.create_valid_view(state, root, dirty_mask, register_view);
+      return closer.create_valid_view(state, root, closing_mask,
+                                      dirty_mask, register_view);
     }
 
     //--------------------------------------------------------------------------
@@ -13602,6 +13646,9 @@ namespace Legion {
                                                     UniqueID ctx_uid) const
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(!ref.is_composite_ref());
+#endif
       PhysicalManager *manager = ref.get_manager();
 #ifdef DEBUG_HIGH_LEVEL
       // Small sanity check to make sure they are in the same tree
@@ -13617,6 +13664,27 @@ namespace Legion {
       else
         return as_partition_node()->convert_reference_partition(manager, 
                                                                 ctx_uid);
+    }
+
+    //--------------------------------------------------------------------------
+    CompositeView* RegionTreeNode::convert_reference(
+                                                   const InstanceRef &ref) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(ref.is_composite_ref());
+#endif
+      CompositeView *view = ref.get_composite_view();
+#ifdef DEBUG_HIGH_LEVEL
+      assert(get_tree_id() == view->logical_node->get_tree_id());
+#endif
+      // If we're already at the root then we are done
+      if (view->logical_node == this)
+        return view;
+      if (is_region())
+        return as_region_node()->convert_view_region(view);
+      else
+        return as_partition_node()->convert_view_partition(view);
     }
 
     //--------------------------------------------------------------------------
@@ -14860,7 +14928,6 @@ namespace Legion {
 #ifdef DEBUG_HIGH_LEVEL
           assert(view->is_instance_view());
           assert(view->as_instance_view()->is_reduction_view());
-          assert(view->logical_node == this);
 #endif
           ReductionView *new_view = 
             view->as_instance_view()->as_reduction_view();
@@ -14891,14 +14958,12 @@ namespace Legion {
           for (unsigned idx = 0; idx < targets.size(); idx++)
           {
             const InstanceRef &ref = targets[idx];
-            // Skip any composite references
-            if (ref.is_composite_ref())
-              continue;
-            const FieldMask &valid_fields = ref.get_valid_fields();
 #ifdef DEBUG_HIGH_LEVEL
+            assert(!ref.is_composite_ref());
             assert(new_views[idx]->is_instance_view());
             assert(new_views[idx]->as_instance_view()->is_materialized_view());
 #endif
+            const FieldMask &valid_fields = ref.get_valid_fields();
             MaterializedView *view = 
               new_views[idx]->as_instance_view()->as_materialized_view();
             // See if this instance is valid already 
@@ -14973,18 +15038,8 @@ namespace Legion {
             for (unsigned idx = 0; idx < targets.size(); idx++)
             {
               const InstanceRef &ref = targets[idx];
-              if (ref.is_composite_ref())
-              {
-                const FieldMask &composite_fields = ref.get_valid_fields();
-                // Remove the fields from those being close
-                closing_mask -= composite_fields;
-                // if this is a composite reference, we can just register
-                // the view now as a valid view
-                update_valid_views(state, composite_fields, 
-                                   true/*dirty*/, new_views[idx]);
-                continue;
-              }
 #ifdef DEBUG_HIGH_LEVEL
+              assert(!ref.is_composite_ref());
               assert(new_views[idx]->is_instance_view());
               assert(
                   new_views[idx]->as_instance_view()->is_materialized_view());
@@ -15051,10 +15106,8 @@ namespace Legion {
         for (unsigned idx = 0; idx < targets.size(); idx++)
         {
           InstanceRef &ref = targets[idx];
-          // Skip any composite references
-          if (ref.is_composite_ref())
-            continue;
 #ifdef DEBUG_HIGH_LEVEL
+          assert(!ref.is_composite_ref());
           assert(new_views[idx]->is_instance_view());
 #endif
           Event ready = 
@@ -15066,10 +15119,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RegionNode::register_virtual(ContextID ctx, CompositeView *view,
+    void RegionNode::register_virtual(ContextID ctx, const InstanceRef &ref,
                      VersionInfo &version_info, const FieldMask &composite_mask)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(ref.is_composite_ref());
+#endif
+      // Convert the view locally
+      CompositeView *view = convert_reference(ref);
       PhysicalState *state = get_physical_state(ctx, version_info);
       update_valid_views(state, composite_mask, true/*dirty*/, view);
     }
@@ -15353,6 +15411,20 @@ namespace Legion {
       InstanceView *parent_view = 
         parent->convert_reference_partition(manager, ctx_uid);
       return parent_view->get_instance_subview(row_source->color);
+    }
+
+    //--------------------------------------------------------------------------
+    CompositeView* RegionNode::convert_view_region(CompositeView *view) const
+    //--------------------------------------------------------------------------
+    {
+      if (view->logical_node == this)
+        return view;
+#ifdef DEBUG_HIGH_LEVEL
+      assert(parent != NULL);
+#endif
+      CompositeView *parent_view = parent->convert_view_partition(view);
+      return parent_view->get_subview(row_source->color)->
+                                as_deferred_view()->as_composite_view();
     }
 
     //--------------------------------------------------------------------------
@@ -16525,6 +16597,20 @@ namespace Legion {
       InstanceView *parent_view = 
         parent->convert_reference_region(manager, ctx_uid);
       return parent_view->get_instance_subview(row_source->color);
+    }
+
+    //--------------------------------------------------------------------------
+    CompositeView* PartitionNode::convert_view_partition(
+                                                      CompositeView *view) const
+    //--------------------------------------------------------------------------
+    {
+      // No need to bother with the check here
+#ifdef DEBUG_HIGH_LEVEL
+      assert(parent != NULL);
+#endif
+      CompositeView *parent_view = parent->convert_view_region(view);
+      return parent_view->get_subview(row_source->color)->
+                             as_deferred_view()->as_composite_view();
     }
 
     //--------------------------------------------------------------------------

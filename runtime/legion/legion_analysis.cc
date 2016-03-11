@@ -3339,9 +3339,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     CompositeView*CompositeCloser::create_valid_view(PhysicalState *state,
-                                                     CompositeNode *root,
-                                                   const FieldMask &closed_mask,
-                                                     bool register_view)
+                                                    CompositeNode *root,
+                                                    const FieldMask &valid_mask,
+                                                    const FieldMask &dirty_mask,
+                                                    bool register_view)
     //--------------------------------------------------------------------------
     {
       RegionTreeNode *node = root->logical_node;
@@ -3350,9 +3351,9 @@ namespace Legion {
       CompositeView *composite_view = legion_new<CompositeView>(node->context, 
                                    did, node->context->runtime->address_space,
                                    node, node->context->runtime->address_space, 
-                                   closed_mask, true/*register now*/);
+                                   valid_mask, true/*register now*/);
       // Set the root value
-      composite_view->add_root(root, closed_mask, true/*top*/);
+      composite_view->add_root(root, valid_mask, true/*top*/);
       // Fill in the version infos
       VersionInfo &target_version_info = 
                                 composite_version_info->get_version_info();
@@ -3369,8 +3370,20 @@ namespace Legion {
       // Note that if we are permitted to leave the subregions
       // open then we don't make the view dirty
       if (register_view)
-        node->update_valid_views(state, closed_mask,
-                                 true/*dirty*/, composite_view);
+      {
+        if (!!dirty_mask)
+        {
+          node->update_valid_views(state, dirty_mask,
+                                   true /*dirty*/, composite_view);
+          FieldMask non_dirty = valid_mask - dirty_mask;
+          if (!!non_dirty)
+            node->update_valid_views(state, non_dirty,
+                                     false/*dirty*/, composite_view);
+        }
+        else 
+          node->update_valid_views(state, valid_mask,
+                                   false/*dirty*/, composite_view);
+      }
       return composite_view;
     }
 
@@ -6289,15 +6302,15 @@ namespace Legion {
     void InstanceRef::set_composite_view(CompositeView *view)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(composite);
-#endif
-      if ((ptr.view != NULL) && 
+      if (composite && (ptr.view != NULL) && 
           ptr.view->remove_base_valid_ref(COMPOSITE_HANDLE_REF))
         legion_delete(ptr.view);
       ptr.view = view;
       if (ptr.view != NULL)
+      {
         ptr.view->add_base_valid_ref(COMPOSITE_HANDLE_REF);
+        composite = true;
+      }
     }
 
     //--------------------------------------------------------------------------

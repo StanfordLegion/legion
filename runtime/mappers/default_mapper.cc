@@ -1128,9 +1128,40 @@ namespace Legion {
       // We don't even both caching these since they are so simple
       if (chosen.is_inner)
       {
+        std::vector<unsigned> reduction_indexes;
         for (unsigned idx = 0; idx < task.regions.size(); idx++)
-          output.chosen_instances[idx].push_back(
-              PhysicalInstance::get_virtual_instance());
+        {
+          // As long as this isn't a reduction-only region requirement
+          // we will do a virtual mapping, for reduction-only instances
+          // we will actually make a physical instance because the runtime
+          // doesn't allow virtual mappings for reduction-only privileges
+          if (task.regions[idx].privilege == REDUCE)
+            reduction_indexes.push_back(idx);
+          else
+            output.chosen_instances[idx].push_back(
+                PhysicalInstance::get_virtual_instance());
+        }
+        if (!reduction_indexes.empty())
+        {
+          const TaskLayoutConstraintSet &layout_constraints =
+              mapper_rt_find_task_layout_constraints(ctx,
+                                    task.task_id, output.chosen_variant);
+          Memory target_memory = default_policy_select_target_memory(ctx, 
+                                                       task.target_proc);
+          for (std::vector<unsigned>::const_iterator it = 
+                reduction_indexes.begin(); it != reduction_indexes.end(); it++)
+          {
+            std::set<FieldID> copy = task.regions[*it].privilege_fields;
+            if (!default_create_custom_instances(ctx, task.target_proc,
+                target_memory, task.regions[*it], *it, copy, 
+                layout_constraints, false/*needs constraint check*/, 
+                output.chosen_instances[*it]))
+            {
+              default_report_failed_instance_creation(task, *it, 
+                                          task.target_proc, target_memory);
+            }
+          }
+        }
         return;
       }
       // First, let's see if we've cached a result of this task mapping
@@ -1139,6 +1170,9 @@ namespace Legion {
       std::map<std::pair<TaskID,Processor>,
                std::list<CachedTaskMapping> >::const_iterator 
         finder = cached_task_mappings.find(cache_key);
+      // This flag says whether we need to recheck the field constraints,
+      // possibly because a new field was allocated in a region, so our old
+      // cached physical instance(s) is(are) no longer valid
       bool needs_field_constraint_check = false;
       Memory target_memory = default_policy_select_target_memory(ctx, 
                                                          task.target_proc);

@@ -53,7 +53,7 @@ namespace Legion {
 #ifndef NEW_INSTANCE_CREATION
       std::vector<size_t> offsets(field_sizes.size(),0);
       for (unsigned idx = 1; idx < field_sizes.size(); idx++)
-        offsets[idx] = offsets[idx-1] + field_sizes[idx].second;
+        offsets[idx] = offsets[idx-1] + field_sizes[idx-1].second;
 #endif
       for (unsigned idx = 0; idx < mask_index_map.size(); idx++)
       {
@@ -797,6 +797,7 @@ namespace Legion {
                 if (!our_rect.dominates(other_rect))
                   return false;
               }
+              break;
             }
           case 3:
             {
@@ -809,6 +810,7 @@ namespace Legion {
                 if (!our_rect.dominates(other_rect))
                   return false;
               }
+              break;
             }
           default:
             assert(false); // unhandled number of dimensions
