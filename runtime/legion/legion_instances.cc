@@ -1820,6 +1820,8 @@ namespace Legion {
     VirtualManager::~VirtualManager(void)
     //--------------------------------------------------------------------------
     {
+      // this should never be deleted since it is a singleton
+      assert(false);
     }
 
     //--------------------------------------------------------------------------

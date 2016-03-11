@@ -6194,7 +6194,10 @@ namespace Legion {
       : ready_event(Event::NO_EVENT), composite(comp), local(true)
     //--------------------------------------------------------------------------
     {
-      ptr.manager = NULL;
+      if (composite)
+        ptr.view = NULL;
+      else
+        ptr.manager = NULL;
     }
 
     //--------------------------------------------------------------------------
