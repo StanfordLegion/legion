@@ -38,7 +38,7 @@ def run(filename, debug, verbose, flags, env):
     output, _ = proc.communicate()
     retcode = proc.wait()
     if retcode != 0:
-        raise TestFailure(' '.join(args), output.decode('utf-8'))
+        raise TestFailure(' '.join(args), output.decode('utf-8') if output is not None else None)
 
 _re_label = r'^[ \t\r]*--[ \t]+{label}:[ \t\r]*$\n((^[ \t\r]*--.*$\n)+)'
 def find_labeled_prefix(filename, label):
@@ -122,7 +122,7 @@ tests = [
                                           {})),
      (os.path.join('tests', 'regent', 'compile_fail'),
       os.path.join('tests', 'bishop', 'compile_fail'),)),
-    ('run_pass', (test_run_pass, (['-fbounds-checks', '1'],
+    ('run_pass', (test_run_pass, (['-fbounds-checks', '1', '-fpretty', '1'],
                                   {'REALM_BACKTRACE': '1'})),
      (os.path.join('tests', 'regent', 'run_pass'),
       os.path.join('tests', 'bishop', 'run_pass'),
