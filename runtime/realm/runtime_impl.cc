@@ -375,6 +375,7 @@ namespace Realm {
 	local_reservation_free_list(0), local_index_space_free_list(0),
 	local_proc_group_free_list(0), run_method_called(false),
 	shutdown_requested(false), shutdown_condvar(shutdown_mutex),
+	sampling_profiler(true /*system default*/),
 	num_local_memories(0), num_local_processors(0),
 	module_registrar(this)
     {
@@ -595,6 +596,8 @@ namespace Realm {
 
       // very first thing - let the logger initialization happen
       Logger::configure_from_cmdline(cmdline);
+
+      sampling_profiler.configure_from_cmdline(cmdline, core_reservations);
 
       // now load modules
       module_registrar.create_static_modules(cmdline, modules);
@@ -1537,6 +1540,8 @@ namespace Realm {
       // threads that cause inter-node communication have to stop first
       LegionRuntime::LowLevel::stop_dma_worker_threads();
       stop_activemsg_threads();
+
+      sampling_profiler.shutdown();
 
       {
 	std::vector<ProcessorImpl *>& local_procs = nodes[gasnet_mynode()].processors;
