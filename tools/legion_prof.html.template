@@ -358,7 +358,7 @@
           .style("opacity", function(d) {
             if (!searchEnabled ||
                 searchRegex[currentPos].exec(d.title) != null)
-              return 1.0;
+              return d.opacity;
             else return 0.05;
           })
           .on("mouseout", function(d, i) { timelineSvg.selectAll("#desc").remove(); });
@@ -923,6 +923,7 @@
               start: parseFloat(d.start),
               end: parseFloat(d.end),
               color: d.color,
+              opacity: d.opacity,
               title: d.title
             };
         },

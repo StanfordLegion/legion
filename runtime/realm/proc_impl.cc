@@ -418,11 +418,13 @@ namespace Realm {
     ProcessorGroup::ProcessorGroup(void)
       : ProcessorImpl(Processor::NO_PROC, Processor::PROC_GROUP),
 	members_valid(false), members_requested(false), next_free(0)
+      , ready_task_count(0)
     {
     }
 
     ProcessorGroup::~ProcessorGroup(void)
     {
+      delete ready_task_count;
     }
 
     void ProcessorGroup::init(Processor _me, int _owner)
@@ -451,6 +453,11 @@ namespace Realm {
 
       members_requested = true;
       members_valid = true;
+
+      // now that we exist, profile our queue depth
+      std::string gname = stringbuilder() << "realm/proc " << me << "/ready tasks";
+      ready_task_count = new ProfilingGauges::AbsoluteRangeGauge<int>(gname);
+      task_queue.set_gauge(ready_task_count);
     }
 
     void ProcessorGroup::get_group_members(std::vector<Processor>& member_list)
@@ -752,9 +759,11 @@ namespace Realm {
   //
 
   LocalTaskProcessor::LocalTaskProcessor(Processor _me, Processor::Kind _kind)
-    : ProcessorImpl(_me, _kind), sched(0)
+    : ProcessorImpl(_me, _kind)
+    , sched(0)
+    , ready_task_count(stringbuilder() << "realm/proc " << me << "/ready tasks")
   {
-    // nothing really happens until we get a scheduler
+    task_queue.set_gauge(&ready_task_count);
   }
 
   LocalTaskProcessor::~LocalTaskProcessor(void)

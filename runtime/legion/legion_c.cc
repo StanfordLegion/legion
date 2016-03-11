@@ -354,12 +354,13 @@ legion_index_space_get_domain(legion_runtime_t runtime_,
 void
 legion_index_space_attach_name(legion_runtime_t runtime_,
                                legion_index_space_t handle_,
-                               const char *name)
+                               const char *name,
+                               bool is_mutable /* = false */)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   IndexSpace handle = CObjectWrapper::unwrap(handle_);
 
-  runtime->attach_name(handle, name);
+  runtime->attach_name(handle, name, is_mutable);
 }
 
 void
@@ -1490,6 +1491,20 @@ legion_index_partition_get_color_space(legion_runtime_t runtime_,
   return CObjectWrapper::wrap(d);
 }
 
+legion_color_t
+legion_index_partition_get_color(legion_runtime_t runtime_,
+                                 legion_context_t ctx_,
+                                 legion_index_partition_t handle_)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  IndexPartition handle = CObjectWrapper::unwrap(handle_);
+
+  Color c = runtime->get_index_partition_color(ctx, handle);
+
+  return c;
+}
+
 legion_index_space_t
 legion_index_partition_get_parent_index_space(legion_runtime_t runtime_,
                                               legion_context_t ctx_,
@@ -1519,12 +1534,13 @@ legion_index_partition_destroy(legion_runtime_t runtime_,
 void
 legion_index_partition_attach_name(legion_runtime_t runtime_,
                                    legion_index_partition_t handle_,
-                                   const char *name)
+                                   const char *name,
+                                   bool is_mutable /* = false */)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   IndexPartition handle = CObjectWrapper::unwrap(handle_);
 
-  runtime->attach_name(handle, name);
+  runtime->attach_name(handle, name, is_mutable);
 }
 
 void
@@ -1568,12 +1584,13 @@ legion_field_space_destroy(legion_runtime_t runtime_,
 void
 legion_field_space_attach_name(legion_runtime_t runtime_,
                                legion_field_space_t handle_,
-                               const char *name)
+                               const char *name,
+                               bool is_mutable /* = false */)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   FieldSpace handle = CObjectWrapper::unwrap(handle_);
 
-  runtime->attach_name(handle, name);
+  runtime->attach_name(handle, name, is_mutable);
 }
 
 void
@@ -1591,12 +1608,13 @@ void
 legion_field_id_attach_name(legion_runtime_t runtime_,
                             legion_field_space_t handle_,
                             legion_field_id_t id,
-                            const char *name)
+                            const char *name,
+                            bool is_mutable /* = false */)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   FieldSpace handle = CObjectWrapper::unwrap(handle_);
 
-  runtime->attach_name(handle, id, name);
+  runtime->attach_name(handle, id, name, is_mutable);
 }
 
 void
@@ -1684,12 +1702,13 @@ legion_logical_region_get_parent_logical_partition(
 void
 legion_logical_region_attach_name(legion_runtime_t runtime_,
                                   legion_logical_region_t handle_,
-                                  const char *name)
+                                  const char *name,
+                                  bool is_mutable /* = false */)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   LogicalRegion handle = CObjectWrapper::unwrap(handle_);
 
-  runtime->attach_name(handle, name);
+  runtime->attach_name(handle, name, is_mutable);
 }
 
 void
@@ -1816,12 +1835,13 @@ legion_logical_partition_get_parent_logical_region(
 void
 legion_logical_partition_attach_name(legion_runtime_t runtime_,
                                      legion_logical_partition_t handle_,
-                                     const char *name)
+                                     const char *name,
+                                     bool is_mutable /* = false */)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   LogicalPartition handle = CObjectWrapper::unwrap(handle_);
 
-  runtime->attach_name(handle, name);
+  runtime->attach_name(handle, name, is_mutable);
 }
 
 void
@@ -3452,6 +3472,27 @@ legion_index_iterator_next_span(legion_index_iterator_t handle_,
 // Task Operations
 //------------------------------------------------------------------------
 
+void
+legion_task_id_attach_name(legion_runtime_t runtime_,
+                           legion_task_id_t task_id,
+                           const char *name,
+                           bool is_mutable /* = false */)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+
+  runtime->attach_name(task_id, name, is_mutable);
+}
+
+void
+legion_task_id_retrieve_name(legion_runtime_t runtime_,
+                             legion_task_id_t task_id,
+                             const char **result)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+
+  runtime->retrieve_name(task_id, *result);
+}
+
 void *
 legion_task_get_args(legion_task_t task_)
 {
@@ -3547,6 +3588,22 @@ legion_task_get_task_id(legion_task_t task_)
   Task *task = CObjectWrapper::unwrap(task_);
 
   return task->task_id;
+}
+
+legion_processor_t
+legion_task_get_target_pro(legion_task_t task_)
+{
+  Task *task = CObjectWrapper::unwrap(task_);
+
+  return CObjectWrapper::wrap(task->target_proc);
+}
+
+const char *
+legion_task_get_task_name(legion_task_t task_)
+{
+  Task *task = CObjectWrapper::unwrap(task_);
+
+  return task->get_task_name();
 }
 
 // -----------------------------------------------------------------------

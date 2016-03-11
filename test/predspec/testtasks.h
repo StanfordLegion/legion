@@ -16,14 +16,16 @@ public:
   class Launcher : public TaskLauncher {
   public:
     Launcher(LogicalRegion region, int idx, FieldID fid, int newval,
-	     Predicate pred = Predicate::TRUE_PRED);
+	     Predicate pred = Predicate::TRUE_PRED,
+	     MappingTagID tag = 0);
   };
 
   static TaskID taskid;
 
   static Future run(Runtime *runtime, Context ctx,
 		    LogicalRegion region, int idx, FieldID fid, int newval,
-		    Predicate pred = Predicate::TRUE_PRED);
+		    Predicate pred = Predicate::TRUE_PRED,
+		    MappingTagID tag = 0);
 
   static void preregister_tasks(void);
 
@@ -43,14 +45,16 @@ public:
   class Launcher : public TaskLauncher {
   public:
     Launcher(LogicalRegion region, int idx, FieldID fid, int checkval,
-	     Predicate pred = Predicate::TRUE_PRED);
+	     Predicate pred = Predicate::TRUE_PRED,
+	     MappingTagID tag = 0);
   };
 
   static TaskID taskid;
 
   static Future run(Runtime *runtime, Context ctx,
 		    LogicalRegion region, int idx, FieldID fid, int checkval,
-		    Predicate pred = Predicate::TRUE_PRED);
+		    Predicate pred = Predicate::TRUE_PRED,
+		    MappingTagID tag = 0);
 
   static void preregister_tasks(void);
 

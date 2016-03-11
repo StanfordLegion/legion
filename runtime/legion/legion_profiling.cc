@@ -128,9 +128,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void LegionProfInstance::register_slice_owner(UniqueID pid, UniqueID id)
+    //--------------------------------------------------------------------------
+    {
+      slice_owners.push_back(SliceOwner());
+      SliceOwner &task = slice_owners.back();
+      task.parent_id = pid;
+      task.op_id = id;
+    }
+
+    //--------------------------------------------------------------------------
     void LegionProfInstance::process_task(VariantID variant_id, UniqueID op_id,
                   Realm::ProfilingMeasurements::OperationTimeline *timeline,
-                  Realm::ProfilingMeasurements::OperationProcessorUsage *usage)
+                  Realm::ProfilingMeasurements::OperationProcessorUsage *usage,
+                  Realm::ProfilingMeasurements::OperationEventWaits *waits)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -146,12 +157,25 @@ namespace Legion {
       info.start = timeline->start_time;
       // use complete_time instead of end_time to include async work
       info.stop = timeline->complete_time;
+      unsigned num_intervals = waits->intervals.size();
+      if (num_intervals > 0)
+      {
+        for (unsigned idx = 0; idx < num_intervals; ++idx)
+        {
+          info.wait_intervals.push_back(WaitInfo());
+          WaitInfo& wait_info = info.wait_intervals.back();
+          wait_info.wait_start = waits->intervals[idx].wait_start;
+          wait_info.wait_ready = waits->intervals[idx].wait_ready;
+          wait_info.wait_end = waits->intervals[idx].wait_end;
+        }
+      }
     }
 
     //--------------------------------------------------------------------------
     void LegionProfInstance::process_meta(size_t id, UniqueID op_id,
                   Realm::ProfilingMeasurements::OperationTimeline *timeline,
-                  Realm::ProfilingMeasurements::OperationProcessorUsage *usage)
+                  Realm::ProfilingMeasurements::OperationProcessorUsage *usage,
+                  Realm::ProfilingMeasurements::OperationEventWaits *waits)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -167,6 +191,18 @@ namespace Legion {
       info.start = timeline->start_time;
       // use complete_time instead of end_time to include async work
       info.stop = timeline->complete_time;
+      unsigned num_intervals = waits->intervals.size();
+      if (num_intervals > 0)
+      {
+        for (unsigned idx = 0; idx < num_intervals; ++idx)
+        {
+          info.wait_intervals.push_back(WaitInfo());
+          WaitInfo& wait_info = info.wait_intervals.back();
+          wait_info.wait_start = waits->intervals[idx].wait_start;
+          wait_info.wait_ready = waits->intervals[idx].wait_ready;
+          wait_info.wait_end = waits->intervals[idx].wait_end;
+        }
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -270,12 +306,24 @@ namespace Legion {
       {
         log_prof.info("Prof Multi %llu %u", it->op_id, it->task_id);
       }
+      for (std::deque<SliceOwner>::const_iterator it = 
+            slice_owners.begin(); it != slice_owners.end(); it++)
+      {
+        log_prof.info("Prof Slice Owner %llu %llu", it->parent_id, it->op_id);
+      }
       for (std::deque<TaskInfo>::const_iterator it = task_infos.begin();
             it != task_infos.end(); it++)
       {
         log_prof.info("Prof Task Info %llu %lu " IDFMT " %llu %llu %llu %llu",
                       it->op_id, it->variant_id, it->proc.id, 
                       it->create, it->ready, it->start, it->stop);
+        for (std::deque<WaitInfo>::const_iterator wit =
+             it->wait_intervals.begin(); wit != it->wait_intervals.end(); wit++)
+        {
+          log_prof.info("Prof Task Wait Info %llu %lu %llu %llu %llu",
+                        it->op_id, it->variant_id, wit->wait_start, wit->wait_ready,
+                        wit->wait_end);
+        }
       }
       for (std::deque<MetaInfo>::const_iterator it = meta_infos.begin();
             it != meta_infos.end(); it++)
@@ -283,6 +331,13 @@ namespace Legion {
         log_prof.info("Prof Meta Info %llu %u " IDFMT " %llu %llu %llu %llu",
                       it->op_id, it->hlr_id, it->proc.id,
                       it->create, it->ready, it->start, it->stop);
+        for (std::deque<WaitInfo>::const_iterator wit =
+             it->wait_intervals.begin(); wit != it->wait_intervals.end(); wit++)
+        {
+          log_prof.info("Prof Meta Wait Info %llu %u %llu %llu %llu",
+                        it->op_id, it->hlr_id, wit->wait_start, wit->wait_ready,
+                        wit->wait_end);
+        }
       }
       for (std::deque<CopyInfo>::const_iterator it = copy_infos.begin();
             it != copy_infos.end(); it++)
@@ -461,6 +516,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void LegionProfiler::register_slice_owner(UniqueID pid, UniqueID id)
+    //--------------------------------------------------------------------------
+    {
+      Processor current = Processor::get_executing_processor();
+      size_t local_id = current.local_id(); 
+#ifdef DEBUG_HIGH_LEVEL
+      assert(local_id < MAX_NUM_PROCS);
+#endif
+      if (instances[local_id] == NULL)
+        instances[local_id] = new LegionProfInstance(this);
+      instances[local_id]->register_slice_owner(pid, id);
+    }
+
+    //--------------------------------------------------------------------------
     void LegionProfiler::add_task_request(Realm::ProfilingRequestSet &requests,
                                           TaskID tid, SingleTask *task)
     //--------------------------------------------------------------------------
@@ -476,6 +545,8 @@ namespace Legion {
                 Realm::ProfilingMeasurements::OperationTimeline>();
       req.add_measurement<
                 Realm::ProfilingMeasurements::OperationProcessorUsage>();
+      req.add_measurement<
+                Realm::ProfilingMeasurements::OperationEventWaits>();
     }
 
     //--------------------------------------------------------------------------
@@ -494,6 +565,8 @@ namespace Legion {
                 Realm::ProfilingMeasurements::OperationTimeline>();
       req.add_measurement<
                 Realm::ProfilingMeasurements::OperationProcessorUsage>();
+      req.add_measurement<
+                Realm::ProfilingMeasurements::OperationEventWaits>();
     }
 
     //--------------------------------------------------------------------------
@@ -566,6 +639,8 @@ namespace Legion {
                 Realm::ProfilingMeasurements::OperationTimeline>();
       req.add_measurement<
                 Realm::ProfilingMeasurements::OperationProcessorUsage>();
+      req.add_measurement<
+                Realm::ProfilingMeasurements::OperationEventWaits>();
     }
 
     //--------------------------------------------------------------------------
@@ -584,6 +659,8 @@ namespace Legion {
                 Realm::ProfilingMeasurements::OperationTimeline>();
       req.add_measurement<
                 Realm::ProfilingMeasurements::OperationProcessorUsage>();
+      req.add_measurement<
+                Realm::ProfilingMeasurements::OperationEventWaits>();
     }
 
     //--------------------------------------------------------------------------
@@ -672,8 +749,11 @@ namespace Legion {
             Realm::ProfilingMeasurements::OperationProcessorUsage *usage = 
               response.get_measurement<
                     Realm::ProfilingMeasurements::OperationProcessorUsage>();
+            Realm::ProfilingMeasurements::OperationEventWaits *waits = 
+              response.get_measurement<
+                    Realm::ProfilingMeasurements::OperationEventWaits>();
             instances[local_id]->process_task(info->id, info->op_id,
-                                              timeline, usage);
+                                              timeline, usage, waits);
             delete timeline;
             delete usage;
             decrement_total_outstanding_requests();
@@ -693,8 +773,11 @@ namespace Legion {
             Realm::ProfilingMeasurements::OperationProcessorUsage *usage = 
               response.get_measurement<
                     Realm::ProfilingMeasurements::OperationProcessorUsage>();
+            Realm::ProfilingMeasurements::OperationEventWaits *waits = 
+              response.get_measurement<
+                    Realm::ProfilingMeasurements::OperationEventWaits>();
             instances[local_id]->process_meta(info->id, info->op_id,
-                                              timeline, usage);
+                                              timeline, usage, waits);
             delete timeline;
             delete usage;
             decrement_total_outstanding_requests();

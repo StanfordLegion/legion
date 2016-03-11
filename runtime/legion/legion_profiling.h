@@ -64,12 +64,22 @@ namespace Legion {
         UniqueID op_id;
         TaskID task_id;
       };
+      struct SliceOwner {
+      public:
+        UniqueID parent_id;
+        UniqueID op_id;
+      };
+      struct WaitInfo {
+      public:
+        unsigned long long wait_start, wait_ready, wait_end;
+      };
       struct TaskInfo {
       public:
         UniqueID op_id;
         VariantID variant_id;
         Processor proc;
         unsigned long long create, ready, start, stop;
+        std::deque<WaitInfo> wait_intervals;
       };
       struct MetaInfo {
       public:
@@ -77,6 +87,7 @@ namespace Legion {
         unsigned hlr_id;
         Processor proc;
         unsigned long long create, ready, start, stop;
+        std::deque<WaitInfo> wait_intervals;
       };
       struct CopyInfo {
       public:
@@ -120,13 +131,16 @@ namespace Legion {
                                  const char *variant_name);
       void register_operation(Operation *op);
       void register_multi_task(Operation *op, TaskID kind);
+      void register_slice_owner(UniqueID pid, UniqueID id);
     public:
       void process_task(size_t id, UniqueID op_id, 
                   Realm::ProfilingMeasurements::OperationTimeline *timeline,
-                  Realm::ProfilingMeasurements::OperationProcessorUsage *usage);
+                  Realm::ProfilingMeasurements::OperationProcessorUsage *usage,
+                  Realm::ProfilingMeasurements::OperationEventWaits *waits);
       void process_meta(size_t id, UniqueID op_id,
                   Realm::ProfilingMeasurements::OperationTimeline *timeline,
-                  Realm::ProfilingMeasurements::OperationProcessorUsage *usage);
+                  Realm::ProfilingMeasurements::OperationProcessorUsage *usage,
+                  Realm::ProfilingMeasurements::OperationEventWaits *waits);
       void process_copy(UniqueID op_id,
                   Realm::ProfilingMeasurements::OperationTimeline *timeline,
                   Realm::ProfilingMeasurements::OperationMemoryUsage *usage);
@@ -150,6 +164,7 @@ namespace Legion {
       std::deque<TaskVariant>       task_variants;
       std::deque<OperationInstance> operation_instances;
       std::deque<MultiTask>         multi_tasks;
+      std::deque<SliceOwner>        slice_owners;
     private:
       std::deque<TaskInfo> task_infos;
       std::deque<MetaInfo> meta_infos;
@@ -202,6 +217,7 @@ namespace Legion {
       // Operations
       void register_operation(Operation *op);
       void register_multi_task(Operation *op, TaskID task_id);
+      void register_slice_owner(UniqueID pid, UniqueID id);
     public:
       void add_task_request(Realm::ProfilingRequestSet &requests, 
                             TaskID tid, SingleTask *task);

@@ -652,4 +652,9 @@ task toplevel()
   end
   c.free(colorings.first_wires)
 end
-regentlib.start(toplevel)
+
+if os.getenv('SAVEOBJ') == '1' then
+  regentlib.saveobj(toplevel, "circuit", "executable")
+else
+  regentlib.start(toplevel)
+end

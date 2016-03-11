@@ -127,6 +127,14 @@ function data.range(start, stop) -- zero-based, exclusive (as in Python)
   return result
 end
 
+function data.mapi(fn, list)
+  local result = terralib.newlist()
+  for i, elt in ipairs(list) do
+    result:insert(fn(i, elt))
+  end
+  return result
+end
+
 function data.filter(fn, list)
   local result = terralib.newlist()
   for _, elt in ipairs(list) do

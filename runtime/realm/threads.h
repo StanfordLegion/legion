@@ -141,6 +141,7 @@ namespace Realm {
     //  for cancellation reasons
     void start_operation(Operation *op);
     void stop_operation(Operation *op);
+    Operation *get_operation(void) const;
 
 #ifdef REALM_USE_USER_THREADS
     // perform a user-level thread switch

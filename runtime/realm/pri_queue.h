@@ -21,6 +21,8 @@
 #include <deque>
 #include <map>
 
+#include "sampling.h"
+
 namespace Realm {
 
   // a priority queue is templated on the type of thing stored in the queue
@@ -79,6 +81,8 @@ namespace Realm {
     void add_subscription(NotificationCallback *callback, priority_t higher_than = PRI_NEG_INF);
     void remove_subscription(NotificationCallback *callback);
 
+    void set_gauge(ProfilingGauges::AbsoluteRangeGauge<int> *new_gauge);
+
   protected:
     // helper that performs notifications for a new item - returns true if a callback
     //  consumes the item
@@ -96,6 +100,8 @@ namespace Realm {
 
     // notification subscriptions
     std::map<NotificationCallback *, priority_t> subscriptions;
+    
+    ProfilingGauges::AbsoluteRangeGauge<int> *entries_in_queue;
   };
 
 }; // namespace Realm

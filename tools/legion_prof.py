@@ -28,11 +28,14 @@ copy_info_pat = re.compile(prefix + r'Prof Copy Info (?P<opid>[0-9]+) (?P<src>[a
 copy_info_old_pat = re.compile(prefix + r'Prof Copy Info (?P<opid>[0-9]+) (?P<src>[a-f0-9]+) (?P<dst>[a-f0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)')
 fill_info_pat = re.compile(prefix + r'Prof Fill Info (?P<opid>[0-9]+) (?P<dst>[a-f0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)')
 inst_info_pat = re.compile(prefix + r'Prof Inst Info (?P<opid>[0-9]+) (?P<inst>[a-f0-9]+) (?P<mem>[a-f0-9]+) (?P<bytes>[0-9]+) (?P<create>[0-9]+) (?P<destroy>[0-9]+)')
-user_info_pat = re.compile(prefix + r'Prof User Info (?P<pid>[a-f0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+) (?P<name>[a-zA-Z0-9_]+)')
-kind_pat = re.compile(prefix + r'Prof Task Kind (?P<tid>[0-9]+) (?P<name>[a-zA-Z0-9_<>.]+)')
-variant_pat = re.compile(prefix + r'Prof Task Variant (?P<tid>[0-9]+) (?P<vid>[0-9]+) (?P<name>[a-zA-Z0-9_<>.]+)')
+user_info_pat = re.compile(prefix + r'Prof User Info (?P<pid>[a-f0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+) (?P<name>[$()a-zA-Z0-9_]+)')
+task_wait_info_pat = re.compile(prefix + r'Prof Task Wait Info (?P<opid>[0-9]+) (?P<vid>[0-9]+) (?P<start>[0-9]+) (?P<ready>[0-9]+) (?P<end>[0-9]+)')
+meta_wait_info_pat = re.compile(prefix + r'Prof Meta Wait Info (?P<opid>[0-9]+) (?P<hlr>[0-9]+) (?P<start>[0-9]+) (?P<ready>[0-9]+) (?P<end>[0-9]+)')
+kind_pat = re.compile(prefix + r'Prof Task Kind (?P<tid>[0-9]+) (?P<name>[$()a-zA-Z0-9_<>.]+)')
+variant_pat = re.compile(prefix + r'Prof Task Variant (?P<tid>[0-9]+) (?P<vid>[0-9]+) (?P<name>[$()a-zA-Z0-9_<>.]+)')
 operation_pat = re.compile(prefix + r'Prof Operation (?P<opid>[0-9]+) (?P<kind>[0-9]+)')
 multi_pat = re.compile(prefix + r'Prof Multi (?P<opid>[0-9]+) (?P<tid>[0-9]+)')
+owner_pat = re.compile(prefix + r'Prof Slice Owner (?P<pid>[0-9]+) (?P<opid>[0-9]+)')
 meta_desc_pat = re.compile(prefix + r'Prof Meta Desc (?P<hlr>[0-9]+) (?P<kind>[a-zA-Z0-9_ ]+)')
 op_desc_pat = re.compile(prefix + r'Prof Op Desc (?P<opkind>[0-9]+) (?P<kind>[a-zA-Z0-9_ ]+)')
 proc_desc_pat = re.compile(prefix + r'Prof Proc Desc (?P<pid>[a-f0-9]+) (?P<kind>[0-9]+)')
@@ -261,10 +264,33 @@ class TaskRange(TimeRange):
             color = "#555555"
         else:
             color = self.task.variant.color
-        tsv_file.write("%d\t%ld\t%ld\t%s\t%s\n" % \
-                (base_level + (max_levels - level),
-                 self.start_time, self.stop_time,
-                 color,title))
+        if len(self.task.wait_intervals) > 0:
+            start_time = self.start_time
+            cur_level = base_level + (max_levels - level)
+            for wait_interval in self.task.wait_intervals:
+                tsv_file.write("%d\t%ld\t%ld\t%s\t1.0\t%s\n" % \
+                        (cur_level,
+                         start_time,
+                         wait_interval.start, color, title))
+                tsv_file.write("%d\t%ld\t%ld\t%s\t0.15\t%s\n" % \
+                        (cur_level,
+                         wait_interval.start,
+                         wait_interval.ready, color, title))
+                tsv_file.write("%d\t%ld\t%ld\t%s\t1.0\t%s\n" % \
+                        (cur_level,
+                         wait_interval.ready,
+                         wait_interval.end, color, title))
+                start_time = max(start_time, wait_interval.end)
+            if start_time < self.stop_time:
+                tsv_file.write("%d\t%ld\t%ld\t%s\t1.0\t%s\n" % \
+                        (cur_level,
+                         start_time,
+                         self.stop_time, color, title))
+        else:
+            tsv_file.write("%d\t%ld\t%ld\t%s\t1.0\t%s\n" % \
+                    (base_level + (max_levels - level),
+                     self.start_time, self.stop_time,
+                     color,title))
         for subrange in self.subranges:
             subrange.emit_tsv(tsv_file, base_level, max_levels, level + 1)
 
@@ -331,7 +357,7 @@ class MessageRange(TimeRange):
     def emit_tsv(self, tsv_file, base_level, max_levels, level):
         title = repr(self.message)
         title += (' '+self.message.get_timing())
-        tsv_file.write("%d\t%ld\t%ld\t%s\t%s\n" % \
+        tsv_file.write("%d\t%ld\t%ld\t%s\t1.0\t%s\n" % \
                 (base_level + (max_levels - level),
                  self.start_time, self.stop_time,
                  self.message.kind.color,title))
@@ -499,7 +525,7 @@ class Memory(object):
                 assert instance.create is not None
                 assert instance.destroy is not None
                 inst_name = repr(instance)
-                tsv_file.write("%d\t%ld\t%ld\t%s\t%s\n" % \
+                tsv_file.write("%d\t%ld\t%ld\t%s\t1.0\t%s\n" % \
                         (base_level + (max_levels - instance.level),
                          instance.create, instance.destroy,
                          instance.get_color(), inst_name))
@@ -597,7 +623,7 @@ class Channel(object):
                 assert copy.start is not None
                 assert copy.stop is not None
                 copy_name = repr(copy)
-                tsv_file.write("%d\t%ld\t%ld\t%s\t%s\n" % \
+                tsv_file.write("%d\t%ld\t%ld\t%s\t1.0\t%s\n" % \
                         (base_level + (max_levels - copy.level),
                          copy.start, copy.stop,
                          copy.get_color(), copy_name))
@@ -633,10 +659,16 @@ class Channel(object):
         else:
             return self.src.__repr__() + ' to ' + self.dst.__repr__() + ' Channel'
 
+class WaitInterval(object):
+    def __init__(self, start, ready, end):
+        self.start = start
+        self.ready = ready
+        self.end = end
+
 class TaskKind(object):
     def __init__(self, task_id, name):
         self.task_id = task_id
-        self.name = 'Task "'+name+'"'
+        self.name = name
 
     def __repr__(self):
         return self.name
@@ -645,7 +677,7 @@ class Variant(object):
     def __init__(self, variant_id, name):
         self.variant_id = variant_id
         self.name = name
-        self.op = None
+        self.op = dict()
         self.task = None
         self.color = None
         self.total_calls = 0
@@ -716,6 +748,11 @@ class Operation(object):
         self.start = None
         self.stop = None
         self.color = None
+        self.wait_intervals = list()
+        self.owner = None
+
+    def add_wait_interval(self, start, ready, end):
+        self.wait_intervals.append(WaitInterval(start, ready, end))
 
     def assign_color(self, color_map):
         assert self.color is None
@@ -734,11 +771,23 @@ class Operation(object):
         return self.color
 
     def get_info(self):
-        return 'UID='+str(self.op_id)
+        info = '<'+str(self.op_id)+">"
+        if self.owner <> None:
+            prev = self.owner
+            next = prev.owner
+            while next <> None:
+                prev = next
+                next = next.owner
+            info += ' (<-' + repr(self.owner) + ')'
+        return info
 
     def get_timing(self):
+        total_wait_time = 0
+        for interval in self.wait_intervals:
+            total_wait_time += interval.ready - interval.start
         return 'total='+str(self.stop - self.start)+' us start='+ \
-                str(self.start)+' us stop='+str(self.stop)+' us'
+                str(self.start)+' us stop='+str(self.stop)+' us'+ \
+                (' (wait for ' + str(total_wait_time) + ' us)' if total_wait_time > 0 else '')
 
     def __repr__(self):
         if self.is_task:
@@ -766,16 +815,24 @@ class MetaTask(object):
         self.ready = None
         self.start = None
         self.stop = None
+        self.wait_intervals = list()
+
+    def add_wait_interval(self, start, ready, end):
+        self.wait_intervals.append(WaitInterval(start, ready, end))
 
     def get_timing(self):
+        total_wait_time = 0
+        for interval in self.wait_intervals:
+            total_wait_time += interval.ready - interval.start
         return 'total='+str(self.stop - self.start)+' us start='+ \
-                str(self.start)+' us stop='+str(self.stop)+' us'
+                str(self.start)+' us stop='+str(self.stop)+' us'+ \
+                (' (wait for ' + str(total_wait_time) + ' us)' if total_wait_time > 0 else '')
 
     def get_initiation(self):
         return 'initiated by="'+repr(self.op)+'"'
 
     def __repr__(self):
-        return 'Meta '+self.variant.name
+        return self.variant.name
 
 class UserMarker(object):
     def __init__(self, name):
@@ -1130,6 +1187,22 @@ class State(object):
                                        read_time(m.group('stop')),
                                        m.group('name'))
                     continue
+                m = task_wait_info_pat.match(line)
+                if m is not None:
+                    self.log_task_wait_info(long(m.group('opid')),
+                                            int(m.group('vid')),
+                                            read_time(m.group('start')),
+                                            read_time(m.group('ready')),
+                                            read_time(m.group('end')))
+                    continue
+                m = meta_wait_info_pat.match(line)
+                if m is not None:
+                    self.log_meta_wait_info(long(m.group('opid')),
+                                            int(m.group('hlr')),
+                                            read_time(m.group('start')),
+                                            read_time(m.group('ready')),
+                                            read_time(m.group('end')))
+                    continue
                 m = kind_pat.match(line)
                 if m is not None:
                     self.log_kind(int(m.group('tid')),
@@ -1150,6 +1223,11 @@ class State(object):
                 if m is not None:
                     self.log_multi(long(m.group('opid')),
                                    int(m.group('tid')))
+                    continue
+                m = owner_pat.match(line)
+                if m is not None:
+                    self.log_slice_owner(long(m.group('pid')),
+                                         long(m.group('opid')))
                     continue
                 m = meta_desc_pat.match(line)
                 if m is not None:
@@ -1283,6 +1361,21 @@ class State(object):
             self.last_time = stop 
         proc.add_task(user)
 
+    def log_task_wait_info(self, op_id, variant_id, start, ready, end):
+        variant = self.find_variant(variant_id)
+        task = self.find_task(op_id, variant)
+        assert ready >= start
+        assert end >= ready
+        task.add_wait_interval(start, ready, end)
+
+    def log_meta_wait_info(self, op_id, hlr, start, ready, end):
+        op = self.find_op(op_id)
+        variant = self.find_meta_variant(hlr)
+        assert ready >= start
+        assert end >= ready
+        assert op_id in variant.op
+        variant.op[op_id].add_wait_interval(start, ready, end)
+
     def log_kind(self, task_id, name):
         if task_id not in self.task_kinds:
             self.task_kinds[task_id] = TaskKind(task_id, name)
@@ -1306,9 +1399,18 @@ class State(object):
 
     def log_multi(self, op_id, task_id):
         op = self.find_op(op_id)
+        task_kind = TaskKind(task_id, None)
         if task_id in self.task_kinds:
-            op.is_multi = True
-            op.task_kind = self.task_kinds[task_id]
+            task_kind = self.task_kinds[task_id]
+        else:
+            self.task_kinds[task_id] = task_kind
+        op.is_multi = True
+        op.task_kind = self.task_kinds[task_id]
+
+    def log_slice_owner(self, parent_id, op_id):
+        parent = self.find_op(parent_id)
+        op = self.find_op(op_id)
+        op.owner = parent
 
     def log_meta_desc(self, hlr, name):
         if hlr not in self.meta_variants:
@@ -1390,12 +1492,12 @@ class State(object):
             task.is_task = True
             task.name = 'Task '+str(op_id) 
             task.variant = variant
-            variant.op = task
+            variant.op[op_id] = task
         return task
 
     def create_meta(self, variant, op):
         result = MetaTask(variant, op)
-        variant.op = result
+        variant.op[op.op_id] = result
         return result
 
     def create_copy(self, src, dst, op):
@@ -1581,7 +1683,7 @@ class State(object):
         base_level = 0
         last_time = 0
         data_tsv_file = open(data_tsv_file_name, "w")
-        data_tsv_file.write("level\tstart\tend\tcolor\ttitle\n")
+        data_tsv_file.write("level\tstart\tend\tcolor\topacity\ttitle\n")
         if show_procs:
             for p,proc in sorted(self.processors.iteritems()):
                 base_level = proc.emit_tsv(data_tsv_file, base_level)
@@ -1594,9 +1696,10 @@ class State(object):
                 last_time = max(last_time, channel.last_time)
         if show_instances:
             for m,memory in sorted(self.memories.iteritems()):
-                base_level = memory.emit_tsv(data_tsv_file, base_level)
-                memory_levels[memory] = base_level
-                last_time = max(last_time, memory.last_time)
+                if len(memory.instances) > 0:
+                    base_level = memory.emit_tsv(data_tsv_file, base_level)
+                    memory_levels[memory] = base_level
+                    last_time = max(last_time, memory.last_time)
         data_tsv_file.close()
 
         processor_tsv_file = open(processor_tsv_file_name, "w")
@@ -1630,7 +1733,7 @@ def usage():
     sys.exit(1)
 
 def main():
-    opts, args = getopt(sys.argv[1:],'pcivm:o:sCT')
+    opts, args = getopt(sys.argv[1:],'pcivm:o:sCST')
     opts = dict(opts)
     if len(args) == 0:
       usage()
@@ -1646,7 +1749,7 @@ def main():
     copy_output_prefix = 'legion_prof_copy'
     print_stats = False
     verbose = False
-    interactive_timeline = False
+    interactive_timeline = True
     if '-p' in opts:
         show_procs = True
         show_all = False
@@ -1668,8 +1771,8 @@ def main():
         copy_output_prefix = output_prefix + "_copy"
     if '-C' in opts:
         show_copy_matrix = True
-    if '-T' in opts:
-        interactive_timeline = True
+    if '-S' in opts:
+        interactive_timeline = False
     if show_all:
         show_procs = True
         show_channels = True

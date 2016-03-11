@@ -1614,10 +1614,10 @@ class InstanceManager(object):
         dot_file = printer.close()
         pdf_file = name+'.pdf'
         try:
-            subprocess.check_call(['dot -Tpdf -o '+pdf_file+' '+dot_file],shell=True)
+            subprocess.check_call(['dot', '-Tpdf', '-o', pdf_file, dot_file])
         except:
             print "WARNING: DOT failure, image for "+pdf_file+" not generated"
-            subprocess.call(['rm -f core '+pdf_file],shell=True)
+            subprocess.call(['rm', '-f', 'core', pdf_file])
 
     def find_dependences(self, user):
         def traverse_event(node, traverser):
@@ -1857,10 +1857,10 @@ class ConnectedComponent(object):
         dot_file = printer.close()
         pdf_file = name+'.pdf'
         try:
-            subprocess.check_call(['dot -Tpdf -o '+pdf_file+' '+dot_file],shell=True)
+            subprocess.check_call(['dot', '-Tpdf', '-o', pdf_file, dot_file])
         except:
             print "WARNING: DOT failure, image for event graph "+str(idx)+" not generated"
-            subprocess.call(['rm -f core '+pdf_file],shell=True)
+            subprocess.call(['rm', '-f', 'core', pdf_file])
         self.unmark_all()
 
     def unmark_all(self):
@@ -2467,10 +2467,10 @@ class State(object):
             dot_file = printer.close()
             pdf_file = name+'.pdf'
             try:
-                subprocess.check_call(['dot -Tpdf -o '+pdf_file+' '+dot_file],shell=True)
+                subprocess.check_call(['dot', '-Tpdf', '-o', pdf_file, dot_file])
             except:
                 print "WARNING: DOT failure, image for "+pdf_file+" not generated"
-                subprocess.call(['rm -f core '+pdf_file],shell=True)
+                subprocess.call(['rm', '-f', 'core', pdf_file])
 
     def print_memory_graphs(self,path):
         for mid,mem in self.memories.iteritems():
@@ -2505,10 +2505,10 @@ class State(object):
             dot_file = printer.close()
             pdf_file = name+'.pdf'
             try:
-                subprocess.check_call(['dot -Tpdf -o '+pdf_file+' '+dot_file],shell=True)
+                subprocess.check_call(['dot', '-Tpdf', '-o', pdf_file, dot_file])
             except:
                 print "WARNING: DOT failure, image for "+pdf_file+" not generated"
-                subprocess.call(['rm -f core '+pdf_file],shell=True)
+                subprocess.call(['rm', '-f', 'core', pdf_file])
 
     def clear_prev_event_dependences(self):
         for handle,task in self.task_instances.iteritems():

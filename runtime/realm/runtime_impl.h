@@ -36,6 +36,7 @@
 #include "machine_impl.h"
 
 #include "threads.h"
+#include "sampling.h"
 
 #include "module.h"
 
@@ -237,6 +238,8 @@ namespace Realm {
       CoreReservationSet core_reservations;
 
       OperationTable optable;
+
+      SamplingProfiler sampling_profiler;
 
     public:
       // used by modules to add processors, memories, etc.

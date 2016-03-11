@@ -7946,6 +7946,10 @@ namespace Legion {
     void PointTask::deactivate(void)
     //--------------------------------------------------------------------------
     {
+      if (runtime->profiler != NULL)
+        runtime->profiler->register_slice_owner(
+            this->slice_owner->get_unique_op_id(),
+            this->get_unique_op_id());
       deactivate_single();
       if (!remote_instances.empty())
       {
@@ -10079,6 +10083,9 @@ namespace Legion {
       if (Runtime::legion_spy_enabled)
         LegionSpy::log_index_slice(get_unique_id(), 
                                    result->get_unique_id());
+      if (runtime->profiler != NULL)
+        runtime->profiler->register_slice_owner(get_unique_op_id(),
+                                                result->get_unique_op_id());
       return result;
     }
 
@@ -10906,6 +10913,11 @@ namespace Legion {
         parent_ctx = remote_ctx;
       if (Runtime::legion_spy_enabled)
         LegionSpy::log_slice_slice(remote_unique_id, get_unique_id());
+      if (Runtime::legion_spy_enabled)
+        LegionSpy::log_slice_slice(remote_unique_id, get_unique_id());
+      if (runtime->profiler != NULL)
+        runtime->profiler->register_slice_owner(remote_unique_id,
+            get_unique_op_id());
       num_unmapped_points = num_points;
       num_uncomplete_points = num_points;
       num_uncommitted_points = num_points;
@@ -10953,6 +10965,9 @@ namespace Legion {
       if (Runtime::legion_spy_enabled)
         LegionSpy::log_slice_slice(get_unique_id(), 
                                    result->get_unique_id());
+      if (runtime->profiler != NULL)
+        runtime->profiler->register_slice_owner(get_unique_op_id(),
+            result->get_unique_op_id());
       return result;
     }
 
@@ -11423,7 +11438,7 @@ namespace Legion {
           it++;
           bool done = (it == slices.end()); 
           Event wait = owner->runtime->issue_runtime_meta_task(&args, 
-                                sizeof(args), HLR_DEFERRED_SLICE_ID, owner);
+                                sizeof(args), HLR_DEFERRED_SLICE_ID, *it);
           if (wait.exists())
             wait_events.insert(wait);
           if (done)
