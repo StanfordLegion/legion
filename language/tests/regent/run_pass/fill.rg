@@ -17,7 +17,7 @@ import "regent"
 struct t {
   a : int,
   b : float,
-  c : uint32,
+  c : uint8,
 }
 
 task k() : int
