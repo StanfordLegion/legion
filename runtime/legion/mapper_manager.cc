@@ -1543,6 +1543,7 @@ namespace Legion {
       if (manager->try_add_base_valid_ref(MAPPING_ACQUIRE_REF,
                                           !manager->is_owner()))
       {
+        record_acquired_instance(ctx, manager);
         resume_mapper_call(ctx);
         return true;
       }
@@ -1560,7 +1561,7 @@ namespace Legion {
         wait_on.wait(); // wait for the results to be ready
       bool success = results[0];
       if (success)
-        record_acquired_instance(ctx, instance.impl);
+        record_acquired_instance(ctx, manager);
       resume_mapper_call(ctx);
       return success;
     }
