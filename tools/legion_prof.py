@@ -276,7 +276,7 @@ class TaskRange(TimeRange):
                         (cur_level,
                          wait_interval.start,
                          wait_interval.ready, color, title))
-                tsv_file.write("%d\t%ld\t%ld\t%s\t1.0\t%s\n" % \
+                tsv_file.write("%d\t%ld\t%ld\t%s\t0.45\t%s\n" % \
                         (cur_level,
                          wait_interval.ready,
                          wait_interval.end, color, title))
@@ -784,7 +784,7 @@ class Operation(object):
     def get_timing(self):
         total_wait_time = 0
         for interval in self.wait_intervals:
-            total_wait_time += interval.ready - interval.start
+            total_wait_time += interval.end - interval.start
         return 'total='+str(self.stop - self.start)+' us start='+ \
                 str(self.start)+' us stop='+str(self.stop)+' us'+ \
                 (' (wait for ' + str(total_wait_time) + ' us)' if total_wait_time > 0 else '')
@@ -823,7 +823,7 @@ class MetaTask(object):
     def get_timing(self):
         total_wait_time = 0
         for interval in self.wait_intervals:
-            total_wait_time += interval.ready - interval.start
+            total_wait_time += interval.end - interval.start
         return 'total='+str(self.stop - self.start)+' us start='+ \
                 str(self.start)+' us stop='+str(self.stop)+' us'+ \
                 (' (wait for ' + str(total_wait_time) + ' us)' if total_wait_time > 0 else '')
