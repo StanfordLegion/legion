@@ -21,6 +21,7 @@ local optimize_futures = require("regent/optimize_futures")
 local optimize_inlines = require("regent/optimize_inlines")
 local optimize_loops = require("regent/optimize_loops")
 local parser = require("regent/parser")
+local pretty = require("regent/pretty")
 local specialize = require("regent/specialize")
 local std = require("regent/std")
 local type_check = require("regent/type_check")
@@ -47,6 +48,7 @@ function passes.compile(lex)
     local ast = specialize.entry(env, node)
     ast = type_check.entry(ast)
     ast = passes.optimize(ast)
+    if std.config["pretty"] then print(pretty.entry(ast)) end
     return codegen.entry(ast)
   end
   return ctor, {node.name}

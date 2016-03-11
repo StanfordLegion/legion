@@ -24,6 +24,7 @@ local default_options = {
   ["debug"] = false,
   ["no-dynamic-branches"] = true,
   ["no-dynamic-branches-assert"] = false,
+  ["pretty"] = false,
   ["index-launches"] = true,
   ["futures"] = true,
   ["inlines"] = true,
