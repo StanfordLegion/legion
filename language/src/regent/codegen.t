@@ -642,6 +642,12 @@ function value:get_index(cx, index, result_type)
         std.assert([index.value] >= 0 and [index.value] < [value_type.N],
           ["array access to " .. tostring(value_type) .. " is out-of-bounds"])
       end)
+  elseif std.is_list(value_type) then -- Enable list bounds checks all the time.
+    actions:insert(
+      quote
+        std.assert([index.value] >= 0 and [index.value] < [value_expr.value].__size,
+          ["list access to " .. tostring(value_type) .. " is out-of-bounds"])
+      end)
   end
 
   local result
@@ -1487,6 +1493,12 @@ function rawref:get_index(cx, index, result_type)
       quote
         std.assert([index.value] >= 0 and [index.value] < [value_type.N],
           ["array access to " .. tostring(value_type) .. " is out-of-bounds"])
+      end)
+  elseif std.is_list(value_type) then -- Enable list bounds checks all the time.
+    actions:insert(
+      quote
+        std.assert([index.value] >= 0 and [index.value] < [ref_expr.value].__size,
+          ["list access to " .. tostring(value_type) .. " is out-of-bounds"])
       end)
   end
 
