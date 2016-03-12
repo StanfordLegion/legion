@@ -1889,7 +1889,9 @@ namespace Legion {
     void RegionTreeForest::map_virtual_region(RegionTreeContext ctx,
                                               const RegionRequirement &req,
                                               InstanceRef &composite_ref,
-                                              VersionInfo &version_info
+                                              VersionInfo &version_info,
+                                              const bool needs_fields
+
 #ifdef DEBUG_HIGH_LEVEL
                                               , unsigned index
                                               , const char *log_name
@@ -1904,10 +1906,21 @@ namespace Legion {
       assert(req.handle_type == SINGULAR);
 #endif
       RegionNode *child_node = get_node(req.region);
-      const FieldMask &composite_mask = composite_ref.get_valid_fields();
-      CompositeView *view = child_node->map_virtual_region(ctx.get_id(), 
-                                                composite_mask, version_info);
-      composite_ref.set_composite_view(view);
+      if (needs_fields)
+      {
+        FieldMask composite_mask = 
+          child_node->column_source->get_field_mask(req.privilege_fields);
+        CompositeView *view = child_node->map_virtual_region(ctx.get_id(),
+                                                  composite_mask, version_info);
+        composite_ref.set_composite_view(view);
+      }
+      else
+      {
+        const FieldMask &composite_mask = composite_ref.get_valid_fields();
+        CompositeView *view = child_node->map_virtual_region(ctx.get_id(), 
+                                                  composite_mask, version_info);
+        composite_ref.set_composite_view(view);
+      }
     }
 
     //--------------------------------------------------------------------------

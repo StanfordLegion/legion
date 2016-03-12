@@ -2990,7 +2990,8 @@ namespace Legion {
             runtime->forest->map_virtual_region(src_contexts[idx],
                                                 src_requirements[idx],
                                                 src_targets[src_composite],
-                                                src_versions[idx]
+                                                src_versions[idx],
+                                                false/*needs fields*/
 #ifdef DEBUG_HIGH_LEVEL
                                                 , idx, get_logging_name()
                                                 , unique_op_id
@@ -5237,16 +5238,18 @@ namespace Legion {
       assert(chosen_instances.size() == 1);
       assert(chosen_instances[0].is_composite_ref());
 #endif
-      runtime->forest->physical_close_context(physical_ctx, requirement,
-                                              version_info, this,
-                                              chosen_instances
+      InstanceSet composite_refs(1);
+      composite_refs[0] = InstanceRef(true/*composite*/);
+      runtime->forest->map_virtual_region(physical_ctx, requirement,
+                                          composite_refs[0], version_info,
+                                          true/*needs fields*/
 #ifdef DEBUG_HIGH_LEVEL
-                                              , 0/*idx*/, get_logging_name()
-                                              , unique_op_id
+                                          , 0/*idx*/, get_logging_name()
+                                          , unique_op_id
 #endif
-                                              );
+                                          );
       // Pass the reference back to the parent task
-      parent_ctx->return_virtual_instance(parent_idx, chosen_instances); 
+      parent_ctx->return_virtual_instance(parent_idx, composite_refs); 
       // Then we can mark that we are mapped and executed
       complete_mapping();
       complete_execution();

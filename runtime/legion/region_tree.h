@@ -312,7 +312,8 @@ namespace Legion {
       void map_virtual_region(RegionTreeContext ctx,
                               const RegionRequirement &req,
                               InstanceRef &composite_ref,
-                              VersionInfo &version_info
+                              VersionInfo &version_info,
+                              const bool needs_fields
 #ifdef DEBUG_HIGH_LEVEL
                               , unsigned index
                               , const char *log_name

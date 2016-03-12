@@ -2811,7 +2811,8 @@ namespace Legion {
           args.proxy_this = this;
           args.op = op;
           last_registration = runtime->issue_runtime_meta_task(&args, 
-             sizeof(args), HLR_ADD_TO_DEP_QUEUE_TASK_ID, op, lock_acquire);
+                          sizeof(args), HLR_ADD_TO_DEP_QUEUE_TASK_ID, 
+                          op, lock_acquire, 0, true/*holds reservation*/);
           return;
         }
       }
@@ -5214,7 +5215,8 @@ namespace Legion {
           runtime->forest->map_virtual_region(enclosing_contexts[idx],
                                               regions[idx],
                                               physical_instances[idx][0],
-                                              get_version_info(idx)
+                                              get_version_info(idx),
+                                              false/*needs fields*/
 #ifdef DEBUG_HIGH_LEVEL
                                               , idx, get_logging_name()
                                               , unique_op_id
