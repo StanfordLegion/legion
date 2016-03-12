@@ -2732,33 +2732,38 @@ namespace LegionRuntime {
     void SingleTask::register_child_executed(Operation *op)
     //--------------------------------------------------------------------------
     {
-      AutoLock o_lock(op_lock);
-      std::set<Operation*>::iterator finder = executing_children.find(op);
-#ifdef DEBUG_HIGH_LEVEL
-      assert(finder != executing_children.end());
-      assert(executed_children.find(op) == executed_children.end());
-      assert(complete_children.find(op) == complete_children.end());
-#endif
-      executing_children.erase(finder);
-      // Now put it in the list of executing operations
-      // Note this doesn't change the number of active children
-      // so there's no need to trigger any window waits
-      //
-      // Add some hysteresis here so that we have some runway for when
-      // the paused task resumes it can run for a little while.
-      executed_children.insert(op);
-      int outstanding_count = 
-        __sync_add_and_fetch(&outstanding_children_count,-1);
-#ifdef DEBUG_HIGH_LEVEL
-      assert(outstanding_count >= 0);
-#endif
-      if (valid_wait_event && (max_window_size > 0) &&
-          (outstanding_count <=
-           int(hysteresis_percentage * max_window_size / 100)))
+      UserEvent to_trigger = UserEvent::NO_USER_EVENT;
       {
-        window_wait.trigger();
-        valid_wait_event = false;
+        AutoLock o_lock(op_lock);
+        std::set<Operation*>::iterator finder = executing_children.find(op);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(finder != executing_children.end());
+        assert(executed_children.find(op) == executed_children.end());
+        assert(complete_children.find(op) == complete_children.end());
+#endif
+        executing_children.erase(finder);
+        // Now put it in the list of executing operations
+        // Note this doesn't change the number of active children
+        // so there's no need to trigger any window waits
+        //
+        // Add some hysteresis here so that we have some runway for when
+        // the paused task resumes it can run for a little while.
+        executed_children.insert(op);
+        int outstanding_count = 
+          __sync_add_and_fetch(&outstanding_children_count,-1);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(outstanding_count >= 0);
+#endif
+        if (valid_wait_event && (max_window_size > 0) &&
+            (outstanding_count <=
+             int(hysteresis_percentage * max_window_size / 100)))
+        {
+          to_trigger = window_wait;
+          valid_wait_event = false;
+        }
       }
+      if (to_trigger.exists())
+        to_trigger.trigger();
     }
 
     //--------------------------------------------------------------------------
@@ -2820,30 +2825,35 @@ namespace LegionRuntime {
     void SingleTask::unregister_child_operation(Operation *op)
     //--------------------------------------------------------------------------
     {
-      AutoLock o_lock(op_lock);
-      // Remove it from everything and then see if we need to
-      // trigger the window wait event
-      executing_children.erase(op);
-      executed_children.erase(op);
-      complete_children.erase(op);
-      int outstanding_count = 
-        __sync_add_and_fetch(&outstanding_children_count,-1);
-#ifdef DEBUG_HIGH_LEVEL
-      assert(outstanding_count >= 0);
-#endif
-      if (valid_wait_event && (max_window_size > 0) &&
-          (outstanding_count <=
-           int(hysteresis_percentage * max_window_size / 100)))
+      UserEvent to_trigger = UserEvent::NO_USER_EVENT;
       {
-        window_wait.trigger();
-        valid_wait_event = false;
-      }
-      // No need to see if we trigger anything else because this
-      // method is only called while the task is still executing
-      // so 'executed' is still false.
+        AutoLock o_lock(op_lock);
+        // Remove it from everything and then see if we need to
+        // trigger the window wait event
+        executing_children.erase(op);
+        executed_children.erase(op);
+        complete_children.erase(op);
+        int outstanding_count = 
+          __sync_add_and_fetch(&outstanding_children_count,-1);
 #ifdef DEBUG_HIGH_LEVEL
-      assert(!executed);
+        assert(outstanding_count >= 0);
 #endif
+        if (valid_wait_event && (max_window_size > 0) &&
+            (outstanding_count <=
+             int(hysteresis_percentage * max_window_size / 100)))
+        {
+          to_trigger = window_wait;
+          valid_wait_event = false;
+        }
+        // No need to see if we trigger anything else because this
+        // method is only called while the task is still executing
+        // so 'executed' is still false.
+#ifdef DEBUG_HIGH_LEVEL
+        assert(!executed);
+#endif
+      }
+      if (to_trigger.exists())
+        to_trigger.trigger();
     }
 
     //--------------------------------------------------------------------------
