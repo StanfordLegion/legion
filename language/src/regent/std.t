@@ -2987,6 +2987,8 @@ function std.setup(main_task, extra_setup_thunk)
 end
 
 function std.start(main_task)
+  if std.config["pretty"] then os.exit() end
+
   local main = std.setup(main_task)
 
   local args = std.args
