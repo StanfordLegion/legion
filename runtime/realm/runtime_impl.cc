@@ -972,14 +972,14 @@ namespace Realm {
 				  procs_by_kind[k],
 				  mems_by_kind[Memory::SYSTEM_MEM],
 				  100, // "large" bandwidth
-				  1   // "small" latency
+				  5   // "small" latency
 				  );
 
 	  add_proc_mem_affinities(machine,
 				  procs_by_kind[k],
 				  mems_by_kind[Memory::REGDMA_MEM],
 				  80,  // "large" bandwidth
-				  5   // "small" latency
+				  10   // "small" latency
 				  );
 
 	  add_proc_mem_affinities(machine,
