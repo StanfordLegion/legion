@@ -2698,7 +2698,8 @@ namespace LegionRuntime {
           args.proxy_this = this;
           args.op = op;
           last_registration = runtime->issue_runtime_meta_task(&args, 
-             sizeof(args), HLR_ADD_TO_DEP_QUEUE_TASK_ID, op, lock_acquire);
+                          sizeof(args), HLR_ADD_TO_DEP_QUEUE_TASK_ID, 
+                          op, lock_acquire, 0, true/*holds reservation*/);
           return;
         }
       }
