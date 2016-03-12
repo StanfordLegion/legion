@@ -51,11 +51,13 @@ namespace {
 		   maxnode, flags);
   }
 
+#if 0
   long set_mempolicy(int mode, const unsigned long *nmask,
 		     unsigned long maxnode)
   {
     return syscall(__NR_set_mempolicy, mode, nmask, maxnode);
   }
+#endif
 };
 #endif
 
