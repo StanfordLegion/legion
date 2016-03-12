@@ -5365,9 +5365,7 @@ namespace LegionRuntime {
       {
         if (physical_regions[idx].impl->is_mapped())
           physical_regions[idx].impl->unmap_region();
-      }
-      // Now we can clear the physical regions since we're done using them
-      physical_regions.clear();
+      } 
       // Do the same thing with any residual inline mapped regions
       for (std::list<PhysicalRegion>::const_iterator it = 
             inline_regions.begin(); it != inline_regions.end(); it++)
@@ -5416,6 +5414,8 @@ namespace LegionRuntime {
           }
         }
       } 
+      // Now we can clear the physical regions since we're done using them
+      physical_regions.clear();
 
       // See if we want to move the rest of this computation onto
       // the utility processor. We also need to be sure that we have 

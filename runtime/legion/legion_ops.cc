@@ -4337,6 +4337,8 @@ namespace LegionRuntime {
       assert(ref.has_ref());
 #endif
       reference = ref;
+      // Add a valid reference
+      reference.add_valid_reference(PHYSICAL_REGION_REF);
       // If it was write-discard from the task's perspective, make it
       // read-write within the task's context
       if (requirement.privilege == WRITE_DISCARD)
@@ -4443,6 +4445,7 @@ namespace LegionRuntime {
         LegionSpy::log_op_proc_user(unique_op_id, proc.id);
       }
 #endif
+      reference.remove_valid_reference(PHYSICAL_REGION_REF);
       complete_mapping();
       completion_event.trigger(close_event);
       need_completion_trigger = false;
