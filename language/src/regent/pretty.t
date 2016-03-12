@@ -443,11 +443,16 @@ function pretty.expr_fill(cx, node)
 end
 
 function pretty.expr_allocate_scratch_fields(cx, node)
-  assert(false, "unimplemented")
+  return join({
+      "allocate_scratch_fields(", pretty.expr_region_root(cx, node.region), ")"})
 end
 
 function pretty.expr_with_scratch_fields(cx, node)
-  assert(false, "unimplemented")
+  return join({
+      "with_scratch_fields(",
+      commas({pretty.expr_region_root(cx, node.region),
+              pretty.expr(cx, node.field_ids)}),
+      ")"})
 end
 
 function pretty.expr_unary(cx, node)
