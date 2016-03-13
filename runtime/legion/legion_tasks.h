@@ -400,6 +400,7 @@ namespace Legion {
       void increment_outstanding(void);
       void decrement_outstanding(void);
       void increment_pending(void);
+      Event decrement_pending(SingleTask *child) const;
       void decrement_pending(void);
       void increment_frame(void);
       void decrement_frame(void);

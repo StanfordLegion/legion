@@ -2761,13 +2761,20 @@ namespace Legion {
           (context_configuration.max_window_size > 0) && 
             (outstanding_count >= context_configuration.max_window_size))
       {
-        // Launch a window-wait task and then wait on the event 
-        WindowWaitArgs args;
-        args.hlr_id = HLR_WINDOW_WAIT_TASK_ID;
-        args.parent_ctx = this;
-        Event wait_done = runtime->issue_runtime_meta_task(&args, sizeof(args),
-                                                HLR_WINDOW_WAIT_TASK_ID, this);
-        wait_done.wait();
+        // Try taking the lock first and see if we succeed
+        Event precondition = op_lock.acquire(0, true/*exclusive*/);
+        if (precondition.exists() && !precondition.has_triggered())
+        {
+          // Launch a window-wait task and then wait on the event 
+          WindowWaitArgs args;
+          args.hlr_id = HLR_WINDOW_WAIT_TASK_ID;
+          args.parent_ctx = this;  
+          Event wait_done = runtime->issue_runtime_meta_task(&args,sizeof(args),
+            HLR_WINDOW_WAIT_TASK_ID, this, precondition, 0, true/*holds lock*/);
+          wait_done.wait();
+        }
+        else // we can do the wait inline
+          perform_window_wait();
       }
     }
 
@@ -2776,22 +2783,18 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       Event wait_event = Event::NO_EVENT;
+      // We already hold our lock from the callsite above
+      if (outstanding_children_count >= context_configuration.max_window_size)
       {
-        // Take the lock and make sure we didn't lose the race
-        AutoLock o_lock(op_lock);
-        // We can read this without locking because we know the application
-        // task isn't running if we are here and the lock serializes us
-        // with all the other meta-tasks
-        if (outstanding_children_count >= context_configuration.max_window_size)
-        {
 #ifdef DEBUG_HIGH_LEVEL
-          assert(!valid_wait_event);
+        assert(!valid_wait_event);
 #endif
-          window_wait = UserEvent::create_user_event();
-          valid_wait_event = true;
-          wait_event = window_wait;
-        }
+        window_wait = UserEvent::create_user_event();
+        valid_wait_event = true;
+        wait_event = window_wait;
       }
+      // Release our lock now
+      op_lock.release();
       if (wait_event.exists() && !wait_event.has_triggered())
         wait_event.wait();
     }
@@ -2842,34 +2845,39 @@ namespace Legion {
     void SingleTask::register_child_executed(Operation *op)
     //--------------------------------------------------------------------------
     {
-      AutoLock o_lock(op_lock);
-      std::set<Operation*>::iterator finder = executing_children.find(op);
-#ifdef DEBUG_HIGH_LEVEL
-      assert(finder != executing_children.end());
-      assert(executed_children.find(op) == executed_children.end());
-      assert(complete_children.find(op) == complete_children.end());
-#endif
-      executing_children.erase(finder);
-      // Now put it in the list of executing operations
-      // Note this doesn't change the number of active children
-      // so there's no need to trigger any window waits
-      //
-      // Add some hysteresis here so that we have some runway for when
-      // the paused task resumes it can run for a little while.
-      executed_children.insert(op);
-      int outstanding_count = 
-        __sync_add_and_fetch(&outstanding_children_count,-1);
-#ifdef DEBUG_HIGH_LEVEL
-      assert(outstanding_count >= 0);
-#endif
-      if (valid_wait_event && (context_configuration.max_window_size > 0) &&
-          (outstanding_count <=
-           int(context_configuration.hysteresis_percentage * 
-               context_configuration.max_window_size / 100)))
+      UserEvent to_trigger = UserEvent::NO_USER_EVENT;
       {
-        window_wait.trigger();
-        valid_wait_event = false;
+        AutoLock o_lock(op_lock);
+        std::set<Operation*>::iterator finder = executing_children.find(op);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(finder != executing_children.end());
+        assert(executed_children.find(op) == executed_children.end());
+        assert(complete_children.find(op) == complete_children.end());
+#endif
+        executing_children.erase(finder);
+        // Now put it in the list of executing operations
+        // Note this doesn't change the number of active children
+        // so there's no need to trigger any window waits
+        //
+        // Add some hysteresis here so that we have some runway for when
+        // the paused task resumes it can run for a little while.
+        executed_children.insert(op);
+        int outstanding_count = 
+          __sync_add_and_fetch(&outstanding_children_count,-1);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(outstanding_count >= 0);
+#endif
+        if (valid_wait_event && (context_configuration.max_window_size > 0) &&
+            (outstanding_count <=
+             int(context_configuration.hysteresis_percentage * 
+                 context_configuration.max_window_size / 100)))
+        {
+          to_trigger = window_wait;
+          valid_wait_event = false;
+        }
       }
+      if (to_trigger.exists())
+        to_trigger.trigger();
     }
 
     //--------------------------------------------------------------------------
@@ -2931,31 +2939,36 @@ namespace Legion {
     void SingleTask::unregister_child_operation(Operation *op)
     //--------------------------------------------------------------------------
     {
-      AutoLock o_lock(op_lock);
-      // Remove it from everything and then see if we need to
-      // trigger the window wait event
-      executing_children.erase(op);
-      executed_children.erase(op);
-      complete_children.erase(op);
-      int outstanding_count = 
-        __sync_add_and_fetch(&outstanding_children_count,-1);
-#ifdef DEBUG_HIGH_LEVEL
-      assert(outstanding_count >= 0);
-#endif
-      if (valid_wait_event && (context_configuration.max_window_size > 0) &&
-          (outstanding_count <=
-           int(context_configuration.hysteresis_percentage * 
-               context_configuration.max_window_size / 100)))
+      UserEvent to_trigger = UserEvent::NO_USER_EVENT;
       {
-        window_wait.trigger();
-        valid_wait_event = false;
-      }
-      // No need to see if we trigger anything else because this
-      // method is only called while the task is still executing
-      // so 'executed' is still false.
+        AutoLock o_lock(op_lock);
+        // Remove it from everything and then see if we need to
+        // trigger the window wait event
+        executing_children.erase(op);
+        executed_children.erase(op);
+        complete_children.erase(op);
+        int outstanding_count = 
+          __sync_add_and_fetch(&outstanding_children_count,-1);
 #ifdef DEBUG_HIGH_LEVEL
-      assert(!executed);
+        assert(outstanding_count >= 0);
 #endif
+        if (valid_wait_event && (context_configuration.max_window_size > 0) &&
+            (outstanding_count <=
+             int(context_configuration.hysteresis_percentage * 
+                 context_configuration.max_window_size / 100)))
+        {
+          to_trigger = window_wait;
+          valid_wait_event = false;
+        }
+        // No need to see if we trigger anything else because this
+        // method is only called while the task is still executing
+        // so 'executed' is still false.
+#ifdef DEBUG_HIGH_LEVEL
+        assert(!executed);
+#endif
+      }
+      if (to_trigger.exists())
+        to_trigger.trigger();
     }
 
     //--------------------------------------------------------------------------
@@ -3289,28 +3302,43 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    Event SingleTask::decrement_pending(SingleTask *child) const
+    //--------------------------------------------------------------------------
+    {
+      // Don't need to do this if we are scheduled by frames
+      if (context_configuration.min_tasks_to_schedule == 0)
+        return Event::NO_EVENT;
+      // This may involve waiting, so always issue it as a meta-task 
+      DecrementArgs decrement_args;
+      decrement_args.hlr_id = HLR_DECREMENT_PENDING_TASK_ID;
+      decrement_args.parent_ctx = const_cast<SingleTask*>(this);
+      Event precondition = op_lock.acquire(0, true/*exclusive*/);
+      return runtime->issue_runtime_meta_task(&decrement_args, 
+          sizeof(decrement_args), HLR_DECREMENT_PENDING_TASK_ID, child,
+          precondition, 0, true/*holds reservation*/);
+    }
+
+    //--------------------------------------------------------------------------
     void SingleTask::decrement_pending(void)
     //--------------------------------------------------------------------------
     {
-      // Don't need to do this if we are schedule based on mapped frames
-      if (context_configuration.min_tasks_to_schedule == 0)
-        return;
       Event wait_on = Event::NO_EVENT;
       UserEvent to_trigger = UserEvent::NO_USER_EVENT;
-      {
-        AutoLock o_lock(op_lock);
+      // We already hold the lock from the dispatch site (see above)
 #ifdef DEBUG_HIGH_LEVEL
-        assert(pending_subtasks > 0);
+      assert(pending_subtasks > 0);
 #endif
-        if ((outstanding_subtasks > 0) &&
-            (pending_subtasks == context_configuration.min_tasks_to_schedule))
-        {
-          wait_on = context_order_event;
-          to_trigger = UserEvent::create_user_event();
-          context_order_event = to_trigger;
-        }
-        pending_subtasks--;
+      if ((outstanding_subtasks > 0) &&
+          (pending_subtasks == context_configuration.min_tasks_to_schedule))
+      {
+        wait_on = context_order_event;
+        to_trigger = UserEvent::create_user_event();
+        context_order_event = to_trigger;
       }
+      pending_subtasks--;
+      // Release the lock before doing the trigger or the wait
+      op_lock.release();
+      // Do anything that we need to do
       if (to_trigger.exists())
       {
         wait_on.wait();
@@ -5847,13 +5875,7 @@ namespace Legion {
 #endif
       // Issue a utility task to decrement the number of outstanding
       // tasks now that this task has started running
-      {
-        DecrementArgs decrement_args;
-        decrement_args.hlr_id = HLR_DECREMENT_PENDING_TASK_ID;
-        decrement_args.parent_ctx = parent_ctx;
-        pending_done = runtime->issue_runtime_meta_task(&decrement_args, 
-            sizeof(decrement_args), HLR_DECREMENT_PENDING_TASK_ID, this);
-      }
+      pending_done = parent_ctx->decrement_pending(this);
       return physical_regions;
     }
 
@@ -5906,7 +5928,7 @@ namespace Legion {
       {
         if (physical_regions[idx].impl->is_mapped())
           physical_regions[idx].impl->unmap_region();
-      }
+      } 
       // Now we can clear the physical regions since we're done using them
       physical_regions.clear();
       // Do the same thing with any residual inline mapped regions
@@ -5916,6 +5938,7 @@ namespace Legion {
         if (it->impl->is_mapped())
           it->impl->unmap_region();
       }
+
       inline_regions.clear();
 
       if (!is_leaf() || has_virtual_instances())
@@ -5966,8 +5989,10 @@ namespace Legion {
         }
         else
           post_end_args.result = const_cast<void*>(res);
+        // Give these high priority too since they are cleaning up 
+        // and will allow other tasks to run
         runtime->issue_runtime_meta_task(&post_end_args, sizeof(post_end_args),
-                                     HLR_POST_END_ID, this, last_registration);
+               HLR_POST_END_ID, this, last_registration, 0, true/*important*/);
       }
       else
         post_end_task(res, res_size, owned);
