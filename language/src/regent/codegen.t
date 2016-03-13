@@ -447,7 +447,10 @@ local function physical_region_get_base_pointer(cx, index_type, field_type, fiel
              std.assert(subrect.hi.x[i] == rect.hi.x[i], "subrect not equal to rect")
            end
          end)]
-      std.assert(offsets[0].offset == [expected_stride],
+      std.assert(offsets[0].offset == [expected_stride] or
+                 -- wonchan: raw_rect_ptr thinks an SOA instance of one element
+                 --          as an AOS instance and returns an unexpected stride
+                 c.legion_domain_get_volume(domain) == 1,
                  "stride does not match expected value")
 
       -- Fix up the base pointer so it points to the origin (zero),

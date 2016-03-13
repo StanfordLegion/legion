@@ -110,7 +110,6 @@ legion_domain_get_rect_3d(legion_domain_t d_)
   return CObjectWrapper::wrap(d.get_rect<3>());
 }
 
-#if 0
 size_t
 legion_domain_get_volume(legion_domain_t d_)
 {
@@ -119,6 +118,7 @@ legion_domain_get_volume(legion_domain_t d_)
   return d.get_volume();
 }
 
+#if 0
 legion_domain_t
 legion_domain_from_index_space(legion_index_space_t is_)
 {
