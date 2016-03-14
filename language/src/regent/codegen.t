@@ -5402,7 +5402,8 @@ function codegen.stat_index_launch(cx, node)
   for condition, args_enabled in pairs(param_conditions) do
     for i, arg_type in ipairs(arg_types) do
       if args_enabled[i] then
-        assert(std.is_phase_barrier(arg_type))
+        assert(std.is_phase_barrier(arg_type) or
+          (std.is_list(arg_type) and std.is_phase_barrier(arg_type.element_type)))
         local arg_value = arg_values[i]
         expr_call_setup_phase_barrier_arg(
           cx, fn.value, arg_value, condition,
