@@ -1534,25 +1534,51 @@ namespace Realm {
       char* buffer_start = (char*) malloc(max_xfer_size);
       const char *pos = (const char *)data;
       unsigned xfers = 0;
+
+      size_t element_size = 0;
       while (count > 0) {
         size_t cur_size = 0;
         size_t cur_count = 0;
         char* buffer = buffer_start;
         off_t new_offset = offset;
         while (count > 0) {
-          size_t elemnt_size = serdez_op->serialized_size(pos);
+          element_size = serdez_op->serialized_size(pos);
           // break if including this element exceeds max_xfer_size
-          if (elemnt_size + cur_size > max_xfer_size)
+          if (element_size + cur_size > max_xfer_size)
             break;
           count--;
           cur_count++;
-          serdez_op->serialize(pos, buffer); 
+          serdez_op->serialize(pos, buffer);
           pos += field_size;
           new_offset += field_size;
-          buffer += elemnt_size;
-          cur_size += elemnt_size;
+          buffer += element_size;
+          cur_size += element_size;
         }
-        assert(cur_size > 0);
+        if (cur_size == 0) {
+          if (count == 0) {
+            // No elements to serialize
+            log_copy.error("In performing remote serdez request "
+                           "(serdez_id=%d): "
+                           "No elements to serialize",
+                           serdez_id);
+          } else if (cur_count == 0) {
+            // Individual serialized element size greater than lmb buffer
+            log_copy.error("In performing remote serdez request "
+                           "(serdez_id=%d): "
+                           "Serialized size of custom serdez type (%lu bytes) "
+                           "exceeds size of the LMB buffer (%lu bytes). Try "
+                           "increasing the LMB buffer size using "
+                           "-ll:lmbsize <kbytes>",
+                           serdez_id, element_size, max_xfer_size);
+          } else {
+            // No element wrote data
+            log_copy.error("In performing remote serdez request "
+                           "(serdez_id=%d): "
+                           "No serialized element wrote data",
+                           serdez_id);
+          }
+          assert(cur_size > 0);
+        }
         RemoteSerdezMessage::RequestArgs args;
         args.mem = mem;
         args.offset = offset;
