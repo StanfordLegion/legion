@@ -125,6 +125,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void LayoutDescription::log_instance_layout(PhysicalInstance inst) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(Runtime::legion_spy_enabled);
+#endif
+      std::vector<FieldID> fields;  
+      owner->get_field_ids(allocated_fields, fields);
+      for (std::vector<FieldID>::const_iterator it = fields.begin();
+            it != fields.end(); it++)
+        LegionSpy::log_physical_instance_field(inst.id, *it);
+    }
+
+    //--------------------------------------------------------------------------
     void LayoutDescription::compute_copy_offsets(const FieldMask &copy_mask,
                                                  PhysicalInstance instance,
                                    std::vector<Domain::CopySrcDstField> &fields)
@@ -955,6 +969,12 @@ namespace Legion {
       log_garbage.info("GC Instance Manager %ld " IDFMT " " IDFMT " ",
                         did, inst.id, mem.id);
 #endif
+      if (is_owner() && Runtime::legion_spy_enabled)
+      {
+        LegionSpy::log_physical_instance(inst.id, mem->memory.id, 0);
+        LegionSpy::log_physical_instance_region(inst.id, region_node->handle);
+        layout->log_instance_layout(inst);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -1241,6 +1261,12 @@ namespace Legion {
         op(o), redop(red), logical_field(f)
     //--------------------------------------------------------------------------
     { 
+      if (is_owner() && Runtime::legion_spy_enabled)
+      {
+        LegionSpy::log_physical_instance(inst.id, mem->memory.id, redop);
+        LegionSpy::log_physical_instance_region(inst.id, region_node->handle);
+        layout->log_instance_layout(inst);
+      }
     }
 
     //--------------------------------------------------------------------------

@@ -5144,15 +5144,6 @@ namespace Legion {
         std::vector<Domain::CopySrcDstField> dst_fields;
         dst->copy_to(pre_set.set_mask, dst_fields);
         Event fill_pre = Runtime::merge_events<false>(pre_set.preconditions);
-#ifdef LEGION_SPY
-        if (!fill_pre.exists())
-        {
-          UserEvent new_fill_pre = UserEvent::create_user_event();
-          new_fill_pre.trigger();
-          fill_pre = new_fill_pre;
-        }
-        LegionSpy::log_event_dependences(pre_set.preconditions, fill_pre);
-#endif
         // Issue the fill commands
         Event fill_post;
         if (dst->logical_node->has_component_domains())
@@ -5184,14 +5175,6 @@ namespace Legion {
                                           value->value, value->value_size, 
                                           fill_pre);
         }
-#ifdef LEGION_SPY
-        if (!fill_post.exists())
-        {
-          UserEvent new_fill_post = UserEvent::create_user_event();
-          new_fill_post.trigger();
-          fill_post = new_fill_post;
-        }
-#endif
         // Now see if there are any reductions to apply
         FieldMask reduce_overlap = reduction_mask & pre_set.set_mask;
         if (!!reduce_overlap)
@@ -5255,15 +5238,6 @@ namespace Legion {
         std::vector<Domain::CopySrcDstField> dst_fields;
         dst->copy_to(pre_set.set_mask, dst_fields);
         Event fill_pre = Runtime::merge_events<false>(pre_set.preconditions);
-#ifdef LEGION_SPY
-        if (!fill_pre.exists())
-        {
-          UserEvent new_fill_pre = UserEvent::create_user_event();
-          new_fill_pre.trigger();
-          fill_pre = new_fill_pre;
-        }
-        LegionSpy::log_event_dependences(pre_set.preconditions, fill_pre);
-#endif
         // Issue the fill commands
         Event fill_post;
         if (dst->logical_node->has_component_domains())
@@ -5295,14 +5269,6 @@ namespace Legion {
                                           value->value, value->value_size, 
                                           fill_pre);
         }
-#ifdef LEGION_SPY
-        if (!fill_post.exists())
-        {
-          UserEvent new_fill_post = UserEvent::create_user_event();
-          new_fill_post.trigger();
-          fill_post = new_fill_post;
-        }
-#endif
         FieldMask reduce_overlap = reduction_mask & pre_set.set_mask;
         if (!!reduce_overlap)
           flush_reductions(info, dst, reduce_overlap, postconditions);
@@ -5500,9 +5466,6 @@ namespace Legion {
           post_events.insert(post);
         }
         reduce_post = Runtime::merge_events<false>(post_events);
-#ifdef LEGION_SPY
-        reduce_index_space = logical_node->as_region_node()->row_source->handle;
-#endif
       }
       else
       {
@@ -5513,37 +5476,13 @@ namespace Legion {
         reduce_post = manager->issue_reduction(op, src_fields, dst_fields,
                                                domain, reduce_pre, fold,
                                                true/*precise*/);
-#ifdef LEGION_SPY
-        reduce_index_space = logical_node->as_region_node()->row_source->handle;
-#endif
       }
-#ifdef LEGION_SPY
-      if (!reduce_post.exists())
-      {
-        UserEvent new_reduce_post = UserEvent::create_user_event();
-        new_reduce_post.trigger();
-        reduce_post = new_reduce_post;
-      }
-#endif
       target->add_copy_user(manager->redop, reduce_post, version_info,
                             reduce_mask, false/*reading*/);
       this->add_copy_user(manager->redop, reduce_post, version_info,
                           reduce_mask, true/*reading*/);
       if (tracker != NULL)
         tracker->add_copy_event(reduce_post);
-#ifdef LEGION_SPY
-      {
-        std::vector<FieldID> fids;
-        manager->region_node->column_source->get_field_ids(reduce_mask,
-            fids);
-        LegionSpy::log_copy_events(manager->get_instance().id,
-            target->get_manager()->get_instance().id, true,
-            reduce_index_space.get_id(),
-            manager->region_node->column_source->handle.id,
-            manager->region_node->handle.tree_id, reduce_pre, reduce_post,
-            manager->redop, fids);
-      }
-#endif
     } 
 
     //--------------------------------------------------------------------------
@@ -5592,20 +5531,6 @@ namespace Legion {
       // be handled by the caller using the reduce post event we return
       add_copy_user(manager->redop, reduce_post, version_info,
                     red_mask, true/*reading*/);
-#ifdef LEGION_SPY
-      IndexSpace reduce_index_space =
-              target->logical_node->as_region_node()->row_source->handle;
-      {
-        std::vector<FieldID> fids;
-        manager->region_node->column_source->get_field_ids(red_mask, fids);
-        LegionSpy::log_copy_events(manager->get_instance().id,
-            target->get_manager()->get_instance().id, true,
-            reduce_index_space.get_id(),
-            manager->region_node->column_source->handle.id,
-            manager->region_node->handle.tree_id, reduce_pre, reduce_post,
-            manager->redop, fids);
-      }
-#endif
       return reduce_post;
     }
 
@@ -5657,20 +5582,6 @@ namespace Legion {
       // be handled by the caller using the reduce post event we return
       add_copy_user(manager->redop, reduce_post, version_info,
                     red_mask, true/*reading*/);
-#ifdef LEGION_SPY
-      IndexSpace reduce_index_space =
-              target->logical_node->as_region_node()->row_source->handle;
-      {
-        std::vector<FieldID> fids;
-        manager->region_node->column_source->get_field_ids(red_mask, fids);
-        LegionSpy::log_copy_events(manager->get_instance().id,
-            target->get_manager()->get_instance().id, true,
-            reduce_index_space.get_id(),
-            manager->region_node->column_source->handle.id,
-            manager->region_node->handle.tree_id, reduce_pre, reduce_post,
-            manager->redop, fids);
-      }
-#endif
       return reduce_post;
     }
 

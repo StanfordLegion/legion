@@ -2855,7 +2855,9 @@ namespace Legion {
           rename.trigger();
           result = rename;
         }
-        LegionSpy::log_event_dependences(events, result);
+        for (std::set<Event>::const_iterator it = events.begin();
+              it != events.end(); it++)
+          LegionSpy::log_event_dependence(*it, result);
       }
 #endif
       return result;

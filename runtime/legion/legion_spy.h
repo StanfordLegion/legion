@@ -175,6 +175,11 @@ namespace Legion {
       }
 
       // Logger calls for operations 
+      static inline void log_task_name(TaskID task_id, const char *name)
+      {
+        log_spy.info("Task ID Name %d %s", task_id, name);
+      }
+
       static inline void log_top_level_task(Processor::TaskFuncID task_id,
                                             UniqueID unique_id,
                                             const char *name)
@@ -345,7 +350,38 @@ namespace Legion {
         }
       }
 
+      // Logger call for physical instances
+      static inline void log_physical_instance(IDType inst_id, IDType mem_id,
+                                               ReductionOpID redop)
+      {
+        log_spy.info("Physical Instance " IDFMT " " IDFMT " %d", 
+                     inst_id, mem_id, redop);
+      }
+
+      static inline void log_physical_instance_region(IDType inst_id, 
+                                                      LogicalRegion handle)
+      {
+        log_spy.info("Physical Instance Region " IDFMT " %d %d %d",
+                      inst_id, handle.get_index_space().get_id(), 
+                      handle.get_field_space().get_id(), handle.get_tree_id());
+      }
+
+      static inline void log_physical_instance_field(IDType inst_id,
+                                                     FieldID field_id)
+      {
+        log_spy.info("Physical Instance Field " IDFMT " %d", inst_id, field_id);
+      }
+
+      // Logger calls for mapping decisions
+      static inline void log_mapping_decision(UniqueID unique_id, 
+                                  unsigned index, FieldID fid, IDType inst_id)
+      {
+        log_spy.info("Mapping Decision %llu %d %d " IDFMT "", unique_id,
+                     index, fid, inst_id);
+      }
+
 #ifdef LEGION_SPY
+      // Logger calls for mapping dependences
       static inline void log_mapping_dependence(UniqueID context, 
                 UniqueID prev_id, unsigned prev_idx, UniqueID next_id, 
                 unsigned next_idx, unsigned dep_type)
@@ -354,15 +390,7 @@ namespace Legion {
             context, prev_id, prev_idx, next_id, next_idx, dep_type);
       }
 
-      // Logger calls for physical dependence analysis
-      static inline void log_task_instance_requirement(UniqueID unique_id, 
-                                  unsigned idx, unsigned index)
-      {
-        log_spy.info("Task Instance Requirement %llu %u %u", 
-                            unique_id, idx, index);
-      }
-
-      // Logger calls for events
+      // Logger calls for realm events
       static inline void log_event_dependence(Event one, Event two)
       {
         if (one != two)
@@ -370,232 +398,52 @@ namespace Legion {
                           one.id, one.gen, two.id, two.gen);
       }
 
-      static inline void log_event_dependences(
-          const std::set<Event> &preconditions, Event result)
+      static inline void log_operation_events(UniqueID uid,
+                                              Event pre, Event post)
       {
-        for (std::set<Event>::const_iterator it = preconditions.begin();
-              it != preconditions.end(); it++)
-        {
-          if (*it != result)
-            log_spy.info("Event Event " IDFMT " %u " IDFMT " %u", 
-                    it->id, it->gen, result.id, result.gen);
-        }
+        log_spy.info("Operation Events %llu " IDFMT " %u " IDFMT " %u",
+                     uid, pre.id, pre.gen, post.id, post.gen);
       }
 
-      static inline void log_implicit_dependence(Event one, Event two)
+      static inline void log_copy_events(UniqueID op_unique_id,
+                                         LogicalRegion handle,
+                                         Event pre, Event post)
       {
-        if (one != two)
-          log_spy.info("Implicit Event " IDFMT " %u " IDFMT " %u",
-              one.id, one.gen, two.id, two.gen);
+        log_spy.info("Copy Events %llu %d %d %d " IDFMT " %u "
+                      IDFMT " %u", op_unique_id,
+                      handle.get_index_space().get_id(),
+                      handle.get_field_space().get_id(), handle.get_tree_id(), 
+                      pre.id, pre.gen, post.id, post.gen);
       }
 
-      static inline void log_op_events(UniqueID uid, Event start_event,
-                                       Event term_event)
+      static inline void log_copy_field(Event post, FieldID fid,
+                                        IDType src, IDType dst,
+                                        ReductionOpID redop)
       {
-        log_spy.info("Op Events %llu " IDFMT " %u " IDFMT " %u",
-            uid, start_event.id, start_event.gen, 
-            term_event.id, term_event.gen);
+        log_spy.info("Copy Field " IDFMT " %u %d " IDFMT " " IDFMT " %d",
+                      post.id, post.gen, fid, src, dst, redop);
       }
 
-      static inline void log_realm_copy(Event start_event,
-                                        Event term_event)
+      static inline void log_fill_events(UniqueID op_unique_id,
+                                         LogicalRegion handle,
+                                         Event pre, Event post)
       {
-        log_spy.info("Copy Events " IDFMT " %u " IDFMT " %u",
-            start_event.id, start_event.gen, term_event.id, term_event.gen);
+        log_spy.info("Fill Events %llu %d %d %d " IDFMT " %u " IDFMT " %u",
+                     op_unique_id, handle.get_index_space().get_id(),
+                     handle.get_field_space().get_id(), handle.get_tree_id(),
+                     pre.id, pre.gen, post.id, post.gen);
       }
 
-      static inline void log_realm_copy_requirement(Event start_event,
-                                                    Event term_event,
-                                                    unsigned index,
-                                                    bool region,
-                                                    IDType ispace,
-                                                    unsigned fspace,
-                                                    unsigned tree_id,
-                                                    unsigned privilege,
-                                                    unsigned coherence,
-                                                    unsigned redop)
+      static inline void log_fill_field(Event post, FieldID fid)
       {
-        log_spy.info("Copy Requirement " IDFMT " %u " IDFMT " %u %u %u " IDFMT
-            " %u %u %u %u %u",
-            start_event.id, start_event.gen, term_event.id, term_event.gen,
-            index, region, ispace, fspace, tree_id, privilege, coherence,
-            redop);
-      }
-
-      static inline void log_realm_copy_field(Event start_event,
-                                              Event term_event,
-                                              unsigned index,
-                                              FieldID fid)
-      {
-        log_spy.info("Copy Field " IDFMT " %u " IDFMT " %u %u %u",
-            start_event.id, start_event.gen, term_event.id, term_event.gen,
-            index, fid);
-      }
-
-      static inline void log_realm_copy_instance(Event start_event,
-                                                 Event term_event,
-                                                 unsigned index,
-                                                 IDType inst)
-      {
-        log_spy.info("Copy Instance " IDFMT " %u " IDFMT " %u %u " IDFMT,
-            start_event.id, start_event.gen, term_event.id, term_event.gen,
-            index, inst);
-      }
-
-      static inline void log_realm_copy_context(Event start_event,
-                                                Event term_event,
-                                                UniqueID unique_id)
-      {
-        log_spy.info("Copy Context " IDFMT " %u " IDFMT " %u %llu",
-            start_event.id, start_event.gen, term_event.id, term_event.gen,
-            unique_id);
-      }
-
-      static inline void log_copy_events(IDType src_inst,
-                                         IDType dst_inst,
-                                         bool is_region,
-                                         IDType ispace,
-                                         unsigned fspace,
-                                         unsigned tree_id,
-                                         Event copy_pre,
-                                         Event copy_post,
-                                         unsigned redop,
-                                         const std::vector<FieldID>& fids)
-      {
-        LegionSpy::log_realm_copy(copy_pre, copy_post);
-        LegionSpy::log_realm_copy_requirement(copy_pre, copy_post, 0,
-            is_region, ispace, fspace, tree_id, READ_ONLY, EXCLUSIVE, redop);
-        LegionSpy::log_realm_copy_requirement(copy_pre, copy_post, 1,
-            is_region, ispace, fspace, tree_id, READ_WRITE, EXCLUSIVE, redop);
-        for (std::vector<FieldID>::const_iterator fit = fids.begin();
-             fit != fids.end(); ++fit)
-        {
-          LegionSpy::log_realm_copy_field(copy_pre, copy_post, 0, *fit);
-          LegionSpy::log_realm_copy_field(copy_pre, copy_post, 1, *fit);
-        }
-        LegionSpy::log_realm_copy_instance(copy_pre, copy_post, 0,
-            src_inst);
-        LegionSpy::log_realm_copy_instance(copy_pre, copy_post, 1,
-            dst_inst);
-      }
-
-      static inline void log_copy_across_events(UniqueID unique_id,
-                                                Event copy_pre,
-                                                Event copy_post,
-                                               const RegionRequirement &src_req,
-                                               const RegionRequirement &dst_req,
-                                         const std::vector<FieldID> &src_fields,
-                                         const std::vector<FieldID> &dst_fields,
-                                                IDType src_inst,
-                                                IDType dst_inst)
-      {
-        LegionSpy::log_realm_copy(copy_pre, copy_post);
-
-        if (src_req.handle_type == PART_PROJECTION)
-          log_realm_copy_requirement(copy_pre, copy_post, 0, false,
-              src_req.partition.get_index_partition().id,
-              src_req.partition.get_field_space().get_id(),
-              src_req.partition.get_tree_id(),
-              src_req.privilege,
-              src_req.prop,
-              src_req.redop);
-        else
-          log_realm_copy_requirement(copy_pre, copy_post, 0, true,
-              src_req.region.get_index_space().get_id(),
-              src_req.region.get_field_space().get_id(),
-              src_req.region.get_tree_id(),
-              src_req.privilege,
-              src_req.prop,
-              src_req.redop);
-        for (std::vector<FieldID>::const_iterator fit = src_fields.begin();
-             fit != src_fields.end(); ++fit)
-          LegionSpy::log_realm_copy_field(copy_pre, copy_post, 0, *fit);
-
-        if (dst_req.handle_type == PART_PROJECTION)
-          log_realm_copy_requirement(copy_pre, copy_post, 1, false,
-              dst_req.partition.get_index_partition().id,
-              dst_req.partition.get_field_space().get_id(),
-              dst_req.partition.get_tree_id(),
-              dst_req.privilege,
-              dst_req.prop,
-              dst_req.redop);
-        else
-          log_realm_copy_requirement(copy_pre, copy_post, 1, true,
-              dst_req.region.get_index_space().get_id(),
-              dst_req.region.get_field_space().get_id(),
-              dst_req.region.get_tree_id(),
-              dst_req.privilege,
-              dst_req.prop,
-              dst_req.redop);
-        for (std::vector<FieldID>::const_iterator fit = dst_fields.begin();
-             fit != dst_fields.end(); ++fit)
-          LegionSpy::log_realm_copy_field(copy_pre, copy_post, 1, *fit);
-
-        LegionSpy::log_realm_copy_instance(copy_pre, copy_post, 0,
-            src_inst);
-        LegionSpy::log_realm_copy_instance(copy_pre, copy_post, 1,
-            dst_inst);
-        LegionSpy::log_realm_copy_context(copy_pre, copy_post, unique_id);
-      }
-
-      // Logger calls for physical instances
-      static inline void log_physical_instance(IDType inst_id, 
-                         IDType mem_id, IDType index_handle, 
-                         unsigned field_handle, unsigned tree_id,
-                         size_t blocking_factor)
-      {
-        log_spy.info("Physical Instance " IDFMT " " IDFMT " "
-            IDFMT " %u %u %lu",
-            inst_id, mem_id, index_handle, field_handle, tree_id,
-            blocking_factor);
-      }
-
-      static inline void log_physical_reduction(IDType inst_id, 
-          IDType mem_id, IDType index_handle, unsigned field_handle, 
-          unsigned tree_id, bool fold, unsigned indirect_id = 0)
-      {
-        log_spy.info("Reduction Instance " IDFMT " " IDFMT " " 
-                            IDFMT " %u %u %u %u", 
-                             inst_id, mem_id, index_handle, field_handle, 
-                             tree_id, fold, indirect_id);
-      }
-
-      static inline void log_instance_field(IDType inst_id, FieldID field_id)
-      {
-        log_spy.info("Instance Field " IDFMT " %u", inst_id, field_id);
-      }
-
-
-      static inline void log_op_user(UniqueID user,
-                                     unsigned idx, 
-                                     IDType inst_id)
-      {
-        log_spy.info("Op Instance User %llu %u " IDFMT "", 
-                              user, idx, inst_id);
-      }
-
-      static inline void log_op_user_with_field(UniqueID user,
-                                                unsigned idx,
-                                                IDType inst_id,
-                                                FieldID field_id)
-      {
-        log_spy.info("Op Instance Field User %llu %u " IDFMT " %u",
-                              user, idx, inst_id, field_id);
+        log_spy.info("Fill Field " IDFMT " %u %d", post.id, post.gen, fid);
       }
 
       static inline void log_phase_barrier(Barrier barrier)
       {
         log_spy.info("Phase Barrier " IDFMT, barrier.id);
       }
-
-      static inline void log_op_proc_user(UniqueID user,
-                                          IDType proc_id)
-      {
-        log_spy.info("Op Processor User %llu " IDFMT "",
-                              user, proc_id);
-      }
 #endif
-
     }; // namespace LegionSpy
 
     class TreeStateLogger {

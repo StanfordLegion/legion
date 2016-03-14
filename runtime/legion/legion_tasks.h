@@ -649,12 +649,6 @@ namespace Legion {
     protected:
       // Information for tracking restrictions
       LegionMap<RegionTreeID,FieldMask>::aligned restricted_trees;
-#ifdef LEGION_SPY
-    protected:
-      Event legion_spy_start;
-    public:
-      inline Event get_start_event(void) { return legion_spy_start; }
-#endif
     };
 
     /**

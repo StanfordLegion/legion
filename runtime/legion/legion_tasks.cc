@@ -1887,6 +1887,9 @@ namespace Legion {
 #endif
             exit(ERROR_INVALID_MAPPER_OUTPUT);
           } 
+          if (Runtime::legion_spy_enabled)
+            runtime->forest->log_mapping_decision(unique_op_id, *it,
+                                                  chosen_instances);
           if (!Runtime::unsafe_mapper)
           {
             std::vector<LogicalRegion> regions_to_check(1, 
@@ -2730,10 +2733,6 @@ namespace Legion {
       rez.serialize(num_local);
       for (unsigned idx = 0; idx < locals.size(); idx++)
         rez.serialize(locals[idx]);
-#ifdef LEGION_SPY
-      rez.serialize(legion_spy_start);
-      rez.serialize(get_task_completion());
-#endif
     }
 
     //-------------------------------------------------------------------------
@@ -4865,6 +4864,9 @@ namespace Legion {
           }
           virtual_mapped[idx] = true;
         } 
+        if (Runtime::legion_spy_enabled)
+          runtime->forest->log_mapping_decision(unique_op_id, idx,
+                                                physical_instances[idx]);
         // Skip checks if the mapper promises it is safe
         if (Runtime::unsafe_mapper)
           continue;
@@ -5748,41 +5750,6 @@ namespace Legion {
         }
       }
       // STEP 3: Finally we get to launch the task
-#ifdef LEGION_SPY
-      for (unsigned idx = 0; idx < regions.size(); idx++)
-      {
-        LegionSpy::log_task_instance_requirement(get_unique_id(), idx,
-                                 regions[idx].region.get_index_space().id);
-      }
-      {
-        std::set<Event> unmap_set;
-        for (unsigned idx = 0; idx < regions.size(); idx++)
-        {
-          if (!virtual_mapped[idx])
-            unmap_set.insert(unmap_events[idx]);
-        }
-        Event all_unmap_event = Runtime::merge_events<false>(unmap_set);
-        // Log an implicit dependence on the parent's start event
-        LegionSpy::log_implicit_dependence(parent_ctx->get_start_event(),
-                                           start_condition);
-        LegionSpy::log_op_events(get_unique_id(), 
-                                 start_condition, all_unmap_event);
-        this->legion_spy_start = start_condition; 
-        // Record the start
-        for (unsigned idx = 0; idx < regions.size(); idx++)
-        {
-          if (!virtual_mapped[idx])
-          {
-            LegionSpy::log_event_dependence(all_unmap_event, unmap_events[idx]);
-            // Log an implicit dependence on the parent's start event
-            LegionSpy::log_event_dependence(unmap_events[idx],
-                                               get_task_completion());
-          }
-        }
-        LegionSpy::log_implicit_dependence(get_task_completion(),
-                                           parent_ctx->get_task_completion());
-      }
-#endif
       // Mark that we have an outstanding task in this context 
       parent_ctx->increment_pending();
       // If this is a leaf task and we have no virtual instances
@@ -5832,6 +5799,11 @@ namespace Legion {
         profiling_done = info.profiling_done;
       } 
 #endif
+#ifdef LEGION_SPY
+      if (Runtime::legion_spy_enabled)
+        LegionSpy::log_operation_events(get_unique_id(), start_condition, 
+                                        completion_event);
+#endif
       Event task_launch_event = variant->dispatch_task(launch_processor, this,
                           start_condition, task_priority, profiling_requests);
       // Finish the chaining optimization if we're doing it
@@ -5863,15 +5835,6 @@ namespace Legion {
       assert(regions.size() == physical_instances.size());
       assert(regions.size() == virtual_mapped.size());
       assert(regions.size() == region_deleted.size());
-#endif
-#ifdef LEGION_SPY
-      for (unsigned idx = 0; idx < physical_instances.size(); idx++)
-      {
-        for (unsigned idx2 = 0; idx2 < physical_instances[idx].size(); idx2++)
-          LegionSpy::log_op_user(unique_op_id, idx, 
-              physical_instances[idx][idx2].get_manager()->get_instance().id);
-      }
-      LegionSpy::log_op_proc_user(unique_op_id, executing_processor.id);
 #endif
       // Issue a utility task to decrement the number of outstanding
       // tasks now that this task has started running
@@ -8662,10 +8625,6 @@ namespace Legion {
         derez.deserialize(temp_local[idx]);
         allocate_local_field(temp_local[idx]);
       }
-#ifdef LEGION_SPY
-      derez.deserialize(legion_spy_start);
-      derez.deserialize(remote_legion_spy_completion);
-#endif
       // Now put them on the local fields list, hold the lock
       // while modifying the data structure
       AutoLock o_lock(op_lock);

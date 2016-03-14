@@ -53,6 +53,8 @@ namespace Legion {
       void* operator new(size_t count);
       void operator delete(void *ptr);
     public:
+      void log_instance_layout(PhysicalInstance inst) const;
+    public:
       void compute_copy_offsets(const FieldMask &copy_mask, 
                                 PhysicalInstance inst,
                                 std::vector<Domain::CopySrcDstField> &fields);

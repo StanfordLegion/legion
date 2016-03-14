@@ -5607,6 +5607,8 @@ namespace Legion {
         memcpy(name_copy, name, name_size);
         semantic_infos[NAME_SEMANTIC_TAG] = 
           SemanticInfo(name_copy, name_size, false/*mutable*/);
+        if (Runtime::legion_spy_enabled)
+          LegionSpy::log_task_name(task_id, name);
       }
       // Register this task with the profiler if necessary
       if (runtime->profiler != NULL)
@@ -11549,7 +11551,7 @@ namespace Legion {
           add_to_dependence_queue(proc, op);
         }
         // Wait for all the re-mapping operations to complete
-        Event mapped_event = Event::merge_events(mapped_events);
+        Event mapped_event = Runtime::merge_events<true>(mapped_events);
         if (!mapped_event.has_triggered())
           mapped_event.wait();
       }
@@ -13037,6 +13039,8 @@ namespace Legion {
            const void *buffer, size_t size, bool is_mutable, bool send_to_owner)
     //--------------------------------------------------------------------------
     {
+      if ((tag == NAME_SEMANTIC_TAG) && legion_spy_enabled)
+        LegionSpy::log_task_name(task_id, static_cast<const char*>(buffer));
       TaskImpl *impl = find_or_create_task_impl(task_id);
       impl->attach_semantic_information(tag, address_space, buffer, size, 
                                         is_mutable, send_to_owner);
@@ -18228,7 +18232,11 @@ namespace Legion {
     /*sattic*/ bool Runtime::stealing_disabled = false;
     /*static*/ bool Runtime::resilient_mode = false;
     /*static*/ bool Runtime::unsafe_launch = false;
+#ifdef DEBUG_HIGH_LEVEL
     /*static*/ bool Runtime::unsafe_mapper = false;
+#else
+    /*static*/ bool Runtime::unsafe_mapper = true;
+#endif
     /*static*/ bool Runtime::dynamic_independence_tests = true;
     /*static*/ bool Runtime::legion_spy_enabled = false;
     /*static*/ int Runtime::mpi_rank = -1;
@@ -18336,7 +18344,11 @@ namespace Legion {
         stealing_disabled = false;
         resilient_mode = false;
         unsafe_launch = false;
+#ifdef DEBUG_HIGH_LEVEL
         unsafe_mapper = false;
+#else
+        unsafe_mapper = true;
+#endif
         // We always turn this on as the Legion Spy will 
         // now understand how to handle it.
         dynamic_independence_tests = true;

@@ -375,6 +375,8 @@ namespace Legion {
                                std::map<PhysicalManager*,unsigned> *acquired,
                                std::vector<PhysicalManager*> &unacquired,
                                const bool do_acquire_checks);
+      void log_mapping_decision(UniqueID uid, unsigned index,
+                                const InstanceSet &targets);
     protected: // helper method for the above two methods
       void perform_missing_acquires(
                                std::map<PhysicalManager*,unsigned> &acquired,

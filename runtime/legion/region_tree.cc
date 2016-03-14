@@ -2165,17 +2165,6 @@ namespace Legion {
             it != dst_domains.end(); it++)
       {
         Event copy_result = issue_copy(*it, op, src_fields,dst_fields,copy_pre);
-#ifdef LEGION_SPY
-        // TODO: Update this to log correctly for many instances
-        if ((src_targets.size() > 1) || (dst_targets.size() > 1) || 
-            (src_composite_index >= 0))
-          assert(false);
-        LegionSpy::log_copy_across(op->get_unique_op_id(), 
-            copy_pre, copy_result, src_req, dst_req,
-            src_req.instance_fields, dst_req.instance_fields,
-            src_targets[0].get_manager()->get_instance().id,
-            dst_targets[0].get_manager()->get_instance().id);
-#endif
         if (copy_result.exists())
           result_events.insert(copy_result);
       }
@@ -2353,17 +2342,6 @@ namespace Legion {
         {
           Event copy_result = issue_reduction_copy(*it, op, dst_req.redop, 
                     true/*fold*/, src_fields_fold, dst_fields_fold, copy_pre);
-#ifdef LEGION_SPY
-          // TODO: Update this to log correctly for many instances
-          if ((src_targets.size() > 1) || (dst_targets.size() > 1) || 
-              (src_composite_index >= 0))
-            assert(false);
-          LegionSpy::log_copy_across(op->get_unique_op_id(), 
-              copy_pre, copy_result, src_req, dst_req,
-              src_req.instance_fields, dst_req.instance_fields,
-              src_targets[0].get_manager()->get_instance().id,
-              dst_targets[0].get_manager()->get_instance().id);
-#endif
           if (copy_result.exists())
             result_events.insert(copy_result);
         }
@@ -2378,17 +2356,6 @@ namespace Legion {
         {
           Event copy_result = issue_reduction_copy(*it, op, dst_req.redop, 
                     false/*fold*/, src_fields_list, dst_fields_list, copy_pre);
-#ifdef LEGION_SPY
-          // TODO: Update this to log correctly for many instances
-          if ((src_targets.size() > 1) || (dst_targets.size() > 1) || 
-              (src_composite_index >= 0))
-            assert(false);
-          LegionSpy::log_copy_across(op->get_unique_op_id(), 
-              copy_pre, copy_result, src_req, dst_req,
-              src_req.instance_fields, dst_req.instance_fields,
-              src_targets[0].get_manager()->get_instance().id,
-              dst_targets[0].get_manager()->get_instance().id);
-#endif
           if (copy_result.exists())
             result_events.insert(copy_result);
         }
@@ -2542,6 +2509,37 @@ namespace Legion {
         perform_missing_acquires(*acquired, unacquired);
       }
       return has_composite;
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeForest::log_mapping_decision(UniqueID uid, unsigned index,
+                                                const InstanceSet &targets)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(Runtime::legion_spy_enabled); 
+#endif
+      for (unsigned idx = 0; idx < targets.size(); idx++)
+      {
+        const InstanceRef &inst = targets[idx];
+        const FieldMask &valid_mask = inst.get_valid_fields();
+        PhysicalManager *manager = inst.get_manager();
+        std::vector<FieldID> valid_fields;
+        manager->region_node->column_source->get_field_ids(valid_mask, 
+                                                           valid_fields);
+        if (manager->is_virtual_manager())
+        {
+          for (std::vector<FieldID>::const_iterator it = valid_fields.begin();
+                it != valid_fields.end(); it++)
+            LegionSpy::log_mapping_decision(uid, index, *it, 0/*iid*/);
+        }
+        else
+        {
+          for (std::vector<FieldID>::const_iterator it = valid_fields.begin();
+                it != valid_fields.end(); it++)
+            LegionSpy::log_mapping_decision(uid,index,*it,manager->instance.id);
+        }
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -8968,7 +8966,7 @@ namespace Legion {
           }
           context->runtime->send_field_alloc_notification(*it, rez);
         }
-        return Event::merge_events(allocated_events);
+        return Runtime::merge_events<true>(allocated_events);
       }
       return Event::NO_EVENT;
     }
@@ -9060,7 +9058,7 @@ namespace Legion {
           }
           context->runtime->send_field_alloc_notification(*it, rez);
         }
-        return Event::merge_events(allocated_events);
+        return Runtime::merge_events<true>(allocated_events);
       }
       return Event::NO_EVENT;
     }
@@ -9330,7 +9328,7 @@ namespace Legion {
         }
         if (ready_events.empty())
           return Event::NO_EVENT;
-        return Event::merge_events(ready_events);
+        return Runtime::merge_events<true>(ready_events);
       }
       return Event::NO_EVENT;
     }
@@ -11821,7 +11819,7 @@ namespace Legion {
         {
 #ifdef LEGION_SPY
           LegionSpy::log_mapping_dependence(
-              op->get_parent()->get_unique_task_id(),
+              op->get_parent()->get_unique_id(),
               it->uid, it->idx, op->get_unique_op_id(),
               0/*idx*/, TRUE_DEPENDENCE);
 #endif
@@ -11850,7 +11848,7 @@ namespace Legion {
         {
 #ifdef LEGION_SPY
           LegionSpy::log_mapping_dependence(
-              op->get_parent()->get_unique_task_id(),
+              op->get_parent()->get_unique_id(),
               it->uid, it->idx, op->get_unique_op_id(), 0/*idx*/, 
               TRUE_DEPENDENCE);
 #endif
@@ -13253,33 +13251,6 @@ namespace Legion {
           }
           postconditions[copy_post] = pre_set.set_mask;
         }
-#ifdef LEGION_SPY
-        {
-          bool is_region = dst->logical_node->is_region();
-          LegionSpy::IDType ispace;
-          if (is_region)
-            ispace =
-              dst->logical_node->as_region_node()->row_source->handle.get_id();
-          else
-            ispace =
-              dst->logical_node->as_partition_node()->row_source
-                ->handle.get_id();
-
-          for (LegionMap<MaterializedView*,FieldMask>::aligned::const_iterator
-                it = update_views.begin(); it != update_views.end(); it++)
-          {
-            RegionNode *manager_node = dst->manager->region_node;
-            unsigned fspace = manager_node->column_source->handle.id;
-            unsigned tree_id = manager_node->handle.tree_id;
-            std::vector<FieldID> fids;
-            manager_node->column_source->get_field_ids(it->second, fids);
-
-            LegionSpy::log_copy_events(it->first->manager->get_instance().id,
-                dst->manager->get_instance().id, is_region, ispace, fspace,
-                tree_id, copy_pre, copy_post, 0, fids);
-          }
-        }
-#endif
       }
     }
 
@@ -14135,7 +14106,7 @@ namespace Legion {
 #ifdef LEGION_SPY
                 if (dtype != PROMOTED_DEPENDENCE)
                   LegionSpy::log_mapping_dependence(
-                      user.op->get_parent()->get_unique_task_id(),
+                      user.op->get_parent()->get_unique_id(),
                       it->uid, it->idx, user.uid, user.idx, dtype);
 #endif
                 if (RECORD)
@@ -14400,7 +14371,7 @@ namespace Legion {
 #ifdef LEGION_SPY
           if ((dtype != NO_DEPENDENCE) && (dtype != PROMOTED_DEPENDENCE))
             LegionSpy::log_mapping_dependence(
-                closer.user.op->get_parent()->get_unique_task_id(),
+                closer.user.op->get_parent()->get_unique_id(),
                 it->uid, it->idx, closer.user.uid, closer.user.idx, dtype);
 #endif
           // Register the dependence 
@@ -15490,7 +15461,7 @@ namespace Legion {
         for (LegionList<EventSet>::aligned::const_iterator pit = 
               event_sets.begin(); pit != event_sets.end(); pit++)
         {
-          Event precondition = Event::merge_events(pit->preconditions);
+          Event precondition = Runtime::merge_events<false>(pit->preconditions);
           std::vector<Domain::CopySrcDstField> dst_fields;
           target->copy_to(pit->set_mask, dst_fields);
           for (std::set<Domain>::const_iterator it = fill_domains.begin();
@@ -15514,7 +15485,7 @@ namespace Legion {
         invalidate_reduction_views(state, fill_mask);
       update_valid_views(state, fill_mask, target_views, instances);
       // Return the merge of all the post events
-      return Event::merge_events(post_events);
+      return Runtime::merge_events<false>(post_events);
     }
 
     //--------------------------------------------------------------------------
