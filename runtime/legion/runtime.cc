@@ -3206,6 +3206,26 @@ namespace LegionRuntime {
               runtime->handle_field_space_return(derez);
               break;
             }
+          case SEND_FIELD_ALLOC_REQUEST:
+            {
+              runtime->handle_field_alloc_request(derez);
+              break;
+            }
+          case SEND_FIELD_ALLOC_NOTIFICATION:
+            {
+              runtime->handle_field_alloc_notification(derez);
+              break;
+            }
+          case SEND_FIELD_SPACE_TOP_ALLOC:
+            {
+              runtime->handle_field_space_top_alloc(derez,remote_address_space);
+              break;
+            }
+          case SEND_FIELD_FREE:
+            {
+              runtime->handle_field_free(derez, remote_address_space);
+              break;
+            }
           case SEND_TOP_LEVEL_REGION_REQUEST:
             {
               runtime->handle_top_level_region_request(derez, 
@@ -3215,16 +3235,6 @@ namespace LegionRuntime {
           case SEND_TOP_LEVEL_REGION_RETURN:
             {
               runtime->handle_top_level_region_return(derez);
-              break;
-            }
-          case SEND_DISTRIBUTED_ALLOC:
-            {
-              runtime->handle_distributed_alloc_request(derez);
-              break;
-            }
-          case SEND_DISTRIBUTED_UPGRADE:
-            {
-              runtime->handle_distributed_alloc_upgrade(derez);
               break;
             }
           case SEND_LOGICAL_REGION_NODE:
@@ -3260,16 +3270,6 @@ namespace LegionRuntime {
             {
               runtime->handle_logical_partition_destruction(derez, 
                                                           remote_address_space);
-              break;
-            }
-          case FIELD_ALLOCATION_MESSAGE:
-            {
-              runtime->handle_field_allocation(derez, remote_address_space);
-              break;
-            }
-          case FIELD_DESTRUCTION_MESSAGE:
-            {
-              runtime->handle_field_destruction(derez, remote_address_space);
               break;
             }
           case INDIVIDUAL_REMOTE_MAPPED:
@@ -8504,7 +8504,7 @@ namespace LegionRuntime {
     void Internal::finalize_field_destroy(FieldSpace handle, FieldID fid)
     //--------------------------------------------------------------------------
     {
-      forest->free_field(handle, fid, address_space);
+      forest->free_field(handle, fid);
     }
 
     //--------------------------------------------------------------------------
@@ -8512,7 +8512,8 @@ namespace LegionRuntime {
                                                const std::set<FieldID> &to_free)
     //--------------------------------------------------------------------------
     {
-      forest->free_fields(handle, to_free, address_space);
+      std::vector<FieldID> dense(to_free.begin(), to_free.end());
+      forest->free_fields(handle, dense);
     }
 
     //--------------------------------------------------------------------------
@@ -12371,6 +12372,41 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void Internal::send_field_alloc_request(AddressSpaceID target,
+                                            Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_FIELD_ALLOC_REQUEST,
+                                INDEX_AND_FIELD_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Internal::send_field_alloc_notification(AddressSpaceID target,
+                                                 Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_FIELD_ALLOC_NOTIFICATION,
+                                INDEX_AND_FIELD_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Internal::send_field_space_top_alloc(AddressSpaceID target,
+                                              Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_FIELD_SPACE_TOP_ALLOC,
+                                INDEX_AND_FIELD_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Internal::send_field_free(AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_FIELD_FREE,
+                                INDEX_AND_FIELD_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Internal::send_top_level_region_request(AddressSpaceID target,
                                                 Serializer &rez)
     //--------------------------------------------------------------------------
@@ -12386,24 +12422,6 @@ namespace LegionRuntime {
     {
       find_messenger(target)->send_message(rez, SEND_TOP_LEVEL_REGION_RETURN,
                                   LOGICAL_TREE_VIRTUAL_CHANNEL, true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Internal::send_distributed_alloc_request(AddressSpaceID target,
-                                                 Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(rez, SEND_DISTRIBUTED_ALLOC,
-                                INDEX_AND_FIELD_VIRTUAL_CHANNEL, true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Internal::send_distributed_alloc_upgrade(AddressSpaceID target,
-                                                 Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(rez, SEND_DISTRIBUTED_UPGRADE,
-                                INDEX_AND_FIELD_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -12487,41 +12505,6 @@ namespace LegionRuntime {
       find_messenger(target)->send_message(rez, 
           LOGICAL_PARTITION_DESTRUCTION_MESSAGE, LOGICAL_TREE_VIRTUAL_CHANNEL,
                                                                 false/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Internal::send_field_allocation(FieldSpace space, FieldID fid,
-                                              size_t size, unsigned idx,
-                                              CustomSerdezID serdez_id,
-                                              AddressSpaceID target)
-    //--------------------------------------------------------------------------
-    {
-      Serializer rez;
-      {
-        RezCheck z(rez);
-        rez.serialize(space);
-        rez.serialize(fid);
-        rez.serialize(size);
-        rez.serialize(idx);
-        rez.serialize(serdez_id);
-      }
-      find_messenger(target)->send_message(rez, FIELD_ALLOCATION_MESSAGE,
-                               INDEX_AND_FIELD_VIRTUAL_CHANNEL, false/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Internal::send_field_destruction(FieldSpace space, FieldID fid,
-                                         AddressSpaceID target)
-    //--------------------------------------------------------------------------
-    {
-      Serializer rez;
-      {
-        RezCheck z(rez);
-        rez.serialize(space);
-        rez.serialize(fid);
-      }
-      find_messenger(target)->send_message(rez, FIELD_DESTRUCTION_MESSAGE,
-                               INDEX_AND_FIELD_VIRTUAL_CHANNEL, false/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13181,6 +13164,35 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    void Internal::handle_field_alloc_request(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      FieldSpaceNode::handle_alloc_request(forest, derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Internal::handle_field_alloc_notification(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      FieldSpaceNode::handle_alloc_notification(forest, derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Internal::handle_field_space_top_alloc(Deserializer &derez,
+                                                AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      FieldSpaceNode::handle_top_alloc(forest, derez, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Internal::handle_field_free(Deserializer &derez, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      FieldSpaceNode::handle_field_free(forest, derez, source);
+    }
+
+    //--------------------------------------------------------------------------
     void Internal::handle_top_level_region_request(Deserializer &derez,
                                                   AddressSpaceID source)
     //--------------------------------------------------------------------------
@@ -13193,20 +13205,6 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       RegionNode::handle_top_level_return(derez);   
-    }
-
-    //--------------------------------------------------------------------------
-    void Internal::handle_distributed_alloc_request(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      FieldSpaceNode::handle_distributed_alloc_request(forest, derez);
-    }
-
-    //--------------------------------------------------------------------------
-    void Internal::handle_distributed_alloc_upgrade(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      FieldSpaceNode::handle_distributed_alloc_upgrade(forest, derez);
     }
 
     //--------------------------------------------------------------------------
@@ -13270,38 +13268,6 @@ namespace LegionRuntime {
       LogicalPartition handle;
       derez.deserialize(handle);
       forest->destroy_logical_partition(handle, source);
-    }
-
-    //--------------------------------------------------------------------------
-    void Internal::handle_field_allocation(Deserializer &derez, 
-                                          AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      FieldSpace handle;
-      derez.deserialize(handle);
-      FieldID fid;
-      derez.deserialize(fid);
-      size_t size;
-      derez.deserialize(size);
-      unsigned idx;
-      derez.deserialize(idx);
-      CustomSerdezID serdez_id;
-      derez.deserialize(serdez_id);
-      forest->allocate_field_index(handle, size, fid, idx, serdez_id, source);
-    }
-
-    //--------------------------------------------------------------------------
-    void Internal::handle_field_destruction(Deserializer &derez, 
-                                           AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      FieldSpace handle;
-      derez.deserialize(handle);
-      FieldID fid;
-      derez.deserialize(fid);
-      forest->free_field(handle, fid, source);
     }
 
     //--------------------------------------------------------------------------

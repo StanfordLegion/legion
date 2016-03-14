@@ -3327,7 +3327,7 @@ namespace LegionRuntime {
       // event has triggered.  Otherwise it already exists on this node
       // so we are free to use it no matter what
       if (runtime->forest->allocate_field(info.handle, info.field_size,
-                              info.fid, true/*local*/, info.serdez_id))
+                                       info.fid, info.serdez_id, true/*local*/))
       {
         // Successfully allocated a local field, launch a task to reclaim it
         Serializer rez;

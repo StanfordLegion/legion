@@ -186,7 +186,6 @@ namespace LegionRuntime {
             derez.deserialize(vid);
             FieldMask version_mask;
             derez.deserialize(version_mask);
-            node->transform_field_mask(version_mask, source);
             versions->add_field_version(vid, version_mask);
           }
         }
@@ -1048,7 +1047,6 @@ namespace LegionRuntime {
         info.field_versions = new FieldVersions();
         info.field_versions->add_reference();
       }
-      FieldSpaceNode *field_node = node->column_source;
       for (unsigned idx = 0; idx < num_states; idx++)
       {
         VersionID vid;
@@ -1060,7 +1058,6 @@ namespace LegionRuntime {
         FieldMask mask;
         derez.deserialize(mask);
         // Transform the field mask
-        field_node->transform_field_mask(mask, source);
         VersionState *state = node->find_remote_version_state(ctx, vid, 
                                                               did, owner);
         info.physical_state->add_version_state(state, mask);
@@ -1081,7 +1078,6 @@ namespace LegionRuntime {
         FieldMask mask;
         derez.deserialize(mask);
         // Transform the field mask
-        field_node->transform_field_mask(mask, source);
         VersionState *state = node->find_remote_version_state(ctx, vid, 
                                                               did, owner);
         // No point in adding this to the version state infos
@@ -1170,7 +1166,6 @@ namespace LegionRuntime {
         derez.deserialize(mask);
         if (field_node == NULL)
           field_node = forest->get_node(handle)->column_source;
-        field_node->transform_field_mask(mask, source);
       }
     }
 
@@ -5892,9 +5887,6 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(is_owner());
 #endif
-      // First transform the initial mask
-      manager->owner->column_source->transform_field_mask(path_only_mask, 
-                                                          source);
       AutoLock s_lock(state_lock);
       path_only_nodes[source] |= path_only_mask;
     }
@@ -5907,8 +5899,6 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(is_owner());
 #endif
-      // First transform the initial mask
-      manager->owner->column_source->transform_field_mask(initial_mask, source);
       AutoLock s_lock(state_lock);
       initial_nodes[source] |= initial_mask;
     }
@@ -5921,9 +5911,6 @@ namespace LegionRuntime {
     {
       if (!is_owner())
       {
-        // First things first, transform the field mask
-        manager->owner->column_source->transform_field_mask(request_mask, 
-                                                            owner_space);
         // If we are not the owner, we should definitely be able to handle this
         std::set<Event> launch_preconditions;
 #ifdef DEBUG_HIGH_LEVEL
@@ -5981,9 +5968,6 @@ namespace LegionRuntime {
       }
       else
       {
-        // First things first, transform the field mask
-        manager->owner->column_source->transform_field_mask(request_mask, 
-                                                            source);
         // We're the owner, figure out what to do
         FieldMask remaining_fields = request_mask;
         FieldMask local_fields;
@@ -6139,7 +6123,6 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       RegionTreeNode *owner_node = manager->owner;
-      FieldSpaceNode *field_node = owner_node->column_source;
       // Special case for path only response
       if (request_kind == PATH_ONLY_VERSION_REQUEST)
       {
@@ -6157,7 +6140,6 @@ namespace LegionRuntime {
             {
               FieldMask child_update;
               derez.deserialize(child_update);
-              field_node->transform_field_mask(child_update, source);
               finder->second |= child_update;
               children.valid_fields |= child_update;
             }
@@ -6165,7 +6147,6 @@ namespace LegionRuntime {
             {
               FieldMask &mask = children.open_children[child];
               derez.deserialize(mask);
-              field_node->transform_field_mask(mask, source);
               children.valid_fields |= mask;
             }
           }
@@ -6188,20 +6169,16 @@ namespace LegionRuntime {
         if (in_place)
         {
           derez.deserialize(dirty_mask);
-          field_node->transform_field_mask(dirty_mask, source); 
           derez.deserialize(reduction_mask);
-          field_node->transform_field_mask(reduction_mask, source);
         }
         else
         {
           FieldMask dirty_update;
           derez.deserialize(dirty_update);
-          field_node->transform_field_mask(dirty_update, source);
           dirty_mask |= dirty_update;
 
           FieldMask reduction_update;
           derez.deserialize(reduction_update);
-          field_node->transform_field_mask(reduction_update, source);
           reduction_mask |= reduction_update;
         }
         // Unpack the open children
@@ -6215,7 +6192,6 @@ namespace LegionRuntime {
             derez.deserialize(child);
             FieldMask &mask = children.open_children[child];
             derez.deserialize(mask);
-            field_node->transform_field_mask(mask, source);
             children.valid_fields |= mask;
           }
         }
@@ -6233,7 +6209,6 @@ namespace LegionRuntime {
             {
               FieldMask child_update;
               derez.deserialize(child_update);
-              field_node->transform_field_mask(child_update, source);
               finder->second |= child_update;
               children.valid_fields |= child_update;
             }
@@ -6241,7 +6216,6 @@ namespace LegionRuntime {
             {
               FieldMask &mask = children.open_children[child];
               derez.deserialize(mask);
-              field_node->transform_field_mask(mask, source);
               children.valid_fields |= mask;
             }
           }
@@ -6265,7 +6239,6 @@ namespace LegionRuntime {
             }
             FieldMask &mask = valid_views[view];
             derez.deserialize(mask);
-            field_node->transform_field_mask(mask, source);
             view->add_nested_gc_ref(did);
             view->add_nested_valid_ref(did);
           }
@@ -6284,7 +6257,6 @@ namespace LegionRuntime {
               view->as_instance_view()->as_reduction_view();
             FieldMask &mask = reduction_views[red_view];
             derez.deserialize(mask);
-            field_node->transform_field_mask(mask, source);
             view->add_nested_gc_ref(did);
             view->add_nested_valid_ref(did);
           }
@@ -6311,14 +6283,12 @@ namespace LegionRuntime {
             {
               FieldMask update_mask;
               derez.deserialize(update_mask);
-              field_node->transform_field_mask(update_mask, source);
               finder->second |= update_mask;
             }
             else
             {
               FieldMask &mask = valid_views[view];
               derez.deserialize(mask);
-              field_node->transform_field_mask(mask, source);
               view->add_nested_gc_ref(did);
               view->add_nested_valid_ref(did);
             }
@@ -6342,14 +6312,12 @@ namespace LegionRuntime {
             {
               FieldMask update_mask;
               derez.deserialize(update_mask);
-              field_node->transform_field_mask(update_mask, source);
               finder->second |= update_mask;
             }
             else
             {
               FieldMask &mask = reduction_views[red_view];
               derez.deserialize(mask);
-              field_node->transform_field_mask(mask, source);
               view->add_nested_gc_ref(did);
               view->add_nested_valid_ref(did);
             }
