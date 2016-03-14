@@ -447,7 +447,10 @@ local function physical_region_get_base_pointer(cx, index_type, field_type, fiel
              std.assert(subrect.hi.x[i] == rect.hi.x[i], "subrect not equal to rect")
            end
          end)]
-      std.assert(offsets[0].offset == [expected_stride],
+      std.assert(offsets[0].offset == [expected_stride] or
+                 -- wonchan: raw_rect_ptr thinks an SOA instance of one element
+                 --          as an AOS instance and returns an unexpected stride
+                 c.legion_domain_get_volume(domain) == 1,
                  "stride does not match expected value")
 
       -- Fix up the base pointer so it points to the origin (zero),
@@ -2008,8 +2011,8 @@ local function expr_call_setup_ispace_arg(
 
   local requirement = terralib.newsymbol("requirement")
   local requirement_args = terralib.newlist({
-      launcher, `([cx:ispace(arg_type).index_space].impl),
-      c.ALL_MEMORY, `([parent_ispace].impl), false})
+      launcher, `([cx:ispace(arg_type).index_space]),
+      c.ALL_MEMORY, `([parent_ispace]), false})
 
   args_setup:insert(
     quote
@@ -2919,7 +2922,7 @@ function codegen.expr_ispace(cx, node)
     it = terralib.newsymbol(c.legion_terra_cached_index_iterator_t, "it")
   end
 
-  cx:add_ispace_root(ispace_type, i, isa, it)
+  cx:add_ispace_root(ispace_type, is, isa, it)
 
   if ispace_type.dim == 0 then
     if start then
@@ -6100,7 +6103,7 @@ function codegen.stat_task(cx, node)
       it = terralib.newsymbol(c.legion_terra_cached_index_iterator_t, "it")
     end
 
-    local privileges, privilege_field_paths, privilege_field_types =
+    local privileges, privilege_field_paths, privilege_field_types, coherences, flags =
       std.find_task_privileges(region_type, task:getprivileges(),
                                task:get_coherence_modes(), task:get_flags())
 
@@ -6123,6 +6126,7 @@ function codegen.stat_task(cx, node)
     for i, field_paths in ipairs(privilege_field_paths) do
       local privilege = privileges[i]
       local field_types = privilege_field_types[i]
+      local flag = flags[i]
       local physical_region = terralib.newsymbol(
         c.legion_physical_region_t,
         "pr_" .. tostring(physical_region_i))
@@ -6136,7 +6140,7 @@ function codegen.stat_task(cx, node)
         physical_regions_by_field_path[field_path:hash()] = physical_region
       end
 
-      if not task:get_config_options().inner then
+      if not task:get_config_options().inner and flag ~= std.no_access_flag then
         local pr_actions, pr_base_pointers, pr_strides = unpack(data.zip(unpack(
           data.zip(field_paths, field_types):map(
             function(field)

@@ -1806,12 +1806,12 @@ namespace Legion {
       void send_field_space_node(AddressSpaceID target, Serializer &rez);
       void send_field_space_request(AddressSpaceID target, Serializer &rez);
       void send_field_space_return(AddressSpaceID target, Serializer &rez);
+      void send_field_alloc_request(AddressSpaceID target, Serializer &rez);
+      void send_field_alloc_notification(AddressSpaceID target,Serializer &rez);
+      void send_field_space_top_alloc(AddressSpaceID target, Serializer &rez);
+      void send_field_free(AddressSpaceID target, Serializer &rez);
       void send_top_level_region_request(AddressSpaceID target,Serializer &rez);
       void send_top_level_region_return(AddressSpaceID target, Serializer &rez);
-      void send_distributed_alloc_request(AddressSpaceID target, 
-                                          Serializer &rez);
-      void send_distributed_alloc_upgrade(AddressSpaceID target,
-                                          Serializer &rez);
       void send_logical_region_node(AddressSpaceID target, Serializer &rez);
       void send_index_space_destruction(IndexSpace handle, 
                                         AddressSpaceID target);
@@ -1823,12 +1823,6 @@ namespace Legion {
                                            AddressSpaceID target);
       void send_logical_partition_destruction(LogicalPartition handle,
                                               AddressSpaceID target);
-      void send_field_allocation(FieldSpace space, FieldID fid, 
-                                 size_t size, unsigned idx, 
-                                 CustomSerdezID serdez_id,
-                                 AddressSpaceID target);
-      void send_field_destruction(FieldSpace space, FieldID fid, 
-                                  AddressSpaceID target); 
       void send_individual_remote_mapped(Processor target, 
                                          Serializer &rez, bool flush = true);
       void send_individual_remote_complete(Processor target, Serializer &rez);
@@ -1928,11 +1922,14 @@ namespace Legion {
       void handle_field_space_request(Deserializer &derez,
                                       AddressSpaceID source);
       void handle_field_space_return(Deserializer &derez);
+      void handle_field_alloc_request(Deserializer &derez);
+      void handle_field_alloc_notification(Deserializer &derez);
+      void handle_field_space_top_alloc(Deserializer &derez,
+                                        AddressSpaceID source);
+      void handle_field_free(Deserializer &derez, AddressSpaceID source);
       void handle_top_level_region_request(Deserializer &derez,
                                            AddressSpaceID source);
       void handle_top_level_region_return(Deserializer &derez);
-      void handle_distributed_alloc_request(Deserializer &derez);
-      void handle_distributed_alloc_upgrade(Deserializer &derez);
       void handle_logical_region_node(Deserializer &derez, 
                                       AddressSpaceID source);
       void handle_index_space_destruction(Deserializer &derez,
@@ -1945,8 +1942,6 @@ namespace Legion {
                                              AddressSpaceID source);
       void handle_logical_partition_destruction(Deserializer &derez,
                                                 AddressSpaceID source);
-      void handle_field_allocation(Deserializer &derez, AddressSpaceID source);
-      void handle_field_destruction(Deserializer &derez, AddressSpaceID source);
       void handle_individual_remote_mapped(Deserializer &derez); 
       void handle_individual_remote_complete(Deserializer &derez);
       void handle_individual_remote_commit(Deserializer &derez);

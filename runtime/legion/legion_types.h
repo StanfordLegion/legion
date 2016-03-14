@@ -359,18 +359,18 @@ namespace Legion {
       SEND_FIELD_SPACE_NODE,
       SEND_FIELD_SPACE_REQUEST,
       SEND_FIELD_SPACE_RETURN,
+      SEND_FIELD_ALLOC_REQUEST,
+      SEND_FIELD_ALLOC_NOTIFICATION,
+      SEND_FIELD_SPACE_TOP_ALLOC,
+      SEND_FIELD_FREE,
       SEND_TOP_LEVEL_REGION_REQUEST,
       SEND_TOP_LEVEL_REGION_RETURN,
-      SEND_DISTRIBUTED_ALLOC,
-      SEND_DISTRIBUTED_UPGRADE,
       SEND_LOGICAL_REGION_NODE,
       INDEX_SPACE_DESTRUCTION_MESSAGE,
       INDEX_PARTITION_DESTRUCTION_MESSAGE,
       FIELD_SPACE_DESTRUCTION_MESSAGE,
       LOGICAL_REGION_DESTRUCTION_MESSAGE,
       LOGICAL_PARTITION_DESTRUCTION_MESSAGE,
-      FIELD_ALLOCATION_MESSAGE,
-      FIELD_DESTRUCTION_MESSAGE,
       INDIVIDUAL_REMOTE_MAPPED,
       INDIVIDUAL_REMOTE_COMPLETE,
       INDIVIDUAL_REMOTE_COMMIT,
@@ -457,18 +457,18 @@ namespace Legion {
         "Send Field Space Node",                                      \
         "Send Field Space Request",                                   \
         "Send Field Space Return",                                    \
+        "Send Field Alloc Request",                                   \
+        "Send Field Alloc Notification",                              \
+        "Send Field Space Top Alloc",                                 \
+        "Send Field Free",                                            \
         "Send Top Level Region Request",                              \
         "Send Top Level Region Return",                               \
-        "Send Distributed Alloc",                                     \
-        "Send Distributed Upgrade",                                   \
         "Send Logical Region Node",                                   \
         "Index Space Destruction",                                    \
         "Index Partition Destruction",                                \
         "Field Space Destruction",                                    \
         "Logical Region Destruction",                                 \
         "Logical Partition Destruction",                              \
-        "Field Allocation",                                           \
-        "Field Destruction",                                          \
         "Individual Remote Mapped",                                   \
         "Individual Remote Complete",                                 \
         "Individual Remote Commit",                                   \

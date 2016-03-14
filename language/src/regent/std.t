@@ -1214,10 +1214,12 @@ function std.get_field(t, f)
 end
 
 function std.get_field_path(value_type, field_path)
+  local field_type = value_type
   for _, field_name in ipairs(field_path) do
-    value_type = std.get_field(value_type, field_name)
+    field_type = std.get_field(field_type, field_name)
+    assert(field_type, tostring(value_type) .. " has no field " .. tostring(field_path))
   end
-  return value_type
+  return field_type
 end
 
 function std.implicit_cast(from, to, expr)

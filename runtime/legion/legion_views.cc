@@ -915,7 +915,6 @@ namespace Legion {
 #endif
               FieldMask user_mask;
               derez.deserialize(user_mask);
-              field_node->transform_field_mask(user_mask, source);
               if (need_reference[index])
                 users[index]->add_reference();
               else
@@ -931,7 +930,6 @@ namespace Legion {
             // Just one user
             FieldMask user_mask;
             derez.deserialize(user_mask);
-            field_node->transform_field_mask(user_mask, source);
             if (need_reference[index])
               users[index]->add_reference();
             else
@@ -964,7 +962,6 @@ namespace Legion {
 #endif
               FieldMask user_mask;
               derez.deserialize(user_mask);
-              field_node->transform_field_mask(user_mask, source);
               if (need_reference[index])
                 users[index]->add_reference();
               else
@@ -980,7 +977,6 @@ namespace Legion {
             // Just one user
             FieldMask user_mask;
             derez.deserialize(user_mask);
-            field_node->transform_field_mask(user_mask, source);
             if (need_reference[index])
               users[index]->add_reference();
             else
@@ -2958,7 +2954,6 @@ namespace Legion {
     {
       size_t num_epochs;
       derez.deserialize(num_epochs);
-      FieldSpaceNode *field_node = logical_node->column_source;
       AutoLock v_lock(view_lock);
       for (unsigned idx = 0; idx < num_epochs; idx++)
       {
@@ -2970,7 +2965,6 @@ namespace Legion {
         derez.deserialize(epoch.redop);
         FieldMask valid_fields;
         derez.deserialize(valid_fields);
-        field_node->transform_field_mask(valid_fields, source);
         epoch.valid_fields |= valid_fields;
         reduction_mask |= valid_fields;
         size_t num_reductions;
@@ -3270,7 +3264,6 @@ namespace Legion {
         new_node->add_reference();
         FieldMask &mask = roots[new_node];
         derez.deserialize(mask);
-        logical_node->column_source->transform_field_mask(mask, source);
         new_node->set_owner_did(did);
       }
     }
@@ -3325,8 +3318,6 @@ namespace Legion {
         derez.deserialize(handle);
         target_node = runtime->forest->get_node(handle);
       }
-      // Transform the fields mask 
-      target_node->column_source->transform_field_mask(valid_mask, source);
       CompositeView *new_view = legion_new<CompositeView>(runtime->forest,
                             did, owner, target_node, runtime->address_space,
                             valid_mask, false/*register now*/);
@@ -4778,9 +4769,7 @@ namespace Legion {
                                               AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      FieldSpaceNode *field_node = logical_node->column_source;
       derez.deserialize(dirty_mask); 
-      field_node->transform_field_mask(dirty_mask, source);
       size_t num_valid_views;
       derez.deserialize(num_valid_views);
       for (unsigned idx = 0; idx < num_valid_views; idx++)
@@ -4791,7 +4780,6 @@ namespace Legion {
         view->add_base_resource_ref(COMPOSITE_NODE_REF);
         FieldMask &mask = valid_views[view];
         derez.deserialize(mask);
-        field_node->transform_field_mask(mask, source);
       }
       size_t num_open_children;
       derez.deserialize(num_open_children);
@@ -4806,7 +4794,6 @@ namespace Legion {
         new_node->add_reference();
         derez.deserialize<bool>(info.complete);
         derez.deserialize(info.open_fields);
-        field_node->transform_field_mask(info.open_fields, source);
         new_node->unpack_composite_tree(derez, source);
       }
     }
@@ -6373,7 +6360,6 @@ namespace Legion {
           {
             FieldMask user_mask;
             derez.deserialize(user_mask);
-            field_node->transform_field_mask(user_mask, source);
             add_physical_user(red_users[reduction_index++], false/*reading*/,
                               red_event, user_mask);
           }
@@ -6396,7 +6382,6 @@ namespace Legion {
           {
             FieldMask user_mask;
             derez.deserialize(user_mask);
-            field_node->transform_field_mask(user_mask, source);
             add_physical_user(read_users[reading_index++], true/*reading*/,
                               read_event, user_mask);
           }
