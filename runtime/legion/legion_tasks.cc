@@ -11002,13 +11002,11 @@ namespace LegionRuntime {
         while (true) 
         {
           args.slice = *it;
-          it++;
-          bool done = (it == slices.end()); 
           Event wait = owner->runtime->issue_runtime_meta_task(&args, 
                                 sizeof(args), HLR_DEFERRED_SLICE_ID, *it);
           if (wait.exists())
             wait_events.insert(wait);
-          if (done)
+          if (++it == slices.end())
             break;
         }
       }
