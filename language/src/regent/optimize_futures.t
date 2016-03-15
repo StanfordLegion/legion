@@ -24,9 +24,8 @@ local std = require("regent/std")
 local context = {}
 context.__index = context
 
-function context:new_task_scope(params)
+function context:new_task_scope()
   local cx = {
-    params = params,
     var_flows = {},
     var_futures = {},
   }
@@ -402,11 +401,6 @@ local function compute_var_futures(cx)
       end
     end
   until not changed
-
-  -- Deoptimize task parameters.
-  for _, param in ipairs(cx.params) do
-    var_futures[param.symbol] = false
-  end
 end
 
 local optimize_futures = {}
@@ -1190,13 +1184,58 @@ function optimize_futures.stat(cx, node)
   end
 end
 
+function optimize_futures.stat_task_param(cx, param)
+  if cx:is_future(param.symbol) then
+    local new_symbol = terralib.newsymbol(param.param_type, param.symbol.displayname .. "_tmp")
+    local new_param = param { symbol = new_symbol }
+    local new_var = ast.typed.stat.Var {
+      symbols = terralib.newlist({param.symbol}),
+      types = terralib.newlist({std.future(param.param_type)}),
+      values = terralib.newlist({
+          promote(ast.typed.expr.ID {
+            value = new_symbol,
+            expr_type = std.rawref(&param.param_type),
+            options = param.options,
+            span = param.span,
+          }),
+      }),
+      options = param.options,
+      span = param.span,
+    }
+
+    return new_param, new_var
+  else
+    return param
+  end
+end
+
+function optimize_futures.stat_task_params(cx, node)
+  local results = terralib.newlist()
+  local actions = terralib.newlist()
+  for _, param in ipairs(node.params) do
+    local result, action = optimize_futures.stat_task_param(cx, param)
+    results:insert(result)
+    if action then actions:insert(action) end
+  end
+  return results, actions
+end
+
 function optimize_futures.stat_task(cx, node)
-  local cx = cx:new_task_scope(node.params)
+  local cx = cx:new_task_scope()
   analyze_var_flow.block(cx, node.body)
-  compute_var_futures(cx)
+  compute_var_futures(cx, node.params)
+  local params, actions = optimize_futures.stat_task_params(cx, node)
   local body = optimize_futures.block(cx, node.body)
 
-  return node { body = body }
+  if #actions > 0 then
+    actions:insertall(body.stats)
+    body = body { stats = actions }
+  end
+
+  return node {
+    params = params,
+    body = body
+  }
 end
 
 function optimize_futures.stat_top(cx, node)
