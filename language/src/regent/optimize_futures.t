@@ -24,8 +24,9 @@ local std = require("regent/std")
 local context = {}
 context.__index = context
 
-function context:new_task_scope()
+function context:new_task_scope(params)
   local cx = {
+    params = params,
     var_flows = {},
     var_futures = {},
   }
@@ -401,6 +402,11 @@ local function compute_var_futures(cx)
       end
     end
   until not changed
+
+  -- Deoptimize task parameters.
+  for _, param in ipairs(cx.params) do
+    var_futures[param.symbol] = false
+  end
 end
 
 local optimize_futures = {}
@@ -1098,9 +1104,23 @@ function optimize_futures.stat_assignment(cx, node)
 end
 
 function optimize_futures.stat_reduce(cx, node)
+  local lhs = node.lhs:map(function(lh) return optimize_futures.expr(cx, lh) end)
+  local rhs = node.rhs:map(function(rh) return optimize_futures.expr(cx, rh) end)
+
+  local normalized_rhs = terralib.newlist()
+  for i, lh in ipairs(lhs) do
+    local rh = rhs[i]
+
+    if std.is_future(std.as_read(lh.expr_type)) then
+      normalized_rhs:insert(rh)
+    else
+      normalized_rhs:insert(concretize(rh))
+    end
+  end
+
   return node {
-    lhs = node.lhs:map(function(lh) return optimize_futures.expr(cx, lh) end),
-    rhs = node.rhs:map(function(rh) return optimize_futures.expr(cx, rh) end),
+    lhs = lhs,
+    rhs = normalized_rhs,
   }
 end
 
@@ -1171,7 +1191,7 @@ function optimize_futures.stat(cx, node)
 end
 
 function optimize_futures.stat_task(cx, node)
-  local cx = cx:new_task_scope()
+  local cx = cx:new_task_scope(node.params)
   analyze_var_flow.block(cx, node.body)
   compute_var_futures(cx)
   local body = optimize_futures.block(cx, node.body)
