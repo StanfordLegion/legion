@@ -27,6 +27,7 @@ task f() : int
   var x = new(ptr(int, r0))
   @x = 5
   __delete(p)
+  __delete(r)
   return @x
 end
 
@@ -47,6 +48,7 @@ task g() : int
   @x = 5
   __delete(p)
   __delete(p0)
+  __delete(r)
   return @x
 end
 
