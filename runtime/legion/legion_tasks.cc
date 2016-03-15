@@ -4514,6 +4514,9 @@ namespace LegionRuntime {
         // them a virtual mapping
         if (regions[idx].virtual_map || regions[idx].privilege_fields.empty())
         {
+          // Make sure no instance created when no access privilege is given
+          if (IS_NO_ACCESS(regions[idx])) continue;
+
           virtual_mapped[idx] = true;
           // Check to see if we already virtually mapped it
           if (virtual_instances.find(idx) != virtual_instances.end())
@@ -5053,6 +5056,9 @@ namespace LegionRuntime {
             // initialized the local contexts and received
             // back the local instance references
           }
+          // Make sure you have the metadata for the region with no access priv
+          if (IS_NO_ACCESS(clone_requirements[idx]))
+            runtime->forest->get_node(clone_requirements[idx].region);
         }
 
         // If we're a leaf task and we have virtual mappings
