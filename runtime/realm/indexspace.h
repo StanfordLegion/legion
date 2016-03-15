@@ -977,30 +977,21 @@ namespace Realm {
       struct CopySrcDstField {
       public:
         CopySrcDstField(void) 
-          : inst(RegionInstance::NO_INST), offset(0), size(0), serdez_id(0) { }
+          : inst(RegionInstance::NO_INST), offset(0), size(0), 
+            field_id(0), serdez_id(0) { }
         CopySrcDstField(RegionInstance i, unsigned o, unsigned s)
-          : inst(i), offset(o), size(s), serdez_id(0) { }
-        CopySrcDstField(RegionInstance i, unsigned o, unsigned s, CustomSerdezID sid)
-          : inst(i), offset(o), size(s), serdez_id(sid) { }
+          : inst(i), offset(o), size(s), field_id(0), serdez_id(0) { }
+        CopySrcDstField(RegionInstance i, unsigned o, unsigned s, unsigned f)
+          : inst(i), offset(o), size(s), field_id(f), serdez_id(0) { }
+        CopySrcDstField(RegionInstance i, unsigned o, unsigned s, 
+                        unsigned f, CustomSerdezID sid)
+          : inst(i), offset(o), size(s), field_id(f), serdez_id(sid) { }
       public:
 	RegionInstance inst;
 	unsigned offset, size;
+        unsigned field_id;
 	CustomSerdezID serdez_id;
       };
-
-#ifdef REALM_USE_LEGION_LAYOUT_CONSTRAINTS
-      struct CopySrcDstFieldInfo {
-      public:
-        CopySrcDstFieldInfo(void)
-          : inst(RegionInstance::NO_INST), field_id(0), serdez_id(0) { }
-        CopySrcDstFieldInfo(RegionInstance i, unsigned fid, CustomSerdezID sid = 0)
-          : inst(i), field_id(fid), serdez_id(sid) { }
-      public:
-        RegionInstance inst;
-        unsigned field_id;
-        CustomSerdezID serdez_id;
-      };
-#endif
 
       Event fill(const std::vector<CopySrcDstField> &dsts,
                  const void *fill_value, size_t fill_value_size,
@@ -1045,19 +1036,6 @@ namespace Realm {
                  const ProfilingRequestSet &reqeusts,
 		 Event wait_on = Event::NO_EVENT,
 		 ReductionOpID redop_id = 0, bool red_fold = false) const;
-
-#ifdef REALM_USE_LEGION_LAYOUT_CONSTRAINTS
-      Event fill(const std::vector<CopySrcDstFieldInfo> &dsts,
-                 const ProfilingRequestSet &requests,
-                 const void *fill_value, size_t fill_value_size,
-                 Event wait_on = Event::NO_EVENT) const;
-
-      Event copy(const std::vector<CopySrcDstFieldInfo>& srcs,
-                 const std::vector<CopySrcDstFieldInfo>& dsts,
-                 const ProfilingRequestSet &requests,
-                 Event wait_on = Event::NO_EVENT,
-                 ReductionOpID redop_id = 0, bool red_fold = false) const;
-#endif
     };
 
     inline std::ostream& operator<<(std::ostream& os, Domain d) 

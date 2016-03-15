@@ -193,8 +193,7 @@ namespace Legion {
       MaterializedView(RegionTreeForest *ctx, DistributedID did,
                        AddressSpaceID owner_proc, AddressSpaceID local_proc,
                        RegionTreeNode *node, InstanceManager *manager,
-                       MaterializedView *parent, bool register_now, 
-                       UniqueID context_uid = 0);
+                       MaterializedView *parent, bool register_now); 
       MaterializedView(const MaterializedView &rhs);
       virtual ~MaterializedView(void);
     public:
@@ -428,7 +427,7 @@ namespace Legion {
       ReductionView(RegionTreeForest *ctx, DistributedID did,
                     AddressSpaceID owner_proc, AddressSpaceID local_proc,
                     RegionTreeNode *node, ReductionManager *manager,
-                    bool register_now, UniqueID context_uid);
+                    bool register_now);
       ReductionView(const ReductionView &rhs);
       virtual ~ReductionView(void);
     public:
@@ -441,8 +440,6 @@ namespace Legion {
                                         const FieldMask &copy_mask,
                                         const VersionInfo &version_info,
                                         const std::set<Event> &preconditions,
-                                        const std::set<Domain> &reduce_domains,
-                                        Event domain_precondition,
                                         Operation *op);
       Event perform_deferred_across_reduction(MaterializedView *target,
                                               FieldID dst_field,
@@ -450,9 +447,7 @@ namespace Legion {
                                               unsigned src_index,
                                        const VersionInfo &version_info,
                                        const std::set<Event> &preconditions,
-                                       const std::set<Domain> &reduce_domains,
-                                       Event domain_precondition,
-                                       Operation *op);
+                                       Operation *op,RegionTreeNode *intersect);
     public:
       virtual bool is_materialized_view(void) const;
       virtual bool is_reduction_view(void) const;
@@ -620,9 +615,6 @@ namespace Legion {
                                    FieldID src_field, FieldID dst_field,
                                    Event dst_precondition,
                                    std::set<Event> &conditions);
-      Event find_component_domains(ReductionView *reduction_view,
-                                   MaterializedView *dst_view,
-                                   std::set<Domain> &component_domains);
     protected:
       void activate_deferred(void);
       void deactivate_deferred(void);
@@ -869,7 +861,6 @@ namespace Legion {
                                std::set<Event> &postconditions);
     public:
       bool intersects_with(RegionTreeNode *dst);
-      const std::set<Domain>& find_intersection_domains(RegionTreeNode *dst);
     public:
       void find_bounding_roots(CompositeView *target, const FieldMask &mask);
       void set_owner_did(DistributedID owner_did);

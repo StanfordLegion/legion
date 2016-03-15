@@ -1898,6 +1898,7 @@ namespace Legion {
       if (Runtime::legion_spy_enabled)
       {
         runtime->forest->log_mapping_decision(unique_op_id, 0/*idx*/,
+                                              requirement,
                                               mapped_instances);
 #ifdef LEGION_SPY
         LegionSpy::log_operation_events(unique_op_id, map_complete_event,
@@ -3018,8 +3019,9 @@ namespace Legion {
                                                  );
         }
         if (Runtime::legion_spy_enabled)
-          runtime->forest->log_mapping_decision(unique_op_id, 
-                                                idx, src_targets);
+          runtime->forest->log_mapping_decision(unique_op_id, idx, 
+                                                src_requirements[idx],
+                                                src_targets);
         // Little bit of a hack here, if we are going to do a reduction
         // explicit copy, switch the privileges to read-write when doing
         // the registration since we know we are using normal instances
@@ -3064,7 +3066,7 @@ namespace Legion {
         }
         if (Runtime::legion_spy_enabled)
           runtime->forest->log_mapping_decision(unique_op_id, 
-                              idx + src_requirements.size(), dst_targets);
+             idx + src_requirements.size(), dst_requirements[idx], dst_targets);
         // Switch the privileges back when we are done
         if (is_reduce_req)
           dst_requirements[idx].privilege = REDUCE;
@@ -4620,6 +4622,7 @@ namespace Legion {
       if (Runtime::legion_spy_enabled)
       {
         runtime->forest->log_mapping_decision(unique_op_id, 0/*idx*/,
+                                              requirement,
                                               chosen_instances);
 #ifdef LEGION_SPY
         LegionSpy::log_operation_events(unique_op_id, close_event, 
@@ -5044,6 +5047,7 @@ namespace Legion {
       if (Runtime::legion_spy_enabled)
       {
         runtime->forest->log_mapping_decision(unique_op_id, 0/*idx*/,
+                                              requirement,
                                               chosen_instances);
 #ifdef LEGION_SPY
         LegionSpy::log_operation_events(unique_op_id, close_event, 
@@ -5589,6 +5593,7 @@ namespace Legion {
       if (Runtime::legion_spy_enabled)
       {
         runtime->forest->log_mapping_decision(unique_op_id, 0/*idx*/,
+                                              requirement,
                                               mapped_instances);
 #ifdef LEGION_SPY
         LegionSpy::log_operation_events(unique_op_id, acquire_complete,
@@ -6152,6 +6157,7 @@ namespace Legion {
       if (Runtime::legion_spy_enabled)
       {
         runtime->forest->log_mapping_decision(unique_op_id, 0/*idx*/,
+                                              requirement,
                                               mapped_instances);
 #ifdef LEGION_SPY
         LegionSpy::log_operation_events(unique_op_id, release_complete,
@@ -9416,6 +9422,7 @@ namespace Legion {
         if (!mapped_instances.empty() && Runtime::legion_spy_enabled)
         {
           runtime->forest->log_mapping_decision(unique_op_id, 0/*idx*/,
+                                                requirement,
                                                 mapped_instances);
 #ifdef LEGION_SPY
           LegionSpy::log_operation_events(unique_op_id, done_event,
@@ -9500,6 +9507,7 @@ namespace Legion {
       if (!mapped_instances.empty() && Runtime::legion_spy_enabled)
       {
         runtime->forest->log_mapping_decision(unique_op_id, 0/*idx*/,
+                                              requirement,
                                               mapped_instances);
 #ifdef LEGION_SPY
         LegionSpy::log_operation_events(unique_op_id, done_event,

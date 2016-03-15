@@ -61,14 +61,10 @@ namespace Legion {
         unsigned index = mask_index_map[idx];
         FieldID fid = field_sizes[index].first;
         field_indexes[fid] = idx;
-#ifdef NEW_INSTANCE_CREATION
-        Domain::CopySrcDstFieldInfo &info = field_infos[idx];
-        info.field_id = fid;
-#else
         Domain::CopySrcDstField &info = field_infos[idx];
         info.offset = offsets[index];
         info.size = field_sizes[index].second;
-#endif
+        info.field_id = fid;
         info.serdez_id = serdez[index];
       }
     }
@@ -686,7 +682,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     InstanceView* PhysicalManager::find_or_create_logical_top_view(
-                                                           UniqueID context_uid)
+                                UniqueID context_uid, VersionInfo *version_info)
     //--------------------------------------------------------------------------
     {
       // See if we've already got it
@@ -697,7 +693,11 @@ namespace Legion {
         std::map<UniqueID,InstanceView*>::const_iterator finder = 
           top_views.find(context_uid);
         if (finder != top_views.end())
+        {
+          if (version_info != NULL)
+            version_info->record_top_view(finder->second, false/*create*/);
           return finder->second;
+        }
         // If we didn't find it, see if someone else is already making it
         std::map<UniqueID,UserEvent>::const_iterator pending_finder = 
           pending_views.find(context_uid);
@@ -725,7 +725,7 @@ namespace Legion {
           runtime->send_create_top_view_request(owner_space, rez);
         }
         else // we're the owner so make the view
-          return create_logical_top_view(context_uid);
+          return create_logical_top_view(context_uid, version_info);
       }
       // Wait for the results
       wait_on.wait();
@@ -734,7 +734,10 @@ namespace Legion {
       // It better be there when this gets triggered
       assert(top_views.find(context_uid) != top_views.end());
 #endif
-      return top_views[context_uid];
+      InstanceView *result = top_views[context_uid];
+      if (version_info != NULL)
+        version_info->record_top_view(result, false/*create*/);
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -940,7 +943,7 @@ namespace Legion {
           runtime->find_distributed_collectable(did));
 #endif
       InstanceView *target_view = 
-        manager->find_or_create_logical_top_view(context_uid);
+        manager->find_or_create_logical_top_view(context_uid, NULL);
       target_view->send_view_base(source);
     }
 
@@ -1093,7 +1096,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    InstanceView* InstanceManager::create_logical_top_view(UniqueID ctx_uid)
+    InstanceView* InstanceManager::create_logical_top_view(UniqueID ctx_uid,
+                                                      VersionInfo *version_info)
     //--------------------------------------------------------------------------
     {
       DistributedID view_did = 
@@ -1103,8 +1107,10 @@ namespace Legion {
                                                 context->runtime->address_space,
                                                 region_node, this,
                                             ((MaterializedView*)NULL/*parent*/),
-                                                true/*register now*/,
-                                                ctx_uid);
+                                                true/*register now*/);
+      if (version_info != NULL)
+        version_info->record_top_view(result, true/*create*/);
+      register_logical_top_view(ctx_uid, result);
       return result;
     }
 
@@ -1454,7 +1460,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     InstanceView* ReductionManager::create_logical_top_view(
-                                                           UniqueID context_uid)
+                                UniqueID context_uid, VersionInfo *version_info)
     //--------------------------------------------------------------------------
     {
       DistributedID view_did = 
@@ -1462,8 +1468,10 @@ namespace Legion {
       ReductionView *result = legion_new<ReductionView>(context, view_did,
                                                 context->runtime->address_space,
                                                 context->runtime->address_space,
-                                                region_node, this, 
-                                                true/*reg*/, context_uid);
+                                                region_node, this, true/*reg*/);
+      if (version_info != NULL)
+        version_info->record_top_view(result, true/*create*/);
+      register_logical_top_view(context_uid, result);
       return result;
     }
 
@@ -1583,33 +1591,24 @@ namespace Legion {
       // Assume that it's all the fields for right now
       // but offset by the pointer size
       fields.push_back(
-          Domain::CopySrcDstField(instance, sizeof(ptr_t), op->sizeof_rhs));
+          Domain::CopySrcDstField(instance, sizeof(ptr_t), 
+                                  op->sizeof_rhs, logical_field));
     }
 
     //--------------------------------------------------------------------------
     Event ListReductionManager::issue_reduction(Operation *op,
         const std::vector<Domain::CopySrcDstField> &src_fields,
         const std::vector<Domain::CopySrcDstField> &dst_fields,
-        Domain space, Event precondition, bool reduction_fold, bool precise)
+        RegionTreeNode *dst, Event precondition, bool reduction_fold, 
+        bool precise, RegionTreeNode *intersect)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
       assert(instance.exists());
 #endif
-      if (precise)
-      {
-        Domain::CopySrcDstField idx_field(instance, 0/*offset*/, sizeof(ptr_t));
-        return context->issue_indirect_copy(space, op, idx_field, redop, 
-                                            reduction_fold, src_fields, 
-                                            dst_fields, precondition);
-      }
-      else
-      {
-        // TODO: teach the low-level runtime how to issue
-        // partial reduction copies from a given space
-        assert(false);
-        return Event::NO_EVENT;
-      }
+      // TODO: use the "new" Realm interface for list instances
+      assert(false);
+      return Event::NO_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -1763,22 +1762,24 @@ namespace Legion {
       // Assume that its all the fields for now
       // until we find a different way to do reductions on a subset of fields
       fields.push_back(
-          Domain::CopySrcDstField(instance, 0/*offset*/, op->sizeof_rhs));
+          Domain::CopySrcDstField(instance, 0/*offset*/, 
+                                  op->sizeof_rhs, logical_field));
     }
 
     //--------------------------------------------------------------------------
     Event FoldReductionManager::issue_reduction(Operation *op,
         const std::vector<Domain::CopySrcDstField> &src_fields,
         const std::vector<Domain::CopySrcDstField> &dst_fields,
-        Domain space, Event precondition, bool reduction_fold, bool precise)
+        RegionTreeNode *dst, Event precondition, bool reduction_fold, 
+        bool precise, RegionTreeNode *intersect)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
       assert(instance.exists());
 #endif
       // Doesn't matter if this one is precise or not
-      return context->issue_reduction_copy(space, op, redop, reduction_fold,
-                                         src_fields, dst_fields, precondition);
+      return dst->issue_copy(op, src_fields, dst_fields, precondition, 
+                             intersect, redop, reduction_fold);
     }
 
     //--------------------------------------------------------------------------
@@ -1970,7 +1971,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    InstanceView* VirtualManager::create_logical_top_view(UniqueID context_uid)
+    InstanceView* VirtualManager::create_logical_top_view(UniqueID context_uid,
+                                                      VersionInfo *version_info)
     //--------------------------------------------------------------------------
     {
       // should never be called

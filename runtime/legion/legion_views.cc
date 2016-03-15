@@ -224,8 +224,7 @@ namespace Legion {
                                RegionTreeForest *ctx, DistributedID did,
                                AddressSpaceID own_addr, AddressSpaceID loc_addr,
                                RegionTreeNode *node, InstanceManager *man,
-                               MaterializedView *par, bool register_now, 
-                               UniqueID context_uid)
+                               MaterializedView *par, bool register_now) 
       : InstanceView(ctx, did, own_addr, loc_addr, node, register_now), 
         manager(man), parent(par)
     //--------------------------------------------------------------------------
@@ -240,11 +239,7 @@ namespace Legion {
         add_nested_resource_ref(did);
       else 
       {
-#ifdef DEBUG_HIGH_LEVEL
-        assert(context_uid != 0);
-#endif
         manager->add_nested_resource_ref(did);
-        manager->register_logical_top_view(context_uid, this);
         // Do remote registration for the top of each remote tree
         if (!is_owner())
         {
@@ -2485,8 +2480,7 @@ namespace Legion {
                                       did, owner_space, runtime->address_space,
                                       target_node, inst_manager, 
                                       (MaterializedView*)NULL/*parent*/,
-                                      false/*don't register yet*/,
-                                      context_uid);
+                                      false/*don't register yet*/);
       if (!target_node->register_logical_view(new_view))
       {
         if (new_view->remove_base_resource_ref(REMOTE_DID_REF))
@@ -2496,6 +2490,7 @@ namespace Legion {
       {
         new_view->register_with_runtime();
         new_view->update_remote_instances(source);
+        inst_manager->register_logical_top_view(context_uid, new_view);
       }
     }
 
@@ -2713,17 +2708,11 @@ namespace Legion {
         for (std::set<ReductionView*>::const_iterator it = 
               epoch.views.begin(); it != epoch.views.end(); it++)
         {
-          std::set<Domain> component_domains;
-          Event dom_pre = find_component_domains(*it, dst, component_domains);
-          if (!component_domains.empty())
-          {
-            Event result = (*it)->perform_deferred_reduction(dst,
+          Event result = (*it)->perform_deferred_reduction(dst,
                                     epoch.valid_fields, info.version_info, 
-                                    preconditions, component_domains, 
-                                    dom_pre, info.op);
-            if (result.exists())
-              postconditions.insert(result);
-          }
+                                    preconditions, info.op);
+          if (result.exists())
+            postconditions.insert(result);
         }
         // Merge the post-conditions together and add them to results
         Event result = Runtime::merge_events<false>(postconditions);
@@ -2767,18 +2756,12 @@ namespace Legion {
                 epoch.views.begin(); it != epoch.views.end(); it++)
           {
             // Get the domains for this reduction view
-            std::set<Domain> component_domains;
-            Event dom_pre = find_component_domains(*it, dst, component_domains);
-            if (!component_domains.empty())
-            {
-              Event result = (*it)->perform_deferred_across_reduction(dst,
+            Event result = (*it)->perform_deferred_across_reduction(dst,
                                               dst_field, src_field, src_index,
-                                              info.version_info,
-                                              preconditions, component_domains,
-                                              dom_pre, info.op);
-              if (result.exists())
-                postconditions.insert(result);
-            }
+                                              info.version_info, preconditions,
+                                              info.op, logical_node);
+            if (result.exists())
+              postconditions.insert(result);
           }
           // Merge the postconditions
           Event result = Runtime::merge_events<false>(postconditions);
@@ -2789,27 +2772,6 @@ namespace Legion {
           }
         }
       }
-    }
-
-    //--------------------------------------------------------------------------
-    Event DeferredView::find_component_domains(ReductionView *reduction_view,
-                                               MaterializedView *dst_view,
-                                            std::set<Domain> &component_domains)
-    //--------------------------------------------------------------------------
-    {
-      Event result = Event::NO_EVENT;
-      if (dst_view->logical_node == reduction_view->logical_node)
-      {
-        if (dst_view->logical_node->has_component_domains())
-          component_domains = 
-            dst_view->logical_node->get_component_domains(result);
-        else
-          component_domains.insert(dst_view->logical_node->get_domain(result));
-      }
-      else
-        component_domains = dst_view->logical_node->get_intersection_domains(
-                                                reduction_view->logical_node);
-      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -4198,10 +4160,10 @@ namespace Legion {
             
             // Now we have our preconditions so we can issue our copy
             LegionMap<Event,FieldMask>::aligned update_postconditions;
-            RegionTreeNode::issue_grouped_copies(context, info, dst, 
-                         update_preconditions, update_mask, Event::NO_EVENT,
-                         find_intersection_domains(dst->logical_node),
-                         src_instances,src_info,update_postconditions,tracker);
+            logical_node->issue_grouped_copies(info, dst, 
+                         update_preconditions, update_mask,
+                         src_instances, src_info, update_postconditions,
+                         tracker, dst->logical_node);
             // If we dominate the target, then we can remove
             // the update_mask fields from the traversal_mask
             if (dominates(dst->logical_node))
@@ -4334,15 +4296,8 @@ namespace Legion {
             std::vector<Domain::CopySrcDstField> src_fields, dst_fields;
             src->copy_field(src_field, src_fields);
             dst->copy_field(dst_field, dst_fields);
-            const std::set<Domain> &overlap_domains = 
-              find_intersection_domains(dst->logical_node);
-            for (std::set<Domain>::const_iterator it = overlap_domains.begin();
-                  it != overlap_domains.end(); it++)
-            {
-              result_events.insert(context->issue_copy(*it, info.op, src_fields,
-                                                       dst_fields, copy_pre));
-            }
-            Event copy_post = Runtime::merge_events<false>(result_events);
+            Event copy_post = logical_node->issue_copy(info.op, src_fields, 
+                                  dst_fields, copy_pre, dst->logical_node);
             if (copy_post.exists())
             {
               // Only need to record the source user as the destination
@@ -4402,14 +4357,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return logical_node->intersects_with(dst);
-    }
-
-    //--------------------------------------------------------------------------
-    const std::set<Domain>& CompositeNode::find_intersection_domains(
-                                                            RegionTreeNode *dst)
-    //--------------------------------------------------------------------------
-    {
-      return logical_node->get_intersection_domains(dst);
     }
 
     //--------------------------------------------------------------------------
@@ -5145,36 +5092,9 @@ namespace Legion {
         dst->copy_to(pre_set.set_mask, dst_fields);
         Event fill_pre = Runtime::merge_events<false>(pre_set.preconditions);
         // Issue the fill commands
-        Event fill_post;
-        if (dst->logical_node->has_component_domains())
-        {
-          std::set<Event> post_events; 
-          Event dom_pre;
-          const std::set<Domain> &fill_domains = 
-            dst->logical_node->get_component_domains(dom_pre);
-          if (dom_pre.exists())
-            fill_pre = Runtime::merge_events<false>(fill_pre, dom_pre);
-          UniqueID op_id = (info.op == NULL) ? 0 : info.op->get_unique_op_id();
-          for (std::set<Domain>::const_iterator it = fill_domains.begin();
-                it != fill_domains.end(); it++)
-          {
-            post_events.insert(context->issue_fill(*it, op_id,
-                                                   dst_fields, value->value,
-                                                   value->value_size,fill_pre));
-          }
-          fill_post = Runtime::merge_events<false>(post_events);
-        }
-        else
-        {
-          Event dom_pre;
-          const Domain &dom = dst->logical_node->get_domain(dom_pre);
-          if (dom_pre.exists())
-            fill_pre = Runtime::merge_events<false>(fill_pre, dom_pre);
-          UniqueID op_id = (info.op == NULL) ? 0 : info.op->get_unique_op_id();
-          fill_post = context->issue_fill(dom, op_id, dst_fields,
-                                          value->value, value->value_size, 
-                                          fill_pre);
-        }
+        Event fill_post = logical_node->issue_fill(info.op, dst_fields,
+                                          value->value, value->value_size,
+                                          fill_pre, NULL/*intersect*/);
         // Now see if there are any reductions to apply
         FieldMask reduce_overlap = reduction_mask & pre_set.set_mask;
         if (!!reduce_overlap)
@@ -5238,40 +5158,22 @@ namespace Legion {
         std::vector<Domain::CopySrcDstField> dst_fields;
         dst->copy_to(pre_set.set_mask, dst_fields);
         Event fill_pre = Runtime::merge_events<false>(pre_set.preconditions);
-        // Issue the fill commands
-        Event fill_post;
-        if (dst->logical_node->has_component_domains())
-        {
-          std::set<Event> post_events; 
-          Event dom_pre;
-          const std::set<Domain> &fill_domains = 
-            dst->logical_node->get_component_domains(dom_pre);
-          if (dom_pre.exists())
-            fill_pre = Runtime::merge_events<false>(fill_pre, dom_pre);
-          UniqueID op_id = (info.op == NULL) ? 0 : info.op->get_unique_op_id();
-          for (std::set<Domain>::const_iterator it = fill_domains.begin();
-                it != fill_domains.end(); it++)
-          {
-            post_events.insert(context->issue_fill(*it, op_id, dst_fields,
-                                                   value->value, 
-                                                   value->value_size,fill_pre));
-          }
-          fill_post = Runtime::merge_events<false>(post_events);
-        }
-        else
-        {
-          Event dom_pre;
-          const Domain &dom = dst->logical_node->get_domain(dom_pre);
-          if (dom_pre.exists())
-            fill_pre = Runtime::merge_events<false>(fill_pre, dom_pre);
-          UniqueID op_id = (info.op == NULL) ? 0 : info.op->get_unique_op_id();
-          fill_post = context->issue_fill(dom, op_id, dst_fields,
-                                          value->value, value->value_size, 
-                                          fill_pre);
-        }
+        Event fill_post = dst->logical_node->issue_fill(info.op, dst_fields,
+                                                value->value, value->value_size,
+                                                fill_pre, NULL/*intersect*/);
         FieldMask reduce_overlap = reduction_mask & pre_set.set_mask;
         if (!!reduce_overlap)
-          flush_reductions(info, dst, reduce_overlap, postconditions);
+        {
+          // See if we have any reductions to flush
+          LegionMap<Event,FieldMask>::aligned reduce_conditions;
+          if (fill_post.exists())
+            reduce_conditions[fill_post] = pre_set.set_mask;
+          flush_reductions(info, dst, reduce_overlap, reduce_conditions);
+          postconditions.insert(reduce_conditions.begin(),
+                                reduce_conditions.end());
+        }
+        else if (fill_post.exists())
+          postconditions[fill_post] = pre_set.set_mask;
       }
     }
 
@@ -5287,18 +5189,9 @@ namespace Legion {
       std::vector<Domain::CopySrcDstField> dst_fields;   
       dst->copy_field(dst_field, dst_fields);
       // Issue the copy to the low-level runtime and get back the event
-      std::set<Event> post_events;
-      const std::set<Domain> &overlap_domains = 
-        logical_node->get_intersection_domains(dst->logical_node);
-      UniqueID op_id = (info.op == NULL) ? 0 : info.op->get_unique_op_id();
-      for (std::set<Domain>::const_iterator it = overlap_domains.begin();
-            it != overlap_domains.end(); it++)
-      {
-        post_events.insert(context->issue_fill(*it, op_id, dst_fields,
-                                              value->value, value->value_size, 
-                                              precondition));
-      }
-      Event post_event = Runtime::merge_events<false>(post_events); 
+      Event post_event = logical_node->issue_fill(info.op, dst_fields,
+                                     value->value, value->value_size,
+                                     precondition, dst->logical_node);
       // If we're going to issue a reduction then we can just flush reductions
       // and the precondition will translate naturally
       if (!!reduction_mask)
@@ -5347,7 +5240,7 @@ namespace Legion {
     ReductionView::ReductionView(RegionTreeForest *ctx, DistributedID did,
                                  AddressSpaceID own_sp, AddressSpaceID loc_sp,
                                  RegionTreeNode *node, ReductionManager *man,
-                                 bool register_now, UniqueID context_uid)
+                                 bool register_now)
       : InstanceView(ctx, did, own_sp, loc_sp, node, register_now), manager(man)
     //--------------------------------------------------------------------------
     {
@@ -5355,7 +5248,6 @@ namespace Legion {
       assert(manager != NULL);
 #endif
       manager->add_nested_resource_ref(did);
-      manager->register_logical_top_view(context_uid, this);
       if (!is_owner())
       {
         add_base_resource_ref(REMOTE_DID_REF);
@@ -5445,38 +5337,10 @@ namespace Legion {
         event_preconds.insert(it->first);
       }
       Event reduce_pre = Runtime::merge_events<false>(event_preconds); 
-#ifdef LEGION_SPY
-      IndexSpace reduce_index_space;
-#endif
-      Event reduce_post; 
-      if (logical_node->has_component_domains())
-      {
-        std::set<Event> post_events;
-        Event dom_pre;
-        const std::set<Domain> &component_domains = 
-          logical_node->get_component_domains(dom_pre);
-        if (dom_pre.exists())
-          reduce_pre = Runtime::merge_events<false>(reduce_pre, dom_pre);
-        for (std::set<Domain>::const_iterator it = 
-              component_domains.begin(); it != component_domains.end(); it++)
-        {
-          Event post = manager->issue_reduction(op, src_fields, dst_fields,
-                                                *it, reduce_pre, fold, 
-                                                true/*precise*/);
-          post_events.insert(post);
-        }
-        reduce_post = Runtime::merge_events<false>(post_events);
-      }
-      else
-      {
-        Event dom_pre;
-        Domain domain = logical_node->get_domain(dom_pre);
-        if (dom_pre.exists())
-          reduce_pre = Runtime::merge_events<false>(reduce_pre, dom_pre);
-        reduce_post = manager->issue_reduction(op, src_fields, dst_fields,
-                                               domain, reduce_pre, fold,
-                                               true/*precise*/);
-      }
+      Event reduce_post = manager->issue_reduction(op, src_fields, dst_fields,
+                                                   logical_node, reduce_pre,
+                                                   fold, true/*precise*/,
+                                                   NULL/*intersect*/);
       target->add_copy_user(manager->redop, reduce_post, version_info,
                             reduce_mask, false/*reading*/);
       this->add_copy_user(manager->redop, reduce_post, version_info,
@@ -5490,8 +5354,6 @@ namespace Legion {
                                                     const FieldMask &red_mask,
                                                 const VersionInfo &version_info,
                                                     const std::set<Event> &pre,
-                                         const std::set<Domain> &reduce_domains,
-                                                    Event dom_precondition,
                                                     Operation *op)
     //--------------------------------------------------------------------------
     {
@@ -5509,24 +5371,16 @@ namespace Legion {
       find_copy_preconditions(manager->redop, true/*reading*/,
                               red_mask, version_info, src_pre);
       std::set<Event> preconditions = pre;
-      if (dom_precondition.exists())
-        preconditions.insert(dom_precondition);
       for (LegionMap<Event,FieldMask>::aligned::const_iterator it = 
             src_pre.begin(); it != src_pre.end(); it++)
       {
         preconditions.insert(it->first);
       }
       Event reduce_pre = Runtime::merge_events<false>(preconditions); 
-      std::set<Event> post_events;
-      for (std::set<Domain>::const_iterator it = reduce_domains.begin();
-            it != reduce_domains.end(); it++)
-      {
-        Event post = manager->issue_reduction(op, src_fields, dst_fields,
-                                              *it, reduce_pre, fold,
-                                              false/*precise*/);
-        post_events.insert(post);
-      }
-      Event reduce_post = Runtime::merge_events<false>(post_events);
+      Event reduce_post = target->logical_node->issue_copy(op,
+                                            src_fields, dst_fields,
+                                            reduce_pre, NULL/*intersect*/,
+                                            manager->redop, fold);
       // No need to add the user to the destination as that will
       // be handled by the caller using the reduce post event we return
       add_copy_user(manager->redop, reduce_post, version_info,
@@ -5540,8 +5394,7 @@ namespace Legion {
                               FieldID src_field, unsigned src_index, 
                               const VersionInfo &version_info,
                               const std::set<Event> &preconds,
-                              const std::set<Domain> &reduce_domains,
-                              Event dom_precondition, Operation *op)
+                              Operation *op, RegionTreeNode *intersect)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_PERF
@@ -5560,24 +5413,16 @@ namespace Legion {
       find_copy_preconditions(manager->redop, true/*reading*/,
                               red_mask, version_info, src_pre);
       std::set<Event> preconditions = preconds;
-      if (dom_precondition.exists())
-        preconditions.insert(dom_precondition);
       for (LegionMap<Event,FieldMask>::aligned::const_iterator it = 
             src_pre.begin(); it != src_pre.end(); it++)
       {
         preconditions.insert(it->first);
       }
       Event reduce_pre = Runtime::merge_events<false>(preconditions); 
-      std::set<Event> post_events;
-      for (std::set<Domain>::const_iterator it = reduce_domains.begin();
-            it != reduce_domains.end(); it++)
-      {
-        Event post = manager->issue_reduction(op, src_fields, dst_fields,
-                                              *it, reduce_pre, fold,
-                                              false/*precise*/);
-        post_events.insert(post);
-      }
-      Event reduce_post = Runtime::merge_events<false>(post_events);
+      Event reduce_post = manager->issue_reduction(op, src_fields, dst_fields,
+                                                   intersect, reduce_pre,
+                                                   fold, false/*precise*/,
+                                                   target->logical_node);
       // No need to add the user to the destination as that will
       // be handled by the caller using the reduce post event we return
       add_copy_user(manager->redop, reduce_post, version_info,
@@ -6355,7 +6200,7 @@ namespace Legion {
       ReductionView *new_view = legion_new<ReductionView>(runtime->forest,
                                    did, owner_space, runtime->address_space,
                                    target_node, red_manager,
-                                   false/*don't register yet*/, context_uid);
+                                   false/*don't register yet*/);
       if (!target_node->register_logical_view(new_view))
       {
         if (new_view->remove_base_resource_ref(REMOTE_DID_REF))
@@ -6365,6 +6210,7 @@ namespace Legion {
       {
         new_view->register_with_runtime();
         new_view->update_remote_instances(source);
+        red_manager->register_logical_top_view(context_uid, new_view);
       }
     }
 

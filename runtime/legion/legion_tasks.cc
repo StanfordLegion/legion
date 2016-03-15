@@ -1889,6 +1889,7 @@ namespace Legion {
           } 
           if (Runtime::legion_spy_enabled)
             runtime->forest->log_mapping_decision(unique_op_id, *it,
+                                                  regions[*it],
                                                   chosen_instances);
           if (!Runtime::unsafe_mapper)
           {
@@ -4866,6 +4867,7 @@ namespace Legion {
         } 
         if (Runtime::legion_spy_enabled)
           runtime->forest->log_mapping_decision(unique_op_id, idx,
+                                                regions[idx],
                                                 physical_instances[idx]);
         // Skip checks if the mapper promises it is safe
         if (Runtime::unsafe_mapper)

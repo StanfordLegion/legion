@@ -376,6 +376,7 @@ namespace Legion {
                                std::vector<PhysicalManager*> &unacquired,
                                const bool do_acquire_checks);
       void log_mapping_decision(UniqueID uid, unsigned index,
+                                const RegionRequirement &req,
                                 const InstanceSet &targets);
     protected: // helper method for the above two methods
       void perform_missing_acquires(
@@ -491,26 +492,6 @@ namespace Legion {
       FatTreePath* compute_full_fat_path(IndexSpaceNode *node);
       FatTreePath* compute_full_fat_path(IndexPartNode *node);
     public:
-      // Interfaces to the low-level runtime
-      Event issue_copy(const Domain &dom, Operation *op,
-                       const std::vector<Domain::CopySrcDstField> &src_fields,
-                       const std::vector<Domain::CopySrcDstField> &dst_fields,
-                       Event precondition = Event::NO_EVENT);
-      Event issue_fill(const Domain &dom, UniqueID uid,
-                       const std::vector<Domain::CopySrcDstField> &dst_fields,
-                       const void *fill_value, size_t fill_size,
-                       Event precondition = Event::NO_EVENT);
-      Event issue_reduction_copy(const Domain &dom, Operation *op,
-                       ReductionOpID redop, bool reduction_fold,
-                       const std::vector<Domain::CopySrcDstField> &src_fields,
-                       const std::vector<Domain::CopySrcDstField> &dst_fields,
-                       Event precondition = Event::NO_EVENT);
-      Event issue_indirect_copy(const Domain &dom, Operation *op,
-                       const Domain::CopySrcDstField &idx,
-                       ReductionOpID redop, bool reduction_fold,
-                       const std::vector<Domain::CopySrcDstField> &src_fields,
-                       const std::vector<Domain::CopySrcDstField> &dst_fields,
-                       Event precondition = Event::NO_EVENT);
 #ifdef NEW_INSTANCE_CREATION
       Event create_instance(const Domain &dom, Memory target,
                             const std::vector<std::pair<FieldID,size_t> > &fids,
@@ -791,8 +772,13 @@ namespace Legion {
       virtual void send_node(AddressSpaceID target, bool up, bool down) = 0;
     public:
       virtual bool is_index_space_node(void) const = 0;
+#ifdef DEBUG_HIGH_LEVEL
       virtual IndexSpaceNode* as_index_space_node(void) = 0;
       virtual IndexPartNode* as_index_part_node(void) = 0;
+#else
+      inline IndexSpaceNode* as_index_space_node(void);
+      inline IndexPartNode* as_index_part_node(void);
+#endif
       virtual AddressSpaceID get_owner_space(void) const = 0;
     public:
       void attach_semantic_information(SemanticTag tag, AddressSpaceID source,
@@ -886,8 +872,10 @@ namespace Legion {
       void operator delete(void *ptr);
     public:
       virtual bool is_index_space_node(void) const;
+#ifdef DEBUG_HIGH_LEVEL
       virtual IndexSpaceNode* as_index_space_node(void);
       virtual IndexPartNode* as_index_part_node(void);
+#endif
       virtual AddressSpaceID get_owner_space(void) const;
       static AddressSpaceID get_owner_space(IndexSpace handle, Runtime *rt);
     public:
@@ -1042,8 +1030,10 @@ namespace Legion {
       void operator delete(void *ptr);
     public:
       virtual bool is_index_space_node(void) const;
+#ifdef DEBUG_HIGH_LEVEL
       virtual IndexSpaceNode* as_index_space_node(void);
       virtual IndexPartNode* as_index_part_node(void);
+#endif
       virtual AddressSpaceID get_owner_space(void) const;
       static AddressSpaceID get_owner_space(IndexPartition handle, Runtime *rt);
     public:
@@ -1557,24 +1547,19 @@ namespace Legion {
                  LegionMap<MaterializedView*,FieldMask>::aligned &src_instances,
                LegionMap<DeferredView*,FieldMask>::aligned &deferred_instances);
       // Issue copies for fields with the same event preconditions
-      static void issue_grouped_copies(RegionTreeForest *context,
-                                       const TraversalInfo &info,
-                                       MaterializedView *dst,
-                             LegionMap<Event,FieldMask>::aligned &preconditions,
-                                       const FieldMask &update_mask,
-                                       Event copy_domains_precondition,
-                                       const std::set<Domain> &copy_domains,
+      void issue_grouped_copies(const TraversalInfo &info,
+                                MaterializedView *dst,
+                      LegionMap<Event,FieldMask>::aligned &preconditions,
+                                const FieldMask &update_mask,
            const LegionMap<MaterializedView*,FieldMask>::aligned &src_instances,
-                                       const VersionInfo &src_version_info,
-                           LegionMap<Event,FieldMask>::aligned &postconditions,
-                                       CopyTracker *tracker = NULL);
+                                const VersionInfo &src_version_info,
+                      LegionMap<Event,FieldMask>::aligned &postconditions,
+                                CopyTracker *tracker = NULL,
+                                RegionTreeNode *intersect = NULL);
       // Note this function can mutate the preconditions set
       static void compute_event_sets(FieldMask update_mask,
           const LegionMap<Event,FieldMask>::aligned &preconditions,
           LegionList<EventSet>::aligned &event_sets);
-      Event perform_copy_operation(Operation *op, Event precondition,
-                        const std::vector<Domain::CopySrcDstField> &src_fields,
-                        const std::vector<Domain::CopySrcDstField> &dst_fields);
       void issue_update_reductions(LogicalView *target,
                                    const FieldMask &update_mask,
                                    const VersionInfo &version_info,
@@ -1611,13 +1596,15 @@ namespace Legion {
           const LegionMap<ColorPoint,FieldMask>::aligned &children,
           FieldMask &complete_fields);
       InstanceView* convert_reference(const InstanceRef &ref, 
-                                      UniqueID ctx_uid) const;
+                     UniqueID ctx_uid, VersionInfo &version_info) const;
       CompositeView* convert_reference(const InstanceRef &ref) const;
       void convert_target_views(const InstanceSet &targets, UniqueID ctx_uid,
-                                std::vector<InstanceView*> &target_views); 
+                                std::vector<InstanceView*> &target_views,
+                                VersionInfo &version_info); 
       // I hate the container problem, same as previous except MaterializedView
       void convert_target_views(const InstanceSet &targets, UniqueID ctx_uid,
-                                std::vector<MaterializedView*> &target_views);
+                                std::vector<MaterializedView*> &target_views,
+                                VersionInfo &version_info);
     public:
       bool register_logical_view(LogicalView *view);
       void unregister_logical_view(LogicalView *view);
@@ -1637,28 +1624,37 @@ namespace Legion {
       virtual RegionTreeNode* get_tree_child(const ColorPoint &c) = 0; 
       virtual void instantiate_children(void) = 0;
       virtual bool is_region(void) const = 0;
+#ifdef DEBUG_HIGH_LEVEL
       virtual RegionNode* as_region_node(void) const = 0;
       virtual PartitionNode* as_partition_node(void) const = 0;
+#else
+      inline RegionNode* as_region_node(void) const;
+      inline PartitionNode* as_partition_node(void) const;
+#endif
       virtual bool visit_node(PathTraverser *traverser) = 0;
       virtual bool visit_node(NodeTraverser *traverser) = 0;
       virtual AddressSpaceID get_owner_space(void) const = 0;
     public:
+      // Interfaces to Realm
+      virtual Event issue_copy(Operation *op,
+                  const std::vector<Domain::CopySrcDstField> &src_fields,
+                  const std::vector<Domain::CopySrcDstField> &dst_fields,
+                  Event precondition, RegionTreeNode *intersect = NULL,
+                  ReductionOpID redop = 0, bool reduction_fold = true) = 0;
+      virtual Event issue_fill(Operation *op,
+                  const std::vector<Domain::CopySrcDstField> &dst_fields,
+                  const void *fill_value, size_t fill_size,
+                  Event precondition, RegionTreeNode *intersect = NULL) = 0;
+    public:
       virtual bool are_children_disjoint(const ColorPoint &c1, 
                                          const ColorPoint &c2) = 0;
       virtual bool are_all_children_disjoint(void) = 0;
-      virtual bool has_component_domains(void) const = 0;
-      virtual const std::set<Domain>&
-                        get_component_domains_blocking(void) const = 0;
-      virtual const std::set<Domain>& 
-                        get_component_domains(Event &ready) const = 0;
       virtual const Domain& get_domain_blocking(void) const = 0;
       virtual const Domain& get_domain(Event &precondition) const = 0;
       virtual const Domain& get_domain_no_wait(void) const = 0;
       virtual bool is_complete(void) = 0;
       virtual bool intersects_with(RegionTreeNode *other) = 0;
       virtual bool dominates(RegionTreeNode *other) = 0;
-      virtual const std::set<Domain>& 
-                      get_intersection_domains(RegionTreeNode *other) = 0;
     public:
       virtual size_t get_num_children(void) const = 0;
       virtual InterCloseOp* create_close_op(Operation *creator, 
@@ -1767,29 +1763,36 @@ namespace Legion {
       virtual RegionTreeID get_tree_id(void) const;
       virtual RegionTreeNode* get_parent(void) const;
       virtual RegionTreeNode* get_tree_child(const ColorPoint &c);
+    public:
+      virtual Event issue_copy(Operation *op,
+                  const std::vector<Domain::CopySrcDstField> &src_fields,
+                  const std::vector<Domain::CopySrcDstField> &dst_fields,
+                  Event precondition, RegionTreeNode *intersect = NULL,
+                  ReductionOpID redop = 0, bool reduction_fold = true);
+      virtual Event issue_fill(Operation *op,
+                  const std::vector<Domain::CopySrcDstField> &dst_fields,
+                  const void *fill_value, size_t fill_size,
+                  Event precondition, RegionTreeNode *intersect = NULL);
+    public:
       virtual bool are_children_disjoint(const ColorPoint &c1, 
                                          const ColorPoint &c2);
       virtual bool are_all_children_disjoint(void);
       virtual void instantiate_children(void);
       virtual bool is_region(void) const;
+#ifdef DEBUG_HIGH_LEVEL
       virtual RegionNode* as_region_node(void) const;
       virtual PartitionNode* as_partition_node(void) const;
+#endif
       virtual AddressSpaceID get_owner_space(void) const;
       static AddressSpaceID get_owner_space(LogicalRegion handle, Runtime *rt);
       virtual bool visit_node(PathTraverser *traverser);
       virtual bool visit_node(NodeTraverser *traverser);
-      virtual bool has_component_domains(void) const;
-      virtual const std::set<Domain>& 
-                                     get_component_domains_blocking(void) const;
-      virtual const std::set<Domain>& get_component_domains(Event &ready) const;
       virtual const Domain& get_domain_blocking(void) const;
       virtual const Domain& get_domain(Event &precondition) const;
       virtual const Domain& get_domain_no_wait(void) const;
       virtual bool is_complete(void);
       virtual bool intersects_with(RegionTreeNode *other);
       virtual bool dominates(RegionTreeNode *other);
-      virtual const std::set<Domain>& 
-                                get_intersection_domains(RegionTreeNode *other);
       virtual size_t get_num_children(void) const;
       virtual InterCloseOp* create_close_op(Operation *creator, 
                                             const FieldMask &closing_mask,
@@ -1885,12 +1888,13 @@ namespace Legion {
       Event detach_file(ContextID ctx, DetachOp *detach_op, 
                         VersionInfo &version_info, const InstanceRef &ref);
       InstanceView* convert_reference_region(PhysicalManager *manager, 
-                                             UniqueID ctx_uid) const;
+                 UniqueID ctx_uid, VersionInfo *version_info) const;
       CompositeView* convert_view_region(CompositeView *view) const;
       void convert_references_region(
                               const std::vector<PhysicalManager*> &managers,
                               std::vector<bool> &up_mask, UniqueID ctx_uid,
-                              std::vector<InstanceView*> &results) const;
+                              std::vector<InstanceView*> &results,
+                              VersionInfo *version_info) const;
     public:
       const LogicalRegion handle;
       PartitionNode *const parent;
@@ -1937,30 +1941,37 @@ namespace Legion {
       virtual RegionTreeID get_tree_id(void) const;
       virtual RegionTreeNode* get_parent(void) const;
       virtual RegionTreeNode* get_tree_child(const ColorPoint &c);
+    public:
+      virtual Event issue_copy(Operation *op,
+                  const std::vector<Domain::CopySrcDstField> &src_fields,
+                  const std::vector<Domain::CopySrcDstField> &dst_fields,
+                  Event precondition, RegionTreeNode *intersect = NULL,
+                  ReductionOpID redop = 0, bool reduction_fold = true);
+      virtual Event issue_fill(Operation *op,
+                  const std::vector<Domain::CopySrcDstField> &dst_fields,
+                  const void *fill_value, size_t fill_size,
+                  Event precondition, RegionTreeNode *intersect = NULL);
+    public:
       virtual bool are_children_disjoint(const ColorPoint &c1, 
                                          const ColorPoint &c2);
       virtual bool are_all_children_disjoint(void);
       virtual void instantiate_children(void);
       virtual bool is_region(void) const;
+#ifdef DEBUG_HIGH_LEVEL
       virtual RegionNode* as_region_node(void) const;
       virtual PartitionNode* as_partition_node(void) const;
+#endif
       virtual AddressSpaceID get_owner_space(void) const;
       static AddressSpaceID get_owner_space(LogicalPartition handle, 
                                             Runtime *runtime);
       virtual bool visit_node(PathTraverser *traverser);
       virtual bool visit_node(NodeTraverser *traverser);
-      virtual bool has_component_domains(void) const;
-      virtual const std::set<Domain>& 
-                                     get_component_domains_blocking(void) const;
-      virtual const std::set<Domain>& get_component_domains(Event &ready) const;
       virtual const Domain& get_domain_blocking(void) const;
       virtual const Domain& get_domain(Event &precondition) const;
       virtual const Domain& get_domain_no_wait(void) const;
       virtual bool is_complete(void);
       virtual bool intersects_with(RegionTreeNode *other);
       virtual bool dominates(RegionTreeNode *other);
-      virtual const std::set<Domain>& 
-                                get_intersection_domains(RegionTreeNode *other);
       virtual size_t get_num_children(void) const;
       virtual InterCloseOp* create_close_op(Operation *creator, 
                                             const FieldMask &closing_mask,
@@ -1982,12 +1993,13 @@ namespace Legion {
       virtual void send_node(AddressSpaceID target);
     public:
       InstanceView* convert_reference_partition(PhysicalManager *manager,
-                                                UniqueID ctx_uid) const;
+                          UniqueID ctx_uid, VersionInfo *version_info) const;
       CompositeView* convert_view_partition(CompositeView *view) const;
       void convert_references_partition(
                                   const std::vector<PhysicalManager*> &managers,
                                   std::vector<bool> &up_mask, UniqueID ctx_uid,
-                                  std::vector<InstanceView*> &results) const;
+                                  std::vector<InstanceView*> &results,
+                                  VersionInfo *version_info) const;
     public:
       virtual void send_semantic_request(AddressSpaceID target, 
              SemanticTag tag, bool can_fail, bool wait_until, UserEvent ready);
@@ -2029,6 +2041,37 @@ namespace Legion {
       std::map<ColorPoint,RegionNode*> color_map;
       std::map<ColorPoint,RegionNode*> valid_map;
     }; 
+
+    // some inline implementations
+#ifndef DEBUG_HIGH_LEVEL
+    //--------------------------------------------------------------------------
+    inline IndexSpaceNode* IndexTreeNode::as_index_space_node(void)
+    //--------------------------------------------------------------------------
+    {
+      return static_cast<IndexSpaceNode*>(this);
+    }
+
+    //--------------------------------------------------------------------------
+    inline IndexPartNode* IndexTreeNode::as_index_part_node(void)
+    //--------------------------------------------------------------------------
+    {
+      return static_cast<IndexPartNode*>(this);
+    }
+
+    //--------------------------------------------------------------------------
+    inline RegionNode* RegionTreeNode::as_region_node(void) const
+    //--------------------------------------------------------------------------
+    {
+      return static_cast<RegionNode*>(const_cast<RegionTreeNode*>(this));
+    }
+
+    //--------------------------------------------------------------------------
+    inline PartitionNode* RegionTreeNode::as_partition_node(void) const
+    //--------------------------------------------------------------------------
+    {
+      return static_cast<PartitionNode*>(const_cast<RegionTreeNode*>(this));
+    }
+#endif
 
   }; // namespace Internal
 }; // namespace Legion

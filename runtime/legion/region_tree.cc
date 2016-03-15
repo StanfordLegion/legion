@@ -1674,8 +1674,8 @@ namespace Legion {
             finder = top_views.find(manager);
           if (finder == top_views.end())
           {
-            ReductionView *new_view = 
-             manager->create_logical_top_view(context_uid)->as_reduction_view();
+            ReductionView *new_view = manager->create_logical_top_view(
+                                context_uid, NULL)->as_reduction_view();
             top_views[manager] = new_view;
             corresponding[idx] = new_view;
           }
@@ -1698,13 +1698,13 @@ namespace Legion {
           if (finder == top_views.end())
           {
             MaterializedView *new_view = 
-              manager->create_logical_top_view(context_uid)
+              manager->create_logical_top_view(context_uid, NULL)
                      ->as_materialized_view();
             top_views[manager] = new_view;
             // See if we need to get the appropriate subview
             if (top_node != manager->region_node)
               corresponding[idx] = 
-                top_node->convert_reference_region(manager, context_uid);
+                top_node->convert_reference_region(manager, context_uid, NULL);
             else
               corresponding[idx] = new_view;
           }
@@ -1713,7 +1713,7 @@ namespace Legion {
             // See if we have to pull down the right subview
             if (top_node != manager->region_node)
               corresponding[idx] = 
-                top_node->convert_reference_region(manager, context_uid);
+                top_node->convert_reference_region(manager, context_uid, NULL);
             else // they are the same so we can just use the view as is
               corresponding[idx] = finder->second;
           }
@@ -2149,25 +2149,11 @@ namespace Legion {
           continue;
         copy_preconditions.insert(src_targets[idx].get_ready_event());
       }
-      // Find the domains for the copy
-      std::set<Domain> dst_domains;
-      { 
-        Event dom_precondition = Event::NO_EVENT;
-        if (dst_node->has_component_domains())
-          dst_domains = dst_node->get_component_domains(dom_precondition);
-        else
-          dst_domains.insert(dst_node->get_domain(dom_precondition));
-        copy_preconditions.insert(dom_precondition);
-      }
       Event copy_pre = Runtime::merge_events<false>(copy_preconditions);
-      // Now we can issue all the copies
-      for (std::set<Domain>::const_iterator it = dst_domains.begin();
-            it != dst_domains.end(); it++)
-      {
-        Event copy_result = issue_copy(*it, op, src_fields,dst_fields,copy_pre);
-        if (copy_result.exists())
-          result_events.insert(copy_result);
-      }
+      Event copy_post = dst_node->issue_copy(op, src_fields, 
+                                             dst_fields, copy_pre);
+      if (copy_post.exists())
+        result_events.insert(copy_post);
       // Now if we have a composite source, handle that now
       if (src_composite_index >= 0)
       {
@@ -2185,7 +2171,8 @@ namespace Legion {
         {
           const InstanceRef &dst_ref = dst_targets[it->first];
           InstanceView *view = 
-            dst_node->convert_reference(dst_ref, info.context_uid);
+            dst_node->convert_reference(dst_ref, info.context_uid, 
+                                        info.version_info);
 #ifdef DEBUG_HIGH_LEVEL
           assert(view->is_materialized_view());
 #endif
@@ -2321,44 +2308,25 @@ namespace Legion {
         else
           list_copy_preconditions.insert(dst_ref.get_ready_event());
       }
-      // Find the domains for the copy
-      std::set<Domain> dst_domains;
-      { 
-        Event dom_precondition = Event::NO_EVENT;
-        if (dst_node->has_component_domains())
-          dst_domains = dst_node->get_component_domains(dom_precondition);
-        else
-          dst_domains.insert(dst_node->get_domain(dom_precondition));
-        fold_copy_preconditions.insert(dom_precondition);
-        list_copy_preconditions.insert(dom_precondition);
-      }
       // See if we have any fold copies
       if (!dst_fields_fold.empty())
       {
         Event copy_pre = Runtime::merge_events<false>(fold_copy_preconditions);
-        // Now we can issue all the copies
-        for (std::set<Domain>::const_iterator it = dst_domains.begin();
-              it != dst_domains.end(); it++)
-        {
-          Event copy_result = issue_reduction_copy(*it, op, dst_req.redop, 
-                    true/*fold*/, src_fields_fold, dst_fields_fold, copy_pre);
-          if (copy_result.exists())
-            result_events.insert(copy_result);
-        }
+        Event copy_post = dst_node->issue_copy(op, 
+                            src_fields_fold, dst_fields_fold, copy_pre, 
+                            NULL/*intersect*/, dst_req.redop, true/*fold*/);
+        if (copy_post.exists())
+          result_events.insert(copy_post);
       }
       // See if we have any reduction copies
       if (!dst_fields_list.empty())
       {
         Event copy_pre = Runtime::merge_events<false>(list_copy_preconditions);
-        // Now we can issue all the copies
-        for (std::set<Domain>::const_iterator it = dst_domains.begin();
-              it != dst_domains.end(); it++)
-        {
-          Event copy_result = issue_reduction_copy(*it, op, dst_req.redop, 
-                    false/*fold*/, src_fields_list, dst_fields_list, copy_pre);
-          if (copy_result.exists())
-            result_events.insert(copy_result);
-        }
+        Event copy_post = dst_node->issue_copy(op, 
+                            src_fields_list, dst_fields_list, copy_pre, 
+                            NULL/*intersect*/, dst_req.redop, false/*fold*/);
+        if (copy_post.exists())
+          result_events.insert(copy_post);
       }
       if (src_composite_index >= 0)
       {
@@ -2513,20 +2481,22 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionTreeForest::log_mapping_decision(UniqueID uid, unsigned index,
+                                                const RegionRequirement &req,
                                                 const InstanceSet &targets)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
       assert(Runtime::legion_spy_enabled); 
+      assert(req.handle_type == SINGULAR);
 #endif
+      FieldSpaceNode *node = get_node(req.region.get_field_space());
       for (unsigned idx = 0; idx < targets.size(); idx++)
       {
         const InstanceRef &inst = targets[idx];
         const FieldMask &valid_mask = inst.get_valid_fields();
         PhysicalManager *manager = inst.get_manager();
         std::vector<FieldID> valid_fields;
-        manager->region_node->column_source->get_field_ids(valid_mask, 
-                                                           valid_fields);
+        node->get_field_ids(valid_mask, valid_fields);
         if (manager->is_virtual_manager())
         {
           for (std::vector<FieldID>::const_iterator it = valid_fields.begin();
@@ -4003,114 +3973,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Event RegionTreeForest::issue_copy(const Domain &dom, Operation *op,
-                         const std::vector<Domain::CopySrcDstField> &src_fields,
-                         const std::vector<Domain::CopySrcDstField> &dst_fields,
-                                       Event precondition)
-    //--------------------------------------------------------------------------
-    {
-      Event result;
-      if (runtime->profiler != NULL)
-      {
-        Realm::ProfilingRequestSet requests;
-        runtime->profiler->add_copy_request(requests, op); 
-        result = dom.copy(src_fields, dst_fields, requests, precondition);
-      }
-      else
-        result = dom.copy(src_fields, dst_fields, precondition);
-#ifdef LEGION_SPY
-      if (!result.exists())
-      {
-        UserEvent new_result = UserEvent::create_user_event();
-        new_result.trigger();
-        result = new_result;
-      }
-#endif
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    Event RegionTreeForest::issue_fill(const Domain &dom, UniqueID uid,
-                         const std::vector<Domain::CopySrcDstField> &dst_fields,
-                         const void *fill_value, size_t fill_size,
-                                       Event precondition)
-    //--------------------------------------------------------------------------
-    {
-      Event result;
-      if (runtime->profiler != NULL)
-      {
-        Realm::ProfilingRequestSet requests;
-        runtime->profiler->add_fill_request(requests, uid);
-        result = dom.fill(dst_fields, requests, 
-                          fill_value, fill_size, precondition);
-      }
-      else
-        result = dom.fill(dst_fields, fill_value, fill_size, precondition);
-#ifdef LEGION_SPY
-      if (!result.exists())
-      {
-        UserEvent new_result = UserEvent::create_user_event();
-        new_result.trigger();
-        result = new_result;
-      }
-#endif
-      return result;
-    }
-    
-    //--------------------------------------------------------------------------
-    Event RegionTreeForest::issue_reduction_copy(const Domain &dom, 
-                        Operation *op, ReductionOpID redop, bool reduction_fold,
-                         const std::vector<Domain::CopySrcDstField> &src_fields,
-                         const std::vector<Domain::CopySrcDstField> &dst_fields,
-                                       Event precondition)
-    //--------------------------------------------------------------------------
-    {
-      Event result;
-      if (runtime->profiler != NULL)
-      {
-        Realm::ProfilingRequestSet requests;
-        runtime->profiler->add_copy_request(requests, op); 
-        result = dom.copy(src_fields, dst_fields, requests, 
-                          precondition, redop, reduction_fold);
-      }
-      else
-        result = dom.copy(src_fields, dst_fields,
-                          precondition, redop, reduction_fold);
-#ifdef LEGION_SPY
-      if (!result.exists())
-      {
-        UserEvent new_result = UserEvent::create_user_event();
-        new_result.trigger();
-        result = new_result;
-      }
-#endif
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    Event RegionTreeForest::issue_indirect_copy(const Domain &dom, 
-                       Operation *op, const Domain::CopySrcDstField &idx,
-                       ReductionOpID redop, bool reduction_fold,
-                       const std::vector<Domain::CopySrcDstField> &src_fields,
-                       const std::vector<Domain::CopySrcDstField> &dst_fields,
-                                                Event precondition)
-    //--------------------------------------------------------------------------
-    {
-      // TODO: teach the low-level runtime to profile indirect copies
-      Event result = dom.copy_indirect(idx, src_fields, dst_fields, 
-                                       precondition, redop, reduction_fold);
-#ifdef LEGION_SPY
-      if (!result.exists())
-      {
-        UserEvent new_result = UserEvent::create_user_event();
-        new_result.trigger();
-        result = new_result;
-      }
-#endif
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
     PhysicalInstance RegionTreeForest::create_instance(const Domain &dom,
                     Memory target, const std::vector<size_t> &field_sizes, 
                     size_t blocking_factor, ReductionOpID redop, UniqueID op_id)
@@ -5562,6 +5424,7 @@ namespace Legion {
       return true;
     }
 
+#ifdef DEBUG_HIGH_LEVEL
     //--------------------------------------------------------------------------
     IndexSpaceNode* IndexSpaceNode::as_index_space_node(void)
     //--------------------------------------------------------------------------
@@ -5575,6 +5438,7 @@ namespace Legion {
     {
       return NULL;
     }
+#endif
 
     //--------------------------------------------------------------------------
     AddressSpaceID IndexSpaceNode::get_owner_space(void) const
@@ -6229,6 +6093,9 @@ namespace Legion {
                                          other->get_domain_blocking(), 
                                          intersect, compute); 
       }
+      if (!result && Runtime::legion_spy_enabled)
+        LegionSpy::log_nonintersection(handle.id, other->handle.id, 
+                                       LegionSpy::SPACE_SPACE_TEST);
       AutoLock n_lock(node_lock);
       if (result)
       {
@@ -6277,6 +6144,9 @@ namespace Legion {
         result = compute_intersections(component_domains, other_domains,
                                        intersect, compute);
       }
+      if (!result && Runtime::legion_spy_enabled)
+        LegionSpy::log_nonintersection(handle.id, other->handle.id, 
+                                       LegionSpy::SPACE_PART_TEST);
       AutoLock n_lock(node_lock);
       if (result)
       {
@@ -6437,6 +6307,9 @@ namespace Legion {
           result = compute_dominates(component_domains, other_doms);
         }
       }
+      if (result && Runtime::legion_spy_enabled)
+        LegionSpy::log_dominance(handle.id, other->handle.id, 
+                                 LegionSpy::SPACE_SPACE_TEST);
       AutoLock n_lock(node_lock);
       dominators[other] = result;
       return result;
@@ -6464,6 +6337,9 @@ namespace Legion {
       }
       else
         result = compute_dominates(component_domains, other_doms);
+      if (result && Runtime::legion_spy_enabled)
+        LegionSpy::log_dominance(handle.id, other->handle.id, 
+                                 LegionSpy::SPACE_PART_TEST);
       AutoLock n_lock(node_lock);
       dominators[other] = result;
       return result;
@@ -6884,6 +6760,7 @@ namespace Legion {
       return false;
     }
 
+#ifdef DEBUG_HIGH_LEVEL
     //--------------------------------------------------------------------------
     IndexSpaceNode* IndexPartNode::as_index_space_node(void)
     //--------------------------------------------------------------------------
@@ -6897,6 +6774,7 @@ namespace Legion {
     {
       return this;
     }
+#endif
 
     //--------------------------------------------------------------------------
     AddressSpaceID IndexPartNode::get_owner_space(void) const
@@ -7370,6 +7248,8 @@ namespace Legion {
           child_domains.insert(it->second->get_domain_blocking());
       }
       bool result = compute_dominates(child_domains, parent_domains);
+      if (result && Runtime::legion_spy_enabled)
+        LegionSpy::log_index_partition_completeness(handle.id);
       if (can_cache)
       {
         AutoLock n_lock(node_lock);
@@ -7773,6 +7653,9 @@ namespace Legion {
                                        other->get_domain_blocking(), 
                                        intersect, compute);
       }
+      if (!result && Runtime::legion_spy_enabled)
+        LegionSpy::log_nonintersection(handle.id, other->handle.id, 
+                                       LegionSpy::PART_SPACE_TEST);
       AutoLock n_lock(node_lock);
       if (result)
       {
@@ -7812,6 +7695,9 @@ namespace Legion {
       other->get_subspace_domains(other_domains);
       bool result = compute_intersections(local_domains, other_domains, 
                                           intersect, compute);
+      if (!result && Runtime::legion_spy_enabled)
+        LegionSpy::log_nonintersection(handle.id, other->handle.id, 
+                                       LegionSpy::PART_PART_TEST);
       AutoLock n_lock(node_lock);
       if (result)
       {
@@ -7928,6 +7814,9 @@ namespace Legion {
         other_doms.insert(other->get_domain_blocking());
         result = compute_dominates(local, other_doms);
       }
+      if (result && Runtime::legion_spy_enabled)
+        LegionSpy::log_dominance(handle.id, other->handle.id, 
+                                 LegionSpy::PART_SPACE_TEST);
       AutoLock n_lock(node_lock);
       dominators[other] = result;
       return result;
@@ -7948,6 +7837,9 @@ namespace Legion {
       get_subspace_domains(local);
       other->get_subspace_domains(other_doms);
       bool result = compute_dominates(local, other_doms);
+      if (result && Runtime::legion_spy_enabled)
+        LegionSpy::log_dominance(handle.id, other->handle.id, 
+                                 LegionSpy::PART_PART_TEST);
       AutoLock n_lock(node_lock);
       dominators[other] = result;
       return result;
@@ -12390,11 +12282,6 @@ namespace Legion {
                                                bool register_view)
     //--------------------------------------------------------------------------
     {
-#ifdef LEGION_SPY
-      log_run.error("Unfortunately Legion Spy doesn't support composite "
-                    "instance analysis yet");
-      assert(false); // TODO: Teach Legion Spy to analyze composite instances
-#endif
       PhysicalState *state = get_physical_state(ctx_id, version_info);
       FieldMask dirty_mask, complete_mask; 
       const bool capture_children = !is_region();
@@ -12917,25 +12804,8 @@ namespace Legion {
                                      preconditions);
 
         LegionMap<Event,FieldMask>::aligned postconditions;
-        if (!has_component_domains())
-        {
-          Event domain_pre;
-          std::set<Domain> copy_domain;
-          copy_domain.insert(get_domain(domain_pre));
-          issue_grouped_copies(context, info, dst, preconditions, update_mask,
-                               domain_pre, copy_domain, src_instances, 
-                               info.version_info, postconditions, tracker);
-        }
-        else
-        {
-          Event domain_pre;
-          const std::set<Domain> &component_domains = 
-                                            get_component_domains(domain_pre);
-          issue_grouped_copies(context, info, dst, preconditions, update_mask,
-                               domain_pre, component_domains, src_instances,
-                               info.version_info, postconditions, tracker);
-        }
-
+        issue_grouped_copies(info, dst, preconditions, update_mask,
+                 src_instances, info.version_info, postconditions, tracker);
         // Tell the destination about all of the copies that were done
         for (LegionMap<Event,FieldMask>::aligned::const_iterator it = 
               postconditions.begin(); it != postconditions.end(); it++)
@@ -13174,18 +13044,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void RegionTreeNode::issue_grouped_copies(
-                                                      RegionTreeForest *context,
-                                                      const TraversalInfo &info,
-                                                         MaterializedView *dst,
+    void RegionTreeNode::issue_grouped_copies(const TraversalInfo &info,
+                                              MaterializedView *dst,
                              LegionMap<Event,FieldMask>::aligned &preconditions,
                                        const FieldMask &update_mask,
-                                       Event copy_domains_precondition,
-                                       const std::set<Domain> &copy_domains,
            const LegionMap<MaterializedView*,FieldMask>::aligned &src_instances,
                                        const VersionInfo &src_version_info,
                             LegionMap<Event,FieldMask>::aligned &postconditions,
-                                                CopyTracker *tracker /*= NULL*/)
+                                             CopyTracker *tracker /*= NULL*/,
+                                             RegionTreeNode *intersect/*=NULL*/)
     //--------------------------------------------------------------------------
     {
       // Now let's build maximal sets of fields which have
@@ -13221,20 +13088,11 @@ namespace Legion {
         assert(!dst_fields.empty());
         assert(src_fields.size() == dst_fields.size());
 #endif
-        // Add the copy domain precondition if it exists
-        if (copy_domains_precondition.exists())
-          pre_set.preconditions.insert(copy_domains_precondition);
         // Now that we've got our offsets ready, we
         // can now issue the copy to the low-level runtime
         Event copy_pre = Runtime::merge_events<false>(pre_set.preconditions);
-        std::set<Event> post_events;
-        for (std::set<Domain>::const_iterator it = copy_domains.begin();
-              it != copy_domains.end(); it++)
-        {
-          post_events.insert(context->issue_copy(*it, info.op, src_fields,
-                                                 dst_fields, copy_pre));
-        }
-        Event copy_post = Runtime::merge_events<false>(post_events);
+        Event copy_post = issue_copy(info.op, src_fields, dst_fields, 
+                                     copy_pre, intersect);
         // Save the copy post in the post conditions
         if (copy_post.exists())
         {
@@ -13331,38 +13189,6 @@ namespace Legion {
       // no preconditions so it can start right away!
       if (!!update_mask)
         precondition_sets.push_front(EventSet(update_mask));
-    }
-
-    //--------------------------------------------------------------------------
-    Event RegionTreeNode::perform_copy_operation(Operation *op,
-                                                 Event precondition,
-                         const std::vector<Domain::CopySrcDstField> &src_fields,
-                         const std::vector<Domain::CopySrcDstField> &dst_fields)
-    //--------------------------------------------------------------------------
-    {
-      if (has_component_domains())
-      {
-        Event domain_pre;
-        const std::set<Domain> &component_domains = 
-                                  get_component_domains(domain_pre);
-        if (domain_pre.exists())
-          precondition = Runtime::merge_events<false>(precondition, domain_pre);
-        std::set<Event> result_events;
-        for (std::set<Domain>::const_iterator it = component_domains.begin();
-              it != component_domains.end(); it++)
-          result_events.insert(context->issue_copy(*it, op, src_fields, 
-                                                   dst_fields, precondition));
-        return Runtime::merge_events<false>(result_events);
-      }
-      else
-      {
-        Event domain_pre;
-        Domain copy_domain = get_domain(domain_pre);
-        if (domain_pre.exists())
-          precondition = Runtime::merge_events<false>(precondition, domain_pre);
-        return context->issue_copy(copy_domain, op, src_fields, 
-                                   dst_fields, precondition);
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -13780,7 +13606,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     InstanceView* RegionTreeNode::convert_reference(const InstanceRef &ref,
-                                                    UniqueID ctx_uid) const
+                              UniqueID ctx_uid, VersionInfo &version_info) const
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -13793,14 +13619,15 @@ namespace Legion {
 #endif
       // If we're at the root, get the view we need for this context
       if (manager->region_node == this)
-        return manager->find_or_create_logical_top_view(ctx_uid);
+        return manager->find_or_create_logical_top_view(ctx_uid, &version_info);
       // If we didn't find it immediately, switch over to the explicit
       // versions that don't have so many virtual function calls
       if (is_region())
-        return as_region_node()->convert_reference_region(manager, ctx_uid);
+        return as_region_node()->convert_reference_region(manager, ctx_uid,
+                                                          &version_info);
       else
         return as_partition_node()->convert_reference_partition(manager, 
-                                                                ctx_uid);
+                                                        ctx_uid, &version_info);
     }
 
     //--------------------------------------------------------------------------
@@ -13826,7 +13653,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionTreeNode::convert_target_views(const InstanceSet &targets,
-                     UniqueID ctx_uid, std::vector<InstanceView*> &target_views)
+                     UniqueID ctx_uid, std::vector<InstanceView*> &target_views,
+                                              VersionInfo &version_info)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -13835,7 +13663,7 @@ namespace Legion {
       if (targets.size() == 1)
       {
         // If we just have one there is a fast path 
-        target_views[0] = convert_reference(targets[0], ctx_uid);
+        target_views[0] = convert_reference(targets[0], ctx_uid, version_info);
       }
       else
       {
@@ -13849,7 +13677,7 @@ namespace Legion {
           if (manager->region_node == this)
           {
             target_views[idx] = 
-              manager->find_or_create_logical_top_view(ctx_uid);
+              manager->find_or_create_logical_top_view(ctx_uid, &version_info);
             continue;
           }
           else
@@ -13866,7 +13694,7 @@ namespace Legion {
         {
           // Easy case, there is only one deduplicated instance
           InstanceView *result = 
-            convert_reference(to_convert[0], ctx_uid);
+            convert_reference(to_convert[0], ctx_uid, version_info);
           for (unsigned idx = 0; idx < target_views.size(); idx++)
           {
             if (target_views[idx] != NULL) // skip if we already did it
@@ -13881,10 +13709,10 @@ namespace Legion {
           std::vector<InstanceView*> results(to_convert.size(), NULL);
           if (is_region())
             as_region_node()->convert_references_region(to_convert, 
-                                              up_mask, ctx_uid, results);
+                             up_mask, ctx_uid, results, &version_info);
           else
             as_partition_node()->convert_references_partition(to_convert,
-                                              up_mask, ctx_uid, results);
+                                up_mask, ctx_uid, results, &version_info);
           for (unsigned idx = 0; idx < target_views.size(); idx++)
           {
             if (target_views[idx] != NULL) // skip it if we already did it
@@ -13904,7 +13732,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionTreeNode::convert_target_views(const InstanceSet &targets,
-                 UniqueID ctx_uid, std::vector<MaterializedView*> &target_views)
+                 UniqueID ctx_uid, std::vector<MaterializedView*> &target_views,
+                 VersionInfo &version_info)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -13912,7 +13741,7 @@ namespace Legion {
 #endif
       std::vector<InstanceView*> instance_views(target_views.size(), NULL);
       // Call the instance view version
-      convert_target_views(targets, ctx_uid, instance_views);
+      convert_target_views(targets, ctx_uid, instance_views, version_info);
       // Then do our conversion
       for (unsigned idx = 0; idx < targets.size(); idx++)
       {
@@ -14579,6 +14408,149 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    Event RegionNode::issue_copy(Operation *op,
+                        const std::vector<Domain::CopySrcDstField> &src_fields,
+                        const std::vector<Domain::CopySrcDstField> &dst_fields,
+                        Event precondition, RegionTreeNode *intersect/*=NULL*/,
+                        ReductionOpID redop /*=0*/,bool reduction_fold/*=true*/)
+    //--------------------------------------------------------------------------
+    {
+      Realm::ProfilingRequestSet requests;
+      if (context->runtime->profiler != NULL)
+        context->runtime->profiler->add_fill_request(requests, op);
+      Event result;
+      if (intersect == NULL)
+      {
+        // This is a normal copy
+        if (row_source->has_component_domains())
+        {
+          Event dom_pre;
+          const std::set<Domain> &doms = 
+            row_source->get_component_domains(dom_pre);
+          if (dom_pre.exists() && !dom_pre.has_triggered())
+            precondition = Runtime::merge_events<false>(precondition, dom_pre);
+          std::set<Event> done_events;
+          for (std::set<Domain>::const_iterator it = doms.begin();
+                it != doms.end(); it++)
+          {
+            done_events.insert(it->copy(src_fields, dst_fields, 
+                                        requests, precondition,
+                                        redop, reduction_fold));
+          }
+          result = Runtime::merge_events<false>(done_events);
+        }
+        else
+        {
+          Event dom_pre;
+          const Domain &dom = row_source->get_domain(dom_pre);
+          if (dom_pre.exists() && !dom_pre.has_triggered())
+            precondition = Runtime::merge_events<false>(precondition, dom_pre);
+          result = dom.copy(src_fields, dst_fields, requests, 
+                            precondition, redop, reduction_fold); 
+        }
+      }
+      else
+      {
+        // This is a copy between the intersection of two regions
+        const std::set<Domain> *intersection_doms;
+        if (intersect->is_region())
+          intersection_doms = &(row_source->get_intersection_domains(
+                intersect->as_region_node()->row_source));
+        else
+          intersection_doms = &(row_source->get_intersection_domains(
+                intersect->as_partition_node()->row_source));
+        std::set<Event> done_events;
+        for (std::set<Domain>::const_iterator it = intersection_doms->begin();
+              it != intersection_doms->end(); it++)
+        {
+          done_events.insert(it->copy(src_fields, dst_fields, 
+                                      requests, precondition,
+                                      redop, reduction_fold));
+        }
+        result = Runtime::merge_events<false>(done_events);
+      }
+#ifdef LEGION_SPY
+      if (!result.exists())
+      {
+        UserEvent new_result = UserEvent::create_user_event();
+        new_result.trigger();
+        result = new_result;
+      }
+#endif
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    Event RegionNode::issue_fill(Operation *op,
+                        const std::vector<Domain::CopySrcDstField> &dst_fields,
+                        const void *fill_value, size_t fill_size,
+                        Event precondition, RegionTreeNode *intersect)
+    //--------------------------------------------------------------------------
+    {
+      Realm::ProfilingRequestSet requests;
+      if (context->runtime->profiler != NULL)
+        context->runtime->profiler->add_fill_request(requests, op);
+      Event result;
+      if (intersect == NULL)
+      {
+        // This is a normal fill 
+        if (row_source->has_component_domains())
+        {
+          Event dom_pre;
+          const std::set<Domain> &doms = 
+            row_source->get_component_domains(dom_pre);
+          if (dom_pre.exists() && !dom_pre.has_triggered())
+            precondition = Runtime::merge_events<false>(precondition, dom_pre);
+          std::set<Event> done_events;
+          for (std::set<Domain>::const_iterator it = doms.begin();
+                it != doms.end(); it++)
+          {
+            done_events.insert(it->fill(dst_fields, requests, 
+                                        fill_value, fill_size, precondition));
+          }
+          result = Runtime::merge_events<false>(done_events);
+        }
+        else
+        {
+          Event dom_pre;
+          const Domain &dom = row_source->get_domain(dom_pre);
+          if (dom_pre.exists() && !dom_pre.has_triggered())
+            precondition = Runtime::merge_events<false>(precondition, dom_pre);
+          result = dom.fill(dst_fields, requests, 
+                            fill_value, fill_size, precondition); 
+        }
+      }
+      else
+      {
+        // This is the fill between the intersection of two regions
+        const std::set<Domain> *intersection_doms;
+        if (intersect->is_region())
+          intersection_doms = &(row_source->get_intersection_domains(
+                intersect->as_region_node()->row_source));
+        else
+          intersection_doms = &(row_source->get_intersection_domains(
+                intersect->as_partition_node()->row_source));
+        std::set<Event> done_events;
+        for (std::set<Domain>::const_iterator it = intersection_doms->begin();
+              it != intersection_doms->end(); it++)
+        {
+          done_events.insert(it->fill(dst_fields, requests,
+                                      fill_value, fill_size, precondition));
+        }
+        result = Runtime::merge_events<false>(done_events);
+      }
+#ifdef LEGION_SPY
+      if (!result.exists())
+      {
+        UserEvent new_result = UserEvent::create_user_event();
+        new_result.trigger();
+        result = new_result;
+      }
+#endif
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     bool RegionNode::are_children_disjoint(const ColorPoint &c1, 
                                            const ColorPoint &c2)
     //--------------------------------------------------------------------------
@@ -14613,6 +14585,7 @@ namespace Legion {
       return true;
     }
 
+#ifdef DEBUG_HIGH_LEVEL
     //--------------------------------------------------------------------------
     RegionNode* RegionNode::as_region_node(void) const
     //--------------------------------------------------------------------------
@@ -14626,6 +14599,7 @@ namespace Legion {
     {
       return NULL;
     }
+#endif
 
     //--------------------------------------------------------------------------
     AddressSpaceID RegionNode::get_owner_space(void) const
@@ -14702,29 +14676,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool RegionNode::has_component_domains(void) const
-    //--------------------------------------------------------------------------
-    {
-      return row_source->has_component_domains();
-    }
-
-    //--------------------------------------------------------------------------
-    const std::set<Domain>& RegionNode::get_component_domains_blocking(
-                                                                     void) const
-    //--------------------------------------------------------------------------
-    {
-      return row_source->get_component_domains_blocking();
-    }
-
-    //--------------------------------------------------------------------------
-    const std::set<Domain>& RegionNode::get_component_domains(
-                                                             Event &ready) const
-    //--------------------------------------------------------------------------
-    {
-      return row_source->get_component_domains(ready);
-    }
-
-    //--------------------------------------------------------------------------
     const Domain& RegionNode::get_domain_blocking(void) const
     //--------------------------------------------------------------------------
     {
@@ -14773,19 +14724,6 @@ namespace Legion {
         return row_source->dominates(other->as_region_node()->row_source);
       else
         return row_source->dominates(other->as_partition_node()->row_source);
-    }
-
-    //--------------------------------------------------------------------------
-    const std::set<Domain>& RegionNode::get_intersection_domains(
-                                                          RegionTreeNode *other)
-    //--------------------------------------------------------------------------
-    {
-      if (other->is_region())
-        return row_source->get_intersection_domains(
-                                           other->as_region_node()->row_source);
-      else
-        return row_source->get_intersection_domains(
-                                        other->as_partition_node()->row_source);
     }
 
     //--------------------------------------------------------------------------
@@ -14862,7 +14800,8 @@ namespace Legion {
       // Iterate over all the targets and assign set the right views
       // In the process, issue any copies necessary to bring these 
       std::vector<MaterializedView*> target_views(targets.size());
-      convert_target_views(targets, info.context_uid, target_views);
+      convert_target_views(targets, info.context_uid, 
+                           target_views, version_info);
       closer.initialize_targets(this, state, target_views,
                                 closing_mask, complete_fields, targets);
       bool changed = false;
@@ -15016,11 +14955,6 @@ namespace Legion {
                                                  VersionInfo &version_info)
     //--------------------------------------------------------------------------
     {
-#ifdef LEGION_SPY
-      log_run.error("Unfortunately Legion Spy doesn't support virtual "
-                    "mapping analysis yet");
-      assert(false); // TODO: Teach Legion Spy to analyze composite instances
-#endif
       PhysicalState *state = get_physical_state(ctx_id, version_info);
       // Figure out which children we need to close
       LegionMap<ColorPoint,FieldMask>::aligned targets;
@@ -15061,7 +14995,8 @@ namespace Legion {
 #ifdef DEBUG_HIGH_LEVEL
           assert(!ref.is_composite_ref());
 #endif
-          LogicalView *view = convert_reference(ref, info.context_uid);
+          LogicalView *view = convert_reference(ref, info.context_uid,
+                                                info.version_info);
 #ifdef DEBUG_HIGH_LEVEL
           assert(view->is_instance_view());
           assert(view->as_instance_view()->is_reduction_view());
@@ -15079,7 +15014,8 @@ namespace Legion {
       {
         // Normal instances
         std::vector<InstanceView*> new_views(targets.size());
-        convert_target_views(targets, info.context_uid, new_views);
+        convert_target_views(targets, info.context_uid, 
+                             new_views, info.version_info);
         if (IS_READ_ONLY(info.req))
         {
           // Read-only case
@@ -15298,7 +15234,8 @@ namespace Legion {
         for (unsigned idx = 0; idx < targets.size(); idx++)
         {
           InstanceRef &ref = targets[idx];
-          LogicalView *view = convert_reference(ref, info.context_uid);
+          LogicalView *view = convert_reference(ref, info.context_uid, 
+                                                info.version_info);
 #ifdef DEBUG_HIGH_LEVEL
           assert(view->is_instance_view());
           assert(view->as_instance_view()->is_reduction_view());
@@ -15434,22 +15371,13 @@ namespace Legion {
       std::set<Event> post_events;
       std::vector<InstanceView*> target_views(instances.size(), NULL);
       convert_target_views(instances, op->get_parent()->get_context_uid(),
-                           target_views);
+                           target_views, version_info);
       for (unsigned idx = 0; idx < instances.size(); idx++)
       {
         InstanceView *target = target_views[idx];
         LegionMap<Event,FieldMask>::aligned preconditions;
         target->find_copy_preconditions(0/*redop*/, false/*reading*/,
                                         fill_mask, version_info, preconditions);
-        // Get the domains we need for this copy 
-        std::set<Domain> fill_domains;
-        Event dom_pre = Event::NO_EVENT;
-        if (has_component_domains())
-          fill_domains = get_component_domains(dom_pre);
-        else
-          fill_domains.insert(get_domain(dom_pre));
-        if (dom_pre.exists())
-          preconditions[dom_pre] = fill_mask;
         if (sync_precondition.exists())
           preconditions[sync_precondition] = fill_mask;
         // Sort the preconditions into event sets
@@ -15457,20 +15385,16 @@ namespace Legion {
         compute_event_sets(fill_mask, preconditions, event_sets);
         // Iterate over the event sets and issue the fill operations on 
         // the different fields
-        UniqueID op_id = op->get_unique_op_id();
         for (LegionList<EventSet>::aligned::const_iterator pit = 
               event_sets.begin(); pit != event_sets.end(); pit++)
         {
           Event precondition = Runtime::merge_events<false>(pit->preconditions);
           std::vector<Domain::CopySrcDstField> dst_fields;
           target->copy_to(pit->set_mask, dst_fields);
-          for (std::set<Domain>::const_iterator it = fill_domains.begin();
-                it != fill_domains.end(); it++)
-          {
-            post_events.insert(context->issue_fill(*it, op_id, dst_fields,
-                                                   value, value_size,
-                                                   precondition));
-          }
+          Event fill_event = issue_fill(op, dst_fields, 
+                                        value, value_size, precondition);
+          if (fill_event.exists())
+            post_events.insert(fill_event);
         }
         // Add user to make record when everyone is done writing
         target->add_copy_user(0/*redop*/, op->get_completion_event(),
@@ -15502,8 +15426,8 @@ namespace Legion {
                                             attach_mask, this, attach_op);
       // Wrap it in a view
       UniqueID context_uid = attach_op->get_parent()->get_context_uid();
-      MaterializedView *view = 
-        manager->create_logical_top_view(context_uid)->as_materialized_view();
+      MaterializedView *view = manager->create_logical_top_view(context_uid, 
+                                        &version_info)->as_materialized_view();
 #ifdef DEBUG_HIGH_LEVEL
       assert(view != NULL);
 #endif
@@ -15524,7 +15448,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       UniqueID context_uid = detach_op->get_parent()->get_context_uid();
-      InstanceView *view = convert_reference(ref, context_uid);
+      InstanceView *view = convert_reference(ref, context_uid, version_info);
 #ifdef DEBUG_HIGH_LEVEL
       assert(view->is_materialized_view());
 #endif
@@ -15537,16 +15461,17 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     InstanceView* RegionNode::convert_reference_region(
-                               PhysicalManager *manager, UniqueID ctx_uid) const
+                               PhysicalManager *manager, UniqueID ctx_uid,
+                               VersionInfo *version_info) const
     //--------------------------------------------------------------------------
     {
       if (manager->region_node == this)
-        return manager->find_or_create_logical_top_view(ctx_uid);
+        return manager->find_or_create_logical_top_view(ctx_uid, version_info);
 #ifdef DEBUG_HIGH_LEVEL
       assert(parent != NULL);
 #endif
       InstanceView *parent_view = 
-        parent->convert_reference_partition(manager, ctx_uid);
+        parent->convert_reference_partition(manager, ctx_uid, version_info);
       return parent_view->get_instance_subview(row_source->color);
     }
 
@@ -15568,7 +15493,8 @@ namespace Legion {
     void RegionNode::convert_references_region(
                                   const std::vector<PhysicalManager*> &managers,
                                   std::vector<bool> &up_mask, UniqueID ctx_uid,
-                                  std::vector<InstanceView*> &results) const
+                                  std::vector<InstanceView*> &results,
+                                  VersionInfo *version_info) const
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -15583,7 +15509,8 @@ namespace Legion {
         PhysicalManager *manager = managers[idx];
         if (manager->region_node == this)
         {
-          results[idx] = manager->find_or_create_logical_top_view(ctx_uid);
+          results[idx] = 
+            manager->find_or_create_logical_top_view(ctx_uid, version_info);
           // Mark that it is done
           up_mask[idx] = false;
         }
@@ -15596,7 +15523,8 @@ namespace Legion {
 #ifdef DEBUG_HIGH_LEVEL
         assert(parent != NULL);
 #endif
-        parent->convert_references_partition(managers,up_mask,ctx_uid,results);
+        parent->convert_references_partition(managers, up_mask, ctx_uid,
+                                             results, version_info);
         for (unsigned idx = 0; idx < up_indexes.size(); idx++)
         {
           unsigned index = up_indexes[idx];
@@ -16250,6 +16178,29 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    Event PartitionNode::issue_copy(Operation *op,
+                        const std::vector<Domain::CopySrcDstField> &src_fields,
+                        const std::vector<Domain::CopySrcDstField> &dst_fields,
+                        Event precondition, RegionTreeNode *intersect/*=NULL*/,
+                        ReductionOpID redop /*=0*/,bool reduction_fold/*=true*/)
+    //--------------------------------------------------------------------------
+    {
+      return parent->issue_copy(op, src_fields, dst_fields, precondition,
+                                intersect, redop, reduction_fold);
+    }
+
+    //--------------------------------------------------------------------------
+    Event PartitionNode::issue_fill(Operation *op,
+                        const std::vector<Domain::CopySrcDstField> &dst_fields,
+                        const void *fill_value, size_t fill_size,
+                        Event precondition, RegionTreeNode *intersect)
+    //--------------------------------------------------------------------------
+    {
+      return parent->issue_fill(op, dst_fields, fill_value, fill_size, 
+                                precondition, intersect);
+    }
+
+    //--------------------------------------------------------------------------
     bool PartitionNode::are_children_disjoint(const ColorPoint &c1, 
                                               const ColorPoint &c2)
     //--------------------------------------------------------------------------
@@ -16284,6 +16235,7 @@ namespace Legion {
       return false;
     }
 
+#ifdef DEBUG_HIGH_LEVEL
     //--------------------------------------------------------------------------
     RegionNode* PartitionNode::as_region_node(void) const
     //--------------------------------------------------------------------------
@@ -16297,6 +16249,7 @@ namespace Legion {
     {
       return const_cast<PartitionNode*>(this);
     }
+#endif
 
     //--------------------------------------------------------------------------
     AddressSpaceID PartitionNode::get_owner_space(void) const
@@ -16369,38 +16322,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool PartitionNode::has_component_domains(void) const
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(parent != NULL);
-#endif
-      return parent->has_component_domains();    
-    }
-
-    //--------------------------------------------------------------------------
-    const std::set<Domain>& PartitionNode::get_component_domains_blocking(
-                                                                     void) const
-    //--------------------------------------------------------------------------
-    {
- #ifdef DEBUG_HIGH_LEVEL
-      assert(parent != NULL);
-#endif
-      return parent->get_component_domains_blocking();     
-    }
-
-    //--------------------------------------------------------------------------
-    const std::set<Domain>& PartitionNode::get_component_domains(
-                                                             Event &ready) const
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(parent != NULL);
-#endif
-      return parent->get_component_domains(ready);
-    }
-
-    //--------------------------------------------------------------------------
     const Domain& PartitionNode::get_domain_blocking(void) const
     //--------------------------------------------------------------------------
     {
@@ -16460,19 +16381,6 @@ namespace Legion {
         return row_source->dominates(other->as_region_node()->row_source);
       else
         return row_source->dominates(other->as_partition_node()->row_source);
-    }
-
-    //--------------------------------------------------------------------------
-    const std::set<Domain>& PartitionNode::get_intersection_domains(
-                                                          RegionTreeNode *other)
-    //--------------------------------------------------------------------------
-    {
-      if (other->is_region())
-        return row_source->get_intersection_domains(
-                                           other->as_region_node()->row_source);
-      else
-        return row_source->get_intersection_domains(
-                                        other->as_partition_node()->row_source);
     }
 
     //--------------------------------------------------------------------------
@@ -16541,7 +16449,8 @@ namespace Legion {
     {
       // Find the target views
       std::vector<MaterializedView*> target_views(targets.size());
-      convert_target_views(targets, info.context_uid, target_views);
+      convert_target_views(targets, info.context_uid, 
+                           target_views, version_info);
       // Handle a special case here: if the node we're closing is a partition
       // and we're permitted to leave the partition open, then don't actually
       // close the partition. Instead close to the individual target child
@@ -16724,7 +16633,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     InstanceView* PartitionNode::convert_reference_partition(
-                               PhysicalManager *manager, UniqueID ctx_uid) const
+                               PhysicalManager *manager, UniqueID ctx_uid, 
+                               VersionInfo *version_info) const
     //--------------------------------------------------------------------------
     {
       // No need to bother with the check here
@@ -16732,7 +16642,7 @@ namespace Legion {
       assert(parent != NULL);
 #endif
       InstanceView *parent_view = 
-        parent->convert_reference_region(manager, ctx_uid);
+        parent->convert_reference_region(manager, ctx_uid, version_info);
       return parent_view->get_instance_subview(row_source->color);
     }
 
@@ -16754,7 +16664,8 @@ namespace Legion {
     void PartitionNode::convert_references_partition(
                                   const std::vector<PhysicalManager*> &managers,
                                   std::vector<bool> &up_mask, UniqueID ctx_uid,
-                                  std::vector<InstanceView*> &results) const
+                                  std::vector<InstanceView*> &results,
+                                  VersionInfo *version_info) const
     //--------------------------------------------------------------------------
     {
       // No need to bother with the check here
@@ -16764,7 +16675,8 @@ namespace Legion {
 #endif
       // Make a copy of the local mask for the way back down
       std::vector<bool> local_mask = up_mask;
-      parent->convert_references_region(managers, up_mask, ctx_uid, results);
+      parent->convert_references_region(managers, up_mask, ctx_uid, 
+                                        results, version_info);
       // Do the conversion on the way back down
       for (unsigned idx = 0; idx < managers.size(); idx++)
       {

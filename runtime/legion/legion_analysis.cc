@@ -343,6 +343,8 @@ namespace Legion {
         assert(it->second.physical_state == NULL);
       }
 #endif
+      if (!top_views.empty())
+        release_top_views();
       // If we still have a buffer, then free it now
       if (packed_buffer != NULL)
         free(packed_buffer);
@@ -469,6 +471,8 @@ namespace Legion {
         // version manager references in case this operation
         // fails to complete
       }
+      if (!top_views.empty())
+        release_top_views();
     }
 
     //--------------------------------------------------------------------------
@@ -505,6 +509,8 @@ namespace Legion {
                                 target, closed_children, applied_conditions);
         }
       }
+      if (!top_views.empty())
+        release_top_views();
     }
 
     //--------------------------------------------------------------------------
@@ -590,6 +596,31 @@ namespace Legion {
         assert(previous_fields * it->second);
         previous_fields |= it->second;
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionInfo::record_top_view(InstanceView *view, bool created)
+    //--------------------------------------------------------------------------
+    {
+      // If it wasn't created, check to see ifw e already hold a reference
+      if (!created && (top_views.find(view) != top_views.end()))
+        return;
+      // Add a resource reference and record it
+      view->add_base_resource_ref(VERSION_INFO_REF);
+      top_views.insert(view);
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionInfo::release_top_views(void)
+    //--------------------------------------------------------------------------
+    {
+      for (std::set<InstanceView*>::const_iterator it = top_views.begin();
+            it != top_views.end(); it++)
+      {
+        if ((*it)->remove_base_resource_ref(VERSION_INFO_REF))
+          LogicalView::delete_logical_view(*it);
+      }
+      top_views.clear();
     }
 
     //--------------------------------------------------------------------------
@@ -3488,9 +3519,6 @@ namespace Legion {
     PhysicalState::~PhysicalState(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(created_instances.empty());
-#endif
       // Remove references to our version states and delete them if necessary
       for (LegionMap<VersionID,VersionStateInfo>::aligned::const_iterator vit =
             version_states.begin(); vit != version_states.end(); vit++)
@@ -3658,9 +3686,6 @@ namespace Legion {
                AddressSpaceID target, std::set<Event> &applied_conditions) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(created_instances.empty());
-#endif
       if (!advance_states.empty())
       {
         FieldMask non_advance_mask = adv_mask;
@@ -3773,10 +3798,6 @@ namespace Legion {
           }
         }
       }
-      // If we have any created instances, we can now remove our
-      // valid references on them because we've applied all our updates
-      if (!created_instances.empty())
-        release_created_instances();
     }
 
     //--------------------------------------------------------------------------
@@ -3842,32 +3863,6 @@ namespace Legion {
           }
         }
       }
-      // If we have any created instances, we can now remove our
-      // valid references on them because we've applied all our updates
-      if (!created_instances.empty())
-        release_created_instances();
-    }
-
-    //--------------------------------------------------------------------------
-    void PhysicalState::release_created_instances(void)
-    //--------------------------------------------------------------------------
-    {
-      for (std::deque<std::pair<InstanceView*,bool> >::const_iterator it =
-            created_instances.begin(); it != created_instances.end(); it++)
-      {
-        // Remove our reference on the view
-        if (it->first->remove_base_valid_ref(INITIAL_CREATION_REF))
-          LogicalView::delete_logical_view(it->first);
-        // If it was remote, we also have a reference to remove on 
-        // the instance manager from when it was created remotely
-        if (it->second)
-        {
-          PhysicalManager *manager = it->first->get_manager();
-          manager->send_remote_valid_update(manager->owner_space,
-                                            1/*count*/, false/*add*/);
-        }
-      }
-      created_instances.clear();
     }
 
     //--------------------------------------------------------------------------
@@ -3881,15 +3876,6 @@ namespace Legion {
       valid_views.clear();
       reduction_views.clear();
       // Don't clear version states or advance states, we need those
-    }
-
-    //--------------------------------------------------------------------------
-    void PhysicalState::record_created_instance(InstanceView *view, bool remote)
-    //--------------------------------------------------------------------------
-    {
-      // Always record an initial creation reference on this view
-      view->add_base_valid_ref(INITIAL_CREATION_REF); 
-      created_instances.push_back(std::pair<InstanceView*,bool>(view,remote));
     }
 
     //--------------------------------------------------------------------------

@@ -154,6 +154,8 @@ namespace Legion {
       void clear(void);
       void recapture_state(void);
       void sanity_check(RegionTreeNode *node);
+      void record_top_view(InstanceView *view, bool created);
+      void release_top_views(void);
     public:
       PhysicalState* find_physical_state(RegionTreeNode *node, bool capture); 
       FieldVersions* get_versions(RegionTreeNode *node) const;
@@ -178,6 +180,9 @@ namespace Legion {
     protected:
       LegionMap<RegionTreeNode*,NodeInfo>::aligned node_infos;
       RegionTreeNode *upper_bound_node;
+      // Views which we hold resource references on during the 
+      // mapping process prevent them from being collected
+      std::set<InstanceView*> top_views;
     protected:
       bool packed;
       void *packed_buffer;
@@ -628,9 +633,7 @@ namespace Legion {
       void filter_and_apply(bool top, AddressSpaceID target,
             const LegionMap<ColorPoint,FieldMask>::aligned &closed_children,
                             std::set<Event> &applied_conditions);
-      void release_created_instances(void);
       void reset(void);
-      void record_created_instance(InstanceView *view, bool remote);
       void filter_open_children(const FieldMask &filter_mask);
     public:
       PhysicalState* clone(bool clone_state, bool need_advance) const;
@@ -657,10 +660,6 @@ namespace Legion {
       // The valid reduction veiws
       LegionMap<ReductionView*, FieldMask,
                 VALID_REDUCTION_ALLOC>::track_aligned reduction_views;
-      // Any instance views which we created and are therefore holding
-      // additional valid references that will need to be removed
-      // after our updates have been applied
-      std::deque<std::pair<InstanceView*,bool/*remote*/> > created_instances;
     public:
       LegionMap<VersionID,VersionStateInfo>::aligned version_states;
       LegionMap<VersionID,VersionStateInfo>::aligned advance_states;

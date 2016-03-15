@@ -36,6 +36,13 @@ namespace Legion {
 
       extern LegionRuntime::Logger::Category log_spy;
 
+      enum TestKind {
+        SPACE_SPACE_TEST = 0,
+        SPACE_PART_TEST = 1,
+        PART_SPACE_TEST = 2,
+        PART_PART_TEST = 3,
+      };
+
       // Logger calls for the machine architecture
       static inline void log_utility_processor(IDType unique_id)
       {
@@ -122,6 +129,26 @@ namespace Legion {
       {
         log_spy.info("Index Partition Independence " IDFMT " " IDFMT " " 
                       IDFMT "", parent_id, unique_id1, unique_id2);
+      }
+
+      static inline void log_index_partition_completeness(IDType unique_id)
+      {
+        log_spy.info("Index Partition Complete " IDFMT, unique_id);
+      }
+
+      static inline void log_nonintersection(IDType unique_id1,
+                                             IDType unique_id2,
+                                             TestKind k)
+      {
+        log_spy.info("Index Non-Intersection " IDFMT " " IDFMT " %d",
+                      unique_id1, unique_id2, k);
+      }
+
+      static inline void log_dominance(IDType unique_id1,
+                                       IDType unique_id2, TestKind k)
+      {
+        log_spy.info("Index Dominance " IDFMT " " IDFMT " %d", 
+                      unique_id1, unique_id2, k);
       }
 
       static inline void log_field_space(unsigned unique_id)
@@ -380,6 +407,12 @@ namespace Legion {
                      index, fid, inst_id);
       }
 
+      // The calls above this ifdef record the basic information about
+      // the execution of an application. It is sufficient to show how
+      // an application executed, but is insufficient to actually 
+      // validate the execution by the runtime. The calls inside this
+      // ifdef are the more expensive logging calls necessary for 
+      // checking the correctness of the runtime's behaviour.
 #ifdef LEGION_SPY
       // Logger calls for mapping dependences
       static inline void log_mapping_dependence(UniqueID context, 

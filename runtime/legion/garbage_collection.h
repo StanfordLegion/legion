@@ -39,6 +39,7 @@ namespace Legion {
       FUTURE_HANDLE_REF,
       DEFERRED_TASK_REF,
       CURRENT_STATE_REF,
+      VERSION_INFO_REF,
       PHYSICAL_STATE_REF,
       PHYSICAL_REGION_REF,
       VERSION_MANAGER_REF,
@@ -49,7 +50,6 @@ namespace Legion {
       COMPOSITE_NODE_REF,
       COMPOSITE_HANDLE_REF,
       PERSISTENCE_REF,
-      INITIAL_CREATION_REF,
       REMOTE_CREATE_REF,
       INSTANCE_MAPPER_REF,
       APPLICATION_REF,
@@ -69,6 +69,7 @@ namespace Legion {
       "Future Handle Reference",                    \
       "Deferred Task Reference",                    \
       "Current State Reference",                    \
+      "Version Info Reference",                     \
       "Physical State Reference",                   \
       "Physical Region Reference",                  \
       "Version Manager Reference",                  \
@@ -79,7 +80,6 @@ namespace Legion {
       "Composite Node Reference",                   \
       "Composite Handle Reference",                 \
       "Persistent Reference",                       \
-      "Initial Creation Reference",                 \
       "Remote Creation Reference",                  \
       "Application Reference",                      \
       "Mapping Acquire Reference",                  \

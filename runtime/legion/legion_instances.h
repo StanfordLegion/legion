@@ -163,8 +163,10 @@ namespace Legion {
       void register_logical_top_view(UniqueID context_uid, InstanceView *view);
       void unregister_logical_top_view(InstanceView *view);
       UniqueID find_context_uid(InstanceView *top_view) const;
-      InstanceView* find_or_create_logical_top_view(UniqueID context_uid);
-      virtual InstanceView* create_logical_top_view(UniqueID context_uid) = 0;
+      InstanceView* find_or_create_logical_top_view(UniqueID context_uid,
+                                                    VersionInfo *version_info);
+      virtual InstanceView* create_logical_top_view(UniqueID context_uid,
+                                                VersionInfo *version_info) = 0;
     public:
       bool meets_region_tree(const std::vector<LogicalRegion> &regions) const;
       bool meets_regions(const std::vector<LogicalRegion> &regions) const;
@@ -248,7 +250,8 @@ namespace Legion {
     public:
       inline Event get_use_event(void) const { return use_event; }
     public:
-      virtual InstanceView* create_logical_top_view(UniqueID context_uid);
+      virtual InstanceView* create_logical_top_view(UniqueID context_uid,
+                                                    VersionInfo *version_info);
       void compute_copy_offsets(const FieldMask &copy_mask,
                                 std::vector<Domain::CopySrcDstField> &fields);
       void compute_copy_offsets(FieldID fid, 
@@ -323,8 +326,8 @@ namespace Legion {
       virtual Event issue_reduction(Operation *op,
           const std::vector<Domain::CopySrcDstField> &src_fields,
           const std::vector<Domain::CopySrcDstField> &dst_fields,
-          Domain space, Event precondition, bool reduction_fold,
-          bool precise_domain) = 0;
+          RegionTreeNode *dst, Event precondition, bool reduction_fold,
+          bool precise_domain, RegionTreeNode *intersect) = 0;
       virtual Domain get_pointer_space(void) const = 0;
     public:
       virtual bool is_list_manager(void) const = 0;
@@ -348,7 +351,8 @@ namespace Legion {
                                       AddressSpaceID source,
                                       Deserializer &derez);
     public:
-      virtual InstanceView* create_logical_top_view(UniqueID context_uid);
+      virtual InstanceView* create_logical_top_view(UniqueID context_uid,
+                                                    VersionInfo *version_info);
     public:
       const ReductionOp *const op;
       const ReductionOpID redop;
@@ -391,8 +395,8 @@ namespace Legion {
       virtual Event issue_reduction(Operation *op,
           const std::vector<Domain::CopySrcDstField> &src_fields,
           const std::vector<Domain::CopySrcDstField> &dst_fields,
-          Domain space, Event precondition, bool reduction_fold,
-          bool precise_domain);
+          RegionTreeNode *dst, Event precondition, bool reduction_fold,
+          bool precise_domain, RegionTreeNode *intersect);
       virtual Domain get_pointer_space(void) const;
     public:
       virtual bool is_list_manager(void) const;
@@ -442,8 +446,8 @@ namespace Legion {
       virtual Event issue_reduction(Operation *op,
           const std::vector<Domain::CopySrcDstField> &src_fields,
           const std::vector<Domain::CopySrcDstField> &dst_fields,
-          Domain space, Event precondition, bool reduction_fold,
-          bool precise_domain);
+          RegionTreeNode *dst, Event precondition, bool reduction_fold,
+          bool precise_domain, RegionTreeNode *intersect);
       virtual Domain get_pointer_space(void) const;
     public:
       virtual bool is_list_manager(void) const;
@@ -491,7 +495,8 @@ namespace Legion {
       virtual bool has_field(FieldID fid) const;
       virtual void has_fields(std::map<FieldID,bool> &fields) const;
       virtual void remove_space_fields(std::set<FieldID> &fields) const;
-      virtual InstanceView* create_logical_top_view(UniqueID context_uid);
+      virtual InstanceView* create_logical_top_view(UniqueID context_uid,
+                                                    VersionInfo *version_info);
     public:
       static inline VirtualManager* get_virtual_instance(void)
         { return get_singleton(); }
