@@ -981,6 +981,9 @@ function vectorize_loops.stat(node)
   elseif node:is(ast.typed.stat.UnmapRegions) then
     return node
 
+  elseif node:is(ast.typed.stat.RawDelete) then
+    return node
+
   else
     assert(false, "unexpected node type " .. tostring(node:type()))
   end

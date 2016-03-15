@@ -515,6 +515,8 @@ ast.unspecialized.stat:leaf("Fspace", {"name", "params", "fields",
 ast.unspecialized.stat:leaf("FspaceParam", {"param_name", "type_expr"})
 ast.unspecialized.stat:leaf("FspaceField", {"field_name", "type_expr"})
 
+ast.unspecialized.stat:leaf("RawDelete", {"value"})
+
 -- Node Types (Specialized)
 
 ast:inner("specialized", {"span"})
@@ -627,6 +629,8 @@ ast.specialized.stat:leaf("Task", {"name", "params", "return_type",
 ast.specialized.stat:leaf("TaskParam", {"symbol"})
 ast.specialized.stat:leaf("Fspace", {"name", "fspace", "constraints"})
 
+ast.specialized.stat:leaf("RawDelete", {"value"})
+
 -- Node Types (Typed)
 
 ast.typed = ast:inner("typed", {"span"})
@@ -717,5 +721,7 @@ ast.typed.stat:leaf("Task", {"name", "params", "return_type", "privileges",
                              "region_divergence", "prototype"})
 ast.typed.stat:leaf("TaskParam", {"symbol", "param_type"})
 ast.typed.stat:leaf("Fspace", {"name", "fspace"})
+
+ast.typed.stat:leaf("RawDelete", {"value"})
 
 return ast

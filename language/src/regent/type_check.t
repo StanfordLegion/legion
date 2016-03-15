@@ -2684,6 +2684,21 @@ function type_check.stat_expr(cx, node)
   }
 end
 
+function type_check.stat_raw_delete(cx, node)
+  local value = type_check.expr(cx, node.value)
+  local value_type = std.check_read(cx, value)
+
+  if not (std.is_region(value_type) or std.is_partition(value_type)) then
+    log.error(node, "type mismatch in delete: expected a region or partition but got " .. tostring(value_type))
+  end
+
+  return ast.typed.stat.RawDelete {
+    value = value,
+    options = node.options,
+    span = node.span,
+  }
+end
+
 function type_check.stat(cx, node)
   if node:is(ast.specialized.stat.If) then
     return type_check.stat_if(cx, node)
@@ -2726,6 +2741,9 @@ function type_check.stat(cx, node)
 
   elseif node:is(ast.specialized.stat.Expr) then
     return type_check.stat_expr(cx, node)
+
+  elseif node:is(ast.specialized.stat.RawDelete) then
+    return type_check.stat_raw_delete(cx, node)
 
   else
     assert(false, "unexpected node type " .. tostring(node:type()))

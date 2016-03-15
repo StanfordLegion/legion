@@ -52,6 +52,7 @@ local language = {
     "__inline",
     "__parallel",
     "__physical",
+    "__delete",
     "__raw",
     "__runtime",
     "__spmd",

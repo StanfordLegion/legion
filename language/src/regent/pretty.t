@@ -758,6 +758,13 @@ function pretty.stat_unmap_regions(cx, node)
     ")"})
 end
 
+function pretty.stat_raw_delete(cx, node)
+  return join({
+    "__delete(",
+    pretty.expr(cx, node.value),
+    ")"})
+end
+
 function pretty.stat(cx, node)
   if node:is(ast.typed.stat.If) then
     return pretty.stat_if(cx, node)
@@ -812,6 +819,9 @@ function pretty.stat(cx, node)
 
   elseif node:is(ast.typed.stat.UnmapRegions) then
     return pretty.stat_unmap_regions(cx, node)
+
+  elseif node:is(ast.typed.stat.RawDelete) then
+    return pretty.stat_raw_delete(cx, node)
 
   else
     assert(false, "unexpected node type " .. tostring(node:type()))

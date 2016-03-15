@@ -494,6 +494,16 @@ function parser.expr_prefix(p)
       span = ast.span(start, p),
     }
 
+  elseif p:nextif("__delete") then
+    p:expect("(")
+    local value = p:expr()
+    p:expect(")")
+    return ast.unspecialized.expr.RawDelete {
+      value = value,
+      options = ast.default_options(),
+      span = ast.span(start, p),
+    }
+
   elseif p:nextif("__runtime") then
     p:expect("(")
     p:expect(")")
@@ -1359,6 +1369,19 @@ function parser.stat_break(p, options)
   }
 end
 
+function parser.stat_raw_delete(p, options)
+  local start = ast.save(p)
+  p:expect("__delete")
+  p:expect("(")
+  local value = p:expr()
+  p:expect(")")
+  return ast.unspecialized.stat.RawDelete {
+    value = value,
+    options = ast.default_options(),
+    span = ast.span(start, p),
+  }
+end
+
 function parser.stat_expr_assignment(p, start, first_lhs, options)
   local lhs = terralib.newlist()
   lhs:insert(first_lhs)
@@ -1453,6 +1476,9 @@ function parser.stat(p)
 
   elseif p:matches("break") then
     return p:stat_break(options)
+
+  elseif p:matches("__delete") then
+    return p:stat_raw_delete(options)
 
   else
     return p:stat_expr(options)

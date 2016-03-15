@@ -367,6 +367,9 @@ function analyze_var_flow.stat(cx, node)
   elseif node:is(ast.typed.stat.Expr) then
     return
 
+  elseif node:is(ast.typed.stat.RawDelete) then
+    return
+
   else
     assert(false, "unexpected node type " .. tostring(node:type()))
   end
@@ -1107,6 +1110,12 @@ function optimize_futures.stat_expr(cx, node)
   }
 end
 
+function optimize_futures.stat_raw_delete(cx, node)
+  return node {
+    value = optimize_futures.expr(cx, node.value),
+  }
+end
+
 function optimize_futures.stat(cx, node)
   if node:is(ast.typed.stat.If) then
     return optimize_futures.stat_if(cx, node)
@@ -1152,6 +1161,9 @@ function optimize_futures.stat(cx, node)
 
   elseif node:is(ast.typed.stat.Expr) then
     return optimize_futures.stat_expr(cx, node)
+
+  elseif node:is(ast.typed.stat.RawDelete) then
+    return optimize_futures.stat_raw_delete(cx, node)
 
   else
     assert(false, "unexpected node type " .. tostring(node:type()))

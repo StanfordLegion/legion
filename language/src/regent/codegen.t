@@ -5838,6 +5838,28 @@ function codegen.stat_unmap_regions(cx, node)
   return quote [actions] end
 end
 
+function codegen.stat_raw_delete(cx, node)
+  local value = codegen.expr(cx, node.value):read(cx)
+  local value_type = std.as_read(node.value.expr_type)
+
+  local region_delete_fn, ispace_delete_fn, ispace_getter
+  if std.is_region(value_type) then
+    region_delete_fn = c.legion_logical_region_destroy
+    ispace_delete_fn = c.legion_index_space_destroy
+    ispace_getter = function(x) return `([x.value].impl.index_space) end
+  else
+    region_delete_fn = c.legion_logical_partition_destroy
+    ispace_delete_fn = c.legion_index_partition_destroy
+    ispace_getter = function(x) return `([x.value].impl.index_partition) end
+  end
+
+  return quote
+    [value.actions]
+    [region_delete_fn]([cx.runtime], [cx.context], [value.value].impl)
+    [ispace_delete_fn]([cx.runtime], [cx.context], [ispace_getter(value)])
+  end
+end
+
 function codegen.stat(cx, node)
   if node:is(ast.typed.stat.If) then
     return codegen.stat_if(cx, node)
@@ -5892,6 +5914,9 @@ function codegen.stat(cx, node)
 
   elseif node:is(ast.typed.stat.UnmapRegions) then
     return codegen.stat_unmap_regions(cx, node)
+
+  elseif node:is(ast.typed.stat.RawDelete) then
+    return codegen.stat_raw_delete(cx, node)
 
   else
     assert(false, "unexpected node type " .. tostring(node:type()))
