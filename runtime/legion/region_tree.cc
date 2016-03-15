@@ -9351,9 +9351,10 @@ namespace Legion {
         }
       }
       // Now we can linearize the index map without holding the lock
+      unsigned idx = 0;
       for (std::map<unsigned,unsigned>::const_iterator it = 
-            index_map.begin(); it != index_map.end(); it++)
-        mask_index_map[it->first] = it->second;
+            index_map.begin(); it != index_map.end(); it++, idx++)
+        mask_index_map[idx] = it->second;
     }
 
     //--------------------------------------------------------------------------
