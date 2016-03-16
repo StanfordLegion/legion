@@ -1883,7 +1883,7 @@ function std.cross_product(...)
   st.entries = terralib.newlist({
       { "impl", c.legion_logical_partition_t },
       { "product", c.legion_terra_index_cross_product_t },
-      { "partitions", c.legion_index_partition_t[#partition_symbols] },
+      { "colors", c.legion_color_t[#partition_symbols] },
   })
 
   st.is_cross_product = true
@@ -1960,7 +1960,7 @@ function std.cross_product(...)
   function st:force_cast(from, to, expr)
     assert(std.is_cross_product(from) and std.is_cross_product(to))
     -- FIXME: Potential for double (triple) evaluation here.
-    return `([to] { impl = [expr].impl, product = [expr].product, partitions = [expr].partitions })
+    return `([to] { impl = [expr].impl, product = [expr].product, colors = [expr].colors })
   end
 
   function st:hash()

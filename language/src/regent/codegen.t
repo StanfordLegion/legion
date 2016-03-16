@@ -1714,14 +1714,13 @@ function codegen.expr_index_access(cx, node)
     elseif std.is_cross_product(expr_type) then
       actions = quote
         [actions]
-        var ip2 = [value.value].partitions[2]
         var [result] = [expr_type] {
           impl = [lp],
           product = c.legion_terra_index_cross_product_t {
             partition = [ip],
-            other = ip2,
+            other_color = [value.value].colors[2],
           },
-          -- FIXME: partitions
+          -- FIXME: colors
         }
       end
     end
@@ -3314,6 +3313,7 @@ function codegen.expr_cross_product(cx, node)
 
   local partitions = terralib.newsymbol(
     c.legion_index_partition_t[#args], "partitions")
+  local colors = terralib.newsymbol(c.legion_color_t[#args], "colors")
   local product = terralib.newsymbol(
     c.legion_terra_index_cross_product_t, "cross_product")
   local lr = cx:region(expr_type:parent_region()).logical_region
@@ -3326,8 +3326,9 @@ function codegen.expr_cross_product(cx, node)
          local i, arg = unpack(pair)
          return quote partitions[i] = [arg.value].impl.index_partition end
        end)]
+    var [colors]
     var [product] = c.legion_terra_index_cross_product_create_multi(
-      [cx.runtime], [cx.context], &(partitions[0]), [#args])
+      [cx.runtime], [cx.context], &(partitions[0]), &(colors[0]), [#args])
     var ip = c.legion_terra_index_cross_product_get_partition([product])
     var [lp] = c.legion_logical_partition_create(
       [cx.runtime], [cx.context], lr.impl, ip)
@@ -3339,7 +3340,7 @@ function codegen.expr_cross_product(cx, node)
       `(expr_type {
           impl = [lp],
           product = [product],
-          partitions = [partitions],
+          colors = [colors],
         })),
     expr_type)
 end
