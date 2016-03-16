@@ -2373,6 +2373,21 @@ legion_dynamic_collective_destroy(legion_runtime_t runtime_,
 }
 
 void
+legion_dynamic_collective_arrive(legion_runtime_t runtime_,
+                                 legion_context_t ctx_,
+                                 legion_dynamic_collective_t handle_,
+                                 const void *buffer,
+                                 size_t size,
+                                 unsigned count /* = 1 */)
+{
+  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  DynamicCollective handle = CObjectWrapper::unwrap(handle_);
+
+  runtime->arrive_dynamic_collective(ctx, handle, buffer, size, count);
+}
+
+void
 legion_dynamic_collective_defer_arrival(legion_runtime_t runtime_,
                                         legion_context_t ctx_,
                                         legion_dynamic_collective_t handle_,

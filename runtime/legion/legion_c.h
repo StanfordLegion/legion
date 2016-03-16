@@ -1571,6 +1571,17 @@ typedef int coord_t;
                                     legion_dynamic_collective_t handle);
 
   /**
+   * @see LegionRuntime::HighLevel::HighLevelRuntime::arrive_dynamic_collective()
+   */
+  void
+  legion_dynamic_collective_arrive(legion_runtime_t runtime,
+                                   legion_context_t ctx,
+                                   legion_dynamic_collective_t handle,
+                                   const void *buffer,
+                                   size_t size,
+                                   unsigned count /* = 1 */);
+
+  /**
    * @see LegionRuntime::HighLevel::HighLevelRuntime::defer_dynamic_collective_arrival()
    */
   void
