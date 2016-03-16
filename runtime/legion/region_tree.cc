@@ -9345,7 +9345,7 @@ namespace Legion {
 #endif
           field_sizes[idx] = 
             std::pair<FieldID,size_t>(fid, finder->second.field_size);
-          mask_index_map[finder->second.idx] = idx;
+          index_map[finder->second.idx] = idx;
           serdez[idx] = finder->second.serdez_id;
           mask.set_bit(finder->second.idx);
         }
