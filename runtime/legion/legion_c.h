@@ -248,6 +248,20 @@ typedef int coord_t;
   } legion_phase_barrier_t;
 
   /**
+   * @see LegionRuntime::HighLevel::DynamicCollective
+   */
+  typedef struct legion_dynamic_collective_t {
+    // From LegionRuntime::HighLevel::PhaseBarrier
+    //   From Realm::Event
+    legion_lowlevel_id_t id;
+    legion_lowlevel_event_gen_t gen;
+    //   From Realm::Barrier
+    legion_lowlevel_barrier_timestamp_t timestamp;
+    // From LegionRuntime::HighLevel::DynamicCollective
+    legion_reduction_op_id_t redop;
+  } legion_dynamic_collective_t;
+
+  /**
    * Interface for a Legion C registration callback.
    */
   typedef
@@ -1528,6 +1542,63 @@ typedef int coord_t;
   legion_phase_barrier_advance(legion_runtime_t runtime,
                                legion_context_t ctx,
                                legion_phase_barrier_t handle);
+
+  // -----------------------------------------------------------------------
+  // Dynamic Collective Operations
+  // -----------------------------------------------------------------------
+
+  /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see LegionRuntime::HighLevel::HighLevelRuntime::create_dynamic_collective()
+   */
+  legion_dynamic_collective_t
+  legion_dynamic_collective_create(legion_runtime_t runtime,
+                                   legion_context_t ctx,
+                                   unsigned arrivals,
+                                   legion_reduction_op_id_t redop,
+                                   const void *init_value,
+                                   size_t init_size);
+
+  /**
+   * @param handle Caller must have ownership of parameter `handle`.
+   *
+   * @see LegionRuntime::HighLevel::PhaseBarrier::destroy_dynamic_collective()
+   */
+  void
+  legion_dynamic_collective_destroy(legion_runtime_t runtime,
+                                    legion_context_t ctx,
+                                    legion_dynamic_collective_t handle);
+
+  /**
+   * @see LegionRuntime::HighLevel::HighLevelRuntime::defer_dynamic_collective_arrival()
+   */
+  void
+  legion_dynamic_collective_defer_arrival(legion_runtime_t runtime,
+                                          legion_context_t ctx,
+                                          legion_dynamic_collective_t handle,
+                                          legion_future_t f,
+                                          unsigned count /* = 1 */);
+
+  /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see LegionRuntime::HighLevel::HighLevelRuntime::get_dynamic_collective_result()
+   */
+  legion_future_t
+  legion_dynamic_collective_get_result(legion_runtime_t runtime,
+                                       legion_context_t ctx,
+                                       legion_dynamic_collective_t handle);
+
+  /**
+   * @return Caller does **NOT** take ownership of return value.
+   *
+   * @see LegionRuntime::HighLevel::HighLevelRuntime::advance_dynamic_collective()
+   */
+  legion_dynamic_collective_t
+  legion_dynamic_collective_advance(legion_runtime_t runtime,
+                                    legion_context_t ctx,
+                                    legion_dynamic_collective_t handle);
 
   // -----------------------------------------------------------------------
   // Future Operations

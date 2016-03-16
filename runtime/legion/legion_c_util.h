@@ -529,6 +529,26 @@ namespace LegionRuntime {
         barrier.phase_barrier.timestamp = barrier_.timestamp;
         return barrier;
       }
+
+      static legion_dynamic_collective_t
+      wrap(DynamicCollective collective) {
+        legion_dynamic_collective_t collective_;
+        collective_.id = collective.get_barrier().id;
+        collective_.gen = collective.get_barrier().gen;
+        collective_.timestamp = collective.get_barrier().timestamp;
+        collective_.redop = collective.redop;
+        return collective_;
+      }
+
+      static DynamicCollective
+      unwrap(legion_dynamic_collective_t collective_) {
+        DynamicCollective collective;
+        collective.phase_barrier.id = collective_.id;
+        collective.phase_barrier.gen = collective_.gen;
+        collective.phase_barrier.timestamp = collective_.timestamp;
+        collective.redop = collective_.redop;
+        return collective;
+      }
     };
 
     class CContext {

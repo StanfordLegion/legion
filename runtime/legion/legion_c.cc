@@ -2339,6 +2339,80 @@ legion_phase_barrier_advance(legion_runtime_t runtime_,
   return CObjectWrapper::wrap(result);
 }
 
+// -----------------------------------------------------------------------
+// Dynamic Collective Operations
+// -----------------------------------------------------------------------
+
+legion_dynamic_collective_t
+legion_dynamic_collective_create(legion_runtime_t runtime_,
+                                 legion_context_t ctx_,
+                                 unsigned arrivals,
+                                 legion_reduction_op_id_t redop,
+                                 const void *init_value,
+                                 size_t init_size)
+{
+  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+
+  DynamicCollective result =
+    runtime->create_dynamic_collective(ctx, arrivals, redop,
+                                       init_value, init_size);
+  return CObjectWrapper::wrap(result);
+}
+
+void
+legion_dynamic_collective_destroy(legion_runtime_t runtime_,
+                                  legion_context_t ctx_,
+                                  legion_dynamic_collective_t handle_)
+{
+  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  DynamicCollective handle = CObjectWrapper::unwrap(handle_);
+
+  runtime->destroy_dynamic_collective(ctx, handle);
+}
+
+void
+legion_dynamic_collective_defer_arrival(legion_runtime_t runtime_,
+                                        legion_context_t ctx_,
+                                        legion_dynamic_collective_t handle_,
+                                        legion_future_t f_,
+                                        unsigned count /* = 1 */)
+{
+  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  DynamicCollective handle = CObjectWrapper::unwrap(handle_);
+  Future *f = CObjectWrapper::unwrap(f_);
+
+  runtime->defer_dynamic_collective_arrival(ctx, handle, *f, count);
+}
+
+legion_future_t
+legion_dynamic_collective_get_result(legion_runtime_t runtime_,
+                                     legion_context_t ctx_,
+                                     legion_dynamic_collective_t handle_)
+{
+  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  DynamicCollective handle = CObjectWrapper::unwrap(handle_);
+
+  Future f = runtime->get_dynamic_collective_result(ctx, handle);
+  return CObjectWrapper::wrap(new Future(f));
+}
+
+legion_dynamic_collective_t
+legion_dynamic_collective_advance(legion_runtime_t runtime_,
+                                  legion_context_t ctx_,
+                                  legion_dynamic_collective_t handle_)
+{
+  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  DynamicCollective handle = CObjectWrapper::unwrap(handle_);
+
+  DynamicCollective result = runtime->advance_dynamic_collective(ctx, handle);
+  return CObjectWrapper::wrap(result);
+}
+
 //------------------------------------------------------------------------
 // Future Operations
 //------------------------------------------------------------------------
