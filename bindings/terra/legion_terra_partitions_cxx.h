@@ -23,7 +23,7 @@
 using namespace LegionRuntime;
 using namespace LegionRuntime::HighLevel;
 
-void
+Color
 create_cross_product(HighLevelRuntime *runtime,
                      Context ctx,
                      IndexPartition lhs,

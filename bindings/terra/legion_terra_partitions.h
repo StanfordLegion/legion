@@ -32,7 +32,7 @@ extern "C" {
 
 typedef struct legion_terra_index_cross_product_t {
   legion_index_partition_t partition;
-  legion_index_partition_t other;
+  legion_color_t other_color;
 } legion_terra_index_cross_product_t;
 
 typedef struct legion_terra_cached_index_iterator_t {
@@ -50,7 +50,8 @@ legion_terra_index_cross_product_t
 legion_terra_index_cross_product_create_multi(
   legion_runtime_t runtime,
   legion_context_t ctx,
-  legion_index_partition_t *partitions,
+  legion_index_partition_t *partitions, // input
+  legion_color_t *colors, // output
   size_t npartitions);
 
 legion_index_partition_t
