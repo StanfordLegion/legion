@@ -416,9 +416,30 @@ function pretty.expr_phase_barrier(cx, node)
       "phase_barrier(", commas({pretty.expr(cx, node.value)}), ")"})
 end
 
+function pretty.expr_dynamic_collective(cx, node)
+  return join({
+      "dynamic_collective(",
+      commas({tostring(node.value_type), node.op, pretty.expr(cx, node.arrivals)}),
+      ")"})
+end
+
+function pretty.expr_dynamic_collective_get_result(cx, node)
+  return join({
+      "dynamic_collective_get_result(",
+      commas({pretty.expr(cx, node.value)}),
+      ")"})
+end
+
 function pretty.expr_advance(cx, node)
   return join({
       "advance(", commas({pretty.expr(cx, node.value)}), ")"})
+end
+
+function pretty.expr_arrive(cx, node)
+  return join({
+      "arrive(",
+      commas({pretty.expr(cx, node.barrier), pretty.expr(cx, node.value)}),
+      ")"})
 end
 
 function pretty.expr_copy(cx, node)
@@ -581,8 +602,17 @@ function pretty.expr(cx, node)
   elseif node:is(ast.typed.expr.PhaseBarrier) then
     return pretty.expr_phase_barrier(cx, node)
 
+  elseif node:is(ast.typed.expr.DynamicCollective) then
+    return pretty.expr_dynamic_collective(cx, node)
+
+  elseif node:is(ast.typed.expr.DynamicCollectiveGetResult) then
+    return pretty.expr_dynamic_collective_get_result(cx, node)
+
   elseif node:is(ast.typed.expr.Advance) then
     return pretty.expr_advance(cx, node)
+
+  elseif node:is(ast.typed.expr.Arrive) then
+    return pretty.expr_arrive(cx, node)
 
   elseif node:is(ast.typed.expr.Copy) then
     return pretty.expr_copy(cx, node)

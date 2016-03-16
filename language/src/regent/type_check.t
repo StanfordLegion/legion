@@ -1768,17 +1768,77 @@ function type_check.expr_phase_barrier(cx, node)
   }
 end
 
+function type_check.expr_dynamic_collective(cx, node)
+  local arrivals = type_check.expr(cx, node.arrivals)
+  local arrivals_type = std.check_read(cx, arrivals)
+  if not std.validate_implicit_cast(arrivals_type, int) then
+    log.error(node, "type mismatch in argument 3: expected " .. tostring(int) .. " but got " .. tostring(arrivals_type))
+  end
+
+  local expr_type = std.dynamic_collective(node.value_type)
+
+  return ast.typed.expr.DynamicCollective {
+    value_type = node.value_type,
+    op = node.op,
+    arrivals = arrivals,
+    expr_type = expr_type,
+    options = node.options,
+    span = node.span,
+  }
+end
+
+function type_check.expr_dynamic_collective_get_result(cx, node)
+  local value = type_check.expr(cx, node.value)
+  local value_type = std.check_read(cx, value)
+  if not std.is_dynamic_collective(value_type) then
+    log.error(node, "type mismatch: expected a dynamic collective but got " .. tostring(value_type))
+  end
+  local expr_type = value_type.result_type
+
+  return ast.typed.expr.DynamicCollectiveGetResult {
+    value = value,
+    expr_type = expr_type,
+    options = node.options,
+    span = node.span,
+  }
+end
+
 function type_check.expr_advance(cx, node)
   local value = type_check.expr(cx, node.value)
   local value_type = std.check_read(cx, value)
   if not (std.validate_implicit_cast(value_type, std.phase_barrier) or
+            std.is_dynamic_collective(value_type) or
             std.is_list_of_phase_barriers(value_type))
   then
-    log.error(node, "type mismatch: expected " .. tostring(std.phase_barrier) .. " but got " .. tostring(value_type))
+    log.error(node, "type mismatch: expected a phase barrier or dynamic collective but got " .. tostring(value_type))
   end
   local expr_type = value_type
 
   return ast.typed.expr.Advance {
+    value = value,
+    expr_type = expr_type,
+    options = node.options,
+    span = node.span,
+  }
+end
+
+function type_check.expr_arrive(cx, node)
+  local barrier = type_check.expr(cx, node.barrier)
+  local barrier_type = std.check_read(cx, barrier)
+  local value = type_check.expr(cx, node.value)
+  local value_type = std.check_read(cx, value)
+  if not std.is_dynamic_collective(barrier_type) then
+    log.error(node, "type mismatch in argument 1: expected a dynamic collective but got " .. tostring(value_type))
+  end
+  if not std.validate_implicit_cast(value_type, barrier_type.result_type) then
+    log.error(node, "type mismatch in argument 2: expected " ..
+                tostring(barrier_type.result_type) .. " but got " ..
+                tostring(value_type))
+  end
+  local expr_type = barrier_type
+
+  return ast.typed.expr.Arrive {
+    barrier = barrier,
     value = value,
     expr_type = expr_type,
     options = node.options,
@@ -2257,8 +2317,17 @@ function type_check.expr(cx, node)
   elseif node:is(ast.specialized.expr.PhaseBarrier) then
     return type_check.expr_phase_barrier(cx, node)
 
+  elseif node:is(ast.specialized.expr.DynamicCollective) then
+    return type_check.expr_dynamic_collective(cx, node)
+
+  elseif node:is(ast.specialized.expr.DynamicCollectiveGetResult) then
+    return type_check.expr_dynamic_collective_get_result(cx, node)
+
   elseif node:is(ast.specialized.expr.Advance) then
     return type_check.expr_advance(cx, node)
+
+  elseif node:is(ast.specialized.expr.Arrive) then
+    return type_check.expr_arrive(cx, node)
 
   elseif node:is(ast.specialized.expr.Copy) then
     return type_check.expr_copy(cx, node)

@@ -3762,12 +3762,73 @@ function codegen.expr_phase_barrier(cx, node)
     expr_type)
 end
 
+function codegen.expr_dynamic_collective(cx, node)
+  local arrivals_type = std.as_read(node.arrivals.expr_type)
+  local arrivals = codegen.expr(cx, node.arrivals):read(cx, arrivals_type)
+  local value_type = node.value_type
+  local expr_type = std.as_read(node.expr_type)
+  local actions = quote
+    [arrivals.actions];
+    [emit_debuginfo(node)]
+  end
+
+  local redop = std.reduction_op_ids[node.op][value_type]
+  local init_value = std.reduction_op_init[node.op][value_type]
+  assert(redop and init_value)
+
+  local init = terralib.newsymbol(value_type, "init")
+  actions = quote
+    [actions]
+    var [init] = [init_value]
+  end
+
+  return values.value(
+    expr.once_only(
+      actions,
+      `(expr_type {
+          impl = c.legion_dynamic_collective_create(
+            [cx.runtime], [cx.context], [arrivals.value],
+            [redop], &[init], [terralib.sizeof(value_type)]),
+        })),
+    expr_type)
+end
+
+function codegen.expr_dynamic_collective_get_result(cx, node)
+  local value_type = std.as_read(node.value.expr_type)
+  local value = codegen.expr(cx, node.value):read(cx, value_type)
+  local expr_type = std.as_read(node.expr_type)
+  local actions = quote
+    [value.actions];
+    [emit_debuginfo(node)]
+  end
+
+  -- FIXME: Need to support case when optimize_futures hasn't run
+  assert(std.is_future(expr_type))
+
+  return values.value(
+    expr.once_only(
+      actions,
+      `(expr_type {
+          __result = c.legion_dynamic_collective_get_result(
+            [cx.runtime], [cx.context], [value.value].impl),
+        })),
+    expr_type)
+end
+
 local function expr_advance_phase_barrier(cx, value, value_type)
-  assert(std.is_phase_barrier(value_type))
-  return quote end, `(value_type {
-    impl = c.legion_phase_barrier_advance(
-      [cx.runtime], [cx.context], [value].impl),
-  })
+  if std.is_phase_barrier(value_type) then
+    return quote end, `(value_type {
+      impl = c.legion_phase_barrier_advance(
+        [cx.runtime], [cx.context], [value].impl),
+    })
+  elseif std.is_dynamic_collective(value_type) then
+    return quote end, `(value_type {
+      impl = c.legion_dynamic_collective_advance(
+        [cx.runtime], [cx.context], [value].impl),
+    })
+  else
+    assert(false)
+  end
 end
 
 local function expr_advance_list(cx, value, value_type)
@@ -3813,6 +3874,34 @@ function codegen.expr_advance(cx, node)
 
   return values.value(
     expr.once_only(actions, result),
+    expr_type)
+end
+
+function codegen.expr_arrive(cx, node)
+  local barrier_type = std.as_read(node.barrier.expr_type)
+  local barrier = codegen.expr(cx, node.barrier):read(cx, barrier_type)
+  local value_type = std.as_read(node.value.expr_type)
+  local value = codegen.expr(cx, node.value):read(cx, value_type)
+  local expr_type = std.as_read(node.expr_type)
+  local actions = quote
+    [barrier.actions];
+    [value.actions];
+    [emit_debuginfo(node)]
+  end
+
+  if std.is_future(value_type) then
+    actions = quote
+      [actions]
+      c.legion_dynamic_collective_defer_arrival(
+        [cx.runtime], [cx.context], [barrier.value].impl, [value.value].__result, 1)
+    end
+  else
+    -- FIXME: Need to support case when optimize_futures hasn't run
+    assert(false)
+  end
+
+  return values.value(
+    expr.just(actions, barrier.value),
     expr_type)
 end
 
@@ -4747,8 +4836,17 @@ function codegen.expr(cx, node)
   elseif node:is(ast.typed.expr.PhaseBarrier) then
     return codegen.expr_phase_barrier(cx, node)
 
+  elseif node:is(ast.typed.expr.DynamicCollective) then
+    return codegen.expr_dynamic_collective(cx, node)
+
+  elseif node:is(ast.typed.expr.DynamicCollectiveGetResult) then
+    return codegen.expr_dynamic_collective_get_result(cx, node)
+
   elseif node:is(ast.typed.expr.Advance) then
     return codegen.expr_advance(cx, node)
+
+  elseif node:is(ast.typed.expr.Arrive) then
+    return codegen.expr_arrive(cx, node)
 
   elseif node:is(ast.typed.expr.Copy) then
     return codegen.expr_copy(cx, node)

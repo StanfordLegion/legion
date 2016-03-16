@@ -143,6 +143,8 @@ local function analyze_is_side_effect_free_node(cx)
       node:is(ast.typed.expr.ListCrossProduct) or
       node:is(ast.typed.expr.ListPhaseBarriers) or
       node:is(ast.typed.expr.PhaseBarrier) or
+      node:is(ast.typed.expr.DynamicCollective) or
+      node:is(ast.typed.expr.Arrive) or
       node:is(ast.typed.expr.Copy) or
       node:is(ast.typed.expr.AllocateScratchFields) or
       node:is(ast.typed.expr.Deref)
@@ -180,6 +182,9 @@ local function analyze_is_loop_invariant_node(cx)
       node:is(ast.typed.expr.ListCrossProduct) or
       node:is(ast.typed.expr.ListPhaseBarriers) or
       node:is(ast.typed.expr.PhaseBarrier) or
+      node:is(ast.typed.expr.DynamicCollective) or
+      node:is(ast.typed.expr.DynamicCollectiveGetResult) or
+      node:is(ast.typed.expr.Arrive) or
       node:is(ast.typed.expr.Copy) or
       node:is(ast.typed.expr.AllocateScratchFields) or
       node:is(ast.typed.expr.Deref)

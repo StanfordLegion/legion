@@ -56,7 +56,10 @@ local function analyze_leaf_node(cx)
       node:is(ast.typed.expr.ListCrossProduct) or
       node:is(ast.typed.expr.ListPhaseBarriers) or
       node:is(ast.typed.expr.PhaseBarrier) or
+      node:is(ast.typed.expr.DynamicCollective) or
+      node:is(ast.typed.expr.DynamicCollectiveGetResult) or
       node:is(ast.typed.expr.Advance) or
+      node:is(ast.typed.expr.Arrive) or
       node:is(ast.typed.expr.Copy) or
       node:is(ast.typed.expr.Fill) or
       node:is(ast.typed.expr.AllocateScratchFields) or

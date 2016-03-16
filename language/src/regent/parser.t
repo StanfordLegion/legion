@@ -773,11 +773,50 @@ function parser.expr_prefix(p)
       span = ast.span(start, p),
     }
 
+  elseif p:nextif("dynamic_collective") then
+    p:expect("(")
+    local value_type_expr = p:luaexpr()
+    p:expect(",")
+    local op = p:reduction_op()
+    p:expect(",")
+    local arrivals = p:expr()
+    p:expect(")")
+    return ast.unspecialized.expr.DynamicCollective {
+      value_type_expr = value_type_expr,
+      arrivals = arrivals,
+      op = op,
+      options = ast.default_options(),
+      span = ast.span(start, p),
+    }
+
+  elseif p:nextif("dynamic_collective_get_result") then
+    p:expect("(")
+    local value = p:expr()
+    p:expect(")")
+    return ast.unspecialized.expr.DynamicCollectiveGetResult {
+      value = value,
+      options = ast.default_options(),
+      span = ast.span(start, p),
+    }
+
   elseif p:nextif("advance") then
     p:expect("(")
     local value = p:expr()
     p:expect(")")
     return ast.unspecialized.expr.Advance {
+      value = value,
+      options = ast.default_options(),
+      span = ast.span(start, p),
+    }
+
+  elseif p:nextif("arrive") then
+    p:expect("(")
+    local barrier = p:expr()
+    p:expect(",")
+    local value = p:expr()
+    p:expect(")")
+    return ast.unspecialized.expr.Arrive {
+      barrier = barrier,
       value = value,
       options = ast.default_options(),
       span = ast.span(start, p),

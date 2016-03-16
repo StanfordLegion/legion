@@ -262,7 +262,16 @@ local function get_num_accessed_fields(node)
   elseif node:is(ast.unspecialized.expr.PhaseBarrier) then
     return 1
 
+  elseif node:is(ast.unspecialized.expr.DynamicCollective) then
+    return 1
+
   elseif node:is(ast.unspecialized.expr.Advance) then
+    return 1
+
+  elseif node:is(ast.unspecialized.expr.Arrive) then
+    return 1
+
+  elseif node:is(ast.unspecialized.expr.DynamicCollectiveGetResult) then
     return 1
 
   elseif node:is(ast.unspecialized.expr.Copy) then
@@ -946,8 +955,36 @@ function specialize.expr_phase_barrier(cx, node)
   }
 end
 
+function specialize.expr_dynamic_collective(cx, node)
+  local value_type = node.value_type_expr(cx.env:env())
+  return ast.specialized.expr.DynamicCollective {
+    value_type = value_type,
+    op = node.op,
+    arrivals = specialize.expr(cx, node.arrivals),
+    options = node.options,
+    span = node.span,
+  }
+end
+
+function specialize.expr_dynamic_collective_get_result(cx, node)
+  return ast.specialized.expr.DynamicCollectiveGetResult {
+    value = specialize.expr(cx, node.value),
+    options = node.options,
+    span = node.span,
+  }
+end
+
 function specialize.expr_advance(cx, node)
   return ast.specialized.expr.Advance {
+    value = specialize.expr(cx, node.value),
+    options = node.options,
+    span = node.span,
+  }
+end
+
+function specialize.expr_arrive(cx, node)
+  return ast.specialized.expr.Arrive {
+    barrier = specialize.expr(cx, node.barrier),
     value = specialize.expr(cx, node.value),
     options = node.options,
     span = node.span,
@@ -1116,8 +1153,17 @@ function specialize.expr(cx, node)
   elseif node:is(ast.unspecialized.expr.PhaseBarrier) then
     return specialize.expr_phase_barrier(cx, node)
 
+  elseif node:is(ast.unspecialized.expr.DynamicCollective) then
+    return specialize.expr_dynamic_collective(cx, node)
+
   elseif node:is(ast.unspecialized.expr.Advance) then
     return specialize.expr_advance(cx, node)
+
+  elseif node:is(ast.unspecialized.expr.Arrive) then
+    return specialize.expr_arrive(cx, node)
+
+  elseif node:is(ast.unspecialized.expr.DynamicCollectiveGetResult) then
+    return specialize.expr_dynamic_collective_get_result(cx, node)
 
   elseif node:is(ast.unspecialized.expr.Copy) then
     return specialize.expr_copy(cx, node)

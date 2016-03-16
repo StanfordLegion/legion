@@ -583,6 +583,10 @@ function std.is_phase_barrier(t)
   return terralib.types.istype(t) and rawget(t, "is_phase_barrier")
 end
 
+function std.is_dynamic_collective(t)
+  return terralib.types.istype(t) and rawget(t, "is_dynamic_collective")
+end
+
 function std.is_unpack_result(t)
   return terralib.types.istype(t) and rawget(t, "is_unpack_result")
 end
@@ -2305,6 +2309,27 @@ do
   end
 end
 
+std.dynamic_collective = terralib.memoize(function(result_type)
+  if not terralib.types.istype(result_type) then
+    error("dynamic_collective expected a type as argument 1, got " .. tostring(result_type))
+  end
+  assert(not std.is_rawref(result_type))
+
+  local st = terralib.types.newstruct("dynamic_collective")
+  st.entries = terralib.newlist({
+      { "impl", c.legion_dynamic_collective_t },
+  })
+
+  st.is_dynamic_collective = true
+  st.result_type = result_type
+
+  function st.metamethods.__typename(st)
+    return "dynamic_collective(" .. tostring(st.result_type) .. ")"
+  end
+
+  return st
+end)
+
 do
   local function field_name(field)
     local field_name = field["field"] or field[1]
@@ -2881,13 +2906,18 @@ function std.register_task(task)
   tasks:insert(task)
 end
 
+local function zero(value_type) return terralib.cast(value_type, 0) end
+local function one(value_type) return terralib.cast(value_type, 1) end
+local function min_value(value_type) return terralib.cast(value_type, -math.huge) end
+local function max_value(value_type) return terralib.cast(value_type, math.huge) end
+
 local reduction_ops = terralib.newlist({
-    {op = "+", name = "plus"},
-    {op = "-", name = "minus"},
-    {op = "*", name = "times"},
-    {op = "/", name = "divide"},
-    {op = "max", name = "max"},
-    {op = "min", name = "min"},
+    {op = "+", name = "plus", init = zero},
+    {op = "-", name = "minus", init = zero},
+    {op = "*", name = "times", init = one},
+    {op = "/", name = "divide", init = one},
+    {op = "max", name = "max", init = min_value},
+    {op = "min", name = "min", init = max_value},
 })
 
 local reduction_types = terralib.newlist({
@@ -2896,9 +2926,16 @@ local reduction_types = terralib.newlist({
     int32,
 })
 
-std.reduction_op_ids = {}
+std.reduction_op_init = {}
+for _, op in ipairs(reduction_ops) do
+  std.reduction_op_init[op.op] = {}
+  for _, op_type in ipairs(reduction_types) do
+    std.reduction_op_init[op.op][op_type] = op.init(op_type)
+  end
+end
 
 -- Prefill the table of reduction op IDs.
+std.reduction_op_ids = {}
 do
   local base_op_id = 101
   for _, op in ipairs(reduction_ops) do

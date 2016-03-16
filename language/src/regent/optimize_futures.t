@@ -187,7 +187,16 @@ function analyze_var_flow.expr(cx, node)
   elseif node:is(ast.typed.expr.PhaseBarrier) then
     return nil
 
+  elseif node:is(ast.typed.expr.DynamicCollective) then
+    return nil
+
+  elseif node:is(ast.typed.expr.DynamicCollectiveGetResult) then
+    return nil
+
   elseif node:is(ast.typed.expr.Advance) then
+    return nil
+
+  elseif node:is(ast.typed.expr.Arrive) then
     return nil
 
   elseif node:is(ast.typed.expr.Copy) then
@@ -712,9 +721,33 @@ function optimize_futures.expr_phase_barrier(cx, node)
   }
 end
 
+function optimize_futures.expr_dynamic_collective(cx, node)
+  local arrivals = concretize(optimize_futures.expr(cx, node.arrivals))
+  return node {
+    arrivals = arrivals,
+  }
+end
+
+function optimize_futures.expr_dynamic_collective_get_result(cx, node)
+  local value = concretize(optimize_futures.expr(cx, node.value))
+  return node {
+    value = value,
+    expr_type = std.future(node.expr_type),
+  }
+end
+
 function optimize_futures.expr_advance(cx, node)
   local value = concretize(optimize_futures.expr(cx, node.value))
   return node {
+    value = value,
+  }
+end
+
+function optimize_futures.expr_arrive(cx, node)
+  local barrier = concretize(optimize_futures.expr(cx, node.barrier))
+  local value = promote(optimize_futures.expr(cx, node.value))
+  return node {
+    barrier = barrier,
     value = value,
   }
 end
@@ -904,8 +937,17 @@ function optimize_futures.expr(cx, node)
   elseif node:is(ast.typed.expr.PhaseBarrier) then
     return optimize_futures.expr_phase_barrier(cx, node)
 
+  elseif node:is(ast.typed.expr.DynamicCollective) then
+    return optimize_futures.expr_dynamic_collective(cx, node)
+
+  elseif node:is(ast.typed.expr.DynamicCollectiveGetResult) then
+    return optimize_futures.expr_dynamic_collective_get_result(cx, node)
+
   elseif node:is(ast.typed.expr.Advance) then
     return optimize_futures.expr_advance(cx, node)
+
+  elseif node:is(ast.typed.expr.Arrive) then
+    return optimize_futures.expr_arrive(cx, node)
 
   elseif node:is(ast.typed.expr.Copy) then
     return optimize_futures.expr_copy(cx, node)
