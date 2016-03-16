@@ -3802,17 +3802,37 @@ function codegen.expr_dynamic_collective_get_result(cx, node)
     [emit_debuginfo(node)]
   end
 
-  -- FIXME: Need to support case when optimize_futures hasn't run
-  assert(std.is_future(expr_type))
+  local future_type = expr_type
+  if not std.is_future(expr_type) then
+    future_type = std.future(expr_type)
+  end
 
-  return values.value(
+  local future_value = values.value(
     expr.once_only(
       actions,
-      `(expr_type {
+      `(future_type {
           __result = c.legion_dynamic_collective_get_result(
             [cx.runtime], [cx.context], [value.value].impl),
         })),
-    expr_type)
+    future_type)
+
+  if std.is_future(expr_type) then
+    return future_value
+  else
+    return codegen.expr(
+      cx,
+      ast.typed.expr.FutureGetResult {
+        value = ast.typed.expr.Internal {
+          value = future_value,
+          expr_type = future_type,
+          options = node.options,
+          span = node.span,
+        },
+        expr_type = expr_type,
+        options = node.options,
+        span = node.span,
+    })
+  end
 end
 
 local function expr_advance_phase_barrier(cx, value, value_type)
@@ -3893,11 +3913,17 @@ function codegen.expr_arrive(cx, node)
     actions = quote
       [actions]
       c.legion_dynamic_collective_defer_arrival(
-        [cx.runtime], [cx.context], [barrier.value].impl, [value.value].__result, 1)
+        [cx.runtime], [cx.context], [barrier.value].impl,
+        [value.value].__result, 1)
     end
   else
-    -- FIXME: Need to support case when optimize_futures hasn't run
-    assert(false)
+    actions = quote
+      [actions]
+      var buffer : value_type = [value.value]
+      c.legion_dynamic_collective_arrive(
+        [cx.runtime], [cx.context], [barrier.value].impl,
+        &buffer, [terralib.sizeof(value_type)], 1)
+    end
   end
 
   return values.value(
