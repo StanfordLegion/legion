@@ -70,7 +70,7 @@ def regent(args, env = {}, **kwargs):
         terra_exe = os.path.join(terra_dir, 'bin', 'terra')
 
     terra_path = (
-        ['?.t'] +
+        ['?.t', '?.rg'] +
         ([os.path.join(os.path.dirname(os.path.realpath(args[0])), '?.t')]
           if len(args) >= 1 and os.path.exists(args[0]) else []) +
         [os.path.join(regent_dir, 'src', '?.t'),
