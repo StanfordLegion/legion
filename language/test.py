@@ -15,9 +15,39 @@
 # limitations under the License.
 #
 
+from __future__ import print_function
 import argparse, itertools, json, multiprocessing, os, optparse, re, subprocess, sys, traceback
 from collections import OrderedDict
 import regent
+
+_version = sys.version_info.major
+
+if _version == 2: # Python 2.x:
+    # Use binary mode to avoid mangling newlines.
+    def _open(filename, mode='r'):
+        return open(filename, '%sb' % mode)
+elif _version == 3: # Python 3.x:
+    # Use text mode with UTF-8 encoding and '\n' newlines:
+    def _open(filename, mode='r'):
+        return open(filename, mode=mode, encoding='utf-8', newline='\n')
+else:
+    raise Exception('Incompatible Python version')
+
+if _version == 2: # Python 2.x:
+    def glob(path):
+        def visit(result, dirname, filenames):
+            for filename in filenames:
+                result.append(os.path.join(dirname, filename))
+        result = []
+        os.path.walk(path, visit, result)
+        return result
+elif _version == 3: # Python 3.x:
+    def glob(path):
+        return [os.path.join(dirname, filename)
+                for dirname, _, filenames in os.walk(path)
+                for filename in filenames]
+else:
+    raise Exception('Incompatible Python version')
 
 class TestFailure(Exception):
     def __init__(self, command, output):
@@ -31,10 +61,10 @@ def run(filename, debug, verbose, flags, env):
             ([] if verbose else ['-level', '5']))
     proc = regent.regent(
         args,
-        stdout = None if verbose else subprocess.PIPE,
-        stderr = None if verbose else subprocess.STDOUT,
-        env = env,
-        cwd = os.path.dirname(os.path.abspath(filename)))
+        stdout=None if verbose else subprocess.PIPE,
+        stderr=None if verbose else subprocess.STDOUT,
+        env=env,
+        cwd=os.path.dirname(os.path.abspath(filename)))
     output, _ = proc.communicate()
     retcode = proc.wait()
     if retcode != 0:
@@ -42,8 +72,8 @@ def run(filename, debug, verbose, flags, env):
 
 _re_label = r'^[ \t\r]*--[ \t]+{label}:[ \t\r]*$\n((^[ \t\r]*--.*$\n)+)'
 def find_labeled_prefix(filename, label):
-    re_label = re.compile(_re_label.format(label = label), re.MULTILINE)
-    with open(filename, 'rb') as f:
+    re_label = re.compile(_re_label.format(label=label), re.MULTILINE)
+    with _open(filename, 'r') as f:
         program_text = f.read()
     match = re.search(re_label, program_text)
     if match is None:
@@ -145,14 +175,9 @@ def run_all_tests(thread_count, debug, verbose, quiet):
             if os.path.isfile(test_dir):
                 test_paths.append(test_dir)
             else:
-                os.path.walk(
-                    test_dir,
-                    lambda args, dirname, names: test_paths.extend(
-                        path
-                        for name in sorted(names)
-                        for path in [os.path.join(dirname, name)]
-                        if os.path.isfile(path) and os.path.splitext(path)[1] in ('.rg', '.md')),
-                    ())
+                test_paths.extend(
+                    path for path in sorted(glob(test_dir))
+                    if os.path.isfile(path) and os.path.splitext(path)[1] in ('.rg', '.md'))
 
         for test_path in test_paths:
             results.append(thread_pool.apply_async(test_runner, (test_name, test_fn, debug, verbose, test_path)))
@@ -172,12 +197,12 @@ def run_all_tests(thread_count, debug, verbose, quiet):
                 all_saved_temps.append((test_name, filename, saved_temps))
             if outcome == PASS:
                 if (not quiet) or (output is not None):
-                    print '[%sPASS%s] (%s) %s' % (green, clear, test_name, filename)
-                if output is not None: print output
+                    print('[%sPASS%s] (%s) %s' % (green, clear, test_name, filename))
+                if output is not None: print(output)
                 test_counters[test_name].passed += 1
             elif outcome == FAIL:
-                print '[%sFAIL%s] (%s) %s' % (red, clear, test_name, filename)
-                if output is not None: print output
+                print('[%sFAIL%s] (%s) %s' % (red, clear, test_name, filename))
+                if output is not None: print(output)
                 test_counters[test_name].failed += 1
             else:
                 raise Exception('Unexpected test outcome %s' % outcome)
@@ -187,59 +212,59 @@ def run_all_tests(thread_count, debug, verbose, quiet):
     thread_pool.join()
 
     global_counter = Counter()
-    for test_counter in test_counters.itervalues():
+    for test_counter in test_counters.values():
         global_counter.passed += test_counter.passed
         global_counter.failed += test_counter.failed
     global_total = global_counter.passed + global_counter.failed
 
     if len(all_saved_temps) > 0:
-        print
-        print 'The following temporary files have been saved:'
-        print
+        print()
+        print('The following temporary files have been saved:')
+        print()
         for test_name, filename, saved_temps in all_saved_temps:
-            print '[%sFAIL%s] (%s) %s' % (red, clear, test_name, filename)
+            print('[%sFAIL%s] (%s) %s' % (red, clear, test_name, filename))
             for saved_temp in saved_temps:
-                print '  %s' % saved_temp
+                print('  %s' % saved_temp)
 
     if global_total > 0:
-        print
-        print 'Summary of test results by category:'
+        print()
+        print('Summary of test results by category:')
         for test_name, test_counter in test_counters.iteritems():
             test_total = test_counter.passed + test_counter.failed
             if test_total > 0:
-                print '%24s: Passed %3d of %3d tests (%5.1f%%)' % (
+                print('%24s: Passed %3d of %3d tests (%5.1f%%)' % (
                     '%s' % test_name, test_counter.passed, test_total,
-                    float(100*test_counter.passed)/test_total)
-        print '    ' + '~'*54
-        print '%24s: Passed %3d of %3d tests (%5.1f%%)' % (
+                    float(100*test_counter.passed)/test_total))
+        print('    ' + '~'*54)
+        print('%24s: Passed %3d of %3d tests (%5.1f%%)' % (
             'total', global_counter.passed, global_total,
-            (float(100*global_counter.passed)/global_total))
+            (float(100*global_counter.passed)/global_total)))
 
     if not verbose and global_counter.failed > 0:
-        print
-        print 'For detailed information on test failures, run:'
-        print '    ./test.py -j1 -v'
+        print()
+        print('For detailed information on test failures, run:')
+        print('    ./test.py -j1 -v')
         sys.exit(1)
 
 def test_driver(argv):
-    parser = argparse.ArgumentParser(description = 'Regent compiler test suite')
+    parser = argparse.ArgumentParser(description='Regent compiler test suite')
     parser.add_argument('-j',
-                        nargs = '?',
-                        type = int,
-                        help = 'number threads used to compile',
-                        dest = 'thread_count')
+                        nargs='?',
+                        type=int,
+                        help='number threads used to compile',
+                        dest='thread_count')
     parser.add_argument('--debug', '-g',
-                        action = 'store_true',
-                        help = 'enable debug mode',
-                        dest = 'debug')
+                        action='store_true',
+                        help='enable debug mode',
+                        dest='debug')
     parser.add_argument('-v',
-                        action = 'store_true',
-                        help = 'display verbose output',
-                        dest = 'verbose')
+                        action='store_true',
+                        help='display verbose output',
+                        dest='verbose')
     parser.add_argument('-q',
-                        action = 'store_true',
-                        help = 'suppress passing test results',
-                        dest = 'quiet')
+                        action='store_true',
+                        help='suppress passing test results',
+                        dest='quiet')
     args = parser.parse_args(argv[1:])
 
     run_all_tests(
