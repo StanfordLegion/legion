@@ -90,7 +90,7 @@ def regent(args, env = {}, **kwargs):
         cmd = cmd + (os.environ['LAUNCHER'].split()
                      if 'LAUNCHER' in os.environ else [])
     cmd = cmd + [terra_exe] + args
-    cmd_env = dict(os.environ.iteritems())
+    cmd_env = dict(os.environ.items())
     cmd_env.update(terra_env)
     cmd_env.update(env)
     return subprocess.Popen(
