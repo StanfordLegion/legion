@@ -51,8 +51,10 @@ def discover_conduit():
         return os.environ['CONDUIT']
     elif platform.node().startswith('daint'):
         return 'aries'
+    elif platform.node().startswith('excalibur'):
+        return 'aries'
     else:
-        raise Exception('Unable to determine conduit')
+        raise Exception('Please set CONDUIT in your environment')
 
 def build_gasnet(gasnet_dir, conduit):
     subprocess.check_call(['make', 'CONDUIT=%s' % conduit], cwd=gasnet_dir)
@@ -83,6 +85,8 @@ if __name__ == '__main__':
         raise Exception('Please set CC in your environment')
     if 'CXX' not in os.environ:
         raise Exception('Please set CXX in your environment')
+    if 'LG_RT_DIR' in os.environ:
+        raise Exception('Please unset LG_RT_DIR in your environment')
 
     root_dir = os.path.dirname(os.path.realpath(__file__))
     legion_dir = os.path.dirname(root_dir)
