@@ -211,7 +211,7 @@ def driver():
         help = 'Number threads used to compile.')
     args = parser.parse_args()
 
-    install(**args)
+    install(**vars(args))
 
 if __name__ == '__main__':
     driver()
