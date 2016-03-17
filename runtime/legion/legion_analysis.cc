@@ -5414,6 +5414,7 @@ namespace Legion {
       args.to_trigger = to_trigger;
       runtime->issue_runtime_meta_task(&args, sizeof(args),
                                        HLR_SEND_VERSION_STATE_TASK_ID, 
+                                       HLR_LATENCY_PRIORITY,
                                        NULL/*op*/, precondition);
     }
 

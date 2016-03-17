@@ -841,6 +841,7 @@ namespace Legion {
         // Spawn the task dependent on the future being ready
         runtime->issue_runtime_meta_task(&args, sizeof(args),
                                          HLR_CONTRIBUTE_COLLECTIVE_ID,
+                                         HLR_LATENCY_PRIORITY,
                                          NULL, ready_event);
       }
       else // If we've already triggered, then we can do the arrival now
@@ -1762,7 +1763,7 @@ namespace Legion {
       sched_args.hlr_id = HLR_SCHEDULER_ID;
       sched_args.proc = local_proc;
       runtime->issue_runtime_meta_task(&sched_args, sizeof(sched_args),
-                                       HLR_SCHEDULER_ID);
+                                       HLR_SCHEDULER_ID, HLR_LATENCY_PRIORITY);
     } 
 
     //--------------------------------------------------------------------------
@@ -2020,26 +2021,30 @@ namespace Legion {
       args.manager = this;
       args.op = op;
       Event precondition = op->invoke_state_analysis();
-      // Only do executing throttling if we don't have an even to wait on
+      // Only do executing throttling if we don't have an event to wait on
       if (precondition.has_triggered())
       {
         if (!prev_failure)
         {
           AutoLock l_lock(local_queue_lock); 
           Event next = runtime->issue_runtime_meta_task(&args, sizeof(args),
-                                                        HLR_TRIGGER_OP_ID, op,
-                             local_scheduler_preconditions[next_local_index]);
+                                                        HLR_TRIGGER_OP_ID, 
+                                                        HLR_THROUGHPUT_PRIORITY,
+                          op, local_scheduler_preconditions[next_local_index]);
           local_scheduler_preconditions[next_local_index++] = next;
           if (next_local_index == superscalar_width)
             next_local_index = 0;
         }
         else
           runtime->issue_runtime_meta_task(&args, sizeof(args), 
-                                           HLR_TRIGGER_OP_ID, op);
+                                           HLR_TRIGGER_OP_ID, 
+                                           HLR_THROUGHPUT_PRIORITY, op);
       }
       else
         runtime->issue_runtime_meta_task(&args, sizeof(args),
-                                         HLR_TRIGGER_OP_ID, op, precondition);
+                                         HLR_TRIGGER_OP_ID, 
+                                         HLR_THROUGHPUT_PRIORITY, 
+                                         op, precondition);
     }
 
 #ifdef HANG_TRACE
@@ -2238,10 +2243,10 @@ namespace Legion {
           // to tasks being sent remotely to get them in flight.
           // Give priority to things which are getting sent remotely
           args.op = task;
-          int priority = (send_remotely ? 2 : 1);
           runtime->issue_runtime_meta_task(&args, sizeof(args),
-                                           HLR_TRIGGER_TASK_ID, task,
-                                           wait_on, priority);
+                                           HLR_TRIGGER_TASK_ID, 
+                                           HLR_THROUGHPUT_PRIORITY,
+                                           task, wait_on);
         }
       }
 
@@ -4444,9 +4449,9 @@ namespace Legion {
                                                             packaged_messages;
       // Send the message
       Event next_event = runtime->issue_runtime_meta_task(sending_buffer, 
-                                      sending_index, HLR_MESSAGE_ID, NULL,
-                                      last_message_event, 0/*priority*/,
-                                      false/*hold reservation*/, target);
+                                      sending_index, HLR_MESSAGE_ID, 
+                                      HLR_LATENCY_PRIORITY, NULL,
+                                      last_message_event, target);
       // Update the event
       last_message_event = next_event;
       // Reset the state of the buffer
@@ -5300,6 +5305,7 @@ namespace Legion {
         args.manager = it->second;
         runtime->issue_runtime_meta_task(&args, sizeof(args),
                                          HLR_SHUTDOWN_NOTIFICATION_TASK_ID,
+                                         HLR_LATENCY_PRIORITY, 
                                          NULL, precondition);
       }
     }
@@ -5319,7 +5325,8 @@ namespace Legion {
       args.result = result;
       Event precondition = source_manager->notify_pending_shutdown();
       runtime->issue_runtime_meta_task(&args, sizeof(args),
-                                       HLR_SHUTDOWN_RESPONSE_TASK_ID, NULL,
+                                       HLR_SHUTDOWN_RESPONSE_TASK_ID, 
+                                       HLR_LATENCY_PRIORITY, NULL,
                                        precondition);
     }
 
@@ -5457,7 +5464,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Event GarbageCollectionEpoch::launch(int priority)
+    Event GarbageCollectionEpoch::launch(void)
     //--------------------------------------------------------------------------
     {
       // Set remaining to the total number of collections
@@ -5476,8 +5483,9 @@ namespace Legion {
         it++;
         bool done = (it == collections.end());
         Event e = runtime->issue_runtime_meta_task(&args, sizeof(args), 
-                                         HLR_DEFERRED_COLLECT_ID, NULL,
-                                         precondition, priority);
+                                         HLR_DEFERRED_COLLECT_ID, 
+                                         HLR_THROUGHPUT_PRIORITY, NULL,
+                                         precondition);
         events.insert(e);
         if (done)
           break;
@@ -6058,7 +6066,7 @@ namespace Legion {
           args.source = target;
           runtime->issue_runtime_meta_task(&args, sizeof(args),
                         HLR_TASK_IMPL_SEMANTIC_INFO_REQ_TASK_ID,
-                        NULL/*op*/, precondition);
+                        HLR_LATENCY_PRIORITY, NULL/*op*/, precondition);
         }
       }
       else
@@ -7491,9 +7499,9 @@ namespace Legion {
         Processor::Kind kind = it->kind();
         if (kind != Processor::LOC_PROC)
           continue;
-        issue_runtime_meta_task(&args, sizeof(args), HLR_MPI_RANK_ID, NULL,
-                                Event::NO_EVENT, 0/*priority*/, 
-                                false/*holds reservation*/, *it);
+        issue_runtime_meta_task(&args, sizeof(args), HLR_MPI_RANK_ID, 
+                                HLR_LATENCY_PRIORITY, NULL,
+                                Event::NO_EVENT, *it);
         sent_targets.insert(target_space);
       }
       // Now set our own value, update the count, and see if we're done
@@ -7586,7 +7594,8 @@ namespace Legion {
       args.context = map_context;
       Event pre = f.impl->get_ready_event();
       Event post = issue_runtime_meta_task(&args, sizeof(args), 
-                                           HLR_MAPPER_TASK_ID, NULL, pre);
+                                           HLR_MAPPER_TASK_ID, 
+                                           HLR_LATENCY_PRIORITY, NULL, pre);
       // Chain the events properly
       result.trigger(post);
       // Mark that we have another outstanding top level task
@@ -10642,6 +10651,7 @@ namespace Legion {
             args.domain = launcher.launch_domain;
             issue_runtime_meta_task(&args, sizeof(args), 
                                     HLR_DEFERRED_FUTURE_MAP_SET_ID, 
+                                    HLR_LATENCY_PRIORITY,
                                     NULL, ready_event); 
           }
           return FutureMap(result);
@@ -12655,7 +12665,8 @@ namespace Legion {
       args.task = ctx;
       args.result = result;
       issue_runtime_meta_task(&args, sizeof(args),
-                              HLR_SELECT_TUNABLE_TASK_ID, ctx);
+                              HLR_SELECT_TUNABLE_TASK_ID, 
+                              HLR_LATENCY_PRIORITY, ctx);
       return Future(result);
     }
 
@@ -15735,9 +15746,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Event Runtime::issue_runtime_meta_task(const void *args, size_t arglen,
-                                           HLRTaskID tid, Operation *op,
-                                           Event precondition, int priority,
-                                           bool holds_reservation,
+                                           HLRTaskID tid, HLRPriority priority,
+                                           Operation *op, Event precondition,
                                            Processor target)
     //--------------------------------------------------------------------------
     {
@@ -15757,10 +15767,6 @@ namespace Legion {
 #ifdef DEBUG_HIGH_LEVEL
       assert(target.exists());
 #endif
-      // If we hold a reservation, bump the priority by a lot to avoid
-      // priority inversion when running meta task
-      if (holds_reservation)
-        priority += 1024;
       if (profiler != NULL && tid < HLR_MESSAGE_ID)
       {
         Realm::ProfilingRequestSet requests;
@@ -15897,8 +15903,8 @@ namespace Legion {
         deferred_recycle_args.did = did;
         issue_runtime_meta_task(&deferred_recycle_args,
                                 sizeof(deferred_recycle_args),
-                                HLR_DEFERRED_RECYCLE_ID, NULL, recycle_event,
-                                0/*priority*/, true/*holds reservation*/);
+                                HLR_DEFERRED_RECYCLE_ID, 
+                                HLR_RESOURCE_PRIORITY, NULL, recycle_event);
       }
       else
         free_distributed_id(did);
@@ -16056,7 +16062,7 @@ namespace Legion {
         }
       }
       if (to_trigger != NULL)
-        to_trigger->launch(0/*priority*/);
+        to_trigger->launch();
     }
 
     //--------------------------------------------------------------------------
@@ -16130,8 +16136,8 @@ namespace Legion {
       HLRTaskID hlr_id = HLR_SHUTDOWN_ATTEMPT_TASK_ID; 
       // Issue this with a low priority so that other meta-tasks
       // have an opportunity to run
-      issue_runtime_meta_task(&hlr_id, sizeof(hlr_id), hlr_id, NULL,
-                              Event::NO_EVENT, INT_MIN);
+      issue_runtime_meta_task(&hlr_id, sizeof(hlr_id), hlr_id, 
+                              HLR_THROUGHPUT_PRIORITY, NULL);
     }
 
     //--------------------------------------------------------------------------
@@ -16160,7 +16166,7 @@ namespace Legion {
         AutoLock gc(gc_epoch_lock);
         if (current_gc_epoch != NULL)
         {
-          gc_done = current_gc_epoch->launch(0/*priority*/);
+          gc_done = current_gc_epoch->launch();
           current_gc_epoch = NULL;
         }
       }
@@ -19153,24 +19159,128 @@ namespace Legion {
     {
       if (!legion_spy_enabled)
         return;
+      std::set<Processor::Kind> proc_kinds;
       std::set<Processor> all_procs;
       machine.get_all_processors(all_procs);
       // Log processors
       for (std::set<Processor>::const_iterator it = all_procs.begin();
             it != all_procs.end(); it++)
       {
-        Processor::Kind k = it->kind();
-        if (k == Processor::UTIL_PROC)
-          LegionSpy::log_utility_processor(it->id);
-        else
-          LegionSpy::log_processor(it->id, k); 
+        Processor::Kind kind = it->kind();
+        if (proc_kinds.find(kind) == proc_kinds.end())
+        {
+          switch (kind)
+          {
+            case Processor::NO_KIND:
+              {
+                LegionSpy::log_processor_kind(kind, "NoProc");
+                break;
+              }
+            case Processor::TOC_PROC:
+              {
+                LegionSpy::log_processor_kind(kind, "GPU");
+                break;
+              }
+            case Processor::LOC_PROC:
+              {
+                LegionSpy::log_processor_kind(kind, "CPU");
+                break;
+              }
+            case Processor::UTIL_PROC:
+              {
+                LegionSpy::log_processor_kind(kind, "Utility");
+                break;
+              }
+            case Processor::IO_PROC:
+              {
+                LegionSpy::log_processor_kind(kind, "IO");
+                break;
+              }
+            default:
+              assert(false); // unknown processor kind
+          }
+          proc_kinds.insert(kind);
+        }
+        LegionSpy::log_processor(it->id, kind);
       }
       // Log memories
       std::set<Memory> all_mems;
+      std::set<Memory::Kind> mem_kinds;
       machine.get_all_memories(all_mems);
       for (std::set<Memory>::const_iterator it = all_mems.begin();
             it != all_mems.end(); it++)
+      {
+        Memory::Kind kind = it->kind();
+        if (mem_kinds.find(kind) == mem_kinds.end())
+        {
+          switch (kind)
+          {
+            case GLOBAL_MEM:
+              {
+                LegionSpy::log_memory_kind(kind, "GASNet");
+                break;
+              }
+            case SYSTEM_MEM:
+              {
+                LegionSpy::log_memory_kind(kind, "System");
+                break;
+              }
+            case REGDMA_MEM:
+              {
+                LegionSpy::log_memory_kind(kind, "Registered");
+                break;
+              }
+            case SOCKET_MEM:
+              {
+                LegionSpy::log_memory_kind(kind, "NUMA");
+                break;
+              }
+            case Z_COPY_MEM:
+              {
+                LegionSpy::log_memory_kind(kind, "Zero-Copy");
+                break;
+              }
+            case GPU_FB_MEM:
+              {
+                LegionSpy::log_memory_kind(kind, "Framebuffer");
+                break;
+              }
+            case DISK_MEM:
+              {
+                LegionSpy::log_memory_kind(kind, "Disk");
+                break;
+              }
+            case HDF_MEM:
+              {
+                LegionSpy::log_memory_kind(kind, "HDF");
+                break;
+              }
+            case FILE_MEM:
+              {
+                LegionSpy::log_memory_kind(kind, "File");
+                break;
+              }
+            case LEVEL3_CACHE:
+              {
+                LegionSpy::log_memory_kind(kind, "L3");
+                break;
+              }
+            case LEVEL2_CACHE:
+              {
+                LegionSpy::log_memory_kind(kind, "L2");
+                break;
+              }
+            case LEVEL1_CACHE:
+              {
+                LegionSpy::log_memory_kind(kind, "L1");
+                break;
+              }
+            default:
+              assert(false); // unknown memory kind
+          }
+        }
         LegionSpy::log_memory(it->id, it->capacity(), it->kind());
+      }
       // Log Proc-Mem Affinity
       for (std::set<Processor>::const_iterator pit = all_procs.begin();
             pit != all_procs.end(); pit++)
@@ -19791,8 +19901,8 @@ namespace Legion {
       args.hlr_id = HLR_CONTINUATION_TASK_ID;
       args.continuation = this;
       Event done = runtime->issue_runtime_meta_task(&args, sizeof(args),
-                          HLR_CONTINUATION_TASK_ID, NULL, precondition,
-                          0, true/*holds reservation*/);
+                          HLR_CONTINUATION_TASK_ID, 
+                          HLR_RESOURCE_PRIORITY, NULL, precondition);
       return done;
     }
 

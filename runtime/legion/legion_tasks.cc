@@ -2769,8 +2769,11 @@ namespace Legion {
           WindowWaitArgs args;
           args.hlr_id = HLR_WINDOW_WAIT_TASK_ID;
           args.parent_ctx = this;  
-          Event wait_done = runtime->issue_runtime_meta_task(&args,sizeof(args),
-            HLR_WINDOW_WAIT_TASK_ID, this, precondition, 0, true/*holds lock*/);
+          Event wait_done = 
+            runtime->issue_runtime_meta_task(&args, sizeof(args),
+                                             HLR_WINDOW_WAIT_TASK_ID, 
+                                             HLR_RESOURCE_PRIORITY,
+                                             this, precondition);
           wait_done.wait();
         }
         else // we can do the wait inline
@@ -2813,9 +2816,11 @@ namespace Legion {
           args.hlr_id = HLR_ADD_TO_DEP_QUEUE_TASK_ID;
           args.proxy_this = this;
           args.op = op;
-          last_registration = runtime->issue_runtime_meta_task(&args, 
-                          sizeof(args), HLR_ADD_TO_DEP_QUEUE_TASK_ID, 
-                          op, lock_acquire, 0, true/*holds reservation*/);
+          last_registration = 
+            runtime->issue_runtime_meta_task(&args, sizeof(args), 
+                                             HLR_ADD_TO_DEP_QUEUE_TASK_ID,
+                                             HLR_RESOURCE_PRIORITY,
+                                             op, lock_acquire);
           return;
         }
       }
@@ -2834,7 +2839,8 @@ namespace Legion {
       args.hlr_id = HLR_TRIGGER_DEPENDENCE_ID;
       args.op = op;
       Event next = runtime->issue_runtime_meta_task(&args, sizeof(args),
-                                      HLR_TRIGGER_DEPENDENCE_ID, op,
+                                      HLR_TRIGGER_DEPENDENCE_ID, 
+                                      HLR_LATENCY_PRIORITY, op,
                                       dependence_precondition);
       dependence_precondition = next;
       // Now we can release the lock
@@ -3156,7 +3162,8 @@ namespace Legion {
         // We know that the issuing is done in order because we block after
         // we launch this meta-task which blocks the application task
         Event wait_on = runtime->issue_runtime_meta_task(&args, sizeof(args),
-                                              HLR_ISSUE_FRAME_TASK_ID, this); 
+                                              HLR_ISSUE_FRAME_TASK_ID, 
+                                              HLR_THROUGHPUT_PRIORITY, this);
         wait_on.wait();
       }
     }
@@ -3314,8 +3321,8 @@ namespace Legion {
       decrement_args.parent_ctx = const_cast<SingleTask*>(this);
       Event precondition = op_lock.acquire(0, true/*exclusive*/);
       return runtime->issue_runtime_meta_task(&decrement_args, 
-          sizeof(decrement_args), HLR_DECREMENT_PENDING_TASK_ID, child,
-          precondition, 0, true/*holds reservation*/);
+          sizeof(decrement_args), HLR_DECREMENT_PENDING_TASK_ID, 
+          HLR_RESOURCE_PRIORITY, child, precondition);
     }
 
     //--------------------------------------------------------------------------
@@ -3455,7 +3462,7 @@ namespace Legion {
         }
         runtime->issue_runtime_meta_task(rez.get_buffer(),
             rez.get_used_bytes(), HLR_RECLAIM_LOCAL_FIELD_ID,
-            this, info.reclaim_event);
+            HLR_LATENCY_PRIORITY, this, info.reclaim_event);
       }
     }
 
@@ -4660,6 +4667,12 @@ namespace Legion {
                           mapper->get_mapper_name(), get_task_name(),
                           get_unique_id(), this->target_proc.id);
           output.target_procs.push_back(this->target_proc);
+        }
+        else if (Runtime::separate_runtime_instances && 
+                  (output.target_procs.size() > 1))
+        {
+          // Ignore additional processors in separate runtime instances
+          output.target_procs.resize(1);
         }
         if (!Runtime::unsafe_mapper)
           validate_target_processors(output.target_procs);
@@ -5957,7 +5970,7 @@ namespace Legion {
         // Give these high priority too since they are cleaning up 
         // and will allow other tasks to run
         runtime->issue_runtime_meta_task(&post_end_args, sizeof(post_end_args),
-               HLR_POST_END_ID, this, last_registration, 0, true/*important*/);
+               HLR_POST_END_ID, HLR_LATENCY_PRIORITY, this, last_registration);
       }
       else
         post_end_task(res, res_size, owned);
@@ -7128,6 +7141,7 @@ namespace Legion {
           args.task_op = this;
           runtime->issue_runtime_meta_task(&args, sizeof(args),
                                            HLR_DEFERRED_FUTURE_SET_ID,
+                                           HLR_LATENCY_PRIORITY,
                                            this, wait_on);
           trigger = false;
         }
@@ -7528,6 +7542,7 @@ namespace Legion {
         args.task = this;
         runtime->issue_runtime_meta_task(&args, sizeof(args),
                                          HLR_DEFERRED_POST_MAPPED_ID,
+                                         HLR_LATENCY_PRIORITY,
                                          this, mapped_precondition);
         return;
       }
@@ -8282,6 +8297,7 @@ namespace Legion {
         args.task = this;
         runtime->issue_runtime_meta_task(&args, sizeof(args),
                                          HLR_DEFERRED_POST_MAPPED_ID,
+                                         HLR_LATENCY_PRIORITY,
                                          this, mapped_precondition);
         return;
       }
@@ -9676,6 +9692,7 @@ namespace Legion {
             args.task_op = this;
             runtime->issue_runtime_meta_task(&args, sizeof(args),
                                              HLR_DEFERRED_FUTURE_MAP_SET_ID,
+                                             HLR_LATENCY_PRIORITY,
                                              this, wait_on);
             trigger = false;
           }
@@ -9718,6 +9735,7 @@ namespace Legion {
             args.task_op = this;
             runtime->issue_runtime_meta_task(&args, sizeof(args),
                                              HLR_DEFERRED_FUTURE_SET_ID,
+                                             HLR_LATENCY_PRIORITY,
                                              this, wait_on);
             trigger = false;
           }
@@ -11425,8 +11443,10 @@ namespace Legion {
           args.slice = *it;
           it++;
           bool done = (it == slices.end()); 
-          Event wait = owner->runtime->issue_runtime_meta_task(&args, 
-                                sizeof(args), HLR_DEFERRED_SLICE_ID, *it);
+          Event wait = 
+            owner->runtime->issue_runtime_meta_task(&args, sizeof(args), 
+                                                    HLR_DEFERRED_SLICE_ID, 
+                                                    HLR_LATENCY_PRIORITY, *it);
           if (wait.exists())
             wait_events.insert(wait);
           if (done)

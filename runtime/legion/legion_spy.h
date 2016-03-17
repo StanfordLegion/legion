@@ -44,10 +44,14 @@ namespace Legion {
       };
 
       // Logger calls for the machine architecture
-      static inline void log_utility_processor(IDType unique_id)
+      static inline void log_processor_kind(unsigned kind, const char *name)
       {
-        log_spy.info("Utility " IDFMT "", 
-                unique_id);
+        log_spy.info("Processor Kind %d %s", kind, name);
+      }
+
+      static inline void log_memory_kind(unsigned kind, const char *name)
+      {
+        log_spy.info("Memory Kind %d %s", kind, name);
       }
 
       static inline void log_processor(IDType unique_id, unsigned kind)

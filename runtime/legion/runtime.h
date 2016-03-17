@@ -915,7 +915,7 @@ namespace Legion {
       GarbageCollectionEpoch& operator=(const GarbageCollectionEpoch &rhs);
     public:
       void add_collection(LogicalView *view, Event term_event);
-      Event launch(int priority);
+      Event launch(void);
       bool handle_collection(const GarbageCollectionArgs *args);
     private:
       Runtime *const runtime;
@@ -2097,10 +2097,9 @@ namespace Legion {
       inline Processor find_utility_group(void) { return utility_group; }
       Processor find_processor_group(const std::vector<Processor> &procs);
       Event issue_runtime_meta_task(const void *args, size_t arglen,
-                                    HLRTaskID tid, Operation *op = NULL,
+                                    HLRTaskID tid, HLRPriority hlr_priority,
+                                    Operation *op = NULL,
                                     Event precondition = Event::NO_EVENT, 
-                                    int priority = 0, 
-                                    bool holds_reservation = false,
                                     Processor proc = Processor::NO_PROC);
     public:
       void allocate_context(SingleTask *task);

@@ -2853,7 +2853,8 @@ namespace Legion {
       args.hlr_id = HLR_MAPPER_CONTINUATION_TASK_ID;
       args.continuation = this;
       Event wait_on = runtime->issue_runtime_meta_task(&args, sizeof(args),
-                          HLR_MAPPER_CONTINUATION_TASK_ID, op, precondition);
+                          HLR_MAPPER_CONTINUATION_TASK_ID, 
+                          HLR_LATENCY_PRIORITY, op, precondition);
       wait_on.wait();
     }
 

@@ -333,6 +333,12 @@ namespace Legion {
         "Shutdown Response",                                      \
       };
 
+    enum HLRPriority {
+      HLR_THROUGHPUT_PRIORITY = 0, // don't care so much
+      HLR_LATENCY_PRIORITY = 1, // care some but not too much
+      HLR_RESOURCE_PRIORITY = 2, // this needs to be first
+    };
+
     enum VirtualChannelKind {
       DEFAULT_VIRTUAL_CHANNEL = 0,
       INDEX_AND_FIELD_VIRTUAL_CHANNEL = 1,

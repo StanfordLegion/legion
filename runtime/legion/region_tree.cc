@@ -186,7 +186,8 @@ namespace Legion {
         args.handle = pid;
         args.ready = disjointness_event;
         runtime->issue_runtime_meta_task(&args, sizeof(args),
-                                         HLR_DISJOINTNESS_TASK_ID);
+                                         HLR_DISJOINTNESS_TASK_ID,
+                                         HLR_LATENCY_PRIORITY);
       }
     }
 
@@ -258,7 +259,8 @@ namespace Legion {
         args.handle = pid;
         args.ready = disjointness_event;
         runtime->issue_runtime_meta_task(&args, sizeof(args),
-                                         HLR_DISJOINTNESS_TASK_ID);
+                                         HLR_DISJOINTNESS_TASK_ID,
+                                         HLR_LATENCY_PRIORITY);
       }
     }
 
@@ -529,7 +531,8 @@ namespace Legion {
         args.handle = pid;
         args.ready = disjointness_event;
         runtime->issue_runtime_meta_task(&args, sizeof(args),
-                                         HLR_DISJOINTNESS_TASK_ID, NULL,
+                                         HLR_DISJOINTNESS_TASK_ID, 
+                                         HLR_LATENCY_PRIORITY, NULL,
                                          domain_ready);
 #ifdef LEGION_SPY
         LegionSpy::log_event_dependence(domain_ready, disjointness_event);
@@ -5562,7 +5565,7 @@ namespace Legion {
           args.source = source;
           context->runtime->issue_runtime_meta_task(&args, sizeof(args),
                               HLR_INDEX_SPACE_SEMANTIC_INFO_REQ_TASK_ID,
-                              NULL/*op*/, precondition);
+                              HLR_LATENCY_PRIORITY, NULL/*op*/, precondition);
         }
       }
       else
@@ -5875,7 +5878,8 @@ namespace Legion {
           // Get the preconditions for domains 
           Event pre = Runtime::merge_events<true>(preconditions);
           ready = context->runtime->issue_runtime_meta_task(&args, sizeof(args),
-                                      HLR_PART_INDEPENDENCE_TASK_ID, NULL, pre);
+                                      HLR_PART_INDEPENDENCE_TASK_ID, 
+                                      HLR_LATENCY_PRIORITY, NULL, pre);
           pending_tests[key] = ready;
           pending_tests[std::pair<ColorPoint,ColorPoint>(c2,c1)] = ready;
         }
@@ -6894,7 +6898,7 @@ namespace Legion {
           args.source = source;
           context->runtime->issue_runtime_meta_task(&args, sizeof(args),
                               HLR_INDEX_PART_SEMANTIC_INFO_REQ_TASK_ID,
-                              NULL/*op*/, precondition);
+                              HLR_LATENCY_PRIORITY, NULL/*op*/, precondition);
         }
       }
       else
@@ -7164,7 +7168,8 @@ namespace Legion {
           args.right = right;
           Event pre = Runtime::merge_events<true>(left_pre, right_pre);
           ready_event = context->runtime->issue_runtime_meta_task(&args, 
-                    sizeof(args), HLR_SPACE_INDEPENDENCE_TASK_ID, NULL, pre);
+                    sizeof(args), HLR_SPACE_INDEPENDENCE_TASK_ID, 
+                    HLR_LATENCY_PRIORITY, NULL, pre);
           pending_tests[key] = ready_event;
           pending_tests[std::pair<ColorPoint,ColorPoint>(c2,c1)] = ready_event;
         }
@@ -7345,6 +7350,7 @@ namespace Legion {
         // Don't remove the pending child until the handle is ready
         context->runtime->issue_runtime_meta_task(&args, sizeof(args),
                                                   HLR_PENDING_CHILD_TASK_ID,
+                                                  HLR_LATENCY_PRIORITY,
                                                   NULL, handle_ready);
       }
     }
@@ -8627,7 +8633,7 @@ namespace Legion {
           args.source = source;
           context->runtime->issue_runtime_meta_task(&args, sizeof(args),
                               HLR_FIELD_SPACE_SEMANTIC_INFO_REQ_TASK_ID,
-                              NULL/*op*/, precondition);
+                              HLR_LATENCY_PRIORITY, NULL/*op*/, precondition);
         }
       }
       else
@@ -8687,7 +8693,7 @@ namespace Legion {
           args.source = source;
           context->runtime->issue_runtime_meta_task(&args, sizeof(args),
                               HLR_FIELD_SEMANTIC_INFO_REQ_TASK_ID,
-                              NULL/*op*/, precondition);
+                              HLR_LATENCY_PRIORITY, NULL/*op*/, precondition);
         }
       }
       else
@@ -15622,7 +15628,7 @@ namespace Legion {
           args.source = source;
           context->runtime->issue_runtime_meta_task(&args, sizeof(args),
                               HLR_REGION_SEMANTIC_INFO_REQ_TASK_ID,
-                              NULL/*op*/, precondition);
+                              HLR_LATENCY_PRIORITY, NULL/*op*/, precondition);
         }
       }
       else
@@ -16775,7 +16781,7 @@ namespace Legion {
           args.source = source;
           context->runtime->issue_runtime_meta_task(&args, sizeof(args),
                               HLR_PARTITION_SEMANTIC_INFO_REQ_TASK_ID,
-                              NULL/*op*/, precondition);
+                              HLR_LATENCY_PRIORITY, NULL/*op*/, precondition);
         }
       }
       else
