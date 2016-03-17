@@ -229,7 +229,7 @@ def run_all_tests(thread_count, debug, verbose, quiet):
     if global_total > 0:
         print()
         print('Summary of test results by category:')
-        for test_name, test_counter in test_counters.iteritems():
+        for test_name, test_counter in test_counters.items():
             test_total = test_counter.passed + test_counter.failed
             if test_total > 0:
                 print('%24s: Passed %3d of %3d tests (%5.1f%%)' % (
