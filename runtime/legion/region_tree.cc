@@ -1071,6 +1071,14 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    bool RegionTreeForest::is_index_partition_complete(IndexPartition p)
+    //--------------------------------------------------------------------------
+    {
+      IndexPartNode *node = get_node(p);
+      return node->is_complete();
+    }
+
+    //--------------------------------------------------------------------------
     void RegionTreeForest::create_field_space(FieldSpace handle)
     //--------------------------------------------------------------------------
     {

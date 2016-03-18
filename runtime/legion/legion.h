@@ -3874,6 +3874,14 @@ namespace LegionRuntime {
       bool is_index_partition_disjoint(Context ctx, IndexPartition p);
 
       /**
+       * Return whether a given index partition is complete
+       * @param ctx enclosing task context
+       * @param p index partition handle
+       * @return whether the index partition is complete
+       */
+      bool is_index_partition_complete(Context ctx, IndexPartition p);
+
+      /**
        * Get an index subspace from a partition with a given
        * color point.
        * @param ctx enclosing task context
