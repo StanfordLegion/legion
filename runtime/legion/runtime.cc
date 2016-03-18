@@ -8285,6 +8285,13 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    bool Internal::is_index_partition_complete(Context ctx, IndexPartition p)
+    //--------------------------------------------------------------------------
+    {
+      return forest->is_index_partition_complete(p);
+    }
+
+    //--------------------------------------------------------------------------
     Color Internal::get_index_space_color(Context ctx, IndexSpace handle)
     //--------------------------------------------------------------------------
     {

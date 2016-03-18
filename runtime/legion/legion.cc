@@ -2689,11 +2689,17 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    bool Runtime::is_index_partition_disjoint(Context ctx, 
-                                                       IndexPartition p)
+    bool Runtime::is_index_partition_disjoint(Context ctx, IndexPartition p)
     //--------------------------------------------------------------------------
     {
       return runtime->is_index_partition_disjoint(ctx, p);
+    }
+
+    //--------------------------------------------------------------------------
+    bool Runtime::is_index_partition_complete(Context ctx, IndexPartition p)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->is_index_partition_complete(ctx, p);
     }
 
     //--------------------------------------------------------------------------

@@ -181,6 +181,7 @@ namespace LegionRuntime {
       IndexSpaceAllocator* get_index_space_allocator(IndexSpace handle);
       size_t get_domain_volume(IndexSpace handle);
       bool is_index_partition_disjoint(IndexPartition p);
+      bool is_index_partition_complete(IndexPartition p);
     public:
       void create_field_space(FieldSpace handle);
       void destroy_field_space(FieldSpace handle, AddressSpaceID source);
