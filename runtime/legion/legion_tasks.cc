@@ -2266,7 +2266,7 @@ namespace Legion {
                 req.partition.field_space.id,
           reg ? req.region.tree_id : 
                 req.partition.tree_id,
-          req.privilege, req.prop, req.redop);
+          req.privilege, req.prop, req.redop, req.parent.index_space.id);
       LegionSpy::log_requirement_fields(uid, idx, req.privilege_fields);
     }
 

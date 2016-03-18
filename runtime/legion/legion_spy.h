@@ -352,11 +352,11 @@ namespace Legion {
       static inline void log_logical_requirement(UniqueID unique_id, 
           unsigned index, bool region, IDType index_component,
           unsigned field_component, unsigned tree_id, unsigned privilege, 
-          unsigned coherence, unsigned redop)
+          unsigned coherence, unsigned redop, IDType parent_index)
       {
-        log_spy.info("Logical Requirement %llu %u %u " IDFMT " %u %u %u %u %u", 
-            unique_id, index, region, index_component,
-            field_component, tree_id, privilege, coherence, redop);
+        log_spy.info("Logical Requirement %llu %u %u " IDFMT " %u %u "
+          "%u %u %u " IDFMT, unique_id, index, region, index_component,
+          field_component, tree_id, privilege, coherence, redop, parent_index);
       }
 
       static inline void log_requirement_fields(UniqueID unique_id, 
@@ -453,12 +453,12 @@ namespace Legion {
                       pre.id, pre.gen, post.id, post.gen);
       }
 
-      static inline void log_copy_field(Event post, FieldID fid,
-                                        IDType src, IDType dst,
-                                        ReductionOpID redop)
+      static inline void log_copy_field(Event post, FieldID src_fid,
+                                        IDType src, FieldID dst_fid,
+                                        IDType dst, ReductionOpID redop)
       {
-        log_spy.info("Copy Field " IDFMT " %u %d " IDFMT " " IDFMT " %d",
-                      post.id, post.gen, fid, src, dst, redop);
+        log_spy.info("Copy Field " IDFMT " %u %d " IDFMT " %d " IDFMT " %d",
+                      post.id, post.gen, src_fid, src, dst_fid, dst, redop);
       }
 
       static inline void log_fill_events(UniqueID op_unique_id,
@@ -471,9 +471,10 @@ namespace Legion {
                      pre.id, pre.gen, post.id, post.gen);
       }
 
-      static inline void log_fill_field(Event post, FieldID fid)
+      static inline void log_fill_field(Event post, FieldID fid, IDType dst)
       {
-        log_spy.info("Fill Field " IDFMT " %u %d", post.id, post.gen, fid);
+        log_spy.info("Fill Field " IDFMT " %u %d " IDFMT, 
+                      post.id, post.gen, fid, dst);
       }
 
       static inline void log_phase_barrier(Barrier barrier)

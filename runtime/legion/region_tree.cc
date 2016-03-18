@@ -14483,6 +14483,13 @@ namespace Legion {
         new_result.trigger();
         result = new_result;
       }
+      LegionSpy::log_copy_events(op->get_unique_op_id(), handle, 
+                                 precondition, result);
+      for (unsigned idx = 0; idx < src_fields.size(); idx++)
+        LegionSpy::log_copy_field(result, src_fields[idx].field_id,
+                                  src_fields[idx].inst.id,
+                                  dst_fields[idx].field_id,
+                                  dst_fields[idx].inst.id, redop);
 #endif
       return result;
     }
@@ -14553,6 +14560,11 @@ namespace Legion {
         new_result.trigger();
         result = new_result;
       }
+      LegionSpy::log_fill_events(op->get_unique_op_id(), handle, 
+                                 precondition, result);
+      for (unsigned idx = 0; idx < dst_fields.size(); idx++)
+        LegionSpy::log_fill_field(result, dst_fields[idx].field_id,
+                                  dst_fields[idx].inst.id);
 #endif
       return result;
     }

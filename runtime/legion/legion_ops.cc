@@ -1639,7 +1639,8 @@ namespace Legion {
                                            requirement.region.tree_id,
                                            requirement.privilege,
                                            requirement.prop,
-                                           requirement.redop);
+                                           requirement.redop,
+                                           requirement.parent.index_space.id);
         LegionSpy::log_requirement_fields(unique_op_id, 0/*index*/,
                                           requirement.privilege_fields);
       }
@@ -1686,7 +1687,8 @@ namespace Legion {
                                            requirement.region.tree_id,
                                            requirement.privilege,
                                            requirement.prop,
-                                           requirement.redop);
+                                           requirement.redop,
+                                           requirement.parent.index_space.id);
         LegionSpy::log_requirement_fields(unique_op_id, 0/*index*/,
                                           requirement.privilege_fields);
       }
@@ -1723,7 +1725,8 @@ namespace Legion {
                                            requirement.region.tree_id,
                                            requirement.privilege,
                                            requirement.prop,
-                                           requirement.redop);
+                                           requirement.redop,
+                                           requirement.parent.index_space.id);
         LegionSpy::log_requirement_fields(unique_op_id, 0/*index*/,
                                           requirement.privilege_fields);
       }
@@ -2692,7 +2695,8 @@ namespace Legion {
                                              req.region.field_space.id,
                                              req.region.tree_id,
                                              req.privilege,
-                                             req.prop, req.redop);
+                                             req.prop, req.redop,
+                                             req.parent.index_space.id);
           LegionSpy::log_requirement_fields(unique_op_id, idx, 
                                             req.instance_fields);
         }
@@ -2706,7 +2710,8 @@ namespace Legion {
                                              req.region.field_space.id,
                                              req.region.tree_id,
                                              req.privilege,
-                                             req.prop, req.redop);
+                                             req.prop, req.redop,
+                                             req.parent.index_space.id);
           LegionSpy::log_requirement_fields(unique_op_id, 
                                             src_requirements.size()+idx, 
                                             req.instance_fields);
@@ -4329,7 +4334,8 @@ namespace Legion {
                                   requirement.partition.tree_id,
                                   requirement.privilege,
                                   requirement.prop,
-                                  requirement.redop);
+                                  requirement.redop,
+                                  requirement.parent.index_space.id);
       else
         LegionSpy::log_logical_requirement(unique_op_id, 0/*idx*/,
                                   true/*region*/,
@@ -4338,7 +4344,8 @@ namespace Legion {
                                   requirement.region.tree_id,
                                   requirement.privilege,
                                   requirement.prop,
-                                  requirement.redop);
+                                  requirement.redop,
+                                  requirement.parent.index_space.id);
       LegionSpy::log_requirement_fields(unique_op_id, 0/*idx*/,
                                 requirement.privilege_fields);
     } 
@@ -5405,7 +5412,8 @@ namespace Legion {
                                            requirement.region.tree_id,
                                            requirement.privilege,
                                            requirement.prop,
-                                           requirement.redop);
+                                           requirement.redop,
+                                           requirement.parent.index_space.id);
         LegionSpy::log_requirement_fields(unique_op_id, 0/*index*/,
                                           requirement.privilege_fields);
       }
@@ -5971,7 +5979,8 @@ namespace Legion {
                                            requirement.region.tree_id,
                                            requirement.privilege,
                                            requirement.prop,
-                                           requirement.redop);
+                                           requirement.redop,
+                                           requirement.parent.index_space.id);
         LegionSpy::log_requirement_fields(unique_op_id, 0/*index*/,
                                           requirement.privilege_fields);
       }
@@ -8824,7 +8833,8 @@ namespace Legion {
                                   requirement.partition.tree_id,
                                   requirement.privilege,
                                   requirement.prop,
-                                  requirement.redop);
+                                  requirement.redop,
+                                  requirement.parent.index_space.id);
       else
         LegionSpy::log_logical_requirement(unique_op_id, 0/*idx*/,
                                   true/*region*/,
@@ -8833,7 +8843,8 @@ namespace Legion {
                                   requirement.region.tree_id,
                                   requirement.privilege,
                                   requirement.prop,
-                                  requirement.redop);
+                                  requirement.redop,
+                                  requirement.parent.index_space.id);
       LegionSpy::log_requirement_fields(unique_op_id, 0/*index*/,
                                         requirement.privilege_fields);
     }
@@ -9282,7 +9293,8 @@ namespace Legion {
                                          requirement.region.tree_id,
                                          requirement.privilege,
                                          requirement.prop,
-                                         requirement.redop);
+                                         requirement.redop,
+                                         requirement.parent.index_space.id);
       LegionSpy::log_requirement_fields(unique_op_id, 0/*index*/,
                                         requirement.privilege_fields);
     }
