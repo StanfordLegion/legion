@@ -16,7 +16,7 @@
 #
 
 import subprocess
-import sys, os, re, shutil
+import sys, os, re, gc, shutil
 import string
 import tempfile
 from getopt import getopt
@@ -57,8 +57,8 @@ FILL_OP_KIND = 7
 ACQUIRE_OP_KIND = 8
 RELEASE_OP_KIND = 9
 DELETION_OP_KIND = 10
-DEP_PART_KIND = 11
-PENDING_PART_KIND = 12
+DEP_PART_OP_KIND = 11
+PENDING_PART_OP_KIND = 12
 
 OpNames = [
 "Unknown Kind",
@@ -111,13 +111,17 @@ class Point(object):
         return hash(self.to_simple_string())
 
 class Processor(object):
-    __slots__ = ['state', 'uid', 'kind', 'mem_latency', 'mem_bandwidth']
+    __slots__ = ['state', 'uid', 'kind', 'mem_latency', 'mem_bandwidth', 'node_name']
     def __init__(self, state, uid):
         self.state = state
         self.uid = uid
         self.kind = "Unknown"
         self.mem_latency = dict()
         self.mem_bandwidth = dict()
+        self.node_name = 'proc_node_'+str(uid)
+
+    def __str__(self):
+        return self.kind + " Processor " + hex(self.uid)
 
     def set_kind(self, kind):
         self.kind = kind
@@ -126,9 +130,22 @@ class Processor(object):
         self.mem_latency[mem] = latency
         self.mem_bandwidth[mem] = bandwidth
 
+    def print_node(self, printer):
+        label = str(self)
+        printer.println(self.node_name+' [label="'+label+
+            '",shape=oval,fontsize=14,'+
+            'fontcolor=black,fontname="Helvetica"];')
+
+    def print_mem_edges(self, printer):
+        for mem,band in self.mem_bandwidth.iteritems():
+            label = 'bandwidth='+str(band)+',latency='+str(self.mem_latency[mem])
+            printer.println(self.node_name+' -> ' + mem.node_name+ 
+                ' [label="'+label+'",style=solid,color=black,penwidth=2];')
+        
+
 class Memory(object):
     __slots__ = ['state', 'uid', 'kind', 'capacity', 'proc_latency',
-                 'proc_bandwidth', 'mem_latency', 'mem_bandwidth']
+                 'proc_bandwidth', 'mem_latency', 'mem_bandwidth', 'node_name']
     def __init__(self, state, uid):
         self.state = state
         self.uid = uid
@@ -138,6 +155,12 @@ class Memory(object):
         self.proc_bandwidth = dict()
         self.mem_latency = dict()
         self.mem_bandwidth = dict()
+        self.node_name = 'mem_node_'+str(uid)
+
+    def __str__(self):
+        return self.kind + "Memory " + hex(self.uid)
+
+    __repr__ = __str__
 
     def set_kind(self, kind):
         self.kind = kind
@@ -154,8 +177,22 @@ class Memory(object):
         self.mem_latency[mem] = latency
         self.mem_bandwidth[mem] = bandwidth
 
+    def print_node(self, printer):
+        label = str(self) 
+        printer.println(self.node_name+' [label="'+label+
+            '",shape=box,fontsize=14,'+
+            'fontcolor=black,fontname="Helvetica"];')
+
+    def print_mem_edges(self, printer):
+        for mem,band in self.mem_bandwidth.iteritems():
+            label = 'bandwidth='+str(band)+',latency='+str(self.mem_latency[mem])
+            printer.println(self.node_name+' -> ' + mem.node_name+ 
+                ' [label="'+label+'",style=solid,color=black,penwidth=2];')
+
 class IndexSpace(object):
-    __slots__ = ['state', 'uid', 'parent', 'color', 'children', 'instances', 'name']
+    __slots__ = ['state', 'uid', 'parent', 'color', 'children', 
+                 'instances', 'name', 'independent_children',
+                 'node_name']
     def __init__(self, state, uid):
         self.state = state
         self.uid = uid
@@ -164,6 +201,8 @@ class IndexSpace(object):
         self.children = dict()
         self.instances = dict()
         self.name = None
+        self.independent_children = None
+        self.node_name = 'index_space_node_'+str(uid)
 
     def set_name(self, name):
         self.name = name
@@ -184,6 +223,12 @@ class IndexSpace(object):
     def add_instance(self, tid, region):
         self.instances[tid] = region
 
+    def add_independent_children(self, ip1, ip2):
+        if self.independent_children is None:
+            self.independent_chidlren = set()
+        self.independent_children.add((ip1,ip2))
+        self.independent_children.add((ip2,ip1))
+
     def __str__(self):
         if self.name is None:
             return "Index Space "+str(self.uid)
@@ -192,9 +237,39 @@ class IndexSpace(object):
 
     __repr__ = __str__
 
+    def print_link_to_parent(self, printer, parent):
+        printer.println(parent+' -> '+ self.node_name+
+                " [style=solid,color=black,penwidth=2];")
+
+    def print_graph(self, printer):
+        if self.name is not None:
+            label = self.name + ' (ID: '+str(uid)
+        else:
+            if self.parent == None:
+                label = 'index space '+hex(self.uid)
+            else:
+                color = None
+                for c, child in self.parent.children.iteritems():
+                    if child == self:
+                        color = c
+                        break
+                assert color is not None
+                label = 'subspace '+str(self.uid)+\
+                        ' (color: ' + color.to_simple_string() +')'
+        printer.println(self.node_name+' [label="'+label+
+                '",shape=plaintext,fontsize=14,'+
+                'fontcolor=black,fontname="Helvetica"];')
+        # print links to children
+        for child in self.children.itervalues():
+            child.print_link_to_parent(printer, self.node_name)
+        for child in self.children.itervalues():
+            child.print_graph(printer)
+
+
 class IndexPartition(object):
     __slots__ = ['state', 'uid', 'parent', 'color', 'children', 'instances', 
-                 'disjoint', 'complete', 'name']
+                 'disjoint', 'complete', 'name', 'independent_children',
+                 'node_name']
     def __init__(self, state, uid):
         self.state = state
         self.uid = uid
@@ -205,6 +280,8 @@ class IndexPartition(object):
         self.disjoint = False
         self.complete = False
         self.name = None
+        self.independent_children = None
+        self.node_name = 'index_part_node_'+str(uid)
 
     def set_parent(self, parent, color):
         self.parent = parent
@@ -231,6 +308,12 @@ class IndexPartition(object):
     def add_instance(self, tid, partition):
         self.instances[tid] = partition
 
+    def add_independent_children(self, is1, is2):
+        if self.independent_children is None:
+            self.independent_children = set()
+        self.independent_children.add((is1,is2))
+        self.independent_children.add((is2,is1))
+
     def __str__(self):
         if self.name is None:
             return "Index Partition: "+str(self.uid)
@@ -238,6 +321,28 @@ class IndexPartition(object):
             return self.name
 
     __repr__ = __str__
+
+    def print_link_to_parent(self, printer, parent):
+        if self.disjoint:
+            edge_label = '*'
+        else:
+            edge_label = ''
+        printer.println(parent+' -> '+ self.node_name+
+                ' [label="'+edge_label+'",style=dotted,color=black,penwidth=2];')
+
+    def print_graph(self, printer):
+        if self.name is not None:
+            label = self.name + ' (ID: ' + str(self.uid) + ')'
+        else:
+            label = 'Index Partition '+str(self.uid)
+        printer.println(self.node_name+' [label="'+label+
+                '",shape=plaintext,fontsize=14,'+
+                'fontcolor=black,fontname="times italic"];')
+        # print links to children
+        for child in self.children.itervalues():
+            child.print_link_to_parent(printer, self.node_name)
+        for child in self.children.itervalues():
+            child.print_graph(printer)
 
 class Field(object):
     __slots__ = ['space', 'fid', 'name']
@@ -253,17 +358,18 @@ class Field(object):
         if self.name is None:
             return "Field "+str(self.fid)
         else:
-            return self.name
+            return self.name + " (FID=" + str(self.fid) + ")"
 
     __repr__ = __str__
 
 class FieldSpace(object):
-    __slots__ = ['state', 'uid', 'name', 'fields']
+    __slots__ = ['state', 'uid', 'name', 'fields', 'node_name']
     def __init__(self, state, uid):
         self.state = state
         self.uid = uid
         self.name = None
         self.fields = dict()
+        self.node_name = 'field_space_node_'+str(uid)
 
     def set_name(self, name):
         self.name = name
@@ -283,22 +389,55 @@ class FieldSpace(object):
 
     __repr__ = __str__
 
+    def print_graph(self, printer):
+        if self.name is not None:
+            label = self.name + ' (ID: '+str(self.uid) + ')'
+        else:
+            label = str(self)
+        printer.println(self.node_name+' [label="'+label+
+                '",shape=plaintext,fontsize=14,'+
+                'fontcolor=black,fontname="Helvetica"];')
+
+        for fid,field in self.fields.iteritems():
+            field_id = "field_node_"+str(self.uid)+"_"+str(fid)
+            if field.name is not None:
+                field_name = field.name + '(FID: ' + str(fid) + ')'
+            else:
+                field_name = 'FID: ' + str(fid)
+            printer.println(field_id+' [label="'+field_name+
+                    '",shape=plaintext,fontsize=14,'+
+                    'fontcolor=black,fontname="Helvetica"]')
+            printer.println(self.node_name+' -> '+ field_id+
+                    " [style=dotted,color=black,penwidth=2];")
+
 class LogicalRegion(object):
-    __slots__ = ['state', 'index_space', 'field_space', 'tree_id', 'name', 'parent']
+    __slots__ = ['state', 'index_space', 'field_space', 'tree_id', 'children',
+                 'name', 'parent', 'logical_state', 'physical_state', 'node_name',
+                 'has_named_children']
     def __init__(self, state, iid, fid, tid):
         self.state = state
         self.index_space = iid
         self.field_space = fid
         self.tree_id = tid
+        self.children = dict() 
         self.name = None
         self.parent = None
+        self.logical_state = dict()
+        self.physical_state = dict()
         self.index_space.add_instance(self.tree_id, self)
+        self.node_name = 'region_node_'+str(self.index_space.uid)+\
+            '_'+str(self.field_space.uid)+'_'+str(self.tree_id)
+        self.has_named_children = False
 
     def set_name(self, name):
         self.name = name
 
     def set_parent(self, parent):
         self.parent = parent
+        self.parent.add_child(self.index_space.color, self)
+
+    def add_child(self, color, child):
+        self.children[color] = child 
 
     def __str__(self):
         if self.name is None:
@@ -309,22 +448,105 @@ class LogicalRegion(object):
 
     __repr__ = __str__
 
+    def reset_logical_state(self):
+        if not not self.logical_state:
+            self.logical_state = dict()
+
+    def reset_physical_state(self):
+        if not not self.logical_state:
+            self.physical_state = dict()
+
+    def compute_path(self, path, target):
+        if self is not target:
+            assert self.parent is not None
+            self.parent.compute_path(path, target)
+        path.append(self)
+
+    def perform_logical_analysis(self, depth, path, op, req, field):
+        assert self is path[depth]
+        if field not in self.logical_state:
+            self.logical_state[field] = LogicalState(self, field)
+        if not self.logical_state[field].perform_logical_analysis(op, req):
+            return False
+        if (depth+1) < len(path):
+            return path[depth+1].perform_logical_analysis(depth+1, path, op, req, field)
+        return True
+
+    def mark_named_children(self):
+        if self.name is not None:
+            self.has_named_children = True
+        for child in self.children.itervalues():
+            has_named_children = child.mark_named_children()
+            self.has_named_children = self.has_named_children or has_named_children
+        return self.has_named_children
+
+    def print_link_to_parent(self, printer, parent):
+        printer.println(parent+' -> '+ self.node_name+
+                " [style=solid,color=black,penwidth=2];")
+
+    def gen_id(self):
+        return 'index: '+str(self.index_space.uid)+','+\
+                'field: '+str(self.field_space.uid)+','+\
+                'tree: '+str(self.tree_id)
+
+    def print_node(self, printer):
+        if self.name is not None:
+            label = self.name+' ('+self.gen_id()+')'
+        else:
+            if self.parent == None:
+                label = 'region ('+self.gen_id()+')'
+            else:
+                label = 'subregion ('+self.gen_id()+')'
+
+        printer.println(self.node_name+' [label="'+label+
+                '",shape=plaintext,fontsize=14,'+
+                'fontcolor=black,fontname="Helvetica"];')
+
+    def print_graph(self, printer, simplify_graph):
+        if simplify_graph and not self.has_named_children:
+            return
+        # print node itself
+        self.print_node(printer)
+        # Instantiate the region tree if it isn't full
+        if len(self.children) < len(self.index_space.children):
+            for color,child in self.index_space.children.iteritems():
+                if color not in self.children:
+                    state.get_partition(child.uid, self.field_space.uid, self.tree_id)
+        # print links to children
+        for child in self.children.itervalues():
+            if not simplify_graph or child.has_named_children:
+                child.print_link_to_parent(printer, self.node_name)
+        for child in self.children.itervalues():
+            child.print_graph(printer, simplify_graph)
+
 class LogicalPartition(object):
-    __slots__ = ['state', 'index_partition', 'field_space', 'tree_id', 'name', 'parent']
+    __slots__ = ['state', 'index_partition', 'field_space', 'tree_id', 'children',
+                 'name', 'parent', 'logical_state', 'physical_state', 'node_name',
+                 'has_named_children']
     def __init__(self, state, iid, fid, tid):
         self.state = state
         self.index_partition = iid
         self.field_space = fid
         self.tree_id = tid
+        self.children = dict()
         self.name = None 
         self.parent = None
+        self.logical_state = dict()
+        self.physical_state = dict()
         self.index_partition.add_instance(self.tree_id, self)
+        self.node_name = 'part_node_'+str(self.index_partition.uid)+'_'+\
+            str(self.field_space.uid)+'_'+str(self.tree_id)
+        self.has_named_children = False
 
     def set_name(self, name):
         self.name = name
 
     def set_parent(self, parent):
         self.parent = parent
+        self.parent.add_child(self.index_partition.color, self)
+
+    def add_child(self, color, child):
+        self.children[color] = child
 
     def __str__(self):
         if self.name is None:
@@ -335,11 +557,102 @@ class LogicalPartition(object):
 
     __repr__ = __str__
 
+    def reset_logical_state(self):
+        if not not self.logical_state:
+            self.logical_state = dict()
+
+    def reset_physical_state(self):
+        if not not self.logical_state:
+            self.physical_state = dict()
+
+    def compute_path(self, path, target):
+        if self is not target:
+            assert self.parent is not None
+            self.parent.compute_path(path, target)
+        path.append(self)
+
+    def perform_logical_analysis(self, depth, path, op, req, field):
+        assert self is path[depth]
+        if field not in self.logical_state:
+            self.logical_state[field] = LogicalState(self, field)
+        if not self.logical_state[field].perform_logical_analysis(op, req):
+            return False
+        if (depth+1) < len(path):
+            return path[depth+1].perform_logical_analysis(depth+1, path, op, req, field)
+        return True
+
+    def mark_named_children(self):
+        if self.name is not None:
+            self.has_named_children = True
+        for child in self.children.itervalues():
+            has_named_children = child.mark_named_children()
+            self.has_named_children = self.has_named_children or has_named_children
+        return self.has_named_children
+
+    def print_link_to_parent(self, printer, parent):
+        if self.index_partition.disjoint:
+            edge_label = '*'
+        else:
+            edge_label = ''
+        printer.println(parent+' -> '+ self.node_name+
+                ' [label="'+edge_label+'",style=dotted,color=black,penwidth=2];')
+
+    def gen_id(self):
+        return 'part: '+hex(self.index_partition.uid)+','+\
+                'field: '+str(self.field_space.uid)+','+\
+                'tree: '+str(self.tree_id)
+
+    def print_node(self, printer):
+        if self.name is not None:
+            label = self.name+' ('+self.gen_id() +')'
+        else:
+            label = 'partition ('+self.gen_id() +')'
+        printer.println(self.node_name+' [label="'+label+
+                '",shape=plaintext,fontsize=14,'+
+                'fontcolor=black,fontname="times italic"];')
+
+    def print_graph(self, printer, simplify_graph):
+        if simplify_graph and not self.has_named_children:
+            return
+        # print node itself
+        self.print_node(printer)
+        # instantiate the region tree if it isn't full
+        if len(self.children) < len(self.index_partition.children):
+            for color,child in self.index_partition.children.iteritems():
+                if color not in self.children:
+                    self.state.get_region(child.uid,
+                        self.field_space.uid, self.tree_id)
+        # print links to children
+        for child in self.children.itervalues():
+            child.print_link_to_parent(printer, self.node_name)
+            if simplify_graph and not child.has_named_children:
+                child.print_node(printer)
+        for child in self.children.itervalues():
+            child.print_graph(printer, simplify_graph)
+
+
+class LogicalState(object):
+    __slots__ = ['node', 'field']
+    def __init__(self, node, field):
+        self.node = node
+        self.field = field
+
+    def perform_logical_analysis(self, op, req):
+        return True
+
+
+class PhysicalState(object):
+    __slots__ = ['node', 'field']
+    def __init__(self, node, field):
+        self.node = node 
+        self.field = field
+
+
 class Requirement(object):
     __slots__ = ['state', 'index', 'is_reg', 'index_node', 'field_space', 'tid',
-                 'logical_node', 'priv', 'coher', 'redop', 'fields']
+                 'logical_node', 'priv', 'coher', 'redop', 'fields', 'parent']
     def __init__(self, state, index, is_reg, index_node, field_space, 
-                 tid, logical_node, priv, coher, redop):
+                 tid, logical_node, priv, coher, redop, parent):
         self.state = state
         self.index = index
         self.is_reg = is_reg
@@ -350,6 +663,7 @@ class Requirement(object):
         self.priv = priv
         self.coher = coher
         self.redop = redop
+        self.parent = parent
         self.fields = list()
 
     def print_requirement(self):
@@ -493,9 +807,9 @@ class MappingDependence(object):
 
         
 class Operation(object):
-    __slots__ = ['state', 'uid', 'kind', 'context', 'name', 'reqs', 
-                 'logical_incoming', 'logical_outgoing', 'task_id', 
-                 'points', 'creator']
+    __slots__ = ['state', 'uid', 'kind', 'context', 'name', 'reqs', 'mappings', 
+                 'incoming', 'outgoing', 'start_event', 'finish_event', 'task_id', 
+                 'points', 'creator', 'partition_kind', 'partition_node']
     def __init__(self, state, uid):
         self.state = state
         self.uid = uid
@@ -503,17 +817,26 @@ class Operation(object):
         self.context = None
         self.name = None
         self.reqs = None
-        self.logical_incoming = None
-        self.logical_outgoing = None
+        self.mappings = None
+        self.incoming = None
+        self.outgoing = None
+        self.start_event = state.get_no_event() 
+        self.finish_event = state.get_no_event()
         # Only valid for tasks
         self.task_id = -1
         # Only valid for index tasks
         self.points = None
         # Only valid for close operations
         self.creator = None
+        # Only valid for pending partition operations
+        self.partition_kind = None
+        self.partition_node = None
 
     def set_name(self, name):
         self.name = name
+        if self.points is not None:
+            for point in self.points.itervalues():
+                point.set_name(name)
 
     def __str__(self):
         if self.name is None:
@@ -534,6 +857,10 @@ class Operation(object):
         else:
             assert self.kind is kind
 
+    def set_events(self, start, finish):
+        self.start_event = start
+        self.finish_event = finish
+
     def set_task_id(self, task_id):
         assert self.kind == SINGLE_TASK_KIND or self.kind == INDEX_TASK_KIND
         self.task_id = task_id
@@ -542,11 +869,17 @@ class Operation(object):
         assert self.kind == CLOSE_OP_KIND
         self.creator = creator
 
+    def set_pending_partition_info(self, node, kind):
+        assert self.kind == PENDING_PART_OP_KIND
+        self.partition_node = node
+        self.partition_kind = kind
+
     def add_point_task(self, point):
         assert self.kind == INDEX_TASK_KIND
         # Initialize if necessary
         if self.points is None:
             self.points = dict()
+        point.op.set_name(self.name)
         index_point = point.point
         if index_point in self.points:
             self.points[index_point] = self.state.alias_points(point,
@@ -565,17 +898,24 @@ class Operation(object):
         assert index in self.reqs
         self.reqs[index].add_field(fid)
 
-    def add_logical_incoming(self, dep):
-        assert dep.op2 == self
-        if self.logical_incoming is None:
-            self.logical_incoming = set()
-        self.logical_incoming.add(dep)
+    def add_mapping_decision(self, index, fid, inst):
+        if self.mappings is None:
+            self.mappings = dict()
+        if index not in self.mappings:
+            self.mappings[index] = dict()
+        self.mappings[index][fid] = inst
 
-    def add_logical_outgoing(self, dep):
+    def add_incoming(self, dep):
+        assert dep.op2 == self
+        if self.incoming is None:
+            self.incoming = set()
+        self.incoming.add(dep)
+
+    def add_outgoing(self, dep):
         assert dep.op1 == self
-        if self.logical_outgoing is None:
-            self.logical_outgoing = set()
-        self.logical_outgoing.add(dep)
+        if self.outgoing is None:
+            self.outgoing = set()
+        self.outgoing.add(dep)
 
     def merge(self, other):
         if self.kind == NO_OP_KIND:
@@ -588,35 +928,55 @@ class Operation(object):
             assert self.context == other.context
         if self.name is None:
             self.name = other.name
-        if len(self.reqs) == 0:
+        if not self.reqs:
             self.reqs = other.reqs
         else:
-            assert len(other.reqs) == 0
+            assert not other.reqs
         if self.task_id == -1:
             self.task_id = other.task_id
         elif other.task_id <> -1:
             assert self.task_id == other.task_id
         # Should only be called on point tasks
-        assert len(self.points) == 0
-        assert len(other.points) == 0
+        assert not self.points
+        assert not other.points
+
+    def perform_logical_analysis(self):
+        if self.reqs is None:
+            return True
+        # We need a context to do this
+        assert self.context is not None
+        success = True
+        for idx,req in self.reqs.iteritems():
+            # Special out for no access
+            if req.priv is NO_ACCESS:
+                continue
+            # Compute the analysis path
+            path = list()
+            req.logical_node.compute_path(path, req.parent)
+            assert not not path
+            # Now do the traversal for each of the fields
+            for field in req.fields:
+                if not req.parent.perform_logical_analysis(0, path, self, req, field):
+                    success = False
+                    break
+            # Early out
+            if not success:
+                break
+        return success
         
 
 class Task(object):
-    __slots__ = ['op', 'task_id', 'point', 'operations']
+    __slots__ = ['op', 'point', 'operations', 'top']
     def __init__(self, state, op):
         self.op = op
-        self.task_id = -1 
         self.point = Point(0)
         self.operations = list()
+        self.top = False
 
     def __str__(self):
-        return "Task %d (UID %d)" % (self.task_id, self.op.uid)
+        return str(self.op)
 
     __repr__ = __str__
-
-    def set_task_id(self, task_id):
-        self.task_id = task_id
-        self.op.set_task_id(task_id)
 
     def add_operation(self, operation):
         self.operations.append(operation)
@@ -633,57 +993,384 @@ class Task(object):
             self.point = other.point
         elif other.point.dim <> 0:
             assert self.point == other.point
-        if len(self.operations) == 0:
+        if not self.operations:
             self.operations = other.operations
         else:
-            assert len(other.operations) == 0
+            assert not other.operations
+
+    def check_logical_dependence_analysis(self):
+        # If we don't have any operations we are done
+        if not self.operations or self.top:
+            return True
+        print 'Performing logical dependence analysis for %s...' % str(self)
+        if self.op.state.verbose:
+            print '  Analyzing %d operations...' % len(self.operations)
+        # Iterate over all the operations in order and
+        # have them perform their analysis
+        success = True
+        for op in self.operations:
+            if not op.perform_logical_analysis():
+                success = False
+                break
+        # Reset the logical state when we are done
+        self.op.state.reset_logical_state()
+        return success
+    
+    def check_logical_sanity(self):
+        if not self.operations:
+            return True
+        success = True
+
+        return success
+
+class Instance(object):
+    __slots__ = ['state', 'handle', 'memory', 'region', 'fields', 'redop']
+    def __init__(self, state, handle):
+        self.state = state
+        self.handle = handle
+        self.memory = None
+        self.region = None
+        self.fields = None
+        self.redop = 0
+
+    def __str__(self):
+        return "Instance %s in %s" % (hex(self.handle), str(self.memory))
+
+    def set_memory(self, memory):
+        self.memory = memory
+
+    def set_region(self, region):
+        self.region = region
+
+    def set_redop(self, redop):
+        self.redop = redop
+
+    def add_field(self, fid):
+        # We better have a region at this point
+        assert self.region is not None
+        field = self.region.field_space.get_field(fid)
+        if self.fields is None:
+            self.fields = set()
+        self.fields.add(field)
+
+    # Only one virtual instance always with ID 0
+    def is_virtual(self):
+        return self.handle == 0
+
+class EventHandle(object):
+    __slots__ = ['uid', 'gen']
+    def __init__(self, uid, gen):
+        self.uid = uid
+        self.gen = gen
+
+    def __hash__(self):
+        return hash((self.uid, self.gen))
+
+    def __eq__(self, other):
+        return (self.uid,self.gen) == (other.uid,other.gen)
+
+    def __str__(self):
+        return "ev(" + hex(self.uid) + "," + str(self.gen) + ")"
+
+    __repr__ = __str__
+
+    def exists(self):
+        return (self.uid <> 0)
+
+class Event(object):
+    __slots__ = ['state', 'handle', 'phase_barrier', 'incoming', 'outgoing' ]
+    def __init__(self, state, handle):
+        self.state = state
+        self.handle = handle
+        self.phase_barrier = False
+        self.incoming = None
+        self.outgoing = None
+
+    def __str__(self):
+        return str(self.handle)
+
+    __repr__ = __str__
+
+    def add_incoming(self, prev):
+        if self.incoming is None:
+            self.incoming = set()
+        self.incoming.add(prev)
+
+    def add_outgoing(self, nex):
+        if self.outgoing is None:
+            self.outgoing = set()
+        self.outgoing.add(nex)
+
+class RealmCopy(object):
+    __slots__ = ['state', 'creator', 'region', 'start_event', 'finish_event',
+                 'src_fields', 'dst_fields', 'srcs', 'dsts', 'redops']
+    def __init__(self, state, finish):
+        self.state = state
+        self.creator = None
+        self.region = None
+        self.start_event = state.get_no_event()
+        self.finish_event = finish
+        self.src_fields = list()
+        self.dst_fields = list()
+        self.srcs = list()
+        self.dsts = list()
+        self.redops = list()
+
+    def set_creator(self, creator):
+        self.creator = creator
+
+    def set_start(self, start):
+        self.start_event = start
+
+    def set_region(self, region):
+        self.region = region
+
+    def add_field(self, src_fid, src, dst_fid, dst, redop):
+        assert self.region is not None
+        src_field = self.region.field_space.get_field(src_fid)
+        dst_field = self.region.field_space.get_field(dst_fid)
+        self.src_fields.append(src_field)
+        self.dst_fields.append(dst_field)
+        self.srcs.append(src)
+        self.dsts.append(dst)
+        self.redops.append(redop)
+
+class RealmFill(object):
+    __slots__ = ['state', 'creator', 'region', 'start_event', 'finish_event',
+                 'fields', 'dsts', ]
+    def __init__(self, state, finish):
+        self.state = state
+        self.creator = None
+        self.region = None
+        self.start_event = state.get_no_event()
+        self.finish_event = finish
+        self.fields = list()
+        self.dsts = list()
+
+    def set_creator(self, creator):
+        self.creator = creator
+
+    def set_start(self, start):
+        self.start_event = start
+
+    def set_region(self, region):
+        self.region = region
+
+    def add_field(self, fid, dst):
+        assert self.region is not None
+        field = self.region.field_space.get_field(fid)
+        self.fields.append(field)
+        self.dsts.append(dst)
+
+class GraphPrinter(object):
+    __slots__ = ['name', 'filename', 'out', 'depth', 'cluster_id']
+    def __init__(self,path,name,direction='LR'):
+        self.name = name
+        self.filename = path+name+'.dot'
+        self.out = open(self.filename,'w')
+        self.depth = 0
+        self.println('digraph "'+name+'"')
+        self.println('{')
+        self.down()
+        #self.println('aspect = ".00001,100";')
+        #self.println('ratio = 1;')
+        #self.println('size = "10,10";')
+        self.println('compound = true;')
+        self.println('rankdir="'+direction+'";')
+        self.println('size = "36,36";')
+        self.cluster_id = 0
+
+    def close(self):
+        self.up()
+        self.println('}')
+        self.out.close()
+        return self.filename
+
+    def print_pdf_after_close(self, simplify):
+        dot_file = self.close()
+        pdf_file = self.name+".pdf"
+        try:
+            if simplify:
+                tred = subprocess.Popen(['tred', dot_file], stdout=subprocess.PIPE)
+                dot = subprocess.Popen(['dot', '-Tpdf', '-o', pdf_file], stdin=tred.stdout)
+                if dot.wait() != 0:
+                    raise Exception('DOT failed')
+            else:
+                subprocess.check_call(['dot', '-Tpdf', '-o', pdf_file, dot_file])
+        except:
+            print "WARNING: DOT failure, image for graph "+str(self.name)+" not generated"
+            subprocess.call(['rm', '-f', 'core', pdf_file])
+
+    def up(self):
+        assert self.depth > 0
+        self.depth = self.depth-1
+
+    def down(self):
+        self.depth = self.depth+1
+
+    def start_new_cluster(self):
+        self.println('subgraph cluster_' + str(self.cluster_id))
+        self.cluster_id += 1
+        self.println('{')
+        self.down()
+
+    def end_this_cluster(self):
+        self.up()
+        self.println('}')
+
+    def println(self,string):
+        for i in range(self.depth):
+            self.out.write('  ')
+        self.out.write(string)
+        self.out.write('\n')
 
 prefix    = "\[(?P<node>[0-9]+) - (?P<thread>[0-9a-f]+)\] \{\w+\}\{legion_spy\}: "
-prefix_pat              = re.compile(prefix)
+prefix_pat               = re.compile(prefix)
 # Patterns for the shape of the machine
-proc_kind_pat           = re.compile(prefix+"Processor Kind (?P<kind>[0-9]+) (?P<name>[-$()\w. ])")
-mem_kind_pat            = re.compile(prefix+"Memory Kind (?P<kind>[0-9]+) (?P<name>[-$()\w. ]+)")
-processor_pat           = re.compile(prefix+"Processor (?P<pid>[0-9a-f]+) (?P<kind>[0-9]+)")
-memory_pat              = re.compile(prefix+"Memory (?P<mid>[0-9a-f]+) (?P<capacity>[0-9]+) (?P<kind>[0-9]+)")
-proc_mem_pat            = re.compile(prefix+"Processor Memory (?P<pid>[0-9a-f]+) (?P<mid>[0-9a-f]+) (?P<band>[0-9]+) (?P<lat>[0-9]+)")
-mem_mem_pat             = re.compile(prefix+"Memory Memory (?P<mone>[0-9a-f]+) (?P<mtwo>[0-9a-f]+) (?P<band>[0-9]+) (?P<lat>[0-9]+)")
+proc_kind_pat            = re.compile(
+    prefix+"Processor Kind (?P<kind>[0-9]+) (?P<name>[-$()\w. ]+)")
+mem_kind_pat             = re.compile(
+    prefix+"Memory Kind (?P<kind>[0-9]+) (?P<name>[-$()\w. ]+)")
+processor_pat            = re.compile(
+    prefix+"Processor (?P<pid>[0-9a-f]+) (?P<kind>[0-9]+)")
+memory_pat               = re.compile(
+    prefix+"Memory (?P<mid>[0-9a-f]+) (?P<capacity>[0-9]+) (?P<kind>[0-9]+)")
+proc_mem_pat             = re.compile(
+    prefix+"Processor Memory (?P<pid>[0-9a-f]+) (?P<mid>[0-9a-f]+) (?P<band>[0-9]+) "+
+           "(?P<lat>[0-9]+)")
+mem_mem_pat              = re.compile(
+    prefix+"Memory Memory (?P<mone>[0-9a-f]+) (?P<mtwo>[0-9a-f]+) (?P<band>[0-9]+) "+
+           "(?P<lat>[0-9]+)")
 # Patterns for the shape of region trees
-top_index_pat           = re.compile(prefix+"Index Space (?P<uid>[0-9a-f]+)")
-index_name_pat          = re.compile(prefix+"Index Space Name (?P<uid>[0-9a-f]+) (?P<name>[-$()\w. ]+)")
-index_part_pat          = re.compile(prefix+"Index Partition (?P<pid>[0-9a-f]+) (?P<uid>[0-9a-f]+) (?P<disjoint>[0-1]) (?P<dim>[0-9]+) (?P<val1>[0-9]+) (?P<val2>[0-9]+) (?P<val3>[0-9]+)")
-index_part_name_pat     = re.compile(prefix+"Index Partition Name (?P<uid>[0-9a-f]+) (?P<name>[-$()\w. ]+)")
-index_subspace_pat      = re.compile(prefix+"Index Subspace (?P<pid>[0-9a-f]+) (?P<uid>[0-9a-f]+) (?P<dim>[0-9]+) (?P<val1>[0-9]+) (?P<val2>[0-9]+) (?P<val3>[0-9]+)")
-field_space_pat         = re.compile(prefix+"Field Space (?P<uid>[0-9]+)")
-field_space_name_pat    = re.compile(prefix+"Field Space Name (?P<uid>[0-9]+) (?P<name>[-$()\w. ]+)")
-field_create_pat        = re.compile(prefix+"Field Creation (?P<uid>[0-9]+) (?P<fid>[0-9]+)")
-field_name_pat          = re.compile(prefix+"Field Name (?P<uid>[0-9]+) (?P<fid>[0-9]+) (?P<name>[-$()\w. ]+)")
-region_pat              = re.compile(prefix+"Region (?P<iid>[0-9a-f]+) (?P<fid>[0-9]+) (?P<tid>[0-9]+)")
-region_name_pat         = re.compile(prefix+"Logical Region Name (?P<iid>[0-9a-f]+) (?P<fid>[0-9]+) (?P<tid>[0-9]+) (?P<name>[-$()\w. ]+)")
-partition_name_pat      = re.compile(prefix+"Logical Partition Name (?P<iid>[0-9a-f]+) (?P<fid>[0-9]+) (?P<tid>[0-9]+) (?P<name>[-$()\w. ]+)")
+top_index_pat            = re.compile(
+    prefix+"Index Space (?P<uid>[0-9a-f]+)")
+index_name_pat           = re.compile(
+    prefix+"Index Space Name (?P<uid>[0-9a-f]+) (?P<name>[-$()\w. ]+)")
+index_part_pat           = re.compile(
+    prefix+"Index Partition (?P<pid>[0-9a-f]+) (?P<uid>[0-9a-f]+) (?P<disjoint>[0-1]) "+
+           "(?P<dim>[0-9]+) (?P<val1>[0-9]+) (?P<val2>[0-9]+) (?P<val3>[0-9]+)")
+index_part_name_pat      = re.compile(
+    prefix+"Index Partition Name (?P<uid>[0-9a-f]+) (?P<name>[-$()\w. ]+)")
+index_subspace_pat       = re.compile(
+    prefix+"Index Subspace (?P<pid>[0-9a-f]+) (?P<uid>[0-9a-f]+) (?P<dim>[0-9]+) "+
+           "(?P<val1>[0-9]+) (?P<val2>[0-9]+) (?P<val3>[0-9]+)")
+field_space_pat          = re.compile(
+    prefix+"Field Space (?P<uid>[0-9]+)")
+field_space_name_pat     = re.compile(
+    prefix+"Field Space Name (?P<uid>[0-9]+) (?P<name>[-$()\w. ]+)")
+field_create_pat         = re.compile(
+    prefix+"Field Creation (?P<uid>[0-9]+) (?P<fid>[0-9]+)")
+field_name_pat           = re.compile(
+    prefix+"Field Name (?P<uid>[0-9]+) (?P<fid>[0-9]+) (?P<name>[-$()\w. ]+)")
+region_pat               = re.compile(
+    prefix+"Region (?P<iid>[0-9a-f]+) (?P<fid>[0-9]+) (?P<tid>[0-9]+)")
+region_name_pat          = re.compile(
+    prefix+"Logical Region Name (?P<iid>[0-9a-f]+) (?P<fid>[0-9]+) (?P<tid>[0-9]+) "+
+           "(?P<name>[-$()\w. ]+)")
+partition_name_pat       = re.compile(
+    prefix+"Logical Partition Name (?P<iid>[0-9a-f]+) (?P<fid>[0-9]+) (?P<tid>[0-9]+) "+
+           "(?P<name>[-$()\w. ]+)")
+partition_complete_pat   = re.compile(
+    prefix+"Index Partition Complete (?P<iid>[0-9a-f]+)")
+is_independence_pat      = re.compile(
+    prefix+"Index Space Independence (?P<pid>[0-9a-f]+) (?P<is1>[0-9a-f]+) "+
+           "(?P<is2>[0-9a-f]+)")
+ip_independence_pat      = re.compile(
+    prefix+"Index Partition Independence (?P<pid>[0-9a-f]+) (?P<ip1>[0-9a-f]+) "+
+           "(?P<ip2>[0-9a-f]+)")
+dominance_pat            = re.compile(
+    prefix+"Index Dominance (?P<id1>[0-9a-f]+) (?P<id2>[0-9a-f]+) (?P<kind>[0-3])")
+non_intersection_pat     = re.compile(
+    prefix+"Index Non-Intersection (?P<id1>[0-9a-f]+) (?P<id2>[0-9a-f]+) (?P<kind>[0-3])")
 # Patterns for operations
-top_task_pat             = re.compile(prefix+"Top Task (?P<tid>[0-9]+) (?P<uid>[0-9]+) (?P<name>[-$()\w. ]+)")
-single_task_pat          = re.compile(prefix+"Individual Task (?P<ctx>[0-9]+) (?P<tid>[0-9]+) (?P<uid>[0-9]+) (?P<name>[-$()\w. ]+)")
-index_task_pat           = re.compile(prefix+"Index Task (?P<ctx>[0-9]+) (?P<tid>[0-9]+) (?P<uid>[0-9]+) (?P<name>[-$()\w. ]+)")
-mapping_pat              = re.compile(prefix+"Mapping Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
-close_pat                = re.compile(prefix+"Close Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+) (?P<is_inter>[0-1])")
-close_creator_pat        = re.compile(prefix+"Close Operation Creator (?P<uid>[0-9]+) (?P<cuid>[0-9]+) (?P<idx>[0-9]+)")
-fence_pat                = re.compile(prefix+"Fence Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
-copy_op_pat              = re.compile(prefix+"Copy Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
-fill_op_pat              = re.compile(prefix+"Fill Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
-acquire_op_pat           = re.compile(prefix+"Acquire Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
-release_op_pat           = re.compile(prefix+"Release Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
-deletion_pat             = re.compile(prefix+"Deletion Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
-dep_partition_op_pat     = re.compile(prefix+"Dependent Partition Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+) (?P<pid>[0-9a-f]+) (?P<kind>[0-9]+)")
-pending_partition_op_pat = re.compile(prefix+"Pending Partition Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
-target_partition_pat     = re.compile(prefix+"Pending Partition Target (?P<uid>[0-9]+) (?P<pid>[0-9a-f]+) (?P<kind>[0-9]+)")
-index_slice_pat          = re.compile(prefix+"Index Slice (?P<index>[0-9]+) (?P<slice>[0-9]+)")
-slice_slice_pat          = re.compile(prefix+"Slice Slice (?P<slice1>[0-9]+) (?P<slice2>[0-9]+)")
-slice_point_pat          = re.compile(prefix+"Slice Point (?P<slice>[0-9]+) (?P<point>[0-9]+) (?P<dim>[0-9]+) (?P<val1>[0-9]+) (?P<val2>[0-9]+) (?P<val3>[0-9]+)")
-point_point_pat          = re.compile(prefix+"Point Point (?P<point1>[0-9]+) (?P<point2>[0-9]+)")
+task_name_pat            = re.compile(
+    prefix+"Task ID Name (?P<tid>[0-9]+) (?P<name>[-$()\w. ]+)")
+top_task_pat             = re.compile(
+    prefix+"Top Task (?P<tid>[0-9]+) (?P<uid>[0-9]+) (?P<name>[-$()\w. ]+)")
+single_task_pat          = re.compile(
+    prefix+"Individual Task (?P<ctx>[0-9]+) (?P<tid>[0-9]+) (?P<uid>[0-9]+) "+
+           "(?P<name>[-$()\w. ]+)")
+index_task_pat           = re.compile(
+    prefix+"Index Task (?P<ctx>[0-9]+) (?P<tid>[0-9]+) (?P<uid>[0-9]+) "+
+           "(?P<name>[-$()\w. ]+)")
+mapping_pat              = re.compile(
+    prefix+"Mapping Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
+close_pat                = re.compile(
+    prefix+"Close Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+) (?P<is_inter>[0-1])")
+close_creator_pat        = re.compile(
+    prefix+"Close Operation Creator (?P<uid>[0-9]+) (?P<cuid>[0-9]+) (?P<idx>[0-9]+)")
+fence_pat                = re.compile(
+    prefix+"Fence Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
+copy_op_pat              = re.compile(
+    prefix+"Copy Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
+fill_op_pat              = re.compile(
+    prefix+"Fill Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
+acquire_op_pat           = re.compile(
+    prefix+"Acquire Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
+release_op_pat           = re.compile(
+    prefix+"Release Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
+deletion_pat             = re.compile(
+    prefix+"Deletion Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
+dep_partition_op_pat     = re.compile(
+    prefix+"Dependent Partition Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+) "+
+           "(?P<pid>[0-9a-f]+) (?P<kind>[0-9]+)")
+pending_partition_op_pat = re.compile(
+    prefix+"Pending Partition Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
+target_partition_pat     = re.compile(
+    prefix+"Pending Partition Target (?P<uid>[0-9]+) (?P<pid>[0-9a-f]+) (?P<kind>[0-9]+)")
+index_slice_pat          = re.compile(
+    prefix+"Index Slice (?P<index>[0-9]+) (?P<slice>[0-9]+)")
+slice_slice_pat          = re.compile(
+    prefix+"Slice Slice (?P<slice1>[0-9]+) (?P<slice2>[0-9]+)")
+slice_point_pat          = re.compile(
+    prefix+"Slice Point (?P<slice>[0-9]+) (?P<point>[0-9]+) (?P<dim>[0-9]+) "+
+           "(?P<val1>[0-9]+) (?P<val2>[0-9]+) (?P<val3>[0-9]+)")
+point_point_pat          = re.compile(
+    prefix+"Point Point (?P<point1>[0-9]+) (?P<point2>[0-9]+)")
 # Patterns for logical analysis and region requirements
-requirement_pat         = re.compile(prefix+"Logical Requirement (?P<uid>[0-9]+) (?P<index>[0-9]+) (?P<is_reg>[0-1]) (?P<ispace>[0-9a-f]+) (?P<fspace>[0-9]+) (?P<tid>[0-9]+) (?P<priv>[0-9]+) (?P<coher>[0-9]+) (?P<redop>[0-9]+)")
-req_field_pat           = re.compile(prefix+"Logical Requirement Field (?P<uid>[0-9]+) (?P<index>[0-9]+) (?P<fid>[0-9]+)")
-mapping_dep_pat         = re.compile(prefix+"Mapping Dependence (?P<ctx>[0-9]+) (?P<prev_id>[0-9]+) (?P<pidx>[0-9]+) (?P<next_id>[0-9]+) (?P<nidx>[0-9]+) (?P<dtype>[0-9]+)")
+requirement_pat         = re.compile(
+    prefix+"Logical Requirement (?P<uid>[0-9]+) (?P<index>[0-9]+) (?P<is_reg>[0-1]) "+
+           "(?P<ispace>[0-9a-f]+) (?P<fspace>[0-9]+) (?P<tid>[0-9]+) (?P<priv>[0-9]+) "+
+           "(?P<coher>[0-9]+) (?P<redop>[0-9]+) (?P<pis>[0-9a-f]+)")
+req_field_pat           = re.compile(
+    prefix+"Logical Requirement Field (?P<uid>[0-9]+) (?P<index>[0-9]+) (?P<fid>[0-9]+)")
+mapping_dep_pat         = re.compile(
+    prefix+"Mapping Dependence (?P<ctx>[0-9]+) (?P<prev_id>[0-9]+) (?P<pidx>[0-9]+) "+
+           "(?P<next_id>[0-9]+) (?P<nidx>[0-9]+) (?P<dtype>[0-9]+)")
+# Physical instance and mapping decision patterns
+instance_pat            = re.compile(
+    prefix+"Physical Instance (?P<iid>[0-9a-f]+) (?P<mid>[0-9a-f]+) (?P<redop>[0-9]+)")
+instance_region_pat     = re.compile(
+    prefix+"Physical Instance Region (?P<iid>[0-9a-f]+) (?P<ispace>[0-9]+) "
+           "(?P<fspace>[0-9]+) (?P<tid>[0-9]+)")
+instance_field_pat      = re.compile(
+    prefix+"Physical Instance Field (?P<iid>[0-9a-f]+) (?P<fid>[0-9]+)")
+mapping_decision_pat    = re.compile(
+    prefix+"Mapping Decision (?P<uid>[0-9]+) (?P<idx>[0-9]+) (?P<fid>[0-9]+) "
+           "(?P<iid>[0-9a-f]+)")
+# Physical event and operation patterns
+event_dependence_pat     = re.compile(
+    prefix+"Event Event (?P<id1>[0-9a-f]+) (?P<gen1>[0-9]+) (?P<id2>[0-9a-f]+) "+
+           "(?P<gen2>[0-9]+)")
+operation_event_pat     = re.compile(
+    prefix+"Operation Events (?P<uid>[0-9]+) (?P<id1>[0-9a-f]+) (?P<gen1>[0-9]+) "+
+           "(?P<id2>[0-9a-f]+) (?P<gen2>[0-9]+)")
+realm_copy_pat          = re.compile(
+    prefix+"Copy Events (?P<uid>[0-9]+) (?P<ispace>[0-9]+) (?P<fspace>[0-9]+) "+
+           "(?P<tid>[0-9]+) (?P<preid>[0-9a-f]+) (?P<pregen>[0-9]+) "+
+           "(?P<postid>[0-9a-f]+) (?P<postgen>[0-9]+)")
+realm_copy_field_pat    = re.compile(
+    prefix+"Copy Field (?P<id>[0-9a-f]+) (?P<gen>[0-9]+) (?P<srcfid>[0-9]+) "+
+           "(?P<srcid>[0-9a-f]+) (?P<dstfid>[0-9]+) (?P<dstid>[0-9a-f]+) (?P<redop>[0-9]+)")
+realm_fill_pat          = re.compile(
+    prefix+"Fill Events (?P<uid>[0-9]+) (?P<ispace>[0-9]+) (?P<fspace>[0-9]+) "+
+           "(?P<tid>[0-9]+) (?P<preid>[0-9a-f]+) (?P<pregen>[0-9]+) "+
+           "(?P<postid>[0-9a-f]+) (?P<postgen>[0-9]+)")
+realm_fill_field_pat    = re.compile(
+    prefix+"Fill Field (?P<id>[0-9a-f]+) (?P<gen>[0-9]+) (?P<fid>[0-9]+) "+
+           "(?P<dstid>[0-9a-f]+)")
+phase_barrier_pat       = re.compile(
+    prefix+"Phase Barrier (?P<iid>[0-9a-f]+)")
 
 def parse_legion_spy_line(line, state):
     # Quick test to see if the line is even worth considering
@@ -692,7 +1379,67 @@ def parse_legion_spy_line(line, state):
         return False
     # We order these regex matches by the frequency in which they
     # are likely to happen in order to improve parsing time
-
+    # Event stuff is very likely the most frequent stuff
+    m = event_dependence_pat.match(line)
+    if m is not None:
+        e1 = state.get_event(int(m.group('id1'),16),int(m.group('gen1')))
+        e2 = state.get_event(int(m.group('id2'),16),int(m.group('gen2')))
+        e2.add_incoming(e1)
+        e1.add_outgoing(e2)
+        return True
+    m = operation_event_pat.match(line)
+    if m is not None:
+        e1 = state.get_event(int(m.group('id1'),16),int(m.group('gen1')))
+        e2 = state.get_event(int(m.group('id2'),16),int(m.group('gen2')))
+        op = state.get_operation(int(m.group('uid')))
+        op.set_events(e1, e2)
+        return True
+    m = realm_copy_pat.match(line)
+    if m is not None:
+        e1 = state.get_event(int(m.group('preid'),16),int(m.group('pregen')))
+        e2 = state.get_event(int(m.group('postid'),16),int(m.group('postgen')))
+        copy = state.get_realm_copy(e2)
+        copy.set_start(e2)
+        op = state.get_operation(int(m.group('uid')))
+        copy.set_creator(op)
+        region = state.get_region(int(m.group('ispace')), 
+            int(m.group('fspace')), int(m.group('tid')))
+        copy.set_region(region)
+        return True
+    m = realm_copy_field_pat.match(line)
+    if m is not None:
+        e = state.get_event(int(m.group('id'),16),int(m.group('gen')))
+        copy = state.get_realm_copy(e)
+        src = state.get_instance(int(m.group('srcid'),16))
+        dst = state.get_instance(int(m.group('dstid'),16))
+        copy.add_field(int(m.group('srcfid')), src, 
+                       int(m.group('dstfid')), dst, int(m.group('redop')))
+        return True
+    m = realm_fill_pat.match(line)
+    if m is not None:
+        e1 = state.get_event(int(m.group('preid'),16),int(m.group('pregen')))
+        e2 = state.get_event(int(m.group('postid'),16),int(m.group('postgen')))
+        fill = state.get_realm_fill(e2)
+        fill.set_start(e1)
+        op = state.get_operation(int(m.group('uid')))
+        fill.set_creator(op)
+        region = state.get_region(int(m.group('ispace')), 
+            int(m.group('fspace')), int(m.group('tid')))
+        fill.set_region(region)
+        return True
+    m = realm_fill_field_pat.match(line)
+    if m is not None:
+        e = state.get_event(int(m.group('id'),16),int(m.group('gen')))
+        fill = state.get_realm_fill(e)
+        dst = state.get_instance(int(m.group('dstid'),16))
+        fill.add_field(int(m.group('fid')), dst)
+        return True
+    m = phase_barrier_pat.match(line)
+    if m is not None:
+        if state.phase_barriers is None:
+            state.phase_barriers = set()
+        state.phase_barriers.add(int(m.group('iid'),16))
+        return True
     # Region requirements and mapping dependences happen often
     m = requirement_pat.match(line)
     if m is not None:
@@ -703,17 +1450,21 @@ def parse_legion_spy_line(line, state):
         priv = int(m.group('priv'))
         coher = int(m.group('coher'))
         redop = int(m.group('redop'))
+        parent_ispace = int(m.group('pis'),16)
+        parent = state.get_region(int(m.group('pis'),16), field_space.uid, tid)
         if is_reg:
             index_space = state.get_index_space(int(m.group('ispace'),16))
             region = state.get_region(index_space.uid, field_space.uid, tid) 
             requirement = Requirement(state, int(m.group('index')), True,
-                index_space, field_space, tid, region, priv, coher, redop)
+                index_space, field_space, tid, region, 
+                priv, coher, redop, parent)
             op.add_requirement(requirement)
         else:
             index_partition = state.get_index_partition(int(m.group('ispace'),16))
             partition = state.get_partition(index_partition.uid, field_space.uid, tid)
             requirement = Requirement(state, int(m.group('index')), False,
-                index_partition, field_space, tid, partition, priv, coher, redop)
+                index_partition, field_space, tid, partition, 
+                priv, coher, redop, parent)
             op.add_requirement(requirement)
         return True
     m = req_field_pat.match(line)
@@ -729,25 +1480,58 @@ def parse_legion_spy_line(line, state):
         op2 = state.get_operation(int(m.group('next_id')))
         dep = MappingDependence(op1, op2, int(m.group('pidx')),
             int(m.group('nidx')), int(m.group('dtype')))
-        op2.add_logical_incoming(dep)
-        op1.add_logical_outgoing(dep)
+        op2.add_incoming(dep)
+        op1.add_outgoing(dep)
+        # Record that we found a mapping dependence
+        state.has_mapping_deps = True
+        return True
+    # Physical Instances and Mapping decisions happen frequently too
+    m = instance_pat.match(line)
+    if m is not None:
+        mem = state.get_memory(int(m.group('mid'),16))
+        inst = state.get_instance(int(m.group('iid'),16))
+        inst.set_memory(mem)
+        inst.set_redop(int(m.group('redop')))
+        return True
+    m = instance_region_pat.match(line)
+    if m is not None:
+        inst = state.get_instance(int(m.group('iid'),16))
+        region = state.get_region(int(m.group('ispace'),16), 
+            int(m.group('fspace')), int(m.group('tid')))
+        inst.set_region(region)
+        return True
+    m = instance_field_pat.match(line)
+    if m is not None:
+        inst = state.get_instance(int(m.group('iid'),16))
+        inst.add_field(int(m.group('fid')))
+        return True
+    m = mapping_decision_pat.match(line)
+    if m is not None:
+        op = state.get_operation(int(m.group('uid')))
+        inst = state.get_instance(int(m.group('iid'),16))
+        op.add_mapping_decision(int(m.group('idx')),
+            int(m.group('fid')), inst)
         return True
     # Operations near the top since they happen frequently
+    m = task_name_pat.match(line)
+    if m is not None:
+        state.task_names[int(m.group('tid'))] = m.group('name')
+        return True
     m = top_task_pat.match(line)
     if m is not None:
         op = state.get_operation(int(m.group('uid')))
         op.set_op_kind(SINGLE_TASK_KIND)
         op.set_name(m.group('name'))
-        task = state.get_task(int(m.group('uid')))
-        task.set_task_id(int(m.group('tid')))
+        op.set_task_id(int(m.group('tid')))
+        if op.context is not None:
+            op.context.top = True
         return True
     m = single_task_pat.match(line)
     if m is not None:
         op = state.get_operation(int(m.group('uid')))
         op.set_op_kind(SINGLE_TASK_KIND)
         op.set_name(m.group('name'))
-        task = state.get_task(int(m.group('uid')))
-        task.set_task_id(int(m.group('tid')))
+        op.set_task_id(int(m.group('uid')))
         context = state.get_task(int(m.group('ctx')))
         op.set_context(context)
         return True
@@ -755,6 +1539,7 @@ def parse_legion_spy_line(line, state):
     if m is not None:
         op = state.get_operation(int(m.group('uid')))
         op.set_op_kind(INDEX_TASK_KIND)
+        op.set_name(m.group('name'))
         op.set_task_id(int(m.group('tid')))
         context = state.get_task(int(m.group('ctx')))
         op.set_context(context)
@@ -784,7 +1569,76 @@ def parse_legion_spy_line(line, state):
         creator = state.get_operation(int(m.group('cuid')))
         op.set_creator(creator)
         return True
-
+    m = fence_pat.match(line)
+    if m is not None:
+        op = state.get_operation(int(m.group('uid')))
+        op.set_op_kind(FENCE_OP_KIND)
+        op.set_name("Fence Op "+m.group('uid'))
+        context = state.get_task(int(m.group('ctx')))
+        op.set_context(context)
+        return True
+    m = copy_op_pat.match(line)
+    if m is not None:
+        op = state.get_operation(int(m.group('uid')))
+        op.set_op_kind(COPY_OP_KIND)
+        op.set_name("Copy Op "+m.group('uid'))
+        context = state.get_task(int(m.group('ctx')))
+        op.set_context(context)
+        return True
+    m = fill_op_pat.match(line)
+    if m is not None:
+        op = state.get_operation(int(m.group('uid')))
+        op.set_op_kind(FILL_OP_KIND)
+        op.set_name("Fill Op "+m.group('uid'))
+        context = state.get_task(int(m.group('ctx')))
+        op.set_context(context)
+        return True
+    m = acquire_op_pat.match(line)
+    if m is not None:
+        op = state.get_operation(int(m.group('uid')))
+        op.set_op_kind(ACQUIRE_OP_KIND)
+        op.set_name("Acquire Op "+m.group('uid'))
+        context = state.get_task(int(m.group('ctx')))
+        op.set_context(context)
+        return True
+    m = release_op_pat.match(line)
+    if m is not None:
+        op = state.get_operation(int(m.group('uid')))
+        op.set_op_kind(RELEASE_OP_KIND)
+        op.set_name("Release Op "+m.group('uid'))
+        context = state.get_task(int(m.group('ctx')))
+        op.set_context(context)
+        return True
+    m = deletion_pat.match(line)
+    if m is not None:
+        op = state.get_operation(int(m.group('uid')))
+        op.set_op_kind(DELETION_OP_KIND)
+        op.set_name("Deletion Op "+m.group('uid'))
+        context = state.get_task(int(m.group('ctx')))
+        op.set_context(context)
+        return True
+    m = dep_partition_op_pat.match(line)
+    if m is not None:
+        op = state.get_operation(int(m.group('uid')))
+        op.set_op_kind(DEP_PART_OP_KIND)
+        op.set_name("Dependent Partition Op "+m.group('uid'))
+        context = state.get_task(int(m.group('ctx')))
+        op.set_context(context)
+        return True
+    m = pending_partition_op_pat.match(line)
+    if m is not None:
+        op = state.get_operation(int(m.group('uid')))
+        op.set_op_kind(PENDING_PART_OP_KIND)
+        op.set_name("Pending Partition Op "+m.group('uid'))
+        context = state.get_task(int(m.group('ctx')))
+        op.set_context(context)
+        return True
+    m = target_partition_pat.match(line)
+    if m is not None:
+        op = state.get_operation(int(m.group('uid'))) 
+        index_partition = state.get_index_partition(int(m.group('pid'),16))
+        op.set_pending_partition_info(index_partition, int(m.group('kind')))
+        return True
     m = index_slice_pat.match(line)
     if m is not None:
         op = state.get_operation(int(m.group('index')))
@@ -892,6 +1746,69 @@ def parse_legion_spy_line(line, state):
             int(m.group('fid')),int(m.group('tid')))
         partition.set_name(m.group('name'))
         return True
+    m = partition_complete_pat.match(line)
+    if m is not None:
+        partition = state.get_index_partition(int(m.group('iid'),16))
+        partition.set_complete(True)
+        return True
+    m = is_independence_pat.match(line)
+    if m is not None:
+        parent = state.get_index_partition(int(m.group('pid'),16))
+        is1 = state.get_index_space(int(m.group('is1'),16))
+        is2 = state.get_index_space(int(m.group('is2'),16))
+        parent.add_independent_children(is1, is2)
+        return True
+    m = ip_independence_pat.match(line)
+    if m is not None:
+        parent = state.get_index_space(int(m.group('pid'),16))
+        ip1 = state.get_index_partition(int(m.group('ip1'),16))
+        ip2 = state.get_index_partition(int(m.group('ip2'),16))
+        parent.add_independent_children(ip1, ip2)
+        return True
+    m = dominance_pat.match(line)
+    if m is not None:
+        kind = int(m.group('kind'))
+        if kind is 0:
+            is1 = state.get_index_space(int(m.group('id1'),16))
+            is2 = state.get_index_space(int(m.group('id2'),16))
+            state.dominance_pairs.add((is1,is2))
+        elif kind is 1:
+            is1 = state.get_index_space(int(m.group('id1'),16))
+            ip2 = state.get_index_partition(int(m.group('id2'),16))
+            state.dominance_pairs.add((is1,ip2))
+        elif kind is 2:
+            ip1 = state.get_index_partition(int(m.group('id1'),16))
+            is2 = state.get_index_partition(int(m.group('id2'),16))
+            state.dominance_pairs.add((ip1,is2))
+        else:
+            ip1 = state.get_index_partition(int(m.group('id1'),16))
+            ip2 = state.get_index_partition(int(m.group('id2'),16))
+            state.dominance_pairs.add((ip1,ip2))
+        return True
+    m = non_intersection_pat.match(line)
+    if m is not None:
+        kind = int(m.group('kind'))
+        if kind is 0:
+            is1 = state.get_index_space(int(m.group('id1'),16))
+            is2 = state.get_index_space(int(m.group('id2'),16))
+            state.non_intersection_pairs.add((is1,is2))
+            state.non_intersection_pairs.add((is2,is1))
+        elif kind is 1:
+            is1 = state.get_index_space(int(m.group('id1'),16))
+            ip2 = state.get_index_partition(int(m.group('id2'),16))
+            state.non_intersection_pairs.add((is1,ip2))
+            state.non_intersection_pairs.add((ip2,is1))
+        elif kind is 2:
+            ip1 = state.get_index_partition(int(m.group('id1'),16))
+            is2 = state.get_index_partition(int(m.group('id2'),16))
+            state.non_intersection_pairs.add((ip1,is2))
+            state.non_intersection_pairs.add((is2,ip1))
+        else:
+            ip1 = state.get_index_partition(int(m.group('id1'),16))
+            ip2 = state.get_index_partition(int(m.group('id2'),16))
+            state.non_intersection_pairs.add((ip1,ip2))
+            state.non_intersection_pairs.add((ip2,ip1))
+        return True
     # Machine kinds (at the bottom cause they are least likely)
     m = proc_kind_pat.match(line)
     if m is not None:
@@ -930,11 +1847,16 @@ def parse_legion_spy_line(line, state):
         mem1.add_memory(mem2, bandwidth, latency)
         mem2.add_memory(mem1, bandwidth, latency)
         return True
-      
     return False
-        
 
 class State(object):
+    __slots__ = ['verbose', 'top_level_uid', 'traverser_gen', 'processors', 'memories',
+                 'processor_kinds', 'memory_kinds', 'index_spaces', 'index_partitions',
+                 'field_spaces', 'regions', 'partitions', 'top_spaces', 'trees',
+                 'non_intersection_pairs', 'dominance_pairs', 'ops', 'tasks', 
+                 'task_names', 'has_mapping_deps', 'instances', 'events', 'copies',
+                 'fills', 'phase_barriers', 'no_event', 'slice_index', 'slice_slice', 
+                 'point_slice']
     def __init__(self, verbose):
         self.verbose = verbose
         self.top_level_uid = None
@@ -952,13 +1874,20 @@ class State(object):
         self.partitions = dict()
         self.top_spaces = dict()
         self.trees = dict()
+        self.non_intersection_pairs = set()
+        self.dominance_pairs = set()
         # Logical things 
         self.ops = dict()
         self.tasks = dict()
+        self.task_names = dict()
         self.has_mapping_deps = False
         # Physical things 
         self.instances = dict()
         self.events = dict()
+        self.copies = dict()
+        self.fills = dict()
+        self.phase_barriers = None
+        self.no_event = Event(self, EventHandle(0,0))
         # For parsing only
         self.slice_index = dict()
         self.slice_slice = dict()
@@ -997,20 +1926,45 @@ class State(object):
                 slice_ = self.slice_slice[slice_]
             assert slice_ in self.slice_index
             self.slice_index[slice_].add_point_task(point)
+        # Fill in any task names
+        for task in self.tasks.itervalues():
+            if task.op.task_id in self.task_names:
+                task.op.set_name(self.task_names[task.task_id])
+        # Check to see if we have any unknown operations
+        unknown = None
+        for op in self.ops.itervalues():
+            if op.kind is NO_OP_KIND:
+                unknown = op
+                break
+        if unknown is not None:
+            print 'WARNING: operation %d has unknown operation kind!' % op.uid 
+        # If we have any phase barriers, mark all the events of the phase barrier
+        if self.phase_barriers is not None:
+            for event in self.events:
+                if event.handle.uid in self.phase_barriers:
+                    event.phase_barrier = True
         # We can delete some of these data structures now that we
         # no longer need them, go go garbage collection
         self.slice_index = None
         self.slice_slice = None
         self.point_slice = None
         if self.verbose:
+            print "Found %d processors" % len(self.processors)
+            print "Found %d memories" % len(self.memories)
+            print ""
             print "Found %d index space trees" % num_index_trees
             print "Found %d field spaces" % len(self.field_spaces)
             print "Found %d region trees" % len(self.trees)
             print ""
             print "Found %d tasks" % len(self.tasks)
             print "Found %d operations (including tasks)" % len(self.ops)
+            print ""
+            print "Found %d instances" % len(self.instances)
+            print "Found %d events" % len(self.events)
+            print "Found %d copies" % len(self.copies)
+            print "Found %d fills" % len(self.fills)
         logical_enabled = self.has_mapping_deps
-        physical_enabled = len(self.events) > 0
+        physical_enabled = not not self.events
         return logical_enabled,physical_enabled
 
     def alias_points(self, p1, p2):
@@ -1023,21 +1977,60 @@ class State(object):
         del self.tasks[p2.op]
 
     def perform_logical_checks(self):
-        pass
+        # Run the full analysis first, this will confirm that
+        # the runtime did what we thought it should do
+        success = True
+        for task in self.tasks.itervalues():
+            if not task.check_logical_dependence_analysis():
+                success = False
+        # Skip the rest of the checks if something is wrong
+        if not success:
+            return
+        # Run the old version of the checks that
+        # is more of a sanity check on our algorithm that
+        # doesn't depend on our implementation but doesn't
+        # really tell us what it means if something goes wrong
+        #for task in self.tasks:
+        #    task.check_logical_sanity()
 
     def perform_physical_checks(self):
         pass
 
-    def make_region_tree_graphs(self):
+    def make_region_tree_graphs(self, path, simplify_graphs):
+        index_space_printer = GraphPrinter(path, 'index_space_graph', 'TB')
+        for node in self.index_spaces.itervalues():
+            if node.parent is None:
+                node.print_graph(index_space_printer)
+        index_space_printer.print_pdf_after_close(simplify_graphs)
+
+        field_space_printer = GraphPrinter(path, 'field_space_graph', 'TB')
+        for node in self.field_spaces.itervalues():
+            node.print_graph(field_space_printer)
+        field_space_printer.print_pdf_after_close(simplify_graphs)
+
+        region_graph_printer = GraphPrinter(path, 'region_graph', 'TB')
+        for node in self.trees.itervalues():
+            if simplify_graphs:
+                node.mark_named_children()
+            node.print_graph(region_graph_printer, simplify_graphs)
+        region_graph_printer.print_pdf_after_close(simplify_graphs)
+
+    def make_machine_graphs(self, path):
+        machine_printer = GraphPrinter(path, 'machine_graph', 'TB')
+        for proc in self.processors.itervalues():
+            proc.print_node(machine_printer)
+        for mem in self.memories.itervalues():
+            mem.print_node(machine_printer)
+        for proc in self.processors.itervalues():
+            proc.print_mem_edges(machine_printer)
+        for mem in self.memories.itervalues():
+            mem.print_mem_edges(machine_printer)
+        machine_printer.print_pdf_after_close(False)
+
+    def make_dataflow_graphs(self, path, simplify_graphs):
         pass
 
-    def make_machine_graphs(self):
-        pass
-
-    def make_dataflow_graphs(self, simplify_graphs):
-        pass
-
-    def make_event_graphs(self, simplify_graphs):
+    def make_event_graphs(self, path, simplify_graphs):
         pass
 
     def get_processor(self, proc_id):
@@ -1117,6 +2110,38 @@ class State(object):
         self.tasks[op] = result
         return result
 
+    def get_instance(self, iid):
+        if iid in self.instances:
+            return self.instances[iid]
+        result = Instance(self, iid)
+        self.instances[iid] = result
+        return result
+
+    def get_event(self, iid, gen):
+        handle = EventHandle(iid, gen)
+        if handle in self.events:
+            return self.events[handle]
+        result = Event(self, handle)
+        self.events[handle] = result 
+        return result 
+
+    def get_no_event(self):
+        return self.no_event
+
+    def get_realm_copy(self, event):
+        if event in self.copies:
+            return self.copies[event]
+        result = RealmCopy(self, event)
+        self.copies[event] = result
+        return result
+
+    def get_realm_fill(self, event):
+        if event in self.fills:
+            return self.fills[event]
+        result = RealmFill(self, event)
+        self.fills[event] = result
+        return result
+
     def record_processor_kind(self, kind, name):
         self.processor_kinds[kind] = name
 
@@ -1130,6 +2155,22 @@ class State(object):
     def get_memory_kind(self, kind):
         assert kind in self.memory_kinds
         return self.memory_kinds[kind]
+
+    def reset_logical_state(self):
+        for region in self.regions.itervalues():
+            region.reset_logical_state()
+        for partition in self.partitions.itervalues():
+            partition.reset_logical_state()
+        # Definitely run the garbage collector here
+        gc.collect()
+
+    def reset_physical_state(self):
+        for region in self.regions.itervalues():
+            region.reset_physical_state()
+        for partition in self.partitions.itervalues():
+            partition.reset_physical_state()
+        # Definitely run the garbage collector here
+        gc.collect()
 
 def usage():
     print "Usage: "+sys.argv[0]+" [-l -p -r -m -d -e -s -k -v] <file_name>"
@@ -1220,16 +2261,16 @@ def main(temp_dir):
         state.perform_physical_checks()
     if region_tree_graphs:
         print "Making region tree graphs..."
-        state.make_region_tree_graphs()
+        state.make_region_tree_graphs(temp_dir, simplify_graphs)
     if machine_graphs:
         print "Making machine graphs..."
-        state.make_machine_graphs()
+        state.make_machine_graphs(temp_dir)
     if dataflow_graphs:
         print "Making dataflow graphs..."
-        state.make_dataflow_graphs(simplify_graphs)
+        state.make_dataflow_graphs(temp_dir, simplify_graphs)
     if event_graphs:
         print "Making event graphs..."
-        state.make_event_graphs(simplify_graphs)
+        state.make_event_graphs(temp_dir, simplify_graphs)
 
     print 'Legion Spy analysis complete.  Exiting...'
     if keep_temp_files:
