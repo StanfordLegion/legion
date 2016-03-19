@@ -325,10 +325,65 @@ create_cross_product_shallow(HighLevelRuntime *runtime,
                              const std::vector<IndexSpace> &rhs,
                              std::map<IndexSpace, std::set<IndexSpace> > &product)
 {
+  std::vector<std::pair<ptr_t, ptr_t> >lhs_bounds;
   for (std::vector<IndexSpace>::const_iterator it = lhs.begin(); it != lhs.end(); ++it) {
     IndexSpace lh_space = *it;
-    for (std::vector<IndexSpace>::const_iterator it = rhs.begin(); it != rhs.end(); ++it) {
-      IndexSpace rh_space = *it;
+
+    bool is_first = true;
+    ptr_t first, last;
+    for (IndexIterator lh_it(runtime, ctx, lh_space); lh_it.has_next();) {
+      size_t lh_count = 0;
+      ptr_t lh_ptr = lh_it.next_span(lh_count);
+      ptr_t lh_end = lh_ptr.value + lh_count - 1;
+      if (is_first) {
+        first = lh_ptr;
+        is_first = false;
+      }
+      last = lh_end;
+    }
+    lhs_bounds.push_back(std::pair<ptr_t, ptr_t>(first, last));
+  }
+
+  std::vector<std::pair<ptr_t, ptr_t> >rhs_bounds;
+  for (std::vector<IndexSpace>::const_iterator it = rhs.begin(); it != rhs.end(); ++it) {
+    IndexSpace rh_space = *it;
+
+    bool is_first = true;
+    ptr_t first, last;
+    for (IndexIterator rh_it(runtime, ctx, rh_space); rh_it.has_next();) {
+      size_t rh_count = 0;
+      ptr_t rh_ptr = rh_it.next_span(rh_count);
+      ptr_t rh_end = rh_ptr.value + rh_count - 1;
+      if (is_first) {
+        first = rh_ptr;
+        is_first = false;
+      }
+      last = rh_end;
+    }
+    rhs_bounds.push_back(std::pair<ptr_t, ptr_t>(first, last));
+  }
+
+  // size_t total = 0, overlap = 0;
+  // for (std::vector<std::pair<ptr_t, ptr_t> >::iterator i = lhs_bounds.begin(); i != lhs_bounds.end(); ++i) {
+  //   for (std::vector<std::pair<ptr_t, ptr_t> >::iterator j = rhs_bounds.begin(); j != rhs_bounds.end(); ++j) {
+  //     if (!(i->second.value < j->first.value || j->second.value < i->first.value)) {
+  //       overlap++;
+  //     }
+  //     total++;
+  //   }
+  // }
+  // printf("bounding boxes: total %lu overlap %lu percent %f\n", total, overlap, double(overlap)/total*100.);
+
+  for (size_t i = 0; i < lhs.size(); i++) {
+    IndexSpace lh_space = lhs[i];
+    std::pair<ptr_t, ptr_t> lh_bound = lhs_bounds[i];
+    for (size_t j = 0; j < rhs.size(); j++) {
+      IndexSpace rh_space = rhs[j];
+      std::pair<ptr_t, ptr_t> rh_bound = rhs_bounds[j];
+      if (lh_bound.second.value < rh_bound.first.value ||
+          rh_bound.second.value < lh_bound.first.value) {
+        continue;
+      }
 
       bool intersects = false;
       for (IndexIterator lh_it(runtime, ctx, lh_space); lh_it.has_next();) {
