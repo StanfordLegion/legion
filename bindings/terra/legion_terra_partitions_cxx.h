@@ -28,6 +28,10 @@ create_cross_product(HighLevelRuntime *runtime,
                      Context ctx,
                      IndexPartition lhs,
                      IndexPartition rhs,
-                     Color rhs_color = -1);
+                     Color rhs_color = -1,
+                     bool consistent_ids = true,
+                     std::map<IndexSpace, Color> *chosen_colors = NULL,
+                     const std::set<Color> *lhs_filter = NULL,
+                     const std::set<Color> *rhs_filter = NULL);
 
 #endif // __LEGION_TERRA_PARTITIONS_CXX_H__

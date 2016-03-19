@@ -163,17 +163,21 @@ create_cross_product_coloring(HighLevelRuntime *runtime,
                               Context ctx,
                               IndexPartition lhs,
                               IndexPartition rhs,
-                              std::map<Color, Coloring> &coloring)
+                              std::map<Color, Coloring> &coloring,
+                              const std::set<Color> *lhs_filter,
+                              const std::set<Color> *rhs_filter)
 {
   Domain lhs_colors = runtime->get_index_partition_color_space(ctx, lhs);
   Domain rhs_colors = runtime->get_index_partition_color_space(ctx, rhs);
 
   for (Domain::DomainPointIterator lh_dp(lhs_colors); lh_dp; lh_dp++) {
     Color lh_color = lh_dp.p.get_point<1>()[0];
+    if (lhs_filter && !lhs_filter->count(lh_color)) continue;
     IndexSpace lh_space = runtime->get_index_subspace(ctx, lhs, lh_color);
 
     for (Domain::DomainPointIterator rh_dp(rhs_colors); rh_dp; rh_dp++) {
       Color rh_color = rh_dp.p.get_point<1>()[0];
+      if (rhs_filter && !rhs_filter->count(rh_color)) continue;
       IndexSpace rh_space = runtime->get_index_subspace(ctx, rhs, rh_color);
 
       for (IndexIterator lh_it(runtime, ctx, lh_space); lh_it.has_next();) {
@@ -207,27 +211,12 @@ create_cross_product(HighLevelRuntime *runtime,
                      Context ctx,
                      IndexPartition lhs,
                      IndexPartition rhs,
-                     Color rhs_color /* = -1 */)
+                     Color rhs_color /* = -1 */,
+                     bool consistent_ids /* = true */,
+                     std::map<IndexSpace, Color> *chosen_colors /* = NULL */,
+                     const std::set<Color> *lhs_filter /* = NULL */,
+                     const std::set<Color> *rhs_filter /* = NULL */)
 {
-  if (rhs_color == (Color)-1) {
-    // Try to find a color that isn't already being used.
-    Domain lhs_colors = runtime->get_index_partition_color_space(ctx, lhs);
-    Domain::DomainPointIterator lh_dp(lhs_colors);
-    assert(lh_dp);
-    Color lh_color = lh_dp.p.get_point<1>()[0];
-    IndexSpace lh_subspace = runtime->get_index_subspace(ctx, lhs, lh_color);
-    std::set<Color> colors;
-    runtime->get_index_space_partition_colors(ctx, lh_subspace, colors);
-
-    Color original_rhs_color = runtime->get_index_partition_color(ctx, rhs);
-    for (Color c = original_rhs_color;; c++) {
-      if (!colors.count(c)) {
-        rhs_color = c;
-        break;
-      }
-    }
-  }
-
 #if USE_LEGION_CROSS_PRODUCT
   std::map<DomainPoint, IndexPartition> handles;
   runtime->create_cross_product_partitions(
@@ -246,10 +235,12 @@ create_cross_product(HighLevelRuntime *runtime,
   // time here estimating which will have fewer spans.
 
   bool flip = false;
-  for (Domain::DomainPointIterator lh_dp(lhs_colors), rh_dp(rhs_colors); lh_dp && rh_dp;) {
+  for (Domain::DomainPointIterator lh_dp(lhs_colors), rh_dp(rhs_colors); lh_dp && rh_dp; lh_dp++, rh_dp++) {
     Color lh_color = lh_dp.p.get_point<1>()[0];
+    if (lhs_filter && !lhs_filter->count(lh_color)) continue;
     IndexSpace lh_space = runtime->get_index_subspace(ctx, lhs, lh_color);
     Color rh_color = rh_dp.p.get_point<1>()[0];
+    if (rhs_filter && !rhs_filter->count(rh_color)) continue;
     IndexSpace rh_space = runtime->get_index_subspace(ctx, rhs, rh_color);
 
     IndexIterator lh_it(runtime, ctx, lh_space);
@@ -267,19 +258,21 @@ create_cross_product(HighLevelRuntime *runtime,
 
   std::map<Color, Coloring> coloring;
   if (flip) {
-    create_cross_product_coloring(runtime, ctx, rhs, lhs, coloring);
+    create_cross_product_coloring(runtime, ctx, rhs, lhs, coloring, rhs_filter, lhs_filter);
   } else {
-    create_cross_product_coloring(runtime, ctx, lhs, rhs, coloring);
+    create_cross_product_coloring(runtime, ctx, lhs, rhs, coloring, lhs_filter, rhs_filter);
   }
 
   for (Domain::DomainPointIterator lh_dp(lhs_colors); lh_dp; lh_dp++) {
     Color lh_color = lh_dp.p.get_point<1>()[0];
+    if (lhs_filter && !lhs_filter->count(lh_color)) continue;
     IndexSpace lh_space = runtime->get_index_subspace(ctx, lhs, lh_color);
 
     Coloring empty; // Make sure this stays on the stack while we need it...
     Coloring &lh_coloring = flip ? empty : coloring[lh_color];
     for (Domain::DomainPointIterator rh_dp(rhs_colors); rh_dp; rh_dp++) {
       Color rh_color = rh_dp.p.get_point<1>()[0];
+      if (rhs_filter && !rhs_filter->count(rh_color)) continue;
 
       // Flip order of coloring.
       if (flip) {
@@ -290,10 +283,16 @@ create_cross_product(HighLevelRuntime *runtime,
       lh_coloring[rh_color];
     }
 
-    runtime->create_index_partition(
+    IndexPartition part = runtime->create_index_partition(
       ctx, lh_space, lh_coloring,
       runtime->is_index_partition_disjoint(ctx, rhs),
       rhs_color);
+    if (chosen_colors) {
+      (*chosen_colors)[lh_space] = runtime->get_index_partition_color(ctx, part);
+    }
+    if (rhs_color == Color(-1) and consistent_ids) {
+      rhs_color = runtime->get_index_partition_color(ctx, part);
+    }
   }
 #endif
 
@@ -379,6 +378,252 @@ legion_terra_index_cross_product_create_multi(
   result.partition = CObjectWrapper::wrap(partitions[0]);
   result.other_color = colors[0];
   return result;
+}
+
+static IndexSpace
+unwrap_list(legion_terra_index_space_list_t list,
+            std::vector<IndexSpace> &subspaces)
+{
+  subspaces.reserve(list.count);
+  for (size_t i = 0; i < list.count; i++) {
+    subspaces.push_back(CObjectWrapper::unwrap(list.subspaces[i]));
+  }
+  return CObjectWrapper::unwrap(list.space);
+}
+
+static legion_terra_index_space_list_t
+wrap_list(IndexSpace root, std::vector<IndexSpace> &subspaces)
+{
+  legion_terra_index_space_list_t result;
+  result.space = CObjectWrapper::wrap(root);
+  result.count = subspaces.size();
+  result.subspaces = (legion_index_space_t *)
+    malloc(sizeof(legion_index_space_t) * subspaces.size());
+  assert(result.subspaces);
+  for (size_t i = 0; i < subspaces.size(); i++) {
+    result.subspaces[i] = CObjectWrapper::wrap(subspaces[i]);
+  }
+  return result;
+}
+
+static void
+unwrap_list_list(legion_terra_index_space_list_list_t list,
+                 std::map<IndexSpace, std::vector<IndexSpace> > &product)
+{
+  for (size_t i = 0; i < list.count; i++) {
+    std::vector<IndexSpace> subspaces;
+    IndexSpace space = unwrap_list(list.sublists[i], subspaces);
+    assert(space != IndexSpace::NO_SPACE);
+    product[space] = subspaces;
+  }
+}
+
+static legion_terra_index_space_list_list_t
+wrap_list_list(std::vector<IndexSpace> &spaces,
+               std::map<IndexSpace, std::vector<IndexSpace> > &product)
+{
+  legion_terra_index_space_list_list_t result;
+  result.count = spaces.size();
+  result.sublists = (legion_terra_index_space_list_t *)
+    malloc(sizeof(legion_terra_index_space_list_t) * spaces.size());
+  for (size_t i = 0; i < spaces.size(); i++) {
+    IndexSpace space = spaces[i];
+    assert(product.count(space));
+    result.sublists[i] = wrap_list(space, product[space]);
+  }
+  return result;
+}
+
+static IndexPartition
+partition_from_list(HighLevelRuntime *runtime, Context ctx,
+                    const std::vector<IndexSpace> &subspaces)
+{
+  assert(subspaces.size() > 0);
+  assert(runtime->has_parent_index_partition(ctx, subspaces[0]));
+  return runtime->get_parent_index_partition(ctx, subspaces[0]);
+}
+
+static IndexPartition
+partition_from_list_list(HighLevelRuntime *runtime, Context ctx,
+                         std::map<IndexSpace, std::vector<IndexSpace> > &product)
+{
+  for (std::map<IndexSpace, std::vector<IndexSpace> >::const_iterator it = product.begin();
+       it != product.end(); ++it) {
+    return partition_from_list(runtime, ctx, it->second);
+  }
+  assert(false);
+}
+
+static void
+filter_from_list(HighLevelRuntime *runtime, Context ctx,
+                 const std::vector<IndexSpace> &spaces,
+                 std::set<Color> &filter)
+{
+  for (std::vector<IndexSpace>::const_iterator it = spaces.begin();
+       it != spaces.end(); ++it) {
+    Color c = runtime->get_index_space_color(ctx, *it);
+    filter.insert(c);
+  }
+}
+
+static void
+filter_from_list_list(HighLevelRuntime *runtime, Context ctx,
+                      const std::map<IndexSpace, std::vector<IndexSpace> > &product,
+                      std::set<Color> &filter)
+{
+  for (std::map<IndexSpace, std::vector<IndexSpace> >::const_iterator it = product.begin();
+       it != product.end(); ++it) {
+    filter_from_list(runtime, ctx, it->second, filter);
+  }
+}
+
+
+legion_terra_index_space_list_list_t
+legion_terra_index_cross_product_create_list(
+  legion_runtime_t runtime_,
+  legion_context_t ctx_,
+  legion_terra_index_space_list_t lhs_,
+  legion_terra_index_space_list_t rhs_)
+{
+  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  std::vector<IndexSpace> lhs;
+  unwrap_list(lhs_, lhs);
+  std::vector<IndexSpace> rhs;
+  unwrap_list(rhs_, rhs);
+
+  IndexPartition lhs_part = partition_from_list(runtime, ctx, lhs);
+  IndexPartition rhs_part = partition_from_list(runtime, ctx, rhs);
+
+  Color sub_color = create_cross_product(runtime, ctx, rhs_part, lhs_part);
+
+  std::map<IndexSpace, std::vector<IndexSpace> > product;
+  for (std::vector<IndexSpace>::iterator it = rhs.begin(); it != rhs.end(); ++it) {
+    IndexSpace rh_space = *it;
+    IndexPartition rh_subpart = runtime->get_index_partition(ctx, rh_space, sub_color);
+
+    for (std::vector<IndexSpace>::iterator it = lhs.begin(); it != lhs.end(); ++it) {
+      IndexSpace lh_space = *it;
+      Color lh_color = runtime->get_index_space_color(ctx, lh_space);
+      IndexSpace rh_subspace = runtime->get_index_subspace(ctx, rh_subpart, lh_color);
+
+      IndexIterator rh_it(runtime, ctx, rh_subspace);
+      if (rh_it.has_next()) {
+        product[lh_space].push_back(rh_subspace);
+      } else {
+        product[lh_space].push_back(IndexSpace::NO_SPACE);
+      }
+    }
+  }
+
+  return wrap_list_list(lhs, product);
+}
+
+legion_terra_index_space_list_list_t
+legion_terra_index_cross_product_create_list_shallow(
+  legion_runtime_t runtime_,
+  legion_context_t ctx_,
+  legion_terra_index_space_list_t lhs_,
+  legion_terra_index_space_list_t rhs_)
+{
+  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  std::vector<IndexSpace> lhs;
+  unwrap_list(lhs_, lhs);
+  std::vector<IndexSpace> rhs;
+  unwrap_list(rhs_, rhs);
+
+  std::map<IndexSpace, std::vector<IndexSpace> > product;
+  for (std::vector<IndexSpace>::iterator it = lhs.begin(); it != lhs.end(); ++it) {
+    IndexSpace lh_space = *it;
+    for (std::vector<IndexSpace>::iterator it = rhs.begin(); it != rhs.end(); ++it) {
+      IndexSpace rh_space = *it;
+
+      bool intersects = false;
+      for (IndexIterator lh_it(runtime, ctx, lh_space); lh_it.has_next();) {
+        size_t lh_count = 0;
+        ptr_t lh_ptr = lh_it.next_span(lh_count);
+        ptr_t lh_end = lh_ptr.value + lh_count - 1;
+
+        IndexIterator rh_it(runtime, ctx, rh_space, lh_ptr);
+        if (rh_it.has_next()) {
+          size_t rh_count = 0;
+          ptr_t rh_ptr = rh_it.next_span(rh_count);
+
+          if (rh_ptr.value <= lh_end.value) {
+            intersects = true;
+            break;
+          }
+        }
+      }
+      if (intersects) {
+        product[lh_space].push_back(rh_space);
+      } else {
+        product[lh_space].push_back(IndexSpace::NO_SPACE);
+      }
+    }
+  }
+
+  return wrap_list_list(lhs, product);
+}
+
+legion_terra_index_space_list_list_t
+legion_terra_index_cross_product_create_list_complete(
+  legion_runtime_t runtime_,
+  legion_context_t ctx_,
+  legion_terra_index_space_list_t lhs_,
+  legion_terra_index_space_list_list_t product_,
+  bool consistent_ids)
+{
+  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  std::vector<IndexSpace> lhs;
+  unwrap_list(lhs_, lhs);
+  std::map<IndexSpace, std::vector<IndexSpace> > product;
+  unwrap_list_list(product_, product);
+
+  IndexPartition lhs_part = partition_from_list(runtime, ctx, lhs);
+  IndexPartition rhs_part = partition_from_list_list(runtime, ctx, product);
+
+  std::set<Color> lhs_filter;
+  filter_from_list(runtime, ctx, lhs, lhs_filter);
+  std::set<Color> rhs_filter;
+  filter_from_list_list(runtime, ctx, product, rhs_filter);
+
+  std::map<IndexSpace, Color> chosen_colors;
+  create_cross_product(
+    runtime, ctx, rhs_part, lhs_part, -1, consistent_ids, &chosen_colors,
+    &rhs_filter, &lhs_filter);
+
+  std::map<IndexSpace, std::vector<IndexSpace> > result;
+  for (std::vector<IndexSpace>::iterator it = lhs.begin(); it != lhs.end(); ++it) {
+    IndexSpace lh_space = *it;
+    Color lh_color = runtime->get_index_space_color(ctx, lh_space);
+    assert(product.count(lh_space));
+    std::vector<IndexSpace> &rh_spaces = product[lh_space];
+    for (std::vector<IndexSpace>::iterator it = rh_spaces.begin(); it != rh_spaces.end(); ++it) {
+      IndexSpace rh_space = *it;
+
+      assert(chosen_colors.count(rh_space));
+      Color color = chosen_colors[rh_space];
+      IndexPartition rh_part = runtime->get_index_partition(ctx, rh_space, color);
+      IndexSpace rh_subspace = runtime->get_index_subspace(ctx, rh_part, lh_color);
+      result[lh_space].push_back(rh_subspace);
+    }
+    assert(result[lh_space].size() == product[lh_space].size());
+  }
+
+  return wrap_list_list(lhs, result);
+}
+
+void
+legion_terra_index_space_list_list_destroy(
+  legion_terra_index_space_list_list_t list)
+{
+  for (size_t i = 0; i < list.count; i++) {
+    free(list.sublists[i].subspaces);
+  }
+  free(list.sublists);
 }
 
 legion_index_partition_t
