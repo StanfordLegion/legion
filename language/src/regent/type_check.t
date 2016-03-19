@@ -1657,15 +1657,18 @@ function type_check.expr_list_cross_product(cx, node)
   local lhs_type = std.check_read(cx, lhs)
   local rhs = type_check.expr(cx, node.rhs)
   local rhs_type = std.check_read(cx, rhs)
-  if not std.is_list_of_regions(lhs_type) then
+  if not std.is_list_of_regions(lhs_type) and lhs_type:depth() == 1 then
     log.error(node, "type mismatch: expected a list of regions but got " .. tostring(lhs_type))
   end
-  if not std.is_list_of_regions(rhs_type) then
+  if not std.is_list_of_regions(rhs_type) and lhs_type:depth() == 1 then
     log.error(node, "type mismatch: expected a list of regions but got " .. tostring(rhs_type))
   end
-  local expr_type = std.list(
-    std.list(rhs_type:subregion_dynamic(), nil, 1),
-    nil, 1)
+  local expr_type
+  if node.shallow then
+    expr_type = std.list(std.list(rhs_type:subregion_dynamic()))
+  else
+    expr_type = std.list(std.list(rhs_type:subregion_dynamic(), nil, 1), nil, 1)
+  end
 
   std.copy_privileges(cx, rhs_type, expr_type)
   -- FIXME: Copy constraints.
@@ -1674,6 +1677,36 @@ function type_check.expr_list_cross_product(cx, node)
   return ast.typed.expr.ListCrossProduct {
     lhs = lhs,
     rhs = rhs,
+    shallow = node.shallow,
+    expr_type = expr_type,
+    options = node.options,
+    span = node.span,
+  }
+end
+
+function type_check.expr_list_cross_product_complete(cx, node)
+  local lhs = type_check.expr(cx, node.lhs)
+  local lhs_type = std.check_read(cx, lhs)
+  local product = type_check.expr(cx, node.product)
+  local product_type = std.check_read(cx, product)
+  if not std.is_list_of_regions(lhs_type) and lhs_type:depth() == 1 then
+    log.error(node, "type mismatch: expected a list of regions but got " .. tostring(lhs_type))
+  end
+  if not std.is_list_of_regions(product_type) and product_type:depth() == 2 then
+    log.error(node, "type mismatch: expected a list of lists of regions but got " .. tostring(product_type))
+  end
+
+  local expr_type = std.list(
+    std.list(product_type:subregion_dynamic(), nil, 1),
+    nil, 1)
+
+  std.copy_privileges(cx, product_type, expr_type)
+  -- FIXME: Copy constraints.
+  cx:intern_region(expr_type)
+
+  return ast.typed.expr.ListCrossProductComplete {
+    lhs = lhs,
+    product = product,
     expr_type = expr_type,
     options = node.options,
     span = node.span,
@@ -2304,6 +2337,9 @@ function type_check.expr(cx, node)
 
   elseif node:is(ast.specialized.expr.ListCrossProduct) then
     return type_check.expr_list_cross_product(cx, node)
+
+  elseif node:is(ast.specialized.expr.ListCrossProductComplete) then
+    return type_check.expr_list_cross_product_complete(cx, node)
 
   elseif node:is(ast.specialized.expr.ListPhaseBarriers) then
     return type_check.expr_list_phase_barriers(cx, node)

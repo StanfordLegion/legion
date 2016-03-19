@@ -175,6 +175,9 @@ function analyze_var_flow.expr(cx, node)
   elseif node:is(ast.typed.expr.ListCrossProduct) then
     return nil
 
+  elseif node:is(ast.typed.expr.ListCrossProductComplete) then
+    return nil
+
   elseif node:is(ast.typed.expr.ListPhaseBarriers) then
     return nil
 
@@ -684,6 +687,16 @@ function optimize_futures.expr_list_cross_product(cx, node)
   return node {
     lhs = lhs,
     rhs = rhs,
+    shallow = node.shallow,
+  }
+end
+
+function optimize_futures.expr_list_cross_product_complete(cx, node)
+  local lhs = concretize(optimize_futures.expr(cx, node.lhs))
+  local product = concretize(optimize_futures.expr(cx, node.product))
+  return node {
+    lhs = lhs,
+    product = product,
   }
 end
 
@@ -924,6 +937,9 @@ function optimize_futures.expr(cx, node)
 
   elseif node:is(ast.typed.expr.ListCrossProduct) then
     return optimize_futures.expr_list_cross_product(cx, node)
+
+  elseif node:is(ast.typed.expr.ListCrossProductComplete) then
+    return optimize_futures.expr_list_cross_product_complete(cx, node)
 
   elseif node:is(ast.typed.expr.ListPhaseBarriers) then
     return optimize_futures.expr_list_phase_barriers(cx, node)

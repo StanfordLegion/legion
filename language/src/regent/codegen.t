@@ -3482,46 +3482,59 @@ function codegen.expr_list_cross_product(cx, node)
     cx:list_of_regions(lhs_type).field_types,
     cx:list_of_regions(lhs_type).field_ids)
 
+  local cross_product_create = c.legion_terra_index_cross_product_create_list
+  if node.shallow then
+    cross_product_create = c.legion_terra_index_cross_product_create_list_shallow
+  end
+
   actions = quote
     [actions]
-    var lhs_partition = [lhs.value].__partition.index_partition
-    var rhs_partition = [rhs.value].__partition.index_partition
 
-    -- Note: This is backwards on purpose. Privileges must be rooted
-    -- at rhs to be useful as copy destinations (which, as a rule,
-    -- must be dominated by the source).
-    var product = c.legion_terra_index_cross_product_create(
-      [cx.runtime], [cx.context], [rhs_partition], [lhs_partition])
+    var lhs_list : c.legion_terra_index_space_list_t
+    lhs_list.space.tid = 0
+    lhs_list.space.id = 0
+    lhs_list.count = [lhs.value].__size
+    lhs_list.subspaces = [&c.legion_index_space_t](
+      c.malloc(
+        terralib.sizeof([c.legion_index_space_t]) * [lhs.value].__size))
+    regentlib.assert(lhs_list.subspaces ~= nil, "malloc failed in list_cross_product")
+    for i = 0, [lhs.value].__size do
+      lhs_list.subspaces[i] = [lhs_type:data(lhs.value)][i].impl.index_space
+    end
 
-    -- *BUT*, the list is still indexed by lhs first.
+    var rhs_list : c.legion_terra_index_space_list_t
+    rhs_list.space.tid = 0
+    rhs_list.space.id = 0
+    rhs_list.count = [rhs.value].__size
+    rhs_list.subspaces = [&c.legion_index_space_t](
+      c.malloc(
+        terralib.sizeof([c.legion_index_space_t]) * [rhs.value].__size))
+    regentlib.assert(rhs_list.subspaces ~= nil, "malloc failed in list_cross_product")
+    for i = 0, [rhs.value].__size do
+      rhs_list.subspaces[i] = [rhs_type:data(rhs.value)][i].impl.index_space
+    end
+
+    var product = [cross_product_create](
+      [cx.runtime], [cx.context], [lhs_list], [rhs_list])
+
+    regentlib.assert(product.count == [lhs.value].__size,
+                     "size mismatch in list_cross_product")
     var data = c.malloc(
       terralib.sizeof([expr_type.element_type]) * [lhs.value].__size)
-    regentlib.assert(data ~= nil, "malloc failed in list_duplicate_partition")
+    regentlib.assert(data ~= nil, "malloc failed in list_cross_product")
     var [result] = expr_type {
       __size = [lhs.value].__size,
       __data = data,
     }
-    for i = 0, [lhs.value].__size do
-      var lhs_color = c.legion_logical_region_get_color(
-        [cx.runtime], [cx.context],
-        [lhs_type:data(lhs.value)][i].impl)
 
-      -- Count non-empty subspaces.
+    for i = 0, [lhs.value].__size do
+      regentlib.assert([rhs.value].__size == product.sublists[i].count,
+                       "size mismatch in list_cross_product")
+
       var subsize = 0
       for j = 0, [rhs.value].__size do
-        var rhs_color = c.legion_logical_region_get_color(
-          [cx.runtime], [cx.context],
-          [rhs_type:data(rhs.value)][j].impl)
-        var product_ip1 = c.legion_terra_index_cross_product_get_subpartition_by_color(
-          [cx.runtime], [cx.context],
-          product, rhs_color)
-
-        var is = c.legion_index_partition_get_index_subspace(
-          [cx.runtime], [cx.context], product_ip1, lhs_color)
-        var it = c.legion_index_iterator_create(
-          [cx.runtime], [cx.context], is)
-        var nonempty = c.legion_index_iterator_has_next(it)
-        if nonempty then
+        var is = product.sublists[i].subspaces[j]
+        if is.id > 0 then
           subsize = subsize + 1
         end
       end
@@ -3529,7 +3542,7 @@ function codegen.expr_list_cross_product(cx, node)
       -- Allocate sublist.
       var subdata = c.malloc(
         terralib.sizeof([expr_type.element_type.element_type]) * subsize)
-      regentlib.assert(subdata ~= nil, "malloc failed in list_duplicate_partition")
+      regentlib.assert(subdata ~= nil, "malloc failed in list_cross_product")
       [expr_type:data(result)][i] = [expr_type.element_type] {
         __size = subsize,
         __data = subdata,
@@ -3538,19 +3551,9 @@ function codegen.expr_list_cross_product(cx, node)
       -- Fill sublist.
       var subslot = 0
       for j = 0, [rhs.value].__size do
-        var rhs_color = c.legion_logical_region_get_color(
-          [cx.runtime], [cx.context],
-          [rhs_type:data(rhs.value)][j].impl)
-        var product_ip1 = c.legion_terra_index_cross_product_get_subpartition_by_color(
-          [cx.runtime], [cx.context],
-          product, rhs_color)
-
-        var is = c.legion_index_partition_get_index_subspace(
-          [cx.runtime], [cx.context], product_ip1, lhs_color)
-        var it = c.legion_index_iterator_create(
-          [cx.runtime], [cx.context], is)
-        var nonempty = c.legion_index_iterator_has_next(it)
-        if nonempty then
+        var is = product.sublists[i].subspaces[j]
+        if is.id > 0 then
+          regentlib.assert(subslot < subsize, "index mismatch in list_cross_product")
           [expr_type.element_type:data(`([expr_type:data(result)][i]))][subslot] =
             [expr_type.element_type.element_type] {
               impl = c.legion_logical_region_t {
@@ -3562,7 +3565,126 @@ function codegen.expr_list_cross_product(cx, node)
           subslot = subslot + 1
         end
       end
+      regentlib.assert(subslot == subsize, "underflow in list_cross_product")
     end
+
+    c.legion_terra_index_space_list_list_destroy(product)
+    c.free(lhs_list.subspaces)
+    c.free(rhs_list.subspaces)
+  end
+
+  return values.value(
+    expr.just(actions, result),
+    expr_type)
+end
+
+function codegen.expr_list_cross_product_complete(cx, node)
+  local lhs_type = std.as_read(node.lhs.expr_type)
+  local lhs = codegen.expr(cx, node.lhs):read(cx, lhs_type)
+  local product_type = std.as_read(node.product.expr_type)
+  local product = codegen.expr(cx, node.product):read(cx, product_type)
+  local expr_type = std.as_read(node.expr_type)
+  local actions = quote
+    [lhs.actions]
+    [product.actions]
+    [emit_debuginfo(node)]
+  end
+
+  local result = terralib.newsymbol(expr_type, "result")
+
+  assert(cx:has_list_of_regions(lhs_type))
+
+  cx:add_list_of_regions(
+    expr_type, result,
+    cx:list_of_regions(lhs_type).field_paths,
+    cx:list_of_regions(lhs_type).privilege_field_paths,
+    cx:list_of_regions(lhs_type).field_privileges,
+    cx:list_of_regions(lhs_type).field_types,
+    cx:list_of_regions(lhs_type).field_ids)
+
+  actions = quote
+    [actions]
+
+    regentlib.assert([product.value].__size == [lhs.value].__size,
+                     "size mismatch in list_cross_product 1")
+
+    var lhs_list : c.legion_terra_index_space_list_t
+    lhs_list.space.tid = 0
+    lhs_list.space.id = 0
+    lhs_list.count = [lhs.value].__size
+    lhs_list.subspaces = [&c.legion_index_space_t](
+      c.malloc(
+        terralib.sizeof([c.legion_index_space_t]) * [lhs.value].__size))
+    regentlib.assert(lhs_list.subspaces ~= nil, "malloc failed in list_cross_product")
+    for i = 0, [lhs.value].__size do
+      lhs_list.subspaces[i] = [lhs_type:data(lhs.value)][i].impl.index_space
+    end
+
+    var shallow_product : c.legion_terra_index_space_list_list_t
+    shallow_product.count = [lhs.value].__size
+    shallow_product.sublists = [&c.legion_terra_index_space_list_t](
+      c.malloc(
+        terralib.sizeof([c.legion_terra_index_space_list_t]) * [lhs.value].__size))
+    regentlib.assert(shallow_product.sublists ~= nil, "malloc failed in list_cross_product")
+    for i = 0, [lhs.value].__size do
+      var subsize = [product_type:data(product.value)][i].__size
+      shallow_product.sublists[i].space = [lhs_type:data(lhs.value)][i].impl.index_space
+      shallow_product.sublists[i].count = subsize
+      shallow_product.sublists[i].subspaces = [&c.legion_index_space_t](
+        c.malloc(terralib.sizeof([c.legion_index_space_t]) * subsize))
+      for j = 0, subsize do
+        shallow_product.sublists[i].subspaces[j] =
+          [product_type.element_type:data(
+             `([product_type:data(product.value)][i]))][j].impl.index_space
+      end
+    end
+
+    var complete_product = c.legion_terra_index_cross_product_create_list_complete(
+      [cx.runtime], [cx.context], [lhs_list], [shallow_product], false)
+    regentlib.assert(complete_product.count == [lhs.value].__size,
+                     "size mismatch in list_cross_product 2")
+
+    var data = c.malloc(
+      terralib.sizeof([expr_type.element_type]) * [lhs.value].__size)
+    regentlib.assert(data ~= nil, "malloc failed in list_cross_product")
+    var [result] = expr_type {
+      __size = [lhs.value].__size,
+      __data = data,
+    }
+
+    for i = 0, [lhs.value].__size do
+      var subsize = [product_type:data(product.value)][i].__size
+      regentlib.assert(
+        subsize == complete_product.sublists[i].count,
+        "size mismatch in list_cross_product 3")
+
+      -- Allocate sublist.
+      var subdata = c.malloc(
+        terralib.sizeof([expr_type.element_type.element_type]) * subsize)
+      regentlib.assert(subdata ~= nil, "malloc failed in list_cross_product")
+      [expr_type:data(result)][i] = [expr_type.element_type] {
+        __size = subsize,
+        __data = subdata,
+      }
+
+      -- Fill sublist.
+      for j = 0, subsize do
+        [expr_type.element_type:data(`([expr_type:data(result)][i]))][j] =
+          [expr_type.element_type.element_type] {
+            impl = c.legion_logical_region_t {
+              tree_id = [product_type.element_type:data(
+                           `([product_type:data(product.value)][i]))][j].impl.tree_id,
+              index_space = complete_product.sublists[i].subspaces[j],
+              field_space = [product_type.element_type:data(
+                               `([product_type:data(product.value)][i]))][j].impl.field_space,
+            }
+          }
+      end
+    end
+
+    c.legion_terra_index_space_list_list_destroy(complete_product)
+    c.free(lhs_list.subspaces)
+    -- c.free(rhs_list.subspaces)
   end
 
   return values.value(
@@ -3645,27 +3767,41 @@ function codegen.expr_list_invert(cx, node)
       __size = [rhs.value].__size,
       __data = data,
     }
+
+    std.assert(
+      [barriers.value].__size == [product.value].__size,
+      "list size mismatch in list_invert")
     for i = 0, [rhs.value].__size do
       var rhs_ = [rhs_type:data(rhs.value)][i].impl
 
       var rhs_color = c.legion_logical_region_get_color(
-        [cx.runtime], [cx.context],
-        [rhs_type:data(rhs.value)][i].impl)
+        [cx.runtime], [cx.context], rhs_)
 
       var subsize = 0
       for j = 0, [product.value].__size do
         for k = 0, [product_type:data(product.value)][j].__size do
           var leaf = [product_type.element_type:data(
                         `([product_type:data(product.value)][j]))][k].impl
-          var part = c.legion_logical_region_get_parent_logical_partition(
+          var match = false
+
+          if leaf.index_space.tid == rhs_.index_space.tid and
+            leaf.index_space.id == rhs_.index_space.id
+          then
+            match = true
+          elseif c.legion_logical_region_has_parent_logical_partition(
             [cx.runtime], [cx.context], leaf)
-          var parent = c.legion_logical_partition_get_parent_logical_region(
-            [cx.runtime], [cx.context], part)
-          var color = c.legion_logical_region_get_color(
-            [cx.runtime], [cx.context], parent)
-          if color == rhs_color then
-            subsize = subsize + 1
+          then
+            var part = c.legion_logical_region_get_parent_logical_partition(
+              [cx.runtime], [cx.context], leaf)
+            var parent = c.legion_logical_partition_get_parent_logical_region(
+              [cx.runtime], [cx.context], part)
+            var color = c.legion_logical_region_get_color(
+              [cx.runtime], [cx.context], parent)
+            if color == rhs_color then
+              match = true
+            end
           end
+          if match then subsize = subsize + 1 end
         end
       end
 
@@ -3680,9 +3816,6 @@ function codegen.expr_list_invert(cx, node)
 
       -- Fill sublist.
       var subslot = 0
-      std.assert(
-        [barriers.value].__size == [product.value].__size,
-        "list size mismatch in list_invert")
       for j = 0, [product.value].__size do
         std.assert(
           [barriers_type:data(barriers.value)][j].__size == [product_type:data(product.value)][j].__size,
@@ -3690,13 +3823,25 @@ function codegen.expr_list_invert(cx, node)
         for k = 0, [product_type:data(product.value)][j].__size do
           var leaf = [product_type.element_type:data(
                         `([product_type:data(product.value)][j]))][k].impl
-          var part = c.legion_logical_region_get_parent_logical_partition(
+          var match = false
+          if leaf.index_space.tid == rhs_.index_space.tid and
+            leaf.index_space.id == rhs_.index_space.id
+          then
+            match = true
+          elseif c.legion_logical_region_has_parent_logical_partition(
             [cx.runtime], [cx.context], leaf)
-          var parent = c.legion_logical_partition_get_parent_logical_region(
-            [cx.runtime], [cx.context], part)
-          var color = c.legion_logical_region_get_color(
-            [cx.runtime], [cx.context], parent)
-          if color == rhs_color then
+          then
+            var part = c.legion_logical_region_get_parent_logical_partition(
+              [cx.runtime], [cx.context], leaf)
+            var parent = c.legion_logical_partition_get_parent_logical_region(
+              [cx.runtime], [cx.context], part)
+            var color = c.legion_logical_region_get_color(
+              [cx.runtime], [cx.context], parent)
+            if color == rhs_color then
+              match = true
+            end
+          end
+          if match then
             std.assert(subslot < subsize, "overflowed sublist in list_invert")
             [expr_type.element_type:data(`([expr_type:data(result)][i]))][subslot] =
               [barriers_type.element_type:data(
@@ -4853,6 +4998,9 @@ function codegen.expr(cx, node)
 
   elseif node:is(ast.typed.expr.ListCrossProduct) then
     return codegen.expr_list_cross_product(cx, node)
+
+  elseif node:is(ast.typed.expr.ListCrossProductComplete) then
+    return codegen.expr_list_cross_product_complete(cx, node)
 
   elseif node:is(ast.typed.expr.ListPhaseBarriers) then
     return codegen.expr_list_phase_barriers(cx, node)

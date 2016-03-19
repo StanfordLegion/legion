@@ -716,10 +716,34 @@ function parser.expr_prefix(p)
     local lhs = p:expr()
     p:expect(",")
     local rhs = p:expr()
+    local shallow = false -- Default is false.
+    if p:nextif(",") then
+      if p:nextif("true") then
+        shallow = true
+      elseif p:nextif("false") then
+        shallow = false
+      else
+        p:error("expected true or false")
+      end
+    end
     p:expect(")")
     return ast.unspecialized.expr.ListCrossProduct {
       lhs = lhs,
       rhs = rhs,
+      shallow = shallow,
+      options = ast.default_options(),
+      span = ast.span(start, p),
+    }
+
+  elseif p:nextif("list_cross_product_complete") then
+    p:expect("(")
+    local lhs = p:expr()
+    p:expect(",")
+    local product = p:expr()
+    p:expect(")")
+    return ast.unspecialized.expr.ListCrossProductComplete {
+      lhs = lhs,
+      product = product,
       options = ast.default_options(),
       span = ast.span(start, p),
     }

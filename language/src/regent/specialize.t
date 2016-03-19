@@ -250,6 +250,9 @@ local function get_num_accessed_fields(node)
   elseif node:is(ast.unspecialized.expr.ListCrossProduct) then
     return 1
 
+  elseif node:is(ast.unspecialized.expr.ListCrossProductComplete) then
+    return 1
+
   elseif node:is(ast.unspecialized.expr.ListPhaseBarriers) then
     return 1
 
@@ -915,6 +918,16 @@ function specialize.expr_list_cross_product(cx, node)
   return ast.specialized.expr.ListCrossProduct {
     lhs = specialize.expr(cx, node.lhs),
     rhs = specialize.expr(cx, node.rhs),
+    shallow = node.shallow,
+    options = node.options,
+    span = node.span,
+  }
+end
+
+function specialize.expr_list_cross_product_complete(cx, node)
+  return ast.specialized.expr.ListCrossProductComplete {
+    lhs = specialize.expr(cx, node.lhs),
+    product = specialize.expr(cx, node.product),
     options = node.options,
     span = node.span,
   }
@@ -1140,6 +1153,9 @@ function specialize.expr(cx, node)
 
   elseif node:is(ast.unspecialized.expr.ListCrossProduct) then
     return specialize.expr_list_cross_product(cx, node)
+
+  elseif node:is(ast.unspecialized.expr.ListCrossProductComplete) then
+    return specialize.expr_list_cross_product_complete(cx, node)
 
   elseif node:is(ast.unspecialized.expr.ListPhaseBarriers) then
     return specialize.expr_list_phase_barriers(cx, node)
