@@ -439,7 +439,7 @@ static IndexPartition
 partition_from_list(HighLevelRuntime *runtime, Context ctx,
                     const std::vector<IndexSpace> &subspaces)
 {
-  assert(subspaces.size() > 0);
+  if (subspaces.empty()) return IndexPartition::NO_PART;
   assert(runtime->has_parent_index_partition(ctx, subspaces[0]));
   return runtime->get_parent_index_partition(ctx, subspaces[0]);
 }
@@ -450,9 +450,10 @@ partition_from_list_list(HighLevelRuntime *runtime, Context ctx,
 {
   for (std::map<IndexSpace, std::vector<IndexSpace> >::const_iterator it = product.begin();
        it != product.end(); ++it) {
-    return partition_from_list(runtime, ctx, it->second);
+    IndexPartition part = partition_from_list(runtime, ctx, it->second);
+    if (part != IndexPartition::NO_PART) return part;
   }
-  assert(false);
+  return IndexPartition::NO_PART;
 }
 
 static void
@@ -496,16 +497,19 @@ legion_terra_index_cross_product_create_list(
   IndexPartition lhs_part = partition_from_list(runtime, ctx, lhs);
   IndexPartition rhs_part = partition_from_list(runtime, ctx, rhs);
 
-  Color sub_color = create_cross_product(runtime, ctx, rhs_part, lhs_part);
+  Color sub_color = -1;
+  if (lhs_part != IndexPartition::NO_PART && rhs_part != IndexPartition::NO_PART) {
+    sub_color = create_cross_product(runtime, ctx, rhs_part, lhs_part);
+  }
 
   std::map<IndexSpace, std::vector<IndexSpace> > product;
   for (std::vector<IndexSpace>::iterator it = rhs.begin(); it != rhs.end(); ++it) {
     IndexSpace rh_space = *it;
-    IndexPartition rh_subpart = runtime->get_index_partition(ctx, rh_space, sub_color);
 
     for (std::vector<IndexSpace>::iterator it = lhs.begin(); it != lhs.end(); ++it) {
       IndexSpace lh_space = *it;
       Color lh_color = runtime->get_index_space_color(ctx, lh_space);
+      IndexPartition rh_subpart = runtime->get_index_partition(ctx, rh_space, sub_color);
       IndexSpace rh_subspace = runtime->get_index_subspace(ctx, rh_subpart, lh_color);
 
       IndexIterator rh_it(runtime, ctx, rh_subspace);
@@ -592,9 +596,11 @@ legion_terra_index_cross_product_create_list_complete(
   filter_from_list_list(runtime, ctx, product, rhs_filter);
 
   std::map<IndexSpace, Color> chosen_colors;
-  create_cross_product(
-    runtime, ctx, rhs_part, lhs_part, -1, consistent_ids, &chosen_colors,
-    &rhs_filter, &lhs_filter);
+  if (lhs_part != IndexPartition::NO_PART && rhs_part != IndexPartition::NO_PART) {
+    create_cross_product(
+      runtime, ctx, rhs_part, lhs_part, -1, consistent_ids, &chosen_colors,
+      &rhs_filter, &lhs_filter);
+  }
 
   std::map<IndexSpace, std::vector<IndexSpace> > result;
   for (std::vector<IndexSpace>::iterator it = lhs.begin(); it != lhs.end(); ++it) {
