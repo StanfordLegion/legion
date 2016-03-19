@@ -51,14 +51,14 @@ public:
     return index < spans.size();
   }
 
-  ptr_t next_span(size_t *count) {
+  ptr_t next_span(size_t &count) {
     if (!cached) cache();
     if (index >= spans.size()) {
-      *count = 0;
+      count = 0;
       return ptr_t::nil();
     }
     std::pair<ptr_t, size_t> span = spans[index++];
-    *count = span.second;
+    count = span.second;
     return span.first;
   }
 
@@ -206,6 +206,46 @@ create_cross_product_coloring(HighLevelRuntime *runtime,
 }
 #endif
 
+static bool
+should_flip_cross_product(HighLevelRuntime *runtime,
+                          Context ctx,
+                          IndexPartition lhs,
+                          IndexPartition rhs,
+                          const std::set<Color> *lhs_filter = NULL,
+                          const std::set<Color> *rhs_filter = NULL)
+{
+  Domain lhs_colors = runtime->get_index_partition_color_space(ctx, lhs);
+  Domain rhs_colors = runtime->get_index_partition_color_space(ctx, rhs);
+
+  size_t lhs_span_count = 0, rhs_span_count = 0;
+  for (Domain::DomainPointIterator lh_dp(lhs_colors), rh_dp(rhs_colors);; lh_dp++, rh_dp++) {
+    while (lh_dp && lhs_filter && !lhs_filter->count(lh_dp.p.get_point<1>()[0])) {
+      lh_dp++;
+    }
+    if (!lh_dp) { break; }
+    Color lh_color = lh_dp.p.get_point<1>()[0];
+    IndexSpace lh_space = runtime->get_index_subspace(ctx, lhs, lh_color);
+
+    while (rh_dp && rhs_filter && !rhs_filter->count(rh_dp.p.get_point<1>()[0])) {
+      rh_dp++;
+    }
+    if (!rh_dp) { break; }
+    Color rh_color = rh_dp.p.get_point<1>()[0];
+    IndexSpace rh_space = runtime->get_index_subspace(ctx, rhs, rh_color);
+
+    IndexIterator lh_it(runtime, ctx, lh_space), rh_it(runtime, ctx, rh_space);
+    size_t lh_count = 0, rh_count = 0;
+    for (; lh_it.has_next() && rh_it.has_next();) {
+      lh_it.next_span(lh_count);
+      rh_it.next_span(rh_count);
+    }
+
+    lhs_span_count += lh_it.has_next();
+    rhs_span_count += rh_it.has_next();
+  }
+  return rhs_span_count < lhs_span_count;
+}
+
 Color
 create_cross_product(HighLevelRuntime *runtime,
                      Context ctx,
@@ -226,35 +266,12 @@ create_cross_product(HighLevelRuntime *runtime,
 #else
   // FIXME: Validate: same index tree
 
-  Domain lhs_colors = runtime->get_index_partition_color_space(ctx, lhs);
-  Domain rhs_colors = runtime->get_index_partition_color_space(ctx, rhs);
-
   // The efficiency of this algorithm depends heavily on how many
   // spans are in lhs and rhs. Since it is *MUCH* better to have a
   // smaller number of spans on lhs, it is worth spending a little
   // time here estimating which will have fewer spans.
 
-  bool flip = false;
-  for (Domain::DomainPointIterator lh_dp(lhs_colors), rh_dp(rhs_colors); lh_dp && rh_dp; lh_dp++, rh_dp++) {
-    Color lh_color = lh_dp.p.get_point<1>()[0];
-    if (lhs_filter && !lhs_filter->count(lh_color)) continue;
-    IndexSpace lh_space = runtime->get_index_subspace(ctx, lhs, lh_color);
-    Color rh_color = rh_dp.p.get_point<1>()[0];
-    if (rhs_filter && !rhs_filter->count(rh_color)) continue;
-    IndexSpace rh_space = runtime->get_index_subspace(ctx, rhs, rh_color);
-
-    IndexIterator lh_it(runtime, ctx, lh_space);
-    IndexIterator rh_it(runtime, ctx, rh_space);
-    for (; lh_it.has_next() && rh_it.has_next();) {
-      size_t lh_count = 0;
-      lh_it.next_span(lh_count);
-      size_t rh_count = 0;
-      rh_it.next_span(rh_count);
-    }
-
-    flip = lh_it.has_next() && !rh_it.has_next();
-    break;
-  }
+  bool flip = should_flip_cross_product(runtime, ctx, lhs, rhs, lhs_filter, rhs_filter);
 
   std::map<Color, Coloring> coloring;
   if (flip) {
@@ -263,6 +280,8 @@ create_cross_product(HighLevelRuntime *runtime,
     create_cross_product_coloring(runtime, ctx, lhs, rhs, coloring, lhs_filter, rhs_filter);
   }
 
+  Domain lhs_colors = runtime->get_index_partition_color_space(ctx, lhs);
+  Domain rhs_colors = runtime->get_index_partition_color_space(ctx, rhs);
   for (Domain::DomainPointIterator lh_dp(lhs_colors); lh_dp; lh_dp++) {
     Color lh_color = lh_dp.p.get_point<1>()[0];
     if (lhs_filter && !lhs_filter->count(lh_color)) continue;
@@ -297,6 +316,42 @@ create_cross_product(HighLevelRuntime *runtime,
 #endif
 
   return rhs_color;
+}
+
+static void
+create_cross_product_shallow(HighLevelRuntime *runtime,
+                             Context ctx,
+                             const std::vector<IndexSpace> &lhs,
+                             const std::vector<IndexSpace> &rhs,
+                             std::map<IndexSpace, std::set<IndexSpace> > &product)
+{
+  for (std::vector<IndexSpace>::const_iterator it = lhs.begin(); it != lhs.end(); ++it) {
+    IndexSpace lh_space = *it;
+    for (std::vector<IndexSpace>::const_iterator it = rhs.begin(); it != rhs.end(); ++it) {
+      IndexSpace rh_space = *it;
+
+      bool intersects = false;
+      for (IndexIterator lh_it(runtime, ctx, lh_space); lh_it.has_next();) {
+        size_t lh_count = 0;
+        ptr_t lh_ptr = lh_it.next_span(lh_count);
+        ptr_t lh_end = lh_ptr.value + lh_count - 1;
+
+        IndexIterator rh_it(runtime, ctx, rh_space, lh_ptr);
+        if (rh_it.has_next()) {
+          size_t rh_count = 0;
+          ptr_t rh_ptr = rh_it.next_span(rh_count);
+
+          if (rh_ptr.value <= lh_end.value) {
+            intersects = true;
+            break;
+          }
+        }
+      }
+      if (intersects) {
+        product[lh_space].insert(rh_space);
+      }
+    }
+  }
 }
 
 static void
@@ -479,7 +534,6 @@ filter_from_list_list(HighLevelRuntime *runtime, Context ctx,
   }
 }
 
-
 legion_terra_index_space_list_list_t
 legion_terra_index_cross_product_create_list(
   legion_runtime_t runtime_,
@@ -538,38 +592,32 @@ legion_terra_index_cross_product_create_list_shallow(
   std::vector<IndexSpace> rhs;
   unwrap_list(rhs_, rhs);
 
-  std::map<IndexSpace, std::vector<IndexSpace> > product;
-  for (std::vector<IndexSpace>::iterator it = lhs.begin(); it != lhs.end(); ++it) {
-    IndexSpace lh_space = *it;
-    for (std::vector<IndexSpace>::iterator it = rhs.begin(); it != rhs.end(); ++it) {
-      IndexSpace rh_space = *it;
+  IndexPartition lhs_part = partition_from_list(runtime, ctx, lhs);
+  IndexPartition rhs_part = partition_from_list(runtime, ctx, rhs);
 
-      bool intersects = false;
-      for (IndexIterator lh_it(runtime, ctx, lh_space); lh_it.has_next();) {
-        size_t lh_count = 0;
-        ptr_t lh_ptr = lh_it.next_span(lh_count);
-        ptr_t lh_end = lh_ptr.value + lh_count - 1;
+  bool flip = false;
+  if (lhs_part != IndexPartition::NO_PART and rhs_part != IndexPartition::NO_PART) {
+    flip = should_flip_cross_product(runtime, ctx, lhs_part, rhs_part);
+  }
 
-        IndexIterator rh_it(runtime, ctx, rh_space, lh_ptr);
-        if (rh_it.has_next()) {
-          size_t rh_count = 0;
-          ptr_t rh_ptr = rh_it.next_span(rh_count);
+  std::map<IndexSpace, std::set<IndexSpace> > product;
+  if (flip) {
+    create_cross_product_shallow(runtime, ctx, rhs, lhs, product);
+  } else {
+    create_cross_product_shallow(runtime, ctx, lhs, rhs, product);
+  }
 
-          if (rh_ptr.value <= lh_end.value) {
-            intersects = true;
-            break;
-          }
-        }
-      }
-      if (intersects) {
-        product[lh_space].push_back(rh_space);
+  std::map<IndexSpace, std::vector<IndexSpace> > result;
+  for (std::vector<IndexSpace>::iterator lh = lhs.begin(); lh != lhs.end(); ++lh) {
+    for (std::vector<IndexSpace>::iterator rh = rhs.begin(); rh != rhs.end(); ++rh) {
+      if (flip) {
+        result[*lh].push_back(product[*rh].count(*lh) ? *rh : IndexSpace::NO_SPACE);
       } else {
-        product[lh_space].push_back(IndexSpace::NO_SPACE);
+        result[*lh].push_back(product[*lh].count(*rh) ? *rh : IndexSpace::NO_SPACE);
       }
     }
   }
-
-  return wrap_list_list(lhs, product);
+  return wrap_list_list(lhs, result);
 }
 
 legion_terra_index_space_list_list_t
@@ -697,7 +745,8 @@ legion_terra_cached_index_iterator_next_span(
   assert(req_count == size_t(-1));
   CachedIndexIterator *handle = TerraCObjectWrapper::unwrap(handle_);
 
-  ptr_t result = handle->next_span(count);
+  assert(count);
+  ptr_t result = handle->next_span(*count);
   return CObjectWrapper::wrap(result);
 }
 
