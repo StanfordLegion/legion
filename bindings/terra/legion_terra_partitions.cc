@@ -312,18 +312,19 @@ create_cross_product_multi(HighLevelRuntime *runtime,
   if (rest != end) {
     Color desired_color = result_colors[level];
     Color color = create_cross_product(runtime, ctx, next, *rest, desired_color);
+    assert(color != Color(-1));
     if (desired_color == Color(-1)) {
+      assert(result_colors[level] == Color(-1));
       result_colors[level] = color;
     } else {
       assert(color == desired_color);
     }
 
     Domain colors = runtime->get_index_partition_color_space(ctx, next);
-    Color color2 = runtime->get_index_partition_color(ctx, *rest);
     for (Domain::DomainPointIterator dp(colors); dp; dp++) {
-      Color color = dp.p.get_point<1>()[0];
-      IndexSpace is = runtime->get_index_subspace(ctx, next, color);
-      IndexPartition ip = runtime->get_index_partition(ctx, is, color2);
+      Color next_color = dp.p.get_point<1>()[0];
+      IndexSpace is = runtime->get_index_subspace(ctx, next, next_color);
+      IndexPartition ip = runtime->get_index_partition(ctx, is, color);
       create_cross_product_multi(
         runtime, ctx, npartitions - 1, ip, rest+1, end, result_colors, level + 1);
     }
