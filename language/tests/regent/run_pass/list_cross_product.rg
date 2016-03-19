@@ -15,7 +15,7 @@
 import "regent"
 
 -- runs-with:
--- ["-finlines", "0"]
+-- [["-finlines", "0"]]
 
 -- FIXME: This test exercises some bizarre corner case in the inline
 -- optimization. Probably, the (duplicated) lists are not being marked

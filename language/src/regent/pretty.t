@@ -385,7 +385,16 @@ function pretty.expr_list_cross_product(cx, node)
   return join({
       "list_cross_product(",
       commas({pretty.expr(cx, node.lhs),
-              pretty.expr(cx, node.rhs)}),
+              pretty.expr(cx, node.rhs),
+              tostring(node.shallow)}),
+      ")"})
+end
+
+function pretty.expr_list_cross_product_complete(cx, node)
+  return join({
+      "list_cross_product_complete(",
+      commas({pretty.expr(cx, node.lhs),
+              pretty.expr(cx, node.product)}),
       ")"})
 end
 
@@ -396,7 +405,7 @@ end
 
 function pretty.expr_list_invert(cx, node)
   return join({
-      "list_cross_product(",
+      "list_invert(",
       commas({pretty.expr(cx, node.rhs),
               pretty.expr(cx, node.product),
               pretty.expr(cx, node.barriers)}),
@@ -405,7 +414,7 @@ end
 
 function pretty.expr_list_range(cx, node)
   return join({
-      "list_duplicate_partition(",
+      "list_range(",
       commas({pretty.expr(cx, node.start),
               pretty.expr(cx, node.stop)}),
       ")"})
@@ -589,6 +598,9 @@ function pretty.expr(cx, node)
 
   elseif node:is(ast.typed.expr.ListCrossProduct) then
     return pretty.expr_list_cross_product(cx, node)
+
+  elseif node:is(ast.typed.expr.ListCrossProductComplete) then
+    return pretty.expr_list_cross_product_complete(cx, node)
 
   elseif node:is(ast.typed.expr.ListPhaseBarriers) then
     return pretty.expr_list_phase_barriers(cx, node)
