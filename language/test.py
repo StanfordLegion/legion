@@ -107,9 +107,11 @@ def test_run_pass(filename, debug, verbose, flags, env):
     runs_with_text = find_labeled_prefix(filename, 'runs-with')
     if runs_with_text is not None:
         runs_with = json.loads(runs_with_text)
+        assert isinstance(runs_with, list), "runs-with declaration must be a json-formatted nested list"
 
     try:
         for params in runs_with:
+            assert isinstance(params, list), "runs-with declaration must be a json-formatted nested list"
             run(filename, debug, verbose, flags + params, env)
     except TestFailure as e:
         raise Exception('Command failed:\n%s\n\nOutput:\n%s' % (e.command, e.output))
@@ -135,7 +137,7 @@ def test_runner(test_name, test_closure, debug, verbose, filename):
     #     return test_name, filename, e.saved_temps, FAIL, None
     except Exception as e:
         if verbose:
-            return test_name, filename, [], FAIL, ''.join(traceback.format_exception_only(*sys.exc_info()[:2]))
+            return test_name, filename, [], FAIL, ''.join(traceback.format_exception(*sys.exc_info()))
         return test_name, filename, [], FAIL, ''.join(traceback.format_exception_only(*sys.exc_info()[:2]))
     else:
         return test_name, filename, [], PASS, None
