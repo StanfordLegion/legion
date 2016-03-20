@@ -1829,6 +1829,19 @@ terra read_config()
        end
      end)]
 
+  -- report mesh size in bytes
+  do
+    var zone_size = terralib.sizeof(zone)
+    var point_size = terralib.sizeof(point)
+    var side_size = [ terralib.sizeof(side(wild,wild,wild,wild)) ]
+    c.printf("Mesh memory usage:\n")
+    c.printf("  Zones  : %9lld * %4d bytes = %11lld bytes\n", conf.nz, zone_size, conf.nz * zone_size)
+    c.printf("  Points : %9lld * %4d bytes = %11lld bytes\n", conf.np, point_size, conf.np * point_size)
+    c.printf("  Sides  : %9lld * %4d bytes = %11lld bytes\n", conf.ns, side_size, conf.ns * side_size)
+    var total = ((conf.nz * zone_size) + (conf.np * point_size) + (conf.ns * side_size))
+    c.printf("  Total                             %11lld bytes\n", total)
+  end
+
   return conf
 end
 end
