@@ -56,6 +56,7 @@ local language = {
     "__raw",
     "__runtime",
     "__spmd",
+    "__trace",
     "__unroll",
     "__vectorize",
     "aliased",

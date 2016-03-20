@@ -29,6 +29,7 @@ local default_options = {
   ["futures"] = true,
   ["inlines"] = true,
   ["leaf"] = true,
+  ["trace"] = true,
   ["vectorize"] = true,
   ["task-inlines"] = true,
 }

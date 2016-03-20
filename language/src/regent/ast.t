@@ -385,7 +385,8 @@ ast.options:leaf("Forbid", {"value"}, true)
 ast.options:leaf("Unroll", {"value"}, true)
 
 -- Options: Sets
-ast.options:leaf("Set", {"cuda", "inline", "parallel", "spmd", "vectorize"},
+ast.options:leaf("Set", {"cuda", "inline", "parallel", "spmd", "trace",
+                         "vectorize"},
                  false, true)
 
 function ast.default_options()
@@ -395,6 +396,7 @@ function ast.default_options()
     inline = allow,
     parallel = allow,
     spmd = allow,
+    trace = allow,
     vectorize = allow,
   }
 end
@@ -722,6 +724,8 @@ ast.typed.stat:leaf("Break")
 ast.typed.stat:leaf("Assignment", {"lhs", "rhs"})
 ast.typed.stat:leaf("Reduce", {"op", "lhs", "rhs"})
 ast.typed.stat:leaf("Expr", {"expr"})
+ast.typed.stat:leaf("BeginTrace", {"trace_id"})
+ast.typed.stat:leaf("EndTrace", {"trace_id"})
 ast.typed.stat:leaf("MapRegions", {"region_types"})
 ast.typed.stat:leaf("UnmapRegions", {"region_types"})
 

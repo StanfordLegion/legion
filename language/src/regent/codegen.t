@@ -6055,6 +6055,24 @@ function codegen.stat_expr(cx, node)
   return quote [expr.actions] end
 end
 
+function codegen.stat_begin_trace(cx, node)
+  local trace_id = codegen.expr(cx, node.trace_id):read(cx)
+  return quote
+    [trace_id.actions];
+    [emit_debuginfo(node)];
+    c.legion_runtime_begin_trace([cx.runtime], [cx.context], [trace_id.value])
+  end
+end
+
+function codegen.stat_end_trace(cx, node)
+  local trace_id = codegen.expr(cx, node.trace_id):read(cx)
+  return quote
+    [trace_id.actions];
+    [emit_debuginfo(node)];
+    c.legion_runtime_end_trace([cx.runtime], [cx.context], [trace_id.value])
+  end
+end
+
 local function find_region_roots(cx, region_types)
   local roots_by_type = {}
   for _, region_type in ipairs(region_types) do
@@ -6184,6 +6202,12 @@ function codegen.stat(cx, node)
 
   elseif node:is(ast.typed.stat.Expr) then
     return codegen.stat_expr(cx, node)
+
+  elseif node:is(ast.typed.stat.BeginTrace) then
+    return codegen.stat_begin_trace(cx, node)
+
+  elseif node:is(ast.typed.stat.EndTrace) then
+    return codegen.stat_end_trace(cx, node)
 
   elseif node:is(ast.typed.stat.MapRegions) then
     return codegen.stat_map_regions(cx, node)

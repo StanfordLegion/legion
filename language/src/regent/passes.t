@@ -20,6 +20,7 @@ local optimize_divergence = require("regent/optimize_divergence")
 local optimize_futures = require("regent/optimize_futures")
 local optimize_inlines = require("regent/optimize_inlines")
 local optimize_loops = require("regent/optimize_loops")
+local optimize_traces = require("regent/optimize_traces")
 local parser = require("regent/parser")
 local pretty = require("regent/pretty")
 local specialize = require("regent/specialize")
@@ -36,6 +37,7 @@ function passes.optimize(ast)
   if std.config["futures"] then ast = optimize_futures.entry(ast) end
   if std.config["leaf"] then ast = optimize_config_options.entry(ast) end
   if std.config["inlines"] then ast = optimize_inlines.entry(ast) end
+  if std.config["trace"] then ast = optimize_traces.entry(ast) end
   if std.config["no-dynamic-branches"] then ast = optimize_divergence.entry(ast) end
   if std.config["vectorize"] then ast = vectorize_loops.entry(ast) end
   return ast

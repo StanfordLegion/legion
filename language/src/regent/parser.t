@@ -60,6 +60,8 @@ function parser.option_name(p)
     return "parallel"
   elseif p:nextif("__spmd") then
     return "spmd"
+  elseif p:nextif("__trace") then
+    return "trace"
   elseif p:nextif("__vectorize") then
     return "vectorize"
   else

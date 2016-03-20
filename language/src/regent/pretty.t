@@ -786,6 +786,14 @@ function pretty.stat_expr(cx, node)
   return pretty.expr(cx, node.expr)
 end
 
+function pretty.stat_begin_trace(cx, node)
+  return join({"__begin_trace(", pretty.expr(cx, node.trace_id), ")"})
+end
+
+function pretty.stat_end_trace(cx, node)
+  return join({"__end_trace(", pretty.expr(cx, node.trace_id), ")"})
+end
+
 function pretty.stat_map_regions(cx, node)
   return join({
     "__map_regions(",
@@ -855,6 +863,12 @@ function pretty.stat(cx, node)
 
   elseif node:is(ast.typed.stat.Expr) then
     return pretty.stat_expr(cx, node)
+
+  elseif node:is(ast.typed.stat.BeginTrace) then
+    return pretty.stat_begin_trace(cx, node)
+
+  elseif node:is(ast.typed.stat.EndTrace) then
+    return pretty.stat_end_trace(cx, node)
 
   elseif node:is(ast.typed.stat.MapRegions) then
     return pretty.stat_map_regions(cx, node)
