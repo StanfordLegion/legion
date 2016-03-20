@@ -1128,36 +1128,42 @@ bool PennantMapper::map_task(Task *task)
 
 bool PennantMapper::map_copy(Copy *copy)
 {
-  if (
+  for (unsigned idx = 0; idx < copy->src_requirements.size(); ++idx) {
+    RegionRequirement& src_req = copy->src_requirements[idx];
+    RegionRequirement& dst_req = copy->dst_requirements[idx];
+    Color src_color = get_logical_region_color(src_req.region);
+    Color dst_color = get_logical_region_color(dst_req.region);
+    Processor src_proc = procs_list[src_color % procs_list.size()];
+    Processor dst_proc = procs_list[dst_color % procs_list.size()];
+
 #if 0
-      strcmp(copy->parent_task->get_task_name(), "toplevel") == 0
-#else
-      true
+    // If the source is a composite instance, then the runtime will
+    // crash here if we decline to map the source.
+    if (!src_req.restricted) {
 #endif
-      )
-  {
-    for (unsigned idx = 0; idx < copy->src_requirements.size(); ++idx)
-    {
-      RegionRequirement& src_req = copy->src_requirements[idx];
-      RegionRequirement& dst_req = copy->dst_requirements[idx];
-      Color index = get_logical_region_color(src_req.region);
-      Processor target_proc = procs_list[index % procs_list.size()];
-      Memory mem = proc_sysmems[target_proc];
-      if (dst_req.privilege_fields.size() == 1)
-        mem = proc_regmems[target_proc];
       src_req.target_ranking.clear();
-      src_req.target_ranking.push_back(proc_sysmems[target_proc]);
-      dst_req.target_ranking.clear();
-      // dst_req.target_ranking.push_back(mem);
-      dst_req.target_ranking.push_back(proc_sysmems[target_proc]);
-      src_req.blocking_factor = src_req.max_blocking_factor;
-      dst_req.blocking_factor = dst_req.max_blocking_factor;
+      for (std::map<Memory, bool>::iterator it = src_req.current_instances.begin(),
+             ie = src_req.current_instances.end(); it != ie; ++it) {
+        if (it->second) {
+          src_req.target_ranking.push_back(it->first);
+        }
+      }
+      if (src_req.target_ranking.empty()) {
+        src_req.target_ranking.push_back(proc_sysmems[src_proc]);
+      }
+#if 0
     }
-    return false;
+#endif
+
+    if (!dst_req.restricted) {
+      dst_req.target_ranking.clear();
+      dst_req.target_ranking.push_back(proc_sysmems[dst_proc]);
+    }
+
+    src_req.blocking_factor = src_req.max_blocking_factor;
+    dst_req.blocking_factor = dst_req.max_blocking_factor;
   }
-  else {
-    return DefaultMapper::map_copy(copy);
-  }
+  return false;
 }
 
 bool PennantMapper::map_inline(Inline *inline_operation)
@@ -1214,9 +1220,9 @@ bool PennantMapper::map_must_epoch(const std::vector<Task*> &tasks,
 
     Memory regmem;
     if (c.t2->regions[c.idx2].flags & NO_ACCESS_FLAG)
-      regmem = proc_sysmems[c.t1->target_proc]; // proc_regmems[c.t1->target_proc];
+      regmem = proc_regmems[c.t1->target_proc]; // proc_sysmems[c.t1->target_proc];
     else if (c.t1->regions[c.idx1].flags & NO_ACCESS_FLAG)
-      regmem = proc_sysmems[c.t2->target_proc]; // proc_regmems[c.t2->target_proc];
+      regmem = proc_regmems[c.t2->target_proc]; // proc_sysmems[c.t2->target_proc];
     else
       assert(0);
     c.t1->regions[c.idx1].target_ranking.clear();
@@ -1278,7 +1284,8 @@ void PennantMapper::notify_mapping_failed(const Mappable *mappable)
   switch (mappable->get_mappable_kind()) {
   case Mappable::TASK_MAPPABLE:
     {
-      log_pennant.warning("mapping failed on task");
+      Task *task = mappable->as_mappable_task();
+      log_pennant.warning("mapping failed on task %s", task->variants->name);
       break;
     }
   case Mappable::COPY_MAPPABLE:
