@@ -1595,6 +1595,7 @@ namespace Legion {
                                 const std::vector<PhaseBarrier> &phase_barriers)
     //--------------------------------------------------------------------------
     {
+      Event arrive_pre = get_task_completion();
       for (std::vector<PhaseBarrier>::const_iterator it = 
             phase_barriers.begin(); it != phase_barriers.end(); it++)
       {
@@ -1602,13 +1603,7 @@ namespace Legion {
         arrive_barriers.push_back(*it);
         // Note it is imperative we do this off the new barrier
         // generated after updating the arrival count.
-        arrive_barriers.back().phase_barrier.arrive(1, get_task_completion());
-#ifdef LEGION_SPY
-        LegionSpy::log_event_dependence(it->phase_barrier,
-                                        arrive_barriers.back().phase_barrier); 
-        LegionSpy::log_event_dependence(get_task_completion(),
-                                        arrive_barriers.back().phase_barrier);
-#endif
+        Runtime::phase_barrier_arrive<false>(*it, 1/*count*/, arrive_pre);
       }
     }
 
@@ -5236,6 +5231,16 @@ namespace Legion {
                                      MustEpochOp *must_epoch_op /*=NULL*/)
     //--------------------------------------------------------------------------
     {
+#ifdef LEGION_SPY
+      {
+        Event local_completion = get_completion_event();
+        // Yes, these events actually trigger in the opposite order, but
+        // it is the logical entailement that is important here
+        if (local_completion != local_termination_event)
+          LegionSpy::log_event_dependence(local_completion, 
+                                          local_termination_event);
+      }
+#endif
       std::vector<RegionTreeContext> enclosing_contexts(regions.size());
       for (unsigned idx = 0; idx < regions.size(); idx++)
         enclosing_contexts[idx] = get_parent_context(idx);

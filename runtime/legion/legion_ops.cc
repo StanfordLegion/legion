@@ -3141,11 +3141,8 @@ namespace Legion {
         for (std::vector<PhaseBarrier>::const_iterator it = 
               arrive_barriers.begin(); it != arrive_barriers.end(); it++)
         {
-          it->phase_barrier.arrive(1/*count*/, copy_complete_event);    
-#ifdef LEGION_SPY
-          LegionSpy::log_event_dependence(completion_event, 
-              it->phase_barrier);
-#endif
+          Runtime::phase_barrier_arrive<false>(it->phase_barrier, 1/*count*/,
+                                               completion_event);    
         }
       }
       // Mark that we completed mapping
@@ -5623,11 +5620,8 @@ namespace Legion {
         for (std::vector<PhaseBarrier>::const_iterator it = 
               arrive_barriers.begin(); it != arrive_barriers.end(); it++)
         {
-          it->phase_barrier.arrive(1/*count*/, acquire_complete);
-#ifdef LEGION_SPY
-          LegionSpy::log_event_dependence(completion_event,
-              it->phase_barrier);
-#endif
+          Runtime::phase_barrier_arrive<false>(it->phase_barrier, 1/*count*/,
+                                               completion_event);
         }
       }
       // Mark that we completed mapping
@@ -6188,11 +6182,8 @@ namespace Legion {
         for (std::vector<PhaseBarrier>::const_iterator it = 
               arrive_barriers.begin(); it != arrive_barriers.end(); it++)
         {
-#ifdef LEGION_SPY
-          LegionSpy::log_event_dependence(completion_event,
-              it->phase_barrier);
-#endif
-          it->phase_barrier.arrive(1/*count*/, release_complete);
+          Runtime::phase_barrier_arrive<false>(it->phase_barrier, 1/*count*/,
+                                               completion_event);
         }
       }
       // Mark that we completed mapping
@@ -7656,8 +7647,8 @@ namespace Legion {
         InstanceSet inst1, inst2;
         t1->get_physical_references(it->idx1, inst1);
         t2->get_physical_references(it->idx2, inst2);
-        // Check to make sure they selected the same instance 
-        if (inst1 != inst2)
+        if (!runtime->forest->match_instance_fields(t1->regions[it->idx1],
+              t2->regions[it->idx2], inst1, inst2))
         {
           log_run.error("Invalid mapper output from invocation of "
               "'map_must_epoch' on mapper %s. Region requirement %d of task %s "
@@ -9486,7 +9477,8 @@ namespace Legion {
           for (std::vector<PhaseBarrier>::const_iterator it = 
                 arrive_barriers.begin(); it != arrive_barriers.end(); it++)
           {
-            it->phase_barrier.arrive(1/*count*/, completion_event);
+            Runtime::phase_barrier_arrive<false>(it->phase_barrier, 1/*count*/,
+                                                 completion_event);
           }
         }
         complete_execution(done_event);
@@ -9568,7 +9560,8 @@ namespace Legion {
         for (std::vector<PhaseBarrier>::const_iterator it = 
               arrive_barriers.begin(); it != arrive_barriers.end(); it++)
         {
-          it->phase_barrier.arrive(1/*count*/, completion_event);
+          Runtime::phase_barrier_arrive<false>(it->phase_barrier, 1/*count*/,
+                                               completion_event);
         }
       }
       complete_execution(done_event);

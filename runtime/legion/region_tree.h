@@ -274,6 +274,10 @@ namespace Legion {
       void invalidate_current_context(RegionTreeContext ctx,
                                       LogicalRegion handle,
                                       bool logical_users_only);
+      bool match_instance_fields(const RegionRequirement &req1,
+                                 const RegionRequirement &req2,
+                                 const InstanceSet &inst1,
+                                 const InstanceSet &inst2);
     public: // Physical analysis methods
       void physical_traverse_path(RegionTreeContext ctx,
                                   RegionTreePath &path,

@@ -1760,6 +1760,77 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool RegionTreeForest::match_instance_fields(const RegionRequirement &req1,
+                                                 const RegionRequirement &req2,
+                                                 const InstanceSet &inst1,
+                                                 const InstanceSet &inst2)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(req1.handle_type == SINGULAR);
+      assert(req2.handle_type == SINGULAR);
+      assert(req1.region.field_space == req2.region.field_space);
+#endif
+      // We only need to check the fields shared by both region requirements
+      std::set<FieldID> intersection_fields;
+      if (req1.privilege_fields.size() <= req2.privilege_fields.size())
+      {
+        for (std::set<FieldID>::const_iterator it = 
+              req1.privilege_fields.begin(); it != 
+              req1.privilege_fields.end(); it++)
+        {
+          if (req2.privilege_fields.find(*it) != req2.privilege_fields.end())
+            intersection_fields.insert(*it);
+        }
+      }
+      else
+      {
+        for (std::set<FieldID>::const_iterator it = 
+              req2.privilege_fields.begin(); it != 
+              req2.privilege_fields.end(); it++)
+        {
+          if (req1.privilege_fields.find(*it) != req1.privilege_fields.end())
+            intersection_fields.insert(*it);
+        }
+      }
+      FieldSpaceNode *node = get_node(req1.region.field_space);
+      FieldMask intersection_mask = node->get_field_mask(intersection_fields);
+      for (unsigned idx = 0; idx < inst1.size(); idx++)
+      {
+        const InstanceRef &ref = inst1[idx];
+        if (ref.is_composite_ref())
+          continue;
+        FieldMask overlap = intersection_mask & ref.get_valid_fields();
+        if (!overlap)
+          continue;
+        PhysicalManager *manager = ref.get_manager();
+        for (unsigned idx2 = 0; idx2 < inst2.size(); idx2++)
+        {
+          const InstanceRef &other = inst2[idx2];
+          if (other.is_composite_ref())
+            continue;
+          // If they are not the same instance we can keep going
+          if (manager != other.get_manager())
+            continue;
+          // There is only one of these in the set
+          if (!(overlap - other.get_valid_fields()))
+          {
+            // Dominated all the fields, so we can remove them
+            intersection_mask -= overlap;
+          }
+          else // We didn't dominate all the fields, so no good
+              return false;
+          break;
+        }
+        // If we've satisfied all the fields then we are done early
+        if (!intersection_mask)
+          break;
+      }
+      // If we satisfied all the fields then we are good
+      return (!intersection_mask);
+    }
+
+    //--------------------------------------------------------------------------
     void RegionTreeForest::physical_traverse_path(RegionTreeContext ctx,
                                                   RegionTreePath &path,
                                                   const RegionRequirement &req,

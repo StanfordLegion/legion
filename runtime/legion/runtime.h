@@ -2653,6 +2653,9 @@ namespace Legion {
       static inline void trigger_event(UserEvent to_trigger,
                                        Event precondition = Event::NO_EVENT);
       template<bool META>
+      static inline void phase_barrier_arrive(PhaseBarrier bar, unsigned cnt,
+                                       Event precondition = Event::NO_EVENT);
+      template<bool META>
       static inline Event acquire_reservation(Reservation r, bool exclusive,
                                        Event precondition = Event::NO_EVENT);
       template<bool META>
@@ -2872,6 +2875,19 @@ namespace Legion {
 #ifdef LEGION_SPY
       if (!META && precondition.exists())
         LegionSpy::log_event_dependence(precondition, to_trigger);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    template<bool META>
+    /*static*/ inline void Runtime::phase_barrier_arrive(PhaseBarrier bar,
+                                             unsigned count, Event precondition)
+    //--------------------------------------------------------------------------
+    {
+      bar.phase_barrier.arrive(count, precondition);
+#ifdef LEGION_SPY
+      if (!META && precondition.exists())
+        LegionSpy::log_event_dependence(precondition, bar.phase_barrier);
 #endif
     }
 
