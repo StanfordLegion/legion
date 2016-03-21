@@ -1019,6 +1019,14 @@ namespace LegionRuntime {
        */
       template<typename T>
       static inline Future from_value(Runtime *rt, const T &value);
+
+      /**
+       * Generates a future from an untyped pointer.  No
+       * serialization is performed.
+       */
+      static inline Future from_untyped_pointer(Runtime *rt,
+						const void *buffer,
+						size_t bytes);
     private:
       void* get_untyped_result(void); 
     };

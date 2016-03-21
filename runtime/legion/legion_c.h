@@ -1646,6 +1646,16 @@ typedef int coord_t;
                             uint64_t value);
 
   /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see LegionRuntime::HighLevel::Future::from_value()
+   */
+  legion_future_t
+  legion_future_from_bytes(legion_runtime_t runtime,
+			   const void *buffer,
+			   size_t size);
+
+  /**
    * @param handle Caller must have ownership of parameter `handle`.
    *
    * @see LegionRuntime::HighLevel::Future::~Future()

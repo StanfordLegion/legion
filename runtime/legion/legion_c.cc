@@ -2464,6 +2464,22 @@ legion_future_from_uint64(legion_runtime_t runtime_,
   return CObjectWrapper::wrap(result);
 }
 
+/**
+ * @return Caller takes ownership of return value.
+ *
+ * @see LegionRuntime::HighLevel::Future::from_untyped_pointer()
+ */
+legion_future_t
+legion_future_from_bytes(legion_runtime_t runtime_,
+			 const void *buffer,
+			 size_t size)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+
+  Future *result = new Future(Future::from_untyped_pointer(runtime, buffer, size));
+  return CObjectWrapper::wrap(result);
+}
+
 void
 legion_future_destroy(legion_future_t handle_)
 {

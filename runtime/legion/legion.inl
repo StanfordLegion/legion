@@ -1288,6 +1288,16 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    /*static*/ inline Future Future::from_untyped_pointer(Runtime *rt,
+							  const void *buffer,
+							  size_t bytes)
+    //--------------------------------------------------------------------------
+    {
+      return LegionSerialization::from_value_helper(rt, buffer, bytes,
+						    false /*!owned*/);
+    }
+
+    //--------------------------------------------------------------------------
     template<typename T>
     inline T FutureMap::get_result(const DomainPoint &dp)
     //--------------------------------------------------------------------------
