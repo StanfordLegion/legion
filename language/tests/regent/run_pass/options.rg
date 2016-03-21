@@ -12,7 +12,12 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
+-- runs-with:
+-- [["-ll:cpu", "4"]]
+
 import "regent"
+
+-- This tests the parser with multiple options on a single statement.
 
 task inc(r : region(int), y : int)
 where reads writes(r) do
@@ -27,6 +32,7 @@ task main()
   var x1 = new(ptr(int, r))
   var x2 = new(ptr(int, r))
   var x3 = new(ptr(int, r))
+  var p = partition(equal, r, ispace(int1d, 3, 0))
 
   @x0 = 1
   @x1 = 2
@@ -35,25 +41,16 @@ task main()
 
   var t = 0
 
-  __demand(__trace)
-  while t < 2 do
-    inc(r, 10)
-    t += 1
-  end
-
-  __demand(__trace)
-  for i = 0, 3 do
-    inc(r, 100)
-  end
-
-  __demand(__trace)
+  __demand(__spmd, __trace)
   do
-    inc(r, 1000)
+    for i = 0, 3 do
+      inc(p[i], 100)
+    end
   end
 
-  regentlib.assert(@x0 == 1321, "test failed")
-  regentlib.assert(@x1 == 1322, "test failed")
-  regentlib.assert(@x2 == 1323, "test failed")
-  regentlib.assert(@x3 == 1325, "test failed")
+  regentlib.assert(@x0 == 101, "test failed")
+  regentlib.assert(@x1 == 102, "test failed")
+  regentlib.assert(@x2 == 103, "test failed")
+  regentlib.assert(@x3 == 105, "test failed")
 end
 regentlib.start(main)

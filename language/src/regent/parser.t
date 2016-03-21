@@ -50,7 +50,7 @@ function parser.option_values(p)
   end
 end
 
-function parser.option_name(p)
+function parser.option_name(p, required)
   if p:nextif("__cuda") then
     local values = p:option_values()
     return "cuda", values
@@ -64,7 +64,7 @@ function parser.option_name(p)
     return "trace"
   elseif p:nextif("__vectorize") then
     return "vectorize"
-  else
+  elseif required then
     p:error("expected option name")
   end
 end
@@ -77,18 +77,27 @@ function parser.options(p, allow_expr, allow_stat)
   if not level then return options end
 
   p:expect("(")
-  local name = p:option_name()
+  local name = p:option_name(true)
   options = options { [name] = level }
 
-  if allow_expr and p:nextif(",") then
-    local expr = p:expr()
-    p:expect(")")
-    return expr { options = options }
-  elseif allow_stat then
+  while p:nextif(",") do
+    local name = p:option_name(false)
+    if name then
+      options = options { [name] = level }
+    elseif allow_expr then
+      local expr = p:expr()
+      p:expect(")")
+      return expr { options = options }
+    end
+  end
+
+  if allow_stat then
     p:expect(")")
     return options
   else
-    -- throw an error if this was supposed to be an expression.
+    assert(allow_expr)
+    -- Fail: This was supposed to be an expression, but we never saw
+    -- the expression clause.
     p:expect(",")
   end
 end
