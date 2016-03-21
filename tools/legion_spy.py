@@ -60,6 +60,12 @@ DELETION_OP_KIND = 10
 DEP_PART_OP_KIND = 11
 PENDING_PART_OP_KIND = 12
 
+OPEN_NONE = 0
+OPEN_READ_ONLY = 1
+OPEN_READ_WRITE = 2
+OPEN_SINGLE_REDUCE = 3
+OPEN_MULTI_REDUCE = 4
+
 OpNames = [
 "Unknown Kind",
 "Single Task",
@@ -76,6 +82,45 @@ OpNames = [
 "Pending Partition Op",
 ]
 
+def check_for_anti_dependence(req1, req2, actual):
+    if req1.is_read_only():
+        assert req2.has_write()
+        return ANTI_DEPENDENCE
+    else:
+        if req2.is_write_only():
+            return ANTI_DEPENDENCE
+        else:
+            return actual
+
+def compute_dependence_type(req1, req2):
+    if req1.is_no_access() or req2.is_no_access():
+        return NO_DEPENDENCE
+    elif req1.is_read_only() and req2.is_read_only():
+        return NO_DEPENDENCE
+    elif req1.is_reduce() and req2.is_reduce():
+        if req1.redop == req2.redop:
+            return NO_DEPENDENCE
+        else:
+            return TRUE_DEPENDENCE
+    else:
+        assert req1.has_write() or req2.has_write() 
+        if req1.is_exclusive() or req2.is_exclusive():
+            return check_for_anti_dependence(req1,req2,TRUE_DEPENDENCE)
+        elif req1.is_atomic() or req2.is_atomic():
+            if req1.is_atomic() and req2.is_atomic():
+                return check_for_anti_dependence(req1,req1,ATOMIC_DEPENDENCE)
+            elif (((not req1.is_atomic()) and req1.is_read_only()) or 
+                  ((not req2.is_atomic()) and req2.is_read_only())):
+                return NO_DEPENDENCE
+            else:
+                return check_for_anti_dependence(req1,req2,TRUE_DEPENDENCE)
+        elif req1.is_simult() or req2.is_simult():
+            return SIMULTANEOUS_DEPENDENCE
+        elif req1.is_relaxed() and req2.is_relaxed():
+            return req1,req2,SIMULTANEOUS_DEPENDENCE
+        # Should never get here
+        assert False
+        return NO_DEPENDENCE
 
 class Point(object):
     __slots__ = ['dim', 'values']
@@ -237,6 +282,16 @@ class IndexSpace(object):
 
     __repr__ = __str__
 
+    def are_all_children_disjoint(self):
+        return False
+
+    def are_children_disjoint(self, c1, c2):
+        if self.independent_children is None:
+            return False
+        if (c1,c2) in self.independent_children:
+            return True
+        return False
+
     def print_link_to_parent(self, printer, parent):
         printer.println(parent+' -> '+ self.node_name+
                 " [style=solid,color=black,penwidth=2];")
@@ -321,6 +376,18 @@ class IndexPartition(object):
             return self.name
 
     __repr__ = __str__
+
+    def are_all_children_disjoint(self):
+        return self.disjoint
+
+    def are_children_disjoint(self, c1, c2):
+        if self.disjoint:
+            return True
+        if self.independent_children is None:
+            return False
+        if (c1,c2) in self.independent_children:
+            return True
+        return False
 
     def print_link_to_parent(self, printer, parent):
         if self.disjoint:
@@ -448,6 +515,13 @@ class LogicalRegion(object):
 
     __repr__ = __str__
 
+    def are_all_children_disjoint(self):
+        return self.index_space.are_all_children_disjoint()
+
+    def are_children_disjoint(self, c1, c2):
+        return self.index_space.are_children_disjoint(c1.index_partition, 
+                                                      c2.index_partition)
+
     def reset_logical_state(self):
         if not not self.logical_state:
             self.logical_state = dict()
@@ -466,11 +540,18 @@ class LogicalRegion(object):
         assert self is path[depth]
         if field not in self.logical_state:
             self.logical_state[field] = LogicalState(self, field)
-        if not self.logical_state[field].perform_logical_analysis(op, req):
+        arrived = (depth+1) == len(path)
+        next_child = path[depth+1] if not arrived else None
+        if not self.logical_state[field].perform_logical_analysis(op, req, next_child):
             return False
-        if (depth+1) < len(path):
+        if not arrived:
             return path[depth+1].perform_logical_analysis(depth+1, path, op, req, field)
         return True
+
+    def close_logical_tree(self, field, closed_users):
+        if field not in self.logical_state:
+            return
+        self.logical_state[field].close_logical_tree(closed_users)
 
     def mark_named_children(self):
         if self.name is not None:
@@ -551,11 +632,18 @@ class LogicalPartition(object):
     def __str__(self):
         if self.name is None:
             return "Partition (%d,%d,%d)" % (self.index_partition.uid,
-                self.field_space.uid, self.tid)
+                self.field_space.uid, self.tree_id)
         else:
             return self.name
 
     __repr__ = __str__
+
+    def are_all_children_disjoint(self):
+        return self.index_partition.are_all_children_disjoint()
+
+    def are_children_disjoint(self, c1, c2):
+        return self.index_partition.are_children_disjoint(c1.index_space, 
+                                                          c2.index_space)
 
     def reset_logical_state(self):
         if not not self.logical_state:
@@ -575,11 +663,18 @@ class LogicalPartition(object):
         assert self is path[depth]
         if field not in self.logical_state:
             self.logical_state[field] = LogicalState(self, field)
-        if not self.logical_state[field].perform_logical_analysis(op, req):
+        arrived = (depth+1) == len(path)
+        next_child = path[depth+1] if not arrived else None
+        if not self.logical_state[field].perform_logical_analysis(op, req, next_child):
             return False
-        if (depth+1) < len(path):
+        if not arrived:
             return path[depth+1].perform_logical_analysis(depth+1, path, op, req, field)
         return True
+
+    def close_logical_tree(self, field, closed_users):
+        if field not in self.logical_state:
+            return
+        self.logical_state[field].close_logical_tree(closed_users)
 
     def mark_named_children(self):
         if self.name is not None:
@@ -632,12 +727,266 @@ class LogicalPartition(object):
 
 
 class LogicalState(object):
-    __slots__ = ['node', 'field']
+    __slots__ = ['node', 'field', 'open_mode', 'open_redop', 'open_children',
+                 'current_epoch_users', 'previous_epoch_users', 'redop']
     def __init__(self, node, field):
         self.node = node
         self.field = field
+        self.open_mode = OPEN_NONE
+        self.open_redop = 0 # for open children reductions
+        self.open_children = set()
+        self.current_epoch_users = list()
+        self.previous_epoch_users = list()
+        self.redop = 0 # for reductions being done at this node
 
-    def perform_logical_analysis(self, op, req):
+    def perform_logical_analysis(self, op, req, next_child):
+        # Figure out if we need to check close operations or not
+        arrived = next_child is None
+        projecting = op.kind is INDEX_TASK_KIND
+        if not arrived or not (projecting or req.is_write()):
+            if not self.siphon_logical_children(op, req, next_child):
+                return False
+        # Now do our analysis to figure out who we need to wait on locally
+        if not arrived or not projecting:
+            if not self.perform_epoch_analysis(op, req, arrived):
+                return False
+        if arrived and not projecting:
+            # If we are doing a write, register dependences on all
+            # open subtrees
+            if req.is_write() and self.open_children:
+                closed_users = list()
+                for child in self.open_children:
+                    child.close_logical_tree(self.field, closed_users)
+                for prev_op,prev_req in self.closed_users:
+                    if not op.has_mapping_dependence(req, prev_op, prev_req,
+                                                    TRUE_DEPENDENCE, self.field):
+                        return False
+                self.open_children = set()
+            # Add ourselves as the current user
+            self.current_epoch_users.append((op,req))
+            # Record if we have outstanding reductions
+            if req.redop is not 0:
+                self.redop = req.redop                
+        return True
+
+    def siphon_logical_children(self, op, req, next_child):
+        # First see if we have any reductions to flush 
+        if self.redop is not 0 and self.redop is not req.redop:
+            if not self.perform_close_operations(next_child, 
+                                                 False, # allow next
+                                                 False, # permit leave open
+                                                 op, req):
+                print "ERROR: %s failed to generate a close operation "+\
+                      str(op)+" for field "+str(self.field)+" of region "+\
+                      "requirement "+str(req.index)+" at region "+str(self.field)+\
+                      " in order to flush reductions with redop "+str(self.redop) 
+                return False
+        # Figure out what to do based on our open mode
+        if self.open_mode is OPEN_NONE:
+            # Only open if there is next child
+            if next_child is not None:
+                if req.is_read_only():
+                    self.open_mode = OPEN_READ_ONLY
+                elif req.is_write():
+                    self.open_mode = OPEN_READ_WRITE
+                else:
+                    assert req.redop is not 0
+                    self.open_mode = OPEN_SINGLE_REDUCE
+                    self.open_redop = req.redop
+        elif self.open_mode is OPEN_READ_ONLY:
+            # If this is not also read-only, do the close operations
+            if not req.is_read_only():
+                if not self.perform_close_operations(next_child,
+                                                     True, # allow next
+                                                     False, # permit leave open
+                                                     op, req):
+                    print "ERROR: %s failed to generate a close operation "+\
+                          "for field %s of region requirement %d at region %s "+\
+                          "in order to transition from a READ_ONLY state to "+\
+                          "a %s state" % (str(op), str(self.field), str(req.index),
+                              str(self.node), "READ_WRITE" if req.is_write() else
+                              "REDUCE")
+                    return False
+                # Upgrade the state
+                if req.is_write():
+                    self.open_mode = OPEN_READ_WRITE
+                else:
+                    self.open_mode = OPEN_SINGLE_REDUCE
+                    self.open_redop = req.redop
+        elif self.open_mode is OPEN_READ_WRITE:
+            if not self.perform_close_operations(next_child,
+                                                 True, # allow next
+                                                 False, # permit leave open
+                                                 op, req):
+                print "ERROR: %s failed to generate a close operation "+\
+                      "for field %s of region requirement %d at region %s "+\
+                      "in state READ_WRITE" % (str(op), str(self.field), 
+                          str(req.index), str(self.node))
+                return False
+            # See if we closed everything
+            if next_child is not None and self.open_mode is OPEN_NONE:
+                if req.is_read_only():
+                    self.open_mode = OPEN_READ_ONLY
+                elif req.is_write():
+                    self.open_mode = OPEN_READ_WRITE
+                else:
+                    assert req.redop is not 0
+                    self.open_mode = OPEN_SINGLE_REDUCE
+                    self.open_redop = req.redop
+        elif self.open_mode is OPEN_SINGLE_REDUCE:
+            if req.redop is self.open_redop:
+                # Same reduction mode, see if we need to transition 
+                if next_child is not None and next_child not in self.open_children:
+                    # See if the new child overlaps with any children 
+                    # if it does we have to go to multi reduce
+                    for child in self.open_children:
+                        if not self.node.are_children_disjoint(child, next_child):
+                            self.open_mode = OPEN_MULTI_REDUCE
+                            break
+            else:
+                # Different reduction operations, do the closes
+                if not self.perform_close_operations(next_child,
+                                                     True, # allow next
+                                                     False, # permit leave open
+                                                     op, req):
+                    print "ERROR: %s failed to generate a close operation "+\
+                          "for field %s of region requirement %d at region %s "+\
+                          "in state SINGLE_REDUCE" % (str(op), str(self.field),
+                              str(req.index), str(self.node))
+                    return False
+                # go to read write
+                if next_child is not None:
+                    self.open_mode = OPEN_READ_WRITE
+                    self.open_redop = 0
+        elif self.open_mode is OPEN_MULTI_REDUCE:
+            if req.redop is not self.open_redop:
+                if not self.perform_close_operations(next_child,
+                                                     False, # allow next
+                                                     False, # permit leave open
+                                                     op, req):
+                    print "ERROR: %s failed to generate a close operation "+\
+                          "for field %s of region requirement %d at region %s "+\
+                          "in state MULTI_REDUCE" % (str(op), str(self.field),
+                              str(req.index), str(self.node))
+                    return False
+                # See if we closed everything
+                if next_child is not None and self.open_mode is OPEN_NONE:
+                    if req.is_read_only():
+                        self.open_mode = OPEN_READ_ONLY
+                    elif req.is_write():
+                        self.open_mode = OPEN_READ_WRITE
+                    else:
+                        assert req.redop is not 0
+                        self.open_mode = OPEN_SINGLE_REDUCE
+                        self.open_redop = req.redop
+        else:
+            assert False # Very bad
+        # if we made it this far and we have a next child, record it as open
+        if next_child is not None:
+            assert self.open_mode is not OPEN_NONE
+            self.open_children.add(next_child)
+        else:
+            self.open_mode = OPEN_NONE
+            self.open_redop = 0
+        return True
+
+    def perform_close_operations(self, next_child, allow_next, 
+                                 permit_leave_open, op, req):
+        if next_child is not None and self.node.are_all_children_disjoint():
+            if not allow_next and next_child in self.open_children: 
+                # We actually need to do the close, get the close operation
+                close = op.get_close_operation(req, self.node, self.field)
+                if close is None:
+                    return False
+                assert close.kind == CLOSE_OP_KIND
+                closed_users = list()
+                next_child.close_logical_tree(self.field, closed_users)
+                close_req = close.reqs[0]
+                for prev_op,prev_req in closed_users:
+                    if not close.has_mapping_dependence(close_req, prev_op, 
+                                    prev_req, TRUE_DEPENDENCE, self.field):
+                        print "ERROR: close operation %s generated by "+\
+                              "region requirement %d of %s failed to find a "+\
+                              "mapping dependence on previous operation %s."\
+                              % (str(close_op), str(req.index), str(op), str(prev_op))
+                        return False
+                # Now do the dependence analysis to put the close op in
+                # our set of current epoch users
+                self.perform_epoch_analysis(close, close_req, True)
+                self.open_children.remove(next_child)
+        else:
+            close = None
+            closed_users = None
+            to_remove = list()
+            for child in self.open_children:
+                if allow_next and next_child is not None and child is next_child:
+                    continue
+                if next_child is not None and self.node.are_children_disjoint(
+                                                              child, next_child):
+                    continue
+                if close is None:
+                    close = op.get_close_operation(req, self.node, self.field)
+                    if close is None:
+                        return False
+                    closed_users = list()
+                child.close_logical_tree(self.field, closed_users)
+                if not permit_leave_open:
+                    to_remove.append(child)
+            if close is not None:
+                close_req = close.reqs[0]
+                for prev_op,prev_req in closed_users:
+                    if not close.has_mapping_dependence(close_req, prev_op, 
+                                    prev_req, TRUE_DEPENDENCE, self.field):
+                        print "ERROR: close operation %s generated by "+\
+                              "region requirement %d of %s failed to find a "+\
+                              "mapping dependence on previous operation %s."\
+                              % (str(close_op), str(req.index), str(op), str(prev_op))
+                        return False
+                # Now do the dependence analysis to put the close op in
+                # our set of current epoch users
+                self.perform_epoch_analysis(close, close_req, True)
+            for child in to_remove:
+                self.open_children.remove(child)
+        if not self.open_children:
+            self.open_mode = OPEN_NONE
+            self.open_redop = 0
+        return True
+
+    def close_logical_tree(self, closed_users):
+        # Save the closed users and then close the subtrees
+        closed_users += self.current_epoch_users
+        self.current_epoch_users = list()
+        self.previous_epoch_users = list()
+        for child in self.open_children:
+            child.close_logical_tree(self.field, closed_users)
+        self.open_children = set()
+        self.open_mode = OPEN_NONE
+        self.open_redop = 0
+        self.redop = 0
+        
+    def perform_epoch_analysis(self, op, req, can_dominate):
+        dominates = True
+        # Check the current users first
+        for pop,preq in self.current_epoch_users:
+            dep_type = compute_dependence_type(preq, req) 
+            if dep_type is NO_DEPENDENCE:
+                dominates = False
+                continue
+            # Check to see if it has the mapping dependence
+            if not op.has_mapping_dependence(req, pop, preq, dep_type, self.field):
+                return False
+        if not dominates:
+            for pop,preq in self.previous_epoch_users:
+                dep_type = compute_dependence_type(preq, req)
+                if dep_type is NO_DEPENDENCE:
+                    continue
+                if not op.has_mapping_dependence(req, pop, preq, dep_type, self.field):
+                    return False
+        if can_dominate and dominates:
+            # Filter back the users
+            self.previous_epoch_users = self.current_epoch_users
+            self.current_epoch_users = list()
+            self.redop = 0 # no more reductions in the current list
         return True
 
 
@@ -789,6 +1138,7 @@ class MappingDependence(object):
         self.op2 = op2
         self.idx1 = idx1
         self.idx2 = idx2
+        self.dtype = dtype
 
     def __eq__(self,other):
         return (self.op1 is other.op1) and \
@@ -805,11 +1155,20 @@ class MappingDependence(object):
 
     __repr__ = __str__
 
+    def print_dataflow_edge(self, printer, previous_pairs):
+        pair = (self.op1,self.op2)
+        if pair not in previous_pairs:
+            printer.println(self.op1.node_name+' -> '+self.op2.node_name+
+                            ' [style=solid,color=black,penwidth=2];')
+            previous_pairs.add(pair)
         
 class Operation(object):
     __slots__ = ['state', 'uid', 'kind', 'context', 'name', 'reqs', 'mappings', 
-                 'incoming', 'outgoing', 'start_event', 'finish_event', 'task_id', 
-                 'points', 'creator', 'partition_kind', 'partition_node']
+                 'incoming', 'outgoing', 'logical_incoming', 'logical_outgoing',
+                 'physical_incoming', 'physical_outgoing', 'start_event', 
+                 'finish_event', 'close_ops', 'task', 'task_id', 'points', 
+                 'creator', 'close_idx', 'partition_kind', 'partition_node', 
+                 'node_name', 'cluster_name', 'generation']
     def __init__(self, state, uid):
         self.state = state
         self.uid = uid
@@ -818,19 +1177,30 @@ class Operation(object):
         self.name = None
         self.reqs = None
         self.mappings = None
-        self.incoming = None
-        self.outgoing = None
+        self.incoming = None # Mapping dependences
+        self.outgoing = None # Mapping dependences
+        self.logical_incoming = None # Operation dependences
+        self.logical_outgoing = None # Operation dependences
+        self.physical_incoming = set() # op/realm
+        self.physical_outgoing = set() # op/realm
         self.start_event = state.get_no_event() 
         self.finish_event = state.get_no_event()
+        self.close_ops = None
         # Only valid for tasks
+        self.task = None
         self.task_id = -1
         # Only valid for index tasks
         self.points = None
         # Only valid for close operations
         self.creator = None
+        self.close_idx = -1
         # Only valid for pending partition operations
         self.partition_kind = None
         self.partition_node = None
+        self.node_name = 'op_node_'+str(uid)
+        self.cluster_name = None 
+        # For traversals
+        self.generation = 0
 
     def set_name(self, name):
         self.name = name
@@ -848,6 +1218,9 @@ class Operation(object):
 
     def set_context(self, context, add=True):
         self.context = context
+        if self.points is not None:
+            for point in self.points.itervalues():
+                point.op.set_context(context, False)
         if add:
           self.context.add_operation(self)
 
@@ -858,6 +1231,10 @@ class Operation(object):
             assert self.kind is kind
 
     def set_events(self, start, finish):
+        if start.exists():
+            start.add_outgoing_op(self)
+        if finish.exists():
+            finish.add_incoming_op(self)
         self.start_event = start
         self.finish_event = finish
 
@@ -865,9 +1242,31 @@ class Operation(object):
         assert self.kind == SINGLE_TASK_KIND or self.kind == INDEX_TASK_KIND
         self.task_id = task_id
 
-    def set_creator(self, creator):
+    def set_creator(self, creator, idx):
         assert self.kind == CLOSE_OP_KIND
         self.creator = creator
+        self.close_idx = idx
+        creator.add_close_operation(self)
+
+    def add_close_operation(self, close):
+        if self.close_ops is None:
+            self.close_ops = set()
+        self.close_ops.add(close)
+
+    def get_close_operation(self, req, node, field):
+        if self.close_ops is None:
+            return None
+        for close in self.close_ops:
+            if close.close_idx <> req.index:
+                continue
+            assert len(close.reqs) == 1
+            close_req = close.reqs[0]
+            if close_req.logical_node is not node:
+                continue
+            if field not in close_req.fields:
+                continue 
+            return close
+        return None
 
     def set_pending_partition_info(self, node, kind):
         assert self.kind == PENDING_PART_OP_KIND
@@ -886,6 +1285,8 @@ class Operation(object):
                                               self.points[index_point])
         else:
             self.points[index_point] = point
+        if self.context is not None:
+            point.op.set_context(self.context, False)
 
     def add_requirement(self, requirement):
         if self.reqs is None:
@@ -910,12 +1311,44 @@ class Operation(object):
         if self.incoming is None:
             self.incoming = set()
         self.incoming.add(dep)
+        if self.logical_incoming is None:
+            self.logical_incoming = set()
+        self.logical_incoming.add(dep.op1)
 
     def add_outgoing(self, dep):
         assert dep.op1 == self
         if self.outgoing is None:
             self.outgoing = set()
         self.outgoing.add(dep)
+        if self.logical_outgoing is None:
+            self.logical_outgoing = set()
+        self.logical_outgoing.add(dep.op2)
+
+    def get_logical_reachable(self, reachable, forward):
+        if self in reachable:
+            return True
+        reachable.add(self)
+        if forward:
+            if self.logical_outgoing is None:
+                return
+            for op in self.logical_outgoing:
+                op.get_logical_reachable(reachable, True)
+        else:
+            if self.logical_incoming is None:
+                return
+            for op in self.logical_incoming:
+                op.get_logical_reachable(reachable, False)
+
+    def get_physical_reachable(self, reachable, forward):
+        if self in reachable:
+            return True
+        reachable.add(self)
+        if forward:
+            for op in self.physical_outgoing:
+                op.get_physical_reachable(reachable, True)
+        else:
+            for op in self.physical_incoming:
+                op.get_physical_reachable(reachable, False)
 
     def merge(self, other):
         if self.kind == NO_OP_KIND:
@@ -940,11 +1373,68 @@ class Operation(object):
         assert not self.points
         assert not other.points
 
+    def compute_physical_reachable(self):
+        # We can skip some of these
+        if not self.is_physical_operation() or self.kind is INDEX_TASK_KIND:
+            return
+        # Once we reach something that is not an event
+        # then we record it and return
+        def traverse_node(node, traverser):
+            if not node.is_physical_operation():
+                return True 
+            traverser.reachable.add(node)
+            return False
+        if self.start_event.exists():
+            traverser = EventGraphTraverser(False, True,
+                self.state.get_next_traversal_generation(),
+                None, traverse_node, traverse_node, traverse_node)
+            traverser.reachable = self.physical_incoming
+            traverser.visit_event(self.start_event)
+            # Keep everything symmetric
+            for other in self.physical_incoming:
+                other.physical_outgoing.add(self)
+        if self.finish_event.exists():
+            traverser = EventGraphTraverser(True, True,
+                self.state.get_next_traversal_generation(),
+                None, traverse_node, traverse_node, traverse_node)
+            traverser.reachable = self.physical_outgoing
+            traverser.visit_event(self.finish_event)
+            # Keep everything symmetric
+            for other in self.physical_outgoing:
+                other.physical_incoming.add(self)
+
+    def perform_cycle_check(self):
+        def traverse_node(node, traverser):
+            if node is traverser.origin:
+                traverser.cycle = True
+                print "CYCLE DETECTED!"
+                for n in traverser.stack:
+                    print str(n)
+                print str(node)
+                return False
+            if traverser.cycle:
+                return False
+            traverser.stack.append(node)
+            return True
+        def post_traverse(node, traverser):
+            assert traverser.stack
+            traverser.stack.pop()
+        traverser = EventGraphTraverser(False, True,
+            self.state.get_next_traversal_generation(),
+            None, traverse_node, traverse_node, traverse_node,
+            None, post_traverse, post_traverse, post_traverse)
+        traverser.origin = self
+        traverser.cycle = False
+        traverser.stack = list()
+        traverser.visit_event(self.start_event)
+        return traverser.cycle
+
     def perform_logical_analysis(self):
         if self.reqs is None:
             return True
         # We need a context to do this
         assert self.context is not None
+        # TODO: check restricted coherence too
         success = True
         for idx,req in self.reqs.iteritems():
             # Special out for no access
@@ -963,15 +1453,129 @@ class Operation(object):
             if not success:
                 break
         return success
-        
+
+    def has_mapping_dependence(self, req, prev_op, prev_req, dtype, field):
+        for dep in self.incoming:
+            if dep.op1 is not prev_op:
+                continue
+            if dep.idx1 is not prev_req.index:
+                continue
+            if dep.idx2 is not req.index:
+                continue
+            if dep.dtype is not dtype:
+                continue
+            # We found a good mapping dependence, so all is good
+            return True
+        # Issue the error and return false
+        print "ERROR: Missing mapping dependence on %s between requirement %d of %s and region requirement %d of %s" % (str(field), prev_req.index, str(prev_op), req.index, str(self))
+        return False
+
+    def get_color(self):
+        return {
+            NO_OP_KIND : "white",
+            SINGLE_TASK_KIND : "lightskyblue",
+            INDEX_TASK_KIND : "mediumslateblue",
+            MAP_OP_KIND : "mediumseagreen",
+            CLOSE_OP_KIND : "orangered", 
+            FENCE_OP_KIND : "darkorchid2",
+            COPY_OP_KIND : "darkgoldenrod3",
+            FILL_OP_KIND : "darkorange1",
+            ACQUIRE_OP_KIND : "darkolivegreen",
+            RELEASE_OP_KIND : "darksalmon",
+            DELETION_OP_KIND : "dodgerblue3",
+            DEP_PART_OP_KIND : "steelblue",
+            PENDING_PART_OP_KIND : "honeydew",
+            }[self.kind]
+
+    def print_base_node(self, printer, dataflow):
+        title = str(self)+' (UID: '+str(self.uid)+')'
+        if self.task is not None and self.task.point.dim > 0:
+            title += ' Point: ' + self.task.point.to_string()
+        label = printer.generate_html_op_label(title, self.reqs,
+                                       self.mappings if not dataflow else None,
+                                       self.get_color(), self.state.verbose)
+        printer.println(self.node_name+' [label=<'+label+'>,fontsize=14,'+\
+                'fontcolor=black,shape=record,penwidth=0];')
+
+    def print_dataflow_node(self, printer):
+        self.print_base_node(printer, True) 
+
+    def print_incoming_dataflow_edges(self, printer, previous):
+        if self.incoming is None:
+            return
+        for dep in self.incoming:
+            dep.print_dataflow_edge(printer, previous)
+
+    def print_event_node(self, printer):
+        self.print_base_node(printer, False)
+
+    def print_event_graph(self, printer, elevate, top):
+        # Handle index space operations specially, everything
+        # else is the same
+        if self.kind is INDEX_TASK_KIND:
+            assert self.points is not None
+            for point in self.points.itervalues():
+                point.op.print_event_graph(printer, elevate, False)
+            return
+        # If this is a single task, recurse and generate our subgraph first
+        if self.kind is SINGLE_TASK_KIND:
+            # Get our corresponding task
+            task = self.state.get_task(self.uid)   
+            task.print_event_graph_context(printer, elevate, top)
+        if self.is_physical_operation():
+            # Finally put ourselves in the set if we are a physical operation
+            assert self.context is not None
+            elevate[self] = self.context
+            # Look through all our incoming set and find all the
+            # realm operations and add them if we haven't already done so
+            for prev in self.physical_incoming:
+                if prev not in elevate and prev.is_realm_operation():
+                    elevate[prev] = prev.get_context()
+
+    def is_realm_operation(self):
+        return False
+
+    def is_physical_operation(self):
+        if self.kind is CLOSE_OP_KIND:
+            return False
+        if self.kind is COPY_OP_KIND:
+            return False
+        if self.kind is FENCE_OP_KIND:
+            return False
+        if self.kind is DELETION_OP_KIND:
+            return False
+        return True
+
+    def print_incoming_event_edges(self, printer):
+        if self.cluster_name is not None:
+            for src in self.physical_incoming:
+                if src.cluster_name is not None:
+                    printer.println(src.node_name+' -> '+self.node_name+
+                            ' [ltail='+src.cluster_name+',lhead='+
+                            self.cluster_name+',style=solid,color=black,'+
+                            'penwidth=2];')
+                else:
+                    printer.println(src.node_name+' -> '+dst.node_name+
+                            ' [lhead='+self.cluster_name+',style=solid,'+
+                            'color=black,penwidth=2];')
+        else:
+            for src in self.physical_incoming:
+                if src.cluster_name is not None:
+                    printer.println(src.node_name+' -> '+self.node_name+
+                            ' [ltail='+src.cluster_name+',style=solid,'+
+                            'color=black,penwidth=2];')
+                else:
+                    printer.println(src.node_name+' -> '+self.node_name+
+                            ' [style=solid,color=black,penwidth=2];')
 
 class Task(object):
-    __slots__ = ['op', 'point', 'operations', 'top']
+    __slots__ = ['op', 'point', 'operations', 'depth']
     def __init__(self, state, op):
         self.op = op
-        self.point = Point(0)
+        self.op.task = self
+        self.point = Point(0) 
         self.operations = list()
-        self.top = False
+        self.depth = None
 
     def __str__(self):
         return str(self.op)
@@ -983,6 +1587,16 @@ class Task(object):
 
     def set_point(self, point):
         self.point = point
+
+    def get_parent_context(self):
+        assert self.op.context is not None
+        return self.op.context
+
+    def get_depth(self):
+        if self.depth is None:
+            assert self.op.context is not None
+            self.depth = self.get_parent_context().get_depth() + 1
+        return self.depth
 
     def merge(self, other):
         if self.task_id == -1:
@@ -1021,8 +1635,92 @@ class Task(object):
             return True
         success = True
 
-        return success
+        return success 
 
+    def print_dataflow_graph(self, path, simplify_graphs):
+        if len(self.operations) < 2:
+            return 0
+        name = str(self)
+        filename = 'dataflow_'+name.replace(' ', '_')+'_'+str(self.op.uid)
+        printer = GraphPrinter(path,filename)
+        # First emit the nodes
+        for op in self.operations:
+            op.print_dataflow_node(printer)
+        # Simplify our graph if necessary
+        if simplify_graphs:
+            print "Simplifying dataflow graph for "+str(self)+"..."
+            for src in reversed(self.operations):
+                if src.logical_outgoing is None:
+                    continue
+                actual_out = src.logical_outgoing.copy()
+                diff = False
+                for next_vert in src.logical_outgoing:
+                    if not next_vert in actual_out:
+                        continue
+                    reachable = set()
+                    next_vert.get_logical_reachable(reachable, True)
+                    # See which edges we can remove
+                    to_remove = list()
+                    for other in actual_out:
+                        if other == next_vert:
+                            continue
+                        if other in reachable:
+                            to_remove.append(other)
+                    del reachable
+                    if len(to_remove) > 0:
+                        diff = True
+                        for rem in to_remove:
+                            actual_out.remove(rem)
+                            rem.logical_incoming.remove(src)
+                    del to_remove
+                if diff:
+                    src.logical_outgoing = actual_out
+                for dst in actual_out:
+                    printer.println(src.node_name+' -> '+dst.node_name+
+                                    ' [style=solid,color=black,penwidth=2];')
+            print "Done"
+        else:
+            previous_pairs = set()
+            for op in self.operations:
+                op.print_incoming_dataflow_edges(printer, previous_pairs)
+        printer.print_pdf_after_close(False)
+        # We printed our dataflow graph
+        return 1
+
+    def print_event_graph_context(self, printer, elevate, top):
+        if not self.operations:
+            return 
+        if not top:
+            # Start the cluster 
+            title = str(self)+' (UID: '+str(self.op.uid)+')'
+            if self.point.dim > 0:
+                title += ' Point: ' + self.point.to_string()
+            label = printer.generate_html_op_label(title, self.op.reqs,
+                                                   self.op.mappings,
+                                                   self.op.get_color(), 
+                                                   self.op.state.verbose)
+            self.op.cluster_name = printer.start_new_cluster(label)
+            # Make an invisible node for this cluster
+            printer.println(self.op.node_name + ' [shape=point,style=invis];')
+        # Generate the sub-graph
+        for op in self.operations:
+            op.print_event_graph(printer, elevate, False)
+        # Find our local nodes
+        local_nodes = list()
+        for node,context in elevate.iteritems():
+            if context is self:
+                local_nodes.append(node)
+                node.print_event_node(printer)
+        # Print the edges
+        for op in local_nodes:
+            op.print_incoming_event_edges(printer)
+        # Remove our nodes from elevate
+        for node in local_nodes:
+            del elevate[node] 
+        if not top:
+            # End the cluster
+            printer.end_this_cluster()
+          
 class Instance(object):
     __slots__ = ['state', 'handle', 'memory', 'region', 'fields', 'redop']
     def __init__(self, state, handle):
@@ -1078,13 +1776,26 @@ class EventHandle(object):
         return (self.uid <> 0)
 
 class Event(object):
-    __slots__ = ['state', 'handle', 'phase_barrier', 'incoming', 'outgoing' ]
+    __slots__ = ['state', 'handle', 'phase_barrier', 'incoming', 'outgoing',
+                 'incoming_ops', 'outgoing_ops', 'incoming_fills', 'outgoing_fills',
+                 'incoming_copies', 'outgoing_copies', 'generation']
     def __init__(self, state, handle):
         self.state = state
         self.handle = handle
         self.phase_barrier = False
         self.incoming = None
         self.outgoing = None
+        self.incoming_ops = None
+        self.outgoing_ops = None
+        self.incoming_fills = None
+        self.outgoing_fills = None
+        self.incoming_copies = None
+        self.outgoing_copies = None
+        # For traversals
+        self.generation = 0
+
+    def exists(self):
+        return self.handle.uid > 0
 
     def __str__(self):
         return str(self.handle)
@@ -1101,29 +1812,204 @@ class Event(object):
             self.outgoing = set()
         self.outgoing.add(nex)
 
-class RealmCopy(object):
-    __slots__ = ['state', 'creator', 'region', 'start_event', 'finish_event',
-                 'src_fields', 'dst_fields', 'srcs', 'dsts', 'redops']
-    def __init__(self, state, finish):
+    def add_incoming_op(self, op):
+        if self.incoming_ops is None:
+            self.incoming_ops = set()
+        self.incoming_ops.add(op)
+
+    def add_outgoing_op(self, op):
+        if self.outgoing_ops is None:
+            self.outgoing_ops = set()
+        self.outgoing_ops.add(op)
+
+    def add_incoming_fill(self, fill):
+        if self.incoming_fills is None:
+            self.incoming_fills = set()
+        self.incoming_fills.add(fill)
+
+    def add_outgoing_fill(self, fill):
+        if self.outgoing_fills is None:
+            self.outgoing_fills = set()
+        self.outgoing_fills.add(fill)
+
+    def add_incoming_copy(self, copy):
+        if self.incoming_copies is None:
+            self.incoming_copies = set()
+        self.incoming_copies.add(copy)
+
+    def add_outgoing_copy(self, copy):
+        if self.outgoing_copies is None:
+            self.outgoing_copies = set()
+        self.outgoing_copies.add(copy)
+
+class RealmBase(object):
+    __slots__ = ['state', 'creator', 'region', 'start_event', 'finish_event', 
+                 'physical_incoming', 'physical_outgoing', 'generation', 'context', 
+                 'cluster_name']
+    def __init__(self, state):
         self.state = state
         self.creator = None
         self.region = None
+        self.physical_incoming = set()
+        self.physical_outgoing = set()
         self.start_event = state.get_no_event()
+        self.finish_event = state.get_no_event()
+        self.generation = 0
+        self.context = None
+        self.cluster_name = None # always none
+
+    def set_creator(self, creator):
+        self.creator = creator
+
+    def set_region(self, region):
+        self.region = region
+
+    def is_realm_operation(self):
+        return True
+
+    def is_physical_operation(self):
+        return True
+
+    def compute_physical_reachable(self):
+        # Once we reach something that is not an event
+        # then we record it and return
+        def traverse_node(node, traverser):
+            if not node.is_physical_operation():
+                return True
+            traverser.reachable.add(node)
+            return False
+        if self.start_event.exists():
+            traverser = EventGraphTraverser(False, True,
+                self.state.get_next_traversal_generation(),
+                None, traverse_node, traverse_node, traverse_node)
+            traverser.reachable = self.physical_incoming
+            traverser.visit_event(self.start_event)
+            # Keep everything symmetric
+            for other in self.physical_incoming:
+                other.physical_outgoing.add(self)
+        if self.finish_event.exists():
+            traverser = EventGraphTraverser(True, True,
+                self.state.get_next_traversal_generation(),
+                None, traverse_node, traverse_node, traverse_node)
+            traverser.reachable = self.physical_outgoing
+            traverser.visit_event(self.finish_event)
+            # Keep everything symmetric
+            for other in self.physical_outgoing:
+                other.physical_incoming.add(self)
+
+    def perform_cycle_check(self):
+        def traverse_node(node, traverser):
+            if node is traverser.origin:
+                traverser.cycle = True
+                print "CYCLE DETECTED!"
+                for n in traverser.stack:
+                    print str(n)
+                print str(node)
+                return False
+            if traverser.cycle:
+                return False
+            traverser.stack.append(node)
+            return True
+        def post_traverse(node, traverser):
+            assert traverser.stack
+            traverser.stack.pop()
+        traverser = EventGraphTraverser(False, True,
+            self.state.get_next_traversal_generation(),
+            None, traverse_node, traverse_node, traverse_node,
+            None, post_traverse, post_traverse, post_traverse)
+        traverser.origin = self
+        traverser.cycle = False
+        traverser.stack = list()
+        traverser.visit_event(self.start_event)
+        return traverser.cycle
+
+    def get_physical_reachable(self, reachable, forward):
+        if self in reachable:
+            return True
+        reachable.add(self)
+        if forward:
+            for op in self.physical_outgoing:
+                op.get_physical_reachable(reachable, True)
+        else:
+            for op in self.physical_incoming:
+                op.get_physical_reachable(reachable, False)
+
+    def get_context(self):
+        if self.context is not None:
+            return self.context
+        # Find all the preceding and postceding operations and then
+        # find their common ancestor in the task hierarchy
+        def traverse_op(node, traverser):
+            traverser.ops.add(node)
+            return False
+        op_finder = EventGraphTraverser(True, True, 
+            self.state.get_next_traversal_generation(), None, traverse_op)
+        op_finder.ops = set()
+        if self.finish_event.exists():
+            op_finder.visit_event(self.finish_event)
+        if self.start_event.exists():
+            op_finder.forwards = False
+            op_finder.visit_event(self.start_event)
+        assert op_finder.ops # Better not be empty
+        result = None
+        for op in op_finder.ops:
+            assert op.context is not None
+            if result is not None:
+                if op.context is not result:
+                    # We have to do a merge
+                    result_depth = result.get_depth()
+                    other = op.context
+                    other_depth = other.get_depth()
+                    while result_depth > other_depth:
+                        result = result.get_parent_context()
+                        result_depth -= 1
+                    while other_depth > result_depth:
+                        other = other.get_parent_context()
+                        other_depth -= 1
+                    # As long as they are not the same keep going up
+                    while other is not result:
+                        result = result.get_parent_context()
+                        other = other.get_parent_context()
+            else:
+                result = op.context
+        assert result is not None
+        return result
+
+    def print_incoming_event_edges(self, printer):
+        for src in self.physical_incoming:
+            if src.cluster_name is not None:
+                printer.println(src.node_name+' -> '+self.node_name+
+                            ' [ltail='+src.cluster_name+',style=solid,'+
+                            'color=black,penwidth=2];')
+            else:
+                printer.println(src.node_name+' -> '+self.node_name+
+                        ' [style=solid,color=black,penwidth=2];')
+
+
+class RealmCopy(RealmBase):
+    __slots__ = ['start_event', 'finish_event', 'src_fields', 'dst_fields', 
+                 'srcs', 'dsts', 'redops', 'node_name']
+    def __init__(self, state, finish, realm_num):
+        RealmBase.__init__(self, state)
         self.finish_event = finish
+        if finish.exists():
+            finish.add_incoming_copy(self)
         self.src_fields = list()
         self.dst_fields = list()
         self.srcs = list()
         self.dsts = list()
         self.redops = list()
+        self.node_name = 'realm_copy_'+str(realm_num)
 
-    def set_creator(self, creator):
-        self.creator = creator
+    def __str__(self):
+        return self.node_name
+
+    __repr__ = __str__
 
     def set_start(self, start):
         self.start_event = start
-
-    def set_region(self, region):
-        self.region = region
+        if start.exists:
+            start.add_outgoing_copy(self) 
 
     def add_field(self, src_fid, src, dst_fid, dst, redop):
         assert self.region is not None
@@ -1135,26 +2021,57 @@ class RealmCopy(object):
         self.dsts.append(dst)
         self.redops.append(redop)
 
-class RealmFill(object):
-    __slots__ = ['state', 'creator', 'region', 'start_event', 'finish_event',
-                 'fields', 'dsts', ]
-    def __init__(self, state, finish):
-        self.state = state
-        self.creator = None
-        self.region = None
-        self.start_event = state.get_no_event()
+    def print_event_node(self, printer):
+        lines = [[{ "label" : "Realm Copy", "colspan" : 3 }]]
+        if self.state.verbose:
+            num_fields = len(self.src_fields)
+            first_field = True
+            for fidx in range(num_fields):
+                src_field = self.src_fields[fidx]
+                dst_field = self.dst_fields[fidx]
+                src_inst = self.srcs[fidx]
+                dst_inst = self.dsts[fidx]
+                line = []
+                line.append(str(src_field)+":"+str(src_inst))
+                line.append(' -> ')
+                line.append(str(dst_field)+":"+str(dst_inst))
+                if first_field:
+                    line.insert(0, {"label" : "Fields",
+                                    "rowspan" : num_fields})
+                    first_field = False
+                lines.append(line)
+        color = 'darkgoldenrod1'
+        for redop in self.redops:
+            if redop is not 0:
+                color = 'tomato'
+                break
+        size = 14
+        label = '<table border="0" cellborder="1" cellspacing="0" cellpadding="3" bgcolor="%s">' % color + \
+                "".join([printer.wrap_with_trtd(line) for line in lines]) + '</table>'
+        printer.println(self.node_name+' [label=<'+label+'>,fontsize='+str(size)+\
+                ',fontcolor=black,shape=record,penwidth=0];')
+
+
+class RealmFill(RealmBase):
+    __slots__ = ['fields', 'dsts', 'node_name']
+    def __init__(self, state, finish, realm_num):
+        RealmBase.__init__(self, state)
         self.finish_event = finish
+        if finish.exists():
+            finish.add_incoming_fill(self)
         self.fields = list()
         self.dsts = list()
+        self.node_name = 'realm_fill_'+str(realm_num)
 
-    def set_creator(self, creator):
-        self.creator = creator
+    def __str__(self):
+        return self.node_name
+
+    __repr__ = __str__
 
     def set_start(self, start):
         self.start_event = start
-
-    def set_region(self, region):
-        self.region = region
+        if start.exists():
+            start.add_outgoing_fill(self)
 
     def add_field(self, fid, dst):
         assert self.region is not None
@@ -1162,8 +2079,150 @@ class RealmFill(object):
         self.fields.append(field)
         self.dsts.append(dst)
 
+    def print_event_node(self, printer):
+        lines = [[{ "label" : "Realm Fill", "colspan" : 3 }]]
+        if self.state.verbose:
+            num_fields = len(self.fields)
+            first_field = True
+            for fidx in range(num_fields):
+                dst_field = self.fields[fidx]
+                dst_inst = self.dsts[fidx]
+                line = []
+                line.append(str(dst_field)+":"+str(dst_inst))
+                if first_field:
+                    line.insert(0, {"label" : "Fields",
+                                    "rowspan" : num_fields})
+                    first_field = False
+                lines.append(line)
+        color = 'chartreuse'
+        size = 14
+        label = '<table border="0" cellborder="1" cellspacing="0" cellpadding="3" bgcolor="%s">' % color + \
+                "".join([printer.wrap_with_trtd(line) for line in lines]) + '</table>'
+        printer.println(self.node_name+' [label=<'+label+'>,fontsize='+str(size)+\
+                ',fontcolor=black,shape=record,penwidth=0];')
+
+
+class EventGraphTraverser(object):
+    def __init__(self, forwards, use_gen, generation,
+                 event_fn = None, op_fn = None,
+                 copy_fn = None, fill_fn = None,
+                 post_event_fn = None, post_op_fn = None,
+                 post_copy_fn = None, post_fill_fn = None):
+        self.forwards = forwards
+        self.use_gen = use_gen
+        self.generation = generation
+        self.event_fn = event_fn
+        self.op_fn = op_fn
+        self.copy_fn = copy_fn
+        self.fill_fn = fill_fn
+        self.post_event_fn = post_event_fn
+        self.post_op_fn = post_op_fn
+        self.post_copy_fn = post_copy_fn
+        self.post_fill_fn = post_fill_fn
+
+    def visit_event(self, node):
+        if self.use_gen:
+            if node.generation == self.generation:
+                return
+            else:
+                node.generation = self.generation
+        do_next = True
+        if self.event_fn is not None:
+            do_next = self.event_fn(node, self)
+        if not do_next:
+            return
+        if self.forwards:
+            if node.outgoing is not None:
+                for event in node.outgoing:
+                    self.visit_event(event)
+            if node.outgoing_ops is not None:
+                for op in node.outgoing_ops:
+                    self.visit_op(op)
+            if node.outgoing_fills is not None:
+                for fill in node.outgoing_fills:
+                    self.visit_fill(fill)
+            if node.outgoing_copies is not None:
+                for copy in node.outgoing_copies:
+                    self.visit_copy(copy)
+        else:
+            if node.incoming is not None:
+                for event in node.incoming:
+                    self.visit_event(event)
+            if node.incoming_ops is not None:
+                for op in node.incoming_ops:
+                    self.visit_op(op)
+            if node.incoming_fills is not None:
+                for fill in node.incoming_fills:
+                    self.visit_fill(fill)
+            if node.incoming_copies is not None:
+                for copy in node.incoming_copies:
+                    self.visit_copy(copy)
+        if self.post_event_fn is not None:
+            self.post_event_fn(node, self)
+
+    def visit_op(self, node):
+        if self.use_gen:
+            if node.generation == self.generation:
+                return
+            else:
+                node.generation = self.generation
+        do_next = True
+        if self.op_fn is not None:
+            do_next = self.op_fn(node, self)
+        if not do_next:
+            return
+        if self.forwards:
+            if node.finish_event.exists():
+                self.visit_event(node.finish_event)
+        else:
+            if node.start_event.exists():
+                self.visit_event(node.start_event)
+        if self.post_op_fn is not None:
+            self.post_op_fn(node, self)
+
+    def visit_fill(self, node):
+        if self.use_gen:
+            if node.generation == self.generation:
+                return
+            else:
+                node.generation = self.generation
+        do_next = True
+        if self.fill_fn is not None:
+            do_next = self.fill_fn(node, self)
+        if not do_next:
+            return
+        if self.forwards:
+            if node.finish_event.exists():
+                self.visit_event(node.finish_event)
+        else:
+            if node.start_event.exists():
+                self.visit_event(node.start_event)
+        if self.post_fill_fn is not None:
+            self.post_fill_fn(node, self)
+
+    def visit_copy(self, node):
+        if self.use_gen:
+            if node.generation == self.generation:
+                return
+            else:
+                node.generation = self.generation
+        do_next = True
+        if self.copy_fn is not None:
+            do_next = self.copy_fn(node, self)
+        if not do_next:
+            return
+        if self.forwards:
+            if node.finish_event.exists():
+                self.visit_event(node.finish_event)
+        else:
+            if node.start_event.exists():
+                self.visit_event(node.start_event)
+        if self.post_copy_fn is not None:
+            self.post_copy_fn(node, self)
+        
+
 class GraphPrinter(object):
-    __slots__ = ['name', 'filename', 'out', 'depth', 'cluster_id']
+    __slots__ = ['name', 'filename', 'out', 'depth', 'next_cluster_id']
     def __init__(self,path,name,direction='LR'):
         self.name = name
         self.filename = path+name+'.dot'
@@ -1178,7 +2237,7 @@ class GraphPrinter(object):
         self.println('compound = true;')
         self.println('rankdir="'+direction+'";')
         self.println('size = "36,36";')
-        self.cluster_id = 0
+        self.next_cluster_id = 0
 
     def close(self):
         self.up()
@@ -1191,11 +2250,16 @@ class GraphPrinter(object):
         pdf_file = self.name+".pdf"
         try:
             if simplify:
+                print "Simpliyfing dot file "+dot_file+" with tred..."
                 tred = subprocess.Popen(['tred', dot_file], stdout=subprocess.PIPE)
+                print "Done"
+                print "Invoking dot to generate file "+pdf_file+"..."
                 dot = subprocess.Popen(['dot', '-Tpdf', '-o', pdf_file], stdin=tred.stdout)
+                print "Done"
                 if dot.wait() != 0:
                     raise Exception('DOT failed')
             else:
+                print "Invoking dot to generate file "+pdf_file+"..."
                 subprocess.check_call(['dot', '-Tpdf', '-o', pdf_file, dot_file])
         except:
             print "WARNING: DOT failure, image for graph "+str(self.name)+" not generated"
@@ -1208,11 +2272,15 @@ class GraphPrinter(object):
     def down(self):
         self.depth = self.depth+1
 
-    def start_new_cluster(self):
-        self.println('subgraph cluster_' + str(self.cluster_id))
-        self.cluster_id += 1
+    def start_new_cluster(self, label=None):
+        cluster_name = 'cluster_'+str(self.next_cluster_id)
+        self.next_cluster_id += 1
+        self.println('subgraph ' + cluster_name)
         self.println('{')
         self.down()
+        if label is not None:
+            self.println('label=<'+label+'>;')
+        return cluster_name
 
     def end_this_cluster(self):
         self.up()
@@ -1223,6 +2291,52 @@ class GraphPrinter(object):
             self.out.write('  ')
         self.out.write(string)
         self.out.write('\n')
+
+    def wrap_with_trtd(self, labels):
+        line = "<tr>"
+        for label in labels:
+            if isinstance(label, str):
+                l = label
+                rowspan = 1
+                colspan = 1
+            else:
+                l = label["label"]
+                rowspan = label["rowspan"] if "rowspan" in label else 1
+                colspan = label["colspan"] if "colspan" in label else 1
+            line = line + ('<td colspan="%d" rowspan="%d">%s</td>' % (colspan, rowspan, l))
+        line = line + "</tr>"
+        return line
+
+    def generate_html_op_label(self, title, requirements, mappings, color, verbose):
+        lines = list()
+        lines.append([{"label" : title, "colspan" : 2}])       
+        if requirements is not None:
+            for i in range(len(requirements)):
+                req = requirements[i]
+                region_name = str(req.logical_node)
+                priv = req.get_privilege_and_coherence()
+                line = [str(i), region_name+" (priv: "+priv+")"]
+                lines.append(line)
+                if verbose and mappings is not None and i in mappings:
+                    # Find the mapping of instances to its set of fields
+                    instances = dict()
+                    for fid,inst in mappings[i].iteritems():
+                        if inst not in instances:
+                            instances[inst] = set()
+                        instances[inst].add(fid)
+                    for inst,fields in instances.iteritems():
+                        lines.append([str(inst)])
+                        first_field = True
+                        for f in fields:
+                            line = []
+                            if first_field:
+                                line.append({"label" : "Fields", "rowspan" : len(fields)})
+                                first_field = False
+                            line.append(str(f))
+                            lines.append(line)
+        return '<table border="0" cellborder="1" cellpadding="3" cellspacing="0" bgcolor="%s">' % color + \
+              "".join([self.wrap_with_trtd(line) for line in lines]) + '</table>'
+
 
 prefix    = "\[(?P<node>[0-9]+) - (?P<thread>[0-9a-f]+)\] \{\w+\}\{legion_spy\}: "
 prefix_pat               = re.compile(prefix)
@@ -1384,8 +2498,10 @@ def parse_legion_spy_line(line, state):
     if m is not None:
         e1 = state.get_event(int(m.group('id1'),16),int(m.group('gen1')))
         e2 = state.get_event(int(m.group('id2'),16),int(m.group('gen2')))
-        e2.add_incoming(e1)
-        e1.add_outgoing(e2)
+        assert e2.exists()
+        if e1.exists():
+            e2.add_incoming(e1)
+            e1.add_outgoing(e2)
         return True
     m = operation_event_pat.match(line)
     if m is not None:
@@ -1399,7 +2515,7 @@ def parse_legion_spy_line(line, state):
         e1 = state.get_event(int(m.group('preid'),16),int(m.group('pregen')))
         e2 = state.get_event(int(m.group('postid'),16),int(m.group('postgen')))
         copy = state.get_realm_copy(e2)
-        copy.set_start(e2)
+        copy.set_start(e1)
         op = state.get_operation(int(m.group('uid')))
         copy.set_creator(op)
         region = state.get_region(int(m.group('ispace')), 
@@ -1523,8 +2639,8 @@ def parse_legion_spy_line(line, state):
         op.set_op_kind(SINGLE_TASK_KIND)
         op.set_name(m.group('name'))
         op.set_task_id(int(m.group('tid')))
-        if op.context is not None:
-            op.context.top = True
+        # Save the top-level uid
+        state.top_level_uid = int(m.group('uid'))
         return True
     m = single_task_pat.match(line)
     if m is not None:
@@ -1567,7 +2683,7 @@ def parse_legion_spy_line(line, state):
         op = state.get_operation(int(m.group('uid')))
         op.set_op_kind(CLOSE_OP_KIND)
         creator = state.get_operation(int(m.group('cuid')))
-        op.set_creator(creator)
+        op.set_creator(creator, int(m.group('idx')))
         return True
     m = fence_pat.match(line)
     if m is not None:
@@ -1670,7 +2786,7 @@ def parse_legion_spy_line(line, state):
     # Region tree shape patterns (near the bottom since they are infrequent)
     m = top_index_pat.match(line)
     if m is not None:
-        state.get_index_space(int(m.group('uid'),16))
+        state.get_index_space(int(m.group('uid'),16)) 
         return True
     m = index_name_pat.match(line)
     if m is not None:
@@ -1856,7 +2972,7 @@ class State(object):
                  'non_intersection_pairs', 'dominance_pairs', 'ops', 'tasks', 
                  'task_names', 'has_mapping_deps', 'instances', 'events', 'copies',
                  'fills', 'phase_barriers', 'no_event', 'slice_index', 'slice_slice', 
-                 'point_slice']
+                 'point_slice', 'next_generation', 'next_realm_num']
     def __init__(self, verbose):
         self.verbose = verbose
         self.top_level_uid = None
@@ -1892,6 +3008,14 @@ class State(object):
         self.slice_index = dict()
         self.slice_slice = dict()
         self.point_slice = dict()
+        # For physical traversals
+        self.next_generation = 1
+        self.next_realm_num = 1
+
+    def get_next_traversal_generation(self):
+        result = self.next_generation
+        self.next_generation += 1
+        return result
 
     def parse_log_file(self, file_name):
         print 'Reading log file %s...' % file_name
@@ -1909,7 +3033,7 @@ class State(object):
             print 'Matched %d lines in %s' % (matches,file_name)
         return matches
 
-    def post_parse(self):
+    def post_parse(self, simplify_graphs):
         # Find the top-level index spaces
         num_index_trees = 0
         for space in self.index_spaces.itervalues():
@@ -1929,7 +3053,20 @@ class State(object):
         # Fill in any task names
         for task in self.tasks.itervalues():
             if task.op.task_id in self.task_names:
-                task.op.set_name(self.task_names[task.task_id])
+                task.op.set_name(self.task_names[task.op.task_id])
+        # Assign the depth of the top context
+        op = self.get_operation(self.top_level_uid)
+        assert op.context is not None
+        op.context.depth = 0
+        # Compute the physical reachable
+        for op in self.ops.itervalues():
+            op.compute_physical_reachable()
+        for copy in self.copies.itervalues():
+            copy.compute_physical_reachable()
+        for fill in self.fills.itervalues():
+            fill.compute_physical_reachable()
+        if simplify_graphs:
+            self.simplify_physical_graph() 
         # Check to see if we have any unknown operations
         unknown = None
         for op in self.ops.itervalues():
@@ -1940,7 +3077,7 @@ class State(object):
             print 'WARNING: operation %d has unknown operation kind!' % op.uid 
         # If we have any phase barriers, mark all the events of the phase barrier
         if self.phase_barriers is not None:
-            for event in self.events:
+            for event in self.events.itervalues():
                 if event.handle.uid in self.phase_barriers:
                     event.phase_barrier = True
         # We can delete some of these data structures now that we
@@ -1966,6 +3103,57 @@ class State(object):
         logical_enabled = self.has_mapping_deps
         physical_enabled = not not self.events
         return logical_enabled,physical_enabled
+
+    def simplify_physical_graph(self):
+        print "Simplifying event graph..."
+        def traverse_node(node, traverser):
+            if node not in traverser.order:
+                traverser.order.append(node)
+            return True
+        # Build a topological order of everything 
+        topological_sorter = EventGraphTraverser(False, True,
+            self.get_next_traversal_generation(), None,
+            traverse_node, traverse_node, traverse_node)
+        topological_sorter.order = list()
+        # Traverse all the sinks
+        for op in self.ops.itervalues():
+            if not op.physical_outgoing:
+                topological_sorter.visit_op(op)
+        for copy in self.ops.itervalues():
+            if not copy.physical_outgoing:
+                topological_sorter.visit_copy(op)
+        for fill in self.fills.itervalues():
+            if not fill.physical_outgoing:
+                toplogical_sorter.visit_fill(fill)
+        # Now that we have everything sorter based on topology
+        # Do the simplification in reverse order
+        for src in topological_sorter.order:
+            if src.physical_outgoing is None:
+                continue
+            actual_out = src.physical_outgoing.copy()
+            diff = False
+            for next_vert in src.physical_outgoing:
+                if not next_vert in actual_out:
+                    continue
+                reachable = set()
+                next_vert.get_physical_reachable(reachable, True)
+                # See which edges we can remove
+                to_remove = list()
+                for other in actual_out:
+                    if other == next_vert:
+                        continue
+                    if other in reachable:
+                        to_remove.append(other)
+                del reachable
+                if len(to_remove) > 0:
+                    diff = True
+                    for rem in to_remove:
+                        actual_out.remove(rem)
+                        rem.physical_incoming.remove(src)
+                del to_remove
+            if diff:
+                src.physical_outgoing = actual_out
+        print "Done"
 
     def alias_points(self, p1, p2):
         # These two tasks are aliased so merge them together 
@@ -1995,6 +3183,18 @@ class State(object):
 
     def perform_physical_checks(self):
         pass
+
+    def perform_cycle_checks(self):
+        for op in self.ops.itervalues(): 
+            if op.perform_cycle_check():
+                return
+        for copy in self.copies.itervalues():
+            if copy.perform_cycle_check():
+                return
+        for fill in self.fills.itervalues():
+            if fill.perform_cycle_check():
+                return
+        print "No cycles detected"
 
     def make_region_tree_graphs(self, path, simplify_graphs):
         index_space_printer = GraphPrinter(path, 'index_space_graph', 'TB')
@@ -2028,10 +3228,21 @@ class State(object):
         machine_printer.print_pdf_after_close(False)
 
     def make_dataflow_graphs(self, path, simplify_graphs):
-        pass
+        total_dataflow_graphs = 0
+        for task in self.tasks.itervalues():
+            total_dataflow_graphs += task.print_dataflow_graph(path, simplify_graphs)
+        if self.verbose:
+            print "Made "+str(total_dataflow_graphs)+" dataflow graphs"
 
-    def make_event_graphs(self, path, simplify_graphs):
-        pass
+    def make_event_graph(self, path):
+        # we print these recursively so we can see the hierarchy
+        assert self.top_level_uid is not None
+        op = self.get_operation(self.top_level_uid)
+        file_name = 'event_graph_'+str(op).replace(' ','_')+'_'+str(op.uid)
+        printer = GraphPrinter(path, file_name)
+        elevate = dict()
+        op.print_event_graph(printer, elevate, True) 
+        printer.print_pdf_after_close(False)
 
     def get_processor(self, proc_id):
         if proc_id in self.processors:
@@ -2131,14 +3342,16 @@ class State(object):
     def get_realm_copy(self, event):
         if event in self.copies:
             return self.copies[event]
-        result = RealmCopy(self, event)
+        result = RealmCopy(self, event, self.next_realm_num)
+        self.next_realm_num += 1
         self.copies[event] = result
         return result
 
     def get_realm_fill(self, event):
         if event in self.fills:
             return self.fills[event]
-        result = RealmFill(self, event)
+        result = RealmFill(self, event, self.next_realm_num)
+        self.next_realm_num += 1
         self.fills[event] = result
         return result
 
@@ -2173,14 +3386,15 @@ class State(object):
         gc.collect()
 
 def usage():
-    print "Usage: "+sys.argv[0]+" [-l -p -r -m -d -e -s -k -v] <file_name>"
+    print "Usage: "+sys.argv[0]+" [-l -p -c -r -m -d -e -s -k -v] <file_name>"
     print "  -l : perform logical checks"
     print "  -p : perform physical checks"
+    print "  -c : check for cycles"
     print "  -r : make region tree graphs"
     print "  -m : make machine graphs"
     print "  -d : make dataflow graphs"
     print "  -e : make event graphs"
-    print "  -s : generate simplified graphs"
+    print "  -s : disable simplified graphs (all implied event dependences)"
     print "  -k : keep temporary files"
     print "  -v : verbose"
     sys.exit(1)
@@ -2189,7 +3403,7 @@ def main(temp_dir):
     if len(sys.argv) < 2:
         usage()
 
-    opts, args = getopt(sys.argv[1:],'lprmdeskv')
+    opts, args = getopt(sys.argv[1:],'lpcrmdeskv')
     opts = dict(opts)
     if len(args) <> 1:
         usage()
@@ -2197,11 +3411,12 @@ def main(temp_dir):
 
     logical_checks = False
     physical_checks = False
+    cycle_checks = False
     region_tree_graphs = False
     machine_graphs = False
     dataflow_graphs = False
     event_graphs = False
-    simplify_graphs = False
+    simplify_graphs = True # Default this to true 
     keep_temp_files = False
     verbose = False
     for opt in opts:
@@ -2211,6 +3426,8 @@ def main(temp_dir):
         if opt == '-p':
             physical_checks = True
             continue
+        if opt == '-c':
+            cycle_checks = True
         if opt == '-r':
             region_tree_graphs = True
             continue
@@ -2224,7 +3441,7 @@ def main(temp_dir):
             event_graphs = True
             continue;
         if opt == '-s':
-            simplify_graphs = True
+            simplify_graphs = False 
             continue
         if opt == '-k':
             keep_temp_files = True
@@ -2242,23 +3459,35 @@ def main(temp_dir):
     if total_matches == 0:
         print 'No matches found! Exiting...'
         return
-    logical_enabled,physical_enabled = state.post_parse()
+    logical_enabled,physical_enabled = state.post_parse(simplify_graphs)
     if logical_checks and not logical_enabled:
-        print "WARNING: Requested logical analysis but logging information is "\
-              "missing. Please compile the runtime with -DLEGION_SPY to enable "\
+        print "WARNING: Requested logical analysis but logging information is "+\
+              "missing. Please compile the runtime with -DLEGION_SPY to enable "+\
               "validation of the runtime." 
         logical_checks = False
     if physical_checks and not physical_enabled:
-        print "WARNING: Requested physical analysis but logging information is "\
-              "missing. Please compile the runtime with -DLEGION_SPY to enable "\
+        print "WARNING: Requested physical analysis but logging information is "+\
+              "missing. Please compile the runtime with -DLEGION_SPY to enable "+\
               "validation of the runtime."
         physical_checks = False
+    if cycle_checks and not physical_enabled:
+        print "WARNING: Requested cycle checks but logging information is "+\
+              "missing. Please compile the runtime with -DLEGION_SPY to enable "+\
+              "validation of the runtime."
+        cycle_checks = False
+    if not logical_enabled and dataflow_graphs:
+        assert False # TODO: compute the dataflow graph
+    if not physical_enabled and event_graphs:
+        assert False # TODO: compute the event graph
     if logical_checks:
         print "Performing logical checks..."
         state.perform_logical_checks()
     if physical_checks:
         print "Performing physical checks..."
         state.perform_physical_checks()
+    if cycle_checks:
+        print "Performing cycle checks..."
+        state.perform_cycle_checks()
     if region_tree_graphs:
         print "Making region tree graphs..."
         state.make_region_tree_graphs(temp_dir, simplify_graphs)
@@ -2270,12 +3499,12 @@ def main(temp_dir):
         state.make_dataflow_graphs(temp_dir, simplify_graphs)
     if event_graphs:
         print "Making event graphs..."
-        state.make_event_graphs(temp_dir, simplify_graphs)
+        state.make_event_graph(temp_dir)
 
     print 'Legion Spy analysis complete.  Exiting...'
     if keep_temp_files:
         try:
-            subprocess.check_call('cp', temp_dir+'.', '.')
+            subprocess.check_call('cp '+temp_dir+'* .',shell=True)
         except:
             print 'WARNING: Unable to copy temporary files into current directory'
 
