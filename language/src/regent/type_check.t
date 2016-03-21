@@ -1612,6 +1612,38 @@ function type_check.expr_cross_product(cx, node)
   }
 end
 
+function type_check.expr_list_slice_partition(cx, node)
+  local partition = type_check.expr(cx, node.partition)
+  local partition_type = std.check_read(cx, partition)
+  local indices = type_check.expr(cx, node.indices)
+  local indices_type = std.check_read(cx, indices)
+  if not std.is_partition(partition_type) then
+    log.error(node, "type mismatch: expected a partition but got " .. tostring(partition_type))
+  end
+  if not std.validate_implicit_cast(indices_type, std.list(int)) then
+    log.error(node, "type mismatch: expected " .. tostring(std.list(int)) .. " but got " .. tostring(indices_type))
+  end
+  local expr_type = std.list(
+    std.region(
+      terralib.newsymbol(std.ispace(partition_type:parent_region():ispace().index_type)),
+      partition_type:parent_region():fspace()),
+    partition_type, 1)
+  -- FIXME: The privileges for these region aren't necessarily exactly
+  -- one level up.
+
+  std.copy_privileges(cx, partition_type, expr_type)
+  -- FIXME: Copy constraints.
+  cx:intern_region(expr_type)
+
+  return ast.typed.expr.ListSlicePartition {
+    partition = partition,
+    indices = indices,
+    expr_type = expr_type,
+    options = node.options,
+    span = node.span,
+  }
+end
+
 function type_check.expr_list_duplicate_partition(cx, node)
   local partition = type_check.expr(cx, node.partition)
   local partition_type = std.check_read(cx, partition)
@@ -2331,6 +2363,9 @@ function type_check.expr(cx, node)
 
   elseif node:is(ast.specialized.expr.CrossProduct) then
     return type_check.expr_cross_product(cx, node)
+
+  elseif node:is(ast.specialized.expr.ListSlicePartition) then
+    return type_check.expr_list_slice_partition(cx, node)
 
   elseif node:is(ast.specialized.expr.ListDuplicatePartition) then
     return type_check.expr_list_duplicate_partition(cx, node)

@@ -2287,8 +2287,14 @@ std.list = terralib.memoize(function(element_type, partition_type, privilege_dep
     end
   end
 
-  function st.metamethods.__typename(st)
-    return "list(" .. tostring(st.element_type) .. ")"
+  if std.config["debug"] then
+    function st.metamethods.__typename(st)
+      return "list(" .. tostring(st.element_type) .. ", " .. tostring(st.partition_type) .. ", " .. tostring(st.privilege_depth) .. ")"
+    end
+  else
+    function st.metamethods.__typename(st)
+      return "list(" .. tostring(st.element_type) .. ")"
+    end
   end
 
   return st

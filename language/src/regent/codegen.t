@@ -3345,6 +3345,55 @@ function codegen.expr_cross_product(cx, node)
     expr_type)
 end
 
+function codegen.expr_list_slice_partition(cx, node)
+  local partition_type = std.as_read(node.partition.expr_type)
+  local partition = codegen.expr(cx, node.partition):read(cx, partition_type)
+  local indices_type = std.as_read(node.indices.expr_type)
+  local indices = codegen.expr(cx, node.indices):read(cx, indices_type)
+  local expr_type = std.as_read(node.expr_type)
+  local actions = quote
+    [partition.actions]
+    [indices.actions]
+    [emit_debuginfo(node)]
+  end
+
+  local result = terralib.newsymbol(expr_type, "result")
+
+  local parent_region = partition_type:parent_region()
+  assert(cx:has_region(parent_region))
+
+  cx:add_list_of_regions(
+    expr_type, result,
+    cx:region(parent_region).field_paths,
+    cx:region(parent_region).privilege_field_paths,
+    cx:region(parent_region).field_privileges,
+    cx:region(parent_region).field_types,
+    cx:region(parent_region).field_ids)
+
+  actions = quote
+    [actions]
+    var data = c.malloc(
+      terralib.sizeof([expr_type.element_type]) * [indices.value].__size)
+    regentlib.assert(data ~= nil, "malloc failed in list_slice_partition")
+    var [result] = expr_type {
+      __size = [indices.value].__size,
+      __data = data,
+      __partition = [partition.value].impl,
+    }
+
+    for i = 0, [indices.value].__size do
+      var color = [indices_type:data(indices.value)][i]
+      var r = c.legion_logical_partition_get_logical_subregion_by_color(
+        [cx.runtime], [cx.context], [partition.value].impl, color)
+      [expr_type:data(result)][i] = [expr_type.element_type] { impl = r }
+    end
+  end
+
+  return values.value(
+    expr.just(actions, result),
+    expr_type)
+end
+
 function codegen.expr_list_duplicate_partition(cx, node)
   local partition_type = std.as_read(node.partition.expr_type)
   local partition = codegen.expr(cx, node.partition):read(cx, partition_type)
@@ -4989,6 +5038,9 @@ function codegen.expr(cx, node)
 
   elseif node:is(ast.typed.expr.CrossProduct) then
     return codegen.expr_cross_product(cx, node)
+
+  elseif node:is(ast.typed.expr.ListSlicePartition) then
+    return codegen.expr_list_slice_partition(cx, node)
 
   elseif node:is(ast.typed.expr.ListDuplicatePartition) then
     return codegen.expr_list_duplicate_partition(cx, node)

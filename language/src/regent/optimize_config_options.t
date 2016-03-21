@@ -51,6 +51,7 @@ local function analyze_leaf_node(cx)
       node:is(ast.typed.expr.Image) or
       node:is(ast.typed.expr.Preimage) or
       node:is(ast.typed.expr.CrossProduct) or
+      node:is(ast.typed.expr.ListSlicePartition) or
       node:is(ast.typed.expr.ListDuplicatePartition) or
       node:is(ast.typed.expr.ListSliceCrossProduct) or
       node:is(ast.typed.expr.ListCrossProduct) or

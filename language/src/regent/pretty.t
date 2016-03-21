@@ -365,6 +365,14 @@ function pretty.expr_cross_product(cx, node)
       "cross_product(", commas({pretty.expr_list(cx, node.args)}), ")"})
 end
 
+function pretty.expr_list_slice_partition(cx, node)
+  return join({
+      "list_slice_partition(",
+      commas({pretty.expr(cx, node.partition),
+              pretty.expr(cx, node.indices)}),
+      ")"})
+end
+
 function pretty.expr_list_duplicate_partition(cx, node)
   return join({
       "list_duplicate_partition(",
@@ -589,6 +597,9 @@ function pretty.expr(cx, node)
 
   elseif node:is(ast.typed.expr.CrossProduct) then
     return pretty.expr_cross_product(cx, node)
+
+  elseif node:is(ast.typed.expr.ListSlicePartition) then
+    return pretty.expr_list_slice_partition(cx, node)
 
   elseif node:is(ast.typed.expr.ListDuplicatePartition) then
     return pretty.expr_list_duplicate_partition(cx, node)

@@ -709,6 +709,19 @@ function parser.expr_prefix(p)
       span = ast.span(start, p),
     }
 
+  elseif p:nextif("list_slice_partition") then
+    p:expect("(")
+    local partition = p:expr()
+    p:expect(",")
+    local indices = p:expr()
+    p:expect(")")
+    return ast.unspecialized.expr.ListSlicePartition {
+      partition = partition,
+      indices = indices,
+      options = ast.default_options(),
+      span = ast.span(start, p),
+    }
+
   elseif p:nextif("list_duplicate_partition") then
     p:expect("(")
     local partition = p:expr()

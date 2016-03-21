@@ -81,6 +81,7 @@ local language = {
     "ispace",
     "list_cross_product",
     "list_cross_product_complete",
+    "list_slice_partition",
     "list_duplicate_partition",
     "list_invert",
     "list_phase_barriers",
