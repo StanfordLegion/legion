@@ -29,8 +29,6 @@
 
 -- Inspired by https://github.com/losalamos/PENNANT
 
--- (terra() c.printf("Compiling C++ module (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6) end)()
-
 import "regent"
 
 -- Compile and link pennant.cc
@@ -74,8 +72,6 @@ local cmath = terralib.includec("math.h")
 local cstring = terralib.includec("string.h")
 
 local sqrt = terralib.intrinsic("llvm.sqrt.f64", double -> double)
-
-(terra() c.printf("Compiling from top (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6) end)()
 
 -- #####################################
 -- ## Data Structures
@@ -297,9 +293,6 @@ fspace side(rz : region(zone),
 -- #####################################
 -- ## Initialization
 -- #################
-
-function _t1() end -- seems like I need this to break up the statements
-(terra() c.printf("Compiling kernels (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6) end)()
 
 -- Hack: This exists to make the compiler recompute the bitmasks for
 -- each pointer. This needs to happen here (rather than at
@@ -1263,9 +1256,6 @@ task calc_global_dt(dt : double, dtfac : double, dtinit : double,
   return dt
 end
 
-function _t2() end -- seems like I need this to break up the statements
-(terra() c.printf("Compiling simulation (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6) end)()
-
 task continue_simulation(cycle : int64, cstop : int64,
                          time : double, tstop : double)
   return (cycle < cstop and time < tstop)
@@ -1616,9 +1606,6 @@ end
 terra wait_for(x : int)
   return x
 end
-
-function _t20() end -- seems like I need this to break up the statements
-(terra() c.printf("Compiling main (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6) end)()
 
 --
 -- Command Line Processing
@@ -2519,7 +2506,5 @@ end
 task toplevel()
   test()
 end
-function _t3() end -- seems like I need this to break up the statements
-(terra() c.printf("Starting Legion runtime (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6) end)()
 cpennant.register_mappers()
 regentlib.start(toplevel)

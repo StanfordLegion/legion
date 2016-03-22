@@ -29,8 +29,6 @@
 
 -- Inspired by https://github.com/losalamos/PENNANT
 
--- (terra() c.printf("Compiling C++ module (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6) end)()
-
 import "regent"
 
 -- Compile and link pennant.cc
@@ -74,8 +72,6 @@ local cmath = terralib.includec("math.h")
 local cstring = terralib.includec("string.h")
 
 local sqrt = terralib.intrinsic("llvm.sqrt.f64", double -> double)
-
--- (terra() c.printf("Compiling from top (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6) end)()
 
 -- #####################################
 -- ## Data Structures
@@ -299,14 +295,6 @@ fspace side(rz : region(zone),
 -- #####################################
 -- ## Initialization
 -- #################
-
--- function _t1() end -- seems like I need this to break up the statements
--- (terra() c.printf("Compiling kernels (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6) end)()
-
--- task reserve_space(rz : region(zone), rp : region(point),
---                    rs : region(side(wild, wild, wild, wild)))
--- where reads(rz, rp, rs) do
--- end
 
 -- Hack: This exists to make the compiler recompute the bitmasks for
 -- each pointer. This needs to happen here (rather than at
@@ -1279,9 +1267,6 @@ task calc_global_dt(dt : double, dtfac : double, dtinit : double,
   return dt
 end
 
--- function _t2() end -- seems like I need this to break up the statements
--- (terra() c.printf("Compiling simulation (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6) end)()
-
 terra wait_for(x : double)
   return x
 end
@@ -1545,9 +1530,6 @@ do
   end
   return 1.0
 end
-
--- function _t20() end -- seems like I need this to break up the statements
--- (terra() c.printf("Compiling main (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6) end)()
 
 --
 -- Command Line Processing
@@ -2407,10 +2389,6 @@ task test()
   var rs_spans = cross_product(rs_all_p, rs_spans_p)
 
   c.printf("Initializing (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6)
-  -- __demand(__parallel)
-  -- for i = 0, conf.npieces do
-  --   reserve_space(rz_all, rp_all, rs_all)
-  -- end
   wait_for(initialize(rz_all, rz_all_p, rz_spans_p, rz_spans,
                       rp_all,
                       rp_all_private, rp_all_private_p,
@@ -2443,7 +2421,5 @@ end
 task toplevel()
   test()
 end
--- function _t3() end -- seems like I need this to break up the statements
--- (terra() c.printf("Starting Legion runtime (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6) end)()
 cpennant.register_mappers()
 regentlib.start(toplevel)
