@@ -76,7 +76,8 @@ def regent(args, env = {}, **kwargs):
 
     terra_path += (
         ['?.t', '?.rg'] +
-        ([os.path.join(os.path.dirname(os.path.realpath(args[0])), '?.t')]
+        ([os.path.join(os.path.dirname(os.path.realpath(args[0])), '?.t'),
+          os.path.join(os.path.dirname(os.path.realpath(args[0])), '?.rg')]
           if len(args) >= 1 and os.path.exists(args[0]) else []) +
         [os.path.join(regent_dir, 'src', '?.t'),
         os.path.join(terra_dir, 'tests', 'lib', '?.t'),
