@@ -59,6 +59,7 @@ local language = {
     "__trace",
     "__unroll",
     "__vectorize",
+    "__block",
     "aliased",
     "allocate_scratch_fields",
     "advance",

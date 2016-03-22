@@ -5598,18 +5598,31 @@ end
 function codegen.stat_must_epoch(cx, node)
   local must_epoch = terralib.newsymbol("must_epoch")
   local must_epoch_point = terralib.newsymbol("must_epoch_point")
+  local block_future_map = node.options.block:is(ast.options.Demand)
+  local future_map = terralib.newsymbol("legion_future_map_t")
 
   local cx = cx:new_local_scope(nil, must_epoch, must_epoch_point)
-  return quote
-    do
-      var [must_epoch] = c.legion_must_epoch_launcher_create(0, 0)
-      var [must_epoch_point] = 0
-      [codegen.block(cx, node.block)]
-      c.legion_must_epoch_launcher_execute(
-        [cx.runtime], [cx.context], [must_epoch])
-      c.legion_must_epoch_launcher_destroy([must_epoch])
+  local actions = quote
+    var [must_epoch] = c.legion_must_epoch_launcher_create(0, 0)
+    var [must_epoch_point] = 0
+    [codegen.block(cx, node.block)]
+    var [future_map] = c.legion_must_epoch_launcher_execute(
+      [cx.runtime], [cx.context], [must_epoch])
+    c.legion_must_epoch_launcher_destroy([must_epoch])
+  end
+  if block_future_map then
+    actions = quote
+      [actions];
+      c.legion_future_map_wait_all_results([future_map]);
     end
   end
+  actions = quote
+    do
+      [actions];
+      c.legion_future_map_destroy([future_map])
+    end
+  end
+  return actions
 end
 
 function codegen.stat_block(cx, node)

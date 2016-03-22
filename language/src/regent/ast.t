@@ -386,11 +386,12 @@ ast.options:leaf("Unroll", {"value"}, true)
 
 -- Options: Sets
 ast.options:leaf("Set", {"cuda", "inline", "parallel", "spmd", "trace",
-                         "vectorize"},
+                         "vectorize", "block"},
                  false, true)
 
 function ast.default_options()
   local allow = ast.options.Allow { value = false }
+  local forbid = ast.options.Forbid { value = false }
   return ast.options.Set {
     cuda = allow,
     inline = allow,
@@ -398,6 +399,7 @@ function ast.default_options()
     spmd = allow,
     trace = allow,
     vectorize = allow,
+    block = forbid,
   }
 end
 
