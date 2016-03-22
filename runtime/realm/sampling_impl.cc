@@ -257,6 +257,7 @@ namespace Realm {
   }
 
   template <typename T>
+  __attribute__ ((noinline))
   GaugeSampler *SamplingProfiler::add_gauge(T *gauge)
   {
     return ((SamplingProfilerImpl *)impl)->add_gauge(gauge);
@@ -769,15 +770,19 @@ namespace Realm {
 	profiler->remove_gauge(this, sampler);
     }
 
-    size_t Gauge::instantiate_templates(void)
-    {
-      // materializing these catches all the other templated things too
-      return(reinterpret_cast<size_t>(Gauge::add_gauge<AbsoluteGauge<size_t> >) +
-	     reinterpret_cast<size_t>(Gauge::add_gauge<AbsoluteGauge<unsigned long> >) +
-	     reinterpret_cast<size_t>(Gauge::add_gauge<AbsoluteRangeGauge<int> >));
-    }
+    class GaugeInstantiator {
+    public:
+      GaugeInstantiator(const std::string& name);
+      AbsoluteGauge<size_t> g1;
+      AbsoluteGauge<unsigned long> g2;
+      AbsoluteRangeGauge<int> g3;
+    };
 
-    size_t gauge_template_inst_helper = Gauge::instantiate_templates();
+    GaugeInstantiator::GaugeInstantiator(const std::string& name)
+      : g1(name)
+      , g2(name)
+      , g3(name)
+    {}
 
   };
 
