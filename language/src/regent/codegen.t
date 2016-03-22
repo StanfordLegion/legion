@@ -2105,12 +2105,21 @@ local function expr_call_setup_region_arg(
 end
 
 local function raise_privilege_depth(cx, value, container_type)
-  for i = 1, container_type.privilege_depth do
-    value = `(
-      c.legion_logical_partition_get_parent_logical_region(
-        [cx.runtime], [cx.context],
-        c.legion_logical_region_get_parent_logical_partition(
-          [cx.runtime], [cx.context], [value])))
+  if container_type.region_root then
+    assert(cx:has_region(container_type.region_root))
+    local region = cx:region(
+      cx:region(container_type.region_root).root_region_type).logical_region
+    return `([region].impl)
+  elseif container_type.privilege_depth then
+    for i = 1, container_type.privilege_depth do
+      value = `(
+        c.legion_logical_partition_get_parent_logical_region(
+          [cx.runtime], [cx.context],
+          c.legion_logical_region_get_parent_logical_partition(
+            [cx.runtime], [cx.context], [value])))
+    end
+  else
+    assert(false)
   end
   return value
 end
@@ -3378,7 +3387,6 @@ function codegen.expr_list_slice_partition(cx, node)
     var [result] = expr_type {
       __size = [indices.value].__size,
       __data = data,
-      __partition = [partition.value].impl,
     }
 
     for i = 0, [indices.value].__size do
@@ -3427,7 +3435,6 @@ function codegen.expr_list_duplicate_partition(cx, node)
     var [result] = expr_type {
       __size = [indices.value].__size,
       __data = data,
-      __partition = [partition.value].impl,
     }
 
     -- Grab the root region to copy semantic info.
@@ -3846,7 +3853,10 @@ function codegen.expr_list_invert(cx, node)
               [cx.runtime], [cx.context], part)
             var color = c.legion_logical_region_get_color(
               [cx.runtime], [cx.context], parent)
-            if color == rhs_color then
+            if parent.index_space.tid == rhs_.index_space.tid and
+              parent.index_space.id == rhs_.index_space.id and
+              color == rhs_color
+            then
               match = true
             end
           end
@@ -3886,7 +3896,10 @@ function codegen.expr_list_invert(cx, node)
               [cx.runtime], [cx.context], part)
             var color = c.legion_logical_region_get_color(
               [cx.runtime], [cx.context], parent)
-            if color == rhs_color then
+            if parent.index_space.tid == rhs_.index_space.tid and
+              parent.index_space.id == rhs_.index_space.id and
+              color == rhs_color
+            then
               match = true
             end
           end
