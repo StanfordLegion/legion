@@ -68,6 +68,10 @@ namespace Realm {
       void remove_gauge(void);
 
       GaugeSampler *sampler;
+
+    public:
+      // don't actually call this - it's here for linker fun
+      static size_t instantiate_templates(void);
     };
 
     template <typename T>
