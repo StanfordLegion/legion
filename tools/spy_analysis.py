@@ -825,11 +825,11 @@ class Operation(object):
         return True
 
     def add_logical_incoming(self, op):
-        assert op <> self
+        #assert op <> self
         self.logical_incoming.add(op)
 
     def add_logical_outgoing(self, op):
-        assert op <> self
+        #assert op <> self
         self.logical_outgoing.add(op)
 
     def get_logical_mark(self, idx):

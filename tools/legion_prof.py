@@ -1732,14 +1732,16 @@ class State(object):
         data_tsv_file.write("level\tstart\tend\tcolor\topacity\ttitle\n")
         if show_procs:
             for p,proc in sorted(self.processors.iteritems()):
-                base_level = proc.emit_tsv(data_tsv_file, base_level)
-                processor_levels[proc] = base_level
-                last_time = max(last_time, proc.full_range.stop_time)
+                if len(proc.tasks) > 0:
+                    base_level = proc.emit_tsv(data_tsv_file, base_level)
+                    processor_levels[proc] = base_level
+                    last_time = max(last_time, proc.full_range.stop_time)
         if show_channels:
             for c,channel in sorted(self.channels.iteritems()):
-                base_level = channel.emit_tsv(data_tsv_file, base_level)
-                channel_levels[channel] = base_level
-                last_time = max(last_time, channel.last_time)
+                if len(channel.copies) > 0:
+                    base_level = channel.emit_tsv(data_tsv_file, base_level)
+                    channel_levels[channel] = base_level
+                    last_time = max(last_time, channel.last_time)
         if show_instances:
             for m,memory in sorted(self.memories.iteritems()):
                 if len(memory.instances) > 0:
