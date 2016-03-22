@@ -189,7 +189,6 @@ local config_fields_mesh = terralib.newlist({
 local config_fields_cmd = terralib.newlist({
   -- Command-line parameters.
   {field = "npieces", type = int64, default_value = 1},
-  {field = "use_foreign", type = bool, default_value = false},
   {field = "enable", type = bool, default_value = true},
   {field = "warmup", type = bool, default_value = true},
   {field = "compact", type = bool, default_value = true},
@@ -578,7 +577,7 @@ task calc_everything(rz : region(zone), rpp : region(point), rpg : region(point)
                      alfa : double, gamma : double, ssmin : double, dt : double,
                      q1 : double, q2 : double,
                      nspans_zones : int64,
-                     use_foreign : bool, enable : bool)
+                     enable : bool)
 where
   reads(rz.zvol),
   writes(rz.zvol0),
@@ -1073,7 +1072,7 @@ task calc_everything_full(rz : region(zone), rpp : region(point), rpg : region(p
                           rs_spans_p : partition(disjoint, rs),
                           dt : double,
                           nspans_zones : int64,
-                          use_foreign : bool, enable : bool)
+                          enable : bool)
 where
   reads(rz.znump, rpp.px, rpg.px, rs.{mapsz, mapsp1, mapsp2}),
   writes(rz.zx, rs.ex),
@@ -1330,7 +1329,6 @@ do
   var uinitradial = conf.uinitradial
   var vfix = {x = 0.0, y = 0.0}
 
-  var use_foreign = conf.use_foreign
   var enable = conf.enable and not conf.warmup
   var warmup = conf.warmup and conf.enable
 
@@ -1394,7 +1392,7 @@ do
                       alfa, gamma, ssmin, dt,
                       q1, q2,
                       conf.nspans_zones,
-                      use_foreign, enable)
+                      enable)
     end
 
     __demand(__parallel)
@@ -1424,7 +1422,7 @@ do
                            rs_spans[i],
                            dt,
                            conf.nspans_zones,
-                           use_foreign, enable)
+                           enable)
     end
 
     dthydro = dtmax
@@ -1480,7 +1478,6 @@ do
   var subregion = conf.subregion
   var uinitradial = conf.uinitradial
 
-  var use_foreign = conf.use_foreign
   var enable = true
 
   for i = 0, conf.npieces do
@@ -1754,11 +1751,6 @@ terra read_config()
   if conf.npieces <= 0 then
     c.printf("Error: npieces (%lld) must be >= 0\n", conf.npieces)
     c.abort()
-  end
-
-  var use_foreign = get_optional_arg("-foreign")
-  if use_foreign ~= nil then
-    conf.use_foreign = [bool](c.atoll(use_foreign))
   end
 
   var warmup = get_optional_arg("-warmup")

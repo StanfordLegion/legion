@@ -189,7 +189,6 @@ local config_fields_mesh = terralib.newlist({
 local config_fields_cmd = terralib.newlist({
   -- Command-line parameters.
   {field = "npieces", type = int64, default_value = 1},
-  {field = "use_foreign", type = bool, default_value = false},
   {field = "enable", type = bool, default_value = true},
   {field = "warmup", type = bool, default_value = true},
   {field = "compact", type = bool, default_value = true},
@@ -453,22 +452,17 @@ do
 end
 
 -- Save off zone variable value from previous cycle.
-task init_step_zones(rz : region(zone),
-                     use_foreign : bool, enable : bool)
+task init_step_zones(rz : region(zone), enable : bool)
 where
   reads(rz.zvol),
   writes(rz.zvol0)
 do
   if not enable then return end
 
-  if false --[[ use_foreign ]] then
-    -- foreign_init_step_zones(zstart, zend, rz)
-  else
-    -- Copy state variables from previous time step.
-    __demand(__vectorize)
-    for z in rz do
-      z.zvol0 = z.zvol
-    end
+  -- Copy state variables from previous time step.
+  __demand(__vectorize)
+  for z in rz do
+    z.zvol0 = z.zvol
   end
 end
 
@@ -479,36 +473,32 @@ end
 -- Compute centers of zones and edges.
 task calc_centers(rz : region(zone), rpp : region(point), rpg : region(point),
                   rs : region(side(rz, rpp, rpg, rs)),
-                  use_foreign : bool, enable : bool)
+                  enable : bool)
 where
   reads(rz.znump, rpp.pxp, rpg.pxp, rs.{mapsz, mapsp1, mapsp2}),
   writes(rz.zxp, rs.exp)
 do
   if not enable then return end
 
-  if false --[[ use_foreign ]] then
-    -- foreign_calc_centers(sstart, send, rz, rpp, rpg, rs)
-  else
-    var zxp = vec2 { x = 0.0, y = 0.0 }
-    var nside = 1
-    for s in rs do
-      var z = s.mapsz
-      var p1 = s.mapsp1
-      var p2 = s.mapsp2
-      var e = s
+  var zxp = vec2 { x = 0.0, y = 0.0 }
+  var nside = 1
+  for s in rs do
+    var z = s.mapsz
+    var p1 = s.mapsp1
+    var p2 = s.mapsp2
+    var e = s
 
-      var p1_pxp = p1.pxp
-      e.exp = 0.5*(p1_pxp + p2.pxp)
+    var p1_pxp = p1.pxp
+    e.exp = 0.5*(p1_pxp + p2.pxp)
 
-      zxp += p1_pxp
+    zxp += p1_pxp
 
-      if nside == z.znump then
-        z.zxp = (1/double(z.znump)) * zxp
-        zxp = vec2 { x = 0.0, y = 0.0 }
-        nside = 0
-      end
-      nside += 1
+    if nside == z.znump then
+      z.zxp = (1/double(z.znump)) * zxp
+      zxp = vec2 { x = 0.0, y = 0.0 }
+      nside = 0
     end
+    nside += 1
   end
 end
 
@@ -516,86 +506,78 @@ end
 -- Compute edge lengths.
 task calc_volumes(rz : region(zone), rpp : region(point), rpg : region(point),
                   rs : region(side(rz, rpp, rpg, rs)),
-                  use_foreign : bool, enable : bool)
+                  enable : bool)
 where
   reads(rz.{zxp, znump}, rpp.pxp, rpg.pxp, rs.{mapsz, mapsp1, mapsp2}),
   writes(rz.{zareap, zvolp}, rs.{sareap, elen})
 do
   if not enable then return end
 
-  if false --[[ use_foreign ]] then
-    -- foreign_calc_volumes(sstart, send, rz, rpp, rpg, rs)
-  else
-    var zareap = 0.0
-    var zvolp = 0.0
-    var nside = 1
-    for s in rs do
-      var z = s.mapsz
-      var p1 = s.mapsp1
-      var p2 = s.mapsp2
+  var zareap = 0.0
+  var zvolp = 0.0
+  var nside = 1
+  for s in rs do
+    var z = s.mapsz
+    var p1 = s.mapsp1
+    var p2 = s.mapsp2
 
-      var p1_pxp = p1.pxp
-      var p2_pxp = p2.pxp
-      var sa = 0.5 * cross(p2_pxp - p1_pxp, z.zxp - p1_pxp)
-      var sv = sa * (p1_pxp.x + p2_pxp.x + z.zxp.x)
-      s.sareap = sa
-      -- s.svolp = sv
-      s.elen = length(p2_pxp - p1_pxp)
+    var p1_pxp = p1.pxp
+    var p2_pxp = p2.pxp
+    var sa = 0.5 * cross(p2_pxp - p1_pxp, z.zxp - p1_pxp)
+    var sv = sa * (p1_pxp.x + p2_pxp.x + z.zxp.x)
+    s.sareap = sa
+    -- s.svolp = sv
+    s.elen = length(p2_pxp - p1_pxp)
 
-      zareap += sa
-      zvolp += sv
+    zareap += sa
+    zvolp += sv
 
-      if nside == z.znump then
-        z.zareap = zareap
-        z.zvolp = (1.0 / 3.0) * zvolp
-        zareap = 0.0
-        zvolp = 0.0
-        nside = 0
-      end
-      nside += 1
-
-      regentlib.assert(sv > 0.0, "sv negative")
+    if nside == z.znump then
+      z.zareap = zareap
+      z.zvolp = (1.0 / 3.0) * zvolp
+      zareap = 0.0
+      zvolp = 0.0
+      nside = 0
     end
+    nside += 1
+
+    regentlib.assert(sv > 0.0, "sv negative")
   end
 end
 
 -- Compute zone characteristic lengths.
 task calc_char_len(rz : region(zone), rpp : region(point), rpg : region(point),
                    rs : region(side(rz, rpp, rpg, rs)),
-                   use_foreign : bool, enable : bool)
+                   enable : bool)
 where
   reads(rz.znump, rs.{mapsz, sareap, elen}),
   writes(rz.zdl)
 do
   if not enable then return end
 
-  if false --[[ use_foreign ]] then
-    -- foreign_calc_char_len(sstart, send, rz, rs)
-  else
-    var zdl = 1e99
-    var nside = 1
-    for s in rs do
-      var z = s.mapsz
-      var e = s
+  var zdl = 1e99
+  var nside = 1
+  for s in rs do
+    var z = s.mapsz
+    var e = s
 
-      var area = s.sareap
-      var base = e.elen
-      var fac = 0.0
-      if z.znump == 3 then
-        fac = 3.0
-      else
-        fac = 4.0
-      end
-      var sdl = fac * area / base
-      zdl = min(zdl, sdl)
-
-      if nside == z.znump then
-        z.zdl = zdl
-        zdl = 1e99
-        nside = 0
-      end
-      nside += 1
+    var area = s.sareap
+    var base = e.elen
+    var fac = 0.0
+    if z.znump == 3 then
+      fac = 3.0
+    else
+      fac = 4.0
     end
+    var sdl = fac * area / base
+    zdl = min(zdl, sdl)
+
+    if nside == z.znump then
+      z.zdl = zdl
+      zdl = 1e99
+      nside = 0
+    end
+    nside += 1
   end
 end
 
@@ -604,28 +586,23 @@ end
 --
 
 -- Compute zone densities.
-task calc_rho_half(rz : region(zone),
-                   use_foreign : bool, enable : bool)
+task calc_rho_half(rz : region(zone), enable : bool)
 where
   reads(rz.{zvolp, zm}),
   writes(rz.zrp)
 do
   if not enable then return end
 
-  if false --[[ use_foreign ]] then
-    -- foreign_calc_rho_half(zstart, zend, rz)
-  else
-    __demand(__vectorize)
-    for z in rz do
-      z.zrp = z.zm / z.zvolp
-    end
+  __demand(__vectorize)
+  for z in rz do
+    z.zrp = z.zm / z.zvolp
   end
 end
 
 -- Reduce masses into points.
 task sum_point_mass(rz : region(zone), rpp : region(point), rpg : region(point),
                     rs : region(side(rz, rpp, rpg, rs)),
-                    use_foreign : bool, enable : bool)
+                    enable : bool)
 where
   reads(rz.{zareap, zrp}, rs.{mapsz, mapsp1, mapss3, smf}),
   reads writes(rpp.pmaswt),
@@ -633,17 +610,13 @@ where
 do
   if not enable then return end
 
-  if false --[[ use_foreign ]] then
-    -- foreign_sum_point_mass(sstart, send, rz, rpp, rpg, rs)
-  else
-    for s in rs do
-      var z = s.mapsz
-      var p1 = s.mapsp1
-      var s3 = s.mapss3
+  for s in rs do
+    var z = s.mapsz
+    var p1 = s.mapsp1
+    var s3 = s.mapss3
 
-      var m = z.zrp * z.zareap * 0.5 * (s.smf + s3.smf)
-      p1.pmaswt += m
-    end
+    var m = z.zrp * z.zareap * 0.5 * (s.smf + s3.smf)
+    p1.pmaswt += m
   end
 end
 
@@ -653,38 +626,34 @@ end
 
 task calc_state_at_half(rz : region(zone),
                         gamma : double, ssmin : double, dt : double,
-                        use_foreign : bool, enable : bool)
+                        enable : bool)
 where
   reads(rz.{zvol0, zvolp, zm, zr, ze, zwrate}),
   writes(rz.{zp, zss})
 do
   if not enable then return end
 
-  if false --[[ use_foreign ]] then
-    -- foreign_calc_state_at_half(gamma, ssmin, dt, zstart, zend, rz)
-  else
-    var gm1 = gamma - 1.0
-    var ss2 = max(ssmin * ssmin, 1e-99)
-    var dth = 0.5 * dt
+  var gm1 = gamma - 1.0
+  var ss2 = max(ssmin * ssmin, 1e-99)
+  var dth = 0.5 * dt
 
-    for z in rz do
-      var rx = z.zr
-      var ex = max(z.ze, 0.0)
-      var px = gm1 * rx * ex
-      var prex = gm1 * ex
-      var perx = gm1 * rx
-      var csqd = max(ss2, prex + perx * px / (rx * rx))
-      var z0per = perx
-      var zss = sqrt(csqd)
-      z.zss = zss
+  for z in rz do
+    var rx = z.zr
+    var ex = max(z.ze, 0.0)
+    var px = gm1 * rx * ex
+    var prex = gm1 * ex
+    var perx = gm1 * rx
+    var csqd = max(ss2, prex + perx * px / (rx * rx))
+    var z0per = perx
+    var zss = sqrt(csqd)
+    z.zss = zss
 
-      var zminv = 1.0 / z.zm
-      var dv = (z.zvolp - z.zvol0) * zminv
-      var bulk = z.zr * zss * zss
-      var denom = 1.0 + 0.5 * z0per * dv
-      var src = z.zwrate * dth * zminv
-      z.zp = px + (z0per * src - z.zr * bulk * dv) / denom
-    end
+    var zminv = 1.0 / z.zm
+    var dv = (z.zvolp - z.zvol0) * zminv
+    var bulk = z.zr * zss * zss
+    var denom = 1.0 + 0.5 * z0per * dv
+    var src = z.zwrate * dth * zminv
+    z.zp = px + (z0per * src - z.zr * bulk * dv) / denom
   end
 end
 
@@ -697,82 +666,63 @@ task calc_force_pgas_tts(rz : region(zone), rpp : region(point),
                          rpg : region(point),
                          rs : region(side(rz, rpp, rpg, rs)),
                          alfa : double, ssmin : double,
-                         use_foreign : bool, enable : bool)
+                         enable : bool)
 where
   reads(rz.{zxp, zareap, zrp, zss, zp}, rs.{mapsz, sareap, smf, exp}),
   writes(rs.{sfp, sft})
 do
   if not enable then return end
 
-  if false --[[ use_foreign ]] then
-    -- foreign_calc_force_pgas(sstart, send, rz, rs)
-  else
-    for s in rs do
-      var z = s.mapsz
+  for s in rs do
+    var z = s.mapsz
 
-      -- Compute surface vectors of sides.
-      var ssurfp = rotateCCW(s.exp - z.zxp)
+    -- Compute surface vectors of sides.
+    var ssurfp = rotateCCW(s.exp - z.zxp)
 
-      -- Compute PolyGas forces.
-      var sfx = (-z.zp)*ssurfp
-      s.sfp = sfx
+    -- Compute PolyGas forces.
+    var sfx = (-z.zp)*ssurfp
+    s.sfp = sfx
 
-      -- Compute TTS forces.
-      var svfacinv = z.zareap / s.sareap
-      var srho = z.zrp * s.smf * svfacinv
-      var sstmp = max(z.zss, ssmin)
-      sstmp = alfa * sstmp * sstmp
-      var sdp = sstmp * (srho - z.zrp)
-      var sqq = (-sdp)*ssurfp
-      s.sft = sfx + sqq
-    end
+    -- Compute TTS forces.
+    var svfacinv = z.zareap / s.sareap
+    var srho = z.zrp * s.smf * svfacinv
+    var sstmp = max(z.zss, ssmin)
+    sstmp = alfa * sstmp * sstmp
+    var sdp = sstmp * (srho - z.zrp)
+    var sqq = (-sdp)*ssurfp
+    s.sft = sfx + sqq
   end
 end
 
 task qcs_zone_center_velocity(rz : region(zone), rpp : region(point), rpg : region(point),
                               rs : region(side(rz, rpp, rpg, rs)),
-                              use_foreign : bool, enable : bool)
+                              enable : bool)
 where
   reads(rz.znump, rpp.pu, rpg.pu, rs.{mapsz, mapsp1}),
   writes(rz.zuc)
 do
   if not enable then return end
 
-  if false --[[ use_foreign ]] then
-    -- foreign_qcs_zone_center_velocity(sstart, send, rz, rpp, rpg, rs)
-  else
-    var zuc = vec2 { x = 0.0, y = 0.0 }
-    var nside = 1
-    for s in rs do
-      var z = s.mapsz
-      var p1 = s.mapsp1
+  var zuc = vec2 { x = 0.0, y = 0.0 }
+  var nside = 1
+  for s in rs do
+    var z = s.mapsz
+    var p1 = s.mapsp1
 
-      zuc += (1.0 / double(z.znump))*p1.pu
+    zuc += (1.0 / double(z.znump))*p1.pu
 
-      if nside == z.znump then
-        z.zuc = zuc
-        zuc = vec2 { x = 0.0, y = 0.0 }
-        nside = 0
-      end
-      nside += 1
+    if nside == z.znump then
+      z.zuc = zuc
+      zuc = vec2 { x = 0.0, y = 0.0 }
+      nside = 0
     end
+    nside += 1
   end
-end
-
-terra foreign_qcs_corner_divergence(
-  rz_physical : c.legion_physical_region_t[4],
-  rz_fields : c.legion_field_id_t[4],
-  rpp_physical : c.legion_physical_region_t[4],
-  rpp_fields : c.legion_field_id_t[4],
-  rpg_physical : c.legion_physical_region_t[4],
-  rpg_fields : c.legion_field_id_t[4],
-  rs_physical : c.legion_physical_region_t[14],
-  rs_fields : c.legion_field_id_t[14])
 end
 
 task qcs_corner_divergence(rz : region(zone), rpp : region(point), rpg : region(point),
                            rs : region(side(rz, rpp, rpg, rs)),
-                           use_foreign : bool, enable : bool)
+                           enable : bool)
 where
   reads(rz.{zxp, zuc}, rpp.{pxp, pu}, rpg.{pxp, pu},
         rs.{mapsz, mapsp1, mapsp2, mapss3, exp, elen}),
@@ -780,112 +730,93 @@ where
 do
   if not enable then return end
 
-  if false --[[ use_foreign ]] then
-    foreign_qcs_corner_divergence(
-      __physical(rz), __fields(rz),
-      __physical(rpp), __fields(rpp),
-      __physical(rpg), __fields(rpg),
-      __physical(rs), __fields(rs))
-  else
-    for s2 in rs do
-      var c = s2
-      var s = s2.mapss3
-      var z = s.mapsz
-      var p = s.mapsp2
-      var p1 = s.mapsp1
-      var p2 = s2.mapsp2
-      var e1 = s
-      var e2 = s2
+  for s2 in rs do
+    var c = s2
+    var s = s2.mapss3
+    var z = s.mapsz
+    var p = s.mapsp2
+    var p1 = s.mapsp1
+    var p2 = s2.mapsp2
+    var e1 = s
+    var e2 = s2
 
-      -- velocities and positions
-      -- point p
-      var up0 = p.pu
-      var xp0 = p.pxp
-      -- edge e2
-      var up1 = 0.5*(p.pu + p2.pu)
-      var xp1 = e2.exp
-      -- zone center z
-      var up2 = z.zuc
-      var xp2 = z.zxp
-      -- edge e1
-      var up3 = 0.5*(p1.pu + p.pu)
-      var xp3 = e1.exp
+    -- velocities and positions
+    -- point p
+    var up0 = p.pu
+    var xp0 = p.pxp
+    -- edge e2
+    var up1 = 0.5*(p.pu + p2.pu)
+    var xp1 = e2.exp
+    -- zone center z
+    var up2 = z.zuc
+    var xp2 = z.zxp
+    -- edge e1
+    var up3 = 0.5*(p1.pu + p.pu)
+    var xp3 = e1.exp
 
-      -- compute 2d cartesian volume of corner
-      var cvolume = 0.5 * cross(xp2 - xp0, xp3 - xp1)
-      c.carea = cvolume
+    -- compute 2d cartesian volume of corner
+    var cvolume = 0.5 * cross(xp2 - xp0, xp3 - xp1)
+    c.carea = cvolume
 
-      -- compute cosine angle
-      var v1 = xp3 - xp0
-      var v2 = xp1 - xp0
-      var de1 = e1.elen
-      var de2 = e2.elen
-      var minelen = min(de1, de2)
-      if minelen < 1e-12 then
-        c.ccos = 0.0
-      else
-        c.ccos = 4.0 * dot(v1, v2) / (de1 * de2)
-      end
+    -- compute cosine angle
+    var v1 = xp3 - xp0
+    var v2 = xp1 - xp0
+    var de1 = e1.elen
+    var de2 = e2.elen
+    var minelen = min(de1, de2)
+    if minelen < 1e-12 then
+      c.ccos = 0.0
+    else
+      c.ccos = 4.0 * dot(v1, v2) / (de1 * de2)
+    end
 
-      -- compute divergence of corner
-      var cdiv = (cross(up2 - up0, xp3 - xp1) -
-                  cross(up3 - up1, xp2 - xp0)) / (2.0 * cvolume)
-      c.cdiv = cdiv
+    -- compute divergence of corner
+    var cdiv = (cross(up2 - up0, xp3 - xp1) -
+                cross(up3 - up1, xp2 - xp0)) / (2.0 * cvolume)
+    c.cdiv = cdiv
 
-      -- compute evolution factor
-      var dxx1 = 0.5*(((xp1 + xp2) - xp0) - xp3)
-      var dxx2 = 0.5*(((xp2 + xp3) - xp0) - xp1)
-      var dx1 = length(dxx1)
-      var dx2 = length(dxx2)
+    -- compute evolution factor
+    var dxx1 = 0.5*(((xp1 + xp2) - xp0) - xp3)
+    var dxx2 = 0.5*(((xp2 + xp3) - xp0) - xp1)
+    var dx1 = length(dxx1)
+    var dx2 = length(dxx2)
 
-      -- average corner-centered velocity
-      var duav = 0.25*(((up0 + up1) + up2) + up3)
+    -- average corner-centered velocity
+    var duav = 0.25*(((up0 + up1) + up2) + up3)
 
-      var test1 = abs(dot(dxx1, duav) * dx2)
-      var test2 = abs(dot(dxx2, duav) * dx1)
-      var num = 0.0
-      var den = 0.0
-      if test1 > test2 then
-        num = dx1
-        den = dx2
-      else
-        num = dx2
-        den = dx1
-      end
-      var r = num / den
-      var evol = min(sqrt(4.0 * cvolume * r), 2.0 * minelen)
+    var test1 = abs(dot(dxx1, duav) * dx2)
+    var test2 = abs(dot(dxx2, duav) * dx1)
+    var num = 0.0
+    var den = 0.0
+    if test1 > test2 then
+      num = dx1
+      den = dx2
+    else
+      num = dx2
+      den = dx1
+    end
+    var r = num / den
+    var evol = min(sqrt(4.0 * cvolume * r), 2.0 * minelen)
 
-      -- compute delta velocity
-      var dv1 = length(((up1 + up2) - up0) - up3)
-      var dv2 = length(((up2 + up3) - up0) - up1)
-      var du = max(dv1, dv2)
+    -- compute delta velocity
+    var dv1 = length(((up1 + up2) - up0) - up3)
+    var dv2 = length(((up2 + up3) - up0) - up1)
+    var du = max(dv1, dv2)
 
-      if cdiv < 0.0 then
-        c.cevol = evol
-        c.cdu = du
-      else
-        c.cevol = 0.0
-        c.cdu = 0.0
-      end
+    if cdiv < 0.0 then
+      c.cevol = evol
+      c.cdu = du
+    else
+      c.cevol = 0.0
+      c.cdu = 0.0
     end
   end
-end
-
-terra foreign_qcs_qcn_force(
-  rz_physical : c.legion_physical_region_t[2],
-  rz_fields : c.legion_field_id_t[2],
-  rpp_physical : c.legion_physical_region_t[2],
-  rpp_fields : c.legion_field_id_t[2],
-  rpg_physical : c.legion_physical_region_t[2],
-  rpg_fields : c.legion_field_id_t[2],
-  rs_physical : c.legion_physical_region_t[14],
-  rs_fields : c.legion_field_id_t[14])
 end
 
 task qcs_qcn_force(rz : region(zone), rpp : region(point), rpg : region(point),
                    rs : region(side(rz, rpp, rpg, rs)),
                    gamma : double, q1 : double, q2 : double,
-                   use_foreign : bool, enable : bool)
+                   enable : bool)
 where
   reads(rz.{zrp, zss}, rpp.pu, rpg.pu,
         rs.{mapsz, mapsp1, mapsp2, mapss3, elen, cdiv, cdu, cevol}),
@@ -893,90 +824,72 @@ where
 do
   if not enable then return end
 
-  if false --[[ use_foreign ]] then
-    foreign_qcs_qcn_force(
-      __physical(rz), __fields(rz),
-      __physical(rpp), __fields(rpp),
-      __physical(rpg), __fields(rpg),
-      __physical(rs), __fields(rs))
-  else
-    var gammap1 = gamma + 1.0
+  var gammap1 = gamma + 1.0
 
-    for s4 in rs do
-      var c = s4
-      var z = c.mapsz
+  for s4 in rs do
+    var c = s4
+    var z = c.mapsz
 
-      var ztmp2 = q2 * 0.25 * gammap1 * c.cdu
-      var ztmp1 = q1 * z.zss
-      var zkur = ztmp2 + sqrt(ztmp2 * ztmp2 + ztmp1 * ztmp1)
-      var rmu = zkur * z.zrp * c.cevol
-      if c.cdiv > 0.0 then
-        rmu = 0.0
-      end
-
-      var s = c.mapss3
-      var p = s.mapsp2
-      var p1 = s.mapsp1
-      var e1 = s
-      var p2 = s4.mapsp2
-      var e2 = s4
-
-      c.cqe1 = rmu / e1.elen*(p.pu - p1.pu)
-      c.cqe2 = rmu / e2.elen*(p2.pu - p.pu)
+    var ztmp2 = q2 * 0.25 * gammap1 * c.cdu
+    var ztmp1 = q1 * z.zss
+    var zkur = ztmp2 + sqrt(ztmp2 * ztmp2 + ztmp1 * ztmp1)
+    var rmu = zkur * z.zrp * c.cevol
+    if c.cdiv > 0.0 then
+      rmu = 0.0
     end
-  end
-end
 
-terra foreign_qcs_force(
-  rs_physical : c.legion_physical_region_t[10],
-  rs_fields : c.legion_field_id_t[10])
+    var s = c.mapss3
+    var p = s.mapsp2
+    var p1 = s.mapsp1
+    var e1 = s
+    var p2 = s4.mapsp2
+    var e2 = s4
+
+    c.cqe1 = rmu / e1.elen*(p.pu - p1.pu)
+    c.cqe2 = rmu / e2.elen*(p2.pu - p.pu)
+  end
 end
 
 task qcs_force(rz : region(zone), rpp : region(point), rpg : region(point),
                rs : region(side(rz, rpp, rpg, rs)),
-               use_foreign : bool, enable : bool)
+               enable : bool)
 where
   reads(rs.{mapss4, elen, carea, ccos, cqe1, cqe2}),
   writes(rs.sfq)
 do
   if not enable then return end
 
-  if false --[[ use_foreign ]] then
-    foreign_qcs_force(
-      __physical(rs), __fields(rs))
-  else
-    for s in rs do
-      var c1 = s
-      var c2 = s.mapss4
-      var e = s
-      var el = e.elen
+  for s in rs do
+    var c1 = s
+    var c2 = s.mapss4
+    var e = s
+    var el = e.elen
 
-      var c1sin2 = 1.0 - c1.ccos * c1.ccos
-      var c1w = 0.0
-      var c1cos = 0.0
-      if c1sin2 >= 1e-4 then
-        c1w = c1.carea / c1sin2
-        c1cos = c1.ccos
-      end
-
-      var c2sin2 = 1.0 - c2.ccos * c2.ccos
-      var c2w = 0.0
-      var c2cos = 0.0
-      if c2sin2 >= 1e-4 then
-        c2w = c2.carea / c2sin2
-        c2cos = c2.ccos
-      end
-
-      s.sfq = (1.0 / el)*(c1w*(c1.cqe2 + c1cos*c1.cqe1) +
-                            c2w*(c2.cqe1 + c2cos*c2.cqe2))
+    var c1sin2 = 1.0 - c1.ccos * c1.ccos
+    var c1w = 0.0
+    var c1cos = 0.0
+    if c1sin2 >= 1e-4 then
+      c1w = c1.carea / c1sin2
+      c1cos = c1.ccos
     end
+
+    var c2sin2 = 1.0 - c2.ccos * c2.ccos
+    var c2w = 0.0
+    var c2cos = 0.0
+    if c2sin2 >= 1e-4 then
+      c2w = c2.carea / c2sin2
+      c2cos = c2.ccos
+    end
+
+    s.sfq = (1.0 / el)*(c1w*(c1.cqe2 + c1cos*c1.cqe1) +
+                          c2w*(c2.cqe1 + c2cos*c2.cqe2))
   end
 end
 
 task qcs_vel_diff(rz : region(zone), rpp : region(point), rpg : region(point),
                   rs : region(side(rz, rpp, rpg, rs)),
                   q1 : double, q2 : double,
-                  use_foreign : bool, enable : bool)
+                  enable : bool)
 where
   reads(rz.{zss, z0tmp}, rpp.{pxp, pu}, rpg.{pxp, pu},
         rs.{mapsp1, mapsp2, mapsz, elen}),
@@ -1030,7 +943,7 @@ end
 -- Reduce forces into points.
 task sum_point_force(rz : region(zone), rpp : region(point), rpg : region(point),
                      rs : region(side(rz, rpp, rpg, rs)),
-                     use_foreign : bool, enable : bool)
+                     enable : bool)
 where
   reads(rz.znump, rs.{mapsz, mapsp1, mapss3, sfq, sft}),
   reads writes(rpp.pf),
@@ -1038,21 +951,13 @@ where
 do
   if not enable then return end
 
-  if use_foreign then
-    -- foreign_sum_point_force(
-    --   __physical(rz), __fields(rz),
-    --   __physical(rpp), __fields(rpp),
-    --   __physical(rpg), __fields(rpg),
-    --   __physical(rs), __fields(rs))
-  else
-    for s in rs do
-      var p1 = s.mapsp1
-      var s3 = s.mapss3
+  for s in rs do
+    var p1 = s.mapsp1
+    var s3 = s.mapss3
 
-      var f = (s.sfq + s.sft) - (s3.sfq + s3.sft)
-      p1.pf.x += f.x
-      p1.pf.y += f.y
-    end
+    var f = (s.sfq + s.sft) - (s3.sfq + s3.sft)
+    p1.pf.x += f.x
+    p1.pf.y += f.y
   end
 end
 
@@ -1127,36 +1032,32 @@ end
 -- in both cases.
 task calc_centers_full(rz : region(zone), rpp : region(point), rpg : region(point),
                        rs : region(side(rz, rpp, rpg, rs)),
-                       use_foreign : bool, enable : bool)
+                       enable : bool)
 where
   reads(rz.znump, rpp.px, rpg.px, rs.{mapsz, mapsp1, mapsp2}),
   writes(rz.zx, rs.ex)
 do
   if not enable then return end
 
-  if false --[[ use_foreign ]] then
-    -- foreign_calc_centers_full(sstart, send, rz, rpp, rpg, rs)
-  else
-    var zx = vec2 { x = 0.0, y = 0.0 }
-    var nside = 1
-    for s in rs do
-      var z = s.mapsz
-      var p1 = s.mapsp1
-      var p2 = s.mapsp2
-      var e = s
+  var zx = vec2 { x = 0.0, y = 0.0 }
+  var nside = 1
+  for s in rs do
+    var z = s.mapsz
+    var p1 = s.mapsp1
+    var p2 = s.mapsp2
+    var e = s
 
-      var p1_px = p1.px
-      e.ex = 0.5*(p1_px + p2.px)
+    var p1_px = p1.px
+    e.ex = 0.5*(p1_px + p2.px)
 
-      zx += p1_px
+    zx += p1_px
 
-      if nside == z.znump then
-        z.zx = (1/double(z.znump)) * zx
-        zx = vec2 { x = 0.0, y = 0.0 }
-        nside = 0
-      end
-      nside += 1
+    if nside == z.znump then
+      z.zx = (1/double(z.znump)) * zx
+      zx = vec2 { x = 0.0, y = 0.0 }
+      nside = 0
     end
+    nside += 1
   end
 end
 
@@ -1165,45 +1066,41 @@ end
 -- in both cases.
 task calc_volumes_full(rz : region(zone), rpp : region(point), rpg : region(point),
                        rs : region(side(rz, rpp, rpg, rs)),
-                       use_foreign : bool, enable : bool)
+                       enable : bool)
 where
   reads(rz.{zx, znump}, rpp.px, rpg.px, rs.{mapsz, mapsp1, mapsp2}),
   writes(rz.{zarea, zvol}, rs.{sarea})
 do
   if not enable then return end
 
-  if false --[[ use_foreign ]] then
-    -- foreign_calc_volumes_full(sstart, send, rz, rpp, rpg, rs)
-  else
-    var zarea = 0.0
-    var zvol = 0.0
-    var nside = 1
-    for s in rs do
-      var z = s.mapsz
-      var p1 = s.mapsp1
-      var p2 = s.mapsp2
+  var zarea = 0.0
+  var zvol = 0.0
+  var nside = 1
+  for s in rs do
+    var z = s.mapsz
+    var p1 = s.mapsp1
+    var p2 = s.mapsp2
 
-      var p1_px = p1.px
-      var p2_px = p2.px
-      var sa = 0.5 * cross(p2_px - p1_px, z.zx - p1_px)
-      var sv = sa * (p1_px.x + p2_px.x + z.zx.x)
-      s.sarea = sa
-      -- s.svol = sv
+    var p1_px = p1.px
+    var p2_px = p2.px
+    var sa = 0.5 * cross(p2_px - p1_px, z.zx - p1_px)
+    var sv = sa * (p1_px.x + p2_px.x + z.zx.x)
+    s.sarea = sa
+    -- s.svol = sv
 
-      zarea += sa
-      zvol += sv
+    zarea += sa
+    zvol += sv
 
-      if nside == z.znump then
-        z.zarea = zarea
-        z.zvol = (1.0 / 3.0) * zvol
-        zarea = 0.0
-        zvol = 0.0
-        nside = 0
-      end
-      nside += 1
-
-      regentlib.assert(sv > 0.0, "sv negative")
+    if nside == z.znump then
+      z.zarea = zarea
+      z.zvol = (1.0 / 3.0) * zvol
+      zarea = 0.0
+      zvol = 0.0
+      nside = 0
     end
+    nside += 1
+
+    regentlib.assert(sv > 0.0, "sv negative")
   end
 end
 
@@ -1214,7 +1111,7 @@ end
 task calc_work(rz : region(zone), rpp : region(point), rpg : region(point),
                rs : region(side(rz, rpp, rpg, rs)),
                dt : double,
-               use_foreign : bool, enable : bool)
+               enable : bool)
 where
   reads(rz.{zetot, znump}, rpp.{pxp, pu0, pu}, rpg.{pxp, pu0, pu},
         rs.{mapsz, mapsp1, mapsp2, sfp, sfq}),
@@ -1222,31 +1119,27 @@ where
 do
   if not enable then return end
 
-  if false --[[ use_foreign ]] then
-    -- foreign_calc_work(dt, sstart, send, rz, rpp, rpg, rs)
-  else
-    var zdwork = 0.0
-    var nside = 1
-    for s in rs do
-      var z = s.mapsz
-      var p1 = s.mapsp1
-      var p2 = s.mapsp2
+  var zdwork = 0.0
+  var nside = 1
+  for s in rs do
+    var z = s.mapsz
+    var p1 = s.mapsp1
+    var p2 = s.mapsp2
 
-      var sftot = s.sfp + s.sfq
-      var sd1 = dot(sftot, p1.pu0 + p1.pu)
-      var sd2 = dot(-1.0*sftot, p2.pu0 + p2.pu)
-      var dwork = -0.5 * dt * (sd1 * p1.pxp.x + sd2 * p2.pxp.x)
+    var sftot = s.sfp + s.sfq
+    var sd1 = dot(sftot, p1.pu0 + p1.pu)
+    var sd2 = dot(-1.0*sftot, p2.pu0 + p2.pu)
+    var dwork = -0.5 * dt * (sd1 * p1.pxp.x + sd2 * p2.pxp.x)
 
-      zdwork += dwork
+    zdwork += dwork
 
-      if nside == z.znump then
-        z.zetot += zdwork
-        z.zw = zdwork
-        zdwork = 0.0
-        nside = 0
-      end
-      nside += 1
+    if nside == z.znump then
+      z.zetot += zdwork
+      z.zw = zdwork
+      zdwork = 0.0
+      nside = 0
     end
+    nside += 1
   end
 end
 
@@ -1408,7 +1301,6 @@ do
   var uinitradial = conf.uinitradial
   var vfix = {x = 0.0, y = 0.0}
 
-  var use_foreign = conf.use_foreign
   var enable = conf.enable
 
   var interval = 10
@@ -1433,7 +1325,7 @@ do
 
     __demand(__parallel)
     for i = 0, conf.npieces do
-      init_step_zones(rz_all_p[i], use_foreign, enable)
+      init_step_zones(rz_all_p[i], enable)
     end
 
     dt = calc_global_dt(dt, dtfac, dtinit, dtmax, dthydro, time, tstop, cycle)
@@ -1460,7 +1352,7 @@ do
                    rp_all_private_p[i],
                    rp_all_ghost_p[i],
                    rs_all_p[i],
-                   use_foreign, enable)
+                   enable)
     end
 
     __demand(__parallel)
@@ -1469,7 +1361,7 @@ do
                    rp_all_private_p[i],
                    rp_all_ghost_p[i],
                    rs_all_p[i],
-                   use_foreign, enable)
+                   enable)
     end
 
     __demand(__parallel)
@@ -1478,12 +1370,12 @@ do
                     rp_all_private_p[i],
                     rp_all_ghost_p[i],
                     rs_all_p[i],
-                    use_foreign, enable)
+                    enable)
     end
 
     __demand(__parallel)
     for i = 0, conf.npieces do
-      calc_rho_half(rz_all_p[i], use_foreign, enable)
+      calc_rho_half(rz_all_p[i], enable)
     end
 
     __demand(__parallel)
@@ -1492,12 +1384,12 @@ do
                      rp_all_private_p[i],
                      rp_all_ghost_p[i],
                      rs_all_p[i],
-                     use_foreign, enable)
+                     enable)
     end
 
     __demand(__parallel)
     for i = 0, conf.npieces do
-      calc_state_at_half(rz_all_p[i], gamma, ssmin, dt, use_foreign, enable)
+      calc_state_at_half(rz_all_p[i], gamma, ssmin, dt, enable)
     end
 
     __demand(__parallel)
@@ -1507,7 +1399,7 @@ do
                           rp_all_ghost_p[i],
                           rs_all_p[i],
                           alfa, ssmin,
-                          use_foreign, enable)
+                          enable)
     end
 
     __demand(__parallel)
@@ -1517,7 +1409,7 @@ do
         rp_all_private_p[i],
         rp_all_ghost_p[i],
         rs_all_p[i],
-        use_foreign, enable)
+        enable)
     end
 
     __demand(__parallel)
@@ -1527,7 +1419,7 @@ do
         rp_all_private_p[i],
         rp_all_ghost_p[i],
         rs_all_p[i],
-        use_foreign, enable)
+        enable)
     end
 
     __demand(__parallel)
@@ -1538,7 +1430,7 @@ do
         rp_all_ghost_p[i],
         rs_all_p[i],
         gamma, q1, q2,
-        use_foreign, enable)
+        enable)
     end
 
     __demand(__parallel)
@@ -1548,7 +1440,7 @@ do
         rp_all_private_p[i],
         rp_all_ghost_p[i],
         rs_all_p[i],
-        use_foreign, enable)
+        enable)
     end
 
     __demand(__parallel)
@@ -1559,7 +1451,7 @@ do
         rp_all_ghost_p[i],
         rs_all_p[i],
         q1, q2,
-        use_foreign, enable)
+        enable)
     end
 
     __demand(__parallel)
@@ -1568,7 +1460,7 @@ do
                       rp_all_private_p[i],
                       rp_all_ghost_p[i],
                       rs_all_p[i],
-                      use_foreign, enable)
+                      enable)
     end
 
     __demand(__parallel)
@@ -1595,7 +1487,7 @@ do
                         rp_all_private_p[i],
                         rp_all_ghost_p[i],
                         rs_all_p[i],
-                        use_foreign, enable)
+                        enable)
     end
 
     __demand(__parallel)
@@ -1604,7 +1496,7 @@ do
                         rp_all_private_p[i],
                         rp_all_ghost_p[i],
                         rs_all_p[i],
-                        use_foreign, enable)
+                        enable)
     end
 
     __demand(__parallel)
@@ -1613,7 +1505,7 @@ do
                 rp_all_private_p[i],
                 rp_all_ghost_p[i],
                 rs_all_p[i],
-                dt, use_foreign, enable)
+                dt, enable)
     end
 
     __demand(__parallel)
@@ -1655,7 +1547,6 @@ do
   var subregion = conf.subregion
   var uinitradial = conf.uinitradial
 
-  var use_foreign = conf.use_foreign
   var enable = true
 
   for i = 0, conf.npieces do
@@ -1674,7 +1565,7 @@ do
                       rp_all_private_p[i],
                       rp_all_ghost_p[i],
                       rs_all_p[i],
-                      use_foreign, enable)
+                      enable)
   end
 
   for i = 0, conf.npieces do
@@ -1682,7 +1573,7 @@ do
                       rp_all_private_p[i],
                       rp_all_ghost_p[i],
                       rs_all_p[i],
-                      use_foreign, enable)
+                      enable)
   end
 
   for i = 0, conf.npieces do
@@ -1931,11 +1822,6 @@ terra read_config()
   if conf.npieces <= 0 then
     c.printf("Error: npieces (%lld) must be >= 0\n", conf.npieces)
     c.abort()
-  end
-
-  var use_foreign = get_optional_arg("-foreign")
-  if use_foreign ~= nil then
-    conf.use_foreign = [bool](c.atoll(use_foreign))
   end
 
   var warmup = get_optional_arg("-warmup")
