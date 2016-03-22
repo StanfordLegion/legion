@@ -69,7 +69,12 @@ def regent(args, env = {}, **kwargs):
     if not os.path.exists(terra_exe):
         terra_exe = os.path.join(terra_dir, 'bin', 'terra')
 
-    terra_path = (
+    if 'TERRA_PATH' in os.environ:
+        terra_path = [os.path.realpath(os.environ['TERRA_PATH'])]
+    else:
+        terra_path = []
+
+    terra_path += (
         ['?.t', '?.rg'] +
         ([os.path.join(os.path.dirname(os.path.realpath(args[0])), '?.t')]
           if len(args) >= 1 and os.path.exists(args[0]) else []) +

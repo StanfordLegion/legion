@@ -2850,6 +2850,10 @@ namespace LegionRuntime {
           new_copy_complete.trigger();
           copy_complete_event = new_copy_complete;
         }
+        LegionSpy::log_event_dependence(sync_precondition, 
+            copy_complete_event);
+        LegionSpy::log_event_dependence(sync_precondition, 
+            completion_event);
         LegionSpy::log_event_dependences(copy_complete_events, 
             copy_complete_event);
         LegionSpy::log_event_dependence(copy_complete_event,

@@ -214,34 +214,21 @@ namespace LegionRuntime {
     public:
       AutoLock(Reservation r, unsigned mode = 0, bool exclusive = true, 
                Event wait_on = Event::NO_EVENT)
-        : is_low(true), low_lock(r)
+        : low_lock(r)
       {
         Event lock_event = r.acquire(mode,exclusive,wait_on);
         if (lock_event.exists())
           lock_event.wait();
       }
-      AutoLock(ImmovableLock l)
-        : is_low(false), immov_lock(l)
-      {
-        l.lock();
-      }
     public:
       AutoLock(const AutoLock &rhs)
-        : is_low(false)
       {
         // should never be called
         assert(false);
       }
       ~AutoLock(void)
       {
-        if (is_low)
-        {
-          low_lock.release();
-        }
-        else
-        {
-          immov_lock.unlock();
-        }
+	low_lock.release();
       }
     public:
       AutoLock& operator=(const AutoLock &rhs)
@@ -251,9 +238,7 @@ namespace LegionRuntime {
         return *this;
       }
     private:
-      const bool is_low;
       Reservation low_lock;
-      ImmovableLock immov_lock;
     };
 
     /////////////////////////////////////////////////////////////

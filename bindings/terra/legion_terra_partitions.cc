@@ -39,6 +39,25 @@
 #endif
 #endif
 
+#if !USE_TLS
+class AutoImmovableLock {
+public:
+  AutoImmovableLock(ImmovableLock& _lock)
+    : lock(_lock)
+  {
+    lock.lock();
+  }
+
+  ~AutoImmovableLock(void)
+  {
+    lock.unlock();
+  }
+
+protected:
+  ImmovableLock& lock;
+};
+#endif
+
 struct CachedIndexIterator {
 public:
   CachedIndexIterator(HighLevelRuntime *rt, Context ctx, IndexSpace is, bool gl)
@@ -72,7 +91,7 @@ private:
 
     if (global) {
 #if !USE_TLS
-      LegionRuntime::HighLevel::AutoLock guard(global_lock);
+      AutoImmovableLock guard(global_lock);
 #endif
       std::map<IndexSpace, std::vector<std::pair<ptr_t, size_t> > >::iterator it =
         global_cache.find(space);
@@ -95,7 +114,7 @@ private:
 #if USE_TLS
       global_cache[space] = spans;
 #else
-      LegionRuntime::HighLevel::AutoLock guard(global_lock);
+      AutoImmovableLock guard(global_lock);
       if (!global_cache.count(space)) {
         global_cache[space] = spans;
       }
