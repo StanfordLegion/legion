@@ -72,6 +72,8 @@ extern "C" {
   NEW_OPAQUE_TYPE(legion_machine_t);
   NEW_OPAQUE_TYPE(legion_mapper_t);
   NEW_OPAQUE_TYPE(legion_default_mapper_t);
+  NEW_OPAQUE_TYPE(legion_processor_query_t);
+  NEW_OPAQUE_TYPE(legion_memory_query_t);
   NEW_OPAQUE_TYPE(legion_machine_query_interface_t);
 #undef NEW_OPAQUE_TYPE
 
@@ -2934,12 +2936,12 @@ typedef int coord_t;
   legion_machine_get_all_processors(
     legion_machine_t machine,
     legion_processor_t *processors,
-    unsigned processors_size);
+    size_t processors_size);
 
   /**
    * @see Realm::Machine::get_all_processors()
    */
-  unsigned
+  size_t
   legion_machine_get_all_processors_size(legion_machine_t machine);
 
   /**
@@ -2949,12 +2951,12 @@ typedef int coord_t;
   legion_machine_get_all_memories(
     legion_machine_t machine,
     legion_memory_t *memories,
-    unsigned memories_size);
+    size_t memories_size);
 
   /**
    * @see Realm::Machine::get_all_memories()
    */
-  unsigned
+  size_t
   legion_machine_get_all_memories_size(legion_machine_t machine);
 
   // -----------------------------------------------------------------------
@@ -2988,6 +2990,248 @@ typedef int coord_t;
    */
   legion_address_space_t
   legion_memory_address_space(legion_memory_t mem);
+
+  // -----------------------------------------------------------------------
+  // Processor Query Operations
+  // -----------------------------------------------------------------------
+
+  /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see Realm::Machine::ProcessorQuery::ProcessorQuery()
+   */
+  legion_processor_query_t
+  legion_processor_query_create(legion_machine_t machine);
+
+  /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see Realm::Machine::ProcessorQuery::ProcessorQuery()
+   */
+  legion_processor_query_t
+  legion_processor_query_create_copy(legion_processor_query_t query);
+
+  /**
+   * @param handle Caller must have ownership of parameter `handle`.
+   *
+   * @see Realm::Machine::ProcessorQuery::~ProcessorQuery()
+   */
+  void
+  legion_processor_query_destroy(legion_processor_query_t handle);
+
+  /**
+   * Note: Mutates `query`.
+   *
+   * @see Realm::Machine::ProcessorQuery::only_kind()
+   */
+  void
+  legion_processor_query_only_kind(legion_processor_query_t query,
+                                   legion_processor_kind_t kind);
+
+  /**
+   * Note: Mutates `query`.
+   *
+   * @see Realm::Machine::ProcessorQuery::local_address_space()
+   */
+  void
+  legion_processor_query_local_address_space(legion_processor_query_t query);
+
+  /**
+   * Note: Mutates `query`.
+   *
+   * @see Realm::Machine::ProcessorQuery::same_address_space_as()
+   */
+  void
+  legion_processor_query_same_address_space_as_processor(legion_processor_query_t query,
+                                                         legion_processor_t proc);
+
+  /**
+   * Note: Mutates `query`.
+   *
+   * @see Realm::Machine::ProcessorQuery::same_address_space_as()
+   */
+  void
+  legion_processor_query_same_address_space_as_memory(legion_processor_query_t query,
+                                                      legion_memory_t mem);
+
+  /**
+   * Note: Mutates `query`.
+   *
+   * @see Realm::Machine::ProcessorQuery::has_affinity_to()
+   */
+  void
+  legion_processor_query_has_affinity_to_memory(legion_processor_query_t query,
+                                                legion_memory_t mem,
+                                                unsigned min_bandwidth /* = 0 */,
+                                                unsigned max_latency /* = 0 */);
+
+  /**
+   * Note: Mutates `query`.
+   *
+   * @see Realm::Machine::ProcessorQuery::best_affinity_to()
+   */
+  void
+  legion_processor_query_best_affinity_to_memory(legion_processor_query_t query,
+                                                 legion_memory_t mem,
+                                                 int bandwidth_weight /* = 0 */,
+                                                 int latency_weight /* = 0 */);
+
+  /**
+   * @see Realm::Machine::ProcessorQuery::count()
+   */
+  size_t
+  legion_processor_query_count(legion_processor_query_t query);
+
+  /**
+   * @see Realm::Machine::ProcessorQuery::first()
+   */
+  legion_processor_t
+  legion_processor_query_first(legion_processor_query_t query);
+
+  /**
+   * @see Realm::Machine::ProcessorQuery::next()
+   */
+  legion_processor_t
+  legion_processor_query_next(legion_processor_query_t query,
+                              legion_processor_t after);
+
+  /**
+   * @see Realm::Machine::ProcessorQuery::random()
+   */
+  legion_processor_t
+  legion_processor_query_random(legion_processor_query_t query);
+
+  // -----------------------------------------------------------------------
+  // Memory Query Operations
+  // -----------------------------------------------------------------------
+
+  /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see Realm::Machine::MemoryQuery::MemoryQuery()
+   */
+  legion_memory_query_t
+  legion_memory_query_create(legion_machine_t machine);
+
+  /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see Realm::Machine::MemoryQuery::MemoryQuery()
+   */
+  legion_memory_query_t
+  legion_memory_query_create_copy(legion_memory_query_t query);
+
+  /**
+   * @param handle Caller must have ownership of parameter `handle`.
+   *
+   * @see Realm::Machine::MemoryQuery::~MemoryQuery()
+   */
+  void
+  legion_memory_query_destroy(legion_memory_query_t handle);
+
+  /**
+   * Note: Mutates `query`.
+   *
+   * @see Realm::Machine::MemoryQuery::only_kind()
+   */
+  void
+  legion_memory_query_only_kind(legion_memory_query_t query,
+                                legion_memory_kind_t kind);
+
+  /**
+   * Note: Mutates `query`.
+   *
+   * @see Realm::Machine::MemoryQuery::local_address_space()
+   */
+  void
+  legion_memory_query_local_address_space(legion_memory_query_t query);
+
+  /**
+   * Note: Mutates `query`.
+   *
+   * @see Realm::Machine::MemoryQuery::same_address_space_as()
+   */
+  void
+  legion_memory_query_same_address_space_as_processor(legion_memory_query_t query,
+                                                      legion_processor_t proc);
+
+  /**
+   * Note: Mutates `query`.
+   *
+   * @see Realm::Machine::MemoryQuery::same_address_space_as()
+   */
+  void
+  legion_memory_query_same_address_space_as_memory(legion_memory_query_t query,
+                                                   legion_memory_t mem);
+
+  /**
+   * Note: Mutates `query`.
+   *
+   * @see Realm::Machine::MemoryQuery::has_affinity_to()
+   */
+  void
+  legion_memory_query_has_affinity_to_processor(legion_memory_query_t query,
+                                                legion_processor_t proc,
+                                                unsigned min_bandwidth /* = 0 */,
+                                                unsigned max_latency /* = 0 */);
+
+  /**
+   * Note: Mutates `query`.
+   *
+   * @see Realm::Machine::MemoryQuery::has_affinity_to()
+   */
+  void
+  legion_memory_query_has_affinity_to_memory(legion_memory_query_t query,
+                                             legion_memory_t mem,
+                                             unsigned min_bandwidth /* = 0 */,
+                                             unsigned max_latency /* = 0 */);
+
+  /**
+   * Note: Mutates `query`.
+   *
+   * @see Realm::Machine::MemoryQuery::best_affinity_to()
+   */
+  void
+  legion_memory_query_best_affinity_to_processor(legion_memory_query_t query,
+                                                 legion_processor_t proc,
+                                                 int bandwidth_weight /* = 0 */,
+                                                 int latency_weight /* = 0 */);
+
+  /**
+   * Note: Mutates `query`.
+   *
+   * @see Realm::Machine::MemoryQuery::best_affinity_to()
+   */
+  void
+  legion_memory_query_best_affinity_to_memory(legion_memory_query_t query,
+                                              legion_memory_t mem,
+                                              int bandwidth_weight /* = 0 */,
+                                              int latency_weight /* = 0 */);
+
+  /**
+   * @see Realm::Machine::MemoryQuery::count()
+   */
+  size_t
+  legion_memory_query_count(legion_memory_query_t query);
+
+  /**
+   * @see Realm::Machine::MemoryQuery::first()
+   */
+  legion_memory_t
+  legion_memory_query_first(legion_memory_query_t query);
+
+  /**
+   * @see Realm::Machine::MemoryQuery::next()
+   */
+  legion_memory_t
+  legion_memory_query_next(legion_memory_query_t query,
+                           legion_memory_t after);
+
+  /**
+   * @see Realm::Machine::MemoryQuery::random()
+   */
+  legion_memory_t
+  legion_memory_query_random(legion_memory_query_t query);
 
   // -----------------------------------------------------------------------
   // Machine Query Interface Operations

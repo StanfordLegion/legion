@@ -148,8 +148,10 @@ namespace LegionRuntime {
       NEW_OPAQUE_WRAPPER(legion_region_requirement_t , RegionRequirement *);
       NEW_OPAQUE_WRAPPER(legion_machine_t, Machine *);
       NEW_OPAQUE_WRAPPER(legion_mapper_t, Mapper *);
+      NEW_OPAQUE_WRAPPER(legion_processor_query_t, Machine::ProcessorQuery *);
+      NEW_OPAQUE_WRAPPER(legion_memory_query_t, Machine::MemoryQuery *);
       NEW_OPAQUE_WRAPPER(legion_machine_query_interface_t,
-                         MappingUtilities::MachineQueryInterface*);
+                         MappingUtilities::MachineQueryInterface *);
       NEW_OPAQUE_WRAPPER(legion_default_mapper_t, DefaultMapper*);
 #undef NEW_OPAQUE_WRAPPER
 

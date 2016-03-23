@@ -4393,7 +4393,7 @@ void
 legion_machine_get_all_processors(
   legion_machine_t machine_,
   legion_processor_t *processors_,
-  unsigned processors_size)
+  size_t processors_size)
 {
   Machine *machine = CObjectWrapper::unwrap(machine_);
 
@@ -4401,15 +4401,14 @@ legion_machine_get_all_processors(
   machine->get_all_processors(pset);
   std::set<Processor>::iterator itr = pset.begin();
 
-  unsigned num_to_copy =
-    std::min((unsigned)pset.size(), processors_size);
+  size_t num_to_copy = std::min(pset.size(), processors_size);
 
   for (unsigned i = 0; i < num_to_copy; ++i) {
     processors_[i] = CObjectWrapper::wrap(*itr++);
   }
 }
 
-unsigned
+size_t
 legion_machine_get_all_processors_size(legion_machine_t machine_)
 {
   Machine *machine = CObjectWrapper::unwrap(machine_);
@@ -4423,7 +4422,7 @@ void
 legion_machine_get_all_memories(
   legion_machine_t machine_,
   legion_memory_t *memories_,
-  unsigned memories_size)
+  size_t memories_size)
 {
   Machine *machine = CObjectWrapper::unwrap(machine_);
 
@@ -4431,15 +4430,14 @@ legion_machine_get_all_memories(
   machine->get_all_memories(mset);
   std::set<Memory>::iterator itr = mset.begin();
 
-  unsigned num_to_copy =
-    std::min((unsigned)mset.size(), memories_size);
+  size_t num_to_copy = std::min(mset.size(), memories_size);
 
-  for (unsigned i = 0; i < num_to_copy; ++i) {
+  for (size_t i = 0; i < num_to_copy; ++i) {
     memories_[i] = CObjectWrapper::wrap(*itr++);
   }
 }
 
-unsigned
+size_t
 legion_machine_get_all_memories_size(legion_machine_t machine_)
 {
   Machine *machine = CObjectWrapper::unwrap(machine_);
@@ -4487,6 +4485,288 @@ legion_memory_address_space(legion_memory_t mem_)
   Memory mem = CObjectWrapper::unwrap(mem_);
 
   return mem.address_space();
+}
+
+// -----------------------------------------------------------------------
+// Processor Query Operations
+// -----------------------------------------------------------------------
+
+legion_processor_query_t
+legion_processor_query_create(legion_machine_t machine_)
+{
+  Machine *machine = CObjectWrapper::unwrap(machine_);
+
+  Machine::ProcessorQuery *result = new Machine::ProcessorQuery(*machine);
+  return CObjectWrapper::wrap(result);
+}
+
+legion_processor_query_t
+legion_processor_query_create_copy(legion_processor_query_t query_)
+{
+  Machine::ProcessorQuery *query = CObjectWrapper::unwrap(query_);
+
+  Machine::ProcessorQuery *result = new Machine::ProcessorQuery(*query);
+  return CObjectWrapper::wrap(result);
+}
+
+void
+legion_processor_query_destroy(legion_processor_query_t handle_)
+{
+  Machine::ProcessorQuery *handle = CObjectWrapper::unwrap(handle_);
+
+  delete handle;
+}
+
+void
+legion_processor_query_only_kind(legion_processor_query_t query_,
+                                 legion_processor_kind_t kind_)
+{
+  Machine::ProcessorQuery *query = CObjectWrapper::unwrap(query_);
+  Processor::Kind kind = CObjectWrapper::unwrap(kind_);
+
+  query->only_kind(kind);
+}
+
+void
+legion_processor_query_local_address_space(legion_processor_query_t query_)
+{
+  Machine::ProcessorQuery *query = CObjectWrapper::unwrap(query_);
+
+  query->local_address_space();
+}
+
+void
+legion_processor_query_same_address_space_as_processor(legion_processor_query_t query_,
+                                                       legion_processor_t proc_)
+{
+  Machine::ProcessorQuery *query = CObjectWrapper::unwrap(query_);
+  Processor proc = CObjectWrapper::unwrap(proc_);
+
+  query->same_address_space_as(proc);
+}
+
+void
+legion_processor_query_same_address_space_as_memory(legion_processor_query_t query_,
+                                                    legion_memory_t mem_)
+{
+  Machine::ProcessorQuery *query = CObjectWrapper::unwrap(query_);
+  Memory mem = CObjectWrapper::unwrap(mem_);
+
+  query->same_address_space_as(mem);
+}
+
+void
+legion_processor_query_has_affinity_to_memory(legion_processor_query_t query_,
+                                              legion_memory_t mem_,
+                                              unsigned min_bandwidth /* = 0 */,
+                                              unsigned max_latency /* = 0 */)
+{
+  Machine::ProcessorQuery *query = CObjectWrapper::unwrap(query_);
+  Memory mem = CObjectWrapper::unwrap(mem_);
+
+  query->has_affinity_to(mem, min_bandwidth, max_latency);
+}
+
+void
+legion_processor_query_best_affinity_to_memory(legion_processor_query_t query_,
+                                               legion_memory_t mem_,
+                                               int bandwidth_weight /* = 0 */,
+                                               int latency_weight /* = 0 */)
+{
+  Machine::ProcessorQuery *query = CObjectWrapper::unwrap(query_);
+  Memory mem = CObjectWrapper::unwrap(mem_);
+
+  query->best_affinity_to(mem, bandwidth_weight, latency_weight);
+}
+
+size_t
+legion_processor_query_count(legion_processor_query_t query_)
+{
+  Machine::ProcessorQuery *query = CObjectWrapper::unwrap(query_);
+
+  return query->count();
+}
+
+legion_processor_t
+legion_processor_query_first(legion_processor_query_t query_)
+{
+  Machine::ProcessorQuery *query = CObjectWrapper::unwrap(query_);
+
+  Processor result = query->first();
+  return CObjectWrapper::wrap(result);
+}
+
+legion_processor_t
+legion_processor_query_next(legion_processor_query_t query_,
+                           legion_processor_t after_)
+{
+  Machine::ProcessorQuery *query = CObjectWrapper::unwrap(query_);
+  Processor after = CObjectWrapper::unwrap(after_);
+
+  Processor result = query->next(after);
+  return CObjectWrapper::wrap(result);
+}
+
+legion_processor_t
+legion_processor_query_random(legion_processor_query_t query_)
+{
+  Machine::ProcessorQuery *query = CObjectWrapper::unwrap(query_);
+
+  Processor result = query->random();
+  return CObjectWrapper::wrap(result);
+}
+
+// -----------------------------------------------------------------------
+// Memory Query Operations
+// -----------------------------------------------------------------------
+
+legion_memory_query_t
+legion_memory_query_create(legion_machine_t machine_)
+{
+  Machine *machine = CObjectWrapper::unwrap(machine_);
+
+  Machine::MemoryQuery *result = new Machine::MemoryQuery(*machine);
+  return CObjectWrapper::wrap(result);
+}
+
+legion_memory_query_t
+legion_memory_query_create_copy(legion_memory_query_t query_)
+{
+  Machine::MemoryQuery *query = CObjectWrapper::unwrap(query_);
+
+  Machine::MemoryQuery *result = new Machine::MemoryQuery(*query);
+  return CObjectWrapper::wrap(result);
+}
+
+void
+legion_memory_query_destroy(legion_memory_query_t handle_)
+{
+  Machine::MemoryQuery *handle = CObjectWrapper::unwrap(handle_);
+
+  delete handle;
+}
+
+void
+legion_memory_query_only_kind(legion_memory_query_t query_,
+                              legion_memory_kind_t kind_)
+{
+  Machine::MemoryQuery *query = CObjectWrapper::unwrap(query_);
+  Memory::Kind kind = CObjectWrapper::unwrap(kind_);
+
+  query->only_kind(kind);
+}
+
+void
+legion_memory_query_local_address_space(legion_memory_query_t query_)
+{
+  Machine::MemoryQuery *query = CObjectWrapper::unwrap(query_);
+
+  query->local_address_space();
+}
+
+void
+legion_memory_query_same_address_space_as_processor(legion_memory_query_t query_,
+                                                    legion_processor_t proc_)
+{
+  Machine::MemoryQuery *query = CObjectWrapper::unwrap(query_);
+  Processor proc = CObjectWrapper::unwrap(proc_);
+
+  query->same_address_space_as(proc);
+}
+
+void
+legion_memory_query_same_address_space_as_memory(legion_memory_query_t query_,
+                                                 legion_memory_t mem_)
+{
+  Machine::MemoryQuery *query = CObjectWrapper::unwrap(query_);
+  Memory mem = CObjectWrapper::unwrap(mem_);
+
+  query->same_address_space_as(mem);
+}
+
+void
+legion_memory_query_has_affinity_to_processor(legion_memory_query_t query_,
+                                              legion_processor_t proc_,
+                                              unsigned min_bandwidth /* = 0 */,
+                                              unsigned max_latency /* = 0 */)
+{
+  Machine::MemoryQuery *query = CObjectWrapper::unwrap(query_);
+  Processor proc = CObjectWrapper::unwrap(proc_);
+
+  query->has_affinity_to(proc, min_bandwidth, max_latency);
+}
+
+void
+legion_memory_query_has_affinity_to_memory(legion_memory_query_t query_,
+                                           legion_memory_t mem_,
+                                           unsigned min_bandwidth /* = 0 */,
+                                           unsigned max_latency /* = 0 */)
+{
+  Machine::MemoryQuery *query = CObjectWrapper::unwrap(query_);
+  Memory mem = CObjectWrapper::unwrap(mem_);
+
+  query->has_affinity_to(mem, min_bandwidth, max_latency);
+}
+
+void
+legion_memory_query_best_affinity_to_processor(legion_memory_query_t query_,
+                                               legion_processor_t proc_,
+                                               int bandwidth_weight /* = 0 */,
+                                               int latency_weight /* = 0 */)
+{
+  Machine::MemoryQuery *query = CObjectWrapper::unwrap(query_);
+  Processor proc = CObjectWrapper::unwrap(proc_);
+
+  query->best_affinity_to(proc, bandwidth_weight, latency_weight);
+}
+
+void
+legion_memory_query_best_affinity_to_memory(legion_memory_query_t query_,
+                                            legion_memory_t mem_,
+                                            int bandwidth_weight /* = 0 */,
+                                            int latency_weight /* = 0 */)
+{
+  Machine::MemoryQuery *query = CObjectWrapper::unwrap(query_);
+  Memory mem = CObjectWrapper::unwrap(mem_);
+
+  query->best_affinity_to(mem, bandwidth_weight, latency_weight);
+}
+
+size_t
+legion_memory_query_count(legion_memory_query_t query_)
+{
+  Machine::MemoryQuery *query = CObjectWrapper::unwrap(query_);
+
+  return query->count();
+}
+
+legion_memory_t
+legion_memory_query_first(legion_memory_query_t query_)
+{
+  Machine::MemoryQuery *query = CObjectWrapper::unwrap(query_);
+
+  Memory result = query->first();
+  return CObjectWrapper::wrap(result);
+}
+
+legion_memory_t
+legion_memory_query_next(legion_memory_query_t query_,
+                         legion_memory_t after_)
+{
+  Machine::MemoryQuery *query = CObjectWrapper::unwrap(query_);
+  Memory after = CObjectWrapper::unwrap(after_);
+
+  Memory result = query->next(after);
+  return CObjectWrapper::wrap(result);
+}
+
+legion_memory_t
+legion_memory_query_random(legion_memory_query_t query_)
+{
+  Machine::MemoryQuery *query = CObjectWrapper::unwrap(query_);
+
+  Memory result = query->random();
+  return CObjectWrapper::wrap(result);
 }
 
 // -----------------------------------------------------------------------
