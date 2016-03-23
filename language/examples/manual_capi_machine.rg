@@ -110,7 +110,15 @@ terra top_level_task(task : c.legion_task_t,
   c.printf("  %lu System:\n", c.legion_memory_query_count(sys_mems))
   var sys_mem = c.legion_memory_query_first(sys_mems)
   while sys_mem.id ~= 0 do
-    c.printf("    %lx\n", sys_mem.id)
+    var proc_affinity = c.legion_processor_query_create(machine)
+    c.legion_processor_query_best_affinity_to_memory(proc_affinity, sys_mem, 0, 0)
+    c.printf("    %lx with affinity to %lu memories:\n", sys_mem.id, c.legion_processor_query_count(proc_affinity))
+    var proc = c.legion_processor_query_first(proc_affinity)
+    while proc.id ~= 0 do
+      c.printf("      %lx\n", proc.id)
+      proc = c.legion_processor_query_next(proc_affinity, proc)
+    end
+    c.legion_processor_query_destroy(proc_affinity)
     sys_mem = c.legion_memory_query_next(sys_mems, sys_mem)
   end
   c.legion_memory_query_destroy(sys_mems)
