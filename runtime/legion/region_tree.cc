@@ -105,6 +105,9 @@ namespace Legion {
     {
       create_node(handle, domain, NULL/*parent*/, 
                   ColorPoint(0)/*color*/, kind, mode);
+#ifdef LEGION_SPY
+      IndexSpaceNode::log_index_space_domain(handle, domain);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -121,6 +124,11 @@ namespace Legion {
       IndexSpaceNode *node = create_node(handle, hull, NULL/*parent*/, 
                                          ColorPoint(0)/*color*/, kind, mode);
       node->update_component_domains(domains);
+#ifdef LEGION_SPY
+      for (std::set<Domain>::const_iterator it = domains.begin();
+            it != domains.end(); it++)
+        IndexSpaceNode::log_index_space_domain(handle, *it);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -174,6 +182,9 @@ namespace Legion {
 
         if (Runtime::legion_spy_enabled)
           LegionSpy::log_index_subspace(pid.id, handle.id, it->first);
+#ifdef LEGION_SPY
+        IndexSpaceNode::log_index_space_domain(handle, it->second);
+#endif
       } 
       if (part_kind == COMPUTE_KIND)
       {
@@ -247,6 +258,11 @@ namespace Legion {
 
         if (Runtime::legion_spy_enabled)
           LegionSpy::log_index_subspace(pid.id, handle.id, it->first);
+#ifdef LEGION_SPY
+        for (std::set<Domain>::const_iterator cit = 
+              comp_it->second.begin(); cit != comp_it->second.end(); cit++)
+          IndexSpaceNode::log_index_space_domain(handle, *cit); 
+#endif
       }
       if (part_kind == COMPUTE_KIND)
       {
@@ -6760,6 +6776,59 @@ namespace Legion {
       return allocator;
     }
 
+#ifdef LEGION_SPY
+    //--------------------------------------------------------------------------
+    /*static*/ void IndexSpaceNode::log_index_space_domain(IndexSpace handle,
+                                                           const Domain &dom)
+    //--------------------------------------------------------------------------
+    {
+      switch (dom.get_dim())
+      {
+        case 0:
+          {
+            const Realm::ElementMask &mask = 
+              dom.get_index_space().get_valid_mask();
+            Realm::ElementMask::Enumerator *enumerator = 
+              mask.enumerate_enabled();
+            int next, length;
+            while (enumerator->get_next(next, length))
+            {
+              if (length > 1)
+              {
+                // inclusive so need -1
+                int end = next + length - 1;
+                LegionSpy::log_index_space_rect<1>(handle.id, &next, &end);
+              }
+              else
+                LegionSpy::log_index_space_point<1>(handle.id, &next);
+            }
+            delete enumerator;
+            break;
+          }
+        case 1:
+          {
+            Rect<1> rect = dom.get_rect<1>();
+            LegionSpy::log_index_space_rect<1>(handle.id, rect.lo.x, rect.hi.x);
+            break;
+          }
+        case 2:
+          {
+            Rect<2> rect = dom.get_rect<2>();
+            LegionSpy::log_index_space_rect<2>(handle.id, rect.lo.x, rect.hi.x);
+            break;
+          }
+        case 3:
+          {
+            Rect<3> rect = dom.get_rect<3>();
+            LegionSpy::log_index_space_rect<3>(handle.id, rect.lo.x, rect.hi.x);
+            break;
+          }
+        default:
+          assert(false);
+      }
+    }
+#endif
+
     /////////////////////////////////////////////////////////////
     // Index Partition Node 
     /////////////////////////////////////////////////////////////
@@ -11797,8 +11866,12 @@ namespace Legion {
           // are going to update the iterator
           if (op->register_dependence(it->op, it->gen))
           {
+#ifndef LEGION_SPY
             // Prune it from the list
             it = state.curr_epoch_users.erase(it);
+#else
+            it++;
+#endif
           }
           else if (dominate)
             it = state.curr_epoch_users.erase(it);
@@ -11826,8 +11899,12 @@ namespace Legion {
           // to update the iterator
           if (op->register_dependence(it->op, it->gen))
           {
+#ifndef LEGION_SPY
             // Prune it from the list
             it = state.prev_epoch_users.erase(it);
+#else
+            it++;
+#endif
           }
           else if (dominate)
             it = state.prev_epoch_users.erase(it);

@@ -423,7 +423,8 @@ namespace Legion {
       virtual void remove_created_region(LogicalRegion handle);
       virtual void remove_created_field(FieldSpace handle, FieldID fid);
     public:
-      void get_top_regions(std::vector<LogicalRegion> &top_regions);
+      void get_top_regions(std::map<LogicalRegion,
+                                    RegionTreeContext> &top_regions);
       void analyze_destroy_index_space(IndexSpace handle, Operation *op);
       void analyze_destroy_index_partition(IndexPartition handle, 
                                            Operation *op);

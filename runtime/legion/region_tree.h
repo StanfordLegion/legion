@@ -968,6 +968,10 @@ namespace Legion {
                                             Deserializer &derez);
     public:
       IndexSpaceAllocator* get_allocator(void);
+#ifdef LEGION_SPY
+    public:
+      static void log_index_space_domain(IndexSpace handle, const Domain &dom);
+#endif
     public:
       const IndexSpace handle;
       IndexPartNode *const parent;

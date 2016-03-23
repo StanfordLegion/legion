@@ -481,6 +481,24 @@ namespace Legion {
       {
         log_spy.info("Phase Barrier " IDFMT, barrier.id);
       }
+
+      // For capturing information about the shpe of index spaces
+      template<int DIM>
+      static inline void log_index_space_point(IDType handle, int *vals)
+      {
+        log_spy.info("Index Space Point " IDFMT " %d %d %d %d", handle, DIM,
+            vals[0], DIM < 2 ? 0 : vals[1], DIM < 3 ? 0 : vals[2]);
+      }
+
+      template<int DIM>
+      static inline void log_index_space_rect(IDType handle, 
+                                              int *lower, int *higher)
+      {
+        log_spy.info("Index Space Rect " IDFMT " %d %d %d %d %d %d %d", 
+            handle, DIM, lower[0], DIM < 2 ? 0 : lower[1], 
+            DIM < 3 ? 0 : lower[2], higher[0], DIM < 2 ? 0 : higher[1],
+            DIM < 3 ? 0 : higher[2]);
+      }
 #endif
     }; // namespace LegionSpy
 

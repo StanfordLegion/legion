@@ -1707,6 +1707,13 @@ namespace Legion {
         else
           all_invalid = false;
       }
+      // Log our requirements that we computed
+      if (Runtime::legion_spy_enabled)
+      {
+        UniqueID our_uid = get_unique_id();
+        for (unsigned idx = 0; idx < regions.size(); idx++)
+          log_requirement(our_uid, idx, regions[idx]);
+      }
       // Return true if this point has any valid region requirements
       return (!all_invalid);
     }
@@ -3611,20 +3618,28 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SingleTask::get_top_regions(std::vector<LogicalRegion> &top_regions)
+    void SingleTask::get_top_regions(
+                         std::map<LogicalRegion,RegionTreeContext> &top_regions)
     //--------------------------------------------------------------------------
     {
+      RegionTreeContext outermost = find_outermost_context()->get_context();
       // Need to hold the lock when getting the top regions because
       // the add_created_region method can be executing in parallel
       // and may result in the vector changing size
       AutoLock o_lock(op_lock,1,false/*exclusive*/);
-      top_regions.resize(regions.size());
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
 #ifdef DEBUG_HIGH_LEVEL
         assert(regions[idx].handle_type == SINGULAR);
 #endif
-        top_regions[idx] = regions[idx].region;
+        if (top_regions.find(regions[idx].region) != top_regions.end())
+          continue;
+        // If it is something that we made, then the context is
+        // the outermost context, otherwise it is our context
+        if (idx >= initial_region_count)
+          top_regions[regions[idx].region] = outermost;
+        else
+          top_regions[regions[idx].region] = context;
       }
     }
 
@@ -3636,12 +3651,13 @@ namespace Legion {
 #ifdef DEBUG_HIGH_LEVEL
       assert(context.exists());
 #endif
-      std::vector<LogicalRegion> top_regions;
+      std::map<LogicalRegion,RegionTreeContext> top_regions;
       get_top_regions(top_regions);
-      for (unsigned idx = 0; idx < top_regions.size(); idx++)
+      for (std::map<LogicalRegion,RegionTreeContext>::const_iterator it = 
+            top_regions.begin(); it != top_regions.end(); it++)
       {
-        runtime->forest->analyze_destroy_index_space(context, handle, op,
-                                                     top_regions[idx]);
+        runtime->forest->analyze_destroy_index_space(it->second, handle, op,
+                                                     it->first);
       }
     }
 
@@ -3653,12 +3669,13 @@ namespace Legion {
 #ifdef DEBUG_HIGH_LEVEL
       assert(context.exists());
 #endif
-      std::vector<LogicalRegion> top_regions;
+      std::map<LogicalRegion,RegionTreeContext> top_regions;
       get_top_regions(top_regions);
-      for (unsigned idx = 0; idx < top_regions.size(); idx++)
+      for (std::map<LogicalRegion,RegionTreeContext>::const_iterator it = 
+            top_regions.begin(); it != top_regions.end(); it++)
       {
-        runtime->forest->analyze_destroy_index_partition(context, handle, op,
-                                                         top_regions[idx]);
+        runtime->forest->analyze_destroy_index_partition(it->second, handle, op,
+                                                         it->first);
       }
     }
 
@@ -3670,12 +3687,13 @@ namespace Legion {
 #ifdef DEBUG_HIGH_LEVEL
       assert(context.exists());
 #endif
-      std::vector<LogicalRegion> top_regions;
+      std::map<LogicalRegion,RegionTreeContext> top_regions;
       get_top_regions(top_regions);
-      for (unsigned idx = 0; idx < top_regions.size(); idx++)
+      for (std::map<LogicalRegion,RegionTreeContext>::const_iterator it = 
+            top_regions.begin(); it != top_regions.end(); it++)
       {
-        runtime->forest->analyze_destroy_field_space(context, handle, op,
-                                                     top_regions[idx]);
+        runtime->forest->analyze_destroy_field_space(it->second, handle, op,
+                                                     it->first);
       }
     }
 
@@ -3687,12 +3705,13 @@ namespace Legion {
 #ifdef DEBUG_HIGH_LEVEL
       assert(context.exists());
 #endif
-      std::vector<LogicalRegion> top_regions;
+      std::map<LogicalRegion,RegionTreeContext> top_regions;
       get_top_regions(top_regions);
-      for (unsigned idx = 0; idx < top_regions.size(); idx++)
+      for (std::map<LogicalRegion,RegionTreeContext>::const_iterator it = 
+            top_regions.begin(); it != top_regions.end(); it++)
       {
-        runtime->forest->analyze_destroy_fields(context, handle, to_delete,
-                                                op, top_regions[idx]);
+        runtime->forest->analyze_destroy_fields(it->second, handle, to_delete,
+                                                op, it->first);
       }
     }
 
@@ -3704,12 +3723,13 @@ namespace Legion {
 #ifdef DEBUG_HIGH_LEVEL
       assert(context.exists());
 #endif
-      std::vector<LogicalRegion> top_regions;
+      std::map<LogicalRegion,RegionTreeContext> top_regions;
       get_top_regions(top_regions);
-      for (unsigned idx = 0; idx < top_regions.size(); idx++)
+      for (std::map<LogicalRegion,RegionTreeContext>::const_iterator it = 
+            top_regions.begin(); it != top_regions.end(); it++)
       {
-        runtime->forest->analyze_destroy_logical_region(context, handle, op,
-                                                        top_regions[idx]);
+        runtime->forest->analyze_destroy_logical_region(it->second, handle, op,
+                                                        it->first);
       }
     }
 
@@ -3721,12 +3741,13 @@ namespace Legion {
 #ifdef DEBUG_HIGH_LEVEL
       assert(context.exists());
 #endif
-      std::vector<LogicalRegion> top_regions;
+      std::map<LogicalRegion,RegionTreeContext> top_regions;
       get_top_regions(top_regions);
-      for (unsigned idx = 0; idx < top_regions.size(); idx++)
+      for (std::map<LogicalRegion,RegionTreeContext>::const_iterator it = 
+            top_regions.begin(); it != top_regions.end(); it++)
       {
-        runtime->forest->analyze_destroy_logical_partition(context, handle, op,
-                                                           top_regions[idx]);
+        runtime->forest->analyze_destroy_logical_partition(it->second, handle, 
+                                                           op, it->first);
       }
     }
 
