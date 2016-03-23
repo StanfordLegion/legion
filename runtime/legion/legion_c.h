@@ -2942,6 +2942,21 @@ typedef int coord_t;
   unsigned
   legion_machine_get_all_processors_size(legion_machine_t machine);
 
+  /**
+   * @see Realm::Machine::get_all_memories()
+   */
+  void
+  legion_machine_get_all_memories(
+    legion_machine_t machine,
+    legion_memory_t *memories,
+    unsigned memories_size);
+
+  /**
+   * @see Realm::Machine::get_all_memories()
+   */
+  unsigned
+  legion_machine_get_all_memories_size(legion_machine_t machine);
+
   // -----------------------------------------------------------------------
   // Processor Operations
   // -----------------------------------------------------------------------
@@ -2950,7 +2965,13 @@ typedef int coord_t;
    * @see Realm::Processor::kind()
    */
   legion_processor_kind_t
-  legion_processor_kind(legion_processor_t proc_);
+  legion_processor_kind(legion_processor_t proc);
+
+  /**
+   * @see Realm::Processor::address_space()
+   */
+  legion_address_space_t
+  legion_processor_address_space(legion_processor_t proc);
 
   // -----------------------------------------------------------------------
   // Memory Operations
@@ -2960,7 +2981,13 @@ typedef int coord_t;
    * @see Realm::Memory::kind()
    */
   legion_memory_kind_t
-  legion_memory_kind(legion_memory_t proc_);
+  legion_memory_kind(legion_memory_t mem);
+
+  /**
+   * @see Realm::Memory::address_space()
+   */
+  legion_address_space_t
+  legion_memory_address_space(legion_memory_t mem);
 
   // -----------------------------------------------------------------------
   // Machine Query Interface Operations

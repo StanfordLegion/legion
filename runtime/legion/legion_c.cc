@@ -4404,8 +4404,9 @@ legion_machine_get_all_processors(
   unsigned num_to_copy =
     std::min((unsigned)pset.size(), processors_size);
 
-  for (unsigned i = 0; i < num_to_copy; ++i)
+  for (unsigned i = 0; i < num_to_copy; ++i) {
     processors_[i] = CObjectWrapper::wrap(*itr++);
+  }
 }
 
 unsigned
@@ -4416,6 +4417,36 @@ legion_machine_get_all_processors_size(legion_machine_t machine_)
   std::set<Processor> pset;
   machine->get_all_processors(pset);
   return pset.size();
+}
+
+void
+legion_machine_get_all_memories(
+  legion_machine_t machine_,
+  legion_memory_t *memories_,
+  unsigned memories_size)
+{
+  Machine *machine = CObjectWrapper::unwrap(machine_);
+
+  std::set<Memory> mset;
+  machine->get_all_memories(mset);
+  std::set<Memory>::iterator itr = mset.begin();
+
+  unsigned num_to_copy =
+    std::min((unsigned)mset.size(), memories_size);
+
+  for (unsigned i = 0; i < num_to_copy; ++i) {
+    memories_[i] = CObjectWrapper::wrap(*itr++);
+  }
+}
+
+unsigned
+legion_machine_get_all_memories_size(legion_machine_t machine_)
+{
+  Machine *machine = CObjectWrapper::unwrap(machine_);
+
+  std::set<Memory> mset;
+  machine->get_all_memories(mset);
+  return mset.size();
 }
 
 // -----------------------------------------------------------------------
@@ -4430,6 +4461,14 @@ legion_processor_kind(legion_processor_t proc_)
   return CObjectWrapper::wrap(proc.kind());
 }
 
+legion_address_space_t
+legion_processor_address_space(legion_processor_t proc_)
+{
+  Processor proc = CObjectWrapper::unwrap(proc_);
+
+  return proc.address_space();
+}
+
 // -----------------------------------------------------------------------
 // Memory Operations
 // -----------------------------------------------------------------------
@@ -4440,6 +4479,14 @@ legion_memory_kind(legion_memory_t mem_)
   Memory mem = CObjectWrapper::unwrap(mem_);
 
   return CObjectWrapper::wrap(mem.kind());
+}
+
+legion_address_space_t
+legion_memory_address_space(legion_memory_t mem_)
+{
+  Memory mem = CObjectWrapper::unwrap(mem_);
+
+  return mem.address_space();
 }
 
 // -----------------------------------------------------------------------

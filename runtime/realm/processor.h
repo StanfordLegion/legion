@@ -27,7 +27,7 @@
 
 namespace Realm {
 
-    typedef unsigned int AddressSpace;
+    typedef ::legion_lowlevel_address_space_t AddressSpace;
 
     class ProfilingRequestSet;
     class CodeDescriptor;
