@@ -3234,37 +3234,6 @@ typedef int coord_t;
   legion_memory_query_random(legion_memory_query_t query);
 
   // -----------------------------------------------------------------------
-  // Machine Query Interface Operations
-  // -----------------------------------------------------------------------
-
-  /**
-   * @return Caller takes ownership of return value.
-   *
-   * @see LegionRuntime::HighLevel::MappingUtilities::MachineQueryInterface()
-   */
-  legion_machine_query_interface_t
-  legion_machine_query_interface_create(legion_machine_t machine);
-
-  /**
-   * @param handle Caller must have ownership of parameter `handle`.
-   *
-   * @see LegionRuntime::HighLevel::MappingUtilities::~MachineQueryInterface()
-   */
-  void
-  legion_machine_query_interface_destroy(
-    legion_machine_query_interface_t handle);
-
-  /**
-   * @see LegionRuntime::HighLevel::MappingUtilities
-   *                   ::MachineQueryInterface::find_memory_kind()
-   */
-  legion_memory_t
-  legion_machine_query_interface_find_memory_kind(
-    legion_machine_query_interface_t handle,
-    legion_processor_t proc,
-    legion_memory_kind_t kind);
-
-  // -----------------------------------------------------------------------
   // Default Mapper Operations
   // -----------------------------------------------------------------------
 

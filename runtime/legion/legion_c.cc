@@ -4770,40 +4770,6 @@ legion_memory_query_random(legion_memory_query_t query_)
 }
 
 // -----------------------------------------------------------------------
-// Machine Query Interface Operations
-// -----------------------------------------------------------------------
-
-
-legion_machine_query_interface_t
-legion_machine_query_interface_create(legion_machine_t machine_)
-{
-  Machine *machine = CObjectWrapper::unwrap(machine_);
-
-  return CObjectWrapper::wrap(new MachineQueryInterface(*machine));
-}
-
-void
-legion_machine_query_interface_destroy(
-  legion_machine_query_interface_t handle_)
-{
-  MachineQueryInterface *handle = CObjectWrapper::unwrap(handle_);
-  delete handle;
-}
-
-legion_memory_t
-legion_machine_query_interface_find_memory_kind(
-  legion_machine_query_interface_t handle_,
-  legion_processor_t proc_,
-  legion_memory_kind_t kind_)
-{
-  MachineQueryInterface *handle = CObjectWrapper::unwrap(handle_);
-  Processor proc = CObjectWrapper::unwrap(proc_);
-  Memory::Kind kind = CObjectWrapper::unwrap(kind_);
-
-  return CObjectWrapper::wrap(handle->find_memory_kind(proc, kind));
-}
-
-// -----------------------------------------------------------------------
 // Default Mapper Operations
 // -----------------------------------------------------------------------
 
