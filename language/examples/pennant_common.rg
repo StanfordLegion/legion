@@ -1112,8 +1112,8 @@ terra read_partitions(conf : config) : mesh_colorings
   -- Zones and sides: private partitions.
   var max_stride_zx = (conf.nzx + conf.numpcx - 1) / conf.numpcx
   var max_stride_zy = (conf.nzy + conf.numpcy - 1) / conf.numpcy
-  result.nspans_zones = (max_stride_zx*max_stride_zy + conf.spansize - 1) / conf.spansize
-  result.nspans_points = result.nspans_zones
+  var zspansize = conf.spansize/znump
+  result.nspans_zones = (max_stride_zx*max_stride_zy + zspansize - 1) / zspansize
 
   for pcy = 0, conf.numpcy do
     for pcx = 0, conf.numpcx do
@@ -1128,13 +1128,13 @@ terra read_partitions(conf : config) : mesh_colorings
         ptr_t(first_z * znump), ptr_t(last_z * znump - 1)) -- inclusive
 
       var span = 0
-      for z = first_z, last_z, conf.spansize do
+      for z = first_z, last_z, zspansize do
         c.legion_coloring_add_range(
           result.rz_spans_c, span,
-          ptr_t(z), ptr_t(min(z + conf.spansize, last_z) - 1)) -- inclusive
+          ptr_t(z), ptr_t(min(z + zspansize, last_z) - 1)) -- inclusive
         c.legion_coloring_add_range(
           result.rs_spans_c, span,
-          ptr_t(z * znump), ptr_t(min(z + conf.spansize, last_z) * znump - 1)) -- inclusive
+          ptr_t(z * znump), ptr_t(min(z + zspansize, last_z) * znump - 1)) -- inclusive
         span = span + 1
       end
       regentlib.assert(span <= result.nspans_zones, "zone span overflow")
@@ -1153,6 +1153,9 @@ terra read_partitions(conf : config) : mesh_colorings
     result.rp_all_c, all_private_color,
     ptr_t(first_private), ptr_t(last_private - 1)) -- inclusive
 
+  -- This math is hard, so just keep track of these as we go along.
+  result.nspans_points = 0
+
   -- Points: private partition.
   for pcy = 0, conf.numpcy do
     for pcx = 0, conf.numpcx do
@@ -1170,7 +1173,7 @@ terra read_partitions(conf : config) : mesh_colorings
           ptr_t(p), ptr_t(min(p + conf.spansize, last_p) - 1)) -- inclusive
         span = span + 1
       end
-      regentlib.assert(span <= result.nspans_points, "point span overflow")
+      result.nspans_points = max(result.nspans_points, span)
     end
   end
 
@@ -1247,6 +1250,12 @@ terra read_partitions(conf : config) : mesh_colorings
       c.legion_coloring_add_range(
         result.rp_spans_c, span,
         ptr_t(bottom_right._0), ptr_t(bottom_right._1 - 1)) -- inclusive
+
+      var leftover3 = max(leftover2 - (bottom_right._1 - bottom_right._0), 0)
+      if (leftover3 == 0 and leftover2 > 0) or conf.spansize == 1 then
+        span = span + 1
+      end
+      result.nspans_points = max(result.nspans_points, span)
     end
   end
 
