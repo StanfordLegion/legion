@@ -95,6 +95,18 @@ void CircuitMapper::select_task_options(Task *task)
   task->spawn_task = false;
   task->map_locally = true;
   task->profile_task = false;
+  const char* task_name = task->get_task_name();
+  if (strcmp(task_name, "calculate_new_currents") == 0 ||
+      strcmp(task_name, "distribute_charge") == 0 ||
+      strcmp(task_name, "update_voltages") == 0)
+  {
+    std::vector<Processor> &local_procs =
+      sysmem_local_procs[proc_sysmems[task->target_proc]];
+    Color index = get_logical_region_color(task->regions[0].region);
+    task->target_proc = local_procs[(index % (local_procs.size() - 1)) + 1];
+    //printf("Task " IDFMT " has color %d mapped to Proc " IDFMT "\n",
+    //    task->get_unique_task_id(), index, task->target_proc.id);
+  }
 }
 
 void CircuitMapper::select_task_variant(Task *task)
@@ -115,10 +127,6 @@ void CircuitMapper::select_task_variant(Task *task)
 
 bool CircuitMapper::map_task(Task *task)
 {
-  task->additional_procs.clear();
-  std::vector<Processor> &local_procs = sysmem_local_procs[proc_sysmems[task->target_proc]];
-  task->additional_procs.insert(local_procs.begin(), local_procs.end());
-
   Memory sysmem = proc_sysmems[task->target_proc];
   assert(sysmem.exists());
   std::vector<RegionRequirement> &regions = task->regions;
@@ -133,37 +141,9 @@ bool CircuitMapper::map_task(Task *task)
 
     // Place all regions in local system memory.
     req.target_ranking.push_back(sysmem);
-#if 1
-    {
-      LogicalRegion root;
-
-      if (req.handle_type == SINGULAR || req.handle_type == REG_PROJECTION) {
-        root = get_root_region(req.region);
-      } else {
-        assert(req.handle_type == PART_PROJECTION);
-        root = get_root_region(req.partition);
-      }
-
-      const char *name_;
-      runtime->retrieve_name(root, name_);
-      assert(name_);
-      std::string name(name_);
-
-      int num_fields = 0;
-      if (name == "all_nodes") {
-        num_fields = 4;
-      } else if (name == "all_wires") {
-        num_fields = 26;
-      } else {
-        assert(false);
-      }
-
-      const int base = 101;
-      for (int i = base; i < base + num_fields; i++) {
-        req.additional_fields.insert(i);
-      }
-    }
-#endif
+    std::set<FieldID> fields;
+    get_field_space_fields(req.parent.get_field_space(), fields);
+    req.additional_fields.insert(fields.begin(), fields.end());
   }
 
   return false;
