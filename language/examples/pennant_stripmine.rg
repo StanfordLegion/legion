@@ -1339,6 +1339,15 @@ task test()
     disjoint, rs_all, colorings_.rs_spans_c)
   var rs_spans = cross_product(rs_all_p, rs_spans_p)
 
+  __demand(__parallel)
+  for i = 0, conf.npieces do
+    initialize_topology(conf, i, rz_all_p[i],
+                        rp_all_private_p[i],
+                        rp_all_shared_p[i],
+                        rp_all_ghost_p[i],
+                        rs_all_p[i])
+  end
+
   c.printf("Initializing (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6)
   wait_for(initialize(rz_all, rz_all_p, rz_spans_p, rz_spans,
                       rp_all,
