@@ -74,8 +74,6 @@ struct Colorings {
   private_node_map : c.legion_coloring_t,
   shared_node_map : c.legion_coloring_t,
   ghost_node_map : c.legion_coloring_t,
-  wire_owner_map : c.legion_coloring_t,
-  first_wires : &c.legion_ptr_t,
 }
 
 struct Config {
@@ -126,7 +124,7 @@ struct voltages {
 fspace wire(rpn : region(node),
             rsn : region(node),
             rgn : region(node)) {
-  in_ptr : ptr(node, rpn, rsn, rgn),
+  in_ptr : ptr(node, rpn, rsn),
   out_ptr : ptr(node, rpn, rsn, rgn),
   inductance : float,
   resistance : float,
@@ -177,205 +175,159 @@ terra random_element(arr : &c.legion_ptr_t,
   return arr[index]
 end
 
-terra load_circuit(runtime : c.legion_runtime_t,
-                   ctx : c.legion_context_t,
-                   all_nodes : c.legion_physical_region_t[4],
-                   all_nodes_fields : c.legion_field_id_t[4],
-                   all_wires : c.legion_physical_region_t[26],
-                   all_wires_fields : c.legion_field_id_t[26],
-                   conf : Config)
+task init_nodes(rn : region(node))
+where
+  reads writes(rn)
+do
+  for node in rn do
+    node.node_cap = drand48() + 1.0
+    node.leakage = 0.1 * drand48()
+    node.charge = 0.0
+    node.node_voltage = 2 * drand48() - 1.0
+  end
+end
 
-  var colorings : Colorings
+task init_wires(piece_id    : int,
+                conf        : Config,
+                rls         : region(int),
+                rn_all      : region(node),
+                rn          : region(node),
+                rw          : region(wire(rn, rn, rn_all)))
+where
+  reads writes(rw, rls)
+do
+  var piece_shared_nodes : &uint =
+    [&uint](c.malloc([sizeof(uint)] * conf.num_pieces))
+  for i = 0, conf.num_pieces do piece_shared_nodes[i] = 0 end
 
-  var wire_owner_map = c.legion_coloring_create()
-  var private_node_map = c.legion_coloring_create()
-  var shared_node_map = c.legion_coloring_create()
-  var ghost_node_map = c.legion_coloring_create()
-  var locator_node_map = c.legion_coloring_create()
+  var npp = conf.nodes_per_piece
+  var ptr_offset = piece_id * npp
 
-  var privacy_map = c.legion_coloring_create()
-  c.legion_coloring_ensure_color(privacy_map, 0)
-  c.legion_coloring_ensure_color(privacy_map, 1)
+  for wire in rw do
+    wire.current.{_0, _1, _2, _3, _4, _5, _6, _7, _8, _9} = 0.0
+    wire.voltage.{_0, _1, _2, _3, _4, _5, _6, _7, _8} = 0.0
+    wire.resistance = drand48() * 10.0 + 1.0
 
-  var piece_shared_nodes = [&uint](c.malloc(conf.num_pieces * sizeof(uint)))
+    -- Keep inductance on the order of 1e-3 * dt to avoid resonance problems
+    wire.inductance = (drand48() + 0.1) * DELTAT * 1e-3
+    wire.wire_cap = drand48() * 0.1
 
-  srand48(conf.random_seed)
+    var in_node = ptr_offset + [uint](drand48() * npp)
+    wire.in_ptr = dynamic_cast(ptr(node, rn, rn), [ptr](in_node))
+    regentlib.assert(not isnull(wire.in_ptr),
+      "picked an invalid random pointer")
 
-  var fa_node_cap =
-    c.legion_physical_region_get_field_accessor_array(all_nodes[0], all_nodes_fields[0])
-  var fa_node_leakage =
-    c.legion_physical_region_get_field_accessor_array(all_nodes[1], all_nodes_fields[1])
-  var fa_node_charge =
-    c.legion_physical_region_get_field_accessor_array(all_nodes[2], all_nodes_fields[2])
-  var fa_node_voltage =
-    c.legion_physical_region_get_field_accessor_array(all_nodes[3], all_nodes_fields[3])
-  var all_nodes_ispace = c.legion_physical_region_get_logical_region(all_nodes[0]).index_space
-  --var first_nodes : &c.legion_ptr_t =
-  --  [&c.legion_ptr_t](c.malloc(conf.num_pieces * sizeof(c.legion_ptr_t)))
-  var piece_node_ptrs : &&c.legion_ptr_t =
-    [&&c.legion_ptr_t](c.malloc(conf.num_pieces * 8))
-  do
-    var itr = c.legion_index_iterator_create(runtime, ctx, all_nodes_ispace)
-    for n = 0, conf.num_pieces do
-      c.legion_coloring_ensure_color(private_node_map, n)
-      piece_node_ptrs[n] =
-        [&c.legion_ptr_t](c.malloc(conf.nodes_per_piece * sizeof(c.legion_ptr_t)))
-      for i = 0, conf.nodes_per_piece do
-        regentlib.assert(c.legion_index_iterator_has_next(itr), "test failed")
-        var node_ptr = c.legion_index_iterator_next(itr)
-        --if i == 0 then
-        --  first_nodes[n] = node_ptr
-        --end
-        var capacitance = drand48() + 1.0
-        @[&float](c.legion_accessor_array_ref(fa_node_cap, node_ptr)) = capacitance
-        var leakage = 0.1 * drand48()
-        @[&float](c.legion_accessor_array_ref(fa_node_leakage, node_ptr)) = leakage
-        @[&float](c.legion_accessor_array_ref(fa_node_charge, node_ptr)) = 0.0
-        var init_voltage = 2 * drand48() - 1.0
-        @[&float](c.legion_accessor_array_ref(fa_node_voltage, node_ptr)) = init_voltage
-        c.legion_coloring_add_point(private_node_map, n, node_ptr)
-        c.legion_coloring_add_point(privacy_map, 0, node_ptr)
-        piece_node_ptrs[n][i] = node_ptr
+    var out_node = 0
+    if (100 * drand48() < conf.pct_wire_in_piece) or (conf.num_pieces == 1) then
+      out_node = ptr_offset + [uint](drand48() * npp)
+    else
+      -- pick a random other piece and a node from there
+      var pp = [uint](drand48() * (conf.num_pieces - 1))
+      if pp >= piece_id then pp += 1 end
+
+      -- pick an arbitrary node, except that if it's one that didn't used to be shared, make the
+      -- sequentially next pointer shared instead so that each node's shared pointers stay compact
+      var idx = [uint](drand48() * npp)
+      if idx >= piece_shared_nodes[pp] then
+        idx = piece_shared_nodes[pp]
+        piece_shared_nodes[pp] = piece_shared_nodes[pp] + 1
       end
+      out_node = pp * npp + idx
     end
-    c.legion_index_iterator_destroy(itr)
+    wire.out_ptr = dynamic_cast(ptr(node, rn, rn, rn_all), [ptr](out_node))
   end
-  c.legion_accessor_array_destroy(fa_node_cap)
-  c.legion_accessor_array_destroy(fa_node_leakage)
-  c.legion_accessor_array_destroy(fa_node_charge)
-  c.legion_accessor_array_destroy(fa_node_voltage)
-
-  var fa_wire_in_ptr =
-    c.legion_physical_region_get_field_accessor_array(all_wires[0], all_wires_fields[0])
-  var fa_wire_in_ptr_index =
-    c.legion_physical_region_get_field_accessor_array(all_wires[1], all_wires_fields[1])
-  var fa_wire_out_ptr =
-    c.legion_physical_region_get_field_accessor_array(all_wires[2], all_wires_fields[2])
-  var fa_wire_out_ptr_index =
-    c.legion_physical_region_get_field_accessor_array(all_wires[3], all_wires_fields[3])
-  var fa_wire_inductance =
-    c.legion_physical_region_get_field_accessor_array(all_wires[4], all_wires_fields[4])
-  var fa_wire_resistance =
-    c.legion_physical_region_get_field_accessor_array(all_wires[5], all_wires_fields[5])
-  var fa_wire_cap =
-    c.legion_physical_region_get_field_accessor_array(all_wires[6], all_wires_fields[6])
-  var fa_wire_currents : &c.legion_accessor_array_t =
-    [&c.legion_accessor_array_t](c.malloc(sizeof(c.legion_accessor_array_t) * WIRE_SEGMENTS))
-  for i = 0, WIRE_SEGMENTS do
-    fa_wire_currents[i] =
-      c.legion_physical_region_get_field_accessor_array(all_wires[7 + i], all_wires_fields[7 + i])
+  var idx = 0
+  for ls in rls do
+    @ls = piece_shared_nodes[idx]
+    idx += 1
   end
-  var fa_wire_voltages =
-    [&c.legion_accessor_array_t](c.malloc(sizeof(c.legion_accessor_array_t) * (WIRE_SEGMENTS - 1)))
-  for i = 0, WIRE_SEGMENTS - 1 do
-    fa_wire_voltages[i] =
-      c.legion_physical_region_get_field_accessor_array(all_wires[17 + i], all_wires_fields[17 + i])
-  end
-  var first_wires : &c.legion_ptr_t =
-    [&c.legion_ptr_t](c.malloc(conf.num_pieces * sizeof(c.legion_ptr_t)))
-  var all_wires_ispace = c.legion_physical_region_get_logical_region(all_wires[0]).index_space
-  do
-    var itr = c.legion_index_iterator_create(runtime, ctx, all_wires_ispace)
-    for n = 0, conf.num_pieces do
-      c.legion_coloring_ensure_color(ghost_node_map, n)
-      for i = 0, conf.wires_per_piece do
-        regentlib.assert(c.legion_index_iterator_has_next(itr), "test failed")
-        var wire_ptr = c.legion_index_iterator_next(itr)
-        if i == 0 then
-          first_wires[n] = wire_ptr
-        end
-        for j = 0, WIRE_SEGMENTS do
-          @[&float](c.legion_accessor_array_ref(fa_wire_currents[j], wire_ptr)) = 0.0
-        end
-        for j = 0, WIRE_SEGMENTS - 1 do
-          @[&float](c.legion_accessor_array_ref(fa_wire_voltages[j], wire_ptr)) = 0.0
-        end
-
-        var resistance = drand48() * 10.0 + 1.0
-        @[&float](c.legion_accessor_array_ref(fa_wire_resistance, wire_ptr)) = resistance
-        -- Keep inductance on the order of 1e-3 * dt to avoid resonance problems
-        var inductance = (drand48() + 0.1) * DELTAT * 1e-3
-        @[&float](c.legion_accessor_array_ref(fa_wire_inductance, wire_ptr)) = inductance
-        var capacitance = drand48() * 0.1
-        @[&float](c.legion_accessor_array_ref(fa_wire_cap, wire_ptr)) = capacitance
-
-        @[&c.legion_ptr_t](c.legion_accessor_array_ref(fa_wire_in_ptr, wire_ptr)) =
-          random_element(piece_node_ptrs[n], conf.nodes_per_piece)
-
-        if ((100 * drand48()) < conf.pct_wire_in_piece) or (conf.num_pieces == 1) then
-          @[&c.legion_ptr_t](c.legion_accessor_array_ref(fa_wire_out_ptr, wire_ptr)) =
-            random_element(piece_node_ptrs[n], conf.nodes_per_piece)
-        else
-          -- pick a random other piece and a node from there
-          var nn = [uint](drand48() * (conf.num_pieces - 1))
-          if nn >= n then nn = nn + 1 end
-
-          -- pick an arbitrary node, except that if it's one that didn't used to be shared, make the
-          --  sequentially next pointer shared instead so that each node's shared pointers stay compact
-          var idx = [uint](drand48() * conf.nodes_per_piece)
-          if idx > piece_shared_nodes[nn] then
-            idx = piece_shared_nodes[nn]
-            piece_shared_nodes[nn] = piece_shared_nodes[nn] + 1
-          end
-          var out_ptr = piece_node_ptrs[nn][idx]
-
-          @[&c.legion_ptr_t](c.legion_accessor_array_ref(fa_wire_out_ptr, wire_ptr)) = out_ptr
-          -- This node is no longer private
-          c.legion_coloring_delete_point(privacy_map, 0, out_ptr)
-          c.legion_coloring_add_point(privacy_map, 1, out_ptr)
-          c.legion_coloring_add_point(ghost_node_map, n, out_ptr)
-        end
-        @[&uint32](c.legion_accessor_array_ref(fa_wire_in_ptr_index, wire_ptr)) = 0
-        @[&uint32](c.legion_accessor_array_ref(fa_wire_out_ptr_index, wire_ptr)) = 0
-        c.legion_coloring_add_point(wire_owner_map, n, wire_ptr)
-      end
-    end
-    c.legion_index_iterator_destroy(itr)
-  end
-  -- Second pass: make some random fraction of the private nodes shared
-  do
-    var itr = c.legion_index_iterator_create(runtime, ctx, all_nodes_ispace)
-    for n = 0, conf.num_pieces do
-      c.legion_coloring_ensure_color(shared_node_map, n)
-      for i = 0, conf.nodes_per_piece do
-        regentlib.assert(c.legion_index_iterator_has_next(itr), "test failed")
-        var node_ptr = c.legion_index_iterator_next(itr)
-        if not c.legion_coloring_has_point(privacy_map, 0, node_ptr) then
-          c.legion_coloring_delete_point(private_node_map, n, node_ptr)
-          c.legion_coloring_add_point(shared_node_map, n, node_ptr)
-        end
-      end
-    end
-    c.legion_index_iterator_destroy(itr)
-  end
-  c.legion_accessor_array_destroy(fa_wire_in_ptr)
-  c.legion_accessor_array_destroy(fa_wire_out_ptr)
-  c.legion_accessor_array_destroy(fa_wire_inductance)
-  c.legion_accessor_array_destroy(fa_wire_resistance)
-  c.legion_accessor_array_destroy(fa_wire_cap)
-  for i = 0, WIRE_SEGMENTS do
-    c.legion_accessor_array_destroy(fa_wire_currents[i])
-  end
-  for i = 0, WIRE_SEGMENTS - 1 do
-    c.legion_accessor_array_destroy(fa_wire_voltages[i])
-  end
-
-  c.free(fa_wire_currents)
-  c.free(fa_wire_voltages)
   c.free(piece_shared_nodes)
-  for n = 0, conf.num_pieces do
-    c.free(piece_node_ptrs[n])
+end
+
+task init_piece(piece_id    : int,
+                conf        : Config,
+                rls         : region(int),
+                rn_all      : region(node),
+                rn          : region(node),
+                rw          : region(wire(rn, rn, rn_all)))
+where
+  reads writes(rls, rn, rw)
+do
+  init_nodes(rn)
+  init_wires(piece_id, conf, rls, rn_all, rn, rw)
+end
+
+task create_colorings(num_pieces      : int,
+                      nodes_per_piece : int,
+                      last_shared     : region(int))
+where
+  reads(last_shared)
+do
+  var coloring : Colorings
+  coloring.privacy_map = c.legion_coloring_create()
+  coloring.private_node_map = c.legion_coloring_create()
+  coloring.shared_node_map = c.legion_coloring_create()
+  coloring.ghost_node_map = c.legion_coloring_create()
+
+  c.legion_coloring_ensure_color(coloring.privacy_map, 0)
+  c.legion_coloring_ensure_color(coloring.privacy_map, 1)
+
+  var max_last_shared : &int =
+    [&int](c.malloc([sizeof(int)] * num_pieces))
+  for i = 0, num_pieces do
+    max_last_shared[i] = 0
+    c.legion_coloring_ensure_color(coloring.private_node_map, i)
+    c.legion_coloring_ensure_color(coloring.shared_node_map, i)
+    c.legion_coloring_ensure_color(coloring.ghost_node_map, i)
   end
-  c.free(piece_node_ptrs)
 
-  colorings.privacy_map = privacy_map
-  colorings.private_node_map = private_node_map
-  colorings.shared_node_map = shared_node_map
-  colorings.ghost_node_map = ghost_node_map
-  colorings.wire_owner_map = wire_owner_map
-  colorings.first_wires = first_wires
+  var idx = 0
+  for ls in last_shared do
+    max_last_shared[idx % num_pieces] =
+      max(max_last_shared[idx % num_pieces], @ls)
 
-  return colorings
+    var piece_id = idx / num_pieces
+    var offset = (idx % num_pieces) * nodes_per_piece
+    var first_shared = offset
+    var last_shared = offset + @ls - 1
+    if piece_id ~= (idx % num_pieces) and last_shared >= first_shared then
+      c.legion_coloring_add_range(coloring.ghost_node_map,
+        piece_id,
+        c.legion_ptr_t { value = first_shared },
+        c.legion_ptr_t { value = last_shared })
+    end
+    idx = idx + 1
+  end
+
+  for i = 0, num_pieces do
+    var offset = i * nodes_per_piece
+    var first_shared = offset
+    var last_shared = offset + max_last_shared[i] - 1
+    var first_private = last_shared + 1
+    var last_private = offset + nodes_per_piece - 1
+
+    if last_shared >= first_shared then
+      c.legion_coloring_add_range(coloring.privacy_map, 1,
+        c.legion_ptr_t { value = first_shared },
+        c.legion_ptr_t { value = last_shared })
+      c.legion_coloring_add_range(coloring.shared_node_map,
+        i,
+        c.legion_ptr_t { value = first_shared },
+        c.legion_ptr_t { value = last_shared })
+    end
+
+    if last_private >= first_private then
+      c.legion_coloring_add_range(coloring.privacy_map, 0,
+        c.legion_ptr_t { value = first_private },
+        c.legion_ptr_t { value = last_private })
+      c.legion_coloring_add_range(coloring.private_node_map,
+        i,
+        c.legion_ptr_t { value = first_private },
+        c.legion_ptr_t { value = last_private })
+    end
+  end
+
+  return coloring
 end
 
 task init_pointers(rpn : region(node),
@@ -383,14 +335,14 @@ task init_pointers(rpn : region(node),
                    rgn : region(node),
                    rw : region(wire(rpn, rsn, rgn)))
 where
-  reads(rpn, rsn, rgn),
   reads writes(rw.{in_ptr, out_ptr})
 do
   for w in rw do
-    w.in_ptr = dynamic_cast(ptr(node, rpn, rsn, rgn), w.in_ptr)
+    w.in_ptr = dynamic_cast(ptr(node, rpn, rsn), w.in_ptr)
+    regentlib.assert(not isnull(w.in_ptr), "in ptr is null!")
     w.out_ptr = dynamic_cast(ptr(node, rpn, rsn, rgn), w.out_ptr)
+    regentlib.assert(not isnull(w.out_ptr), "out ptr is null!")
   end
-  return true
 end
 
 task calculate_new_currents(steps : uint,
@@ -585,8 +537,9 @@ task toplevel()
     conf.num_loops, conf.num_pieces, conf.nodes_per_piece, conf.wires_per_piece,
     conf.pct_wire_in_piece, conf.random_seed)
 
-  var num_circuit_nodes = conf.num_pieces * conf.nodes_per_piece
-  var num_circuit_wires = conf.num_pieces * conf.wires_per_piece
+  var num_pieces = conf.num_pieces
+  var num_circuit_nodes : uint64 = num_pieces * conf.nodes_per_piece
+  var num_circuit_wires : uint64 = num_pieces * conf.wires_per_piece
 
   var all_nodes = region(ispace(ptr, num_circuit_nodes), node)
   var all_wires = region(ispace(ptr, num_circuit_wires), wire(wild, wild, wild))
@@ -599,17 +552,38 @@ task toplevel()
     var node_size = [ terralib.sizeof(node) ]
     var wire_size = [ terralib.sizeof(wire(wild,wild,wild)) ]
     c.printf("Circuit memory usage:\n")
-    c.printf("  Nodes : %9lld * %4d bytes = %11lld bytes\n", num_circuit_nodes, node_size, num_circuit_nodes * node_size)
-    c.printf("  Wires : %9lld * %4d bytes = %11lld bytes\n", num_circuit_wires, wire_size, num_circuit_wires * wire_size)
+    c.printf("  Nodes : %10lld * %4d bytes = %12lld bytes\n", num_circuit_nodes, node_size, num_circuit_nodes * node_size)
+    c.printf("  Wires : %10lld * %4d bytes = %12lld bytes\n", num_circuit_wires, wire_size, num_circuit_wires * wire_size)
     var total = ((num_circuit_nodes * node_size) + (num_circuit_wires * wire_size))
-    c.printf("  Total                            %11lld bytes\n", total)
+    c.printf("  Total                             %12lld bytes\n", total)
   end
 
-  var colorings =
-    load_circuit(__runtime(), __context(),
-                 __physical(all_nodes), __fields(all_nodes),
-                 __physical(all_wires), __fields(all_wires),
-                 conf)
+  var last_shared = region(ispace(ptr, num_pieces * num_pieces), int)
+  new(ptr(int, last_shared), num_pieces * num_pieces)
+
+  var launch_domain = ispace(int1d, num_pieces)
+  var rp_nodes = partition(equal, all_nodes, launch_domain)
+  var rp_wires = partition(equal, all_wires, launch_domain)
+  var rp_last_shared = partition(equal, last_shared, launch_domain)
+
+  var duplicate_coloring = c.legion_coloring_create()
+  for i = 0, num_pieces do
+    c.legion_coloring_add_range(duplicate_coloring, i,
+      c.legion_ptr_t { value = 0 },
+      c.legion_ptr_t { value = num_circuit_nodes - 1 })
+  end
+  var rp_duplicate = partition(aliased, all_nodes, duplicate_coloring)
+  c.legion_coloring_destroy(duplicate_coloring)
+
+  --__demand(__spmd, __block)
+  for j = 0, 1 do
+    __demand(__parallel)
+    for i = 0, num_pieces do
+      init_piece(i, conf, rp_last_shared[i], rp_duplicate[i], rp_nodes[i], rp_wires[i])
+    end
+  end
+
+  var colorings = create_colorings(num_pieces, conf.nodes_per_piece, last_shared)
 
   var rp_all_nodes = partition(disjoint, all_nodes, colorings.privacy_map)
   var all_private = rp_all_nodes[0]
@@ -618,12 +592,14 @@ task toplevel()
   var rp_shared = partition(disjoint, all_shared, colorings.shared_node_map)
   var rp_ghost = partition(aliased, all_shared, colorings.ghost_node_map)
 
-  var rp_all_wires = partition(disjoint, all_wires, colorings.wire_owner_map)
+  --var rp_all_wires = partition(disjoint, all_wires, colorings.wire_owner_map)
 
-  -- var x = false
-  -- for i = 0, conf.num_pieces do
-  --   x = init_pointers(rp_private[i], rp_shared[i], rp_ghost[i], rp_all_wires[i])
-  -- end
+  __demand(__spmd, __block)
+  for j = 0, 1 do
+    for i = 0, num_pieces do
+      init_pointers(rp_private[i], rp_shared[i], rp_ghost[i], rp_wires[i])
+    end
+  end
 
   -- -- Force all previous tasks to complete before continuing.
   -- do
@@ -639,20 +615,19 @@ task toplevel()
   var simulation_success = true
   var steps = conf.steps
   var num_loops = conf.num_loops
-  var num_pieces = conf.num_pieces
-  __demand(__spmd)
+  __demand(__spmd, __block)
   for j = 0, num_loops do
     -- c.legion_runtime_begin_trace(__runtime(), __context(), 0)
 
-    -- __demand(__parallel)
+    --__demand(__parallel)
     for i = 0, num_pieces do
-      calculate_new_currents(steps, rp_private[i], rp_shared[i], rp_ghost[i], rp_all_wires[i])
+      calculate_new_currents(steps, rp_private[i], rp_shared[i], rp_ghost[i], rp_wires[i])
     end
-    -- __demand(__parallel)
+    --__demand(__parallel)
     for i = 0, num_pieces do
-      distribute_charge(rp_private[i], rp_shared[i], rp_ghost[i], rp_all_wires[i])
+      distribute_charge(rp_private[i], rp_shared[i], rp_ghost[i], rp_wires[i])
     end
-    -- __demand(__parallel)
+    --__demand(__parallel)
     for i = 0, num_pieces do
       update_voltages(rp_private[i], rp_shared[i])
     end
@@ -660,13 +635,13 @@ task toplevel()
     -- c.legion_runtime_end_trace(__runtime(), __context(), 0)
   end
   -- Force all previous tasks to complete before continuing.
-  -- do
-  --   var _ = 0
-  --   for i = 0, conf.num_pieces do
-  --     _ += dummy(rp_private[i], rp_shared[i], rp_ghost[i], rp_all_wires[i])
-  --   end
-  --   wait_for(_)
-  -- end
+  --do
+  --  var _ = 0
+  --  for i = 0, conf.num_pieces do
+  --    _ += dummy(rp_private[i], rp_shared[i], rp_ghost[i], rp_wires[i])
+  --  end
+  --  wait_for(_)
+  --end
   var ts_end = c.legion_get_current_time_in_micros()
   if simulation_success then
     c.printf("SUCCESS!\n")
@@ -694,12 +669,11 @@ task toplevel()
     c.printf("GFLOPS = %7.3f GFLOPS\n", gflops)
   end
   c.printf("simulation complete - destroying regions\n")
-  -- if conf.dump_values then
-  --   for i = 0, conf.num_pieces do
-  --     dump_task(rp_private[i], rp_shared[i], rp_ghost[i], rp_all_wires[i])
-  --   end
-  -- end
-  c.free(colorings.first_wires)
+  --if conf.dump_values then
+  --  for i = 0, conf.num_pieces do
+  --    dump_task(rp_private[i], rp_shared[i], rp_ghost[i], rp_wires[i])
+  --  end
+  --end
 end
 
 if os.getenv('SAVEOBJ') == '1' then
