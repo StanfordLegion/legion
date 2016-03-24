@@ -27,7 +27,11 @@ do
   local mapper_dir = runtime_dir .. "mappers/"
   local realm_dir = runtime_dir .. "realm/"
   local pennant_cc = root_dir .. "pennant.cc"
-  local pennant_so = os.tmpname() .. ".so" -- root_dir .. "pennant.so"
+  if os.getenv('SAVEOBJ') == '1' then
+    pennant_so = root_dir .. "libpennant.so"
+  else
+    pennant_so = os.tmpname() .. ".so" -- root_dir .. "pennant.so"
+  end
   local cxx = os.getenv('CXX') or 'c++'
 
   local cxx_flags = "-O2 -std=c++0x -Wall -Werror"
