@@ -15,16 +15,20 @@
 -- runs-with:
 -- [
 --   ["pennant.tests/sedovsmall/sedovsmall.pnt",
---    "-npieces", "1"],
+--    "-npieces", "1", "-seq_init", "1", "-par_init", "1"],
 --   ["pennant.tests/sedovsmall/sedovsmall.pnt",
---    "-npieces", "2",
+--    "-npieces", "2", "-seq_init", "1", "-par_init", "1",
 --    "-absolute", "1e-6", "-relative", "1e-6", "-relative_absolute", "1e-9"],
---   ["pennant.tests/sedov/sedov.pnt", "-npieces", "1",
+--   ["pennant.tests/sedov/sedov.pnt",
+--    "-npieces", "1", "-seq_init", "1", "-par_init", "1",
 --    "-absolute", "2e-6", "-relative", "1e-8", "-relative_absolute", "1e-10"],
---   ["pennant.tests/sedov/sedov.pnt", "-npieces", "3",
+--   ["pennant.tests/sedov/sedov.pnt",
+--    "-npieces", "3", "-seq_init", "1", "-par_init", "1",
 --    "-absolute", "2e-6", "-relative", "1e-8", "-relative_absolute", "1e-10"],
---   ["pennant.tests/leblanc/leblanc.pnt", "-npieces", "1"],
---   ["pennant.tests/leblanc/leblanc.pnt", "-npieces", "2"]
+--   ["pennant.tests/leblanc/leblanc.pnt",
+--    "-npieces", "1", "-seq_init", "1", "-par_init", "1"],
+--   ["pennant.tests/leblanc/leblanc.pnt",
+--    "-npieces", "2", "-seq_init", "1", "-par_init", "1"]
 -- ]
 
 -- Inspired by https://github.com/losalamos/PENNANT
@@ -1274,6 +1278,34 @@ do
   return 1.0
 end
 
+task read_input_sequential(rz_all : region(zone),
+                           rp_all : region(point),
+                           rs_all : region(side(wild, wild, wild, wild)),
+                           conf : config)
+where reads writes(rz_all, rp_all, rs_all) do
+  return read_input(
+    __runtime(), __context(),
+    __physical(rz_all), __fields(rz_all),
+    __physical(rp_all), __fields(rp_all),
+    __physical(rs_all), __fields(rs_all),
+    conf)
+end
+
+task validate_output_sequential(rz_all : region(zone),
+                                rp_all : region(point),
+                                rs_all : region(side(wild, wild, wild, wild)),
+                                conf : config)
+where reads(rz_all, rp_all, rs_all) do
+  validate_output(
+    __runtime(), __context(),
+    __physical(rz_all), __fields(rz_all),
+    __physical(rp_all), __fields(rp_all),
+    __physical(rs_all), __fields(rs_all),
+    conf)
+end
+
+terra unwrap(x : mesh_colorings) return x end
+
 task test()
   c.printf("Running test (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6)
 
@@ -1289,63 +1321,83 @@ task test()
 
   c.printf("Reading input (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6)
 
-  var colorings_ = read_partitions(conf)
-  conf.nspans_zones = colorings_.nspans_zones
-  conf.nspans_points = colorings_.nspans_points
+  var colorings : mesh_colorings
 
-  var colorings = read_input(
-    __runtime(), __context(),
-    __physical(rz_all), __fields(rz_all),
-    __physical(rp_all), __fields(rp_all),
-    __physical(rs_all), __fields(rs_all),
-    conf)
+  regentlib.assert(conf.seq_init or conf.par_init,
+                   "enable one of sequential or parallel initialization")
+
+  if conf.seq_init then
+    -- Hack: This had better run on the same node...
+    colorings = unwrap(read_input_sequential(
+      rz_all, rp_all, rs_all, conf))
+  end
+
+  if conf.par_init then
+    if conf.seq_init then
+      c.legion_coloring_destroy(colorings.rz_all_c)
+      c.legion_coloring_destroy(colorings.rz_spans_c)
+      c.legion_coloring_destroy(colorings.rp_all_c)
+      c.legion_coloring_destroy(colorings.rp_all_private_c)
+      c.legion_coloring_destroy(colorings.rp_all_ghost_c)
+      c.legion_coloring_destroy(colorings.rp_all_shared_c)
+      c.legion_coloring_destroy(colorings.rp_spans_c)
+      c.legion_coloring_destroy(colorings.rs_all_c)
+      c.legion_coloring_destroy(colorings.rs_spans_c)
+    end
+    colorings = read_partitions(conf)
+  end
+
+  conf.nspans_zones = colorings.nspans_zones
+  conf.nspans_points = colorings.nspans_points
 
   -- Partition zones into disjoint pieces.
-  var rz_all_p = partition(disjoint, rz_all, colorings_.rz_all_c)
+  var rz_all_p = partition(disjoint, rz_all, colorings.rz_all_c)
 
   -- Partition zones into spans.
-  var rz_spans_p = partition(disjoint, rz_all, colorings_.rz_spans_c)
+  var rz_spans_p = partition(disjoint, rz_all, colorings.rz_spans_c)
   var rz_spans = cross_product(rz_all_p, rz_spans_p)
 
   -- Partition points into private and ghost regions.
-  var rp_all_p = partition(disjoint, rp_all, colorings_.rp_all_c)
+  var rp_all_p = partition(disjoint, rp_all, colorings.rp_all_c)
   var rp_all_private = rp_all_p[0]
   var rp_all_ghost = rp_all_p[1]
 
   -- Partition private points into disjoint pieces by zone.
   var rp_all_private_p = partition(
-    disjoint, rp_all_private, colorings_.rp_all_private_c)
+    disjoint, rp_all_private, colorings.rp_all_private_c)
 
   -- Partition ghost points into aliased pieces by zone.
   var rp_all_ghost_p = partition(
-    aliased, rp_all_ghost, colorings_.rp_all_ghost_c)
+    aliased, rp_all_ghost, colorings.rp_all_ghost_c)
 
   -- Partition ghost points into disjoint pieces, breaking ties
   -- between zones so that each point goes into one region only.
   var rp_all_shared_p = partition(
-    disjoint, rp_all_ghost, colorings_.rp_all_shared_c)
+    disjoint, rp_all_ghost, colorings.rp_all_shared_c)
 
   -- Partition points into spans.
   var rp_spans_p = partition(
-    disjoint, rp_all, colorings_.rp_spans_c)
+    disjoint, rp_all, colorings.rp_spans_c)
   var rp_spans_private = cross_product(rp_all_private_p, rp_spans_p)
   var rp_spans_shared = cross_product(rp_all_shared_p, rp_spans_p)
 
   -- Partition sides into disjoint pieces by zone.
-  var rs_all_p = partition(disjoint, rs_all, colorings_.rs_all_c)
+  var rs_all_p = partition(disjoint, rs_all, colorings.rs_all_c)
 
   -- Partition sides into spans.
   var rs_spans_p = partition(
-    disjoint, rs_all, colorings_.rs_spans_c)
+    disjoint, rs_all, colorings.rs_spans_c)
   var rs_spans = cross_product(rs_all_p, rs_spans_p)
 
-  __demand(__parallel)
-  for i = 0, conf.npieces do
-    initialize_topology(conf, i, rz_all_p[i],
-                        rp_all_private_p[i],
-                        rp_all_shared_p[i],
-                        rp_all_ghost_p[i],
-                        rs_all_p[i])
+  if conf.par_init then
+    __demand(__parallel)
+    for i = 0, conf.npieces do
+      initialize_topology(conf, i, rz_all_p[i],
+                          rp_all_private_p[i],
+                          rp_all_shared_p[i],
+                          rp_all_ghost_p[i],
+                          rs_all_p[i])
+    end
   end
 
   c.printf("Initializing (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6)
@@ -1368,12 +1420,12 @@ task test()
   var stop_time = c.legion_get_current_time_in_micros()/1.e6
   c.printf("Outer simulation time = %.6e\n", stop_time - start_time)
 
-  validate_output(
-    __runtime(), __context(),
-    __physical(rz_all), __fields(rz_all),
-    __physical(rp_all), __fields(rp_all),
-    __physical(rs_all), __fields(rs_all),
-    conf)
+  if conf.seq_init then
+    validate_output_sequential(
+      rz_all, rp_all, rs_all, conf)
+  else
+    c.printf("Warning: Skipping sequential validation\n")
+  end
 
   -- write_output(conf, rz_all, rp_all, rs_all)
 end

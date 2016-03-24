@@ -15,16 +15,20 @@
 -- runs-with:
 -- [
 --   ["pennant.tests/sedovsmall/sedovsmall.pnt",
---    "-npieces", "1", "-compact", "0"],
+--    "-npieces", "1", "-seq_init", "1", "-par_init", "1"],
 --   ["pennant.tests/sedovsmall/sedovsmall.pnt",
---    "-npieces", "2", "-compact", "0",
+--    "-npieces", "2", "-seq_init", "1", "-par_init", "1",
 --    "-absolute", "1e-6", "-relative", "1e-6", "-relative_absolute", "1e-9"],
---   ["pennant.tests/sedov/sedov.pnt", "-npieces", "1", "-compact", "0",
+--   ["pennant.tests/sedov/sedov.pnt",
+--    "-npieces", "1", "-seq_init", "1", "-par_init", "1",
 --    "-absolute", "2e-6", "-relative", "1e-8", "-relative_absolute", "1e-10"],
---   ["pennant.tests/sedov/sedov.pnt", "-npieces", "3", "-compact", "0",
+--   ["pennant.tests/sedov/sedov.pnt",
+--    "-npieces", "3", "-seq_init", "1", "-par_init", "1",
 --    "-absolute", "2e-6", "-relative", "1e-8", "-relative_absolute", "1e-10"],
---   ["pennant.tests/leblanc/leblanc.pnt", "-npieces", "1", "-compact", "0"],
---   ["pennant.tests/leblanc/leblanc.pnt", "-npieces", "2", "-compact", "0"]
+--   ["pennant.tests/leblanc/leblanc.pnt",
+--    "-npieces", "1", "-seq_init", "1", "-par_init", "1"],
+--   ["pennant.tests/leblanc/leblanc.pnt",
+--    "-npieces", "2", "-seq_init", "1", "-par_init", "1"]
 -- ]
 
 -- Inspired by https://github.com/losalamos/PENNANT
@@ -1352,6 +1356,34 @@ terra wait_for(x : int)
   return x
 end
 
+task read_input_sequential(rz_all : region(zone),
+                           rp_all : region(point),
+                           rs_all : region(side(wild, wild, wild, wild)),
+                           conf : config)
+where reads writes(rz_all, rp_all, rs_all) do
+  return read_input(
+    __runtime(), __context(),
+    __physical(rz_all), __fields(rz_all),
+    __physical(rp_all), __fields(rp_all),
+    __physical(rs_all), __fields(rs_all),
+    conf)
+end
+
+task validate_output_sequential(rz_all : region(zone),
+                                rp_all : region(point),
+                                rs_all : region(side(wild, wild, wild, wild)),
+                                conf : config)
+where reads(rz_all, rp_all, rs_all) do
+  validate_output(
+    __runtime(), __context(),
+    __physical(rz_all), __fields(rz_all),
+    __physical(rp_all), __fields(rp_all),
+    __physical(rs_all), __fields(rs_all),
+    conf)
+end
+
+terra unwrap(x : mesh_colorings) return x end
+
 task test()
   c.printf("Running test (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6)
 
@@ -1365,12 +1397,31 @@ task test()
   new(ptr(point, rp_all), conf.np)
   new(ptr(side(wild, wild, wild, wild), rs_all), conf.ns)
 
-  var colorings = read_input(
-    __runtime(), __context(),
-    __physical(rz_all), __fields(rz_all),
-    __physical(rp_all), __fields(rp_all),
-    __physical(rs_all), __fields(rs_all),
-    conf)
+  var colorings : mesh_colorings
+
+  regentlib.assert(conf.seq_init or conf.par_init,
+                   "enable one of sequential or parallel initialization")
+
+  if conf.seq_init then
+    -- Hack: This had better run on the same node...
+    colorings = unwrap(read_input_sequential(
+      rz_all, rp_all, rs_all, conf))
+  end
+
+  if conf.par_init then
+    if conf.seq_init then
+      c.legion_coloring_destroy(colorings.rz_all_c)
+      c.legion_coloring_destroy(colorings.rz_spans_c)
+      c.legion_coloring_destroy(colorings.rp_all_c)
+      c.legion_coloring_destroy(colorings.rp_all_private_c)
+      c.legion_coloring_destroy(colorings.rp_all_ghost_c)
+      c.legion_coloring_destroy(colorings.rp_all_shared_c)
+      c.legion_coloring_destroy(colorings.rp_spans_c)
+      c.legion_coloring_destroy(colorings.rs_all_c)
+      c.legion_coloring_destroy(colorings.rs_spans_c)
+    end
+    colorings = read_partitions(conf)
+  end
 
   -- Partition zones into disjoint pieces.
   var rz_all_p = partition(disjoint, rz_all, colorings.rz_all_c)
@@ -1395,6 +1446,17 @@ task test()
 
   -- Partition sides into disjoint pieces by zone.
   var rs_all_p = partition(disjoint, rs_all, colorings.rs_all_c)
+
+  if conf.par_init then
+    __demand(__parallel)
+    for i = 0, conf.npieces do
+      initialize_topology(conf, i, rz_all_p[i],
+                          rp_all_private_p[i],
+                          rp_all_shared_p[i],
+                          rp_all_ghost_p[i],
+                          rs_all_p[i])
+    end
+  end
 
   c.printf("Initializing (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6)
   initialize(rz_all, rz_all_p,
@@ -1431,12 +1493,12 @@ task test()
   var stop_time = c.legion_get_current_time_in_micros()/1.e6
   c.printf("Elapsed time = %.6e\n", stop_time - start_time)
 
-  validate_output(
-    __runtime(), __context(),
-    __physical(rz_all), __fields(rz_all),
-    __physical(rp_all), __fields(rp_all),
-    __physical(rs_all), __fields(rs_all),
-    conf)
+  if conf.seq_init then
+    validate_output_sequential(
+      rz_all, rp_all, rs_all, conf)
+  else
+    c.printf("Warning: Skipping sequential validation\n")
+  end
 
   -- write_output(conf, rz_all, rp_all, rs_all)
 end

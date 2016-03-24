@@ -173,6 +173,8 @@ local config_fields_mesh = terralib.newlist({
 local config_fields_cmd = terralib.newlist({
   -- Command-line parameters.
   {field = "npieces", type = int64, default_value = 1},
+  {field = "par_init", type = bool, default_value = true},
+  {field = "seq_init", type = bool, default_value = false},
   {field = "enable", type = bool, default_value = true},
   {field = "warmup", type = bool, default_value = true},
   {field = "compact", type = bool, default_value = true},
@@ -504,6 +506,16 @@ terra read_config()
   if conf.npieces <= 0 then
     c.printf("Error: npieces (%lld) must be >= 0\n", conf.npieces)
     c.abort()
+  end
+
+  var par_init = get_optional_arg("-par_init")
+  if par_init ~= nil then
+    conf.par_init = [bool](c.atoll(par_init))
+  end
+
+  var seq_init = get_optional_arg("-seq_init")
+  if seq_init ~= nil then
+    conf.seq_init = [bool](c.atoll(seq_init))
   end
 
   var warmup = get_optional_arg("-warmup")
@@ -1301,15 +1313,15 @@ do
         regentlib.assert(not isnull(p), "bad pointer")
 
         var px = { x = dx*x, y = dy*y }
-        regentlib.assert(abs(px.x - p.px.x) < eps, "bad value: px.x")
-        regentlib.assert(abs(px.y - p.px.y) < eps, "bad value: px.y")
+        if conf.seq_init then regentlib.assert(abs(px.x - p.px.x) < eps, "bad value: px.x") end
+        if conf.seq_init then regentlib.assert(abs(px.y - p.px.y) < eps, "bad value: px.y") end
 
         var has_bcx = (conf.bcx_n > 0 and cmath.fabs(px.x - conf.bcx[0]) < eps) or
           (conf.bcx_n > 1 and cmath.fabs(px.x - conf.bcx[1]) < eps)
         var has_bcy = (conf.bcy_n > 0 and cmath.fabs(px.y - conf.bcy[0]) < eps) or
           (conf.bcy_n > 1 and cmath.fabs(px.y - conf.bcy[1]) < eps)
-        regentlib.assert(has_bcx == p.has_bcx, "bad value: has_bcx")
-        regentlib.assert(has_bcy == p.has_bcy, "bad value: has_bcy")
+        if conf.seq_init then regentlib.assert(has_bcx == p.has_bcx, "bad value: has_bcx") end
+        if conf.seq_init then regentlib.assert(has_bcy == p.has_bcy, "bad value: has_bcy") end
 
         p.px = px
         p.has_bcx = has_bcx
@@ -1337,15 +1349,15 @@ do
       var x, y = last_zx, first_zy + (p_ - right._0 + [int64](pcy > 0))
 
       var px = { x = dx*x, y = dy*y }
-      regentlib.assert(abs(px.x - p.px.x) < eps, "bad value: px.x")
-      regentlib.assert(abs(px.y - p.px.y) < eps, "bad value: px.y")
+      if conf.seq_init then regentlib.assert(abs(px.x - p.px.x) < eps, "bad value: px.x") end
+      if conf.seq_init then regentlib.assert(abs(px.y - p.px.y) < eps, "bad value: px.y") end
 
       var has_bcx = (conf.bcx_n > 0 and cmath.fabs(px.x - conf.bcx[0]) < eps) or
         (conf.bcx_n > 1 and cmath.fabs(px.x - conf.bcx[1]) < eps)
       var has_bcy = (conf.bcy_n > 0 and cmath.fabs(px.y - conf.bcy[0]) < eps) or
         (conf.bcy_n > 1 and cmath.fabs(px.y - conf.bcy[1]) < eps)
-      regentlib.assert(has_bcx == p.has_bcx, "bad value: has_bcx")
-      regentlib.assert(has_bcy == p.has_bcy, "bad value: has_bcy")
+      if conf.seq_init then regentlib.assert(has_bcx == p.has_bcx, "bad value: has_bcx") end
+      if conf.seq_init then regentlib.assert(has_bcy == p.has_bcy, "bad value: has_bcy") end
 
       p.px = px
       p.has_bcx = has_bcx
@@ -1359,15 +1371,15 @@ do
       var x, y = first_zx + (p_ - bottom._0 + [int64](pcx > 0)), last_zy
 
       var px = { x = dx*x, y = dy*y }
-      regentlib.assert(abs(px.x - p.px.x) < eps, "bad value: px.x")
-      regentlib.assert(abs(px.y - p.px.y) < eps, "bad value: px.y")
+      if conf.seq_init then regentlib.assert(abs(px.x - p.px.x) < eps, "bad value: px.x") end
+      if conf.seq_init then regentlib.assert(abs(px.y - p.px.y) < eps, "bad value: px.y") end
 
       var has_bcx = (conf.bcx_n > 0 and cmath.fabs(px.x - conf.bcx[0]) < eps) or
         (conf.bcx_n > 1 and cmath.fabs(px.x - conf.bcx[1]) < eps)
       var has_bcy = (conf.bcy_n > 0 and cmath.fabs(px.y - conf.bcy[0]) < eps) or
         (conf.bcy_n > 1 and cmath.fabs(px.y - conf.bcy[1]) < eps)
-      regentlib.assert(has_bcx == p.has_bcx, "bad value: has_bcx")
-      regentlib.assert(has_bcy == p.has_bcy, "bad value: has_bcy")
+      if conf.seq_init then regentlib.assert(has_bcx == p.has_bcx, "bad value: has_bcx") end
+      if conf.seq_init then regentlib.assert(has_bcy == p.has_bcy, "bad value: has_bcy") end
 
       p.px = px
       p.has_bcx = has_bcx
@@ -1381,15 +1393,15 @@ do
       var x, y = last_zx, last_zy
 
       var px = { x = dx*x, y = dy*y }
-      regentlib.assert(abs(px.x - p.px.x) < eps, "bad value: px.x")
-      regentlib.assert(abs(px.y - p.px.y) < eps, "bad value: px.y")
+      if conf.seq_init then regentlib.assert(abs(px.x - p.px.x) < eps, "bad value: px.x") end
+      if conf.seq_init then regentlib.assert(abs(px.y - p.px.y) < eps, "bad value: px.y") end
 
       var has_bcx = (conf.bcx_n > 0 and cmath.fabs(px.x - conf.bcx[0]) < eps) or
         (conf.bcx_n > 1 and cmath.fabs(px.x - conf.bcx[1]) < eps)
       var has_bcy = (conf.bcy_n > 0 and cmath.fabs(px.y - conf.bcy[0]) < eps) or
         (conf.bcy_n > 1 and cmath.fabs(px.y - conf.bcy[1]) < eps)
-      regentlib.assert(has_bcx == p.has_bcx, "bad value: has_bcx")
-      regentlib.assert(has_bcy == p.has_bcy, "bad value: has_bcy")
+      if conf.seq_init then regentlib.assert(has_bcx == p.has_bcx, "bad value: has_bcx") end
+      if conf.seq_init then regentlib.assert(has_bcy == p.has_bcy, "bad value: has_bcy") end
 
       p.px = px
       p.has_bcx = has_bcx
@@ -1493,32 +1505,21 @@ do
           ss[i] = s
         end
 
-        regentlib.assert(ss[0].mapsp1 == pp[0], "bad pointer")
-        regentlib.assert(ss[1].mapsp1 == pp[1], "bad pointer")
-        regentlib.assert(ss[2].mapsp1 == pp[2], "bad pointer")
-        regentlib.assert(ss[3].mapsp1 == pp[3], "bad pointer")
-
-
-        regentlib.assert(ss[3].mapsp2 == pp[0], "bad pointer")
-        regentlib.assert(ss[0].mapsp2 == pp[1], "bad pointer")
-        regentlib.assert(ss[1].mapsp2 == pp[2], "bad pointer")
-        regentlib.assert(ss[2].mapsp2 == pp[3], "bad pointer")
-
         for i = 0, znump do
           var prev_i = (i + znump - 1) % znump
           var next_i = (i + 1) % znump
 
           var s = ss[i]
-          regentlib.assert(s.mapsz == z, "bad value: mapsz")
+          if conf.seq_init then regentlib.assert(s.mapsz == z, "bad value: mapsz") end
           s.mapsz = z
 
-          regentlib.assert(s.mapsp1 == pp[i], "bad value: mapsp1")
-          regentlib.assert(s.mapsp2 == pp[next_i], "bad value: mapsp2")
+          if conf.seq_init then regentlib.assert(s.mapsp1 == pp[i], "bad value: mapsp1") end
+          if conf.seq_init then regentlib.assert(s.mapsp2 == pp[next_i], "bad value: mapsp2") end
           s.mapsp1 = pp[i]
           s.mapsp2 = pp[next_i]
 
-          regentlib.assert(s.mapss3 == ss[prev_i], "bad value: mapss3")
-          regentlib.assert(s.mapss4 == ss[next_i], "bad value: mapss4")
+          if conf.seq_init then regentlib.assert(s.mapss3 == ss[prev_i], "bad value: mapss3") end
+          if conf.seq_init then regentlib.assert(s.mapss4 == ss[next_i], "bad value: mapss4") end
           s.mapss3 = ss[prev_i]
           s.mapss4 = ss[next_i]
         end
