@@ -320,7 +320,8 @@ end
 -- Configuration
 --
 
-local terra init_mesh(conf : &config)
+local terra get_mesh_config(conf : &config)
+  -- Calculate mesh size (nzx, nzy) and dimensions (lenx, leny).
   conf.nzx = conf.meshparams[0]
   if conf.meshparams_n >= 2 then
     conf.nzy = conf.meshparams[1]
@@ -356,7 +357,7 @@ local terra init_mesh(conf : &config)
     c.abort()
   end
 
-  -- Calculate approximate nz, np, ns for region size upper bound.
+  -- Calculate numbers of mesh elements (nz, np and ns).
   conf.nz = conf.nzx * conf.nzy
   conf.np = (conf.nzx + 1) * (conf.nzy + 1)
   if conf.meshtype ~= MESH_HEX then
@@ -365,6 +366,27 @@ local terra init_mesh(conf : &config)
     conf.maxznump = 6
   end
   conf.ns = conf.nz * conf.maxznump
+end
+
+local terra get_submesh_config(conf : &config)
+  -- Calculate numbers of submeshes.
+  var nx : double, ny : double = conf.nzx, conf.nzy
+  var swapflag = nx > ny
+  if swapflag then nx, ny = ny, nx end
+  var n = sqrt(conf.npieces * nx / ny)
+  var n1 : int64 = max(cmath.floor(n + 1e-12), 1)
+  while conf.npieces % n1 ~= 0 do n1 = n1 - 1 end
+  var n2 : int64 = cmath.ceil(n - 1e-12)
+  while conf.npieces % n2 ~= 0 do n2 = n2 + 1 end
+  var longside1 = max(nx / n1, ny / (conf.npieces/n1))
+  var longside2 = max(nx / n2, ny / (conf.npieces/n2))
+  if longside1 <= longside2 then
+    conf.numpcx = n1
+  else
+    conf.numpcx = n2
+  end
+  conf.numpcy = conf.npieces / conf.numpcx
+  if swapflag then conf.numpcx, conf.numpcy = conf.numpcy, conf.numpcx end
 end
 
 do
@@ -540,7 +562,8 @@ terra read_config()
 
   c.printf("Config meshtype = \"%s\"\n", meshtype)
 
-  init_mesh(&conf)
+  get_mesh_config(&conf)
+  get_submesh_config(&conf)
 
   [config_fields_all:map(function(field)
        return quote c.printf(
@@ -886,6 +909,354 @@ terra read_input(runtime : c.legion_runtime_t,
   return result
 end
 read_input:compile()
+
+--
+-- Distributed Mesh Generator
+--
+
+local terra ptr_t(x : int64)
+  return c.legion_ptr_t { value = x }
+end
+
+-- Indexing scheme for ghost points:
+
+local terra grid_p(conf : config)
+  var npx, npy = conf.nzx + 1, conf.nzy + 1
+  return npx, npy
+end
+
+local terra get_num_ghost(conf : config)
+  var npx, npy = grid_p(conf)
+  var num_ghost = (conf.numpcy - 1) * npx + (conf.numpcx - 1) * npy - (conf.numpcx - 1)*(conf.numpcy - 1)
+  return num_ghost
+end
+
+local terra all_ghost_p(conf : config)
+  var num_ghost = get_num_ghost(conf)
+  var first_ghost = 0
+  var last_ghost = num_ghost -- exclusive
+  return first_ghost, last_ghost
+end
+
+local terra all_private_p(conf : config)
+  var num_ghost = get_num_ghost(conf)
+  var first_private = num_ghost
+  var last_private = conf.np -- exclusive
+  return first_private, last_private
+end
+
+local terra block_zx(conf : config, pcx : int64)
+  var first_zx = conf.nzx * pcx / conf.numpcx
+  var last_zx = conf.nzx * (pcx + 1) / conf.numpcx -- exclusive
+  var stride_zx = last_zx - first_zx
+  return first_zx, last_zx, stride_zx
+end
+
+local terra block_zy(conf : config, pcy : int64)
+  var first_zy = conf.nzy * pcy / conf.numpcy
+  var last_zy = conf.nzy * (pcy + 1) / conf.numpcy -- exclusive
+  var stride_zy = last_zy - first_zy
+  return first_zy, last_zy, stride_zy
+end
+
+local terra block_z(conf : config, pcx : int64, pcy : int64)
+  var first_zx, last_zx, stride_zx = block_zx(conf, pcx)
+  var first_zy, last_zy, stride_zy = block_zy(conf, pcy)
+  var first_z = first_zy * conf.nzx + first_zx * stride_zy
+  var last_z = first_z + stride_zy*stride_zx -- exclusive
+  return first_z, last_z
+end
+
+local terra block_px(conf : config, pcx : int64)
+  var first_zx, last_zx, stride_zx = block_zx(conf, pcx)
+  var first_px = first_zx - pcx + [int64](pcx ~= 0)
+  var last_px = last_zx - pcx + [int64](pcx == conf.numpcx - 1) -- exclusive
+  var stride_px = last_px - first_px
+  return first_px, last_px, stride_px
+end
+
+local terra block_py(conf : config, pcy : int64)
+  var first_zy, last_zy, stride_zy = block_zy(conf, pcy)
+  var first_py = first_zy - pcy + [int64](pcy ~= 0)
+  var last_py = last_zy - pcy + [int64](pcy == conf.numpcy - 1) -- exclusive
+  var stride_py = last_py - first_py
+  return first_py, last_py, stride_py
+end
+
+local terra block_p(conf : config, pcx : int64, pcy : int64)
+  var npx, npy = grid_p(conf)
+  var first_private, last_private = all_private_p(conf)
+  var first_py, last_py, stride_py = block_py(conf, pcy)
+  var first_px, last_px, stride_px = block_px(conf, pcx)
+  var first_p = first_private + first_py * (npx - conf.numpcx + 1) + first_px * stride_py
+  var last_p = first_p + stride_py*stride_px -- exclusive
+  return first_p, last_p
+end
+
+-- Ghost nodes are counted starting at the right face and moving down
+-- to the bottom and then bottom-right. This is identical to a point
+-- numbering where points are sorted first by number of colors (ghosts
+-- first) and then by first color.
+local terra ghost_first_p(conf : config, pcx : int64, pcy : int64)
+  var npx, npy = conf.nzx + 1, conf.nzy + 1
+
+  var first_zx, last_zx, stride_zx = block_zx(conf, pcx)
+  var first_zy, last_zy, stride_zy = block_zy(conf, pcy)
+
+  -- Count previous vertical segments
+  var prev_vertical_rows = (conf.numpcx - 1) * (first_zy - pcy + [int64](pcy > 0))
+  var prev_vertical_row = pcx * (stride_zy - [int64](pcy > 0 and pcy < conf.numpcy - 1))
+
+  -- Count previous horizontal segments
+  var prev_horizontal_rows = pcy * npx
+  var prev_horizontal_row = [int64](pcy < conf.numpcy - 1) * (first_zx + [int64](pcx > 0))
+
+  return prev_vertical_rows + prev_vertical_row + prev_horizontal_rows + prev_horizontal_row
+end
+
+-- Corners:
+local terra ghost_bottom_right_p(conf : config, pcx : int64, pcy : int64)
+  if pcx < conf.numpcx - 1 and pcy < conf.numpcy - 1 then
+    var first_zx, last_zx, stride_zx = block_zx(conf, pcx)
+    var first_zy, last_zy, stride_zy = block_zy(conf, pcy)
+
+    var first_p = ghost_first_p(conf, pcx, pcy)
+    var corner_p = first_p + stride_zy + stride_zx - [int64](pcy > 0) - [int64](pcx > 0)
+    return corner_p, corner_p + 1
+  end
+  return 0, 0
+end
+
+local terra ghost_top_left_p(conf : config, pcx : int64, pcy : int64)
+  if pcx > 0 and pcy > 0 then
+    return ghost_bottom_right_p(conf, pcx-1, pcy-1)
+  end
+  return 0, 0
+end
+
+
+local terra ghost_top_right_p(conf : config, pcx : int64, pcy : int64)
+  if pcy > 0 then
+    return ghost_bottom_right_p(conf, pcx, pcy-1)
+  end
+  return 0, 0
+end
+
+local terra ghost_bottom_left_p(conf : config, pcx : int64, pcy : int64)
+  if pcx > 0 then
+    return ghost_bottom_right_p(conf, pcx-1, pcy)
+  end
+  return 0, 0
+end
+
+-- Faces:
+local terra ghost_bottom_p(conf : config, pcx : int64, pcy : int64)
+  if pcy < conf.numpcy - 1 then
+    var first_zx, last_zx, stride_zx = block_zx(conf, pcx)
+    var first_zy, last_zy, stride_zy = block_zy(conf, pcy)
+
+    var first_p = ghost_first_p(conf, pcx, pcy)
+    var first_face_p = first_p + [int64](pcx < conf.numpcx - 1) * (stride_zy - [int64](pcy > 0))
+    var last_face_p = first_face_p + stride_zx - 1 + [int64](pcx == 0) + [int64](pcx == conf.numpcx - 1) -- exclusive
+    return first_face_p, last_face_p
+  end
+  return 0, 0
+end
+
+local terra ghost_top_p(conf : config, pcx : int64, pcy : int64)
+  if pcy > 0 then
+    return ghost_bottom_p(conf, pcx, pcy-1)
+  end
+  return 0, 0
+end
+
+local terra ghost_right_p(conf : config, pcx : int64, pcy : int64)
+  if pcx < conf.numpcx - 1 then
+    var first_zx, last_zx, stride_zx = block_zx(conf, pcx)
+    var first_zy, last_zy, stride_zy = block_zy(conf, pcy)
+
+    var first_p = ghost_first_p(conf, pcx, pcy)
+    var first_face_p = first_p
+    var last_face_p = first_face_p + stride_zy - 1 + [int64](pcy == 0) + [int64](pcy == conf.numpcy - 1) -- exclusive
+    return first_face_p, last_face_p
+  end
+  return 0, 0
+end
+
+local terra ghost_left_p(conf : config, pcx : int64, pcy : int64)
+  if pcx > 0 then
+    return ghost_right_p(conf, pcx-1, pcy)
+  end
+  return 0, 0
+end
+
+terra read_partitions(conf : config) : mesh_colorings
+  regentlib.assert(conf.npieces > 0, "npieces must be > 0")
+  regentlib.assert(
+    conf.meshtype == MESH_RECT,
+    "distributed initialization only works on rectangular meshes")
+  var znump = 4
+
+  -- Create colorings.
+  var result : mesh_colorings
+  result.rz_all_c = c.legion_coloring_create()
+  result.rz_spans_c = c.legion_coloring_create()
+  result.rp_all_c = c.legion_coloring_create()
+  result.rp_all_private_c = c.legion_coloring_create()
+  result.rp_all_ghost_c = c.legion_coloring_create()
+  result.rp_all_shared_c = c.legion_coloring_create()
+  result.rp_spans_c = c.legion_coloring_create()
+  result.rs_all_c = c.legion_coloring_create()
+  result.rs_spans_c = c.legion_coloring_create()
+
+  -- Zones and sides: private partitions.
+  var max_stride_zx = (conf.nzx + conf.numpcx - 1) / conf.numpcx
+  var max_stride_zy = (conf.nzy + conf.numpcy - 1) / conf.numpcy
+  result.nspans_zones = (max_stride_zx*max_stride_zy + conf.spansize - 1) / conf.spansize
+  result.nspans_points = result.nspans_zones
+
+  for pcy = 0, conf.numpcy do
+    for pcx = 0, conf.numpcx do
+      var piece = pcy * conf.numpcx + pcx
+      var first_z, last_z = block_z(conf, pcx, pcy)
+
+      c.legion_coloring_add_range(
+        result.rz_all_c, piece,
+        ptr_t(first_z), ptr_t(last_z - 1)) -- inclusive
+      c.legion_coloring_add_range(
+        result.rs_all_c, piece,
+        ptr_t(first_z * znump), ptr_t(last_z * znump - 1)) -- inclusive
+
+      var span = 0
+      for z = first_z, last_z, conf.spansize do
+        c.legion_coloring_add_range(
+          result.rz_spans_c, span,
+          ptr_t(z), ptr_t(min(z + conf.spansize, last_z) - 1)) -- inclusive
+        c.legion_coloring_add_range(
+          result.rs_spans_c, span,
+          ptr_t(z * znump), ptr_t(min(z + conf.spansize, last_z) * znump - 1)) -- inclusive
+        span = span + 1
+      end
+      regentlib.assert(span <= result.nspans_zones, "zone span overflow")
+    end
+  end
+
+  -- Points: top level partition (private vs ghost).
+  var first_ghost, last_ghost = all_ghost_p(conf)
+  var first_private, last_private = all_private_p(conf)
+
+  var all_private_color, all_ghost_color = 0, 1
+  c.legion_coloring_add_range(
+    result.rp_all_c, all_ghost_color,
+    ptr_t(first_ghost), ptr_t(last_ghost - 1)) -- inclusive
+  c.legion_coloring_add_range(
+    result.rp_all_c, all_private_color,
+    ptr_t(first_private), ptr_t(last_private - 1)) -- inclusive
+
+  -- Points: private partition.
+  for pcy = 0, conf.numpcy do
+    for pcx = 0, conf.numpcx do
+      var piece = pcy * conf.numpcx + pcx
+      var first_p, last_p = block_p(conf, pcx, pcy)
+
+      c.legion_coloring_add_range(
+        result.rp_all_private_c, piece,
+        ptr_t(first_p), ptr_t(last_p - 1)) -- inclusive
+
+      var span = 0
+      for p = first_p, last_p, conf.spansize do
+        c.legion_coloring_add_range(
+          result.rp_spans_c, span,
+          ptr_t(p), ptr_t(min(p + conf.spansize, last_p) - 1)) -- inclusive
+        span = span + 1
+      end
+      regentlib.assert(span <= result.nspans_points, "point span overflow")
+    end
+  end
+
+  -- Points: ghost and shared partitions.
+  for pcy = 0, conf.numpcy do
+    for pcx = 0, conf.numpcx do
+      var piece = pcy * conf.numpcx + pcx
+
+      var top_left = ghost_top_left_p(conf, pcx, pcy)
+      var top_right = ghost_top_right_p(conf, pcx, pcy)
+      var bottom_left = ghost_bottom_left_p(conf, pcx, pcy)
+      var bottom_right = ghost_bottom_right_p(conf, pcx, pcy)
+      var top = ghost_top_p(conf, pcx, pcy)
+      var bottom = ghost_bottom_p(conf, pcx, pcy)
+      var left = ghost_left_p(conf, pcx, pcy)
+      var right = ghost_right_p(conf, pcx, pcy)
+
+      c.legion_coloring_add_range(
+        result.rp_all_ghost_c, piece, ptr_t(top_left._0), ptr_t(top_left._1 - 1)) -- inclusive
+      c.legion_coloring_add_range(
+        result.rp_all_ghost_c, piece, ptr_t(top._0), ptr_t(top._1 - 1)) -- inclusive
+      c.legion_coloring_add_range(
+        result.rp_all_ghost_c, piece, ptr_t(top_right._0), ptr_t(top_right._1 - 1)) -- inclusive
+      c.legion_coloring_add_range(
+        result.rp_all_ghost_c, piece, ptr_t(left._0), ptr_t(left._1 - 1)) -- inclusive
+      c.legion_coloring_add_range(
+        result.rp_all_ghost_c, piece, ptr_t(right._0), ptr_t(right._1 - 1)) -- inclusive
+      c.legion_coloring_add_range(
+        result.rp_all_ghost_c, piece, ptr_t(bottom_left._0), ptr_t(bottom_left._1 - 1)) -- inclusive
+      c.legion_coloring_add_range(
+        result.rp_all_ghost_c, piece, ptr_t(bottom._0), ptr_t(bottom._1 - 1)) -- inclusive
+      c.legion_coloring_add_range(
+        result.rp_all_ghost_c, piece, ptr_t(bottom_right._0), ptr_t(bottom_right._1 - 1)) -- inclusive
+
+      c.legion_coloring_add_range(
+        result.rp_all_shared_c, piece, ptr_t(right._0), ptr_t(right._1 - 1)) -- inclusive
+      c.legion_coloring_add_range(
+        result.rp_all_shared_c, piece, ptr_t(bottom._0), ptr_t(bottom._1 - 1)) -- inclusive
+      c.legion_coloring_add_range(
+        result.rp_all_shared_c, piece, ptr_t(bottom_right._0), ptr_t(bottom_right._1 - 1)) -- inclusive
+
+      var span = 0
+      var leftover = 0
+      for p = right._0, right._1, conf.spansize do
+        c.legion_coloring_add_range(
+          result.rp_spans_c, span,
+          ptr_t(p), ptr_t(min(p + conf.spansize, right._1) - 1)) -- inclusive
+        if p + conf.spansize >= right._1 then
+          leftover = p + conf.spansize - right._1
+        else
+          span = span + 1
+        end
+      end
+
+      c.legion_coloring_add_range(
+        result.rp_spans_c, span,
+        ptr_t(bottom._0), ptr_t(min(bottom._0 + leftover, bottom._1) - 1)) -- inclusive
+
+      var leftover2 = max(leftover - (bottom._1 - bottom._0), 0)
+      if leftover2 == 0 and leftover > 0 then
+        span = span + 1
+      end
+      for p = bottom._0 + leftover, bottom._1, conf.spansize do
+        c.legion_coloring_add_range(
+          result.rp_spans_c, span,
+          ptr_t(p), ptr_t(min(p + conf.spansize, bottom._1) - 1)) -- inclusive
+        if p + conf.spansize >= bottom._1 then
+          leftover2 = p + conf.spansize - bottom._1
+        else
+          span = span + 1
+        end
+      end
+
+      c.legion_coloring_add_range(
+        result.rp_spans_c, span,
+        ptr_t(bottom_right._0), ptr_t(bottom_right._1 - 1)) -- inclusive
+    end
+  end
+
+  return result
+end
+read_partitions:compile()
+
+--
+-- Validation
+--
 
 do
 local solution_filename_maxlen = 1024
