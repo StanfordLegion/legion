@@ -98,7 +98,8 @@ void CircuitMapper::select_task_options(Task *task)
   const char* task_name = task->get_task_name();
   if (strcmp(task_name, "calculate_new_currents") == 0 ||
       strcmp(task_name, "distribute_charge") == 0 ||
-      strcmp(task_name, "update_voltages") == 0)
+      strcmp(task_name, "update_voltages") == 0 ||
+      strcmp(task_name, "init_pointers") == 0)
   {
     std::vector<Processor> &local_procs =
       sysmem_local_procs[proc_sysmems[task->target_proc]];
