@@ -1821,6 +1821,37 @@ legion_logical_partition_get_logical_subregion_by_color(
 }
 
 legion_logical_region_t
+legion_logical_partition_get_logical_subregion_by_color_domain_point(
+  legion_runtime_t runtime_,
+  legion_context_t ctx_,
+  legion_logical_partition_t parent_,
+  legion_domain_point_t c_)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  LogicalPartition parent = CObjectWrapper::unwrap(parent_);
+  DomainPoint c = CObjectWrapper::unwrap(c_);
+
+  LogicalRegion r = runtime->get_logical_subregion_by_color(ctx, parent, c);
+  return CObjectWrapper::wrap(r);
+}
+
+bool
+legion_logical_partition_has_logical_subregion_by_color_domain_point(
+  legion_runtime_t runtime_,
+  legion_context_t ctx_,
+  legion_logical_partition_t parent_,
+  legion_domain_point_t c_)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  LogicalPartition parent = CObjectWrapper::unwrap(parent_);
+  DomainPoint c = CObjectWrapper::unwrap(c_);
+
+  return runtime->has_logical_subregion_by_color(ctx, parent, c);
+}
+
+legion_logical_region_t
 legion_logical_partition_get_logical_subregion_by_tree(
   legion_runtime_t runtime_,
   legion_context_t ctx_,

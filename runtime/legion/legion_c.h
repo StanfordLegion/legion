@@ -1111,6 +1111,28 @@ typedef int coord_t;
   /**
    * @return Caller does **NOT** take ownership of return value.
    *
+   * @see LegionRuntime::HighLevel::Runtime::get_logical_subregion_by_color()
+   */
+  legion_logical_region_t
+  legion_logical_partition_get_logical_subregion_by_color_domain_point(
+    legion_runtime_t runtime,
+    legion_context_t ctx,
+    legion_logical_partition_t parent,
+    legion_domain_point_t c);
+
+  /**
+   * @see LegionRuntime::HighLevel::Runtime::has_logical_subregion_by_color()
+   */
+  bool
+  legion_logical_partition_has_logical_subregion_by_color_domain_point(
+    legion_runtime_t runtime,
+    legion_context_t ctx,
+    legion_logical_partition_t parent,
+    legion_domain_point_t c);
+
+  /**
+   * @return Caller does **NOT** take ownership of return value.
+   *
    * @see LegionRuntime::HighLevel::Runtime::get_logical_subregion_by_tree()
    */
   legion_logical_region_t
