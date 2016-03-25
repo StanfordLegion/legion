@@ -1496,6 +1496,38 @@ legion_index_partition_get_index_subspace(legion_runtime_t runtime_,
   return CObjectWrapper::wrap(is);
 }
 
+legion_index_space_t
+legion_index_partition_get_index_subspace_domain_point(
+  legion_runtime_t runtime_,
+  legion_context_t ctx_,
+  legion_index_partition_t handle_,
+  legion_domain_point_t color_)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  IndexPartition handle = CObjectWrapper::unwrap(handle_);
+  DomainPoint color = CObjectWrapper::unwrap(color_);
+
+  IndexSpace is = runtime->get_index_subspace(ctx, handle, color);
+
+  return CObjectWrapper::wrap(is);
+}
+
+bool
+legion_index_partition_has_index_subspace_domain_point(
+  legion_runtime_t runtime_,
+  legion_context_t ctx_,
+  legion_index_partition_t handle_,
+  legion_domain_point_t color_)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  IndexPartition handle = CObjectWrapper::unwrap(handle_);
+  DomainPoint color = CObjectWrapper::unwrap(color_);
+
+  return runtime->has_index_subspace(ctx, handle, color);
+}
+
 legion_domain_t
 legion_index_partition_get_color_space(legion_runtime_t runtime_,
                                        legion_context_t ctx_,

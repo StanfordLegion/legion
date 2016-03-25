@@ -861,6 +861,8 @@ typedef int coord_t;
     bool allocable /* = false */);
 
   /**
+   * @return Caller does **NOT** take ownership of return value.
+   *
    * @see LegionRuntime::HighLevel::Runtime::get_index_subspace()
    */
   legion_index_space_t
@@ -868,6 +870,28 @@ typedef int coord_t;
                                             legion_context_t ctx,
                                             legion_index_partition_t handle,
                                             legion_color_t color);
+
+  /**
+   * @return Caller does **NOT** take ownership of return value.
+   *
+   * @see LegionRuntime::HighLevel::Runtime::get_index_subspace()
+   */
+  legion_index_space_t
+  legion_index_partition_get_index_subspace_domain_point(
+    legion_runtime_t runtime,
+    legion_context_t ctx,
+    legion_index_partition_t handle,
+    legion_domain_point_t color);
+
+  /**
+   * @see LegionRuntime::HighLevel::Runtime::has_index_subspace()
+   */
+  bool
+  legion_index_partition_has_index_subspace_domain_point(
+    legion_runtime_t runtime,
+    legion_context_t ctx,
+    legion_index_partition_t handle,
+    legion_domain_point_t color);
 
   /**
    * @see LegionRuntime::HighLevel::Runtime::get_index_partition_color_space()
@@ -886,6 +910,8 @@ typedef int coord_t;
                                    legion_index_partition_t handle);
 
   /**
+   * @return Caller does **NOT** take ownership of return value.
+   *
    * @see LegionRuntime::HighLevel::Runtime::get_parent_index_space()
    */
   legion_index_space_t
