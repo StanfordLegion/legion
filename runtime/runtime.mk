@@ -103,6 +103,19 @@ GPU_ARCH=k20
 LEGION_LD_FLAGS += ${CRAY_UGNI_POST_LINK_OPTS}
 LEGION_LD_FLAGS += ${CRAY_PMI_POST_LINK_OPTS}
 endif
+ifeq ($(findstring excalibur,$(shell uname -n)),excalibur)
+GCC=CC
+F90=ftn
+# Cray's magic wrappers automatically provide LAPACK goodness?
+LAPACK_LIBS=
+#MARCH=corei7-avx
+CC_FLAGS += -DGASNETI_BUG1389_WORKAROUND=1
+# CUDA=${CUDATOOLKIT_HOME}
+CONDUIT=aries
+# GPU_ARCH=k20
+LD_FLAGS += ${CRAY_UGNI_POST_LINK_OPTS}
+LD_FLAGS += ${CRAY_PMI_POST_LINK_OPTS}
+endif
 
 ifneq (${MARCH},)
   CC_FLAGS += -march=${MARCH}
@@ -262,7 +275,7 @@ ifeq ($(strip $(USE_HDF)), 1)
   LEGION_LD_FLAGS      += -lhdf5
 endif
 
-SKIP_MACHINES= titan% daint%
+SKIP_MACHINES= titan% daint% excalibur%
 #Extra options for MPI support in GASNet
 ifeq ($(strip $(USE_MPI)),1)
   # Skip any machines on this list list
