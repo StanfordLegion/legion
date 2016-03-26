@@ -890,10 +890,11 @@ class LogicalRegion(object):
         physical_state.initialize_physical_state(inst)
 
     # Should only be called on regions and not on partitions
-    def perform_physical_analysis(self, depth, field, op, req, inst, perform_checks):
+    def perform_physical_analysis(self, depth, field, op, req, inst, 
+                                  perform_checks, register = True):
         physical_state = self.get_physical_state(depth, field)
         return physical_state.perform_physical_analysis(op, req, inst,
-                                                        perform_checks)
+                                                        perform_checks, register)
 
     # Should only be called on regions and not on partitions
     def perform_fill_analysis(self, depth, field, op, req, perform_checks):
@@ -1525,7 +1526,7 @@ class PhysicalState(object):
         else:
             self.valid_instances.add(inst)
 
-    def perform_physical_analysis(self, op, req, inst, perform_checks):
+    def perform_physical_analysis(self, op, req, inst, perform_checks, register):
         assert not inst.is_virtual()
         assert req.logical_node is self.node
         if req.is_reduce():
@@ -1569,21 +1570,22 @@ class PhysicalState(object):
                 self.dirty = True
             else:
                 self.valid_instances.add(inst)
-        # Find our preconditions for using this instance
-        preconditions = inst.find_use_dependences(self.field, req, perform_checks)
-        if perform_checks:
-            bad = check_preconditions(preconditions, op)
-            if bad is not None:
-                print "ERROR: Missing use precondition for field "+str(self.field)+\
-                      " of region requirement "+str(req.index)+" of "+str(op)+\
-                      " on previous "+str(bad)
-                return False
-        else:
-            for other in preconditions:
-                op.physical_incoming.add(other)
-                other.physical_outgoing.add(op)
-        # Record ourselves as a users for this instance
-        inst.add_user(self.field, op, req)
+        if register:
+            # Find our preconditions for using this instance
+            preconditions = inst.find_use_dependences(self.field, req, perform_checks)
+            if perform_checks:
+                bad = check_preconditions(preconditions, op)
+                if bad is not None:
+                    print "ERROR: Missing use precondition for field "+str(self.field)+\
+                          " of region requirement "+str(req.index)+" of "+str(op)+\
+                          " on previous "+str(bad)
+                    return False
+            else:
+                for other in preconditions:
+                    op.physical_incoming.add(other)
+                    other.physical_outgoing.add(op)
+            # Record ourselves as a users for this instance
+            inst.add_user(self.field, op, req)
         return True
 
     def perform_fill_analysis(self, op, req, perform_checks):
@@ -2234,6 +2236,26 @@ class Operation(object):
             return copy
         return None
 
+    def find_generated_copy_across(self, src_field, dst_field, region, src_inst, dst_inst):
+        if self.realm_copies is None:
+            return None
+        for copy in self.realm_copies:
+            if region is not copy.region:
+                continue
+            if src_field not in copy.src_fields:
+                continue
+            index = copy.src_fields.index(src_field)
+            if dst_field is not copy.dst_fields[index]:
+                continue
+            if src_inst is not copy.srcs[index]:
+                continue
+            if dst_inst is not copy.dsts[index]:
+                continue
+            # Record that we analyzed the copy
+            copy.analyzed = True
+            return copy
+        return None
+
     def find_generated_fill(self, field, region, dst):
         if self.realm_fills is None:
             return None
@@ -2451,8 +2473,138 @@ class Operation(object):
                 return False
         return True
 
-    def analyze_copy_requirements(self, depth, index, src_req, dst_req, perform_checks):
-        # TODO
+    def analyze_copy_requirements(self, depth, src_index, src_req, 
+                                  dst_index, dst_req, perform_checks):
+        assert len(src_req.fields) == 1
+        assert len(dst_req.fields) == 1
+        src_field = next(iter(src_req.fields))
+        dst_field = next(iter(dst_req.fields))
+        src_mappings = self.mappings[src_index]
+        dst_mappings = self.mappings[dst_index]
+        assert src_field.fid in src_mappings
+        assert dst_field.fid in dst_mappings
+        src_inst = src_mappings[src_field.fid]
+        dst_inst = dst_mappings[dst_field.fid]
+        assert not dst_inst.is_virtual()
+        # Analyze the source and destination regions but don't register yet
+        if not src_inst.is_virtual() and not src_req.logical_node.perform_physical_analysis(
+                          depth, src_field, self, src_req, src_inst, perform_checks, False):
+            return False
+        if not dst_req.logical_node.perform_physical_analysis(depth, dst_field, self,
+                                                  dst_req, dst_inst, perform_checks, False):
+            return False
+        # Now we issue the copy across
+        # See if we are doing a reduction or a normal copy
+        if dst_req.is_reduce():
+            # Reduction case
+            if src_inst.is_virtual():
+                error_str = "source field "+str(src_field)+" and destination field "+\
+                            str(dst_field)+" of region requirements "+src(src_index)+\
+                            " and "+str(dst_index)+" of "+str(self)
+                return src_inst.issue_reductions_across(dst_inst, dst_region.logical_node,
+                                                        self, perform_checks, error_str)
+            else:
+                # Normal reduction, find the source and destination dependences
+                src_preconditions = src_inst.find_use_dependences(src_field, src_req, 
+                                                                  perform_checks)
+                dst_preconditions = dst_inst.find_use_dependences(dst_field, dst_req,
+                                                                  perform_checks)
+                if perform_checks:
+                    reduction = self.find_generated_copy_across(src_field, dst_field,
+                                            dst_req.logical_node, src_inst, dst_inst)
+                    if reduction is None:
+                        print "ERROR: Missing reduction across operation from field "+\
+                              str(src_field)+" to field "+str(dst_field)+" between region "+\
+                              "requirements "+str(src_index)+" and "+str(dst_index)+" of "+\
+                              str(self)
+                        return False
+                    # Have to fill out the reachable cache
+                    reduction.reachable_cache = set()
+                    reduction.get_physical_reachable(reduction.reachable_cache, False)
+                    bad = check_preconditions(src_preconditions, reduction)
+                    if bad is not None:
+                        print "ERROR: Missing source precondition for reduction across "+\
+                              "from field "+str(src_field)+" to field "+str(dst_field)+\
+                              "between region requirements "+str(src_index)+" and "+\
+                              str(dst_index)+" of "+str(self)
+                        return False
+                    bad = check_preconditions(dst_preconditions, reduction)
+                    if bad is not None:
+                        print "ERROR: Missing destination precondition for reduction "+\
+                              "across from field "+str(src_field)+" to field "+\
+                              str(dst_field)+"between region requirements "+str(src_index)+\
+                              " and "+str(dst_index)+" of "+str(self)
+                        return False
+                    reduction.reachable_cache = None
+                else:
+                    # Otherwise make the copy across and record the dependences  
+                    reduction = self.state.create_copy()
+                    reduction.add_field(src_field.fid, src_inst, 
+                                        dst_field.fid, dst_inst, dst_req.redop)
+                    for src in src_preconditions:
+                        src.physical_outgoing.add(reduction)
+                        reduction.physical_incoming.add(src)
+                    for dst in dst_preconditions:
+                        dst.physical_outgoing.add(reduction)
+                        reduction.physical_incoming.add(dst)
+                # Record the copy users
+                src_inst.add_copy_user(src_field, src_req.logical_node, reduction, True, 0)
+                dst_inst.add_copy_user(dst_field, dst_req.logical_node, reduction, False, 
+                                       dst_req.redop)
+        else:
+            # Normal copy case
+            if dst_inst.is_virtual():
+                error_str = "source field "+str(src_field)+" and destination field "+\
+                            str(dst_field)+" of region requirements "+src(src_index)+\
+                            " and "+str(dst_index)+" of "+str(self)
+                return src_inst.issue_copies_across(dst_inst, dst_region.logical_node,
+                                                    self, perform_checks, error_str)
+            else:
+                # Normal copy
+                src_preconditions = src_inst.find_use_dependences(src_field, src_req, 
+                                                                  perform_checks)
+                dst_preconditions = dst_inst.find_use_dependences(dst_field, dst_req,
+                                                                  perform_checks)
+                if perform_checks:
+                    copy = self.find_generated_copy_across(src_field, dst_field,
+                                          dst_req.logical_node, src_inst, dst_inst)
+                    if copy is None:
+                        print "ERROR: Missing copy acros operation from field "+\
+                              str(src_field)+" to field "+str(dst_field)+" between region "+\
+                              "requirements "+str(src_index)+" and "+str(dst_index)+" of "+\
+                              str(self)
+                        return False
+                    # Have to fill in the copy reachable cache
+                    copy.reachable_cache = set()
+                    copy.get_physical_reachable(copy.reachable_cache, False)
+                    bad = check_preconditions(src_preconditions, copy)
+                    if bad is not None:
+                        print "ERROR: Missing source precondition for copy across from "+\
+                              "field "+str(src_field)+" to field "+str(dst_field)+\
+                              "between region requirements "+str(src_index)+" and "+\
+                              str(dst_index)+" of "+str(self)
+                        return False
+                    bad = check_preconditions(dst_preconditions, copy)
+                    if bad is not None:
+                        print "ERROR: Missing destination precondition for copy across "+\
+                              "from field "+str(src_field)+" to field "+str(dst_field)+\
+                              "between region requirements "+str(src_index)+" and "+\
+                              str(dst_index)+" of "+str(self)
+                        return False
+                    copy.reachable_cache = None
+                else:
+                    # Otherwise make the copy across and record the dependences
+                    copy = self.state.create_copy()
+                    copy.add_field(src_field.fid, src_inst, dst_field.fid, dst_inst, 0)
+                    for src in src_preconditions:
+                        src.physical_outgoing.add(copy)
+                        copy.physical_incoming.add(src)
+                    for dst in dst_preconditions:
+                        dst.physical_outgoing.add(copy)
+                        copy.physical_incoming.add(dst)
+                # Record the copy users
+                src_inst.add_copy_user(src_field, src_req.logical_node, copy, True, 0)
+                dst_inst.add_copy_user(dst_field, dst_req.logical_node, copy, False, 0)
         return True
 
     def analyze_fill_requirement(self, depth, index, req, perform_checks):
@@ -2513,7 +2665,7 @@ class Operation(object):
             num_copies = num_reqs / 2
             for idx in range(num_copies):
                 if not self.analyze_copy_requirements(depth, idx, reqs[idx], 
-                                      reqs[idx+num_copies], perform_checks):
+                        idx+num_copies, reqs[idx+num_copies], perform_checks):
                     return False
         elif self.kind == FILL_OP_KIND:
             for index,req in self.reqs.iteritems():
@@ -3000,7 +3152,9 @@ class Instance(object):
                 dep = compute_dependence_type(user, req)
                 if dep == TRUE_DEPENDENCE or dep == ANTI_DEPENDENCE:
                     result.add(user.op)
-                    if precise:
+                    # We only dominate and can remove points if the 
+                    # the previous was an exclusive writer
+                    if precise and user.is_write() and user.is_exclusive():
                         points -= user.region.get_shape()
                         if points.empty():
                             break
@@ -3025,7 +3179,9 @@ class Instance(object):
                 dep = compute_dependence_type(user, inst)
                 if dep == TRUE_DEPENDENCE or dep == ANTI_DEPENDENCE:
                     result.add(user.op)
-                    if precise:
+                    # We only dominate and can remove points if the 
+                    # previous was an exclusive writer
+                    if precise and user.is_write() and user.is_exclusive():
                         points -= user.region.get_shape()
                         if points.empty():
                             break
@@ -3099,6 +3255,14 @@ class FillInstance(object):
         dst.add_copy_user(self.field, False, 0)
         return True
 
+    def issue_copies_across(self, dst, region, op, perform_checks, error_str):
+        # TODO
+        return True
+
+    def issue_reductions_across(self, dst, region, op, perform_checks, error_str):
+        # TODO
+        return True
+
 class CompositeInstance(object):
     __slots__ = ['state', 'root', 'field', 'states', 'root_state']
     def __init__(self, state, root, field):
@@ -3139,6 +3303,14 @@ class CompositeInstance(object):
         return True
 
     def issue_update_copies(self, dst, region, op, perform_checks, error_str):
+        # TODO
+        return True
+
+    def issue_copies_across(self, dst, region, op, perform_checks, error_str):
+        # TODO
+        return True
+
+    def issue_reductions_across(self, dst, region, op, perform_checks, error_str):
         # TODO
         return True
 
@@ -3232,7 +3404,7 @@ class Event(object):
 class RealmBase(object):
     __slots__ = ['state', 'creator', 'region', 'intersect', 'start_event', 'finish_event', 
                  'physical_incoming', 'physical_outgoing', 'generation', 'event_context', 
-                 'analyzed', 'cluster_name']
+                 'analyzed', 'cluster_name', 'reachable_cache']
     def __init__(self, state):
         self.state = state
         self.creator = None
@@ -3246,6 +3418,7 @@ class RealmBase(object):
         self.event_context = None
         self.analyzed = False
         self.cluster_name = None # always none
+        self.reachable_cache = None
 
     def set_region(self, region):
         self.region = region
