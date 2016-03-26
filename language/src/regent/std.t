@@ -2152,7 +2152,7 @@ std.future = terralib.memoize(function(result_type)
   return st
 end)
 
-std.list = terralib.memoize(function(element_type, partition_type, privilege_depth, region_root)
+std.list = terralib.memoize(function(element_type, partition_type, privilege_depth, region_root, shallow)
   if not terralib.types.istype(element_type) then
     error("list expected a type as argument 1, got " .. tostring(element_type))
   end
@@ -2167,6 +2167,10 @@ std.list = terralib.memoize(function(element_type, partition_type, privilege_dep
 
   if region_root and not std.is_region(region_root) then
     error("list expected a region type as argument 4, got " .. tostring(region_root))
+  end
+
+  if shallow and not type(shallow) == "boolean" then
+    error("list expected a boolean as argument 5, got " .. tostring(shallow))
   end
 
   if region_root and privilege_depth and privilege_depth ~= 0 then
@@ -2184,6 +2188,7 @@ std.list = terralib.memoize(function(element_type, partition_type, privilege_dep
   st.partition_type = partition_type or false
   st.privilege_depth = privilege_depth or 0
   st.region_root = region_root or false
+  st.shallow = shallow or false
 
   function st:is_list_of_regions()
     return std.is_region(self.element_type) or
@@ -2256,14 +2261,14 @@ std.list = terralib.memoize(function(element_type, partition_type, privilege_dep
       local slice_type = self:subregion_dynamic()
       for i = 1 + strip_levels, self:list_depth() do
         slice_type = std.list(
-          slice_type, self:partition(), self.privilege_depth, self.region_root)
+          slice_type, self:partition(), self.privilege_depth, self.region_root, self.shallow)
       end
       return slice_type
     elseif std.is_list_of_partitions(self) then
       local slice_type = self:subpartition_dynamic()
       for i = 1 + strip_levels, self:list_depth() do
         slice_type = std.list(
-          slice_type, self:partition(), self.privilege_depth, self.region_root)
+          slice_type, self:partition(), self.privilege_depth, self.region_root, self.shallow)
       end
       return slice_type
     else
@@ -2299,7 +2304,7 @@ std.list = terralib.memoize(function(element_type, partition_type, privilege_dep
   if std.config["debug"] then
     function st.metamethods.__typename(st)
       return "list(" .. tostring(st.element_type) .. ", " .. tostring(st.partition_type) .. ", " ..
-        tostring(st.privilege_depth) .. ", " .. tostring(st.region_root) .. ")"
+        tostring(st.privilege_depth) .. ", " .. tostring(st.region_root) .. ", " .. tostring(st.shallow) .. ")"
     end
   else
     function st.metamethods.__typename(st)

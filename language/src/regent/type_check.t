@@ -1697,7 +1697,9 @@ function type_check.expr_list_cross_product(cx, node)
   end
   local expr_type
   if node.shallow then
-    expr_type = std.list(std.list(rhs_type:subregion_dynamic()))
+    expr_type = std.list(
+      std.list(rhs_type:subregion_dynamic(), nil, nil, nil, true),
+      nil, nil, nil, true)
   else
     expr_type = std.list(std.list(rhs_type:subregion_dynamic(), nil, 1), nil, 1)
   end

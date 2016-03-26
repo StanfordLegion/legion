@@ -3816,6 +3816,11 @@ function codegen.expr_list_invert(cx, node)
   actions = quote
     [actions]
 
+    -- 1. Compute an index from colors to rhs index.
+    -- 2. Compute sublist sizes.
+    -- 3. Allocate sublists.
+    -- 3. Fill sublists.
+
     var data = c.malloc(
       terralib.sizeof([expr_type.element_type]) * [rhs.value].__size)
     regentlib.assert(data ~= nil, "malloc failed in list_invert")
@@ -3824,95 +3829,130 @@ function codegen.expr_list_invert(cx, node)
       __data = data,
     }
 
-    std.assert(
-      [barriers.value].__size == [product.value].__size,
-      "list size mismatch in list_invert")
-    for i = 0, [rhs.value].__size do
-      var rhs_ = [rhs_type:data(rhs.value)][i].impl
+    if [rhs.value].__size > 0 then
+      -- 1. Compute an index from colors to rhs index.
 
-      var rhs_color = c.legion_logical_region_get_color(
-        [cx.runtime], [cx.context], rhs_)
+      -- Determine the range of colors in rhs.
+      var min_color : c.legion_color_t = 0
+      var max_color : c.legion_color_t = 0
+      for i = 0, [rhs.value].__size do
+        var rhs_elt = [rhs_type:data(rhs.value)][i].impl
+        var rhs_color = c.legion_logical_region_get_color(
+          [cx.runtime], [cx.context], rhs_elt)
+        if i == 0 then
+          min_color, max_color = rhs_color, rhs_color
+        else
+          min_color, max_color = std.fmin(min_color, rhs_color), std.fmax(max_color, rhs_color)
+        end
+      end
+      var num_colors = max_color - min_color + 1
+      regentlib.assert(num_colors >= 0, "invalid color range in list_invert")
 
-      var subsize = 0
+      -- Build the index.
+      var color_to_index = [&int64](c.malloc(
+        terralib.sizeof(int64) * num_colors))
+      regentlib.assert(color_to_index ~= nil, "malloc failed in list_invert")
+
+      for i = 0, num_colors do
+        color_to_index[i] = -1
+      end
+
+      for i = 0, [rhs.value].__size do
+        var rhs_elt = [rhs_type:data(rhs.value)][i].impl
+        var rhs_color = c.legion_logical_region_get_color(
+          [cx.runtime], [cx.context], rhs_elt)
+
+        regentlib.assert(
+          color_to_index[rhs_color - min_color] == -1,
+          "duplicate colors in list_invert")
+        color_to_index[rhs_color - min_color] = i
+      end
+
+      -- 2. Compute sublists sizes.
+      for i = 0, [rhs.value].__size do
+        [expr_type:data(result)][i].__size = 0
+      end
+
       for j = 0, [product.value].__size do
         for k = 0, [product_type:data(product.value)][j].__size do
           var leaf = [product_type.element_type:data(
                         `([product_type:data(product.value)][j]))][k].impl
-          var match = false
+          var inner = leaf
 
-          if leaf.index_space.tid == rhs_.index_space.tid and
-            leaf.index_space.id == rhs_.index_space.id
-          then
-            match = true
-          elseif c.legion_logical_region_has_parent_logical_partition(
-            [cx.runtime], [cx.context], leaf)
-          then
+          if not [product_type.shallow] then
+            regentlib.assert(
+              c.legion_logical_region_has_parent_logical_partition(
+                [cx.runtime], [cx.context], leaf),
+              "missing color in list_invert")
             var part = c.legion_logical_region_get_parent_logical_partition(
               [cx.runtime], [cx.context], leaf)
             var parent = c.legion_logical_partition_get_parent_logical_region(
               [cx.runtime], [cx.context], part)
-            var color = c.legion_logical_region_get_color(
-              [cx.runtime], [cx.context], parent)
-            if parent.index_space.tid == rhs_.index_space.tid and
-              parent.index_space.id == rhs_.index_space.id and
-              color == rhs_color
-            then
-              match = true
-            end
+            inner = parent
           end
-          if match then subsize = subsize + 1 end
+
+          var inner_color = c.legion_logical_region_get_color(
+            [cx.runtime], [cx.context], inner)
+          var i = color_to_index[inner_color - min_color]
+          [expr_type:data(result)][i].__size =
+            [expr_type:data(result)][i].__size + 1
         end
       end
 
-      -- Allocate sublist.
-      var subdata = c.malloc(
-        terralib.sizeof([expr_type.element_type.element_type]) * subsize)
-      regentlib.assert(subdata ~= nil, "malloc failed in list_invert")
-      [expr_type:data(result)][i] = [expr_type.element_type] {
-        __size = subsize,
-        __data = subdata,
-      }
+      -- 3. Allocate sublists.
+      for i = 0, [rhs.value].__size do
+        var subsize = [expr_type:data(result)][i].__size
+        var subdata = [&expr_type.element_type.element_type](c.malloc(
+          terralib.sizeof([expr_type.element_type.element_type]) * subsize))
+        regentlib.assert(subdata ~= nil, "malloc failed in list_invert")
+        [expr_type:data(result)][i].__data = subdata
+      end
 
-      -- Fill sublist.
-      var subslot = 0
+      -- 4. Fill sublists.
+
+      -- Create a list to hold the next index.
+      var subslots = [&int64](c.malloc(
+        terralib.sizeof([int64]) * [rhs.value].__size))
+      for i = 0, [rhs.value].__size do
+        subslots[i] = 0
+      end
+
       for j = 0, [product.value].__size do
-        std.assert(
-          [barriers_type:data(barriers.value)][j].__size == [product_type:data(product.value)][j].__size,
-          "sublist size mismatch in list_invert")
         for k = 0, [product_type:data(product.value)][j].__size do
           var leaf = [product_type.element_type:data(
                         `([product_type:data(product.value)][j]))][k].impl
-          var match = false
-          if leaf.index_space.tid == rhs_.index_space.tid and
-            leaf.index_space.id == rhs_.index_space.id
-          then
-            match = true
-          elseif c.legion_logical_region_has_parent_logical_partition(
-            [cx.runtime], [cx.context], leaf)
-          then
+          var inner = leaf
+
+          if not [product_type.shallow] then
+            regentlib.assert(
+              c.legion_logical_region_has_parent_logical_partition(
+                [cx.runtime], [cx.context], leaf),
+              "missing parent in list_invert")
             var part = c.legion_logical_region_get_parent_logical_partition(
               [cx.runtime], [cx.context], leaf)
             var parent = c.legion_logical_partition_get_parent_logical_region(
               [cx.runtime], [cx.context], part)
-            var color = c.legion_logical_region_get_color(
-              [cx.runtime], [cx.context], parent)
-            if parent.index_space.tid == rhs_.index_space.tid and
-              parent.index_space.id == rhs_.index_space.id and
-              color == rhs_color
-            then
-              match = true
-            end
+            inner = parent
           end
-          if match then
-            std.assert(subslot < subsize, "overflowed sublist in list_invert")
-            [expr_type.element_type:data(`([expr_type:data(result)][i]))][subslot] =
+
+          var inner_color = c.legion_logical_region_get_color(
+            [cx.runtime], [cx.context], inner)
+          var i = color_to_index[inner_color - min_color]
+          regentlib.assert(subslots[i] < [expr_type:data(result)][i].__size,
+                           "overflowed sublist in list_invert")
+          [expr_type.element_type:data(`([expr_type:data(result)][i]))][subslots[i]] =
               [barriers_type.element_type:data(
                  `([barriers_type:data(barriers.value)][j]))][k]
-            subslot = subslot + 1
-          end
+          subslots[i] = subslots[i] + 1
         end
       end
-      regentlib.assert(subslot == subsize, "underflowed sublist in list_invert")
+
+      for i = 0, [rhs.value].__size do
+        regentlib.assert(subslots[i] == [expr_type:data(result)][i].__size, "underflowed sublist in list_invert")
+      end
+
+      c.free(subslots)
+      c.free(color_to_index)
     end
   end
 
