@@ -14638,6 +14638,22 @@ namespace Legion {
                                   src_fields[idx].inst.id,
                                   dst_fields[idx].field_id,
                                   dst_fields[idx].inst.id, redop);
+      if (intersect != NULL)
+      {
+        if (intersect->is_region())
+        {
+          RegionNode *node = intersect->as_region_node();
+          LegionSpy::log_copy_intersect(result, 1, node->handle.index_space.id,
+              node->handle.field_space.id, node->handle.tree_id);
+        }
+        else
+        {
+          PartitionNode *node = intersect->as_partition_node();
+          LegionSpy::log_copy_intersect(result, 0,
+              node->handle.index_partition.id,
+              node->handle.field_space.id, node->handle.tree_id);
+        }
+      }
 #endif
       return result;
     }
@@ -14713,6 +14729,22 @@ namespace Legion {
       for (unsigned idx = 0; idx < dst_fields.size(); idx++)
         LegionSpy::log_fill_field(result, dst_fields[idx].field_id,
                                   dst_fields[idx].inst.id);
+      if (intersect != NULL)
+      {
+        if (intersect->is_region())
+        {
+          RegionNode *node = intersect->as_region_node();
+          LegionSpy::log_fill_intersect(result, 1, node->handle.index_space.id,
+              node->handle.field_space.id, node->handle.tree_id);
+        }
+        else
+        {
+          PartitionNode *node = intersect->as_partition_node();
+          LegionSpy::log_fill_intersect(result, 0, 
+              node->handle.index_partition.id,
+              node->handle.field_space.id, node->handle.tree_id);
+        }
+      }
 #endif
       return result;
     }

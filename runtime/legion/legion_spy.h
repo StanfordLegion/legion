@@ -461,6 +461,14 @@ namespace Legion {
                       post.id, post.gen, src_fid, src, dst_fid, dst, redop);
       }
 
+      static inline void log_copy_intersect(Event post, int is_region,
+                                            IDType index, unsigned field,
+                                            unsigned tree_id)
+      {
+        log_spy.info("Copy Intersect " IDFMT " %u %d " IDFMT " %d %d",
+                      post.id, post.gen, is_region, index, field, tree_id);
+      }
+
       static inline void log_fill_events(UniqueID op_unique_id,
                                          LogicalRegion handle,
                                          Event pre, Event post)
@@ -475,6 +483,14 @@ namespace Legion {
       {
         log_spy.info("Fill Field " IDFMT " %u %d " IDFMT, 
                       post.id, post.gen, fid, dst);
+      }
+
+      static inline void log_fill_intersect(Event post, int is_region,
+                                            IDType index, unsigned field,
+                                            unsigned tree_id)
+      {
+        log_spy.info("Fill Intersect " IDFMT " %u %d " IDFMT " %d %d",
+                     post.id, post.gen, is_region, index, field, tree_id);
       }
 
       static inline void log_phase_barrier(Barrier barrier)
