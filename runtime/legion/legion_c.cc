@@ -289,6 +289,36 @@ legion_domain_coloring_get_color_space(legion_domain_coloring_t handle_)
 }
 
 // -----------------------------------------------------------------------
+// Domain Point Coloring Operations
+// -----------------------------------------------------------------------
+
+legion_domain_point_coloring_t
+legion_domain_point_coloring_create(void)
+{
+  return CObjectWrapper::wrap(new DomainPointColoring());
+}
+
+void
+legion_domain_point_coloring_destroy(
+  legion_domain_point_coloring_t handle_)
+{
+  delete CObjectWrapper::unwrap(handle_);
+}
+
+void
+legion_domain_point_coloring_color_domain(
+  legion_domain_point_coloring_t handle_,
+  legion_domain_point_t color_,
+  legion_domain_t domain_)
+{
+  DomainPointColoring *handle = CObjectWrapper::unwrap(handle_);
+  DomainPoint color = CObjectWrapper::unwrap(color_);
+  Domain domain = CObjectWrapper::unwrap(domain_);
+  assert(handle->count(color) == 0);
+  (*handle)[color] = domain;
+}
+
+// -----------------------------------------------------------------------
 // Multi-Domain Coloring Operations
 // -----------------------------------------------------------------------
 
@@ -436,6 +466,28 @@ legion_index_partition_create_domain_coloring(
   IndexPartition ip =
     runtime->create_index_partition(ctx, parent, color_space, *coloring,
                                     disjoint, part_color);
+  return CObjectWrapper::wrap(ip);
+}
+
+legion_index_partition_t
+legion_index_partition_create_domain_point_coloring(
+  legion_runtime_t runtime_,
+  legion_context_t ctx_,
+  legion_index_space_t parent_,
+  legion_domain_t color_space_,
+  legion_domain_point_coloring_t coloring_,
+  legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
+  int color /* = AUTO_GENERATE_ID */)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  IndexSpace parent = CObjectWrapper::unwrap(parent_);
+  Domain color_space = CObjectWrapper::unwrap(color_space_);
+  DomainPointColoring *coloring = CObjectWrapper::unwrap(coloring_);
+
+  IndexPartition ip =
+    runtime->create_index_partition(ctx, parent, color_space, *coloring,
+                                    part_kind, color);
   return CObjectWrapper::wrap(ip);
 }
 
@@ -1496,6 +1548,38 @@ legion_index_partition_get_index_subspace(legion_runtime_t runtime_,
   return CObjectWrapper::wrap(is);
 }
 
+legion_index_space_t
+legion_index_partition_get_index_subspace_domain_point(
+  legion_runtime_t runtime_,
+  legion_context_t ctx_,
+  legion_index_partition_t handle_,
+  legion_domain_point_t color_)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  IndexPartition handle = CObjectWrapper::unwrap(handle_);
+  DomainPoint color = CObjectWrapper::unwrap(color_);
+
+  IndexSpace is = runtime->get_index_subspace(ctx, handle, color);
+
+  return CObjectWrapper::wrap(is);
+}
+
+bool
+legion_index_partition_has_index_subspace_domain_point(
+  legion_runtime_t runtime_,
+  legion_context_t ctx_,
+  legion_index_partition_t handle_,
+  legion_domain_point_t color_)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  IndexPartition handle = CObjectWrapper::unwrap(handle_);
+  DomainPoint color = CObjectWrapper::unwrap(color_);
+
+  return runtime->has_index_subspace(ctx, handle, color);
+}
+
 legion_domain_t
 legion_index_partition_get_color_space(legion_runtime_t runtime_,
                                        legion_context_t ctx_,
@@ -1818,6 +1902,37 @@ legion_logical_partition_get_logical_subregion_by_color(
 
   LogicalRegion r = runtime->get_logical_subregion_by_color(ctx, parent, c);
   return CObjectWrapper::wrap(r);
+}
+
+legion_logical_region_t
+legion_logical_partition_get_logical_subregion_by_color_domain_point(
+  legion_runtime_t runtime_,
+  legion_context_t ctx_,
+  legion_logical_partition_t parent_,
+  legion_domain_point_t c_)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  LogicalPartition parent = CObjectWrapper::unwrap(parent_);
+  DomainPoint c = CObjectWrapper::unwrap(c_);
+
+  LogicalRegion r = runtime->get_logical_subregion_by_color(ctx, parent, c);
+  return CObjectWrapper::wrap(r);
+}
+
+bool
+legion_logical_partition_has_logical_subregion_by_color_domain_point(
+  legion_runtime_t runtime_,
+  legion_context_t ctx_,
+  legion_logical_partition_t parent_,
+  legion_domain_point_t c_)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  LogicalPartition parent = CObjectWrapper::unwrap(parent_);
+  DomainPoint c = CObjectWrapper::unwrap(c_);
+
+  return runtime->has_logical_subregion_by_color(ctx, parent, c);
 }
 
 legion_logical_region_t

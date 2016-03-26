@@ -49,6 +49,7 @@ extern "C" {
   NEW_OPAQUE_TYPE(legion_context_t);
   NEW_OPAQUE_TYPE(legion_coloring_t);
   NEW_OPAQUE_TYPE(legion_domain_coloring_t);
+  NEW_OPAQUE_TYPE(legion_domain_point_coloring_t);
   NEW_OPAQUE_TYPE(legion_multi_domain_point_coloring_t);
   NEW_OPAQUE_TYPE(legion_index_space_allocator_t);
   NEW_OPAQUE_TYPE(legion_field_allocator_t);
@@ -564,7 +565,37 @@ typedef int coord_t;
   legion_domain_coloring_get_color_space(legion_domain_coloring_t handle);
 
   // -----------------------------------------------------------------------
-  // Multi-Domain Coloring Operations
+  // Domain Point Coloring Operations
+  // -----------------------------------------------------------------------
+
+  /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see LegionRuntime::HighLevel::DomainPointColoring
+   */
+  legion_domain_point_coloring_t
+  legion_domain_point_coloring_create(void);
+
+  /**
+   * @param handle Caller must have ownership of parameter `handle`.
+   *
+   * @see LegionRuntime::HighLevel::DomainPointColoring
+   */
+  void
+  legion_domain_point_coloring_destroy(
+    legion_domain_point_coloring_t handle);
+
+  /**
+   * @see LegionRuntime::HighLevel::DomainPointColoring
+   */
+  void
+  legion_domain_point_coloring_color_domain(
+    legion_domain_point_coloring_t handle,
+    legion_domain_point_t color,
+    legion_domain_t domain);
+
+  // -----------------------------------------------------------------------
+  // Multi-Domain Point Coloring Operations
   // -----------------------------------------------------------------------
 
   /**
@@ -693,7 +724,23 @@ typedef int coord_t;
    * @return Caller takes ownership of return value.
    *
    * @see LegionRuntime::HighLevel::Runtime::create_index_partition(
-   *        Context, IndexSpace, Domain, DomainColoring, bool, int)
+   *        Context, IndexSpace, Domain, DomainPointColoring, PartitionKind, int)
+   */
+  legion_index_partition_t
+  legion_index_partition_create_domain_point_coloring(
+    legion_runtime_t runtime,
+    legion_context_t ctx,
+    legion_index_space_t parent,
+    legion_domain_t color_space,
+    legion_domain_point_coloring_t coloring,
+    legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
+    int color /* = AUTO_GENERATE_ID */);
+
+  /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see LegionRuntime::HighLevel::Runtime::create_index_partition(
+   *        Context, IndexSpace, Domain, MultiDomainPointColoring, PartitionKind, int)
    */
   legion_index_partition_t
   legion_index_partition_create_multi_domain_point_coloring(
@@ -861,6 +908,8 @@ typedef int coord_t;
     bool allocable /* = false */);
 
   /**
+   * @return Caller does **NOT** take ownership of return value.
+   *
    * @see LegionRuntime::HighLevel::Runtime::get_index_subspace()
    */
   legion_index_space_t
@@ -868,6 +917,28 @@ typedef int coord_t;
                                             legion_context_t ctx,
                                             legion_index_partition_t handle,
                                             legion_color_t color);
+
+  /**
+   * @return Caller does **NOT** take ownership of return value.
+   *
+   * @see LegionRuntime::HighLevel::Runtime::get_index_subspace()
+   */
+  legion_index_space_t
+  legion_index_partition_get_index_subspace_domain_point(
+    legion_runtime_t runtime,
+    legion_context_t ctx,
+    legion_index_partition_t handle,
+    legion_domain_point_t color);
+
+  /**
+   * @see LegionRuntime::HighLevel::Runtime::has_index_subspace()
+   */
+  bool
+  legion_index_partition_has_index_subspace_domain_point(
+    legion_runtime_t runtime,
+    legion_context_t ctx,
+    legion_index_partition_t handle,
+    legion_domain_point_t color);
 
   /**
    * @see LegionRuntime::HighLevel::Runtime::get_index_partition_color_space()
@@ -886,6 +957,8 @@ typedef int coord_t;
                                    legion_index_partition_t handle);
 
   /**
+   * @return Caller does **NOT** take ownership of return value.
+   *
    * @see LegionRuntime::HighLevel::Runtime::get_parent_index_space()
    */
   legion_index_space_t
@@ -1107,6 +1180,28 @@ typedef int coord_t;
     legion_context_t ctx,
     legion_logical_partition_t parent,
     legion_color_t c);
+
+  /**
+   * @return Caller does **NOT** take ownership of return value.
+   *
+   * @see LegionRuntime::HighLevel::Runtime::get_logical_subregion_by_color()
+   */
+  legion_logical_region_t
+  legion_logical_partition_get_logical_subregion_by_color_domain_point(
+    legion_runtime_t runtime,
+    legion_context_t ctx,
+    legion_logical_partition_t parent,
+    legion_domain_point_t c);
+
+  /**
+   * @see LegionRuntime::HighLevel::Runtime::has_logical_subregion_by_color()
+   */
+  bool
+  legion_logical_partition_has_logical_subregion_by_color_domain_point(
+    legion_runtime_t runtime,
+    legion_context_t ctx,
+    legion_logical_partition_t parent,
+    legion_domain_point_t c);
 
   /**
    * @return Caller does **NOT** take ownership of return value.
