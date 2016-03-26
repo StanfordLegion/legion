@@ -225,6 +225,38 @@ create_cross_product_coloring(HighLevelRuntime *runtime,
 }
 #endif
 
+static inline legion_terra_index_space_list_list_t
+create_list_list(legion_terra_index_space_list_t lhs_, size_t size1, size_t size2)
+{
+  legion_terra_index_space_list_list_t result;
+  result.count = size1;
+  result.sublists =
+    (legion_terra_index_space_list_t*)calloc(size1,
+        sizeof(legion_terra_index_space_list_t));
+
+  for (size_t idx = 0; idx < size1; ++idx) {
+    result.sublists[idx].count = size2;
+    result.sublists[idx].subspaces =
+      (legion_index_space_t*)calloc(size2, sizeof(legion_index_space_t));
+    result.sublists[idx].space = lhs_.subspaces[idx];
+  }
+  return result;
+}
+
+static inline void
+assign_list(legion_terra_index_space_list_t& ls,
+            size_t idx, legion_index_space_t is)
+{
+  ls.subspaces[idx] = is;
+}
+
+static inline void
+assign_list_list(legion_terra_index_space_list_list_t& ls,
+                 size_t idx1, size_t idx2, legion_index_space_t is)
+{
+  assign_list(ls.sublists[idx1], idx2, is);
+}
+
 static bool
 should_flip_cross_product(HighLevelRuntime *runtime,
                           Context ctx,
@@ -337,50 +369,343 @@ create_cross_product(HighLevelRuntime *runtime,
   return rhs_color;
 }
 
+static inline void
+get_bounding_boxes(HighLevelRuntime *runtime,
+                   Context ctx,
+                   const std::vector<IndexSpace> &index_spaces,
+                   std::vector<std::pair<ptr_t, ptr_t> >& bounds)
+{
+  bounds.reserve(index_spaces.size());
+  for (std::vector<IndexSpace>::const_iterator isit = index_spaces.begin();
+       isit != index_spaces.end(); ++isit) {
+    const IndexSpace& space = *isit;
+
+    bool is_first = true;
+    ptr_t first, last;
+    for (IndexIterator it(runtime, ctx, space); it.has_next();) {
+      size_t count = 0;
+      ptr_t ptr = it.next_span(count);
+      ptr_t end = ptr.value + count - 1;
+      if (is_first) {
+        first = ptr;
+        is_first = false;
+      }
+      last = end;
+    }
+    bounds.push_back(std::pair<ptr_t, ptr_t>(first, last));
+  }
+}
+
+struct BoundComp {
+  bool operator()(const std::pair<ptr_t, ptr_t>& b1,
+                  const std::pair<ptr_t, ptr_t>& b2) const
+  {
+    return b1.first.value < b2.first.value;
+  }
+};
+
+struct Leaf;
+struct NonLeaf;
+#define NODE_SIZE 128
+#define NUM_LEAF_ENTRIES 14
+#define NUM_NONLEAF_ENTRIES 7
+
+struct Node {
+  bool is_leaf() { return leaf; }
+  Leaf* as_leaf() { return (Leaf*)this; }
+  NonLeaf* as_nonleaf() { return (NonLeaf*)this; }
+  bool leaf;
+  int num_children;
+};
+
+struct Leaf {
+  bool leaf;
+  int num_children;
+  unsigned starts[NUM_LEAF_ENTRIES];
+  unsigned indices[NUM_LEAF_ENTRIES];
+  Leaf* next;
+};
+
+struct NonLeaf {
+  bool leaf;
+  int num_children;
+  unsigned starts[NUM_NONLEAF_ENTRIES];
+  unsigned ends[NUM_NONLEAF_ENTRIES];
+  Node* childs[NUM_NONLEAF_ENTRIES];
+};
+
+Node* create_interval_tree(std::vector<std::pair<ptr_t, ptr_t> >& lower_bounds,
+                           std::vector<ptr_t>& upper_bounds)
+{
+  unsigned num_bounds = lower_bounds.size();
+  unsigned num_leaves = (num_bounds + NUM_LEAF_ENTRIES - 1) / NUM_LEAF_ENTRIES;
+  void* buffer_for_leaves = malloc(NODE_SIZE * num_leaves);
+
+  std::vector<std::pair<ptr_t, ptr_t> >::iterator it = lower_bounds.begin();
+  // make leaves
+  char* ptr = (char*)buffer_for_leaves;
+  unsigned remaining_bounds = num_bounds;
+  while (remaining_bounds > 0)
+  {
+    Leaf* node = (Leaf*)ptr;
+    unsigned num_children =
+      std::min(remaining_bounds, (unsigned)NUM_LEAF_ENTRIES);
+    node->leaf = 1;
+    node->num_children = num_children;
+    for (unsigned idx = 0; idx < num_children; ++idx)
+    {
+      node->starts[idx] = it->first.value;
+      node->indices[idx] = it->second.value;
+      it++;
+    }
+    ptr += NODE_SIZE;
+    remaining_bounds -= num_children;
+    node->next = remaining_bounds > 0 ? (Leaf*)ptr : 0;
+  }
+
+  // make non-leaf nodes
+  int num_nonleaves =
+    (num_leaves + NUM_NONLEAF_ENTRIES - 1) / NUM_NONLEAF_ENTRIES;
+  unsigned num_prev_nodes = num_leaves;
+  char* prev_ptr = (char*)buffer_for_leaves;
+  while (num_nonleaves > 0)
+  {
+    void* buffer_for_nonleaves = malloc(NODE_SIZE * num_nonleaves);
+    char* ptr = (char*)buffer_for_nonleaves;
+    unsigned remaining_nodes = num_prev_nodes;
+    while (remaining_nodes > 0)
+    {
+      NonLeaf* node = (NonLeaf*)ptr;
+      unsigned num_children =
+        std::min(remaining_nodes, (unsigned)NUM_NONLEAF_ENTRIES);
+      node->leaf = 0;
+      node->num_children = num_children;
+      for (unsigned idx = 0; idx < num_children; ++idx)
+      {
+        Node* child = (Node*)prev_ptr;
+        node->childs[idx] = child;
+        if (child->is_leaf())
+        {
+          node->starts[idx] = child->as_leaf()->starts[0];
+          node->ends[idx] =
+            upper_bounds[child->as_leaf()->indices[child->num_children - 1]];
+        }
+        else
+        {
+          node->starts[idx] = child->as_nonleaf()->starts[0];
+          node->ends[idx] =
+            child->as_nonleaf()->ends[child->num_children - 1];
+        }
+        prev_ptr += NODE_SIZE;
+      }
+      ptr += NODE_SIZE;
+      remaining_nodes -= num_children;
+    }
+    prev_ptr = (char*)buffer_for_nonleaves;
+    num_prev_nodes = num_nonleaves;
+    if (num_nonleaves == 1) break;
+    num_nonleaves =
+      (num_nonleaves + NUM_NONLEAF_ENTRIES - 1) / NUM_NONLEAF_ENTRIES;
+  }
+  return (Node*)prev_ptr;
+}
+
+void print_tree(Node* tree, unsigned level)
+{
+  printf("tree: %p\n", tree);
+  if (tree->is_leaf())
+  {
+    Leaf* leaf = tree->as_leaf();
+    for (unsigned idx = 0; idx < level; ++idx)
+      printf("    ");
+    for (int idx = 0; idx < leaf->num_children; ++idx)
+      printf("start: %d index: %d, ", leaf->starts[idx], leaf->indices[idx]);
+    printf("\n");
+  }
+  else
+  {
+    NonLeaf* nonleaf = tree->as_nonleaf();
+    for (int idx = 0; idx < nonleaf->num_children; ++idx)
+    {
+      for (unsigned j = 0; j < level; ++j) printf("    ");
+      printf("start: %d end: %d ptr: %p\n",
+          nonleaf->starts[idx], nonleaf->ends[idx], nonleaf->childs[idx]);
+      print_tree(nonleaf->childs[idx], level + 1);
+    }
+  }
+}
+
+static void
+find_first_bounding_box(Node* root, unsigned key, Leaf*& leaf, int& idx)
+{
+  Node* node = root;
+  while (!node->is_leaf())
+  {
+    bool found = false;
+    NonLeaf* nonleaf = node->as_nonleaf();
+    for (int idx = 0; idx < nonleaf->num_children; ++idx)
+      if (nonleaf->starts[idx] <= key && key <= nonleaf->ends[idx])
+      {
+        node = nonleaf->childs[idx];
+        found = true;
+        break;
+      }
+    // not found any bounding box
+    if (!found) return;
+  }
+  leaf = node->as_leaf();
+
+  for (idx = 0; idx < leaf->num_children - 1; ++idx)
+    if (leaf->starts[idx] <= key && key <= leaf->starts[idx + 1])
+      return;
+}
+
+static void
+create_cross_product_tree(HighLevelRuntime *runtime,
+                          Context ctx,
+                          bool flip,
+                          const std::vector<IndexSpace> &lhs,
+                          bool lhs_disjoint,
+                          const std::vector<IndexSpace> &rhs,
+                          bool rhs_disjoint,
+                          legion_terra_index_space_list_list_t &result)
+                          //std::map<IndexSpace, std::vector<IndexSpace> > &result)
+{
+  assert(lhs_disjoint);
+  std::vector<std::pair<ptr_t, ptr_t> > lhs_bounds;
+  get_bounding_boxes(runtime, ctx, lhs, lhs_bounds);
+
+  std::vector<std::pair<ptr_t, ptr_t> > rhs_bounds;
+  get_bounding_boxes(runtime, ctx, rhs, rhs_bounds);
+
+  std::vector<ptr_t> lhs_upper_bounds;
+  lhs_upper_bounds.reserve(lhs_bounds.size());
+  for (unsigned idx = 0; idx < lhs_bounds.size(); ++idx)
+  {
+    lhs_upper_bounds[idx] = lhs_bounds[idx].second;
+    lhs_bounds[idx].second.value = idx;
+  }
+  BoundComp cmp;
+  for (unsigned idx = 1; idx < lhs_bounds.size(); ++idx)
+    if (!cmp(lhs_bounds[idx - 1], lhs_bounds[idx]))
+    {
+      std::sort(lhs_bounds.begin(), lhs_bounds.end(), cmp);
+      break;
+    }
+  Node* root = create_interval_tree(lhs_bounds, lhs_upper_bounds);
+  //print_tree(root, 0);
+
+  std::vector<unsigned> potentially_overlap;
+  potentially_overlap.reserve(lhs_bounds.size());
+  for (size_t rhs_idx = 0; rhs_idx < rhs_bounds.size(); rhs_idx++) {
+    std::pair<ptr_t, ptr_t>& rhs_bound = rhs_bounds[rhs_idx];
+    Leaf* leaf = 0;
+    int idx = -1;
+    find_first_bounding_box(root, rhs_bound.first.value, leaf, idx);
+    if (leaf == 0) continue;
+
+    while (leaf->starts[idx] <= rhs_bound.second.value) {
+      int lhs_idx = leaf->indices[idx];
+      if (rhs_bound.first.value <= lhs_upper_bounds[lhs_idx].value)
+        potentially_overlap.push_back(lhs_idx);
+
+      ++idx;
+      if (idx >= leaf->num_children) {
+        idx = 0;
+        leaf = leaf->next;
+      }
+      if (leaf == 0) break;
+    }
+
+    const IndexSpace& rh_space = rhs[rhs_idx];
+    for (unsigned idx = 0; idx < potentially_overlap.size(); ++idx) {
+      int lhs_idx = potentially_overlap[idx];
+      const IndexSpace& lh_space = lhs[lhs_idx];
+      bool intersects = false;
+      for (IndexIterator lh_it(runtime, ctx, lh_space); lh_it.has_next();) {
+        size_t lh_count = 0;
+        ptr_t lh_ptr = lh_it.next_span(lh_count);
+        ptr_t lh_end = lh_ptr.value + lh_count - 1;
+
+        IndexIterator rh_it(runtime, ctx, rh_space, lh_ptr);
+        if (rh_it.has_next()) {
+          size_t rh_count = 0;
+          ptr_t rh_ptr = rh_it.next_span(rh_count);
+
+          if (rh_ptr.value <= lh_end.value) {
+            intersects = true;
+            break;
+          }
+        }
+      }
+      if (intersects) {
+        //if (flip) result[rh_space][lhs_idx] = lh_space;
+        //else result[lh_space][rhs_idx] = rh_space;
+        if (flip)
+          assign_list_list(result, rhs_idx, lhs_idx, CObjectWrapper::wrap(lh_space));
+        else
+          assign_list_list(result, lhs_idx, rhs_idx, CObjectWrapper::wrap(rh_space));
+      }
+    }
+    potentially_overlap.clear();
+  }
+}
+
 static void
 create_cross_product_shallow(HighLevelRuntime *runtime,
                              Context ctx,
+                             bool flip,
                              const std::vector<IndexSpace> &lhs,
+                             bool lhs_disjoint,
                              const std::vector<IndexSpace> &rhs,
-                             std::map<IndexSpace, std::set<IndexSpace> > &product)
+                             bool rhs_disjoint,
+                             legion_terra_index_space_list_list_t &result)
+                             //std::map<IndexSpace, std::vector<IndexSpace> > &result)
 {
-  std::vector<std::pair<ptr_t, ptr_t> >lhs_bounds;
-  for (std::vector<IndexSpace>::const_iterator it = lhs.begin(); it != lhs.end(); ++it) {
-    IndexSpace lh_space = *it;
-
-    bool is_first = true;
-    ptr_t first, last;
-    for (IndexIterator lh_it(runtime, ctx, lh_space); lh_it.has_next();) {
-      size_t lh_count = 0;
-      ptr_t lh_ptr = lh_it.next_span(lh_count);
-      ptr_t lh_end = lh_ptr.value + lh_count - 1;
-      if (is_first) {
-        first = lh_ptr;
-        is_first = false;
-      }
-      last = lh_end;
-    }
-    lhs_bounds.push_back(std::pair<ptr_t, ptr_t>(first, last));
+  //typedef std::map<IndexSpace, std::vector<IndexSpace> >::iterator iterator_t;
+  if (lhs_disjoint) // || rhs_disjoint)
+  {
+    //std::map<IndexSpace, std::vector<IndexSpace> > result;
+    //for (std::vector<IndexSpace>::const_iterator lh = lhs.begin(); lh != lhs.end(); ++lh) {
+    //  std::vector<IndexSpace>& r = result[*lh];
+    //  r.reserve(rhs.size());
+    //  for (unsigned idx = 0; idx < rhs.size(); ++idx)
+    //    r.push_back(IndexSpace::NO_SPACE);
+    //}
+    //unsigned long long ts_start = Realm::Clock::current_time_in_microseconds();
+    create_cross_product_tree(runtime, ctx, flip, lhs, lhs_disjoint, rhs, rhs_disjoint, result);
+    //unsigned long long ts_stop = Realm::Clock::current_time_in_microseconds();
+    //fprintf(stderr, "cross product %zd x %zd with interval tree: %lld us\n",
+    //    lhs.size(), rhs.size(), ts_stop - ts_start);
+    //for (iterator_t it = result.begin(); it != result.end(); ++it) {
+    //  printf("Space (%lx, %d) overlaps with: \n",
+    //      it->first.get_id(), it->first.get_tree_id());
+    //  for (std::vector<IndexSpace>::iterator iit = it->second.begin();
+    //       iit != it->second.end(); ++iit)
+    //  {
+    //    if (*iit != IndexSpace::NO_SPACE)
+    //      printf("    Space (%lx, %d)\n", iit->get_id(), iit->get_tree_id());
+    //  }
+    //}
+    //printf("==========\n");
+    return;
+  }
+  else if (rhs_disjoint) // || rhs_disjoint)
+  {
+    //unsigned long long ts_start = Realm::Clock::current_time_in_microseconds();
+    create_cross_product_tree(runtime, ctx, !flip, rhs, rhs_disjoint, lhs, lhs_disjoint, result);
+    //unsigned long long ts_stop = Realm::Clock::current_time_in_microseconds();
+    //fprintf(stderr, "cross product %zd x %zd with interval tree: %lld us\n",
+    //    rhs.size(), lhs.size(), ts_stop - ts_start);
+    return;
   }
 
-  std::vector<std::pair<ptr_t, ptr_t> >rhs_bounds;
-  for (std::vector<IndexSpace>::const_iterator it = rhs.begin(); it != rhs.end(); ++it) {
-    IndexSpace rh_space = *it;
+  //unsigned long long ts_start = Realm::Clock::current_time_in_microseconds();
+  std::vector<std::pair<ptr_t, ptr_t> > lhs_bounds;
+  std::vector<std::pair<ptr_t, ptr_t> > rhs_bounds;
 
-    bool is_first = true;
-    ptr_t first, last;
-    for (IndexIterator rh_it(runtime, ctx, rh_space); rh_it.has_next();) {
-      size_t rh_count = 0;
-      ptr_t rh_ptr = rh_it.next_span(rh_count);
-      ptr_t rh_end = rh_ptr.value + rh_count - 1;
-      if (is_first) {
-        first = rh_ptr;
-        is_first = false;
-      }
-      last = rh_end;
-    }
-    rhs_bounds.push_back(std::pair<ptr_t, ptr_t>(first, last));
-  }
+  get_bounding_boxes(runtime, ctx, lhs, lhs_bounds);
+  get_bounding_boxes(runtime, ctx, rhs, rhs_bounds);
 
   // size_t total = 0, overlap = 0;
   // for (std::vector<std::pair<ptr_t, ptr_t> >::iterator i = lhs_bounds.begin(); i != lhs_bounds.end(); ++i) {
@@ -422,10 +747,27 @@ create_cross_product_shallow(HighLevelRuntime *runtime,
         }
       }
       if (intersects) {
-        product[lh_space].insert(rh_space);
+        //if (flip) result[rh_space][i] = lh_space;
+        //else result[lh_space][j] = rh_space;
+        if (flip) assign_list_list(result, j, i, CObjectWrapper::wrap(lh_space));
+        else assign_list_list(result, i, j, CObjectWrapper::wrap(rh_space));
       }
     }
   }
+  //unsigned long long ts_stop = Realm::Clock::current_time_in_microseconds();
+  //fprintf(stderr, "cross product %zd x %zd with N^2 comparisons: %lld us\n",
+  //    lhs.size(), rhs.size(), ts_stop - ts_start);
+  //for (iterator_t it = result.begin(); it != result.end(); ++it) {
+  //  printf("Space (%lx, %d) overlaps with: \n",
+  //      it->first.get_id(), it->first.get_tree_id());
+  //  for (std::vector<IndexSpace>::iterator iit = it->second.begin();
+  //       iit != it->second.end(); ++iit)
+  //  {
+  //    if (*iit != IndexSpace::NO_SPACE)
+  //      printf("    Space (%lx, %d)\n", iit->get_id(), iit->get_tree_id());
+  //  }
+  //}
+  //printf("==========\n");
 }
 
 static void
@@ -668,30 +1010,52 @@ legion_terra_index_cross_product_create_list_shallow(
 
   IndexPartition lhs_part = partition_from_list(runtime, ctx, lhs);
   IndexPartition rhs_part = partition_from_list(runtime, ctx, rhs);
+  bool lhs_disjoint = runtime->is_index_partition_disjoint(ctx, lhs_part);
+  bool rhs_disjoint = runtime->is_index_partition_disjoint(ctx, rhs_part);
 
   bool flip = false;
   if (lhs_part != IndexPartition::NO_PART and rhs_part != IndexPartition::NO_PART) {
     flip = should_flip_cross_product(runtime, ctx, lhs_part, rhs_part);
   }
 
-  std::map<IndexSpace, std::set<IndexSpace> > product;
+  //unsigned long long ts_start = Realm::Clock::current_time_in_microseconds();
+  //std::map<IndexSpace, std::vector<IndexSpace> > result;
+  //size_t rhs_size = rhs.size();
+  //for (std::vector<IndexSpace>::iterator lh = lhs.begin(); lh != lhs.end(); ++lh) {
+  //  std::vector<IndexSpace>& r = result[*lh];
+  //  r.reserve(rhs_size);
+  //  for (unsigned idx = 0; idx < rhs_size; ++idx)
+  //    r.push_back(IndexSpace::NO_SPACE);
+  //}
+  legion_terra_index_space_list_list_t result =
+    create_list_list(lhs_, lhs.size(), rhs.size());
+  //unsigned long long ts_stop = Realm::Clock::current_time_in_microseconds();
+  //fprintf(stderr, "initialize map %zd x %zd: %lld us\n",
+  //    lhs.size(), rhs.size(), ts_stop - ts_start);
+
   if (flip) {
-    create_cross_product_shallow(runtime, ctx, rhs, lhs, product);
+    create_cross_product_shallow(runtime, ctx, flip, rhs, rhs_disjoint, lhs, lhs_disjoint, result);
   } else {
-    create_cross_product_shallow(runtime, ctx, lhs, rhs, product);
+    create_cross_product_shallow(runtime, ctx, flip, lhs, lhs_disjoint, rhs, rhs_disjoint, result);
   }
 
-  std::map<IndexSpace, std::vector<IndexSpace> > result;
-  for (std::vector<IndexSpace>::iterator lh = lhs.begin(); lh != lhs.end(); ++lh) {
-    for (std::vector<IndexSpace>::iterator rh = rhs.begin(); rh != rhs.end(); ++rh) {
-      if (flip) {
-        result[*lh].push_back(product[*rh].count(*lh) ? *rh : IndexSpace::NO_SPACE);
-      } else {
-        result[*lh].push_back(product[*lh].count(*rh) ? *rh : IndexSpace::NO_SPACE);
-      }
-    }
-  }
-  return wrap_list_list(lhs, result);
+  //unsigned long long ts_start = Realm::Clock::current_time_in_microseconds();
+  //std::map<IndexSpace, std::vector<IndexSpace> > result;
+  //for (std::vector<IndexSpace>::iterator lh = lhs.begin(); lh != lhs.end(); ++lh) {
+  //  std::vector<IndexSpace>& r = result[*lh];
+  //  for (std::vector<IndexSpace>::iterator rh = rhs.begin(); rh != rhs.end(); ++rh) {
+  //    if (flip) {
+  //      r.push_back(product[*rh].count(*lh) ? *rh : IndexSpace::NO_SPACE);
+  //    } else {
+  //      r.push_back(product[*lh].count(*rh) ? *rh : IndexSpace::NO_SPACE);
+  //    }
+  //  }
+  //}
+  //unsigned long long ts_stop = Realm::Clock::current_time_in_microseconds();
+  //fprintf(stderr, "reordering results %zd x %zd: %lld us\n",
+  //    lhs.size(), rhs.size(), ts_stop - ts_start);
+  //return wrap_list_list(lhs, result);
+  return result;
 }
 
 legion_terra_index_space_list_list_t
