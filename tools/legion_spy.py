@@ -21,6 +21,7 @@ import string
 import tempfile
 from getopt import getopt
 from array import *
+from collections import deque
 
 # These are imported from legion_types.h
 NO_DEPENDENCE = 0
@@ -817,6 +818,9 @@ class LogicalRegion(object):
         return self.index_space.are_children_disjoint(c1.index_partition, 
                                                       c2.index_partition)
 
+    def is_complete(self):
+        return False
+
     def get_shape(self):
         result = self.index_space.shape
         assert result is not None
@@ -1008,6 +1012,12 @@ class LogicalPartition(object):
     def are_children_disjoint(self, c1, c2):
         return self.index_partition.are_children_disjoint(c1.index_space, 
                                                           c2.index_space)
+
+    def get_shape(self):
+        return self.parent.get_shape()
+
+    def is_complete(self):
+        return self.index_partition.complete
 
     def reset_logical_state(self):
         if self.logical_state:
@@ -1607,10 +1617,12 @@ class PhysicalState(object):
     def perform_physical_close(self, op, req, inst, perform_checks):
         if inst.is_virtual():
             target = CompositeInstance(op.state, self.node, self.field)
-            target.capture(self)
+            # Capture down the tree first
             if not self.node.close_physical_tree(self.depth, self.field,
                                                  target, op, perform_checks):
                 return False
+            # Now capture locally
+            target.capture(self)
         else:
             # Issue any local updates needed first
             if self.dirty:
@@ -1621,29 +1633,34 @@ class PhysicalState(object):
             if not self.node.close_physical_tree(self.depth, self.field,
                                                  inst, op, perform_checks):
                 return False
+            target = inst
+        self.dirty = True
+        self.redop = 0
+        self.valid_instances = set()
+        self.reduction_instances = set()
+        self.valid_instances.add(target)
         return True
 
     def close_physical_tree(self, target, op, perform_checks):
         # Issue any updates from our instances
-        if target is not None:
-            if target.is_virtual():
-                target.capture(self)
-            elif self.dirty:
-                if not self.issue_update_copies(inst, self.valid_instances, 
-                                                op, perform-checks, str(op)):
-                    return False
+        if target is not None and not target.is_virtual() and self.dirty:
+            if not self.issue_update_copies(inst, self.valid_instances, 
+                                            op, perform-checks, str(op)):
+                return False
         # Continue down the tree 
         if not self.node.close_physical_tree(self.depth, self.field, 
                                              target, op, perform_checks):
             return False
-        # Flush any reductions
-        # If we are targeting a composite instance we already captured
-        # the reduction instances so we don't need to do anything
-        if target is not None and self.redop <> 0 and not target.is_virtual():
-            assert self.reduction_instances
-            if not self.issue_update_reductions(inst, self.reduction_instances,
-                                                op, perform_checks):
-                return False
+        # If the target is a composite instance do the capture
+        # otherwise flush any reductions
+        if target is not None:
+            if target.is_virtual():
+                target.capture(self)
+            elif self.redop <> 0:
+                assert self.reduction_instances
+                if not self.issue_update_reductions(inst, self.reduction_instances,
+                                                    op, perform_checks):
+                    return False
         # Now we can reset everything since we are closed
         self.dirty = False
         self.redop = 0
@@ -1674,7 +1691,8 @@ class PhysicalState(object):
         # then we need to do something special
         if len(valid) == 1 and next(iter(valid)).is_virtual():
             virtual_inst = next(iter(valid))
-            return virtual_inst.issue_update_copies(dst, self.node, op, 
+            shape = self.node.get_shape().copy()
+            return virtual_inst.issue_update_copies(dst, shape, op, 
                                                     perform_checks, error_str)
         # Find the destination preconditions since we will
         # need to know them no matter what
@@ -2496,13 +2514,15 @@ class Operation(object):
         # Now we issue the copy across
         # See if we are doing a reduction or a normal copy
         if dst_req.is_reduce():
+            assert dst_req.redop <> 0
             # Reduction case
             if src_inst.is_virtual():
                 error_str = "source field "+str(src_field)+" and destination field "+\
                             str(dst_field)+" of region requirements "+src(src_index)+\
                             " and "+str(dst_index)+" of "+str(self)
-                return src_inst.issue_reductions_across(dst_inst, dst_region.logical_node,
-                                                        self, perform_checks, error_str)
+                shape = dst_region.logical_node.get_shape().copy()
+                return src_inst.issue_reductions_across(dst_inst, shape, self, 
+                                            perform_checks, dst_req.redop, error_str)
             else:
                 # Normal reduction, find the source and destination dependences
                 src_preconditions = src_inst.find_use_dependences(src_field, src_req, 
@@ -2557,7 +2577,8 @@ class Operation(object):
                 error_str = "source field "+str(src_field)+" and destination field "+\
                             str(dst_field)+" of region requirements "+src(src_index)+\
                             " and "+str(dst_index)+" of "+str(self)
-                return src_inst.issue_copies_across(dst_inst, dst_region.logical_node,
+                shape = dst_region.logical_node.get_shape().copy()
+                return src_inst.issue_copies_across(dst_inst, shape,
                                                     self, perform_checks, error_str)
             else:
                 # Normal copy
@@ -3119,6 +3140,8 @@ class Instance(object):
     def __str__(self):
         return "Instance %s in %s" % (hex(self.handle), str(self.memory))
 
+    __repr__ = __str__
+
     def set_memory(self, memory):
         self.memory = memory
 
@@ -3139,6 +3162,9 @@ class Instance(object):
     # Only one virtual instance always with ID 0
     def is_virtual(self):
         return self.handle == 0
+
+    def is_composite(self):
+        return False
 
     def find_use_dependences(self, field, req, precise):
         assert not self.is_virtual()
@@ -3215,6 +3241,11 @@ class FillInstance(object):
         self.state = state
         self.region = region 
         self.field = field
+
+    def __str__(self):
+        print "Fill Instance"
+
+    __repr__ = __str__
       
     def find_use_dependences(self, field, req, precise):
         assert False
@@ -3231,7 +3262,10 @@ class FillInstance(object):
     def is_virtual(self):
         return True
 
-    def issue_update_copies(self, dst, region, op, perform_checks, error_str):
+    def is_composite(self):
+        return False
+
+    def issue_update_copies(self, dst, shape, op, perform_checks, error_str):
         # Find the destination preconditions
         preconditions = dst.find_copy_dependences(self.field, region, 
                                                   False, 0, perform_checks)
@@ -3255,38 +3289,86 @@ class FillInstance(object):
         dst.add_copy_user(self.field, False, 0)
         return True
 
-    def issue_copies_across(self, dst, region, op, perform_checks, error_str):
+    def issue_copies_across(self, dst, shape, op, perform_checks, error_str):
         # TODO
         return True
 
-    def issue_reductions_across(self, dst, region, op, perform_checks, error_str):
+    def issue_reductions_across(self, dst, shape, op, redop, perform_checks, error_str):
         # TODO
         return True
 
 class CompositeInstance(object):
-    __slots__ = ['state', 'root', 'field', 'states', 'root_state']
+    __slots__ = ['state', 'root', 'field', 'states', 'reductions', 
+                 'filters', 'captured_below']
     def __init__(self, state, root, field):
         self.state = state
         self.root = root
         self.field = field
         self.states = dict()
-        self.root_state = None
+        self.reductions = dict()
+        self.filters = dict()
+        self.captured_below = dict() # for capture only
+
+    def __str__(self):
+        print "Composite Instance"
+
+    __repr__ = __str__
+
+    def get_state(self, node, depth, field):
+        if node in self.states:
+            return self.states[node]
+        if node is self.root:
+            result = PhysicalState(node, depth, field, None)
+        else:
+            parent_state = self.get_state(node.parent, depth, field)
+            result = PhysicalState(node, depth,  field, parent_state)
+        self.states[node] = result
+        return result
 
     def capture(self, state):
-        # Make a new state and save it
-        if state.node is not self.root:
-            assert state.parent.node in self.states
-            new_state = PhysicalState(state.node, state.depth, state.field, 
-                                      self.states[state.parent.node])
+        # See which of children were captured 
+        captured_below = list()
+        for child in state.node.children.itervalues():
+            if child in self.captured_below:
+                captured_below.extend(self.captured_below[child])
+        # Do the capture if we are dirty or we are the root
+        if state.dirty or state.node is self.root:
+            # Only capture this state if we weren't dominated
+            # by all our captured children
+            if captured_below:
+                shape = state.node.get_shape().copy() 
+                for child_shape in captured_below:
+                    shape -= child_shape
+            else:
+                shape = state.node.get_shape() # no need for a copy
+            # If we still have points then we need to capture
+            if not shape.empty():
+                new_state = self.get_state(state.node, state.depth, state.field)
+                # If this is the root capture all valid instances
+                # otherwise we just need the local ones
+                if state.node is self.root:
+                    new_state.valid_instances = state.find_valid_instances()
+                else:
+                    new_state.valid_instances = state.valid_instances.copy()
+                captured_below.append(shape)
+                self.filters[new_state] = shape
+        if captured_below:
+            self.captured_below[state.node] = captured_below
         else:
-            new_state = PhysicalState(state.node, state.depth, state.field, None)
-            self.root_state = new_state
-        new_state.dirty = state.dirty
-        new_state.redop = state.redop
-        new_state.valid_instances = state.valid_instances.copy()
-        new_state.reduction_instances = state.reduction_instances.copy()
-        self.states[new_state.node] = new_state
-
+            captured_below.append(state.node.get_shape())
+            self.captured_below[state.node] = captured_below
+        # Capture any reductions
+        if state.redop <> 0:
+            assert state.reduction_instances
+            for reduc in state.reduction_instances:
+                if reduc in self.reductions:
+                    self.reductions[reduc] += state.node.get_shape()
+                else:
+                    self.reductions[reduc] = state.node.get_shape().copy()
+        # If we're the root we can clear the captured below
+        if state.node is self.root:
+            self.captured_below = None
+            
     def find_use_dependences(self, field, req, precise):
         assert False
 
@@ -3302,15 +3384,72 @@ class CompositeInstance(object):
     def is_virtual(self):
         return True
 
-    def issue_update_copies(self, dst, region, op, perform_checks, error_str):
+    def is_composite(self):
+        return True
+
+    def issue_update_copies(self, dst, shape, op, perform_checks, error_str):
+        # Find the child the lowest child that dominates the shape  
+        starting_node = self.root
+        while True:
+            dominating_children = list()
+            for child in starting_node.children.itervalues():
+                if child not in self.states:
+                    continue
+                if child.get_shape().dominates(shape):
+                    dominating_children.append(child)
+            if not dominating_children or len(dominating_children) > 1:
+                break
+            starting_node = dominating_children[0]
+        # Now that we have the starting node, start issuing copies from here
+        # Issue copies in breadth first order
+        nodes = deque()
+        nodes.append(starting_node)
+        while nodes:
+            node = nodes.popleft()
+            assert node in self.states
+            state = self.states[node]
+            # Issue copies from the node
+            # See if we have a filter
+            if state.dirty and dst not in state.valid_instances:
+                if node in self.filters:
+                    node_shape = self.filters[node].intersect(shape)
+                    if node_shape.empty():
+                        continue
+                else:
+                    node_shape = shape
+                assert state.valid_instances
+                if len(state.valid_instances) == 1 and \
+                    next(iter(state.valid_instances)).is_virtual():
+                    virtual_inst = next(iter(state.valid_instances))
+                    if not virtual_inst.issue_update_copies(dst, node_shape, op,
+                                                            perform_checks, error_str):
+                        return False
+                else:
+                    if perform_checks:
+
+                    else:
+
+            # Get the next nodes
+            for child in node.children.itervalues():
+                if child in self.states:
+                    nodes.append(child)
+        # Finally issue any reductions from this instance
+        if self.reductions:
+            for reduction,red_shape in self.reductions.itervalues():
+                reduction_shape = red_shape & shape 
+                if not reduction_shape.empty():
+                    continue
+                if perform_checks:
+
+                else:
+
+        return True
+
+    def issue_copies_across(self, dst, shape, op, perform_checks, error_str):
         # TODO
         return True
 
-    def issue_copies_across(self, dst, region, op, perform_checks, error_str):
-        # TODO
-        return True
-
-    def issue_reductions_across(self, dst, region, op, perform_checks, error_str):
+    def issue_reductions_across(self, dst, shape, op, redop, perform_checks, error_str):
         # TODO
         return True
 
