@@ -7335,9 +7335,6 @@ namespace Legion {
       assert(refs[0].is_composite_ref());
 #endif
       RegionTreeContext virtual_ctx = get_parent_context(index);
-      // Put this in an instance set and then register it
-      // Have to control access to the version info data structure
-      AutoLock o_lock(op_lock);
 #ifdef DEBUG_HIGH_LEVEL
       assert(virtual_mapped[index]);
 #endif
@@ -7349,6 +7346,25 @@ namespace Legion {
                                               , unique_op_id
 #endif
                                               );
+      // Apply our version state information, put map applied information
+      // in a temporary data structure and then hold the lock when merging
+      // it back into map_applied conditions
+      std::set<Event> temp_map_applied_conditions;
+      if (is_remote())
+      {
+        AddressSpaceID owner_space = runtime->find_address_space(orig_proc);
+        version_infos[index].apply_mapping(get_parent_context(index).get_id(),
+                                    owner_space, temp_map_applied_conditions);
+      }
+      else
+        version_infos[index].apply_mapping(get_parent_context(index).get_id(),
+                         runtime->address_space, temp_map_applied_conditions);
+      if (!temp_map_applied_conditions.empty())
+      {
+        AutoLock o_lock(op_lock);
+        map_applied_conditions.insert(temp_map_applied_conditions.begin(),
+                                      temp_map_applied_conditions.end());
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -7572,40 +7588,10 @@ namespace Legion {
                                          this, mapped_precondition);
         return;
       }
+      // We used to have to apply our virtual state here, but that is now
+      // done when the virtual instances are returned in return_virtual_task
       // If we have any virtual instances then we need to apply
       // the changes for them now
-      if (has_virtual_instances())
-      {
-        if (is_remote())
-        {
-          AddressSpaceID owner_space = runtime->find_address_space(orig_proc);
-          for (unsigned idx = 0; idx < physical_instances.size(); idx++)
-          {
-            if (!physical_instances[idx].has_composite_ref())
-              continue;
-#ifdef DEBUG_HIGH_LEVEL
-            assert(virtual_mapped[idx]);
-#endif
-            version_infos[idx].apply_mapping(
-                get_parent_context(idx).get_id(),
-                owner_space, map_applied_conditions);
-          }
-        }
-        else
-        {
-          for (unsigned idx = 0; idx < physical_instances.size(); idx++)
-          {
-            if (!physical_instances[idx].has_composite_ref())
-              continue;
-#ifdef DEBUG_HIGH_LEVEL
-            assert(virtual_mapped[idx]);
-#endif
-            version_infos[idx].apply_mapping(
-                get_parent_context(idx).get_id(),
-                runtime->address_space, map_applied_conditions);
-          }
-        }
-      }
       if (!is_remote())
       {
         if (!acquired_instances.empty())

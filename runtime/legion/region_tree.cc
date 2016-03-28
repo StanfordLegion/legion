@@ -6772,6 +6772,7 @@ namespace Legion {
             Realm::ElementMask::Enumerator *enumerator = 
               mask.enumerate_enabled();
             int next, length;
+            bool empty = true;
             while (enumerator->get_next(next, length))
             {
               if (length > 1)
@@ -6782,26 +6783,38 @@ namespace Legion {
               }
               else
                 LegionSpy::log_index_space_point<1>(handle.id, &next);
+              empty = false;
             }
             delete enumerator;
+            if (empty)
+              LegionSpy::log_empty_index_space(handle.id);
             break;
           }
         case 1:
           {
             Rect<1> rect = dom.get_rect<1>();
-            LegionSpy::log_index_space_rect<1>(handle.id, rect.lo.x, rect.hi.x);
+            if (rect.volume() > 0)
+              LegionSpy::log_index_space_rect<1>(handle.id,rect.lo.x,rect.hi.x);
+            else
+              LegionSpy::log_empty_index_space(handle.id);
             break;
           }
         case 2:
           {
             Rect<2> rect = dom.get_rect<2>();
-            LegionSpy::log_index_space_rect<2>(handle.id, rect.lo.x, rect.hi.x);
+            if (rect.volume() > 0)
+              LegionSpy::log_index_space_rect<2>(handle.id,rect.lo.x,rect.hi.x);
+            else
+              LegionSpy::log_empty_index_space(handle.id);
             break;
           }
         case 3:
           {
             Rect<3> rect = dom.get_rect<3>();
-            LegionSpy::log_index_space_rect<3>(handle.id, rect.lo.x, rect.hi.x);
+            if (rect.volume() > 0)
+              LegionSpy::log_index_space_rect<3>(handle.id,rect.lo.x,rect.hi.x);
+            else
+              LegionSpy::log_empty_index_space(handle.id);
             break;
           }
         default:

@@ -5338,7 +5338,8 @@ namespace Legion {
       }
       Event reduce_pre = Runtime::merge_events<false>(event_preconds); 
       Event reduce_post = manager->issue_reduction(op, src_fields, dst_fields,
-                                                   logical_node, reduce_pre,
+                                                   target->logical_node, 
+                                                   reduce_pre,
                                                    fold, true/*precise*/,
                                                    NULL/*intersect*/);
       target->add_copy_user(manager->redop, reduce_post, version_info,

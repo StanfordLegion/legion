@@ -434,7 +434,7 @@ namespace Legion {
       ReductionView& operator=(const ReductionView&rhs);
     public:
       void perform_reduction(InstanceView *target, const FieldMask &copy_mask, 
-                             const VersionInfo &version_info,
+                             const VersionInfo &version_info, 
                              Operation *op, CopyTracker *tracker = NULL);
       Event perform_deferred_reduction(MaterializedView *target,
                                         const FieldMask &copy_mask,

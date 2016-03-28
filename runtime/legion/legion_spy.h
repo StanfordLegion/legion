@@ -182,6 +182,11 @@ namespace Legion {
             DIM < 3 ? 0 : higher[2]);
       }
 
+      static inline void log_empty_index_space(IDType handle)
+      {
+        log_spy.info("Empty Index Space " IDFMT "", handle);
+      }
+
       // Logger calls for operations 
       static inline void log_task_name(TaskID task_id, const char *name)
       {
