@@ -11698,7 +11698,7 @@ namespace LegionRuntime {
         ctx->add_local_field(space, fid, field_size, serdez_id);
       else
       {
-        forest->allocate_field(space, field_size, fid, local, serdez_id);
+        forest->allocate_field(space, field_size, fid, serdez_id);
         ctx->register_field_creation(space, fid);
       }
       return fid;
