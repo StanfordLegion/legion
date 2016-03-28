@@ -105,9 +105,8 @@ namespace Legion {
     {
       create_node(handle, domain, NULL/*parent*/, 
                   ColorPoint(0)/*color*/, kind, mode);
-#ifdef LEGION_SPY
-      IndexSpaceNode::log_index_space_domain(handle, domain);
-#endif
+      if (Runtime::legion_spy_enabled)
+        IndexSpaceNode::log_index_space_domain(handle, domain);
     }
 
     //--------------------------------------------------------------------------
@@ -124,11 +123,12 @@ namespace Legion {
       IndexSpaceNode *node = create_node(handle, hull, NULL/*parent*/, 
                                          ColorPoint(0)/*color*/, kind, mode);
       node->update_component_domains(domains);
-#ifdef LEGION_SPY
-      for (std::set<Domain>::const_iterator it = domains.begin();
-            it != domains.end(); it++)
-        IndexSpaceNode::log_index_space_domain(handle, *it);
-#endif
+      if (Runtime::legion_spy_enabled)
+      {
+        for (std::set<Domain>::const_iterator it = domains.begin();
+              it != domains.end(); it++)
+          IndexSpaceNode::log_index_space_domain(handle, *it);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -181,10 +181,10 @@ namespace Legion {
                     parent_node->kind, mode);
 
         if (Runtime::legion_spy_enabled)
+        {
           LegionSpy::log_index_subspace(pid.id, handle.id, it->first);
-#ifdef LEGION_SPY
-        IndexSpaceNode::log_index_space_domain(handle, it->second);
-#endif
+          IndexSpaceNode::log_index_space_domain(handle, it->second);
+        }
       } 
       if (part_kind == COMPUTE_KIND)
       {
@@ -257,12 +257,12 @@ namespace Legion {
         child->update_component_domains(comp_it->second);
 
         if (Runtime::legion_spy_enabled)
+        {
           LegionSpy::log_index_subspace(pid.id, handle.id, it->first);
-#ifdef LEGION_SPY
-        for (std::set<Domain>::const_iterator cit = 
-              comp_it->second.begin(); cit != comp_it->second.end(); cit++)
-          IndexSpaceNode::log_index_space_domain(handle, *cit); 
-#endif
+          for (std::set<Domain>::const_iterator cit = 
+                comp_it->second.begin(); cit != comp_it->second.end(); cit++)
+            IndexSpaceNode::log_index_space_domain(handle, *cit); 
+        }
       }
       if (part_kind == COMPUTE_KIND)
       {
@@ -5998,12 +5998,6 @@ namespace Legion {
       {
         disjoint_subsets.insert(std::pair<ColorPoint,ColorPoint>(c1,c2));
         disjoint_subsets.insert(std::pair<ColorPoint,ColorPoint>(c2,c1));
-#ifdef LEGION_SPY
-        IndexPartNode *p1 = color_map[c1];
-        IndexPartNode *p2 = color_map[c2];
-        LegionSpy::log_index_partition_independence(handle.get_id(),
-                          p1->handle.get_id(), p2->handle.get_id());
-#endif
       }
       else
       {
@@ -6184,9 +6178,6 @@ namespace Legion {
                                          other->get_domain_blocking(), 
                                          intersect, compute); 
       }
-      if (!result && Runtime::legion_spy_enabled)
-        LegionSpy::log_nonintersection(handle.id, other->handle.id, 
-                                       LegionSpy::SPACE_SPACE_TEST);
       AutoLock n_lock(node_lock);
       if (result)
       {
@@ -6235,9 +6226,6 @@ namespace Legion {
         result = compute_intersections(component_domains, other_domains,
                                        intersect, compute);
       }
-      if (!result && Runtime::legion_spy_enabled)
-        LegionSpy::log_nonintersection(handle.id, other->handle.id, 
-                                       LegionSpy::SPACE_PART_TEST);
       AutoLock n_lock(node_lock);
       if (result)
       {
@@ -6398,9 +6386,6 @@ namespace Legion {
           result = compute_dominates(component_domains, other_doms);
         }
       }
-      if (result && Runtime::legion_spy_enabled)
-        LegionSpy::log_dominance(handle.id, other->handle.id, 
-                                 LegionSpy::SPACE_SPACE_TEST);
       AutoLock n_lock(node_lock);
       dominators[other] = result;
       return result;
@@ -6428,9 +6413,6 @@ namespace Legion {
       }
       else
         result = compute_dominates(component_domains, other_doms);
-      if (result && Runtime::legion_spy_enabled)
-        LegionSpy::log_dominance(handle.id, other->handle.id, 
-                                 LegionSpy::SPACE_PART_TEST);
       AutoLock n_lock(node_lock);
       dominators[other] = result;
       return result;
@@ -6776,7 +6758,6 @@ namespace Legion {
       return allocator;
     }
 
-#ifdef LEGION_SPY
     //--------------------------------------------------------------------------
     /*static*/ void IndexSpaceNode::log_index_space_domain(IndexSpace handle,
                                                            const Domain &dom)
@@ -6827,7 +6808,6 @@ namespace Legion {
           assert(false);
       }
     }
-#endif
 
     /////////////////////////////////////////////////////////////
     // Index Partition Node 
@@ -7340,12 +7320,6 @@ namespace Legion {
       {
         disjoint_subspaces.insert(std::pair<ColorPoint,ColorPoint>(c1,c2));
         disjoint_subspaces.insert(std::pair<ColorPoint,ColorPoint>(c2,c1));
-#ifdef LEGION_SPY
-        IndexSpaceNode *s1 = color_map[c1];
-        IndexSpaceNode *s2 = color_map[c2];
-        LegionSpy::log_index_space_independence(handle.get_id(),
-                      s1->handle.get_id(), s2->handle.get_id());
-#endif
       }
       else
       {
@@ -7393,8 +7367,6 @@ namespace Legion {
           child_domains.insert(it->second->get_domain_blocking());
       }
       bool result = compute_dominates(child_domains, parent_domains);
-      if (result && Runtime::legion_spy_enabled)
-        LegionSpy::log_index_partition_completeness(handle.id);
       if (can_cache)
       {
         AutoLock n_lock(node_lock);
@@ -7799,9 +7771,6 @@ namespace Legion {
                                        other->get_domain_blocking(), 
                                        intersect, compute);
       }
-      if (!result && Runtime::legion_spy_enabled)
-        LegionSpy::log_nonintersection(handle.id, other->handle.id, 
-                                       LegionSpy::PART_SPACE_TEST);
       AutoLock n_lock(node_lock);
       if (result)
       {
@@ -7841,9 +7810,6 @@ namespace Legion {
       other->get_subspace_domains(other_domains);
       bool result = compute_intersections(local_domains, other_domains, 
                                           intersect, compute);
-      if (!result && Runtime::legion_spy_enabled)
-        LegionSpy::log_nonintersection(handle.id, other->handle.id, 
-                                       LegionSpy::PART_PART_TEST);
       AutoLock n_lock(node_lock);
       if (result)
       {
@@ -7960,9 +7926,6 @@ namespace Legion {
         other_doms.insert(other->get_domain_blocking());
         result = compute_dominates(local, other_doms);
       }
-      if (result && Runtime::legion_spy_enabled)
-        LegionSpy::log_dominance(handle.id, other->handle.id, 
-                                 LegionSpy::PART_SPACE_TEST);
       AutoLock n_lock(node_lock);
       dominators[other] = result;
       return result;
@@ -7983,9 +7946,6 @@ namespace Legion {
       get_subspace_domains(local);
       other->get_subspace_domains(other_doms);
       bool result = compute_dominates(local, other_doms);
-      if (result && Runtime::legion_spy_enabled)
-        LegionSpy::log_dominance(handle.id, other->handle.id, 
-                                 LegionSpy::PART_PART_TEST);
       AutoLock n_lock(node_lock);
       dominators[other] = result;
       return result;

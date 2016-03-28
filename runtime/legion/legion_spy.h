@@ -36,13 +36,6 @@ namespace Legion {
 
       extern LegionRuntime::Logger::Category log_spy;
 
-      enum TestKind {
-        SPACE_SPACE_TEST = 0,
-        SPACE_PART_TEST = 1,
-        PART_SPACE_TEST = 2,
-        PART_PART_TEST = 3,
-      };
-
       // Logger calls for the machine architecture
       static inline void log_processor_kind(unsigned kind, const char *name)
       {
@@ -121,40 +114,6 @@ namespace Legion {
                           (int)point.point_data[2]);
       }
 
-      static inline void log_index_space_independence(IDType parent_id,
-                                    IDType unique_id1, IDType unique_id2)
-      {
-        log_spy.info("Index Space Independence " IDFMT " " IDFMT " " IDFMT "",
-                      parent_id, unique_id1, unique_id2);
-      }
-      
-      static inline void log_index_partition_independence(IDType parent_id,
-                                       IDType unique_id1, IDType unique_id2)
-      {
-        log_spy.info("Index Partition Independence " IDFMT " " IDFMT " " 
-                      IDFMT "", parent_id, unique_id1, unique_id2);
-      }
-
-      static inline void log_index_partition_completeness(IDType unique_id)
-      {
-        log_spy.info("Index Partition Complete " IDFMT, unique_id);
-      }
-
-      static inline void log_nonintersection(IDType unique_id1,
-                                             IDType unique_id2,
-                                             TestKind k)
-      {
-        log_spy.info("Index Non-Intersection " IDFMT " " IDFMT " %d",
-                      unique_id1, unique_id2, k);
-      }
-
-      static inline void log_dominance(IDType unique_id1,
-                                       IDType unique_id2, TestKind k)
-      {
-        log_spy.info("Index Dominance " IDFMT " " IDFMT " %d", 
-                      unique_id1, unique_id2, k);
-      }
-
       static inline void log_field_space(unsigned unique_id)
       {
         log_spy.info("Field Space %u", unique_id);
@@ -205,6 +164,24 @@ namespace Legion {
               index_partition, field_space, tree_id, name);
       }
 
+      // For capturing information about the shape of index spaces
+      template<int DIM>
+      static inline void log_index_space_point(IDType handle, int *vals)
+      {
+        log_spy.info("Index Space Point " IDFMT " %d %d %d %d", handle, DIM,
+            vals[0], DIM < 2 ? 0 : vals[1], DIM < 3 ? 0 : vals[2]);
+      }
+
+      template<int DIM>
+      static inline void log_index_space_rect(IDType handle, 
+                                              int *lower, int *higher)
+      {
+        log_spy.info("Index Space Rect " IDFMT " %d %d %d %d %d %d %d", 
+            handle, DIM, lower[0], DIM < 2 ? 0 : lower[1], 
+            DIM < 3 ? 0 : lower[2], higher[0], DIM < 2 ? 0 : higher[1],
+            DIM < 3 ? 0 : higher[2]);
+      }
+
       // Logger calls for operations 
       static inline void log_task_name(TaskID task_id, const char *name)
       {
@@ -251,10 +228,12 @@ namespace Legion {
 
       static inline void log_close_operation(UniqueID context,
                                              UniqueID unique_id,
-                                             bool is_intermediate_close_op)
+                                             bool is_intermediate_close_op,
+                                             bool read_only_close_op)
       {
-        log_spy.info("Close Operation %llu %llu %u",
-            context, unique_id, is_intermediate_close_op ? 1 : 0);
+        log_spy.info("Close Operation %llu %llu %u %u",
+            context, unique_id, is_intermediate_close_op ? 1 : 0,
+            read_only_close_op ? 1 : 0);
       }
 
       static inline void log_close_op_creator(UniqueID close_op_id,
@@ -496,25 +475,7 @@ namespace Legion {
       static inline void log_phase_barrier(Barrier barrier)
       {
         log_spy.info("Phase Barrier " IDFMT, barrier.id);
-      }
-
-      // For capturing information about the shpe of index spaces
-      template<int DIM>
-      static inline void log_index_space_point(IDType handle, int *vals)
-      {
-        log_spy.info("Index Space Point " IDFMT " %d %d %d %d", handle, DIM,
-            vals[0], DIM < 2 ? 0 : vals[1], DIM < 3 ? 0 : vals[2]);
-      }
-
-      template<int DIM>
-      static inline void log_index_space_rect(IDType handle, 
-                                              int *lower, int *higher)
-      {
-        log_spy.info("Index Space Rect " IDFMT " %d %d %d %d %d %d %d", 
-            handle, DIM, lower[0], DIM < 2 ? 0 : lower[1], 
-            DIM < 3 ? 0 : lower[2], higher[0], DIM < 2 ? 0 : higher[1],
-            DIM < 3 ? 0 : higher[2]);
-      }
+      } 
 #endif
     }; // namespace LegionSpy
 

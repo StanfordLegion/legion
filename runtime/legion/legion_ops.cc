@@ -4315,14 +4315,14 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    void CloseOp::perform_logging(bool is_intermediate_close_op)
+    void CloseOp::perform_logging(bool is_intermediate_close_op, bool read_only)
     //--------------------------------------------------------------------------
     {
       if (!Runtime::legion_spy_enabled)
         return;
       LegionSpy::log_close_operation(parent_ctx->get_unique_id(),
                                      unique_op_id,
-                                     is_intermediate_close_op);
+                                     is_intermediate_close_op, read_only);
       if (requirement.handle_type == PART_PROJECTION)
         LegionSpy::log_logical_requirement(unique_op_id, 0/*idx*/,
                                   false/*region*/,
@@ -4432,14 +4432,7 @@ namespace Legion {
       close_idx = close;
       close_mask = close_m;
       create_op = create;
-      create_gen = create_op->get_generation();
-      if (Runtime::legion_spy_enabled)
-      {
-        perform_logging(true/*is intermediate close op*/);
-        LegionSpy::log_close_op_creator(unique_op_id,
-                                        create->get_unique_op_id(),
-                                        close_idx);
-      }
+      create_gen = create_op->get_generation(); 
     }
 
     //--------------------------------------------------------------------------
@@ -4552,6 +4545,13 @@ namespace Legion {
       version_info.merge(ver_info, close_m);
       restrict_info.merge(res_info, close_m);
       parent_req_index = create->find_parent_index(close_idx);
+      if (Runtime::legion_spy_enabled)
+      {
+        perform_logging(true/*is intermediate close op*/, false/*read only*/);
+        LegionSpy::log_close_op_creator(unique_op_id,
+                                        create->get_unique_op_id(),
+                                        close_idx);
+      }
     } 
 
     //--------------------------------------------------------------------------
@@ -4883,6 +4883,13 @@ namespace Legion {
       initialize_trace_close_op(ctx, req, targets, 
                                 trace, close, close_m, create);
       parent_req_index = create->find_parent_index(close_idx);
+      if (Runtime::legion_spy_enabled)
+      {
+        perform_logging(true/*is intermediate close op*/, true/*read only*/);
+        LegionSpy::log_close_op_creator(unique_op_id,
+                                        create->get_unique_op_id(),
+                                        close_idx);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -4970,7 +4977,7 @@ namespace Legion {
         requirement.privilege = READ_WRITE;
       parent_idx = idx;
       localize_region_requirement(requirement);
-      perform_logging(false/*intermediate close op*/);
+      perform_logging(false/*intermediate close op*/, false/*read only*/);
     }
 
     //--------------------------------------------------------------------------
@@ -5186,7 +5193,7 @@ namespace Legion {
         requirement.privilege = READ_WRITE;
       parent_idx = index;
       localize_region_requirement(requirement);
-      perform_logging(false/*intermediate close op*/);
+      perform_logging(false/*intermediate close op*/, false/*read only*/);
     }
     
     //--------------------------------------------------------------------------
