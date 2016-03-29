@@ -4977,7 +4977,13 @@ namespace Legion {
         requirement.privilege = READ_WRITE;
       parent_idx = idx;
       localize_region_requirement(requirement);
-      perform_logging(false/*intermediate close op*/, false/*read only*/);
+      if (Runtime::legion_spy_enabled)
+      {
+        perform_logging(false/*intermediate close op*/, false/*read only*/);
+        LegionSpy::log_close_op_creator(unique_op_id,
+                                        ctx->get_unique_op_id(),
+                                        parent_idx);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -5193,7 +5199,7 @@ namespace Legion {
         requirement.privilege = READ_WRITE;
       parent_idx = index;
       localize_region_requirement(requirement);
-      perform_logging(false/*intermediate close op*/, false/*read only*/);
+      // We don't log virtual close operations for now
     }
     
     //--------------------------------------------------------------------------
