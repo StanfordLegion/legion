@@ -128,6 +128,11 @@ struct voltages {
   _8 : float,
 }
 
+struct ghost_range {
+  first : int,
+  last : int,
+}
+
 fspace wire(rpn : region(node),
             rsn : region(node),
             rgn : region(node)) {
@@ -253,13 +258,13 @@ end
 
 task init_wires(piece_id   : int,
                 conf       : Config,
-                rls        : region(int),
+                rgr        : region(ghost_range),
                 rpn        : region(node),
                 rsn        : region(node),
                 all_shared : region(node),
                 rw         : region(wire(rpn, rsn, all_shared)))
 where
-  reads writes(rw, rls)
+  reads writes(rw, rgr)
 do
   var npp = conf.nodes_per_piece
   var snpp = conf.shared_nodes_per_piece
@@ -274,28 +279,28 @@ do
   if num_neighbors == 0 then
     num_neighbors = [int](ceil((num_pieces - 1) / 2.0 * (conf.density / 100.0)))
   end
-  if num_neighbors > conf.num_pieces then
+  if num_neighbors >= conf.num_pieces then
     num_neighbors = conf.num_pieces - 1
   end
   var neighbor_ids : &uint = [&uint](c.malloc([sizeof(uint)] * num_neighbors))
   var alread_picked : &bool = [&bool](c.malloc([sizeof(bool)] * num_pieces))
 
-  var piece_shared_nodes : &uint =
-    [&uint](c.malloc([sizeof(uint)] * conf.num_pieces))
+  var piece_shared_nodes = [&uint](c.malloc([sizeof(uint)] * conf.num_pieces))
 
   var window = conf.window
   if window * 2 < num_neighbors then
-    window = num_pieces
+    window = (num_neighbors + 1) / 2
   end
 
   var start_piece_id = piece_id - window
   var end_piece_id = piece_id + window
 
   if start_piece_id < 0 then
-    end_piece_id = min(end_piece_id - start_piece_id, num_pieces)
     start_piece_id = 0
-  elseif end_piece_id >= num_pieces then
-    start_piece_id = max(start_piece_id - (end_piece_id - num_pieces + 1), 0)
+    end_piece_id = min(num_neighbors, num_pieces - 1)
+  end
+  if end_piece_id >= num_pieces then
+    start_piece_id = max(0, (num_pieces - 1) - num_neighbors)
     end_piece_id = num_pieces - 1
   end
 
@@ -314,6 +319,8 @@ do
     neighbor_ids[i] = neighbor_id
   end
 
+  var max_shared_node_id = 0
+  var min_shared_node_id = num_shared_nodes
   for wire in rw do
     wire.current.{_0, _1, _2, _3, _4, _5, _6, _7, _8, _9} = 0.0
     wire.voltage.{_0, _1, _2, _3, _4, _5, _6, _7, _8} = 0.0
@@ -355,14 +362,15 @@ do
         end
       end
       out_node = pp * snpp + idx
+      max_shared_node_id = max(max_shared_node_id, out_node)
+      min_shared_node_id = min(min_shared_node_id, out_node)
     end
     wire.out_ptr = dynamic_cast(ptr(node, rpn, rsn, all_shared), [ptr](out_node))
   end
 
-  var idx = 0
-  for ls in rls do
-    @ls = piece_shared_nodes[idx]
-    idx += 1
+  for range in rgr do
+    range.first = min_shared_node_id
+    range.last = max_shared_node_id
   end
   c.free(piece_shared_nodes)
 end
@@ -382,17 +390,17 @@ end
 
 task init_piece(piece_id    : int,
                 conf        : Config,
-                rls         : region(int),
+                rgr         : region(ghost_range),
                 rpn         : region(node),
                 rsn         : region(node),
                 all_shared  : region(node),
                 rw          : region(wire(rpn, rsn, all_shared)))
 where
-  reads writes(rls, rpn, rsn, rw)
+  reads writes(rgr, rpn, rsn, rw)
 do
   init_nodes(rpn)
   init_nodes(rsn)
-  init_wires(piece_id, conf, rls, rpn, rsn, all_shared, rw)
+  init_wires(piece_id, conf, rgr, rpn, rsn, all_shared, rw)
 end
 
 --task create_colorings(num_pieces      : int,
@@ -690,10 +698,10 @@ terra create_colorings(conf : Config)
   return coloring
 end
 
-task create_ghost_node_map(conf        : Config,
-                           last_shared : region(int))
+task create_ghost_node_map(conf         : Config,
+                           ghost_ranges : region(ghost_range))
 where
-  reads(last_shared)
+  reads(ghost_ranges)
 do
   var ghost_node_map = c.legion_coloring_create()
   var num_pieces = conf.num_pieces
@@ -701,42 +709,13 @@ do
     c.legion_coloring_ensure_color(ghost_node_map, i)
   end
 
-  var snpp = conf.shared_nodes_per_piece
   var idx = 0
-  --for ls in last_shared do
-  --  var piece_id : int = idx / num_pieces
-  --  var offset : int = (idx % num_pieces) * snpp
-  --  var first_shared : int = offset
-  --  var last_shared : int = offset + @ls - 1
-  --  if piece_id ~= (idx % num_pieces) and last_shared >= first_shared then
-  --    c.legion_coloring_add_range(ghost_node_map,
-  --      piece_id,
-  --      c.legion_ptr_t { value = first_shared },
-  --      c.legion_ptr_t { value = last_shared })
-  --  end
-  --  idx = idx + 1
-  --end
-
-  var first_shared_node : int = conf.nodes_per_piece * num_pieces
-  var last_shared_node : int = -1
-  for ls in last_shared do
-    if @ls > 0 then
-      regentlib.assert(idx / num_pieces ~= idx % num_pieces,
-        "unreachable")
-      var offset : int = (idx % num_pieces) * snpp
-      first_shared_node = min(first_shared_node, offset)
-      last_shared_node = max(last_shared_node, offset + @ls - 1)
-    end
-    idx = idx + 1
-    if idx % num_pieces == 0 and first_shared_node <= last_shared_node then
-      var piece_id : int = (idx - 1) / num_pieces
-      c.legion_coloring_add_range(ghost_node_map,
-        piece_id,
-        c.legion_ptr_t { value = first_shared_node },
-        c.legion_ptr_t { value = last_shared_node })
-      first_shared_node = conf.nodes_per_piece * num_pieces
-      last_shared_node = -1
-    end
+  for range in ghost_ranges do
+    c.legion_coloring_add_range(ghost_node_map,
+      idx,
+      c.legion_ptr_t { value = range.first },
+      c.legion_ptr_t { value = range.last })
+    idx += 1
   end
 
   return ghost_node_map
@@ -797,19 +776,19 @@ task toplevel()
   var rp_shared = partition(disjoint, all_shared, colorings.shared_node_map)
   var rp_wires = partition(equal, all_wires, launch_domain)
 
-  var last_shared = region(ispace(ptr, num_pieces * num_pieces), int)
-  new(ptr(int, last_shared), num_pieces * num_pieces)
-  var rp_last_shared = partition(equal, last_shared, launch_domain)
+  var ghost_ranges = region(ispace(ptr, num_pieces), ghost_range)
+  new(ptr(ghost_range, ghost_ranges), num_pieces)
+  var rp_ghost_ranges = partition(equal, ghost_ranges, launch_domain)
 
   for j = 0, 1 do
     __demand(__parallel)
     for i = 0, num_pieces do
-      init_piece(i, conf, rp_last_shared[i],
+      init_piece(i, conf, rp_ghost_ranges[i],
                  rp_private[i], rp_shared[i], all_shared, rp_wires[i])
     end
   end
 
-  var ghost_node_map = create_ghost_node_map(conf, last_shared)
+  var ghost_node_map = create_ghost_node_map(conf, ghost_ranges)
   var rp_ghost = partition(aliased, all_shared, ghost_node_map)
 
   --var last_shared = region(ispace(ptr, num_pieces * num_pieces), int)
