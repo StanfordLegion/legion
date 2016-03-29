@@ -6293,6 +6293,8 @@ namespace LegionRuntime {
             child_mask.enable(it->first.value, it->second-it->first+1);
           }
         }
+        else
+          continue;
         // Now make the index space and save the information
 #ifdef ASSUME_UNALLOCABLE
         Realm::IndexSpace child_space = 
