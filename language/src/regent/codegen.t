@@ -208,7 +208,7 @@ end
 
 function context:add_region_root(region_type, logical_region, field_paths,
                                  privilege_field_paths, field_privileges, field_types,
-                                 field_ids, physical_regions,
+                                 field_ids, fields_are_scratch, physical_regions,
                                  base_pointers, strides)
   if not self.regions then
     error("not in task context", 2)
@@ -230,6 +230,7 @@ function context:add_region_root(region_type, logical_region, field_paths,
         field_privileges = field_privileges,
         field_types = field_types,
         field_ids = field_ids,
+        fields_are_scratch = fields_are_scratch,
         physical_regions = physical_regions,
         base_pointers = base_pointers,
         strides = strides,
@@ -262,6 +263,7 @@ function context:add_region_subregion(region_type, logical_region,
         field_privileges = self:region(parent_region_type).field_privileges,
         field_types = self:region(parent_region_type).field_types,
         field_ids = self:region(parent_region_type).field_ids,
+        fields_are_scratch = self:region(parent_region_type).fields_are_scratch,
         physical_regions = self:region(parent_region_type).physical_regions,
         base_pointers = self:region(parent_region_type).base_pointers,
         strides = self:region(parent_region_type).strides,
@@ -279,6 +281,12 @@ function region:field_id(field_path)
   local field_id = self.field_ids[field_path:hash()]
   assert(field_id)
   return field_id
+end
+
+function region:field_is_scratch(field_path)
+  local field_is_scratch = self.fields_are_scratch[field_path:hash()]
+  assert(field_is_scratch ~= nil)
+  return field_is_scratch
 end
 
 function region:physical_region(field_path)
@@ -318,7 +326,7 @@ end
 
 function context:add_list_of_regions(list_type, list_of_logical_regions,
                                      field_paths, privilege_field_paths,
-                                     field_privileges, field_types, field_ids)
+                                     field_privileges, field_types, field_ids, fields_are_scratch)
   if not self.lists_of_regions then
     error("not in task context", 2)
   end
@@ -339,6 +347,7 @@ function context:add_list_of_regions(list_type, list_of_logical_regions,
         field_privileges = field_privileges,
         field_types = field_types,
         field_ids = field_ids,
+        fields_are_scratch = fields_are_scratch,
       }, list_of_regions))
 end
 
@@ -352,6 +361,12 @@ function list_of_regions:field_id(field_path)
   local field_id = self.field_ids[field_path:hash()]
   assert(field_id)
   return field_id
+end
+
+function list_of_regions:field_is_scratch(field_path)
+  local field_is_scratch = self.fields_are_scratch[field_path:hash()]
+  assert(field_is_scratch ~= nil)
+  return field_is_scratch
 end
 
 function context:has_region_or_list(value_type)
@@ -1756,6 +1771,7 @@ function codegen.expr_index_access(cx, node)
             cx:list_of_regions(value_type).field_privileges,
             cx:list_of_regions(value_type).field_types,
             cx:list_of_regions(value_type).field_ids,
+            cx:list_of_regions(value_type).fields_are_scratch,
             false,
             false,
             false)
@@ -1766,7 +1782,8 @@ function codegen.expr_index_access(cx, node)
             cx:list_of_regions(value_type).privilege_field_paths,
             cx:list_of_regions(value_type).field_privileges,
             cx:list_of_regions(value_type).field_types,
-            cx:list_of_regions(value_type).field_ids)
+            cx:list_of_regions(value_type).field_ids,
+            cx:list_of_regions(value_type).fields_are_scratch)
         else
           assert(false)
         end
@@ -1808,7 +1825,8 @@ function codegen.expr_index_access(cx, node)
           cx:list_of_regions(value_type).privilege_field_paths,
           cx:list_of_regions(value_type).field_privileges,
           cx:list_of_regions(value_type).field_types,
-          cx:list_of_regions(value_type).field_ids)
+          cx:list_of_regions(value_type).field_ids,
+          cx:list_of_regions(value_type).fields_are_scratch)
       end
       return values.value(expr.just(actions, list), list_type)
     end
@@ -2019,6 +2037,55 @@ local function expr_call_setup_ispace_arg(
     end)
 end
 
+local terra get_root_of_tree(runtime : c.legion_runtime_t,
+                             ctx : c.legion_context_t,
+                             r : c.legion_logical_region_t)
+  while c.legion_logical_region_has_parent_logical_partition(runtime, ctx, r) do
+    r = c.legion_logical_partition_get_parent_logical_region(
+      runtime, ctx,
+      c.legion_logical_region_get_parent_logical_partition(
+        runtime, ctx, r))
+  end
+  return r
+end
+
+local function raise_privilege_depth(cx, value, container_type, field_paths, optional)
+  -- This method is also used to adjust privilege depth for the
+  -- callee's side, so check optional before asserting that
+  -- container_type is not defined.
+  local scratch = false
+  if not optional or cx:has_region_or_list(container_type) then
+    assert(cx:has_region_or_list(container_type))
+    local are_scratch = field_paths:map(
+      function(field_path) return cx:region_or_list(container_type):field_is_scratch(field_path) end)
+    scratch = #are_scratch > 0 and data.all(unpack(are_scratch))
+  end
+
+  if scratch then
+    value = `(get_root_of_tree([cx.runtime], [cx.context], [value]))
+  elseif std.is_region(container_type) then
+    local region = cx:region(
+      cx:region(container_type).root_region_type).logical_region
+    return `([region].impl)
+  elseif std.is_list_of_regions(container_type) and container_type.region_root then
+    assert(cx:has_region(container_type.region_root))
+    local region = cx:region(
+      cx:region(container_type.region_root).root_region_type).logical_region
+    return `([region].impl)
+  elseif std.is_list_of_regions(container_type) and container_type.privilege_depth then
+    for i = 1, container_type.privilege_depth do
+      value = `(
+        c.legion_logical_partition_get_parent_logical_region(
+          [cx.runtime], [cx.context],
+          c.legion_logical_region_get_parent_logical_partition(
+            [cx.runtime], [cx.context], [value])))
+    end
+  else
+    assert(false)
+  end
+  return value
+end
+
 local function expr_call_setup_region_arg(
     cx, task, arg_type, param_type, launcher, index, args_setup)
   local privileges, privilege_field_paths, privilege_field_types, coherences, flags =
@@ -2026,8 +2093,6 @@ local function expr_call_setup_region_arg(
                              task:get_coherence_modes(), task:get_flags())
   local privilege_modes = privileges:map(std.privilege_mode)
   local coherence_modes = coherences:map(std.coherence_mode)
-  local parent_region =
-    cx:region(cx:region(arg_type).root_region_type).logical_region
 
   local add_field = c.legion_task_launcher_add_field
   if index then
@@ -2045,6 +2110,10 @@ local function expr_call_setup_region_arg(
     local privilege_mode = privilege_modes[i]
     local coherence_mode = coherence_modes[i]
     local flag = std.flag_mode(flags[i])
+
+    local region = `([cx:region(arg_type).logical_region].impl)
+    local parent_region = raise_privilege_depth(
+      cx, region, arg_type, field_paths)
 
     local reduction_op
     if std.is_reduction_op(privilege) then
@@ -2076,7 +2145,7 @@ local function expr_call_setup_region_arg(
 
     local requirement = terralib.newsymbol("requirement")
     local requirement_args = terralib.newlist({
-        launcher, `([cx:region(arg_type).logical_region].impl)})
+        launcher, region})
     if index then
       requirement_args:insert(0)
     end
@@ -2086,7 +2155,7 @@ local function expr_call_setup_region_arg(
       requirement_args:insert(privilege_mode)
     end
     requirement_args:insertall(
-      {coherence_mode, `([parent_region].impl), 0, false})
+      {coherence_mode, parent_region, 0, false})
 
     args_setup:insert(
       quote
@@ -2104,33 +2173,13 @@ local function expr_call_setup_region_arg(
   end
 end
 
-local function raise_privilege_depth(cx, value, container_type)
-  if container_type.region_root then
-    assert(cx:has_region(container_type.region_root))
-    local region = cx:region(
-      cx:region(container_type.region_root).root_region_type).logical_region
-    return `([region].impl)
-  elseif container_type.privilege_depth then
-    for i = 1, container_type.privilege_depth do
-      value = `(
-        c.legion_logical_partition_get_parent_logical_region(
-          [cx.runtime], [cx.context],
-          c.legion_logical_region_get_parent_logical_partition(
-            [cx.runtime], [cx.context], [value])))
-    end
-  else
-    assert(false)
-  end
-  return value
-end
-
 local function setup_list_of_regions_add_region(
     cx, param_type, container_type, value_type, value,
     region, parent, field_paths, add_requirement, get_requirement,
     add_field, has_field, add_flags, intersect_flags, requirement_args, flag, launcher)
   return quote
-    var [region] = [raise_privilege_depth(cx, `([value].impl), param_type)]
-    var [parent] = [raise_privilege_depth(cx, `([value].impl), container_type)]
+    var [region] = [raise_privilege_depth(cx, `([value].impl), param_type, field_paths, true)]
+    var [parent] = [raise_privilege_depth(cx, `([value].impl), container_type, field_paths)]
     var requirement = [get_requirement]([launcher], [region])
     if requirement == [uint32](-1) then
       requirement = [add_requirement]([requirement_args])
@@ -3000,6 +3049,7 @@ function codegen.expr_region(cx, node)
       field_id = field_id + 1
       return field_id
     end)
+  local fields_are_scratch = field_paths:map(function(_) return false end)
   local physical_regions = field_paths:map(function(_) return pr end)
 
   local pr_actions, base_pointers, strides = unpack(data.zip(unpack(
@@ -3016,6 +3066,7 @@ function codegen.expr_region(cx, node)
                      data.dict(data.zip(field_paths:map(data.hash), field_privileges)),
                      data.dict(data.zip(field_paths:map(data.hash), field_types)),
                      data.dict(data.zip(field_paths:map(data.hash), field_ids)),
+                     data.dict(data.zip(field_paths:map(data.hash), fields_are_scratch)),
                      data.dict(data.zip(field_paths:map(data.hash), physical_regions)),
                      data.dict(data.zip(field_paths:map(data.hash), base_pointers)),
                      data.dict(data.zip(field_paths:map(data.hash), strides)))
@@ -3377,7 +3428,8 @@ function codegen.expr_list_slice_partition(cx, node)
     cx:region(parent_region).privilege_field_paths,
     cx:region(parent_region).field_privileges,
     cx:region(parent_region).field_types,
-    cx:region(parent_region).field_ids)
+    cx:region(parent_region).field_ids,
+    cx:region(parent_region).fields_are_scratch)
 
   actions = quote
     [actions]
@@ -3425,7 +3477,8 @@ function codegen.expr_list_duplicate_partition(cx, node)
     cx:region(parent_region).privilege_field_paths,
     cx:region(parent_region).field_privileges,
     cx:region(parent_region).field_types,
-    cx:region(parent_region).field_ids)
+    cx:region(parent_region).field_ids,
+    cx:region(parent_region).fields_are_scratch)
 
   actions = quote
     [actions]
@@ -3536,7 +3589,8 @@ function codegen.expr_list_cross_product(cx, node)
     cx:list_of_regions(lhs_type).privilege_field_paths,
     cx:list_of_regions(lhs_type).field_privileges,
     cx:list_of_regions(lhs_type).field_types,
-    cx:list_of_regions(lhs_type).field_ids)
+    cx:list_of_regions(lhs_type).field_ids,
+    cx:list_of_regions(lhs_type).fields_are_scratch)
 
   local cross_product_create = c.legion_terra_index_cross_product_create_list
   if node.shallow then
@@ -3656,7 +3710,8 @@ function codegen.expr_list_cross_product_complete(cx, node)
     cx:list_of_regions(lhs_type).privilege_field_paths,
     cx:list_of_regions(lhs_type).field_privileges,
     cx:list_of_regions(lhs_type).field_types,
-    cx:list_of_regions(lhs_type).field_ids)
+    cx:list_of_regions(lhs_type).field_ids,
+    cx:list_of_regions(lhs_type).fields_are_scratch)
 
   actions = quote
     [actions]
@@ -4179,14 +4234,14 @@ function codegen.expr_arrive(cx, node)
     expr_type)
 end
 
-local function get_container_root(cx, value, container_type)
+local function get_container_root(cx, value, container_type, field_paths)
   if std.is_region(container_type) then
     assert(cx:has_region(container_type))
     local root = cx:region(
       cx:region(container_type).root_region_type).logical_region
     return `([root].impl)
   elseif std.is_list_of_regions(container_type) then
-    return raise_privilege_depth(cx, value, container_type)
+    return raise_privilege_depth(cx, value, container_type, field_paths)
   else
     assert(false)
   end
@@ -4252,11 +4307,6 @@ local function expr_copy_setup_region(
       c.legion_copy_launcher_add_dst_region_requirement_logical_region_reduction
   end
 
-  local src_parent = get_container_root(
-    cx, `([src_value].impl), src_container_type)
-  local dst_parent = get_container_root(
-    cx, `([dst_value].impl), dst_container_type)
-
   local src_all_fields = std.flatten_struct_fields(src_type:fspace())
   local dst_all_fields = std.flatten_struct_fields(dst_type:fspace())
   local actions = terralib.newlist()
@@ -4275,6 +4325,11 @@ local function expr_copy_setup_region(
       function(field) return field:starts_with(dst_field) end,
       dst_all_fields)
     assert(#src_copy_fields == #dst_copy_fields)
+
+    local src_parent = get_container_root(
+      cx, `([src_value].impl), src_container_type, src_copy_fields)
+    local dst_parent = get_container_root(
+      cx, `([dst_value].impl), dst_container_type, dst_copy_fields)
 
     for j, src_copy_field in ipairs(src_copy_fields) do
       local dst_copy_field = dst_copy_fields[j]
@@ -4419,9 +4474,6 @@ local function expr_fill_setup_region(
   assert(std.is_region(dst_type))
   assert(std.type_supports_privileges(dst_container_type))
 
-  local dst_parent = get_container_root(
-    cx, `([dst_value].impl), dst_container_type)
-
   local dst_all_fields = std.flatten_struct_fields(dst_type:fspace())
   local value_fields, value_field_types
   if terralib.types.istype(value_type) then
@@ -4437,6 +4489,9 @@ local function expr_fill_setup_region(
       function(field) return field:starts_with(dst_field) end,
       dst_all_fields)
     assert(#dst_copy_fields == #value_fields)
+
+    local dst_parent = get_container_root(
+      cx, `([dst_value].impl), dst_container_type, dst_copy_fields)
 
     for j, dst_copy_field in ipairs(dst_copy_fields) do
       local value_field = value_fields[j]
@@ -4585,6 +4640,15 @@ function codegen.expr_with_scratch_fields(cx, node)
     new_field_ids[field_path:hash()] = `([field_ids.value][ [i-1] ])
   end
 
+  local old_fields_are_scratch = cx:region_or_list(region_type).fields_are_scratch
+  local new_fields_are_scratch = {}
+  for k, v in pairs(old_fields_are_scratch) do
+    new_fields_are_scratch[k] = v
+  end
+  for i, field_path in pairs(node.region.fields) do
+    new_fields_are_scratch[field_path:hash()] = true
+  end
+
   if std.is_region(region_type) then
     cx:add_region_root(
       expr_type, value.value,
@@ -4593,6 +4657,7 @@ function codegen.expr_with_scratch_fields(cx, node)
       cx:region(region_type).field_privileges,
       cx:region(region_type).field_types,
       new_field_ids,
+      new_fields_are_scratch,
       false,
       false,
       false)
@@ -4603,7 +4668,8 @@ function codegen.expr_with_scratch_fields(cx, node)
       cx:list_of_regions(region_type).privilege_field_paths,
       cx:list_of_regions(region_type).field_privileges,
       cx:list_of_regions(region_type).field_types,
-      new_field_ids)
+      new_field_ids,
+      new_fields_are_scratch)
   else
     assert(false)
   end
@@ -6654,6 +6720,7 @@ function codegen.stat_task(cx, node)
                        privileges_by_field_path,
                        data.dict(data.zip(field_paths:map(data.hash), field_types)),
                        field_ids_by_field_path,
+                       data.dict(data.zip(field_paths:map(data.hash), field_types:map(function(_) return false end))),
                        physical_regions_by_field_path,
                        base_pointers_by_field_path,
                        strides_by_field_path)
@@ -6683,7 +6750,8 @@ function codegen.stat_task(cx, node)
                            privilege_field_paths,
                            privileges_by_field_path,
                            data.dict(data.zip(field_paths:map(data.hash), field_types)),
-                           field_ids_by_field_path)
+                           field_ids_by_field_path,
+                           data.dict(data.zip(field_paths:map(data.hash), field_types:map(function(_) return false end))))
   end
 
   local preamble = quote
