@@ -491,7 +491,8 @@ do
   end
 end
 
-task calculate_new_currents(steps : uint,
+task calculate_new_currents(print_ts : bool,
+                            steps : uint,
                             rpn : region(node),
                             rsn : region(node),
                             rgn : region(node),
@@ -501,6 +502,9 @@ where
         rw.{in_ptr, out_ptr, inductance, resistance, wire_cap}),
   reads writes(rw.{current, voltage})
 do
+  if print_ts then
+    c.printf("t: %ld\n", c.legion_get_current_time_in_micros())
+  end
   var dt : float = DELTAT
   var recip_dt : float = 1.0 / dt
   __demand(__vectorize)
@@ -600,7 +604,8 @@ do
   end
 end
 
-task update_voltages(rpn : region(node),
+task update_voltages(print_ts : bool,
+                     rpn : region(node),
                      rsn : region(node))
 where
   reads(rpn.{node_cap, leakage}, rsn.{node_cap, leakage}),
@@ -617,6 +622,9 @@ do
     voltage = voltage * (1.0 - node.leakage)
     node.node_voltage = voltage
     node.charge = 0.0
+  end
+  if print_ts then
+    c.printf("t: %ld\n", c.legion_get_current_time_in_micros())
   end
 end
 
@@ -853,7 +861,7 @@ task toplevel()
 
     --__demand(__parallel)
     for i = 0, num_pieces do
-      calculate_new_currents(steps, rp_private[i], rp_shared[i], rp_ghost[i], rp_wires[i])
+      calculate_new_currents(j == 0, steps, rp_private[i], rp_shared[i], rp_ghost[i], rp_wires[i])
     end
     --__demand(__parallel)
     for i = 0, num_pieces do
@@ -861,7 +869,7 @@ task toplevel()
     end
     --__demand(__parallel)
     for i = 0, num_pieces do
-      update_voltages(rp_private[i], rp_shared[i])
+      update_voltages(j == num_loops - 1, rp_private[i], rp_shared[i])
     end
 
     -- c.legion_runtime_end_trace(__runtime(), __context(), 0)
