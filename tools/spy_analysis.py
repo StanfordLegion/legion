@@ -1431,20 +1431,21 @@ class CopyOp(Operation):
         return (cidx, cidx + self.get_num_copies())
 
     def print_base_node(self, printer, logical):
-        title = self.get_name() + ' in '+self.ctx.get_name()
-        # TODO: reduction copy-across operations should also be tracked
-        #if self.redop <> 0:
-        #    title = 'Reduction ' + title
-        lines = [[{ "label" : title, "colspan" : 3 }]]
-
-        color = 'darkgoldenrod3'
         size = 14
-        # TODO: reduction copy-across operations should also be tracked
-        #if self.redop <> 0:
-        #    lines.append(["Reduction Op", {"colspan" : 2, "label" : str(self.redop)}])
-        #    color = 'tomato 3'
+        title = self.get_name() + ' in '+self.ctx.get_name()
+        color = 'darkgoldenrod3'
 
         num_copies = len(self.reqs) / 2
+        for cidx in range(0, num_copies):
+            (src_idx, dst_idx) = self.get_index_pair(cidx)
+            dst_req = self.get_requirement(dst_idx)
+            if dst_req.redop <> 0:
+                title = 'Reduction ' + title
+                color = 'tomato'
+                break
+
+        lines = [[{ "label" : title, "colspan" : 3 }]]
+
         for cidx in range(0, num_copies):
             (src_idx, dst_idx) = self.get_index_pair(cidx)
             src_req = self.get_requirement(src_idx)
@@ -1486,13 +1487,9 @@ class CopyOp(Operation):
                         first_field = False
                     lines.append(line)
 
-            # TODO: reduction copy-across operations should also be tracked
-            #if self.redop <> 0:
-            #    max_blocking = max(src_inst.blocking, dst_inst.blocking)
-            #    min_blocking = min(src_inst.blocking, dst_inst.blocking)
-            #    if max_blocking > 1 and min_blocking == 1:
-            #        color = 'red'
-            #        size = 16
+            if dst_req.redop <> 0:
+                lines.append(["Reduction Op",
+                              {"colspan" : 2, "label" : str(dst_req.redop)}])
 
         label = '<table border="0" cellborder="1" cellspacing="0" cellpadding="3" bgcolor="%s">' % color + \
                 "".join([wrap_with_trtd(line) for line in lines]) +\
