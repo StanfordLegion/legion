@@ -2085,6 +2085,23 @@ namespace Legion {
 #ifdef DEBUG_HIGH_LEVEL
             assert(field_sizes.size() == 1);
 #endif
+            // Before we can actually use this instance, we have to 
+            // initialize it with a fill operation of the proper value
+            // Don't record this fill operation because it is just part
+            // of the semantics of reduction instances and not something
+            // that we want Legion Spy to see
+            void *fill_buffer = malloc(reduction_op->sizeof_rhs);
+            reduction_op->init(buffer, 1);
+            std::vector<Domain::CopySrcDstField> dsts(1,
+                Domain::CopySrcDstField(instance, 0/*offset*/, 
+                  field_sizes[0].second, field_sizes[0].first, 0));
+            Realm::ProfilingRequestSet requests;
+            if (forest->runtime->profiler != NULL)
+              forest->runtime->profiler->add_fill_request(requests, creator_id);
+            Event filled_and_ready = instance_domain.fill(dsts, requests,
+                                  fill_buffer, reduction_op->sizeof_rhs, ready);
+            // We can free the buffer after we've issued the fill
+            free(fill_buffer);
             result = legion_new<FoldReductionManager>(forest, did, 
                                               field_sizes[0].first, local_space,
                                               local_space, memory_manager, 
@@ -2092,7 +2109,7 @@ namespace Legion {
                                               pointer_constraint, 
                                               instance_domain, own_domain,
                                               ancestor, redop_id,
-                                              reduction_op, ready, 
+                                              reduction_op, filled_and_ready, 
                                               true/*register now*/);
             break;
           }
