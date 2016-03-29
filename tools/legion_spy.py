@@ -2085,7 +2085,7 @@ class Requirement(object):
 
     def get_privilege(self):
         if self.priv == NO_ACCESS:
-            return "NO ACCESS"
+            return "NO-ACCESS"
         elif self.priv == READ_ONLY:
             return "READ-ONLY"
         elif self.priv == READ_WRITE:
@@ -2108,28 +2108,7 @@ class Requirement(object):
             return "RELAXED"
 
     def get_privilege_and_coherence(self):
-        result = ''
-        if self.priv == NO_ACCESS:
-            result = result + "NA"
-        elif self.priv == READ_ONLY:
-            result = result + "RO"
-        elif self.priv == READ_WRITE:
-            result = result + "RW"
-        elif self.priv == WRITE_ONLY:
-            result = result + "WO"
-        else:
-            assert self.priv == REDUCE
-            result = result + "Red"+str(self.redop)+'-'
-        if self.coher == EXCLUSIVE:
-            result = result + "E"
-        elif self.coher == ATOMIC:
-            result = result + "A"
-        elif self.coher == SIMULTANEOUS:
-            result = result + "S"
-        else:
-            assert self.coher == RELAXED
-            result = result + "R"
-        return result
+        return self.get_privilege() + ' ' + self.get_coherence()
 
 class MappingDependence(object):
     __slots__ = ['op1', 'op2', 'idx1', 'idx2', 'dtype']
@@ -4280,11 +4259,10 @@ class RealmCopy(RealmBase):
                 dst_inst = self.dsts[fidx]
                 line = []
                 if src_field == dst_field:
-                    field_name = str(src_field)
-                    line.append({"label" : field_name, "colspan" : 2})
-                else:
                     line.append(str(src_field))
-                    line.append(str(dst_field))
+                else:
+                    line.append(str(src_field)+':'+str(dst_field))
+                line.append(str(src_inst)+':'+str(dst_inst))
                 if first_field:
                     line.insert(0, {"label" : "Fields",
                                     "rowspan" : num_fields})
@@ -4343,7 +4321,8 @@ class RealmFill(RealmBase):
                 dst_field = self.fields[fidx]
                 dst_inst = self.dsts[fidx]
                 line = []
-                line.append(str(dst_field)+":"+str(dst_inst))
+                line.append(str(dst_field))
+                line.append(str(dst_inst))
                 if first_field:
                     line.insert(0, {"label" : "Fields",
                                     "rowspan" : num_fields})
@@ -4564,31 +4543,23 @@ class GraphPrinter(object):
 
     def generate_html_op_label(self, title, requirements, mappings, color, verbose):
         lines = list()
-        lines.append([{"label" : title, "colspan" : 2}])       
+        lines.append([{"label" : title, "colspan" : 3}])       
         if requirements is not None:
             for i in range(len(requirements)):
                 req = requirements[i]
                 region_name = str(req.logical_node)
-                priv = req.get_privilege_and_coherence()
-                line = [str(i), region_name+" (priv: "+priv+")"]
+                line = [str(i), region_name, req.get_privilege_and_coherence()]
                 lines.append(line)
                 if verbose and mappings is not None and i in mappings:
-                    # Find the mapping of instances to its set of fields
-                    instances = dict()
-                    for fid,inst in mappings[i].iteritems():
-                        if inst not in instances:
-                            instances[inst] = set()
-                        instances[inst].add(fid)
-                    for inst,fields in instances.iteritems():
-                        lines.append([str(inst)])
-                        first_field = True
-                        for f in fields:
-                            line = []
-                            if first_field:
-                                line.append({"label" : "Fields", "rowspan" : len(fields)})
-                                first_field = False
-                            line.append(str(f))
-                            lines.append(line)
+                    first_field = True
+                    for f in req.fields:
+                        line = []
+                        if first_field:
+                            line.append({"label" : "Fields", "rowspan" : len(req.fields)})
+                            first_field = False
+                        line.append(str(f))
+                        line.append(str(mappings[i][f.fid]))
+                        lines.append(line)
         return '<table border="0" cellborder="1" cellpadding="3" cellspacing="0" bgcolor="%s">' % color + \
               "".join([self.wrap_with_trtd(line) for line in lines]) + '</table>'
 
