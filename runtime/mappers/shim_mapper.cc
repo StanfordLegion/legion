@@ -446,6 +446,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    Mapper::MapperSyncModel ShimMapper::get_mapper_sync_model(void) const
+    //--------------------------------------------------------------------------
+    {
+      // The way we track current_ctx requires non-reentrancy
+      return SERIALIZED_NON_REENTRANT_MAPPER_MODEL;
+    }
+
+    //--------------------------------------------------------------------------
     void ShimMapper::select_task_options(const MapperContext  ctx,
                                          const Legion::Task   &task,
                                                TaskOptions    &output)

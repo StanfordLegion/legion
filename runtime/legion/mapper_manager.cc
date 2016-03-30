@@ -2478,9 +2478,18 @@ namespace Legion {
     void SerializingManager::pause_mapper_call(MappingCallInfo *info)
     //--------------------------------------------------------------------------
     {
+      if (executing_call != info)
+      {
+        log_run.error("ERROR: Invalid mapper context passed to mapper_rt "
+                      "call by mapper %s. Mapper contexts are only valid "
+                      "for the mapper call to which they are passed. They "
+                      "cannot be stored in beyond the lifetime of the "
+                      "mapper call.", mapper->get_mapper_name());
 #ifdef DEBUG_HIGH_LEVEL
-      assert(executing_call == info);
+        assert(false);
 #endif
+        exit(ERROR_INVALID_ARGUMENTS_TO_MAPPER_RUNTIME);
+      }
       // We definitely know we can't start any non_reentrant calls
       // Screw fairness, we care about throughput, see if there are any
       // pending calls to wake up, and then go to sleep ourself

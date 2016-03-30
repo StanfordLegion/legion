@@ -243,6 +243,7 @@ namespace Legion {
       ShimMapper& operator=(const ShimMapper &rhs);
     public:
       // New mapper calls
+      virtual MapperSyncModel get_mapper_sync_model(void) const;
       virtual void select_task_options(const MapperContext    ctx,
                                        const Legion::Task&    task,
                                              TaskOptions&     output);
