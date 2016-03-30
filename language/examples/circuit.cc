@@ -22,7 +22,7 @@
 #include <map>
 #include <vector>
 
-#include "default_mapper.h"
+#include "shim_mapper.h"
 
 using namespace LegionRuntime::HighLevel;
 
@@ -32,7 +32,7 @@ using namespace LegionRuntime::HighLevel;
 
 static LegionRuntime::Logger::Category log_circuit("circuit");
 
-class CircuitMapper : public DefaultMapper
+class CircuitMapper : public ShimMapper 
 {
 public:
   CircuitMapper(Machine machine, HighLevelRuntime *rt, Processor local);
@@ -48,7 +48,7 @@ private:
 };
 
 CircuitMapper::CircuitMapper(Machine machine, HighLevelRuntime *rt, Processor local)
-  : DefaultMapper(machine, rt, local)
+  : ShimMapper(machine, rt, local)
 {
   std::set<Processor> all_procs;
 	machine.get_all_processors(all_procs);
@@ -74,7 +74,7 @@ void CircuitMapper::select_task_variant(Task *task)
 {
   // Use the SOA variant for all tasks.
   // task->selected_variant = VARIANT_SOA;
-  DefaultMapper::select_task_variant(task);
+  ShimMapper::select_task_variant(task);
 
   std::vector<RegionRequirement> &regions = task->regions;
   for (std::vector<RegionRequirement>::iterator it = regions.begin();
