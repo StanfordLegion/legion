@@ -2091,7 +2091,7 @@ namespace Legion {
             // of the semantics of reduction instances and not something
             // that we want Legion Spy to see
             void *fill_buffer = malloc(reduction_op->sizeof_rhs);
-            reduction_op->init(buffer, 1);
+            reduction_op->init(fill_buffer, 1);
             std::vector<Domain::CopySrcDstField> dsts(1,
                 Domain::CopySrcDstField(instance, 0/*offset*/, 
                   field_sizes[0].second, field_sizes[0].first, 0));

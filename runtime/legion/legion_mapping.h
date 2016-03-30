@@ -280,6 +280,12 @@ namespace Legion {
        * expensive and should only be used in testing or rare cases.
        */
       struct TaskSlice {
+      public:
+        TaskSlice(void) : domain(Domain::NO_DOMAIN), 
+          proc(Processor::NO_PROC), recurse(false), stealable(false) { }
+        TaskSlice(const Domain &d, Processor p, bool r, bool s)
+          : domain(d), proc(p), recurse(r), stealable(s) { }
+      public:
         Domain                                  domain;
         Processor                               proc;
         bool                                    recurse;
