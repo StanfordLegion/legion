@@ -971,7 +971,12 @@ static LegionRuntime::Logger::Category log_pennant("pennant");
 class PennantMapper : public DefaultMapper
 {
 public:
-  PennantMapper(Machine machine, HighLevelRuntime *rt, Processor local);
+  PennantMapper(Machine machine, HighLevelRuntime *rt, Processor local,
+                std::vector<Processor>* procs_list,
+                std::vector<Memory>* sysmems_list,
+                std::map<Memory, std::vector<Processor> >* sysmem_local_procs,
+                std::map<Processor, Memory>* proc_sysmems,
+                std::map<Processor, Memory>* proc_regmems);
   virtual void select_task_options(Task *task);
   virtual void select_task_variant(Task *task);
   virtual bool map_task(Task *task);
@@ -1006,35 +1011,19 @@ private:
   std::map<Processor, Memory> proc_regmems;
 };
 
-PennantMapper::PennantMapper(Machine machine, HighLevelRuntime *rt, Processor local)
-  : DefaultMapper(machine, rt, local)
+PennantMapper::PennantMapper(Machine machine, HighLevelRuntime *rt, Processor local,
+                            std::vector<Processor>* _procs_list,
+                            std::vector<Memory>* _sysmems_list,
+                            std::map<Memory, std::vector<Processor> >* _sysmem_local_procs,
+                            std::map<Processor, Memory>* _proc_sysmems,
+                            std::map<Processor, Memory>* _proc_regmems)
+  : DefaultMapper(machine, rt, local),
+    procs_list(*_procs_list),
+    sysmems_list(*_sysmems_list),
+    sysmem_local_procs(*_sysmem_local_procs),
+    proc_sysmems(*_proc_sysmems),
+    proc_regmems(*_proc_regmems)
 {
-  Machine::ProcessorQuery procs =
-    Machine::ProcessorQuery(machine).only_kind(Processor::LOC_PROC);
-  procs_list.assign(procs.begin(), procs.end());
-
-  Machine::MemoryQuery sysmems =
-    Machine::MemoryQuery(machine).only_kind(Memory::SYSTEM_MEM);
-  sysmems_list.assign(sysmems.begin(), sysmems.end());
-  Machine::MemoryQuery regmems =
-    Machine::MemoryQuery(machine).only_kind(Memory::REGDMA_MEM);
-
-  for (Machine::ProcessorQuery::iterator it = procs.begin();
-       it != procs.end(); ++it) {
-    Memory sysmem = Machine::MemoryQuery(sysmems).has_affinity_to(*it).first();
-    assert(sysmem.exists());
-    proc_sysmems[*it] = sysmem;
-    Memory regmem = Machine::MemoryQuery(regmems).has_affinity_to(*it).first();
-    if (!regmem.exists()) regmem = sysmem;
-    proc_regmems[*it] = regmem;
-  }
-
-  for (Machine::MemoryQuery::iterator it = sysmems.begin();
-       it != sysmems.end(); ++it) {
-    Machine::ProcessorQuery local_procs =
-      Machine::ProcessorQuery(procs).has_affinity_to(*it);
-    sysmem_local_procs[*it].assign(local_procs.begin(), local_procs.end());
-  }
 }
 
 void PennantMapper::select_task_options(Task *task)
@@ -1404,10 +1393,50 @@ LogicalRegion PennantMapper::get_root_region(LogicalPartition handle)
 
 static void create_mappers(Machine machine, HighLevelRuntime *runtime, const std::set<Processor> &local_procs)
 {
+  std::vector<Processor>* procs_list = new std::vector<Processor>();
+  std::vector<Memory>* sysmems_list = new std::vector<Memory>();
+  std::map<Memory, std::vector<Processor> >* sysmem_local_procs =
+    new std::map<Memory, std::vector<Processor> >();
+  std::map<Processor, Memory>* proc_sysmems = new std::map<Processor, Memory>();
+  std::map<Processor, Memory>* proc_regmems = new std::map<Processor, Memory>();
+
+
+  std::vector<Machine::ProcessorMemoryAffinity> proc_mem_affinities;
+  machine.get_proc_mem_affinity(proc_mem_affinities);
+
+  for (unsigned idx = 0; idx < proc_mem_affinities.size(); ++idx) {
+    Machine::ProcessorMemoryAffinity& affinity = proc_mem_affinities[idx];
+    if (affinity.p.kind() == Processor::LOC_PROC) {
+      if (affinity.m.kind() == Memory::SYSTEM_MEM) {
+        (*proc_sysmems)[affinity.p] = affinity.m;
+        if (proc_regmems->find(affinity.p) == proc_regmems->end())
+          (*proc_regmems)[affinity.p] = affinity.m;
+      }
+      else if (affinity.m.kind() == Memory::REGDMA_MEM)
+        (*proc_regmems)[affinity.p] = affinity.m;
+    }
+  }
+
+  for (std::map<Processor, Memory>::iterator it = proc_sysmems->begin();
+       it != proc_sysmems->end(); ++it) {
+    procs_list->push_back(it->first);
+    (*sysmem_local_procs)[it->second].push_back(it->first);
+  }
+
+  for (std::map<Memory, std::vector<Processor> >::iterator it =
+        sysmem_local_procs->begin(); it != sysmem_local_procs->end(); ++it)
+    sysmems_list->push_back(it->first);
+
   for (std::set<Processor>::const_iterator it = local_procs.begin();
         it != local_procs.end(); it++)
   {
-    runtime->replace_default_mapper(new PennantMapper(machine, runtime, *it), *it);
+    PennantMapper* mapper = new PennantMapper(machine, runtime, *it,
+                                              procs_list,
+                                              sysmems_list,
+                                              sysmem_local_procs,
+                                              proc_sysmems,
+                                              proc_regmems);
+    runtime->replace_default_mapper(mapper, *it);
   }
 }
 
