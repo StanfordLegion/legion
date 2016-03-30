@@ -1809,12 +1809,12 @@ function codegen.expr_index_access(cx, node)
           __data = data
         }
         for i = 0, [index.value].__size do
-          std.assert(i < [value.value].__size, "slice index out of bounds")
+          var idx = [index_type:data(index.value)][i]
+          std.assert(idx < [value.value].__size, "slice index out of bounds")
           [list_type:data(list)][i] = [std.implicit_cast(
             value_type.element_type,
             list_type.element_type,
-            `([value_type:data(value.value)][
-                [index_type:data(index.value)][i] ]))]
+            `([value_type:data(value.value)][idx]))]
         end
       end
 
@@ -4028,6 +4028,8 @@ function codegen.expr_list_range(cx, node)
     [start.actions]
     [stop.actions]
     [emit_debuginfo(node)]
+
+    regentlib.assert([stop.value] >= [start.value], "negative size range in list_range")
     var data = c.malloc(
       terralib.sizeof([expr_type.element_type]) *
         ([stop.value] - [start.value]))
