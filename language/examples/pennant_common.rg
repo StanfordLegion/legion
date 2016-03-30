@@ -179,6 +179,7 @@ local config_fields_cmd = terralib.newlist({
   {field = "npieces", type = int64, default_value = 1},
   {field = "par_init", type = bool, default_value = true},
   {field = "seq_init", type = bool, default_value = false},
+  {field = "print_ts", type = bool, default_value = false},
   {field = "enable", type = bool, default_value = true},
   {field = "warmup", type = bool, default_value = true},
   {field = "compact", type = bool, default_value = true},

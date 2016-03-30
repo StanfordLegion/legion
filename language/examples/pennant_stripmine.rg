@@ -252,7 +252,8 @@ task adv_pos_half(rp : region(point),
                   rp_spans_p : partition(disjoint, rp),
                   dt : double,
                   nspans_points : int64,
-                  enable : bool)
+                  enable : bool,
+                  print_ts : bool)
 where
   writes(rp.{pmaswt, pf}),
 
@@ -260,6 +261,8 @@ where
   writes(rp.{px0, pxp, pu0})
 do
   if not enable then return end
+
+  if print_ts then c.printf("t: %ld\n", c.legion_get_current_time_in_micros()) end
 
   var dth = 0.5 * dt
 
@@ -959,7 +962,8 @@ task calc_dt_hydro(rz : region(zone),
                    dtlast : double, dtmax : double,
                    cfl : double, cflv : double,
                    nspans_zones : int64,
-                   enable : bool) : double
+                   enable : bool,
+                   print_ts : bool) : double
 where
   reads(rz.{zdl, zvol0, zvol, zss, zdu})
 do
@@ -990,6 +994,8 @@ do
     end
     dthydro min= dtlast * cflv / dvovmax
   end
+
+  if print_ts then c.printf("t: %ld\n", c.legion_get_current_time_in_micros()) end
 
   return dthydro
 end
@@ -1102,7 +1108,7 @@ do
                    rp_spans_private[i],
                    dt,
                    conf.nspans_points,
-                   enable)
+                   enable, conf.print_ts)
     end
     __demand(__parallel)
     for i = 0, conf.npieces do
@@ -1110,7 +1116,7 @@ do
                    rp_spans_shared[i],
                    dt,
                    conf.nspans_points,
-                   enable)
+                   enable, conf.print_ts)
     end
 
     __demand(__parallel)
@@ -1164,7 +1170,7 @@ do
                                  rz_spans[i],
                                  dt, dtmax, cfl, cflv,
                                  conf.nspans_zones,
-                                 enable)
+                                 enable, conf.print_ts)
     end
 
     cycle += 1
