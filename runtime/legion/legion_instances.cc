@@ -2030,7 +2030,12 @@ namespace Legion {
       if (!valid)
         initialize(forest);
       if (field_sizes.empty())
+      {
+        log_run.warning("WARNING: Ignoring request to create instance in "
+                        "memory " IDFMT " with no fields.", 
+                        memory_manager->memory.id);
         return NULL;
+      }
       // If there are no fields then we are done
 #ifdef NEW_INSTANCE_CREATION
       PhysicalInstance instance = PhysicalInstance::NO_INST;
