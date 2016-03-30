@@ -1044,6 +1044,15 @@ void PennantMapper::select_task_options(Task *task)
   task->spawn_task = false;
   task->map_locally = true;
   task->profile_task = false;
+
+  if (!task->regions.empty()) {
+    if (task->regions[0].handle_type == SINGULAR) {
+      Color index = get_logical_region_color(task->regions[0].region);
+      std::vector<Processor> &local_procs =
+        sysmem_local_procs[proc_sysmems[task->target_proc]];
+      task->target_proc = local_procs[(index % (local_procs.size() - 1)) + 1];
+    }
+  }
 }
 
 void PennantMapper::select_task_variant(Task *task)
@@ -1065,8 +1074,8 @@ void PennantMapper::select_task_variant(Task *task)
 bool PennantMapper::map_task(Task *task)
 {
   task->additional_procs.clear();
-  std::vector<Processor> &local_procs = sysmem_local_procs[proc_sysmems[task->target_proc]];
-  task->additional_procs.insert(local_procs.begin(), local_procs.end());
+  // std::vector<Processor> &local_procs = sysmem_local_procs[proc_sysmems[task->target_proc]];
+  // task->additional_procs.insert(local_procs.begin(), local_procs.end());
 
   Memory sysmem = proc_sysmems[task->target_proc];
   assert(sysmem.exists());

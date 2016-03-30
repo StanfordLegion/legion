@@ -1149,14 +1149,19 @@ task test()
     disjoint, rs_all, colorings.rs_spans_c)
   var rs_spans = cross_product(rs_all_p, rs_spans_p)
 
-  if conf.par_init then
-    __demand(__parallel)
-    for i = 0, conf.npieces do
-      initialize_topology(conf, i, rz_all_p[i],
-                          rp_all_private_p[i],
-                          rp_all_shared_p[i],
-                          rp_all_ghost_p[i],
-                          rs_all_p[i])
+  for _ = 0, [int64](conf.par_init) do
+    var npieces = conf.npieces
+
+    __demand(__spmd)
+    do
+      -- __demand(__parallel)
+      for i = 0, npieces do
+        initialize_topology(conf, i, rz_all_p[i],
+                            rp_all_private_p[i],
+                            rp_all_shared_p[i],
+                            rp_all_ghost_p[i],
+                            rs_all_p[i])
+      end
     end
   end
 
@@ -1171,63 +1176,64 @@ task test()
 
     var enable = true
 
-    for i = 0, conf.npieces do
-      init_pointers(
-        rz_all_p[i], rp_all_private_p[i], rp_all_ghost_p[i],
-        rs_all_p[i], rs_spans[i], conf.nspans_zones)
-    end
+    var npieces = conf.npieces
+    var nspans_zones = conf.nspans_zones
+    var nspans_points = conf.nspans_points
 
-    for i = 0, conf.npieces do
-      init_mesh_zones(
-        rz_all_p[i], rz_spans[i], conf.nspans_zones)
-    end
+    var subregion_0, subregion_1, subregion_2, subregion_3 = subregion[0], subregion[1], subregion[2], subregion[3]
 
-    for i = 0, conf.npieces do
-      calc_centers_full(
-        rz_all_p[i], rp_all_private_p[i], rp_all_ghost_p[i],
-        rs_all_p[i], rs_spans[i], conf.nspans_zones,
-        enable)
-    end
+    __demand(__spmd)
+    do
+      for i = 0, npieces do
+        init_pointers(
+          rz_all_p[i], rp_all_private_p[i], rp_all_ghost_p[i],
+          rs_all_p[i], rs_spans[i], nspans_zones)
+      end
 
-    for i = 0, conf.npieces do
-      calc_volumes_full(
-        rz_all_p[i], rp_all_private_p[i], rp_all_ghost_p[i],
-        rs_all_p[i], rs_spans[i], conf.nspans_zones,
-        enable)
-    end
+      for i = 0, npieces do
+        init_mesh_zones(
+          rz_all_p[i], rz_spans[i], nspans_zones)
+      end
 
-    for i = 0, conf.npieces do
-      init_side_fracs(
-        rz_all_p[i], rp_all_private_p[i], rp_all_ghost_p[i],
-        rs_all_p[i], rs_spans[i], conf.nspans_zones)
-    end
+      for i = 0, npieces do
+        calc_centers_full(
+          rz_all_p[i], rp_all_private_p[i], rp_all_ghost_p[i],
+          rs_all_p[i], rs_spans[i], nspans_zones,
+          enable)
+      end
 
-    for i = 0, conf.npieces do
-      init_hydro(
-        rz_all_p[i], rz_spans[i],
-        rinit, einit, rinitsub, einitsub,
-        subregion[0], subregion[1], subregion[2], subregion[3],
-        conf.nspans_zones)
-    end
+      for i = 0, npieces do
+        calc_volumes_full(
+          rz_all_p[i], rp_all_private_p[i], rp_all_ghost_p[i],
+          rs_all_p[i], rs_spans[i], nspans_zones,
+          enable)
+      end
 
-    for i = 0, conf.npieces do
-      init_radial_velocity(
-        rp_all_private_p[i], rp_spans_private[i],
-        uinitradial, conf.nspans_points)
+      for i = 0, npieces do
+        init_side_fracs(
+          rz_all_p[i], rp_all_private_p[i], rp_all_ghost_p[i],
+          rs_all_p[i], rs_spans[i], nspans_zones)
+      end
+
+      for i = 0, npieces do
+        init_hydro(
+          rz_all_p[i], rz_spans[i],
+          rinit, einit, rinitsub, einitsub,
+          subregion_0, subregion_1, subregion_2, subregion_3,
+          nspans_zones)
+      end
+
+      for i = 0, npieces do
+        init_radial_velocity(
+          rp_all_private_p[i], rp_spans_private[i],
+          uinitradial, nspans_points)
+      end
+      for i = 0, npieces do
+        init_radial_velocity(
+          rp_all_shared_p[i], rp_spans_shared[i],
+          uinitradial, nspans_points)
+      end
     end
-    for i = 0, conf.npieces do
-      init_radial_velocity(
-        rp_all_shared_p[i], rp_spans_shared[i],
-        uinitradial, conf.nspans_points)
-    end
-  end
-  -- Hack: Force main task to wait for initialization to finish.
-  do
-    var _ = 0
-    for i = 0, conf.npieces do
-      _ += dummy(rz_all_p[i], rp_all_private_p[i])
-    end
-    wait_for(_)
   end
 
   c.printf("Starting simulation (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6)
@@ -1374,14 +1380,6 @@ task test()
 
       -- c.legion_runtime_end_trace(__runtime(), __context(), 0)
     end
-  end
-  -- Hack: Force main task to wait for simulation to finish.
-  do
-    var _ = 0
-    for i = 0, conf.npieces do
-      _ += dummy(rz_all_p[i], rp_all_private_p[i])
-    end
-    wait_for(_)
   end
 
   var stop_time = c.legion_get_current_time_in_micros()/1.e6
