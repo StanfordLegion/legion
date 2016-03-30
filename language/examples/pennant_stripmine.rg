@@ -1056,8 +1056,8 @@ where reads(rz_all, rp_all, rs_all) do
     conf)
 end
 
-task dummy(rz : region(zone), rpp : region(point), rps : region(point)) : int
-where reads writes(rz, rpp, rps) do
+task dummy(rz : region(zone), rpp : region(point)) : int
+where reads writes(rz, rpp) do
   return 1
 end
 
@@ -1225,7 +1225,7 @@ task test()
   do
     var _ = 0
     for i = 0, conf.npieces do
-      _ += dummy(rz_all_p[i], rp_all_private_p[i], rp_all_shared_p[i])
+      _ += dummy(rz_all_p[i], rp_all_private_p[i])
     end
     wait_for(_)
   end
@@ -1379,7 +1379,7 @@ task test()
   do
     var _ = 0
     for i = 0, conf.npieces do
-      _ += dummy(rz_all_p[i], rp_all_private_p[i], rp_all_shared_p[i])
+      _ += dummy(rz_all_p[i], rp_all_private_p[i])
     end
     wait_for(_)
   end
