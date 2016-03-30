@@ -74,6 +74,10 @@ function analyze_var_flow.expr_call(cx, node)
   end
 end
 
+function analyze_var_flow.expr_dynamic_collective_get_result(cx, node)
+  return {[true] = true}
+end
+
 function analyze_var_flow.expr_unary(cx, node)
   return analyze_var_flow.expr(cx, node.rhs)
 end
@@ -197,7 +201,7 @@ function analyze_var_flow.expr(cx, node)
     return nil
 
   elseif node:is(ast.typed.expr.DynamicCollectiveGetResult) then
-    return nil
+    return analyze_var_flow.expr_dynamic_collective_get_result(cx, node)
 
   elseif node:is(ast.typed.expr.Advance) then
     return nil
@@ -770,7 +774,7 @@ end
 
 function optimize_futures.expr_arrive(cx, node)
   local barrier = concretize(optimize_futures.expr(cx, node.barrier))
-  local value = promote(optimize_futures.expr(cx, node.value))
+  local value = optimize_futures.expr(cx, node.value)
   return node {
     barrier = barrier,
     value = value,
