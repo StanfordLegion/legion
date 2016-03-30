@@ -14,11 +14,9 @@
 
 -- runs-with:
 -- [
---   ["-ll:cpu", "4"]
--- ]
-
--- FIXME: Broken:
+--   ["-ll:cpu", "4"],
 --   ["-ll:cpu", "2", "-fflow-spmd-shardsize", "2"]
+-- ]
 
 import "regent"
 
