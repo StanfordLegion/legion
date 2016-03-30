@@ -512,6 +512,22 @@ terra read_config()
     c.abort()
   end
 
+  var numpcx = get_optional_arg("-numpcx")
+  if numpcx ~= nil then
+    conf.numpcx = c.atoll(numpcx)
+  end
+  var numpcy = get_optional_arg("-numpcy")
+  if numpcy ~= nil then
+    conf.numpcy = c.atoll(numpcy)
+  end
+  if (conf.numpcx > 0 or conf.numpcy > 0) and
+    conf.numpcx * conf.numpcy ~= conf.npieces
+  then
+    c.printf("Error: numpcx (%lld) * numpcy (%lld) must be == npieces (%lld)\n",
+             conf.numpcx, conf.numpcy, conf.npieces)
+    c.abort()
+  end
+
   var par_init = get_optional_arg("-par_init")
   if par_init ~= nil then
     conf.par_init = [bool](c.atoll(par_init))
@@ -579,7 +595,9 @@ terra read_config()
   c.printf("Config meshtype = \"%s\"\n", meshtype)
 
   get_mesh_config(&conf)
-  get_submesh_config(&conf)
+  if conf.numpcx <= 0 or conf.numpcy <= 0 then
+    get_submesh_config(&conf)
+  end
 
   [config_fields_all:map(function(field)
        return quote c.printf(
