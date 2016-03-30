@@ -1411,6 +1411,58 @@ namespace Legion {
                                                     LogicalRegion handle) const;
     protected:
       //------------------------------------------------------------------------
+      // Methods for getting access to semantic info
+      //------------------------------------------------------------------------
+      void mapper_rt_retrieve_semantic_information(MapperContext ctx, 
+          TaskID task_id, SemanticTag tag, const void *&result, size_t &size, 
+          bool can_fail = false, bool wait_until_ready = false);
+
+      void mapper_rt_retrieve_semantic_information(MapperContext ctx, 
+          IndexSpace handle, SemanticTag tag, const void *&result, size_t &size,
+          bool can_fail = false, bool wait_until_ready = false);
+
+      void mapper_rt_retrieve_semantic_information(MapperContext ctx,
+          IndexPartition handle, SemanticTag tag, const void *&result, 
+          size_t &size, bool can_fail = false, bool wait_until_ready = false);
+
+      void mapper_rt_retrieve_semantic_information(MapperContext ctx,
+          FieldSpace handle, SemanticTag tag, const void *&result, size_t &size,
+          bool can_fail = false, bool wait_until_ready = false);
+
+      void mapper_rt_retrieve_semantic_information(MapperContext ctx, 
+          FieldSpace handle, FieldID fid, SemanticTag tag, const void *&result, 
+          size_t &size, bool can_fail = false, bool wait_until_ready = false);
+
+      void mapper_rt_retrieve_semantic_information(MapperContext ctx,
+          LogicalRegion handle, SemanticTag tag, const void *&result, 
+          size_t &size, bool can_fail = false, bool wait_until_ready = false);
+
+      void mapper_rt_retrieve_semantic_information(MapperContext ctx,
+          LogicalPartition handle, SemanticTag tag, const void *&result, 
+          size_t &size, bool can_fail = false, bool wait_until_ready = false);
+
+      void mapper_rt_retrieve_name(MapperContext ctx, TaskID task_id,
+                                   const char *&result);
+
+      void mapper_rt_retrieve_name(MapperContext ctx, IndexSpace handle,
+                                   const char *&result);
+
+      void mapper_rt_retrieve_name(MapperContext ctx, IndexPartition handle,
+                                   const char *&result);
+      
+      void mapper_rt_retrieve_name(MapperContext ctx, FieldSpace handle,
+                                   const char *&result);
+
+      void mapper_rt_retrieve_name(MapperContext ctx, FieldSpace handle, 
+                                   FieldID fid, const char *&result);
+
+      void mapper_rt_retrieve_name(MapperContext ctx, LogicalRegion handle,
+                                   const char *&result);
+
+      void mapper_rt_retrieve_name(MapperContext ctx, LogicalPartition handle,
+                                   const char *&result);
+    protected:
+      //------------------------------------------------------------------------
       // Support for packing tunable values
       //------------------------------------------------------------------------
       template<typename T>

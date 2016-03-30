@@ -218,12 +218,6 @@ namespace Legion {
          * variant of this task.
          */
         Processor::Kind best_processor_kind(const Task *task) const;
-        /**
-         * Return the next processor kind that still has incomplete 
-         * profiling.  If all are complete the best variant will be returned.
-         */
-        Processor::Kind next_processor_kind(const Task *task) const;
-
       public:
         struct Profile {
           long long execution_time;

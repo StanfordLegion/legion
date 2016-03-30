@@ -47,6 +47,7 @@ namespace Legion {
         std::map<Memory,bool> current_instances;
       public: // outputs
         bool virtual_map;
+        bool early_map;
         bool enable_WAR_optimization;
         bool reduction_list;
         bool make_persistent;
@@ -65,6 +66,8 @@ namespace Legion {
           TASK_MAPPABLE,
           INLINE_MAPPABLE,
           COPY_MAPPABLE,
+          ACQUIRE_MAPPABLE,
+          RELEASE_MAPPABLE,
         };
       public:
         virtual MappableKind get_mappable_kind(void) const = 0;
@@ -122,6 +125,8 @@ namespace Legion {
         virtual UniqueID get_unique_id(void) const;
         virtual int get_depth(void) const;
       public:
+        inline UniqueID get_unique_inline_id(void) const { return unique_id; }
+      public:
         RegionRequirement               requirement;
       private:
         UniqueID                        unique_id;
@@ -139,6 +144,8 @@ namespace Legion {
         virtual UniqueID get_unique_mappable_id(void) const;
         virtual UniqueID get_unique_id(void) const;
         virtual int get_depth(void) const;
+      public:
+        inline UniqueID get_unique_copy_id(void) const { return unique_id; }
       public:
         std::vector<RegionRequirement>  src_requirements;
         std::vector<RegionRequirement>  dst_requirements;
@@ -228,7 +235,7 @@ namespace Legion {
         std::map<VariantID,Variant> variants;
       };
     public:
-      ShimMapper(Machine machine, HighLevelRuntime *rt, 
+      ShimMapper(Machine machine, Runtime *rt, 
                  Processor local, const char *name = NULL);
       ShimMapper(const ShimMapper &rhs);
       virtual ~ShimMapper(void);
@@ -273,6 +280,11 @@ namespace Legion {
       virtual void slice_domain(const Task *task, const Domain &domain,
                                 std::vector<DomainSplit> &slices);
     protected:
+      Color get_logical_region_color(LogicalRegion handle);
+      bool has_parent_logical_partition(LogicalRegion handle);
+      LogicalPartition get_parent_logical_partition(LogicalRegion handle);
+      LogicalRegion get_parent_logical_region(LogicalPartition handle);
+    protected:
       TaskVariantCollection* find_task_variant_collection(MapperContext ctx,
                                         TaskID task_id, const char *task_name);
       void initialize_requirement_mapping_fields(RegionRequirement &req,
@@ -293,6 +305,7 @@ namespace Legion {
     protected:
       const Processor::Kind local_kind;
       const Machine machine;
+      Runtime *const runtime;
       // The maximum number of tasks a mapper will allow to be stolen at a time
       // Controlled by -dm:thefts
       unsigned max_steals_per_theft;
@@ -323,6 +336,8 @@ namespace Legion {
       Utilities::MappingProfiler profiler;
     protected:
       std::map<TaskID,TaskVariantCollection*> task_variant_collections;
+    private:
+      MapperContext current_ctx;
     };
 
   };

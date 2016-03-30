@@ -47,6 +47,7 @@ namespace Legion {
       restricted = false;
       max_blocking_factor = INT_MAX;
       virtual_map = false;
+      early_map = false;
       enable_WAR_optimization = false;
       reduction_list = false;
       make_persistent = false;
@@ -369,7 +370,7 @@ namespace Legion {
     ShimMapper::ShimMapper(Machine m, Runtime *rt, 
                            Processor local, const char *name/*=NULL*/)
       : DefaultMapper(m, local, name),
-        local_kind(local.kind()), machine(m),
+        local_kind(local.kind()), machine(m), runtime(rt),
         max_steals_per_theft(STATIC_MAX_PERMITTED_STEALS),
         max_steal_count(STATIC_MAX_STEAL_COUNT),
         splitting_factor(STATIC_SPLIT_FACTOR),
@@ -420,7 +421,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ShimMapper::ShimMapper(const ShimMapper &rhs)
       : DefaultMapper(Machine::get_machine(), Processor::NO_PROC),
-        local_kind(Processor::LOC_PROC), machine(rhs.machine),
+        local_kind(Processor::LOC_PROC), machine(rhs.machine), runtime(NULL),
         machine_interface(Utilities::MachineQueryInterface(rhs.machine))
     //--------------------------------------------------------------------------
     {
@@ -509,6 +510,8 @@ namespace Legion {
             input.premapped_regions.begin(); it !=
             input.premapped_regions.end(); it++)
         local_task.regions[*it].restricted = true;
+      // Save the current context before doing any old calls
+      current_ctx = ctx;
       // Call select variant first to get it over with
       select_task_variant(&local_task);
       // Do this in a while-true loop until we succeed in mapping
@@ -712,6 +715,8 @@ namespace Legion {
         initialize_requirement_mapping_fields(local_copy.dst_requirements[idx],
                                               input.dst_instances[idx]);
       }
+      // Save the current context before doing any old calls
+      current_ctx = ctx;
       // Do this in a while-true loop until we succeed in mapping
       while (true)
       {
@@ -756,6 +761,57 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool ShimMapper::map_copy(Copy *copy)
+    //--------------------------------------------------------------------------
+    {
+      log_shim.spew("Map copy for copy ID %lld in shim mapper "
+                    "for processor " IDFMT "", 
+                    copy->get_unique_copy_id(), local_proc.id);
+      std::vector<Memory> local_stack; 
+      machine_interface.find_memory_stack(local_proc, local_stack,
+                                          (local_kind == Processor::LOC_PROC)); 
+      assert(copy->src_requirements.size() == copy->dst_requirements.size());
+      for (unsigned idx = 0; idx < copy->src_requirements.size(); idx++)
+      {
+        copy->src_requirements[idx].virtual_map = false;
+        copy->src_requirements[idx].early_map = false;
+        copy->src_requirements[idx].enable_WAR_optimization = war_enabled;
+        copy->src_requirements[idx].reduction_list = false;
+        copy->src_requirements[idx].make_persistent = false;
+        if (!copy->src_requirements[idx].restricted)
+        {
+          copy->src_requirements[idx].target_ranking = local_stack;
+        }
+        copy->dst_requirements[idx].virtual_map = false;
+        copy->dst_requirements[idx].early_map = false;
+        copy->dst_requirements[idx].enable_WAR_optimization = war_enabled;
+        copy->dst_requirements[idx].reduction_list = false;
+        copy->dst_requirements[idx].make_persistent = false;
+        if (!copy->dst_requirements[idx].restricted)
+        {
+          copy->dst_requirements[idx].target_ranking = local_stack;
+        }
+        if (local_kind == Processor::LOC_PROC)
+        {
+          // Elliott needs SOA for the compiler.
+          copy->src_requirements[idx].blocking_factor = // 1;
+            copy->src_requirements[idx].max_blocking_factor;
+          copy->dst_requirements[idx].blocking_factor = // 1;
+            copy->dst_requirements[idx].max_blocking_factor;
+        }
+        else
+        {
+          copy->src_requirements[idx].blocking_factor = 
+            copy->src_requirements[idx].max_blocking_factor;
+          copy->dst_requirements[idx].blocking_factor = 
+            copy->dst_requirements[idx].max_blocking_factor;
+        } 
+      }
+      // No profiling on copies yet
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
     void ShimMapper::map_inline(const MapperContext        ctx,
                                 const InlineMapping&       inline_op,
                                 const MapInlineInput&      input,
@@ -766,6 +822,8 @@ namespace Legion {
       Inline local_inline(inline_op);
       initialize_requirement_mapping_fields(local_inline.requirement,
                                             input.valid_instances);
+      // Save the current context before doing any old calls
+      current_ctx = ctx;
       // Do this in a while-true loop until we succeed in mapping
       while (true)
       {
@@ -789,6 +847,42 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool ShimMapper::map_inline(Inline *inline_op)
+    //--------------------------------------------------------------------------
+    {
+      log_shim.spew("Map inline for operation ID %lld in shim "
+                    "mapper for processor " IDFMT "",
+                    inline_op->get_unique_inline_id(), local_proc.id);
+      inline_op->requirement.virtual_map = false;
+      inline_op->requirement.early_map = false;
+      inline_op->requirement.enable_WAR_optimization = war_enabled;
+      inline_op->requirement.reduction_list = false;
+      inline_op->requirement.make_persistent = false;
+      if (!inline_op->requirement.restricted)
+      {
+        machine_interface.find_memory_stack(local_proc, 
+                                          inline_op->requirement.target_ranking,
+                                          (local_kind == Processor::LOC_PROC));
+      }
+      else
+      {
+        assert(inline_op->requirement.current_instances.size() == 1);
+        Memory target = 
+          (inline_op->requirement.current_instances.begin())->first;
+        inline_op->requirement.target_ranking.push_back(target);
+      }
+      if (local_kind == Processor::LOC_PROC)
+        // Elliott needs SOA for the compiler.
+        inline_op->requirement.blocking_factor = // 1;
+          inline_op->requirement.max_blocking_factor;
+      else
+        inline_op->requirement.blocking_factor = 
+          inline_op->requirement.max_blocking_factor;
+      // No profiling on inline mappings
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
     void ShimMapper::slice_task(const MapperContext             ctx,
                                 const Legion::Task&             task, 
                                 const SliceTaskInput&           input,
@@ -807,14 +901,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       log_shim.spew("Slice index space in shim mapper for task %s "
-                    "(ID %lld) for processor " IDFMT "", task->variants->name, 
+                    "(ID %lld) for processor " IDFMT "", task->variants->name,
                     task->get_unique_task_id(), local_proc.id);
 
       Processor::Kind best_kind;
       if (profiler.profiling_complete(task))
         best_kind = profiler.best_processor_kind(task);
       else
-        best_kind = profiler.next_processor_kind(task);
+        best_kind = Processor::LOC_PROC;
       std::set<Processor> all_procs;
       machine.get_all_processors(all_procs);
       machine_interface.filter_processors(machine, best_kind, all_procs);
@@ -900,6 +994,34 @@ namespace Legion {
       }
     }
 
+    //--------------------------------------------------------------------------
+    Color ShimMapper::get_logical_region_color(LogicalRegion handle)
+    //--------------------------------------------------------------------------
+    {
+      return mapper_rt_get_logical_region_color(current_ctx, handle);
+    }
+
+    //--------------------------------------------------------------------------
+    bool ShimMapper::has_parent_logical_partition(LogicalRegion handle)
+    //--------------------------------------------------------------------------
+    {
+      return mapper_rt_has_parent_logical_partition(current_ctx, handle);
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalPartition ShimMapper::get_parent_logical_partition(
+                                                           LogicalRegion handle)
+    //--------------------------------------------------------------------------
+    {
+      return mapper_rt_get_parent_logical_partition(current_ctx, handle);
+    }
+    
+    //--------------------------------------------------------------------------
+    LogicalRegion ShimMapper::get_parent_logical_region(LogicalPartition handle)
+    //--------------------------------------------------------------------------
+    {
+      return mapper_rt_get_parent_logical_region(current_ctx, handle);
+    }
 
     //--------------------------------------------------------------------------
     ShimMapper::TaskVariantCollection* ShimMapper::find_task_variant_collection(
