@@ -158,6 +158,7 @@ namespace Legion {
         depth(m.get_depth())
     //--------------------------------------------------------------------------
     {
+      requirement = m.requirement;
     }
 
     //--------------------------------------------------------------------------
@@ -1177,20 +1178,25 @@ namespace Legion {
                                    ReductionOpID redop)
     //--------------------------------------------------------------------------
     {
+      std::vector<FieldID> all_fields(fields.begin(), fields.end());
       if (redop > 0)
+      {
+        assert(all_fields.size() == 1);
         constraints.add_constraint(SpecializedConstraint(
-              SpecializedConstraint::REDUCTION_FOLD_SPECIALIZE, redop));
+              SpecializedConstraint::REDUCTION_FOLD_SPECIALIZE, redop))
+          .add_constraint(FieldConstraint(all_fields, true/*contiguous*/,
+                                          true/*inorder*/));
+      }
       else
       {
-        std::vector<FieldID> all_fields(fields.begin(), fields.end());
         std::vector<DimensionKind> dimension_ordering(4);
         dimension_ordering[0] = DIM_F;
         dimension_ordering[1] = DIM_X;
         dimension_ordering[2] = DIM_Y;
         dimension_ordering[3] = DIM_Z;
         constraints.add_constraint(SpecializedConstraint())
-          .add_constraint(FieldConstraint(all_fields, false/*contiguous*/,
-                                          false/*inorder*/))
+          .add_constraint(FieldConstraint(all_fields, true/*contiguous*/,
+                                          true/*inorder*/))
           .add_constraint(OrderingConstraint(dimension_ordering, 
                                              false/*contigous*/));
       }
@@ -1203,9 +1209,15 @@ namespace Legion {
                                    ReductionOpID redop)
     //--------------------------------------------------------------------------
     {
+      std::vector<FieldID> all_fields(fields.begin(), fields.end());
       if (redop > 0)
+      {
+        assert(all_fields.size() == 1);
         constraints.add_constraint(SpecializedConstraint(
-              SpecializedConstraint::REDUCTION_FOLD_SPECIALIZE, redop));
+              SpecializedConstraint::REDUCTION_FOLD_SPECIALIZE, redop)).
+          add_constraint(FieldConstraint(all_fields, true/*contiguous*/,
+                                         true/*inorder*/));
+      }
       else
       {
         std::vector<FieldID> all_fields(fields.begin(), fields.end());

@@ -2029,6 +2029,9 @@ namespace Legion {
     {
       if (!valid)
         initialize(forest);
+      if (field_sizes.empty())
+        return NULL;
+      // If there are no fields then we are done
 #ifdef NEW_INSTANCE_CREATION
       PhysicalInstance instance = PhysicalInstance::NO_INST;
       Event ready = forest->create_instance(instance_domain, 
