@@ -2701,11 +2701,9 @@ class Operation(object):
             assert dst_req.redop <> 0
             # Reduction case
             if src_inst.is_virtual():
-                error_str = "source field "+str(src_field)+" and destination field "+\
-                            str(dst_field)+" of region requirements "+src(src_index)+\
-                            " and "+str(dst_index)+" of "+str(self)
-                return src_inst.issue_reductions_across(dst_inst, dst_field, 
-                  dst_region.logical_node, self, perform_checks, dst_req.redop, error_str)
+                # This is a runtime bug, there should never be any reductions across
+                assert False
+                return False
             else:
                 # Normal reduction, find the source and destination dependences
                 src_preconditions = src_inst.find_use_dependences(src_field, src_req, 
@@ -3551,13 +3549,6 @@ class FillInstance(object):
         dst.add_copy_user(dst_field, False, 0)
         return True
 
-    def issue_reductions_across(self, dst, dst_field, region, op, redop, 
-                                perform_checks, error_str):
-        # TODO
-        print "NEED TO IMPLEMENT FILL REDUCTIONS ACROSS"
-        assert False
-        return True
-
 class CompositeNode(object):
     __slots__ = ['owner', 'node', 'parent', 'valid_instances', 'dirty', 'children']
     def __init__(self, owner, node, parent):
@@ -3956,13 +3947,6 @@ class CompositeInstance(object):
                                                          True, 0)
                             dst.add_copy_user(dst_field, region, reduction, False,
                                               reduction_inst.redop)
-        return True
-
-    def issue_reductions_across(self, dst, dst_field, region, op, redop, 
-                                perform_checks, error_str):
-        # TODO
-        print "NEED TO IMPLEMENT COMPOSITE REDUCTIONS ACROSS"
-        assert False
         return True
 
 class EventHandle(object):
