@@ -348,9 +348,9 @@ LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/logging.cc \
 
 # If you want to go back to using the shared mapper, comment out the next line
 # and uncomment the one after that
-MAPPER_SRC	+= $(LG_RT_DIR)/mappers/default_mapper.cc 
+MAPPER_SRC	+= $(LG_RT_DIR)/mappers/default_mapper.cc \
+		   $(LG_RT_DIR)/mappers/shim_mapper.cc
 		   #$(LG_RT_DIR)/mappers/mapping_utilities.cc \
-		   #$(LG_RT_DIR)/mappers/shim_mapper.cc \
 #MAPPER_SRC	+= $(LG_RT_DIR)/shared_mapper.cc
 ifeq ($(strip $(ALT_MAPPERS)),1)
 MAPPER_SRC	+= $(LG_RT_DIR)/mappers/alt_mappers.cc
