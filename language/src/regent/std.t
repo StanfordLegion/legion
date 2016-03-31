@@ -1706,6 +1706,10 @@ function std.ispace(index_type)
   st.index_type = index_type
   st.dim = index_type.dim
 
+  function st:is_opaque()
+    return self.index_type:is_opaque()
+  end
+
   function st:force_cast(from, to, expr)
     assert(std.is_ispace(from) and std.is_ispace(to))
     return `([to] { impl = [expr].impl })
@@ -1747,6 +1751,10 @@ function std.region(ispace_symbol, fspace_type)
              std.is_ispace(ispace),
            "Parition type requires ispace")
     return ispace
+  end
+
+  function st:is_opaque()
+    return self:ispace():is_opaque()
   end
 
   function st:fspace()

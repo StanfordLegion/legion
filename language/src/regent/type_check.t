@@ -1255,7 +1255,7 @@ function type_check.expr_partition(cx, node)
                 tostring(region_type))
   end
 
-  if region_type:ispace().index_type:is_opaque() then
+  if region_type:is_opaque() then
     if coloring_type ~= std.c.legion_coloring_t then
       log.error(node,
                 "type mismatch in argument 3: expected legion_coloring_t but got " ..
@@ -1304,6 +1304,10 @@ function type_check.expr_partition_equal(cx, node)
     log.error(node, "type mismatch in argument 1: expected region but got " ..
                 tostring(region_type))
   end
+  if not region_type:is_opaque() then
+    log.error(node, "type mismatch in argument 1: expected region of ispace(ptr) but got " ..
+                tostring(region_type))
+  end
 
   if not std.is_ispace(colors_type) then
     log.error(node, "type mismatch in argument 2: expected ispace but got " ..
@@ -1340,6 +1344,11 @@ function type_check.expr_partition_by_field(cx, node)
 
   local colors = type_check.expr(cx, node.colors)
   local colors_type = std.check_read(cx, colors)
+
+  if not region_type:is_opaque() then
+    log.error(node, "type mismatch in argument 1: expected region of ispace(ptr) but got " ..
+                tostring(region_type))
+  end
 
   if #region.fields ~= 1 then
     log.error(node, "type mismatch in argument 1: expected 1 field but got " ..
