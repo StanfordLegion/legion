@@ -3662,7 +3662,7 @@ namespace Legion {
       // to be true for all kinds of explicit copies including reductions
       for (unsigned idx = 0; idx < targets.size(); idx++)
       {
-        if (IS_SRC && (idx == composite_idx))
+        if (IS_SRC && (int(idx) == composite_idx))
           continue;
         if (!targets[idx].get_manager()->is_instance_manager())
         {
