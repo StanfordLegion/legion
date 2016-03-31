@@ -2090,9 +2090,16 @@ namespace Legion {
           }
         case SpecializedConstraint::REDUCTION_FOLD_SPECIALIZE:
           {
+            if (field_sizes.size() > 1)
+            {
+              log_run.error("ERROR: Illegal request for a reduction instance "
+                            "containing multiple fields. Only a single field "
+                            "is currently permitted for reduction instances.");
 #ifdef DEBUG_HIGH_LEVEL
-            assert(field_sizes.size() == 1);
+              assert(false);
 #endif
+              exit(ERROR_INVALID_ARGUMENTS_TO_MAPPER_RUNTIME);
+            }
             // Before we can actually use this instance, we have to 
             // initialize it with a fill operation of the proper value
             // Don't record this fill operation because it is just part

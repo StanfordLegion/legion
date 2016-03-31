@@ -2289,7 +2289,6 @@ namespace Legion {
                                           const InstanceSet &src_targets,
                                           const InstanceSet &dst_targets,
                                           VersionInfo &src_version_info, 
-                                          int src_composite_index,
                                           Operation *op, Event precondition)
     //--------------------------------------------------------------------------
     {
@@ -2328,7 +2327,6 @@ namespace Legion {
       std::vector<Domain::CopySrcDstField> dst_fields_fold;
       std::vector<Domain::CopySrcDstField> src_fields_list;
       std::vector<Domain::CopySrcDstField> dst_fields_list;
-      std::vector<std::pair<unsigned,unsigned> > dst_composite_indexes;
       for (unsigned idx1 = 0; idx1 < dst_targets.size(); idx1++)
       {
         const InstanceRef &dst_ref = dst_targets[idx1];
@@ -2345,46 +2343,36 @@ namespace Legion {
           {
             // Find the index of the source
             unsigned src_index = src_target_indexes[idx2];
-            // See if this is the composite reference
-            if (int(src_index) == src_composite_index)
+            // Otherwise, this is a normal copy, fill in offsets
+            const InstanceRef &src_ref = src_targets[src_index];
+#ifdef DEBUG_HIGH_LEVEL
+            assert(!src_ref.is_composite_ref());
+#endif
+            PhysicalManager *src_manager = src_ref.get_manager();
+            if (src_manager->is_reduction_manager())
             {
-              // Pulling from the composite, do that later
-              dst_composite_indexes.push_back(
-                  std::pair<unsigned,unsigned>(idx1,idx2));
+              FieldMask src_mask;
+              src_mask.set_bit(src_indexes[idx2]);
+              src_manager->as_reduction_manager()->find_field_offsets(
+                  src_mask, fold ? src_fields_fold : src_fields_list);
+            }
+            else
+              src_manager->as_instance_manager()->compute_copy_offsets(
+                  src_req.instance_fields[idx2], 
+                  fold ? src_fields_fold : src_fields_list);
+            if (fold)
+            {
+              FieldMask dst_mask;
+              dst_mask.set_bit(dst_indexes[idx2]);
+              dst_manager->as_reduction_manager()->find_field_offsets(
+                  dst_mask, dst_fields_fold);
+              fold_copy_preconditions.insert(src_ref.get_ready_event());
             }
             else
             {
-              // Otherwise, this is a normal copy, fill in offsets
-              const InstanceRef &src_ref = src_targets[src_index];
-#ifdef DEBUG_HIGH_LEVEL
-              assert(!src_ref.is_composite_ref());
-#endif
-              PhysicalManager *src_manager = src_ref.get_manager();
-              if (src_manager->is_reduction_manager())
-              {
-                FieldMask src_mask;
-                src_mask.set_bit(src_indexes[idx2]);
-                src_manager->as_reduction_manager()->find_field_offsets(
-                    src_mask, fold ? src_fields_fold : src_fields_list);
-              }
-              else
-                src_manager->as_instance_manager()->compute_copy_offsets(
-                    src_req.instance_fields[idx2], 
-                    fold ? src_fields_fold : src_fields_list);
-              if (fold)
-              {
-                FieldMask dst_mask;
-                dst_mask.set_bit(dst_indexes[idx2]);
-                dst_manager->as_reduction_manager()->find_field_offsets(
-                    dst_mask, dst_fields_fold);
-                fold_copy_preconditions.insert(src_ref.get_ready_event());
-              }
-              else
-              {
-                dst_manager->as_instance_manager()->compute_copy_offsets(
-                    dst_req.instance_fields[idx2], dst_fields_list);
-                list_copy_preconditions.insert(src_ref.get_ready_event());
-              }
+              dst_manager->as_instance_manager()->compute_copy_offsets(
+                  dst_req.instance_fields[idx2], dst_fields_list);
+              list_copy_preconditions.insert(src_ref.get_ready_event());
             }
             // Unset the bit and see if we are done with this instance
             dst_valid.unset_bit(dst_indexes[idx2]);
@@ -2417,11 +2405,6 @@ namespace Legion {
                             NULL/*intersect*/, dst_req.redop, false/*fold*/);
         if (copy_post.exists())
           result_events.insert(copy_post);
-      }
-      if (src_composite_index >= 0)
-      {
-        // TODO: add support for reduce across from composite instances
-        assert(false);
       }
       return Runtime::merge_events<false>(result_events);
     }

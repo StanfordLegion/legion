@@ -363,7 +363,7 @@ namespace Legion {
                           const RegionRequirement &dst_req,
                           const InstanceSet &src_targets,
                           const InstanceSet &dst_targets,
-                          VersionInfo &src_version_info, int src_composite,
+                          VersionInfo &src_version_info,
                           Operation *op, Event precondition);
     public:
       int physical_convert_mapping(const RegionRequirement &req,

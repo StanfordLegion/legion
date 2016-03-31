@@ -2986,7 +2986,8 @@ namespace Legion {
           src_composite = 
             perform_conversion<true/*src*/>(idx, src_requirements[idx],
                                             output.src_instances[idx],
-                                            src_targets);
+                                            src_targets,
+                                            IS_REDUCE(dst_requirements[idx]));
           // If we have a compsite reference, we need to map it
           // as a virtual region
           if (src_composite >= 0)
@@ -3114,11 +3115,15 @@ namespace Legion {
         }
         else
         {
+          // Composite instances are not valid sources for reductions across
+#ifdef DEBUG_HIGH_LEVEL
+          assert(src_composite == -1);
+#endif
           Event across_done = 
             runtime->forest->reduce_across(src_contexts[idx], dst_contexts[idx],
                                   src_requirements[idx], dst_requirements[idx],
                                   src_targets, dst_targets, src_versions[idx], 
-                                  src_composite, this, local_sync_precondition);
+                                  this, local_sync_precondition);
           Runtime::trigger_event<false>(local_completion, across_done);
         }
         // Apply our changes to the version states
@@ -3509,7 +3514,7 @@ namespace Legion {
     template<bool IS_SRC>
     int CopyOp::perform_conversion(unsigned idx, const RegionRequirement &req,
                                    std::vector<MappingInstance> &output,
-                                   InstanceSet &targets)
+                                   InstanceSet &targets, bool is_reduce)
     //--------------------------------------------------------------------------
     {
       RegionTreeID bad_tree = 0;
@@ -3611,6 +3616,22 @@ namespace Legion {
 #endif
         exit(ERROR_INVALID_MAPPER_OUTPUT); 
       } 
+      if (IS_SRC && (composite_idx >= 0) && is_reduce)
+      {
+        log_run.error("Invalid mapper output from invocation of 'map_copy' "
+                      "on mapper %s. Mapper requested the creation of a "
+                      "composite instance for the source requirement %d of "
+                      "an explicit region-to-region reduction. Only real "
+                      "physical instances are permitted to be sources of "
+                      "explicit region-to-region reductions. Operation was "
+                      "issued in task %s (ID %lld).", mapper->get_mapper_name(),
+                      idx, parent_ctx->get_task_name(), 
+                      parent_ctx->get_unique_id());
+#ifdef DEBUG_HIGH_LEVEL
+        assert(false);
+#endif
+        exit(ERROR_INVALID_MAPPER_OUTPUT);
+      }
       if (Runtime::unsafe_mapper)
         return composite_idx;
       std::vector<LogicalRegion> regions_to_check(1, req.region);
