@@ -315,6 +315,10 @@ namespace Legion {
                               const std::pair<TaskID,Processor> &cache_key,
                               const std::vector<
                                 std::vector<PhysicalInstance> > &post_filter);
+      template<bool IS_SRC>
+      void default_create_copy_instance(MapperContext ctx, const Copy &copy,
+                              const RegionRequirement &req, unsigned index,
+                              std::vector<PhysicalInstance> &instances);
     protected: // static helper methods
       static const char* create_default_name(Processor p);
       template<int DIM>

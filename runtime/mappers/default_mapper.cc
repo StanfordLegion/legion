@@ -2006,9 +2006,18 @@ namespace Legion {
         output.src_instances[idx] = input.src_instances[idx];
         if (!output.src_instances[idx].empty())
           mapper_rt_acquire_and_filter_instances(ctx,output.src_instances[idx]);
-        // Stick this on for good measure, at worst it will be ignored
-        output.src_instances[idx].push_back(
-            PhysicalInstance::get_virtual_instance());
+        // Check to see if we are doing a reduce-across in which case we
+        // need to actually create a real physical instance
+        if (copy.dst_requirements[idx].privilege == REDUCE)
+        {
+          // If the source is restricted, we know we are good
+          if (!copy.src_requirements[idx].is_restricted())
+            default_create_copy_instance<true/*is src*/>(ctx, copy, 
+                copy.src_requirements[idx], idx, output.src_instances[idx]);
+        }
+        else // Stick this on for good measure, at worst it will be ignored
+          output.src_instances[idx].push_back(
+              PhysicalInstance::get_virtual_instance());
         output.dst_instances[idx] = input.dst_instances[idx];
         if (!output.dst_instances[idx].empty())
           mapper_rt_acquire_and_filter_instances(ctx,output.dst_instances[idx]);
@@ -2022,66 +2031,70 @@ namespace Legion {
         {
           output.dst_instances[idx] = input.dst_instances[idx];
           if (!copy.dst_requirements[idx].is_restricted())
-          {
-            // If this is not restricted, see if we have all the fields covered
-            std::set<FieldID> missing_fields = 
-              copy.dst_requirements[idx].privilege_fields;
-            for (std::vector<PhysicalInstance>::const_iterator it = 
-                  output.dst_instances[idx].begin(); it !=
-                  output.dst_instances[idx].end(); it++)
-            {
-              it->remove_space_fields(missing_fields);
-              if (missing_fields.empty())
-                break;
-            }
-            // If we still have fields, we need to make an instance
-            // We clearly need to take a guess, let's see if we can find
-            // one of our instances to use.
-            if (!missing_fields.empty())
-            {
-              Memory target_memory = default_policy_select_target_memory(ctx,
-                                                copy.parent_task->current_proc);
-              bool force_new_instances = false;
-              LayoutConstraintID our_layout_id = 
-               default_policy_select_layout_constraints(ctx, target_memory, 
-                                                     copy.dst_requirements[idx],
-                                                     COPY_MAPPING,
-                                                     true/*needs check*/, 
-                                                     force_new_instances);
-              LayoutConstraintSet creation_constraints = 
-                          mapper_rt_find_layout_constraints(ctx, our_layout_id);
-              creation_constraints.add_constraint(
-                  FieldConstraint(missing_fields,
-                                  false/*contig*/, false/*inorder*/));
-              output.dst_instances[idx].resize(
-                                          output.dst_instances[idx].size() + 1);
-              if (!default_make_instance(ctx, target_memory, 
-                    creation_constraints, output.dst_instances[idx].back(), 
-                    COPY_MAPPING, force_new_instances, true/*meets*/, 
-                    false/*reduction*/, copy.dst_requirements[idx], 
-                    copy.parent_task->current_proc))
-              {
-                // If we failed to make it that is bad
-                log_mapper.error("Default mapper failed allocation for "
-                               "destination region requirement %d of explicit "
-                               "region-to-region copy operation in task %s "
-                               "(ID %lld) in memory " IDFMT " for processor "
-                               IDFMT ". This means the working set of your "
-                               "application is too big for the allotted "
-                               "capacity of the given memory under the default "
-                               "mapper's mapping scheme. You have three "
-                               "choices: ask Realm to allocate more memory, "
-                               "write a custom mapper to better manage working "
-                               "sets, or find a bigger machine. Good luck!",
-                               idx, copy.parent_task->get_task_name(),
-                               copy.parent_task->get_unique_id(),
-                               copy.parent_task->current_proc.id, 
-                               target_memory.id);
-                assert(false);
-              }
-            }
-          }
+            default_create_copy_instance<false/*is src*/>(ctx, copy, 
+                copy.dst_requirements[idx], idx, output.dst_instances[idx]);
         }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    template<bool IS_SRC>
+    void DefaultMapper::default_create_copy_instance(MapperContext ctx,
+                         const Copy &copy, const RegionRequirement &req, 
+                         unsigned idx, std::vector<PhysicalInstance> &instances) 
+    //--------------------------------------------------------------------------
+    {
+      // See if we have all the fields covered
+      std::set<FieldID> missing_fields = req.privilege_fields;
+      for (std::vector<PhysicalInstance>::const_iterator it = 
+            instances.begin(); it != instances.end(); it++)
+      {
+        it->remove_space_fields(missing_fields);
+        if (missing_fields.empty())
+          break;
+      }
+      if (missing_fields.empty())
+        return;
+      // If we still have fields, we need to make an instance
+      // We clearly need to take a guess, let's see if we can find
+      // one of our instances to use.
+      Memory target_memory = default_policy_select_target_memory(ctx,
+                                        copy.parent_task->current_proc);
+      bool force_new_instances = false;
+      LayoutConstraintID our_layout_id = 
+       default_policy_select_layout_constraints(ctx, target_memory, 
+                                                req, COPY_MAPPING,
+                                                true/*needs check*/, 
+                                                force_new_instances);
+      LayoutConstraintSet creation_constraints = 
+                  mapper_rt_find_layout_constraints(ctx, our_layout_id);
+      creation_constraints.add_constraint(
+          FieldConstraint(missing_fields,
+                          false/*contig*/, false/*inorder*/));
+      instances.resize(instances.size() + 1);
+      if (!default_make_instance(ctx, target_memory, 
+            creation_constraints, instances.back(), 
+            COPY_MAPPING, force_new_instances, true/*meets*/, 
+            false/*reduction*/, req, copy.parent_task->current_proc))
+      {
+        // If we failed to make it that is bad
+        log_mapper.error("Default mapper failed allocation for "
+                       "%s region requirement %d of explicit "
+                       "region-to-region copy operation in task %s "
+                       "(ID %lld) in memory " IDFMT " for processor "
+                       IDFMT ". This means the working set of your "
+                       "application is too big for the allotted "
+                       "capacity of the given memory under the default "
+                       "mapper's mapping scheme. You have three "
+                       "choices: ask Realm to allocate more memory, "
+                       "write a custom mapper to better manage working "
+                       "sets, or find a bigger machine. Good luck!",
+                       IS_SRC ? "source" : "destination", idx, 
+                       copy.parent_task->get_task_name(),
+                       copy.parent_task->get_unique_id(),
+                       copy.parent_task->current_proc.id, 
+                       target_memory.id);
+        assert(false);
       }
     }
 
