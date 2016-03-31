@@ -455,6 +455,43 @@ namespace Legion {
                                         LogicalRegion handle);
       LogicalPartition get_parent_logical_partition(MappingCallInfo *info,
                                                     LogicalRegion handle);
+    public:
+      void retrieve_semantic_information(MappingCallInfo *ctx, TaskID task_id,
+          SemanticTag tag, const void *&result, size_t &size, 
+          bool can_fail, bool wait_until_ready);
+      void retrieve_semantic_information(MappingCallInfo *ctx,IndexSpace handle,
+          SemanticTag tag, const void *&result, size_t &size,
+          bool can_fail, bool wait_until_ready);
+      void retrieve_semantic_information(MappingCallInfo *ctx, 
+          IndexPartition handle, SemanticTag tag, const void *&result,
+          size_t &size, bool can_fail, bool wait_until_ready);
+      void retrieve_semantic_information(MappingCallInfo *ctx,FieldSpace handle,
+          SemanticTag tag, const void *&result, size_t &size, 
+          bool can_fail, bool wait_until_ready);
+      void retrieve_semantic_information(MappingCallInfo *ctx,FieldSpace handle,
+          FieldID fid, SemanticTag tag, const void *&result, size_t &size,
+          bool can_fail, bool wait_until_ready);
+      void retrieve_semantic_information(MappingCallInfo *ctx, 
+          LogicalRegion handle, SemanticTag tag, const void *&result, 
+          size_t &size, bool can_fail, bool wait_until_ready);
+      void retrieve_semantic_information(MappingCallInfo *ctx,
+          LogicalPartition handle, SemanticTag tag, const void *&result,
+          size_t &size, bool can_fail, bool wait_until_ready);
+    public:
+      void retrieve_name(MappingCallInfo *ctx, TaskID task_id, 
+                         const char *&result);
+      void retrieve_name(MappingCallInfo *ctx, IndexSpace handle,
+                         const char *&result);
+      void retrieve_name(MappingCallInfo *ctx, IndexPartition handle,
+                         const char *&result);
+      void retrieve_name(MappingCallInfo *ctx, FieldSpace handle,
+                         const char *&result);
+      void retrieve_name(MappingCallInfo *ctx, FieldSpace handle, 
+                         FieldID fid, const char *&result);
+      void retrieve_name(MappingCallInfo *ctx, LogicalRegion handle,
+                         const char *&result);
+      void retrieve_name(MappingCallInfo *ctx, LogicalPartition handle,
+                         const char *&result);
     protected:
       // Both these must be called while holding the lock
       MappingCallInfo* allocate_call_info(MappingCallKind kind, 

@@ -2278,6 +2278,181 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void MapperManager::retrieve_semantic_information(MappingCallInfo *ctx,
+        TaskID task_id, SemanticTag tag, const void *&result, size_t &size,
+        bool can_fail, bool wait_until_ready)
+    //--------------------------------------------------------------------------
+    {
+      pause_mapper_call(ctx);
+      runtime->retrieve_semantic_information(task_id, tag, result, size,
+                                             can_fail, wait_until_ready);
+      resume_mapper_call(ctx);
+    }
+
+    //--------------------------------------------------------------------------
+    void MapperManager::retrieve_semantic_information(MappingCallInfo *ctx,
+        IndexSpace handle, SemanticTag tag, const void *&result, size_t &size,
+        bool can_fail, bool wait_until_ready)
+    //--------------------------------------------------------------------------
+    {
+      pause_mapper_call(ctx);
+      runtime->retrieve_semantic_information(handle, tag, result, size,
+                                             can_fail, wait_until_ready);
+      resume_mapper_call(ctx);
+    }
+
+    //--------------------------------------------------------------------------
+    void MapperManager::retrieve_semantic_information(MappingCallInfo *ctx,
+        IndexPartition handle, SemanticTag tag, const void *&result, 
+        size_t &size, bool can_fail, bool wait_until_ready)
+    //--------------------------------------------------------------------------
+    {
+      pause_mapper_call(ctx);
+      runtime->retrieve_semantic_information(handle, tag, result, size,
+                                             can_fail, wait_until_ready);
+      resume_mapper_call(ctx);
+    }
+
+    //--------------------------------------------------------------------------
+    void MapperManager::retrieve_semantic_information(MappingCallInfo *ctx,
+        FieldSpace handle, SemanticTag tag, const void *&result,
+        size_t &size, bool can_fail, bool wait_until_ready)
+    //--------------------------------------------------------------------------
+    {
+      pause_mapper_call(ctx);
+      runtime->retrieve_semantic_information(handle, tag, result, size,
+                                             can_fail, wait_until_ready);
+      resume_mapper_call(ctx);
+    }
+
+    //--------------------------------------------------------------------------
+    void MapperManager::retrieve_semantic_information(MappingCallInfo *ctx,
+        FieldSpace handle, FieldID fid, SemanticTag tag, const void *&result,
+        size_t &size, bool can_fail, bool wait_until_ready)
+    //--------------------------------------------------------------------------
+    {
+      pause_mapper_call(ctx);
+      runtime->retrieve_semantic_information(handle, fid, tag, result, size,
+                                             can_fail, wait_until_ready);
+      resume_mapper_call(ctx);
+    }
+
+    //--------------------------------------------------------------------------
+    void MapperManager::retrieve_semantic_information(MappingCallInfo *ctx,
+        LogicalRegion handle, SemanticTag tag, const void *&result,
+        size_t &size, bool can_fail, bool wait_until_ready)
+    //--------------------------------------------------------------------------
+    {
+      pause_mapper_call(ctx);
+      runtime->retrieve_semantic_information(handle, tag, result, size,
+                                             can_fail, wait_until_ready);
+      resume_mapper_call(ctx);
+    }
+
+    //--------------------------------------------------------------------------
+    void MapperManager::retrieve_semantic_information(MappingCallInfo *ctx,
+        LogicalPartition handle, SemanticTag tag, const void *&result,
+        size_t &size, bool can_fail, bool wait_until_ready)
+    //--------------------------------------------------------------------------
+    {
+      pause_mapper_call(ctx);
+      runtime->retrieve_semantic_information(handle, tag, result, size,
+                                             can_fail, wait_until_ready);
+      resume_mapper_call(ctx);
+    }
+
+    //--------------------------------------------------------------------------
+    void MapperManager::retrieve_name(MappingCallInfo *ctx, TaskID task_id,
+                                      const char *&result)
+    //--------------------------------------------------------------------------
+    {
+      pause_mapper_call(ctx);
+      const void *name; size_t dummy_size;
+      runtime->retrieve_semantic_information(task_id, NAME_SEMANTIC_TAG,
+                                             name, dummy_size, false, false);
+      result = reinterpret_cast<const char*>(name);
+      resume_mapper_call(ctx);
+    }
+
+    //--------------------------------------------------------------------------
+    void MapperManager::retrieve_name(MappingCallInfo *ctx, IndexSpace handle,
+                                      const char *&result)
+    //--------------------------------------------------------------------------
+    {
+      pause_mapper_call(ctx);
+      const void *name; size_t dummy_size;
+      runtime->retrieve_semantic_information(handle, NAME_SEMANTIC_TAG,
+                                             name, dummy_size, false, false);
+      result = reinterpret_cast<const char*>(name);
+      resume_mapper_call(ctx);
+    }
+
+    //--------------------------------------------------------------------------
+    void MapperManager::retrieve_name(MappingCallInfo *ctx, 
+                                      IndexPartition handle,const char *&result)
+    //--------------------------------------------------------------------------
+    {
+      pause_mapper_call(ctx);
+      const void *name; size_t dummy_size;
+      runtime->retrieve_semantic_information(handle, NAME_SEMANTIC_TAG,
+                                             name, dummy_size, false, false);
+      result = reinterpret_cast<const char*>(name);
+      resume_mapper_call(ctx);
+    }
+
+    //--------------------------------------------------------------------------
+    void MapperManager::retrieve_name(MappingCallInfo *ctx, FieldSpace handle,
+                                      const char *&result)
+    //--------------------------------------------------------------------------
+    {
+      pause_mapper_call(ctx);
+      const void *name; size_t dummy_size;
+      runtime->retrieve_semantic_information(handle, NAME_SEMANTIC_TAG,
+                                             name, dummy_size, false, false);
+      result = reinterpret_cast<const char*>(name);
+      resume_mapper_call(ctx);
+    }
+
+    //--------------------------------------------------------------------------
+    void MapperManager::retrieve_name(MappingCallInfo *ctx, FieldSpace handle,
+                                      FieldID fid, const char *&result)
+    //--------------------------------------------------------------------------
+    {
+      pause_mapper_call(ctx);
+      const void *name; size_t dummy_size;
+      runtime->retrieve_semantic_information(handle, fid, NAME_SEMANTIC_TAG,
+                                             name, dummy_size, false, false);
+      result = reinterpret_cast<const char*>(name);
+      resume_mapper_call(ctx);
+    }
+
+    //--------------------------------------------------------------------------
+    void MapperManager::retrieve_name(MappingCallInfo *ctx, 
+                                      LogicalRegion handle, const char *&result)
+    //--------------------------------------------------------------------------
+    {
+      pause_mapper_call(ctx);
+      const void *name; size_t dummy_size;
+      runtime->retrieve_semantic_information(handle, NAME_SEMANTIC_TAG,
+                                             name, dummy_size, false, false);
+      result = reinterpret_cast<const char*>(name);
+      resume_mapper_call(ctx);
+    }
+
+    //--------------------------------------------------------------------------
+    void MapperManager::retrieve_name(MappingCallInfo *ctx,
+                                   LogicalPartition handle, const char *&result)
+    //--------------------------------------------------------------------------
+    {
+      pause_mapper_call(ctx);
+      const void *name; size_t dummy_size;
+      runtime->retrieve_semantic_information(handle, NAME_SEMANTIC_TAG,
+                                             name, dummy_size, false, false);
+      result = reinterpret_cast<const char*>(name);
+      resume_mapper_call(ctx);
+    }
+
+    //--------------------------------------------------------------------------
     MappingCallInfo* MapperManager::allocate_call_info(MappingCallKind kind,
                                                   Operation *op, bool need_lock)
     //--------------------------------------------------------------------------

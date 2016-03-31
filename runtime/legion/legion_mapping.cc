@@ -761,6 +761,132 @@ namespace Legion {
       return ctx->manager->get_parent_logical_partition(ctx, r);
     }
 
+    //--------------------------------------------------------------------------
+    void Mapper::mapper_rt_retrieve_semantic_information(MapperContext ctx,
+        TaskID task_id, SemanticTag tag, const void *&result, size_t &size,
+        bool can_fail, bool wait_until_ready)
+    //--------------------------------------------------------------------------
+    {
+      ctx->manager->retrieve_semantic_information(ctx, task_id, tag, result,
+                                          size, can_fail, wait_until_ready);
+    }
+
+    //--------------------------------------------------------------------------
+    void Mapper::mapper_rt_retrieve_semantic_information(MapperContext ctx, 
+          IndexSpace handle, SemanticTag tag, const void *&result, size_t &size,
+          bool can_fail, bool wait_until_ready)
+    //--------------------------------------------------------------------------
+    {
+      ctx->manager->retrieve_semantic_information(ctx, handle, tag, result,
+                                          size, can_fail, wait_until_ready);
+    }
+
+    //--------------------------------------------------------------------------
+    void Mapper::mapper_rt_retrieve_semantic_information(MapperContext ctx,
+          IndexPartition handle, SemanticTag tag, const void *&result, 
+          size_t &size, bool can_fail, bool wait_until_ready)
+    //--------------------------------------------------------------------------
+    {
+      ctx->manager->retrieve_semantic_information(ctx, handle, tag, result,
+                                          size, can_fail, wait_until_ready);
+    }
+
+    //--------------------------------------------------------------------------
+    void Mapper::mapper_rt_retrieve_semantic_information(MapperContext ctx,
+          FieldSpace handle, SemanticTag tag, const void *&result, size_t &size,
+          bool can_fail, bool wait_until_ready)
+    //--------------------------------------------------------------------------
+    {
+      ctx->manager->retrieve_semantic_information(ctx, handle, tag, result,
+                                          size, can_fail, wait_until_ready);
+    }
+
+    //--------------------------------------------------------------------------
+    void Mapper::mapper_rt_retrieve_semantic_information(MapperContext ctx, 
+          FieldSpace handle, FieldID fid, SemanticTag tag, const void *&result, 
+          size_t &size, bool can_fail, bool wait_until_ready)
+    //--------------------------------------------------------------------------
+    {
+      ctx->manager->retrieve_semantic_information(ctx, handle, fid, tag,result,
+                                          size, can_fail, wait_until_ready);
+    }
+
+    //--------------------------------------------------------------------------
+    void Mapper::mapper_rt_retrieve_semantic_information(MapperContext ctx,
+          LogicalRegion handle, SemanticTag tag, const void *&result, 
+          size_t &size, bool can_fail, bool wait_until_ready)
+    //--------------------------------------------------------------------------
+    {
+      ctx->manager->retrieve_semantic_information(ctx, handle, tag, result,
+                                          size, can_fail, wait_until_ready);
+    }
+
+    //--------------------------------------------------------------------------
+    void Mapper::mapper_rt_retrieve_semantic_information(MapperContext ctx,
+          LogicalPartition handle, SemanticTag tag, const void *&result, 
+          size_t &size, bool can_fail, bool wait_until_ready)
+    //--------------------------------------------------------------------------
+    {
+      ctx->manager->retrieve_semantic_information(ctx, handle, tag, result,
+                                          size, can_fail, wait_until_ready);
+    }
+
+    //--------------------------------------------------------------------------
+    void Mapper::mapper_rt_retrieve_name(MapperContext ctx, TaskID task_id,
+                                         const char *&result)
+    //--------------------------------------------------------------------------
+    {
+      ctx->manager->retrieve_name(ctx, task_id, result);
+    }
+
+    //--------------------------------------------------------------------------
+    void Mapper::mapper_rt_retrieve_name(MapperContext ctx, IndexSpace handle,
+                                         const char *&result)
+    //--------------------------------------------------------------------------
+    {
+      ctx->manager->retrieve_name(ctx, handle, result);
+    }
+
+    //--------------------------------------------------------------------------
+    void Mapper::mapper_rt_retrieve_name(MapperContext ctx, 
+                                     IndexPartition handle, const char *&result)
+    //--------------------------------------------------------------------------
+    {
+      ctx->manager->retrieve_name(ctx, handle, result);
+    }
+
+    //--------------------------------------------------------------------------
+    void Mapper::mapper_rt_retrieve_name(MapperContext ctx,
+                                         FieldSpace handle, const char *&result)
+    //--------------------------------------------------------------------------
+    {
+      ctx->manager->retrieve_name(ctx, handle, result);
+    }
+
+    //--------------------------------------------------------------------------
+    void Mapper::mapper_rt_retrieve_name(MapperContext ctx, FieldSpace handle,
+                                         FieldID fid, const char *&result)
+    //--------------------------------------------------------------------------
+    {
+      ctx->manager->retrieve_name(ctx, handle, fid, result);
+    }
+
+    //--------------------------------------------------------------------------
+    void Mapper::mapper_rt_retrieve_name(MapperContext ctx, 
+                                      LogicalRegion handle, const char *&result)
+    //--------------------------------------------------------------------------
+    {
+      ctx->manager->retrieve_name(ctx, handle, result);
+    }
+
+    //--------------------------------------------------------------------------
+    void Mapper::mapper_rt_retrieve_name(MapperContext ctx,
+                                   LogicalPartition handle, const char *&result)
+    //--------------------------------------------------------------------------
+    {
+      ctx->manager->retrieve_name(ctx, handle, result);
+    }
+
   }; // namespace Mapping
 }; // namespace Legion
 
