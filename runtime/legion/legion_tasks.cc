@@ -4778,9 +4778,6 @@ namespace Legion {
         // Skip any NO_ACCESS or empty privilege field regions
         if (IS_NO_ACCESS(regions[idx]) || regions[idx].privilege_fields.empty())
         {
-          // Make sure no instance created when no access privilege is given
-          if (IS_NO_ACCESS(regions[idx])) continue;
-
           virtual_mapped[idx] = true;
           continue;
         }
