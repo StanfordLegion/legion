@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 -- fails-with:
--- type_mismatch_partition_equal1.rg:25: type mismatch in argument 1: expected region of ispace(ptr) but got region(int32)
+-- type_mismatch_partition_equal1.rg:25: type mismatch in argument 1: expected region of ispace(ptr) but got region(ispace(int1d), int32)
 -- var p = partition(equal, r, c)
 --                   ^
 

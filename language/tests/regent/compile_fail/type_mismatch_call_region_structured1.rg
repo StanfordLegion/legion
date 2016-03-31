@@ -13,15 +13,16 @@
 -- limitations under the License.
 
 -- fails-with:
--- type_mismatch_partition_by_field4.rg:25: type mismatch in argument 1: expected region of ispace(ptr) but got region(ispace(int1d), int32)
--- var p = partition(r, c)
---                   ^
+-- type_mismatch_call_region_structured1.rg:26: type mismatch in argument 1: expected region(int32) but got region(ispace(int1d), int32)
+-- f(r)
+--   ^
 
 import "regent"
 
-task f()
+task f(y : region(int)) end
+
+task g()
   var r = region(ispace(int1d, 5), int)
-  var c = ispace(ptr, 3)
-  var p = partition(r, c)
+  f(r)
 end
-f:compile()
+regentlib.start(g)

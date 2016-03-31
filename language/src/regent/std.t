@@ -819,7 +819,8 @@ local function type_isomorphic(param_type, arg_type, check, mapping)
   if std.is_ispace(param_type) and std.is_ispace(arg_type) then
     return std.type_eq(param_type.index_type, arg_type.index_type, mapping)
   elseif std.is_region(param_type) and std.is_region(arg_type) then
-      return std.type_eq(param_type.fspace_type, arg_type.fspace_type, mapping)
+    return std.type_eq(param_type:ispace(), arg_type:ispace(), mapping) and
+      std.type_eq(param_type.fspace_type, arg_type.fspace_type, mapping)
   elseif std.is_partition(param_type) and std.is_partition(arg_type) then
     return (param_type:is_disjoint() == arg_type:is_disjoint()) and
       (check(param_type:parent_region(), arg_type:parent_region(), mapping))
@@ -930,6 +931,15 @@ function std.validate_args(node, params, args, isvararg, return_type, mapping, s
         log.error(node, "type mismatch in argument " .. tostring(i) ..
                     ": expected " .. tostring(param_as_arg_type) ..
                     " but got " .. tostring(arg))
+      end
+
+      -- Special case for regions: allow the index spaces to unify.
+      if std.is_region(param_type) and
+        type_compatible(param_type:ispace(), arg_type:ispace()) and
+        not (mapping[param] or mapping[param_type]) and
+        type_isomorphic(param_type:ispace(), arg_type:ispace(), mapping)
+      then
+        mapping[param_type:ispace()] = arg_type:ispace()
       end
 
       mapping[param] = arg
@@ -1779,11 +1789,19 @@ function std.region(ispace_symbol, fspace_type)
     local id = next_region_id
     next_region_id = next_region_id + 1
     function st.metamethods.__typename(st)
-      return "region#" .. tostring(id) .. "(" .. tostring(st.fspace_type) .. ")"
+      if st:is_opaque() then
+        return "region#" .. tostring(id) .. "(" .. tostring(st.fspace_type) .. ")"
+      else
+        return "region#" .. tostring(id) .. "(" .. tostring(st:ispace()) .. ", " .. tostring(st.fspace_type) .. ")"
+      end
     end
   else
     function st.metamethods.__typename(st)
-      return "region(" .. tostring(st.fspace_type) .. ")"
+      if st:is_opaque() then
+        return "region(" .. tostring(st.fspace_type) .. ")"
+      else
+        return "region(" .. tostring(st:ispace()) .. ", " .. tostring(st.fspace_type) .. ")"
+      end
     end
   end
 
