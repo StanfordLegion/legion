@@ -1842,13 +1842,16 @@ function std.partition(disjointness, region)
   function st:subregion_constant(i)
     assert(type(i) == "number" or terralib.issymbol(i))
     if not self.subregions[i] then
-      self.subregions[i] = std.region(self:parent_region().fspace_type)
+      self.subregions[i] = self:subregion_dynamic()
     end
     return self.subregions[i]
   end
 
   function st:subregion_dynamic()
-    return std.region(self:parent_region().fspace_type)
+    local parent = self:parent_region()
+    return std.region(
+      terralib.newsymbol(std.ispace(parent:ispace().index_type)),
+      parent.fspace_type)
   end
 
   function st:force_cast(from, to, expr)

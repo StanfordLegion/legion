@@ -1041,6 +1041,8 @@ function parser.expr_primary(p)
           field_names:insert(field_name)
         until not p:sep()
         p:expect("}")
+      elseif p:nextif("ispace") then
+        field_names:insert("ispace")
       else
         field_names:insert(p:next(p.name).value)
       end

@@ -525,7 +525,7 @@ local function unpack_region(cx, region_expr, region_type, static_region_type)
   local lr = terralib.newsymbol(c.legion_logical_region_t, "lr") 
   local is = terralib.newsymbol(c.legion_index_space_t, "is")
   local isa = false
-  if not cx.leaf then
+  if not cx.leaf and region_type:is_opaque() then
     isa = terralib.newsymbol(c.legion_index_allocator_t, "isa")
   end
   local it = false
@@ -544,7 +544,7 @@ local function unpack_region(cx, region_expr, region_type, static_region_type)
       [actions]
       var [is] = [lr].index_space
     end
-    if region_type:ispace().dim == 0 then
+    if region_type:is_opaque() then
       actions = quote
         [actions]
         var [isa] = c.legion_index_allocator_create(
@@ -1588,7 +1588,24 @@ function codegen.expr_field_access(cx, node)
   local value_type = std.as_read(node.value.expr_type)
   local field_name = node.field_name
   local field_type = node.expr_type
-  return codegen.expr(cx, node.value):get_field(cx, field_name, field_type, node.value.expr_type)
+
+  if std.is_region(value_type) and field_name == "ispace" then
+    local value = codegen.expr(cx, node.value):read(cx)
+    local expr_type = std.as_read(node.expr_type)
+
+    local actions = quote
+      [value.actions];
+      [emit_debuginfo(node)]
+    end
+
+    return values.value(
+      expr.once_only(
+        actions,
+        `([expr_type] { impl = [value.value].impl.index_space })),
+      expr_type)
+  else
+    return codegen.expr(cx, node.value):get_field(cx, field_name, field_type, node.value.expr_type)
+  end
 end
 
 function codegen.expr_index_access(cx, node)
@@ -1616,7 +1633,7 @@ function codegen.expr_index_access(cx, node)
     local lr = terralib.newsymbol(c.legion_logical_region_t, "lr")
     local is = terralib.newsymbol(c.legion_index_space_t, "is")
     local isa = false
-    if not cx.leaf then
+    if not cx.leaf and parent_region_type:is_opaque() then
       isa = terralib.newsymbol(c.legion_index_allocator_t, "isa")
     end
     local it = false
@@ -1632,7 +1649,7 @@ function codegen.expr_index_access(cx, node)
       var [r] = [expr_type] { impl = [lr] }
     end
 
-    if not cx.leaf then
+    if not cx.leaf and parent_region_type:is_opaque() then
       actions = quote
         [actions]
         var [isa] = c.legion_index_allocator_create(
@@ -3142,7 +3159,7 @@ function codegen.expr_partition(cx, node)
       cx.runtime, cx.context,
       `([region_expr.value].impl.index_space),
   })
-  if partition_type:parent_region():ispace().index_type:is_opaque() then
+  if partition_type:parent_region():is_opaque() then
     index_partition_create = c.legion_index_partition_create_coloring
   else
     index_partition_create = c.legion_index_partition_create_domain_coloring
@@ -6607,7 +6624,7 @@ function codegen.stat_task(cx, node)
     local r = params[region_i]
     local is = terralib.newsymbol(c.legion_index_space_t, "is")
     local isa = false
-    if not cx.leaf then
+    if not cx.leaf and region_type:is_opaque() then
       isa = terralib.newsymbol(c.legion_index_allocator_t, "isa")
     end
     local it = false
@@ -6681,7 +6698,7 @@ function codegen.stat_task(cx, node)
         [actions]
         var [is] = [r].impl.index_space
       end
-      if region_type:ispace().dim == 0 then
+      if region_type:is_opaque() then
         actions = quote
           [actions]
           var [isa] = c.legion_index_allocator_create([cx.runtime], [cx.context], [is])

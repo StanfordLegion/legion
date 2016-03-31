@@ -477,11 +477,16 @@ function type_check.expr_field_access(cx, node)
     std.add_constraints(cx, constraints)
   end
 
-  local field_type = std.get_field(unpack_type, node.field_name)
+  local field_type
+  if std.is_region(std.as_read(unpack_type)) and node.field_name == "ispace" then
+    field_type = std.as_read(unpack_type):ispace()
+  else
+    local field_type = std.get_field(unpack_type, node.field_name)
 
-  if not field_type then
-    log.error(node, "no field '" .. node.field_name .. "' in type " ..
-                tostring(std.as_read(value_type)))
+    if not field_type then
+      log.error(node, "no field '" .. node.field_name .. "' in type " ..
+                  tostring(std.as_read(value_type)))
+    end
   end
 
   return ast.typed.expr.FieldAccess {
