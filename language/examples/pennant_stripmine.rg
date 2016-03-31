@@ -1063,18 +1063,40 @@ end
 
 terra unwrap(x : mesh_colorings) return x end
 
+terra flush_stdout()
+  c.fflush(c.stdout)
+end
+flush_stdout:compile()
+
 task test()
+  var start_1 : double = c.legion_get_current_time_in_micros()/double(1e6)
+
   c.printf("Running test (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6)
 
   var conf : config = read_config()
+
+  var end_1 = c.legion_get_current_time_in_micros()/double(1e6)
+  c.printf("timing: read config %e\n", end_1 - start_1)
+  flush_stdout()
+  var start_2 : double = c.legion_get_current_time_in_micros()/double(1e6)
 
   var rz_all = region(ispace(ptr, conf.nz), zone)
   var rp_all = region(ispace(ptr, conf.np), point)
   var rs_all = region(ispace(ptr, conf.ns), side(wild, wild, wild, wild))
 
+  var end_2 = c.legion_get_current_time_in_micros()/double(1e6)
+  c.printf("timing: create regions %e\n", end_2 - start_2)
+  flush_stdout()
+  var start_3 : double = c.legion_get_current_time_in_micros()/double(1e6)
+
   new(ptr(zone, rz_all), conf.nz)
   new(ptr(point, rp_all), conf.np)
   new(ptr(side(wild, wild, wild, wild), rs_all), conf.ns)
+
+  var end_3 = c.legion_get_current_time_in_micros()/double(1e6)
+  c.printf("timing: alloc regions %e\n", end_3 - start_3)
+  flush_stdout()
+  var start_4 : double = c.legion_get_current_time_in_micros()/double(1e6)
 
   c.printf("Reading input (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6)
 
@@ -1106,6 +1128,11 @@ task test()
     end
     colorings = colorings_
   end
+
+  var end_4 = c.legion_get_current_time_in_micros()/double(1e6)
+  c.printf("timing: create colorings %e\n", end_4 - start_4)
+  flush_stdout()
+  var start_5 : double = c.legion_get_current_time_in_micros()/double(1e6)
 
   conf.nspans_zones = colorings.nspans_zones
   conf.nspans_points = colorings.nspans_points
@@ -1148,6 +1175,11 @@ task test()
   var rs_spans_p = partition(
     disjoint, rs_all, colorings.rs_spans_c)
   var rs_spans = cross_product(rs_all_p, rs_spans_p)
+
+  var end_5 = c.legion_get_current_time_in_micros()/double(1e6)
+  c.printf("timing: create partitions %e\n", end_5 - start_5)
+  flush_stdout()
+  var start_6 : double = c.legion_get_current_time_in_micros()/double(1e6)
 
   var par_init = [int64](conf.par_init)
 
@@ -1257,6 +1289,11 @@ task test()
         uinitradial, nspans_points)
     end
   end
+
+  var end_6 = c.legion_get_current_time_in_micros()/double(1e6)
+  c.printf("timing: launch init %e\n", end_6 - start_6)
+  flush_stdout()
+  var start_7 : double = c.legion_get_current_time_in_micros()/double(1e6)
 
   __demand(__spmd)
   do
@@ -1375,6 +1412,10 @@ task test()
   end
 
   -- write_output(conf, rz_all, rp_all, rs_all)
+
+  var end_7 = c.legion_get_current_time_in_micros()/double(1e6)
+  c.printf("timing: remainder of test %e\n", end_7 - start_7)
+  flush_stdout()
 end
 
 task toplevel()

@@ -317,6 +317,9 @@ LogicalRegion CircuitMapper::get_root_region(LogicalPartition handle)
 
 static void create_mappers(Machine machine, HighLevelRuntime *runtime, const std::set<Processor> &local_procs)
 {
+  printf("starting create_mappers absolute time %llu\n", Realm::Clock::current_time_in_microseconds());
+  fflush(stdout);
+
   std::vector<Processor>* procs_list = new std::vector<Processor>();
   std::vector<Memory>* sysmems_list = new std::vector<Memory>();
   std::map<Memory, std::vector<Processor> >* sysmem_local_procs =
@@ -362,6 +365,9 @@ static void create_mappers(Machine machine, HighLevelRuntime *runtime, const std
                                               proc_regmems);
     runtime->replace_default_mapper(mapper, *it);
   }
+
+  printf("finished create_mappers absolute time %llu\n", Realm::Clock::current_time_in_microseconds());
+  fflush(stdout);
 }
 
 void register_mappers()

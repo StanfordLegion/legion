@@ -729,7 +729,18 @@ do
   return ghost_node_map
 end
 
+terra flush_stdout()
+  c.fflush(c.stdout)
+end
+flush_stdout:compile()
+
 task toplevel()
+  var t1 = c.legion_get_current_time_in_micros()
+  c.printf("entered toplevel task at absolute time %llu\n", t1)
+  flush_stdout()
+
+  var start_1 : double = c.legion_get_current_time_in_micros()/double(1e6)
+
   var conf : Config
   conf.num_loops = 5
   conf.num_pieces = 4
@@ -753,6 +764,11 @@ task toplevel()
     conf.num_loops, conf.num_pieces, conf.nodes_per_piece, conf.shared_nodes_per_piece,
     conf.wires_per_piece, conf.pct_wire_in_piece, conf.random_seed)
 
+  var end_1 = c.legion_get_current_time_in_micros()/double(1e6)
+  c.printf("timing: parse input args %e\n", end_1 - start_1)
+  flush_stdout()
+  var start_2 : double = c.legion_get_current_time_in_micros()/double(1e6)
+
   var num_pieces = conf.num_pieces
   var num_circuit_nodes : uint64 = num_pieces * conf.nodes_per_piece
   var num_circuit_wires : uint64 = num_pieces * conf.wires_per_piece
@@ -762,6 +778,11 @@ task toplevel()
 
   new(ptr(node, all_nodes), num_circuit_nodes)
   new(ptr(wire(wild, wild, wild), all_wires), num_circuit_wires)
+
+  var end_2 : double = c.legion_get_current_time_in_micros()/double(1e6)
+  c.printf("timing: create and allocate regions %e\n", end_2 - start_2)
+  flush_stdout()
+  var start_3 : double = c.legion_get_current_time_in_micros()/double(1e6)
 
   -- report mesh size in bytes
   do
@@ -775,6 +796,12 @@ task toplevel()
   end
 
   var colorings = create_colorings(conf)
+
+  var end_3 : double = c.legion_get_current_time_in_micros()/double(1e6)
+  c.printf("timing: create colorings %e\n", end_3 - start_3)
+  flush_stdout()
+  var start_4 : double = c.legion_get_current_time_in_micros()/double(1e6)
+
   var rp_all_nodes = partition(disjoint, all_nodes, colorings.privacy_map)
   var all_private = rp_all_nodes[0]
   var all_shared = rp_all_nodes[1]
@@ -788,6 +815,11 @@ task toplevel()
   new(ptr(ghost_range, ghost_ranges), num_pieces)
   var rp_ghost_ranges = partition(equal, ghost_ranges, launch_domain)
 
+  var end_4 : double = c.legion_get_current_time_in_micros()/double(1e6)
+  c.printf("timing: create partitions %e\n", end_4 - start_4)
+  flush_stdout()
+  var start_5 : double = c.legion_get_current_time_in_micros()/double(1e6)
+
   for j = 0, 1 do
     __demand(__parallel)
     for i = 0, num_pieces do
@@ -796,8 +828,18 @@ task toplevel()
     end
   end
 
+  var end_5 : double = c.legion_get_current_time_in_micros()/double(1e6)
+  c.printf("timing: init pieces %e\n", end_5 - start_5)
+  flush_stdout()
+  var start_6 : double = c.legion_get_current_time_in_micros()/double(1e6)
+
   var ghost_node_map = create_ghost_node_map(conf, ghost_ranges)
   var rp_ghost = partition(aliased, all_shared, ghost_node_map)
+
+  var end_6 : double = c.legion_get_current_time_in_micros()/double(1e6)
+  c.printf("timing: create ghost node map %e\n", end_6 - start_6)
+  flush_stdout()
+  var start_7 : double = c.legion_get_current_time_in_micros()/double(1e6)
 
   --var last_shared = region(ispace(ptr, num_pieces * num_pieces), int)
   --new(ptr(int, last_shared), num_pieces * num_pieces)
@@ -840,6 +882,11 @@ task toplevel()
       init_pointers(rp_private[i], rp_shared[i], rp_ghost[i], rp_wires[i])
     end
   end
+
+  var end_7 : double = c.legion_get_current_time_in_micros()/double(1e6)
+  c.printf("timing: init pointers %e\n", end_7 - start_7)
+  flush_stdout()
+  var start_8 : double = c.legion_get_current_time_in_micros()/double(1e6)
 
   -- -- Force all previous tasks to complete before continuing.
   -- do
@@ -914,6 +961,11 @@ task toplevel()
   --    dump_task(rp_private[i], rp_shared[i], rp_ghost[i], rp_wires[i])
   --  end
   --end
+
+
+  var end_8 : double = c.legion_get_current_time_in_micros()/double(1e6)
+  c.printf("timing: rest of execution %e\n", end_8 - start_8)
+  flush_stdout()
 end
 
 if os.getenv('SAVEOBJ') == '1' then

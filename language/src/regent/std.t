@@ -3063,11 +3063,25 @@ function std.setup(main_task, extra_setup_thunk)
     end
   end
 
+
+  local terra flush_stdout()
+    c.fflush(c.stdout)
+  end
+
   local terra main(argc : int, argv : &rawstring)
+    var t1 = c.legion_get_current_time_in_micros()
+    c.printf("starting main at absolute time %llu\n", t1)
+    flush_stdout()
+
     [task_registrations];
     [reduction_registrations];
     [extra_setup];
     c.legion_runtime_set_top_level_task_id([main_task:gettaskid()])
+
+    var t2 = c.legion_get_current_time_in_micros()
+    c.printf("calling runtime start at absolute time %llu\n", t2)
+    flush_stdout()
+
     return c.legion_runtime_start(argc, argv, false)
   end
 
