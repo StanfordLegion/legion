@@ -1632,8 +1632,11 @@ static void *bytedup(const void *data, size_t datalen)
       if(!wait_on.has_triggered()) {
 	// deferred arrival
 	Barrier b = make_barrier(barrier_gen, timestamp);
-#ifndef DEFER_ARRIVALS_LOCALLY
-        if(owner != gasnet_mynode()) {
+
+	// only forward deferred arrivals if the precondition is not one that looks like it'll
+	//  trigger here first
+        if((owner != gasnet_mynode())  &&
+	   (ID(wait_on).node() != gasnet_mynode())) {
 	  // let deferral happen on owner node (saves latency if wait_on event
           //   gets triggered there)
           //printf("sending deferred arrival to %d for " IDFMT "/%d (" IDFMT "/%d)\n",
@@ -1643,7 +1646,7 @@ static void *bytedup(const void *data, size_t datalen)
 	  BarrierAdjustMessage::send_request(owner, b, delta, wait_on, reduce_value, reduce_value_size);
 	  return;
         }
-#endif
+
 	log_barrier.info("deferring barrier arrival: delta=%d in=" IDFMT "/%d out=" IDFMT "/%d (%llx)",
 			 delta, wait_on.id, wait_on.gen, me.id(), barrier_gen, timestamp);
 	EventImpl::add_waiter(wait_on, new DeferredBarrierArrival(b, delta, 
