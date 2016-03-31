@@ -15,7 +15,7 @@
 #------------------------------------------------------------------------------#
 
 add_executable(09_custom_mappers custom_mapper.cc)
-target_link_libraries(09_custom_mappers ${EXTRA_LIBS} legion realm legion_mappers)
+target_link_libraries(09_custom_mappers legion realm legion_mappers ${EXTRA_LIBS})
 target_include_directories(09_custom_mappers
     PUBLIC "${CMAKE_SOURCE_DIR}/runtime"
    "${CMAKE_SOURCE_DIR}/runtime/legion"

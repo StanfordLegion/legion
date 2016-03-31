@@ -15,8 +15,8 @@
 #------------------------------------------------------------------------------#
 
 add_executable(00_hello_world hello_world.cc)
-target_link_libraries(00_hello_world ${EXTRA_LIBS}
-	pthread legion legion_mappers realm)
+target_link_libraries(00_hello_world
+	pthread legion legion_mappers realm ${EXTRA_LIBS})
 target_include_directories(00_hello_world
 	PUBLIC
 		${CMAKE_SOURCE_DIR}/runtime

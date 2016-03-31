@@ -15,7 +15,7 @@
 #------------------------------------------------------------------------------#
 
 add_executable(04_logical_regions logical_regions.cc)
-target_link_libraries(04_logical_regions ${EXTRA_LIBS} legion realm legion_mappers)
+target_link_libraries(04_logical_regions legion realm legion_mappers ${EXTRA_LIBS})
 target_include_directories(04_logical_regions
     PUBLIC "${CMAKE_SOURCE_DIR}/runtime"
    "${CMAKE_SOURCE_DIR}/runtime/legion"

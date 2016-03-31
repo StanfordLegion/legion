@@ -22,7 +22,7 @@ endif (ENABLE_CUDA)
 
 add_executable(realm_saxpy realm_saxpy_cpu.cc ${CUDA_OBJECT})
 
-target_link_libraries(realm_saxpy ${EXTRA_LIBS} legion realm legion_mappers)
+target_link_libraries(realm_saxpy legion realm legion_mappers ${EXTRA_LIBS})
 target_include_directories(realm_saxpy
     PUBLIC "${CMAKE_SOURCE_DIR}/runtime"
    "${CMAKE_SOURCE_DIR}/runtime/legion"

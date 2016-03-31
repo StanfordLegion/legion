@@ -17,7 +17,7 @@
 
 add_executable(full_ghost ghost.cc)
 
-target_link_libraries(full_ghost ${EXTRA_LIBS} legion realm legion_mappers)
+target_link_libraries(full_ghost legion realm legion_mappers ${EXTRA_LIBS})
 target_include_directories(full_ghost
     PUBLIC "${CMAKE_SOURCE_DIR}/runtime"
    "${CMAKE_SOURCE_DIR}/runtime/legion"

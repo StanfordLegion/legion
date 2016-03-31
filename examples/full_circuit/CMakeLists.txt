@@ -21,7 +21,7 @@ endif (ENABLE_CUDA)
 
 add_executable(full_circuit circuit.cc ${CUDA_OBJECT}  circuit_cpu.cc circuit_mapper.cc)
 
-target_link_libraries(full_circuit ${EXTRA_LIBS} legion realm legion_mappers)
+target_link_libraries(full_circuit legion realm legion_mappers ${EXTRA_LIBS})
 target_include_directories(full_circuit
     PUBLIC "${CMAKE_SOURCE_DIR}/runtime"
    "${CMAKE_SOURCE_DIR}/runtime/legion"

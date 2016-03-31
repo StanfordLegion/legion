@@ -73,9 +73,11 @@ endif(ENABLE_GASNET)
 option(USE_LIBDL "Use libdl" ON)
 if (USE_LIBDL)
  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -ldl")
+ list(APPEND EXTRA_LIBS dl)
 endif (USE_LIBDL)
 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -lrt") 
+set (CMAKE_EXE_LINKER_FLAGS  "${CMAKE_EXE_LINKER_FLAGS} -ldl")
 #------------------------------------------------------------------------------#
 # THREADS configuration
 #------------------------------------------------------------------------------#

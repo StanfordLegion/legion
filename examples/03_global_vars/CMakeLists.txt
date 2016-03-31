@@ -15,7 +15,7 @@
 #------------------------------------------------------------------------------#
 
 add_executable(03_global_vars global_vars.cc)
-target_link_libraries(03_global_vars ${EXTRA_LIBS} legion realm legion_mappers)
+target_link_libraries(03_global_vars legion realm legion_mappers ${EXTRA_LIBS})
 target_include_directories(03_global_vars
     PUBLIC "${CMAKE_SOURCE_DIR}/runtime"
    "${CMAKE_SOURCE_DIR}/runtime/legion"

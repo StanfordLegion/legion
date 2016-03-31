@@ -21,7 +21,7 @@ endif (ENABLE_CUDA)
 
 add_executable(thrust_interop thrust_interop.cc ${CUDA_OBJECT})
 
-target_link_libraries(thrust_interop ${EXTRA_LIBS} legion realm legion_mappers)
+target_link_libraries(thrust_interop legion realm legion_mappers ${EXTRA_LIBS})
 target_include_directories(thrust_interop
     PUBLIC "${CMAKE_SOURCE_DIR}/runtime"
    "${CMAKE_SOURCE_DIR}/runtime/legion"

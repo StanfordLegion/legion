@@ -14,9 +14,10 @@
 # limitations under the License.
 #------------------------------------------------------------------------------#
 
-add_executable(01_tasks_and_futures tasks_and_futures.cc)
-target_link_libraries(01_tasks_and_futures legion realm legion_mappers ${EXTRA_LIBS})
-target_include_directories(01_tasks_and_futures
+add_executable(dynamic_registration dynamic_registration.cc)
+target_link_libraries(dynamic_registration legion realm legion_mappers ${EXTRA_LIBS})
+target_include_directories(dynamic_registration
     PUBLIC "${CMAKE_SOURCE_DIR}/runtime"
-    "${CMAKE_SOURCE_DIR}/runtime/legion"
+   "${CMAKE_SOURCE_DIR}/runtime/legion"
+    "${CMAKE_SOURCE_DIR}/runtime/mappers"
     "${CMAKE_SOURCE_DIR}/runtime/realm")
