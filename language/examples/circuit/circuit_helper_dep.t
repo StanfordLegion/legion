@@ -109,7 +109,7 @@ do
     end
     w.out_ptr = dynamic_cast(ptr(Node, rpn, rsn, rgn), w.out_ptr)
     if isnull(w.out_ptr) then
-      c.printf("validation error: wire %d points to an invalid nod\n",
+      c.printf("validation error: wire %d points to an invalid node\n",
         __raw(w))
       regentlib.assert(false, "pointer validation failed")
     end
