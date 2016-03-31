@@ -436,7 +436,9 @@ typedef int coord_t;
    *        LegionRuntime::HighLevel::IndexSpace)
    */
   legion_domain_t
-  legion_domain_from_index_space(legion_index_space_t is);
+  legion_domain_from_index_space(legion_runtime_t runtime_,
+                                 legion_context_t ctx_,
+                                 legion_index_space_t is);
 
   // -----------------------------------------------------------------------
   // Domain Point Operations

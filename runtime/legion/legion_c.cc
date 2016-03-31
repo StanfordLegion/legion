@@ -118,15 +118,17 @@ legion_domain_get_volume(legion_domain_t d_)
   return d.get_volume();
 }
 
-#if 0
 legion_domain_t
-legion_domain_from_index_space(legion_index_space_t is_)
+legion_domain_from_index_space(legion_runtime_t runtime_,
+                               legion_context_t ctx_,
+                               legion_index_space_t is_)
 {
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   IndexSpace is = CObjectWrapper::unwrap(is_);
 
-  return CObjectWrapper::wrap(Domain(is));
+  return CObjectWrapper::wrap(runtime->get_index_space_domain(ctx, is));
 }
-#endif
 
 // -----------------------------------------------------------------------
 // Domain Point Operations
@@ -644,6 +646,8 @@ PartitionEqualShim::task(const Task *task,
   assert(task->arglen == sizeof(Args));
   Args &args = *(Args *)task->args;
   assert(args.granularity == 1);
+
+  assert(runtime->get_index_space_domain(ctx, args.handle).get_dim() == 0);
 
   size_t total = 0;
   for (IndexIterator it(runtime, ctx, args.handle); it.has_next();) {
