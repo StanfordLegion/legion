@@ -176,7 +176,12 @@ namespace Realm {
 	return 0;
 
       llvm::SMDiagnostic sm;
-      llvm::MemoryBuffer *mb = llvm::MemoryBuffer::getMemBuffer((const char *)ir.base());
+      // LLVM requires that the data be null-terminated (even for bitcode?)
+      //  so make a copy and add one extra byte
+      char *nullterm = new char[ir.size() + 1];
+      memcpy(nullterm, ir.base(), ir.size());
+      nullterm[ir.size()] = 0;
+      llvm::MemoryBuffer *mb = llvm::MemoryBuffer::getMemBuffer(nullterm);
       llvm::Module *m = llvm::ParseIR(mb, sm, *context);
       if(!m) {
 	std::string errstr;
@@ -202,6 +207,9 @@ namespace Realm {
 
       // and this call actually marks that memory executable
       host_exec_engine->finalizeObject();
+
+      // hopefully it's ok to delete the IR source buffer now...
+      delete[] nullterm;
 
       return fnptr;
     }

@@ -365,6 +365,14 @@ function pretty.expr_cross_product(cx, node)
       "cross_product(", commas({pretty.expr_list(cx, node.args)}), ")"})
 end
 
+function pretty.expr_list_slice_partition(cx, node)
+  return join({
+      "list_slice_partition(",
+      commas({pretty.expr(cx, node.partition),
+              pretty.expr(cx, node.indices)}),
+      ")"})
+end
+
 function pretty.expr_list_duplicate_partition(cx, node)
   return join({
       "list_duplicate_partition(",
@@ -385,7 +393,16 @@ function pretty.expr_list_cross_product(cx, node)
   return join({
       "list_cross_product(",
       commas({pretty.expr(cx, node.lhs),
-              pretty.expr(cx, node.rhs)}),
+              pretty.expr(cx, node.rhs),
+              tostring(node.shallow)}),
+      ")"})
+end
+
+function pretty.expr_list_cross_product_complete(cx, node)
+  return join({
+      "list_cross_product_complete(",
+      commas({pretty.expr(cx, node.lhs),
+              pretty.expr(cx, node.product)}),
       ")"})
 end
 
@@ -396,7 +413,7 @@ end
 
 function pretty.expr_list_invert(cx, node)
   return join({
-      "list_cross_product(",
+      "list_invert(",
       commas({pretty.expr(cx, node.rhs),
               pretty.expr(cx, node.product),
               pretty.expr(cx, node.barriers)}),
@@ -405,7 +422,7 @@ end
 
 function pretty.expr_list_range(cx, node)
   return join({
-      "list_duplicate_partition(",
+      "list_range(",
       commas({pretty.expr(cx, node.start),
               pretty.expr(cx, node.stop)}),
       ")"})
@@ -416,9 +433,30 @@ function pretty.expr_phase_barrier(cx, node)
       "phase_barrier(", commas({pretty.expr(cx, node.value)}), ")"})
 end
 
+function pretty.expr_dynamic_collective(cx, node)
+  return join({
+      "dynamic_collective(",
+      commas({tostring(node.value_type), node.op, pretty.expr(cx, node.arrivals)}),
+      ")"})
+end
+
+function pretty.expr_dynamic_collective_get_result(cx, node)
+  return join({
+      "dynamic_collective_get_result(",
+      commas({pretty.expr(cx, node.value)}),
+      ")"})
+end
+
 function pretty.expr_advance(cx, node)
   return join({
       "advance(", commas({pretty.expr(cx, node.value)}), ")"})
+end
+
+function pretty.expr_arrive(cx, node)
+  return join({
+      "arrive(",
+      commas({pretty.expr(cx, node.barrier), pretty.expr(cx, node.value)}),
+      ")"})
 end
 
 function pretty.expr_copy(cx, node)
@@ -560,6 +598,9 @@ function pretty.expr(cx, node)
   elseif node:is(ast.typed.expr.CrossProduct) then
     return pretty.expr_cross_product(cx, node)
 
+  elseif node:is(ast.typed.expr.ListSlicePartition) then
+    return pretty.expr_list_slice_partition(cx, node)
+
   elseif node:is(ast.typed.expr.ListDuplicatePartition) then
     return pretty.expr_list_duplicate_partition(cx, node)
 
@@ -568,6 +609,9 @@ function pretty.expr(cx, node)
 
   elseif node:is(ast.typed.expr.ListCrossProduct) then
     return pretty.expr_list_cross_product(cx, node)
+
+  elseif node:is(ast.typed.expr.ListCrossProductComplete) then
+    return pretty.expr_list_cross_product_complete(cx, node)
 
   elseif node:is(ast.typed.expr.ListPhaseBarriers) then
     return pretty.expr_list_phase_barriers(cx, node)
@@ -581,8 +625,17 @@ function pretty.expr(cx, node)
   elseif node:is(ast.typed.expr.PhaseBarrier) then
     return pretty.expr_phase_barrier(cx, node)
 
+  elseif node:is(ast.typed.expr.DynamicCollective) then
+    return pretty.expr_dynamic_collective(cx, node)
+
+  elseif node:is(ast.typed.expr.DynamicCollectiveGetResult) then
+    return pretty.expr_dynamic_collective_get_result(cx, node)
+
   elseif node:is(ast.typed.expr.Advance) then
     return pretty.expr_advance(cx, node)
+
+  elseif node:is(ast.typed.expr.Arrive) then
+    return pretty.expr_arrive(cx, node)
 
   elseif node:is(ast.typed.expr.Copy) then
     return pretty.expr_copy(cx, node)
@@ -744,6 +797,14 @@ function pretty.stat_expr(cx, node)
   return pretty.expr(cx, node.expr)
 end
 
+function pretty.stat_begin_trace(cx, node)
+  return join({"__begin_trace(", pretty.expr(cx, node.trace_id), ")"})
+end
+
+function pretty.stat_end_trace(cx, node)
+  return join({"__end_trace(", pretty.expr(cx, node.trace_id), ")"})
+end
+
 function pretty.stat_map_regions(cx, node)
   return join({
     "__map_regions(",
@@ -755,6 +816,13 @@ function pretty.stat_unmap_regions(cx, node)
   return join({
     "__unmap_regions(",
     commas(node.region_types:map(function(region) return tostring(region) end)),
+    ")"})
+end
+
+function pretty.stat_raw_delete(cx, node)
+  return join({
+    "__delete(",
+    pretty.expr(cx, node.value),
     ")"})
 end
 
@@ -807,11 +875,20 @@ function pretty.stat(cx, node)
   elseif node:is(ast.typed.stat.Expr) then
     return pretty.stat_expr(cx, node)
 
+  elseif node:is(ast.typed.stat.BeginTrace) then
+    return pretty.stat_begin_trace(cx, node)
+
+  elseif node:is(ast.typed.stat.EndTrace) then
+    return pretty.stat_end_trace(cx, node)
+
   elseif node:is(ast.typed.stat.MapRegions) then
     return pretty.stat_map_regions(cx, node)
 
   elseif node:is(ast.typed.stat.UnmapRegions) then
     return pretty.stat_unmap_regions(cx, node)
+
+  elseif node:is(ast.typed.stat.RawDelete) then
+    return pretty.stat_raw_delete(cx, node)
 
   else
     assert(false, "unexpected node type " .. tostring(node:type()))

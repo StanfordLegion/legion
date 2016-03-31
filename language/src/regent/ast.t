@@ -385,17 +385,21 @@ ast.options:leaf("Forbid", {"value"}, true)
 ast.options:leaf("Unroll", {"value"}, true)
 
 -- Options: Sets
-ast.options:leaf("Set", {"cuda", "inline", "parallel", "spmd", "vectorize"},
+ast.options:leaf("Set", {"cuda", "inline", "parallel", "spmd", "trace",
+                         "vectorize", "block"},
                  false, true)
 
 function ast.default_options()
   local allow = ast.options.Allow { value = false }
+  local forbid = ast.options.Forbid { value = false }
   return ast.options.Set {
     cuda = allow,
     inline = allow,
     parallel = allow,
     spmd = allow,
+    trace = allow,
     vectorize = allow,
+    block = forbid,
   }
 end
 
@@ -469,13 +473,18 @@ ast.unspecialized.expr:leaf("PartitionByField", {"region", "colors"})
 ast.unspecialized.expr:leaf("Image", {"parent", "partition", "region"})
 ast.unspecialized.expr:leaf("Preimage", {"parent", "partition", "region"})
 ast.unspecialized.expr:leaf("CrossProduct", {"args"})
+ast.unspecialized.expr:leaf("ListSlicePartition", {"partition", "indices"})
 ast.unspecialized.expr:leaf("ListDuplicatePartition", {"partition", "indices"})
-ast.unspecialized.expr:leaf("ListCrossProduct", {"lhs", "rhs"})
+ast.unspecialized.expr:leaf("ListCrossProduct", {"lhs", "rhs", "shallow"})
+ast.unspecialized.expr:leaf("ListCrossProductComplete", {"lhs", "product"})
 ast.unspecialized.expr:leaf("ListPhaseBarriers", {"product"})
 ast.unspecialized.expr:leaf("ListInvert", {"rhs", "product", "barriers"})
 ast.unspecialized.expr:leaf("ListRange", {"start", "stop"})
 ast.unspecialized.expr:leaf("PhaseBarrier", {"value"})
+ast.unspecialized.expr:leaf("DynamicCollective", {"value_type_expr", "op", "arrivals"})
+ast.unspecialized.expr:leaf("DynamicCollectiveGetResult", {"value"})
 ast.unspecialized.expr:leaf("Advance", {"value"})
+ast.unspecialized.expr:leaf("Arrive", {"barrier", "value"})
 ast.unspecialized.expr:leaf("Copy", {"src", "dst", "op", "conditions"})
 ast.unspecialized.expr:leaf("Fill", {"dst", "value", "conditions"})
 ast.unspecialized.expr:leaf("AllocateScratchFields", {"region"})
@@ -514,6 +523,8 @@ ast.unspecialized.stat:leaf("Fspace", {"name", "params", "fields",
                                        "constraints"})
 ast.unspecialized.stat:leaf("FspaceParam", {"param_name", "type_expr"})
 ast.unspecialized.stat:leaf("FspaceField", {"field_name", "type_expr"})
+
+ast.unspecialized.stat:leaf("RawDelete", {"value"})
 
 -- Node Types (Specialized)
 
@@ -581,13 +592,18 @@ ast.specialized.expr:leaf("PartitionByField", {"region", "colors"})
 ast.specialized.expr:leaf("Image", {"parent", "partition", "region"})
 ast.specialized.expr:leaf("Preimage", {"parent", "partition", "region"})
 ast.specialized.expr:leaf("CrossProduct", {"args"})
+ast.specialized.expr:leaf("ListSlicePartition", {"partition", "indices"})
 ast.specialized.expr:leaf("ListDuplicatePartition", {"partition", "indices"})
-ast.specialized.expr:leaf("ListCrossProduct", {"lhs", "rhs"})
+ast.specialized.expr:leaf("ListCrossProduct", {"lhs", "rhs", "shallow"})
+ast.specialized.expr:leaf("ListCrossProductComplete", {"lhs", "product"})
 ast.specialized.expr:leaf("ListPhaseBarriers", {"product"})
 ast.specialized.expr:leaf("ListInvert", {"rhs", "product", "barriers"})
 ast.specialized.expr:leaf("ListRange", {"start", "stop"})
 ast.specialized.expr:leaf("PhaseBarrier", {"value"})
+ast.specialized.expr:leaf("DynamicCollective", {"value_type", "op", "arrivals"})
+ast.specialized.expr:leaf("DynamicCollectiveGetResult", {"value"})
 ast.specialized.expr:leaf("Advance", {"value"})
+ast.specialized.expr:leaf("Arrive", {"barrier", "value"})
 ast.specialized.expr:leaf("Copy", {"src", "dst", "op", "conditions"})
 ast.specialized.expr:leaf("Fill", {"dst", "value", "conditions"})
 ast.specialized.expr:leaf("AllocateScratchFields", {"region"})
@@ -627,6 +643,8 @@ ast.specialized.stat:leaf("Task", {"name", "params", "return_type",
 ast.specialized.stat:leaf("TaskParam", {"symbol"})
 ast.specialized.stat:leaf("Fspace", {"name", "fspace", "constraints"})
 
+ast.specialized.stat:leaf("RawDelete", {"value"})
+
 -- Node Types (Typed)
 
 ast.typed = ast:inner("typed", {"span"})
@@ -661,14 +679,19 @@ ast.typed.expr:leaf("PartitionByField", {"region", "colors"})
 ast.typed.expr:leaf("Image", {"parent", "partition", "region"})
 ast.typed.expr:leaf("Preimage", {"parent", "partition", "region"})
 ast.typed.expr:leaf("CrossProduct", {"args"})
+ast.typed.expr:leaf("ListSlicePartition", {"partition", "indices"})
 ast.typed.expr:leaf("ListDuplicatePartition", {"partition", "indices"})
 ast.typed.expr:leaf("ListSliceCrossProduct", {"product", "indices"})
-ast.typed.expr:leaf("ListCrossProduct", {"lhs", "rhs"})
+ast.typed.expr:leaf("ListCrossProduct", {"lhs", "rhs", "shallow"})
+ast.typed.expr:leaf("ListCrossProductComplete", {"lhs", "product"})
 ast.typed.expr:leaf("ListPhaseBarriers", {"product"})
 ast.typed.expr:leaf("ListInvert", {"rhs", "product", "barriers"})
 ast.typed.expr:leaf("ListRange", {"start", "stop"})
 ast.typed.expr:leaf("PhaseBarrier", {"value"})
+ast.typed.expr:leaf("DynamicCollective", {"value_type", "op", "arrivals"})
+ast.typed.expr:leaf("DynamicCollectiveGetResult", {"value"})
 ast.typed.expr:leaf("Advance", {"value"})
+ast.typed.expr:leaf("Arrive", {"barrier", "value"})
 ast.typed.expr:leaf("Copy", {"src", "dst", "op", "conditions"})
 ast.typed.expr:leaf("Fill", {"dst", "value", "conditions"})
 ast.typed.expr:leaf("AllocateScratchFields", {"region"})
@@ -706,6 +729,8 @@ ast.typed.stat:leaf("Break")
 ast.typed.stat:leaf("Assignment", {"lhs", "rhs"})
 ast.typed.stat:leaf("Reduce", {"op", "lhs", "rhs"})
 ast.typed.stat:leaf("Expr", {"expr"})
+ast.typed.stat:leaf("BeginTrace", {"trace_id"})
+ast.typed.stat:leaf("EndTrace", {"trace_id"})
 ast.typed.stat:leaf("MapRegions", {"region_types"})
 ast.typed.stat:leaf("UnmapRegions", {"region_types"})
 
@@ -717,5 +742,7 @@ ast.typed.stat:leaf("Task", {"name", "params", "return_type", "privileges",
                              "region_divergence", "prototype"})
 ast.typed.stat:leaf("TaskParam", {"symbol", "param_type"})
 ast.typed.stat:leaf("Fspace", {"name", "fspace"})
+
+ast.typed.stat:leaf("RawDelete", {"value"})
 
 return ast

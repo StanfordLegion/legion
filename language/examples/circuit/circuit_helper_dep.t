@@ -169,20 +169,20 @@ end
 
 helper.timestamp = c.legion_get_current_time_in_micros
 
-task __block(rn : region(Node), rw : region(Wire(rn, rn, rn)))
+local task block(rn : region(Node), rw : region(Wire(rn, rn, rn)))
 where reads(rn, rw)
 do
   return 1
 end
 
-local terra __wait_for(x : int)
+local terra wait_for(x : int)
 end
 
 __demand(__inline)
 task helper.wait_for(rn : region(Node), rw : region(Wire(rn, rn, rn)))
 where reads(rn, rw)
 do
-  __wait_for(__block(rn, rw))
+  wait_for(block(rn, rw))
 end
 
 return helper

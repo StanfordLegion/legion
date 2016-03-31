@@ -7983,6 +7983,8 @@ namespace Legion {
             child_mask.enable(it->first.value, it->second-it->first+1);
           }
         }
+        else
+          continue;
         // Now make the index space and save the information
 #ifdef ASSUME_UNALLOCABLE
         Realm::IndexSpace child_space = 
@@ -9877,6 +9879,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return forest->is_index_partition_disjoint(p);
+    }
+
+    //--------------------------------------------------------------------------
+    bool Runtime::is_index_partition_complete(Context ctx, IndexPartition p)
+    //--------------------------------------------------------------------------
+    {
+      return forest->is_index_partition_complete(p);
     }
 
     //--------------------------------------------------------------------------
@@ -13237,7 +13246,7 @@ namespace Legion {
         ctx->add_local_field(space, fid, field_size, serdez_id);
       else
       {
-        forest->allocate_field(space, field_size, fid, local, serdez_id);
+        forest->allocate_field(space, field_size, fid, serdez_id);
         ctx->register_field_creation(space, fid);
       }
       return fid;

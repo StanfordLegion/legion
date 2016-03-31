@@ -1087,6 +1087,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool RegionTreeForest::is_index_partition_complete(IndexPartition p)
+    //--------------------------------------------------------------------------
+    {
+      IndexPartNode *node = get_node(p);
+      return node->is_complete();
+    }
+
+    //--------------------------------------------------------------------------
     void RegionTreeForest::create_field_space(FieldSpace handle)
     //--------------------------------------------------------------------------
     {
@@ -3426,10 +3434,28 @@ namespace Legion {
             else
               wait_on = finder->second;
           }
+          else
+          {
+            // We lost the race and it may be here now
+            std::map<LogicalRegion,RegionNode*>::const_iterator it = 
+              region_nodes.find(handle);
+            if (it != region_nodes.end())
+              return it->second;
+          }
         }
-        // Wait for the top-level if necessary
-        if (wait_on.exists() && !wait_on.has_triggered())
-          wait_on.wait();
+        // If we did find something to wait on, do that now
+        if (wait_on.exists())
+        {
+          if (!wait_on.has_triggered())
+            wait_on.wait();
+          // Retake the lock and see again if the handle we
+          // were looking for was the top-level node or not
+          AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
+          std::map<LogicalRegion,RegionNode*>::const_iterator it = 
+            region_nodes.find(handle);
+          if (it != region_nodes.end())
+            return it->second;
+        }
       }
       // Otherwise it hasn't been made yet, so make it
       IndexSpaceNode *index_node = get_node(handle.index_space);

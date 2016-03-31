@@ -4778,6 +4778,9 @@ namespace Legion {
         // Skip any NO_ACCESS or empty privilege field regions
         if (IS_NO_ACCESS(regions[idx]) || regions[idx].privilege_fields.empty())
         {
+          // Make sure no instance created when no access privilege is given
+          if (IS_NO_ACCESS(regions[idx])) continue;
+
           virtual_mapped[idx] = true;
           continue;
         }
@@ -5699,6 +5702,9 @@ namespace Legion {
             // initialized the local contexts and received
             // back the local instance references
           }
+          // Make sure you have the metadata for the region with no access priv
+          if (IS_NO_ACCESS(clone_requirements[idx]))
+            runtime->forest->get_node(clone_requirements[idx].region);
         }
 
         // If we're a leaf task and we have virtual mappings
@@ -11453,12 +11459,14 @@ namespace Legion {
         while (true) 
         {
           args.slice = *it;
+          // Have to update this before launching the task to avoid 
+          // the clean-up race
           it++;
           bool done = (it == slices.end()); 
           Event wait = 
             owner->runtime->issue_runtime_meta_task(&args, sizeof(args), 
                                                     HLR_DEFERRED_SLICE_ID, 
-                                                    HLR_LATENCY_PRIORITY, *it);
+                                                    HLR_LATENCY_PRIORITY, args.slice);
           if (wait.exists())
             wait_events.insert(wait);
           if (done)

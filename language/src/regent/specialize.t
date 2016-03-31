@@ -244,10 +244,16 @@ local function get_num_accessed_fields(node)
   elseif node:is(ast.unspecialized.expr.CrossProduct) then
     return 1
 
+  elseif node:is(ast.unspecialized.expr.ListSlicePartition) then
+    return 1
+
   elseif node:is(ast.unspecialized.expr.ListDuplicatePartition) then
     return 1
 
   elseif node:is(ast.unspecialized.expr.ListCrossProduct) then
+    return 1
+
+  elseif node:is(ast.unspecialized.expr.ListCrossProductComplete) then
     return 1
 
   elseif node:is(ast.unspecialized.expr.ListPhaseBarriers) then
@@ -262,7 +268,16 @@ local function get_num_accessed_fields(node)
   elseif node:is(ast.unspecialized.expr.PhaseBarrier) then
     return 1
 
+  elseif node:is(ast.unspecialized.expr.DynamicCollective) then
+    return 1
+
   elseif node:is(ast.unspecialized.expr.Advance) then
+    return 1
+
+  elseif node:is(ast.unspecialized.expr.Arrive) then
+    return 1
+
+  elseif node:is(ast.unspecialized.expr.DynamicCollectiveGetResult) then
     return 1
 
   elseif node:is(ast.unspecialized.expr.Copy) then
@@ -893,6 +908,15 @@ function specialize.expr_cross_product(cx, node)
   }
 end
 
+function specialize.expr_list_slice_partition(cx, node)
+  return ast.specialized.expr.ListSlicePartition {
+    partition = specialize.expr(cx, node.partition),
+    indices = specialize.expr(cx, node.indices),
+    options = node.options,
+    span = node.span,
+  }
+end
+
 function specialize.expr_list_duplicate_partition(cx, node)
   return ast.specialized.expr.ListDuplicatePartition {
     partition = specialize.expr(cx, node.partition),
@@ -906,6 +930,16 @@ function specialize.expr_list_cross_product(cx, node)
   return ast.specialized.expr.ListCrossProduct {
     lhs = specialize.expr(cx, node.lhs),
     rhs = specialize.expr(cx, node.rhs),
+    shallow = node.shallow,
+    options = node.options,
+    span = node.span,
+  }
+end
+
+function specialize.expr_list_cross_product_complete(cx, node)
+  return ast.specialized.expr.ListCrossProductComplete {
+    lhs = specialize.expr(cx, node.lhs),
+    product = specialize.expr(cx, node.product),
     options = node.options,
     span = node.span,
   }
@@ -946,8 +980,36 @@ function specialize.expr_phase_barrier(cx, node)
   }
 end
 
+function specialize.expr_dynamic_collective(cx, node)
+  local value_type = node.value_type_expr(cx.env:env())
+  return ast.specialized.expr.DynamicCollective {
+    value_type = value_type,
+    op = node.op,
+    arrivals = specialize.expr(cx, node.arrivals),
+    options = node.options,
+    span = node.span,
+  }
+end
+
+function specialize.expr_dynamic_collective_get_result(cx, node)
+  return ast.specialized.expr.DynamicCollectiveGetResult {
+    value = specialize.expr(cx, node.value),
+    options = node.options,
+    span = node.span,
+  }
+end
+
 function specialize.expr_advance(cx, node)
   return ast.specialized.expr.Advance {
+    value = specialize.expr(cx, node.value),
+    options = node.options,
+    span = node.span,
+  }
+end
+
+function specialize.expr_arrive(cx, node)
+  return ast.specialized.expr.Arrive {
+    barrier = specialize.expr(cx, node.barrier),
     value = specialize.expr(cx, node.value),
     options = node.options,
     span = node.span,
@@ -1098,11 +1160,17 @@ function specialize.expr(cx, node)
   elseif node:is(ast.unspecialized.expr.CrossProduct) then
     return specialize.expr_cross_product(cx, node)
 
+  elseif node:is(ast.unspecialized.expr.ListSlicePartition) then
+    return specialize.expr_list_slice_partition(cx, node)
+
   elseif node:is(ast.unspecialized.expr.ListDuplicatePartition) then
     return specialize.expr_list_duplicate_partition(cx, node)
 
   elseif node:is(ast.unspecialized.expr.ListCrossProduct) then
     return specialize.expr_list_cross_product(cx, node)
+
+  elseif node:is(ast.unspecialized.expr.ListCrossProductComplete) then
+    return specialize.expr_list_cross_product_complete(cx, node)
 
   elseif node:is(ast.unspecialized.expr.ListPhaseBarriers) then
     return specialize.expr_list_phase_barriers(cx, node)
@@ -1116,8 +1184,17 @@ function specialize.expr(cx, node)
   elseif node:is(ast.unspecialized.expr.PhaseBarrier) then
     return specialize.expr_phase_barrier(cx, node)
 
+  elseif node:is(ast.unspecialized.expr.DynamicCollective) then
+    return specialize.expr_dynamic_collective(cx, node)
+
   elseif node:is(ast.unspecialized.expr.Advance) then
     return specialize.expr_advance(cx, node)
+
+  elseif node:is(ast.unspecialized.expr.Arrive) then
+    return specialize.expr_arrive(cx, node)
+
+  elseif node:is(ast.unspecialized.expr.DynamicCollectiveGetResult) then
+    return specialize.expr_dynamic_collective_get_result(cx, node)
 
   elseif node:is(ast.unspecialized.expr.Copy) then
     return specialize.expr_copy(cx, node)
@@ -1383,6 +1460,14 @@ function specialize.stat_expr(cx, node)
   }
 end
 
+function specialize.stat_raw_delete(cx, node)
+  return ast.specialized.stat.RawDelete {
+    value = specialize.expr(cx, node.value),
+    options = node.options,
+    span = node.span,
+  }
+end
+
 function specialize.stat(cx, node)
   if node:is(ast.unspecialized.stat.If) then
     return specialize.stat_if(cx, node)
@@ -1425,6 +1510,9 @@ function specialize.stat(cx, node)
 
   elseif node:is(ast.unspecialized.stat.Expr) then
     return specialize.stat_expr(cx, node)
+
+  elseif node:is(ast.unspecialized.stat.RawDelete) then
+    return specialize.stat_raw_delete(cx, node)
 
   else
     assert(false, "unexpected node type " .. tostring(node:type()))

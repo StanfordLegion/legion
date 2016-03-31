@@ -82,7 +82,8 @@ def install_terra(terra_dir, external_terra_dir, thread_count):
             sys.exit(1)
 
     if not os.path.exists(terra_dir):
-        git_clone(terra_dir, 'https://github.com/zdevito/terra.git')
+        #git_clone(terra_dir, 'https://github.com/zdevito/terra.git')
+        git_clone(terra_dir, 'https://github.com/elliottslaughter/terra.git')
     else:
         git_update(terra_dir)
     build_terra(terra_dir, thread_count)
@@ -92,7 +93,7 @@ def symlink(from_path, to_path):
         os.symlink(from_path, to_path)
 
 def install_bindings(bindings_dir, runtime_dir, terra_dir, debug, general_llr,
-                     cuda, gasnet, clean_first, thread_count, extra_flags):
+                     cuda, gasnet, gasnet_dir, clean_first, thread_count, extra_flags):
     env = dict(list(os.environ.items()) + [
         ('LG_RT_DIR', runtime_dir),
         ('TERRA_DIR', terra_dir),                           # for bindings
@@ -105,6 +106,7 @@ def install_bindings(bindings_dir, runtime_dir, terra_dir, debug, general_llr,
          'USE_GASNET=%s' % (1 if gasnet else 0),
          ] +
         extra_flags +
+        (['GASNET=%s' % gasnet_dir] if gasnet_dir is not None else []) +
         (['GCC=%s' % os.environ['CXX']] if 'CXX' in os.environ else []))
 
     if clean_first:
@@ -141,11 +143,46 @@ def install_bindings(bindings_dir, runtime_dir, terra_dir, debug, general_llr,
              '/usr/local/lib/libluajit-5.1.2.dylib', 'libluajit-5.1.2.dylib',
              os.path.join(bindings_dir, 'liblegion_terra.so')])
 
-def install():
+def install(shared_llr=False, general_llr=True, gasnet=False, cuda=False,
+            external_terra_dir=None, gasnet_dir=None, debug=False,
+            clean_first=True, thread_count=None, extra_flags=[]):
+    if shared_llr and general_llr:
+        raise Exception('Shared LLR is mutually exclusive with general LLR.')
+
+    general = not shared_llr
+
+    if gasnet and not general:
+        raise Exception('General LLR is required for GASNet.')
+
+    if cuda and not general:
+        raise Exception('General LLR is required for CUDA.')
+
+    thread_count = thread_count
+    if thread_count is None:
+        thread_count = multiprocessing.cpu_count()
+
+    root_dir = os.path.dirname(os.path.realpath(__file__))
+    legion_dir = os.path.dirname(root_dir)
+
+    # Grab LG_RT_DIR from the environment if available, otherwise
+    # assume we're running relative to our own location.
+    runtime_dir = os.path.join(legion_dir, 'runtime')
+    if 'LG_RT_DIR' in os.environ:
+        runtime_dir = os.path.realpath(os.environ['LG_RT_DIR'])
+
+    terra_dir = os.path.join(root_dir, 'terra')
+    install_terra(terra_dir, external_terra_dir, thread_count)
+
+    bindings_dir = os.path.join(legion_dir, 'bindings', 'terra')
+    install_bindings(bindings_dir, runtime_dir, terra_dir, debug,
+                     general, cuda, gasnet, gasnet_dir, clean_first,
+                     thread_count, extra_flags)
+
+def driver():
     parser = argparse.ArgumentParser(
         description = 'Install Regent front end.')
     parser.add_argument(
-        '--with-terra', dest = 'terra', required = False,
+        '--with-terra', dest = 'external_terra_dir', required = False,
         help = 'Path to Terra installation directory (optional).')
     parser.add_argument(
         '--debug', dest = 'debug', action = 'store_true', required = False,
@@ -175,37 +212,7 @@ def install():
         help = 'Number threads used to compile.')
     args = parser.parse_args()
 
-    if args.shared_llr and args.general_llr:
-        raise Exception('Shared LLR is mutually exclusive with general LLR.')
-
-    general = not args.shared_llr
-
-    if args.gasnet and not general:
-        raise Exception('General LLR is required for GASNet.')
-
-    if args.cuda and not general:
-        raise Exception('General LLR is required for CUDA.')
-
-    thread_count = args.thread_count
-    if thread_count is None:
-        thread_count = multiprocessing.cpu_count()
-
-    root_dir = os.path.dirname(os.path.realpath(__file__))
-    legion_dir = os.path.dirname(root_dir)
-
-    # Grab LG_RT_DIR from the environment if available, otherwise
-    # assume we're running relative to our own location.
-    runtime_dir = os.path.join(legion_dir, 'runtime')
-    if 'LG_RT_DIR' in os.environ:
-        runtime_dir = os.path.realpath(os.environ['LG_RT_DIR'])
-
-    terra_dir = os.path.join(root_dir, 'terra')
-    install_terra(terra_dir, args.terra, thread_count)
-
-    bindings_dir = os.path.join(legion_dir, 'bindings', 'terra')
-    install_bindings(bindings_dir, runtime_dir, terra_dir, args.debug,
-                     general, args.cuda, args.gasnet, args.clean_first,
-                     thread_count, args.extra_flags)
+    install(**vars(args))
 
 if __name__ == '__main__':
-    install()
+    driver()

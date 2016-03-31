@@ -982,6 +982,14 @@ namespace Legion {
        */
       template<typename T>
       static inline Future from_value(Runtime *rt, const T &value);
+
+      /**
+       * Generates a future from an untyped pointer.  No
+       * serialization is performed.
+       */
+      static inline Future from_untyped_pointer(Runtime *rt,
+						const void *buffer,
+						size_t bytes);
     private:
       void* get_untyped_result(void); 
     };
@@ -2749,6 +2757,14 @@ namespace Legion {
        * @return whether the index partition is disjoint
        */
       bool is_index_partition_disjoint(Context ctx, IndexPartition p);
+
+      /**
+       * Return whether a given index partition is complete
+       * @param ctx enclosing task context
+       * @param p index partition handle
+       * @return whether the index partition is complete
+       */
+      bool is_index_partition_complete(Context ctx, IndexPartition p);
 
       /**
        * Get an index subspace from a partition with a given

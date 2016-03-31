@@ -138,11 +138,15 @@ local function analyze_is_side_effect_free_node(cx)
       node:is(ast.typed.expr.Image) or
       node:is(ast.typed.expr.Preimage) or
       node:is(ast.typed.expr.CrossProduct) or
+      node:is(ast.typed.expr.ListSlicePartition) or
       node:is(ast.typed.expr.ListDuplicatePartition) or
       node:is(ast.typed.expr.ListSliceCrossProduct) or
       node:is(ast.typed.expr.ListCrossProduct) or
+      node:is(ast.typed.expr.ListCrossProductComplete) or
       node:is(ast.typed.expr.ListPhaseBarriers) or
       node:is(ast.typed.expr.PhaseBarrier) or
+      node:is(ast.typed.expr.DynamicCollective) or
+      node:is(ast.typed.expr.Arrive) or
       node:is(ast.typed.expr.Copy) or
       node:is(ast.typed.expr.AllocateScratchFields) or
       node:is(ast.typed.expr.Deref)
@@ -175,11 +179,16 @@ local function analyze_is_loop_invariant_node(cx)
       node:is(ast.typed.expr.Image) or
       node:is(ast.typed.expr.Preimage) or
       node:is(ast.typed.expr.CrossProduct) or
+      node:is(ast.typed.expr.ListSlicePartition) or
       node:is(ast.typed.expr.ListDuplicatePartition) or
       node:is(ast.typed.expr.ListSliceCrossProduct) or
       node:is(ast.typed.expr.ListCrossProduct) or
+      node:is(ast.typed.expr.ListCrossProductComplete) or
       node:is(ast.typed.expr.ListPhaseBarriers) or
       node:is(ast.typed.expr.PhaseBarrier) or
+      node:is(ast.typed.expr.DynamicCollective) or
+      node:is(ast.typed.expr.DynamicCollectiveGetResult) or
+      node:is(ast.typed.expr.Arrive) or
       node:is(ast.typed.expr.Copy) or
       node:is(ast.typed.expr.AllocateScratchFields) or
       node:is(ast.typed.expr.Deref)

@@ -1,3 +1,4 @@
 *.so
 /luabind
 /terra
+/src/rdir

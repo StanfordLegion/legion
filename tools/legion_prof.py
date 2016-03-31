@@ -294,19 +294,19 @@ class TaskRange(TimeRange):
         for subrange in self.subranges:
             subrange.emit_tsv(tsv_file, base_level, max_levels, level + 1)
 
-    def update_task_stats(self, stat):
+    def update_task_stats(self, stat, proc):
         exec_time = self.total_time()
         last_time = self.start_time
-        for subrange in self.subranges:
-            subrange.update_task_stats(stat)
-            if last_time > subrange.start_time:
-                exec_time -= subrange.stop_time - last_time
-            else:
-                exec_time -= subrange.total_time()
-            last_time = max(last_time, subrange.stop_time)
-        assert exec_time >= 0
+        #for subrange in self.subranges:
+        #    subrange.update_task_stats(stat)
+        #    if last_time > subrange.start_time:
+        #        exec_time -= subrange.stop_time - last_time
+        #    else:
+        #        exec_time -= subrange.total_time()
+        #    last_time = max(last_time, subrange.stop_time)
+        #assert exec_time >= 0
         if self.task.is_task:
-            stat.record_task(self.task, exec_time)
+            stat.record_task(self.task, exec_time, proc)
 
     def active_time(self):
         return self.total_time()
@@ -454,7 +454,8 @@ class Processor(object):
         print
 
     def update_task_stats(self, stat):
-        self.full_range.update_task_stats(stat)
+        for task in self.tasks:
+            task.update_task_stats(stat, self)
 
     def __repr__(self):
         return '%s Processor %s' % (self.kind, hex(self.proc_id))
@@ -680,11 +681,11 @@ class Variant(object):
         self.op = dict()
         self.task = None
         self.color = None
-        self.total_calls = 0
-        self.total_execution_time = 0
-        self.all_calls = list()
-        self.max_call = None
-        self.min_call = None
+        self.total_calls = dict()
+        self.total_execution_time = dict()
+        self.all_calls = dict()
+        self.max_call = dict()
+        self.min_call = dict()
 
     def set_task(self, task):
         assert self.task == None
@@ -701,36 +702,81 @@ class Variant(object):
     def total_time(self):
         return self.total_execution_time
 
-    def increment_calls(self, exec_time):
-        self.total_calls += 1
-        self.total_execution_time += exec_time
-        self.all_calls.append(exec_time)
-        if self.max_call is None:
-            self.max_call = exec_time
-        elif exec_time > self.max_call:
-            self.max_call = exec_time
-        if self.min_call is None:
-            self.min_call = exec_time
-        elif exec_time < self.min_call:
-            self.min_call = exec_time
+    def increment_calls(self, exec_time, proc):
+        if proc not in self.total_calls:
+            self.total_calls[proc] = 1
+            self.total_execution_time[proc] = exec_time
+            self.all_calls[proc] = [exec_time]
+            self.max_call[proc] = exec_time
+            self.min_call[proc] = exec_time
+        else:
+            self.total_calls[proc] += 1
+            self.total_execution_time[proc] += exec_time
+            self.all_calls[proc].append(exec_time)
+            if exec_time > self.max_call[proc]:
+                self.max_call[proc] = exec_time
+            if exec_time < self.min_call[proc]:
+                self.min_call[proc] = exec_time
 
-    def print_stats(self):
-        avg = float(self.total_execution_time)/float(self.total_calls)
+    def print_task_stat(self, total_calls, total_execution_time,
+            max_call, max_dev, min_call, min_dev):
+        avg = float(total_execution_time) / float(total_calls) \
+                if total_calls > 0 else 0
+        print '       Total Invocations: %d' % total_calls
+        print '       Total Time: %d us' % total_execution_time
+        print '       Average Time: %.2f us' % avg
+        print '       Maximum Time: %d us (%.3f sig)' % (max_call,max_dev)
+        print '       Minimum Time: %d us (%.3f sig)' % (min_call,min_dev)
+
+
+    def print_stats(self, verbose):
+        procs = sorted(self.total_calls.iterkeys())
+        total_execution_time = 0
+        total_calls = 0
+
+        for proc in procs:
+            total_execution_time += self.total_execution_time[proc]
+            total_calls += self.total_calls[proc]
+
+        avg = float(total_execution_time) / float(total_calls)
         stddev = 0
-        for call in self.all_calls:
-            diff = float(call) - avg
-            stddev += sqrt(diff * diff)
-        stddev /= float(self.total_calls)
+        max_call = self.max_call[procs[0]]
+        min_call = self.min_call[procs[0]]
+        for proc in procs:
+            max_call = max(max_call, self.max_call[proc])
+            min_call = min(min_call, self.min_call[proc])
+            for call in self.all_calls[proc]:
+                diff = float(call) - avg
+                stddev += sqrt(diff * diff)
+        stddev /= float(total_calls)
         stddev = sqrt(stddev)
-        max_dev = (float(self.max_call) - avg) / stddev if stddev != 0.0 else 0.0
-        min_dev = (float(self.min_call) - avg) / stddev if stddev != 0.0 else 0.0
+        max_dev = (float(max_call) - avg) / stddev if stddev != 0.0 else 0.0
+        min_dev = (float(min_call) - avg) / stddev if stddev != 0.0 else 0.0
+
         print '  '+self.name
-        print '       Total Invocations: '+str(self.total_calls)
-        print '       Total Time: '+str(self.total_execution_time)+' us'
-        print '       Average Time: %.2f us' % (avg)
-        print '       Maximum Time: %d us (%.3f sig)' % (self.max_call,max_dev)
-        print '       Minimum Time: %d us (%.3f sig)' % (self.min_call,min_dev)
+        self.print_task_stat(total_calls, total_execution_time,
+                max_call, max_dev, min_call, min_dev)
         print
+
+        if verbose and len(procs) > 1:
+            for proc in sorted(self.total_calls.iterkeys()):
+                avg = float(self.total_execution_time[proc]) / float(self.total_calls[proc]) \
+                        if self.total_calls[proc] > 0 else 0
+                stddev = 0
+                for call in self.all_calls[proc]:
+                    diff = float(call) - avg
+                    stddev += sqrt(diff * diff)
+                stddev /= float(self.total_calls[proc])
+                stddev = sqrt(stddev)
+                max_dev = (float(self.max_call[proc]) - avg) / stddev if stddev != 0.0 else 0.0
+                min_dev = (float(self.min_call[proc]) - avg) / stddev if stddev != 0.0 else 0.0
+
+                print '    On ' + repr(proc)
+                self.print_task_stat(self.total_calls[proc],
+                        self.total_execution_time[proc],
+                        self.max_call[proc], max_dev,
+                        self.min_call[proc], min_dev)
+                print
 
 class Operation(object):
     def __init__(self, op_id):
@@ -1070,30 +1116,30 @@ class StatGatherer(object):
         self.application_tasks = set()
         self.meta_tasks = set()
 
-    def record_task(self, task, exec_time):
+    def record_task(self, task, exec_time, proc):
         assert task.variant is not None
         if task.is_meta:
             if task.variant not in self.meta_tasks:
                 self.meta_tasks.add(task.variant)
-            task.variant.increment_calls(exec_time)
+            task.variant.increment_calls(exec_time, proc)
         else:
             if task.variant not in self.application_tasks:
                 self.application_tasks.add(task.variant)
-            task.variant.increment_calls(exec_time)
+            task.variant.increment_calls(exec_time, proc)
 
-    def print_stats(self):
+    def print_stats(self, verbose):
         print "  -------------------------"
         print "  Task Statistics"
         print "  -------------------------"
         for variant in sorted(self.application_tasks,
                                 key=lambda v: v.total_time(),reverse=True):
-            variant.print_stats()
+            variant.print_stats(verbose)
         print "  -------------------------"
         print "  Meta-Task Statistics"
         print "  -------------------------"
         for variant in sorted(self.meta_tasks,
                                 key=lambda v: v.total_time(),reverse=True):
-            variant.print_stats()
+            variant.print_stats(verbose)
 
 class State(object):
     def __init__(self):
@@ -1549,14 +1595,14 @@ class State(object):
             channel.print_stats()
         print
 
-    def print_task_stats(self):
+    def print_task_stats(self, verbose):
         print '****************************************************'
         print '   TASK STATS'
         print '****************************************************'
         stat = StatGatherer(self)
         for proc in self.processors.itervalues():
             proc.update_task_stats(stat)
-        stat.print_stats()
+        stat.print_stats(verbose)
         print
 
     def print_stats(self, verbose):
@@ -1564,7 +1610,7 @@ class State(object):
             self.print_processor_stats()
             self.print_memory_stats()
             self.print_channel_stats()
-        self.print_task_stats()
+        self.print_task_stats(verbose)
 
     def assign_colors(self):
         # Subtract out some colors for which we have special colors
@@ -1686,14 +1732,16 @@ class State(object):
         data_tsv_file.write("level\tstart\tend\tcolor\topacity\ttitle\n")
         if show_procs:
             for p,proc in sorted(self.processors.iteritems()):
-                base_level = proc.emit_tsv(data_tsv_file, base_level)
-                processor_levels[proc] = base_level
-                last_time = max(last_time, proc.full_range.stop_time)
+                if len(proc.tasks) > 0:
+                    base_level = proc.emit_tsv(data_tsv_file, base_level)
+                    processor_levels[proc] = base_level
+                    last_time = max(last_time, proc.full_range.stop_time)
         if show_channels:
             for c,channel in sorted(self.channels.iteritems()):
-                base_level = channel.emit_tsv(data_tsv_file, base_level)
-                channel_levels[channel] = base_level
-                last_time = max(last_time, channel.last_time)
+                if len(channel.copies) > 0:
+                    base_level = channel.emit_tsv(data_tsv_file, base_level)
+                    channel_levels[channel] = base_level
+                    last_time = max(last_time, channel.last_time)
         if show_instances:
             for m,memory in sorted(self.memories.iteritems()):
                 if len(memory.instances) > 0:
@@ -1795,16 +1843,16 @@ def main():
 
     if print_stats:
         state.print_stats(verbose) 
+    else:
+        if not interactive_timeline:
+            state.emit_visualization(output_prefix, show_procs, 
+                                     show_channels, show_instances) 
 
-    if not interactive_timeline:
-        state.emit_visualization(output_prefix, show_procs, 
-                                 show_channels, show_instances) 
-
-    if interactive_timeline:
-        state.emit_interactive_visualization(output_prefix, show_procs,
-                             show_channels, show_instances)
-    if show_copy_matrix:
-        state.show_copy_matrix(copy_output_prefix)
+        if interactive_timeline:
+            state.emit_interactive_visualization(output_prefix, show_procs,
+                                 show_channels, show_instances)
+        if show_copy_matrix:
+            state.show_copy_matrix(copy_output_prefix)
 
 if __name__ == '__main__':
     main()

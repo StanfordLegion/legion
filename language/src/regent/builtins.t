@@ -22,18 +22,19 @@ local builtins = {}
 -- global scope of any legion program (i.e. they need not be accessed
 -- via std).
 
+builtins.aliased = std.aliased
+builtins.cross_product = std.cross_product
+builtins.disjoint = std.disjoint
+builtins.dynamic_collective = std.dynamic_collective
 builtins.index_type = std.index_type
-builtins.ispace = std.ispace
 builtins.int1d = std.int1d
 builtins.int2d = std.int2d
 builtins.int3d = std.int3d
-builtins.region = std.region
-builtins.disjoint = std.disjoint
-builtins.aliased = std.aliased
+builtins.ispace = std.ispace
 builtins.partition = std.partition
 builtins.phase_barrier = std.phase_barrier
-builtins.cross_product = std.cross_product
 builtins.ptr = std.ptr
+builtins.region = std.region
 builtins.wild = std.wild
 
 return builtins

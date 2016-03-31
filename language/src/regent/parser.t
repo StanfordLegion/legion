@@ -50,7 +50,7 @@ function parser.option_values(p)
   end
 end
 
-function parser.option_name(p)
+function parser.option_name(p, required)
   if p:nextif("__cuda") then
     local values = p:option_values()
     return "cuda", values
@@ -60,9 +60,13 @@ function parser.option_name(p)
     return "parallel"
   elseif p:nextif("__spmd") then
     return "spmd"
+  elseif p:nextif("__trace") then
+    return "trace"
   elseif p:nextif("__vectorize") then
     return "vectorize"
-  else
+  elseif p:nextif("__block") then
+    return "block"
+  elseif required then
     p:error("expected option name")
   end
 end
@@ -75,18 +79,27 @@ function parser.options(p, allow_expr, allow_stat)
   if not level then return options end
 
   p:expect("(")
-  local name = p:option_name()
+  local name = p:option_name(true)
   options = options { [name] = level }
 
-  if allow_expr and p:nextif(",") then
-    local expr = p:expr()
-    p:expect(")")
-    return expr { options = options }
-  elseif allow_stat then
+  while p:nextif(",") do
+    local name = p:option_name(false)
+    if name then
+      options = options { [name] = level }
+    elseif allow_expr then
+      local expr = p:expr()
+      p:expect(")")
+      return expr { options = options }
+    end
+  end
+
+  if allow_stat then
     p:expect(")")
     return options
   else
-    -- throw an error if this was supposed to be an expression.
+    assert(allow_expr)
+    -- Fail: This was supposed to be an expression, but we never saw
+    -- the expression clause.
     p:expect(",")
   end
 end
@@ -494,6 +507,16 @@ function parser.expr_prefix(p)
       span = ast.span(start, p),
     }
 
+  elseif p:nextif("__delete") then
+    p:expect("(")
+    local value = p:expr()
+    p:expect(")")
+    return ast.unspecialized.expr.RawDelete {
+      value = value,
+      options = ast.default_options(),
+      span = ast.span(start, p),
+    }
+
   elseif p:nextif("__runtime") then
     p:expect("(")
     p:expect(")")
@@ -688,6 +711,19 @@ function parser.expr_prefix(p)
       span = ast.span(start, p),
     }
 
+  elseif p:nextif("list_slice_partition") then
+    p:expect("(")
+    local partition = p:expr()
+    p:expect(",")
+    local indices = p:expr()
+    p:expect(")")
+    return ast.unspecialized.expr.ListSlicePartition {
+      partition = partition,
+      indices = indices,
+      options = ast.default_options(),
+      span = ast.span(start, p),
+    }
+
   elseif p:nextif("list_duplicate_partition") then
     p:expect("(")
     local partition = p:expr()
@@ -706,10 +742,34 @@ function parser.expr_prefix(p)
     local lhs = p:expr()
     p:expect(",")
     local rhs = p:expr()
+    local shallow = false -- Default is false.
+    if p:nextif(",") then
+      if p:nextif("true") then
+        shallow = true
+      elseif p:nextif("false") then
+        shallow = false
+      else
+        p:error("expected true or false")
+      end
+    end
     p:expect(")")
     return ast.unspecialized.expr.ListCrossProduct {
       lhs = lhs,
       rhs = rhs,
+      shallow = shallow,
+      options = ast.default_options(),
+      span = ast.span(start, p),
+    }
+
+  elseif p:nextif("list_cross_product_complete") then
+    p:expect("(")
+    local lhs = p:expr()
+    p:expect(",")
+    local product = p:expr()
+    p:expect(")")
+    return ast.unspecialized.expr.ListCrossProductComplete {
+      lhs = lhs,
+      product = product,
       options = ast.default_options(),
       span = ast.span(start, p),
     }
@@ -763,11 +823,50 @@ function parser.expr_prefix(p)
       span = ast.span(start, p),
     }
 
+  elseif p:nextif("dynamic_collective") then
+    p:expect("(")
+    local value_type_expr = p:luaexpr()
+    p:expect(",")
+    local op = p:reduction_op()
+    p:expect(",")
+    local arrivals = p:expr()
+    p:expect(")")
+    return ast.unspecialized.expr.DynamicCollective {
+      value_type_expr = value_type_expr,
+      arrivals = arrivals,
+      op = op,
+      options = ast.default_options(),
+      span = ast.span(start, p),
+    }
+
+  elseif p:nextif("dynamic_collective_get_result") then
+    p:expect("(")
+    local value = p:expr()
+    p:expect(")")
+    return ast.unspecialized.expr.DynamicCollectiveGetResult {
+      value = value,
+      options = ast.default_options(),
+      span = ast.span(start, p),
+    }
+
   elseif p:nextif("advance") then
     p:expect("(")
     local value = p:expr()
     p:expect(")")
     return ast.unspecialized.expr.Advance {
+      value = value,
+      options = ast.default_options(),
+      span = ast.span(start, p),
+    }
+
+  elseif p:nextif("arrive") then
+    p:expect("(")
+    local barrier = p:expr()
+    p:expect(",")
+    local value = p:expr()
+    p:expect(")")
+    return ast.unspecialized.expr.Arrive {
+      barrier = barrier,
       value = value,
       options = ast.default_options(),
       span = ast.span(start, p),
@@ -942,6 +1041,8 @@ function parser.expr_primary(p)
           field_names:insert(field_name)
         until not p:sep()
         p:expect("}")
+      elseif p:nextif("ispace") then
+        field_names:insert("ispace")
       else
         field_names:insert(p:next(p.name).value)
       end
@@ -1359,6 +1460,19 @@ function parser.stat_break(p, options)
   }
 end
 
+function parser.stat_raw_delete(p, options)
+  local start = ast.save(p)
+  p:expect("__delete")
+  p:expect("(")
+  local value = p:expr()
+  p:expect(")")
+  return ast.unspecialized.stat.RawDelete {
+    value = value,
+    options = ast.default_options(),
+    span = ast.span(start, p),
+  }
+end
+
 function parser.stat_expr_assignment(p, start, first_lhs, options)
   local lhs = terralib.newlist()
   lhs:insert(first_lhs)
@@ -1453,6 +1567,9 @@ function parser.stat(p)
 
   elseif p:matches("break") then
     return p:stat_break(options)
+
+  elseif p:matches("__delete") then
+    return p:stat_raw_delete(options)
 
   else
     return p:stat_expr(options)

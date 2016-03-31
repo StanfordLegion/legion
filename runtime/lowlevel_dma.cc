@@ -463,7 +463,8 @@ namespace LegionRuntime {
 	    it2++)
 	  log_dma.info() << "dma request " << (void *)this << " field: " <<
 	    it->first.first << "[" << it2->src_offset << "]->" <<
-	    it->first.second << "[" << it2->dst_offset << "] size=" << it2->size;
+	    it->first.second << "[" << it2->dst_offset << "] size=" << it2->size <<
+	    " serdez=" << it2->serdez_id;
     }
  
     CopyRequest::~CopyRequest(void)

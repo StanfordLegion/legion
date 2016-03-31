@@ -663,6 +663,12 @@ function check_vectorizability.stat(cx, node)
       cx:report_error_when_demanded(node,
         error_prefix .. "an expression as a statement")
 
+    elseif node:is(ast.typed.stat.BeginTrace) then
+      cx:report_error_when_demanded(node, error_prefix .. "a trace statement")
+
+    elseif node:is(ast.typed.stat.EndTrace) then
+      cx:report_error_when_demanded(node, error_prefix .. "a trace statement")
+
     else
       assert(false, "unexpected node type " .. tostring(node:type()))
     end
@@ -975,10 +981,19 @@ function vectorize_loops.stat(node)
   elseif node:is(ast.typed.stat.Expr) then
     return node
 
+  elseif node:is(ast.typed.stat.BeginTrace) then
+    return node
+
+  elseif node:is(ast.typed.stat.EndTrace) then
+    return node
+
   elseif node:is(ast.typed.stat.MapRegions) then
     return node
 
   elseif node:is(ast.typed.stat.UnmapRegions) then
+    return node
+
+  elseif node:is(ast.typed.stat.RawDelete) then
     return node
 
   else

@@ -69,10 +69,17 @@ def regent(args, env = {}, **kwargs):
     if not os.path.exists(terra_exe):
         terra_exe = os.path.join(terra_dir, 'bin', 'terra')
 
-    terra_path = (
-        ['?.t'] +
-        ([os.path.join(os.path.dirname(os.path.realpath(args[0])), '?.t')]
-          if len(args) >= 1 and os.path.exists(args[0]) else []) +
+    if 'TERRA_PATH' in os.environ:
+        terra_path = [os.path.realpath(os.environ['TERRA_PATH'])]
+    else:
+        terra_path = []
+
+    normal_args = [arg for arg in args if not arg.startswith('-')]
+    terra_path += (
+        ['?.t', '?.rg'] +
+        ([os.path.join(os.path.dirname(os.path.realpath(normal_args[0])), '?.t'),
+          os.path.join(os.path.dirname(os.path.realpath(normal_args[0])), '?.rg')]
+          if len(normal_args) >= 1 and os.path.exists(normal_args[0]) else []) +
         [os.path.join(regent_dir, 'src', '?.t'),
         os.path.join(terra_dir, 'tests', 'lib', '?.t'),
         os.path.join(terra_dir, 'release', 'include', '?.t'),
@@ -90,7 +97,7 @@ def regent(args, env = {}, **kwargs):
         cmd = cmd + (os.environ['LAUNCHER'].split()
                      if 'LAUNCHER' in os.environ else [])
     cmd = cmd + [terra_exe] + args
-    cmd_env = dict(os.environ.iteritems())
+    cmd_env = dict(os.environ.items())
     cmd_env.update(terra_env)
     cmd_env.update(env)
     return subprocess.Popen(

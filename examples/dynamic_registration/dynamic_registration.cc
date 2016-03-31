@@ -181,16 +181,18 @@ void top_level_task(const Task *task,
       .add_layout_constraint_set(1/*index*/, soa_layout_id);
   runtime->register_task_variant<check_task>(check_registrar);
 
-  TaskVariantRegistrar wrapped_cpp_registrar(WRAPPED_CPP_TASK_ID, true/*global*/,
-					     "wrapped_cpp_variant");
+  TaskVariantRegistrar wrapped_cpp_registrar(WRAPPED_CPP_TASK_ID,
+					     "wrapped_cpp_variant",
+					      true /*global*/);
   wrapped_cpp_registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
   const char cpp_msg[] = "user data for cpp task";
   runtime->register_task_variant(wrapped_cpp_registrar,
 				 CodeDescriptor(wrapped_cpp_task),
 				 cpp_msg, sizeof(cpp_msg));
 
-  TaskVariantRegistrar wrapped_c_registrar(WRAPPED_C_TASK_ID, true/*global*/,
-					   "wrapped_c_variant");
+  TaskVariantRegistrar wrapped_c_registrar(WRAPPED_C_TASK_ID,
+					   "wrapped_c_variant",
+					   true /*global*/);
   wrapped_c_registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
   const char c_msg[] = "user data for c task";
   runtime->register_task_variant(wrapped_c_registrar,

@@ -74,6 +74,10 @@ function analyze_var_flow.expr_call(cx, node)
   end
 end
 
+function analyze_var_flow.expr_dynamic_collective_get_result(cx, node)
+  return {[true] = true}
+end
+
 function analyze_var_flow.expr_unary(cx, node)
   return analyze_var_flow.expr(cx, node.rhs)
 end
@@ -166,6 +170,9 @@ function analyze_var_flow.expr(cx, node)
   elseif node:is(ast.typed.expr.CrossProduct) then
     return nil
 
+  elseif node:is(ast.typed.expr.ListSlicePartition) then
+    return nil
+
   elseif node:is(ast.typed.expr.ListDuplicatePartition) then
     return nil
 
@@ -173,6 +180,9 @@ function analyze_var_flow.expr(cx, node)
     return nil
 
   elseif node:is(ast.typed.expr.ListCrossProduct) then
+    return nil
+
+  elseif node:is(ast.typed.expr.ListCrossProductComplete) then
     return nil
 
   elseif node:is(ast.typed.expr.ListPhaseBarriers) then
@@ -187,7 +197,16 @@ function analyze_var_flow.expr(cx, node)
   elseif node:is(ast.typed.expr.PhaseBarrier) then
     return nil
 
+  elseif node:is(ast.typed.expr.DynamicCollective) then
+    return nil
+
+  elseif node:is(ast.typed.expr.DynamicCollectiveGetResult) then
+    return analyze_var_flow.expr_dynamic_collective_get_result(cx, node)
+
   elseif node:is(ast.typed.expr.Advance) then
+    return nil
+
+  elseif node:is(ast.typed.expr.Arrive) then
     return nil
 
   elseif node:is(ast.typed.expr.Copy) then
@@ -365,6 +384,9 @@ function analyze_var_flow.stat(cx, node)
     return analyze_var_flow.stat_reduce(cx, node)
 
   elseif node:is(ast.typed.stat.Expr) then
+    return
+
+  elseif node:is(ast.typed.stat.RawDelete) then
     return
 
   else
@@ -648,6 +670,15 @@ function optimize_futures.expr_cross_product(cx, node)
   }
 end
 
+function optimize_futures.expr_list_slice_partition(cx, node)
+  local partition = concretize(optimize_futures.expr(cx, node.partition))
+  local indices = concretize(optimize_futures.expr(cx, node.indices))
+  return node {
+    partition = partition,
+    indices = indices,
+  }
+end
+
 function optimize_futures.expr_list_duplicate_partition(cx, node)
   local partition = concretize(optimize_futures.expr(cx, node.partition))
   local indices = concretize(optimize_futures.expr(cx, node.indices))
@@ -672,6 +703,16 @@ function optimize_futures.expr_list_cross_product(cx, node)
   return node {
     lhs = lhs,
     rhs = rhs,
+    shallow = node.shallow,
+  }
+end
+
+function optimize_futures.expr_list_cross_product_complete(cx, node)
+  local lhs = concretize(optimize_futures.expr(cx, node.lhs))
+  local product = concretize(optimize_futures.expr(cx, node.product))
+  return node {
+    lhs = lhs,
+    product = product,
   }
 end
 
@@ -709,9 +750,33 @@ function optimize_futures.expr_phase_barrier(cx, node)
   }
 end
 
+function optimize_futures.expr_dynamic_collective(cx, node)
+  local arrivals = concretize(optimize_futures.expr(cx, node.arrivals))
+  return node {
+    arrivals = arrivals,
+  }
+end
+
+function optimize_futures.expr_dynamic_collective_get_result(cx, node)
+  local value = concretize(optimize_futures.expr(cx, node.value))
+  return node {
+    value = value,
+    expr_type = std.future(node.expr_type),
+  }
+end
+
 function optimize_futures.expr_advance(cx, node)
   local value = concretize(optimize_futures.expr(cx, node.value))
   return node {
+    value = value,
+  }
+end
+
+function optimize_futures.expr_arrive(cx, node)
+  local barrier = concretize(optimize_futures.expr(cx, node.barrier))
+  local value = optimize_futures.expr(cx, node.value)
+  return node {
+    barrier = barrier,
     value = value,
   }
 end
@@ -880,6 +945,9 @@ function optimize_futures.expr(cx, node)
   elseif node:is(ast.typed.expr.CrossProduct) then
     return optimize_futures.expr_cross_product(cx, node)
 
+  elseif node:is(ast.typed.expr.ListSlicePartition) then
+    return optimize_futures.expr_list_slice_partition(cx, node)
+
   elseif node:is(ast.typed.expr.ListDuplicatePartition) then
     return optimize_futures.expr_list_duplicate_partition(cx, node)
 
@@ -888,6 +956,9 @@ function optimize_futures.expr(cx, node)
 
   elseif node:is(ast.typed.expr.ListCrossProduct) then
     return optimize_futures.expr_list_cross_product(cx, node)
+
+  elseif node:is(ast.typed.expr.ListCrossProductComplete) then
+    return optimize_futures.expr_list_cross_product_complete(cx, node)
 
   elseif node:is(ast.typed.expr.ListPhaseBarriers) then
     return optimize_futures.expr_list_phase_barriers(cx, node)
@@ -901,8 +972,17 @@ function optimize_futures.expr(cx, node)
   elseif node:is(ast.typed.expr.PhaseBarrier) then
     return optimize_futures.expr_phase_barrier(cx, node)
 
+  elseif node:is(ast.typed.expr.DynamicCollective) then
+    return optimize_futures.expr_dynamic_collective(cx, node)
+
+  elseif node:is(ast.typed.expr.DynamicCollectiveGetResult) then
+    return optimize_futures.expr_dynamic_collective_get_result(cx, node)
+
   elseif node:is(ast.typed.expr.Advance) then
     return optimize_futures.expr_advance(cx, node)
+
+  elseif node:is(ast.typed.expr.Arrive) then
+    return optimize_futures.expr_arrive(cx, node)
 
   elseif node:is(ast.typed.expr.Copy) then
     return optimize_futures.expr_copy(cx, node)
@@ -1095,15 +1175,35 @@ function optimize_futures.stat_assignment(cx, node)
 end
 
 function optimize_futures.stat_reduce(cx, node)
+  local lhs = node.lhs:map(function(lh) return optimize_futures.expr(cx, lh) end)
+  local rhs = node.rhs:map(function(rh) return optimize_futures.expr(cx, rh) end)
+
+  local normalized_rhs = terralib.newlist()
+  for i, lh in ipairs(lhs) do
+    local rh = rhs[i]
+
+    if std.is_future(std.as_read(lh.expr_type)) then
+      normalized_rhs:insert(rh)
+    else
+      normalized_rhs:insert(concretize(rh))
+    end
+  end
+
   return node {
-    lhs = node.lhs:map(function(lh) return optimize_futures.expr(cx, lh) end),
-    rhs = node.rhs:map(function(rh) return optimize_futures.expr(cx, rh) end),
+    lhs = lhs,
+    rhs = normalized_rhs,
   }
 end
 
 function optimize_futures.stat_expr(cx, node)
   return node {
     expr = optimize_futures.expr(cx, node.expr),
+  }
+end
+
+function optimize_futures.stat_raw_delete(cx, node)
+  return node {
+    value = optimize_futures.expr(cx, node.value),
   }
 end
 
@@ -1153,18 +1253,66 @@ function optimize_futures.stat(cx, node)
   elseif node:is(ast.typed.stat.Expr) then
     return optimize_futures.stat_expr(cx, node)
 
+  elseif node:is(ast.typed.stat.RawDelete) then
+    return optimize_futures.stat_raw_delete(cx, node)
+
   else
     assert(false, "unexpected node type " .. tostring(node:type()))
   end
 end
 
+function optimize_futures.stat_task_param(cx, param)
+  if cx:is_future(param.symbol) then
+    local new_symbol = terralib.newsymbol(param.param_type, param.symbol.displayname .. "_tmp")
+    local new_param = param { symbol = new_symbol }
+    local new_var = ast.typed.stat.Var {
+      symbols = terralib.newlist({param.symbol}),
+      types = terralib.newlist({std.future(param.param_type)}),
+      values = terralib.newlist({
+          promote(ast.typed.expr.ID {
+            value = new_symbol,
+            expr_type = std.rawref(&param.param_type),
+            options = param.options,
+            span = param.span,
+          }),
+      }),
+      options = param.options,
+      span = param.span,
+    }
+
+    return new_param, new_var
+  else
+    return param
+  end
+end
+
+function optimize_futures.stat_task_params(cx, node)
+  local results = terralib.newlist()
+  local actions = terralib.newlist()
+  for _, param in ipairs(node.params) do
+    local result, action = optimize_futures.stat_task_param(cx, param)
+    results:insert(result)
+    if action then actions:insert(action) end
+  end
+  return results, actions
+end
+
 function optimize_futures.stat_task(cx, node)
   local cx = cx:new_task_scope()
   analyze_var_flow.block(cx, node.body)
-  compute_var_futures(cx)
+  compute_var_futures(cx, node.params)
+  local params, actions = optimize_futures.stat_task_params(cx, node)
   local body = optimize_futures.block(cx, node.body)
 
-  return node { body = body }
+  if #actions > 0 then
+    actions:insertall(body.stats)
+    body = body { stats = actions }
+  end
+
+  return node {
+    params = params,
+    body = body
+  }
 end
 
 function optimize_futures.stat_top(cx, node)
