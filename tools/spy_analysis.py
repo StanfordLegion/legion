@@ -131,10 +131,15 @@ def generate_html_op_label(title, requirements, instances, color, verbose):
         req = requirements[i]
         region_name = req.region_node.get_name()
         priv = req.get_privilege_and_coherence()
-        if region_name <> None:
-            line = ["Region " + str(i), region_name+" (priv: "+priv+")"]
+        if req.is_reg:
+            prefix = "Region"
         else:
-            line = [{"label" : "Region "+str(i)+" (priv:"+priv+")", "colspan" : 2}]
+            prefix = "Partition"
+
+        if region_name <> None:
+            line = [prefix + " " + str(i), region_name+" (priv: "+priv+")"]
+        else:
+            line = [{"label" : prefix+" "+str(i)+" (priv:"+priv+")", "colspan" : 2}]
         lines.append(line)
         req_summary = 'index:%s,field:%s,tree:%s' % \
                 (hex(req.region_node.index_node.uid),
