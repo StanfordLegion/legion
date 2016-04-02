@@ -1118,7 +1118,7 @@ bool PennantMapper::map_task(Task *task)
         assert(false);
       }
 
-      const int base = 101;
+      const int base = 10001;
       for (int i = base; i < base + num_fields; i++) {
         req.additional_fields.insert(i);
       }

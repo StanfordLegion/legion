@@ -163,7 +163,7 @@ do
       end
       nside += 1
 
-      regentlib.assert(sv > 0.0, "sv negative")
+      regentlib.assert(sv > 0.0, "sv negative in calc_volumes_full")
     end
   end
 end
@@ -436,7 +436,7 @@ do
         end
         nside += 1
 
-        regentlib.assert(sv > 0.0, "sv negative")
+        regentlib.assert(sv > 0.0, "sv negative in calc_everything")
       end
     end
 
@@ -888,7 +888,7 @@ do
         end
         nside += 1
 
-        regentlib.assert(sv > 0.0, "sv negative")
+        regentlib.assert(sv > 0.0, "sv negative in calc_everything_full")
       end
     end
 
