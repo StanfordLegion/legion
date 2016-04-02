@@ -2777,8 +2777,27 @@ namespace Legion {
     DistributedID CompositeView::send_view_base(AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
-      // TODO: Implement this
-      assert(false);
+      if (!has_remote_instance(target))
+      {
+        // Don't take the lock, it's alright to have duplicate sends
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize(owner_space);
+          bool is_region = logical_node->is_region();
+          rez.serialize(is_region);
+          if (is_region)
+            rez.serialize(logical_node->as_region_node()->handle);
+          else
+            rez.serialize(logical_node->as_partition_node()->handle);
+          VersionInfo &info = version_info->get_version_info();
+          info.pack_version_info(rez, 0, 0);
+          root->pack_composite_tree(rez, target);
+        }
+        runtime->send_composite_view(target, rez);
+        update_remote_instances(target);
+      }
       return did;
     }
 
@@ -2788,15 +2807,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Do nothing, composite instances never have updates
-    }
-
-    //--------------------------------------------------------------------------
-    void CompositeView::unpack_composite_view(Deserializer &derez, 
-                                              AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      // TODO: Implement this
-      assert(false);
     }
 
     //--------------------------------------------------------------------------
@@ -2891,8 +2901,45 @@ namespace Legion {
                                     Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      // TODO: Implement this
-      assert(false);
+      DerezCheck z(derez); 
+      DistributedID did;
+      derez.deserialize(did);
+      AddressSpaceID owner;
+      derez.deserialize(owner);
+      bool is_region;
+      derez.deserialize(is_region);
+      RegionTreeNode *target_node;
+      if (is_region)
+      {
+        LogicalRegion handle;
+        derez.deserialize(handle);
+        target_node = runtime->forest->get_node(handle);
+      }
+      else
+      {
+        LogicalPartition handle;
+        derez.deserialize(handle);
+        target_node = runtime->forest->get_node(handle);
+      }
+      CompositeVersionInfo *version_info = new CompositeVersionInfo();
+      VersionInfo &info = version_info->get_version_info();
+      info.unpack_version_info(derez);
+      CompositeNode *root = legion_new<CompositeNode>(target_node, 
+                                                      (CompositeNode*)NULL);
+      root->unpack_composite_tree(derez, source);
+      CompositeView *new_view = legion_new<CompositeView>(runtime->forest, did,
+                                    owner, target_node, runtime->address_space,
+                                    root, version_info, false/*register now*/);
+      if (!target_node->register_logical_view(new_view))
+      {
+        if (new_view->remove_base_resource_ref(REMOTE_DID_REF))
+          legion_delete(new_view);
+      }
+      else
+      {
+        new_view->register_with_runtime();
+        new_view->update_remote_instances(source);
+      }
     }
 
     /////////////////////////////////////////////////////////////
@@ -3508,7 +3555,7 @@ namespace Legion {
         // This has all our destination preconditions
         // Only issue copies from fields which have values
         FieldMask actual_copy_mask;
-        LegionMap<Event,FieldMask>::aligned src_preconditions = preconditions;
+        LegionMap<Event,FieldMask>::aligned src_preconditions;
         for (LegionMap<MaterializedView*,FieldMask>::aligned::const_iterator 
               it = src_instances.begin(); it != src_instances.end(); it++)
         {
@@ -3516,6 +3563,35 @@ namespace Legion {
                                              it->second, src_version_info,
                                              src_preconditions);
           actual_copy_mask |= it->second;
+        }
+        FieldMask diff_mask = copy_mask - actual_copy_mask;
+        if (!!diff_mask)
+        {
+          // Move in any preconditions that overlap with our set of fields
+          for (LegionMap<Event,FieldMask>::aligned::const_iterator it = 
+                preconditions.begin(); it != preconditions.end(); it++)
+          {
+            FieldMask overlap = it->second & actual_copy_mask;
+            if (!overlap)
+              continue;
+#ifdef DEBUG_HIGH_LEVEL
+            assert(src_preconditions.find(it->first) ==
+                   src_preconditions.end());
+#endif
+            src_preconditions[it->first] = overlap;
+          }
+        }
+        else // we can just add all the preconditions
+        {
+          for (LegionMap<Event,FieldMask>::aligned::const_iterator it = 
+                preconditions.begin(); it != preconditions.end(); it++)
+          {
+#ifdef DEBUG_HIGH_LEVEL
+            assert(src_preconditions.find(it->first) ==
+                   src_preconditions.end());
+#endif
+            src_preconditions[it->first] = it->second;
+          }
         }
         // issue the grouped copies and put the result in the postconditions
         // We are the intersect
@@ -3574,6 +3650,88 @@ namespace Legion {
           if (tracker != NULL)
             tracker->add_copy_event(reduce_event);
         }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void CompositeNode::pack_composite_tree(Serializer &rez, 
+                                            AddressSpaceID target)
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize(dirty_mask);
+      rez.serialize(reduction_mask);
+      rez.serialize<size_t>(valid_views.size());
+      for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
+            valid_views.begin(); it != valid_views.end(); it++)
+      {
+        // Only need to send the structure for now, we'll check for
+        // updates when we unpack and request anything we need later
+        DistributedID did = it->first->send_view_base(target); 
+        rez.serialize(did);
+        rez.serialize(it->second);
+      }
+      rez.serialize<size_t>(reduction_views.size());
+      for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it = 
+            reduction_views.begin(); it != reduction_views.end(); it++)
+      {
+        // Same as above 
+        DistributedID did = it->first->send_view_base(target); 
+        rez.serialize(did);
+        rez.serialize(it->second);
+      }
+      rez.serialize<size_t>(children.size());
+      for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it = 
+            children.begin(); it != children.end(); it++)
+      {
+        rez.serialize(it->first->logical_node->get_color());
+        rez.serialize(it->second);
+        it->first->pack_composite_tree(rez, target);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void CompositeNode::unpack_composite_tree(Deserializer &derez,
+                                              AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      derez.deserialize(dirty_mask);
+      derez.deserialize(reduction_mask);
+      size_t num_views;
+      derez.deserialize(num_views);
+      for (unsigned idx = 0; idx < num_views; idx++)
+      {
+        DistributedID view_did;
+        derez.deserialize(view_did);
+        LogicalView *view = logical_node->find_view(view_did);
+        view->add_base_resource_ref(COMPOSITE_NODE_REF);
+        derez.deserialize(valid_views[view]);
+      }
+      size_t num_reductions;
+      derez.deserialize(num_reductions);
+      for (unsigned idx = 0; idx < num_reductions; idx++)
+      {
+        DistributedID reduc_did;
+        derez.deserialize(reduc_did);
+        LogicalView *view = logical_node->find_view(reduc_did);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(view->is_instance_view());
+        assert(view->as_instance_view()->is_reduction_view());
+#endif
+        ReductionView *reduction_view = 
+          view->as_instance_view()->as_reduction_view();
+        reduction_view->add_base_resource_ref(COMPOSITE_NODE_REF);
+        derez.deserialize(reduction_views[reduction_view]);
+      }
+      size_t num_children;
+      derez.deserialize(num_children);
+      for (unsigned idx = 0; idx < num_children; idx++)
+      {
+        ColorPoint child_color;
+        derez.deserialize(child_color);
+        RegionTreeNode *child_node = logical_node->get_tree_child(child_color);
+        CompositeNode *child = legion_new<CompositeNode>(child_node, this);
+        derez.deserialize(children[child]);
+        child->unpack_composite_tree(derez, source);
       }
     }
 

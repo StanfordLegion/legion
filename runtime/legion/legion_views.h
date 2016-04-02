@@ -670,7 +670,6 @@ namespace Legion {
       virtual DistributedID send_view_base(AddressSpaceID target);
       virtual void send_view_updates(AddressSpaceID target, 
                                      const FieldMask &update_mask);
-      void unpack_composite_view(Deserializer &derez, AddressSpaceID source);
       void make_local(std::set<Event> &preconditions);
     public:
       virtual bool is_composite_view(void) const { return true; }
@@ -759,6 +758,9 @@ namespace Legion {
                       const LegionMap<Event,FieldMask>::aligned &preconditions,
                             LegionMap<Event,FieldMask>::aligned &postconditions,
                          CopyTracker *tracker, CopyAcrossHelper *helper) const;
+    public:
+      void pack_composite_tree(Serializer &rez, AddressSpaceID target);
+      void unpack_composite_tree(Deserializer &derez, AddressSpaceID source);
     public:
       void notify_active(void);
       void notify_inactive(void);
