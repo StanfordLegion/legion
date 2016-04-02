@@ -1284,31 +1284,24 @@ namespace Legion {
       CompositeCloser& operator=(const CompositeCloser &rhs);
     public:
       CompositeNode* get_composite_node(RegionTreeNode *tree_node,
-                                        CompositeNode *parent);
+                                        bool root = false);
       CompositeView* create_valid_view(PhysicalState *state,
                                       CompositeNode *root,
                                       const FieldMask &valid_mask,
-                                      const FieldMask &dirty_mask,
                                       bool register_view);
       void capture_physical_state(CompositeNode *target,
                                   RegionTreeNode *node,
                                   PhysicalState *state,
-                                  const FieldMask &capture_mask,
-                                  FieldMask &dirty_mask);
+                                  const FieldMask &capture_mask);
+    public:
       void update_capture_mask(RegionTreeNode *node,
                                const FieldMask &capture_mask);
       bool filter_capture_mask(RegionTreeNode *node,
                                FieldMask &capture_mask);
     public:
-      inline void set_leave_open_mask(const FieldMask &leave_open)
-        { leave_open_mask = leave_open; }
-    public:
       const ContextID ctx;
       VersionInfo &version_info;
     public:
-      FieldMask leave_open_mask;
-    public:
-      CompositeVersionInfo *composite_version_info;
       std::map<RegionTreeNode*,CompositeNode*> constructed_nodes;
       LegionMap<RegionTreeNode*,FieldMask>::aligned capture_fields;
       LegionMap<ReductionView*,FieldMask>::aligned reduction_views;

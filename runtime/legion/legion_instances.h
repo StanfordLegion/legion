@@ -85,10 +85,6 @@ namespace Legion {
       static LayoutDescription* handle_unpack_layout_description(
           Deserializer &derez, AddressSpaceID source, RegionNode *node);
     public:
-      // This is the shit right here!
-      template<unsigned LOG2MAX>
-      static void compress_mask(FieldMask &x, FieldMask m);
-    public:
       const FieldMask allocated_fields;
       LayoutConstraints *const constraints;
       FieldSpaceNode *const owner;
@@ -106,7 +102,7 @@ namespace Legion {
       std::map<LEGION_FIELD_MASK_FIELD_TYPE,
                LegionList<std::pair<FieldMask,FieldMask> >::aligned> comp_cache;
       NodeSet known_nodes;
-    };
+    }; 
  
     /**
      * \class PhysicalManager
@@ -207,6 +203,25 @@ namespace Legion {
     };
 
     /**
+     * \class CopyAcrossHelper
+     * A small helper class for performing copies between regions
+     * from diferrent region trees
+     */
+    class CopyAcrossHelper {
+    public:
+      CopyAcrossHelper(const FieldMask &full)
+        : full_mask(full) { }
+    public:
+      const FieldMask &full_mask;
+    public:
+      void compute_across_offsets(const FieldMask &src_mask,
+             std::vector<Domain::CopySrcDstField> &dst_fields);
+    public:
+      std::vector<Domain::CopySrcDstField> offsets; 
+      LegionDeque<std::pair<FieldMask,FieldMask> >::aligned compressed_cache;
+    };
+
+    /**
      * \class InstanceManager
      * A class for managing normal physical instances
      */
@@ -258,6 +273,10 @@ namespace Legion {
                                 std::vector<Domain::CopySrcDstField> &fields);
       void compute_copy_offsets(const std::vector<FieldID> &copy_fields,
                                 std::vector<Domain::CopySrcDstField> &fields);
+      void initialize_across_helper(CopyAcrossHelper *across_helper,
+                                    const FieldMask &mask,
+                                    const std::vector<unsigned> &src_indexes,
+                                    const std::vector<unsigned> &dst_indexes);
     public:
       // Interface to the mapper PhysicalInstance
       virtual bool has_field(FieldID fid) const

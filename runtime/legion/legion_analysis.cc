@@ -3318,7 +3318,6 @@ namespace Legion {
       : ctx(c), version_info(info)
     //--------------------------------------------------------------------------
     {
-      composite_version_info = new CompositeVersionInfo();
     }
 
     //--------------------------------------------------------------------------
@@ -3334,9 +3333,6 @@ namespace Legion {
     CompositeCloser::~CompositeCloser(void)
     //--------------------------------------------------------------------------
     {
-      // Only delete the version info if there are no constructed nodes
-      if (constructed_nodes.empty())
-        delete composite_version_info;
     }
 
     //--------------------------------------------------------------------------
@@ -3350,15 +3346,24 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     CompositeNode* CompositeCloser::get_composite_node(RegionTreeNode *node,
-                                                       CompositeNode *parent)
+                                                       bool root /*= false*/)
     //--------------------------------------------------------------------------
     {
       std::map<RegionTreeNode*,CompositeNode*>::const_iterator finder = 
         constructed_nodes.find(node);
       if (finder != constructed_nodes.end())
         return finder->second;
-      CompositeNode *result = legion_new<CompositeNode>(node, parent,
-                                                        composite_version_info);
+      if (!root)
+      {
+        // Recurse up the tree until we find the parent
+        CompositeNode *parent = get_composite_node(node->get_parent(), false);
+        CompositeNode *result = legion_new<CompositeNode>(node, parent);
+        constructed_nodes[node] = result;
+        return result;
+      }
+      // Root case
+      CompositeNode *result = legion_new<CompositeNode>(node, 
+                                                        (CompositeNode*)NULL);
       constructed_nodes[node] = result;
       return result;
     }
@@ -3367,49 +3372,26 @@ namespace Legion {
     CompositeView*CompositeCloser::create_valid_view(PhysicalState *state,
                                                     CompositeNode *root,
                                                     const FieldMask &valid_mask,
-                                                    const FieldMask &dirty_mask,
                                                     bool register_view)
     //--------------------------------------------------------------------------
     {
+      // Finalize the root before we use it
+      FieldMask finalize_mask;
+      root->finalize(finalize_mask);
       RegionTreeNode *node = root->logical_node;
       DistributedID did = 
                     node->context->runtime->get_available_distributed_id(false);
+      CompositeVersionInfo *composite_info = new CompositeVersionInfo();
+      composite_info->get_version_info().clone_from(version_info);
       CompositeView *composite_view = legion_new<CompositeView>(node->context, 
                                    did, node->context->runtime->address_space,
                                    node, node->context->runtime->address_space, 
-                                   valid_mask, true/*register now*/);
-      // Set the root value
-      composite_view->add_root(root, valid_mask, true/*top*/);
-      // Fill in the version infos
-      VersionInfo &target_version_info = 
-                                composite_version_info->get_version_info();
-      target_version_info.clone_from(version_info);
-      if (!reduction_views.empty())
-      {
-        for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it =
-              reduction_views.begin(); it != reduction_views.end(); it++)
-        {
-          composite_view->update_reduction_views(it->first, it->second);
-        }
-      }
+                                   root, composite_info, true/*register now*/);
       // Now update the state of the node
       // Note that if we are permitted to leave the subregions
       // open then we don't make the view dirty
-      if (register_view)
-      {
-        if (!!dirty_mask)
-        {
-          node->update_valid_views(state, dirty_mask,
-                                   true /*dirty*/, composite_view);
-          FieldMask non_dirty = valid_mask - dirty_mask;
-          if (!!non_dirty)
-            node->update_valid_views(state, non_dirty,
-                                     false/*dirty*/, composite_view);
-        }
-        else 
-          node->update_valid_views(state, valid_mask,
-                                   false/*dirty*/, composite_view);
-      }
+      node->update_valid_views(state, valid_mask,
+                               true /*dirty*/, composite_view);
       return composite_view;
     }
 
@@ -3417,34 +3399,11 @@ namespace Legion {
     void CompositeCloser::capture_physical_state(CompositeNode *target,
                                                  RegionTreeNode *node,
                                                  PhysicalState *state,
-                                                 const FieldMask &capture_mask,
-                                                 FieldMask &dirty_mask)
+                                                 const FieldMask &capture_mask)
     //--------------------------------------------------------------------------
     {
       // Do the capture and then update capture mask
-      target->capture_physical_state(node, state, capture_mask, *this,
-                                     dirty_mask, state->dirty_mask,
-                                     state->valid_views);
-      // Capture any reduction views
-      FieldMask reduction_capture = capture_mask & state->reduction_mask;
-      if (!!reduction_capture)
-      {
-        dirty_mask |= reduction_capture;
-        for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it = 
-              state->reduction_views.begin(); it != 
-              state->reduction_views.end(); it++)
-        {
-          FieldMask overlap = capture_mask & it->second;
-          if (!overlap)
-            continue;
-          LegionMap<ReductionView*,FieldMask>::aligned::iterator finder = 
-            reduction_views.find(it->first);
-          if (finder == reduction_views.end())
-            reduction_views[it->first] = overlap;
-          else
-            finder->second |= overlap;
-        }
-      }
+      target->capture_physical_state(*this, state, capture_mask);
       // Record that we've captured the fields for this node
       update_capture_mask(node, capture_mask);
     }

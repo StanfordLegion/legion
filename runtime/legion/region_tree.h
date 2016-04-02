@@ -1490,23 +1490,17 @@ namespace Legion {
                                      VersionInfo &version_info,
                                      bool register_instance); 
       void close_physical_node(CompositeCloser &closer,
-                               CompositeNode *node,
                                const FieldMask &closing_mask,
-                               FieldMask &dirty_mask,
                                FieldMask &complete_mask);
       void siphon_physical_children(CompositeCloser &closer,
-                                    CompositeNode *node,
                                     PhysicalState *state,
                                     const FieldMask &closing_mask,
-                                    FieldMask &dirty_mask,
                                     FieldMask &complete_mask);
-      void close_physical_child(CompositeCloser &closer,
-                                CompositeNode *node,
+      bool close_physical_child(CompositeCloser &closer,
                                 PhysicalState *state,
                                 const FieldMask &closing_mask,
                                 const ColorPoint &target_child,
                                 const std::set<ColorPoint> &next_children,
-                                FieldMask &dirty_mask,
                                 FieldMask &complete_mask);
       void open_physical_child(ContextID ctx_id,
                                const ColorPoint &child_color,
@@ -1562,8 +1556,8 @@ namespace Legion {
                                 const VersionInfo &src_version_info,
                       LegionMap<Event,FieldMask>::aligned &postconditions,
                                 CopyTracker *tracker = NULL,
+                                CopyAcrossHelper *across_helper = NULL,
                                 RegionTreeNode *intersect = NULL);
-      // Note this function can mutate the preconditions set
       static void compute_event_sets(FieldMask update_mask,
           const LegionMap<Event,FieldMask>::aligned &preconditions,
           LegionList<EventSet>::aligned &event_sets);

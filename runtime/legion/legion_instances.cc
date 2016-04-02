@@ -28,6 +28,75 @@ namespace Legion {
 
     LEGION_EXTERN_LOGGER_DECLARATIONS
 
+    // This is the shit right here: super-cool helper function
+
+    //--------------------------------------------------------------------------
+    template<unsigned LOG2MAX>
+    static inline void compress_mask(FieldMask &x, FieldMask m)
+    //--------------------------------------------------------------------------
+    {
+      FieldMask mk, mp, mv, t;
+      // See hacker's delight 7-4
+      x = x & m;
+      mk = ~m << 1;
+      for (unsigned i = 0; i < LOG2MAX; i++)
+      {
+        mp = mk ^ (mk << 1);
+        for (unsigned idx = 1; idx < LOG2MAX; idx++)
+          mp = mp ^ (mp << (1 << idx));
+        mv = mp & m;
+        m = (m ^ mv) | (mv >> (1 << i));
+        t = x & mv;
+        x = (x ^ t) | (t >> (1 << i));
+        mk = mk & ~mp;
+      }
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Copy Across Helper 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    void CopyAcrossHelper::compute_across_offsets(const FieldMask &src_mask,
+                               std::vector<Domain::CopySrcDstField> &dst_fields)
+    //--------------------------------------------------------------------------
+    {
+      FieldMask compressed; 
+      bool found_in_cache = false;
+      for (LegionDeque<std::pair<FieldMask,FieldMask> >::aligned::const_iterator
+            it = compressed_cache.begin(); it != compressed_cache.end(); it++)
+      {
+        if (it->first == src_mask)
+        {
+          compressed = it->second;
+          found_in_cache = true;
+          break;
+        }
+      }
+      if (!found_in_cache)
+      {
+        compressed = src_mask;
+        compress_mask<STATIC_LOG2(MAX_FIELDS)>(compressed, full_mask);
+        compressed_cache.push_back(
+            std::pair<FieldMask,FieldMask>(src_mask, compressed));
+      }
+      int pop_count = FieldMask::pop_count(compressed);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(pop_count == FieldMask::pop_count(src_mask));
+#endif
+      unsigned offset = dst_fields.size();
+      dst_fields.resize(offset + pop_count);
+      int next_start = 0;
+      for (int idx = 0; idx < pop_count; idx++)
+      {
+        int index = compressed.find_next_set(next_start);
+        Domain::CopySrcDstField &field = dst_fields[offset+idx];
+        field = offsets[index];
+        // We'll start looking again at the next index after this one
+        next_start = index + 1;
+      }
+    }
+
     /////////////////////////////////////////////////////////////
     // Layout Description 
     /////////////////////////////////////////////////////////////
@@ -194,29 +263,7 @@ namespace Legion {
         // We'll start looking again at the next index after this one
         next_start = index + 1;
       }
-    }
-
-    //--------------------------------------------------------------------------
-    template<unsigned LOG2MAX>
-    /*static*/ void LayoutDescription::compress_mask(FieldMask &x, FieldMask m)
-    //--------------------------------------------------------------------------
-    {
-      FieldMask mk, mp, mv, t;
-      // See hacker's delight 7-4
-      x = x & m;
-      mk = ~m << 1;
-      for (unsigned i = 0; i < LOG2MAX; i++)
-      {
-        mp = mk ^ (mk << 1);
-        for (unsigned idx = 1; idx < LOG2MAX; idx++)
-          mp = mp ^ (mp << (1 << idx));
-        mv = mp & m;
-        m = (m ^ mv) | (mv >> (1 << i));
-        t = x & mv;
-        x = (x ^ t) | (t >> (1 << i));
-        mk = mk & ~mp;
-      }
-    }
+    } 
 
     //--------------------------------------------------------------------------
     void LayoutDescription::compute_copy_offsets(FieldID fid, 
@@ -1149,6 +1196,48 @@ namespace Legion {
 #endif
       // Pass in our physical instance so the layout knows how to specialize
       layout->compute_copy_offsets(copy_fields, instance, fields);
+    }
+
+    //--------------------------------------------------------------------------
+    void InstanceManager::initialize_across_helper(CopyAcrossHelper *helper,
+                                                   const FieldMask &dst_mask,
+                                     const std::vector<unsigned> &src_indexes,
+                                     const std::vector<unsigned> &dst_indexes)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(src_indexes.size() == dst_indexes.size());
+#endif
+      std::vector<Domain::CopySrcDstField> dst_fields;
+      layout->compute_copy_offsets(dst_mask, instance, dst_fields);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(dst_fields.size() == dst_indexes.size());
+#endif
+      helper->offsets.resize(dst_fields.size());
+      // We've got the offsets compressed based on their destination mask
+      // order, now we need to translate them to their source mask order
+      // Figure out the permutation from destination mask ordering to 
+      // source mask ordering. 
+      // First let's figure out the order of the source indexes
+      std::vector<unsigned> src_order(src_indexes.size());
+      std::map<unsigned,unsigned> translate_map;
+      for (unsigned idx = 0; idx < src_indexes.size(); idx++)
+        translate_map[src_indexes[idx]] = idx;
+      unsigned index = 0;
+      for (std::map<unsigned,unsigned>::const_iterator it = 
+            translate_map.begin(); it != translate_map.end(); it++, index++)
+        src_order[it->second] = index; 
+      // Now we can translate the destination indexes
+      translate_map.clear();
+      for (unsigned idx = 0; idx < dst_indexes.size(); idx++)
+        translate_map[dst_indexes[idx]] = idx;
+      index = 0; 
+      for (std::map<unsigned,unsigned>::const_iterator it = 
+            translate_map.begin(); it != translate_map.end(); it++, index++)
+      {
+        unsigned src_index = src_order[it->second];
+        helper->offsets[src_index] = dst_fields[index];
+      }
     }
 
     //--------------------------------------------------------------------------

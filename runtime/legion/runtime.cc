@@ -4776,11 +4776,6 @@ namespace Legion {
               runtime->handle_send_fill_view(derez, remote_address_space);
               break;
             }
-          case SEND_DEFERRED_UPDATE:
-            {
-              runtime->handle_send_deferred_update(derez, remote_address_space);
-              break;
-            }
           case SEND_REDUCTION_VIEW:
             {
               runtime->handle_send_reduction_view(derez, remote_address_space);
@@ -14231,14 +14226,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_deferred_update(AddressSpaceID target, Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(rez, SEND_DEFERRED_UPDATE,
-                                       DEFAULT_VIRTUAL_CHANNEL, false/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::send_reduction_view(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -14993,14 +14980,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       FillView::handle_send_fill_view(this, derez, source);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_send_deferred_update(Deserializer &derez, 
-                                              AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      DeferredView::handle_deferred_update(this, derez, source);
     }
 
     //--------------------------------------------------------------------------

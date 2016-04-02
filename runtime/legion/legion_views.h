@@ -153,12 +153,14 @@ namespace Legion {
     public:
       // Getting field information for performing copies
       virtual void copy_to(const FieldMask &copy_mask, 
-                   std::vector<Domain::CopySrcDstField> &dst_fields) = 0;
+                   std::vector<Domain::CopySrcDstField> &dst_fields,
+                           CopyAcrossHelper *across_helper = NULL) = 0;
       virtual void copy_from(const FieldMask &copy_mask, 
                    std::vector<Domain::CopySrcDstField> &src_fields) = 0;
       virtual bool reduce_to(ReductionOpID redop, 
                              const FieldMask &reduce_mask,
-                     std::vector<Domain::CopySrcDstField> &src_fields) = 0;
+                     std::vector<Domain::CopySrcDstField> &src_fields,
+                             CopyAcrossHelper *across_helper = NULL) = 0;
       virtual void reduce_from(ReductionOpID redop,const FieldMask &reduce_mask,
                        std::vector<Domain::CopySrcDstField> &src_fields) = 0;
       virtual bool has_war_dependence(const RegionUsage &usage, 
@@ -218,11 +220,13 @@ namespace Legion {
       void copy_field(FieldID fid, std::vector<Domain::CopySrcDstField> &infos);
     public:
       virtual void copy_to(const FieldMask &copy_mask, 
-                   std::vector<Domain::CopySrcDstField> &dst_fields);
+                   std::vector<Domain::CopySrcDstField> &dst_fields,
+                           CopyAcrossHelper *across_helper = NULL);
       virtual void copy_from(const FieldMask &copy_mask, 
                    std::vector<Domain::CopySrcDstField> &src_fields);
       virtual bool reduce_to(ReductionOpID redop, const FieldMask &copy_mask,
-                     std::vector<Domain::CopySrcDstField> &dst_fields);
+                     std::vector<Domain::CopySrcDstField> &dst_fields,
+                             CopyAcrossHelper *across_helper = NULL);
       virtual void reduce_from(ReductionOpID redop,const FieldMask &reduce_mask,
                        std::vector<Domain::CopySrcDstField> &src_fields);
       virtual bool has_war_dependence(const RegionUsage &usage, 
@@ -440,7 +444,8 @@ namespace Legion {
                                         const FieldMask &copy_mask,
                                         const VersionInfo &version_info,
                                         const std::set<Event> &preconditions,
-                                        Operation *op);
+                                        Operation *op, CopyAcrossHelper *helper,
+                                        RegionTreeNode *intersect);
       Event perform_deferred_across_reduction(MaterializedView *target,
                                               FieldID dst_field,
                                               FieldID src_field,
@@ -480,9 +485,11 @@ namespace Legion {
                                     const FieldMask &user_mask);
     public:
       virtual bool reduce_to(ReductionOpID redop, const FieldMask &copy_mask,
-                     std::vector<Domain::CopySrcDstField> &dst_fields);
+                     std::vector<Domain::CopySrcDstField> &dst_fields,
+                             CopyAcrossHelper *across_helper = NULL);
       virtual void copy_to(const FieldMask &copy_mask, 
-                   std::vector<Domain::CopySrcDstField> &dst_fields);
+                   std::vector<Domain::CopySrcDstField> &dst_fields,
+                           CopyAcrossHelper *across_helper = NULL);
       virtual void copy_from(const FieldMask &copy_mask, 
                    std::vector<Domain::CopySrcDstField> &src_fields);
       virtual bool has_war_dependence(const RegionUsage &usage, 
@@ -522,6 +529,325 @@ namespace Legion {
       std::set<Event> initial_user_events;
     };
 
+    /**
+     * \class DeferredView
+     * A DeferredView class is an abstract class the complements
+     * the MaterializedView class. While materialized views are 
+     * actual views onto a real instance, deferred views are 
+     * effectively place holders for non-physical isntances which
+     * contain enough information to perform the necessary 
+     * operations to bring a materialized view up to date for 
+     * specific fields. There are several different flavors of
+     * deferred views and this class is the base type.
+     */
+    class DeferredView : public LogicalView {
+    public:
+      DeferredView(RegionTreeForest *ctx, DistributedID did,
+                   AddressSpaceID owner_space, AddressSpaceID local_space,
+                   RegionTreeNode *node, bool register_now);
+      virtual ~DeferredView(void);
+    public:
+      // Deferred views never have managers
+      virtual bool has_manager(void) const { return false; }
+      virtual PhysicalManager* get_manager(void) const
+      { return NULL; }
+      virtual bool has_parent(void) const = 0;
+      virtual LogicalView* get_parent(void) const = 0;
+      virtual LogicalView* get_subview(const ColorPoint &c) = 0;
+      virtual bool has_space(const FieldMask &space_mask) const
+        { return false; }
+    public:
+      virtual void notify_active(void) = 0;
+      virtual void notify_inactive(void) = 0;
+      virtual void notify_valid(void) = 0;
+      virtual void notify_invalid(void) = 0;
+    public:
+      virtual DistributedID send_view_base(AddressSpaceID target) = 0;
+      virtual void send_view_updates(AddressSpaceID target, 
+                                     const FieldMask &update_mask) = 0;
+    public:
+      // Should never be called
+      virtual void collect_users(const std::set<Event> &term_events)
+        { assert(false); }
+    public:
+      virtual bool is_instance_view(void) const { return false; }
+      virtual bool is_deferred_view(void) const { return true; }
+#ifdef DEBUG_HIGH_LEVEL
+      virtual InstanceView* as_instance_view(void) const { return NULL; }
+      virtual DeferredView* as_deferred_view(void) const
+        { return const_cast<DeferredView*>(this); }
+#endif
+    public:
+      virtual bool is_composite_view(void) const = 0;
+      virtual bool is_fill_view(void) const = 0;
+#ifdef DEBUG_HIGH_LEVEL
+      virtual FillView* as_fill_view(void) const = 0;
+      virtual CompositeView* as_composite_view(void) const = 0;
+#else
+      inline FillView* as_fill_view(void) const;
+      inline CompositeView* as_composite_view(void) const;
+#endif
+    public:
+      virtual DeferredView* simplify(CompositeCloser &closer, 
+                                      const FieldMask &capture_mask) = 0;
+    public:
+      void issue_deferred_copies(const TraversalInfo &info,
+                                 MaterializedView *dst,
+                                 const FieldMask &copy_mask,
+                                 CopyTracker *tracker = NULL);
+      void issue_deferred_copies_across(const TraversalInfo &info,
+                                        MaterializedView *dst,
+                                  const std::vector<unsigned> &src_indexes,
+                                  const std::vector<unsigned> &dst_indexes,
+                                        Event precondition,
+                                        std::set<Event> &postconditions);
+      void find_field_descriptors(Event term_event,
+                                  const RegionUsage &usage,
+                                  const FieldMask &user_mask,
+                                  FieldID field_id, Operation *op,
+                          std::vector<FieldDataDescriptor> &field_data,
+                                  std::set<Event> &preconditions);
+    public:
+      virtual void issue_deferred_copies(const TraversalInfo &info,
+                                         MaterializedView *dst,
+                                         const FieldMask &copy_mask,
+                    const LegionMap<Event,FieldMask>::aligned &preconditions,
+                          LegionMap<Event,FieldMask>::aligned &postconditions,
+                                         CopyTracker *tracker = NULL,
+                                         CopyAcrossHelper *helper = NULL) = 0; 
+    };
+
+    /**
+     * \class CompositeVersionInfo
+     * This is a wrapper class for keeping track of the version
+     * information for all the composite nodes in a composite instance.
+     */
+    class CompositeVersionInfo : public Collectable {
+    public:
+      CompositeVersionInfo(void);
+      CompositeVersionInfo(const CompositeVersionInfo &rhs);
+      ~CompositeVersionInfo(void);
+    public:
+      CompositeVersionInfo& operator=(const CompositeVersionInfo &rhs);
+    public:
+      inline VersionInfo& get_version_info(void)
+        { return version_info; }
+    protected:
+      VersionInfo version_info;
+    };
+
+    /**
+     * \class CompositeView
+     * The CompositeView class is used for deferring close
+     * operations by representing a valid version of a single
+     * logical region with a bunch of different instances.
+     */
+    class CompositeView : public DeferredView {
+      public:
+      static const AllocationType alloc_type = COMPOSITE_VIEW_ALLOC; 
+    public:
+      CompositeView(RegionTreeForest *ctx, DistributedID did,
+                    AddressSpaceID owner_proc, RegionTreeNode *node, 
+                    AddressSpaceID local_proc, CompositeNode *root,
+                    CompositeVersionInfo *version_info, bool register_now);
+      CompositeView(const CompositeView &rhs);
+      virtual ~CompositeView(void);
+    public:
+      CompositeView& operator=(const CompositeView &rhs);
+      void* operator new(size_t count);
+      void operator delete(void *ptr);
+    public:
+      virtual bool has_parent(void) const { return false; }
+      virtual LogicalView* get_parent(void) const 
+        { assert(false); return NULL; }
+      virtual LogicalView* get_subview(const ColorPoint &c);
+    public:
+      virtual void notify_active(void);
+      virtual void notify_inactive(void);
+      virtual void notify_valid(void);
+      virtual void notify_invalid(void);
+    public:
+      virtual DistributedID send_view_base(AddressSpaceID target);
+      virtual void send_view_updates(AddressSpaceID target, 
+                                     const FieldMask &update_mask);
+      void unpack_composite_view(Deserializer &derez, AddressSpaceID source);
+      void make_local(std::set<Event> &preconditions);
+    public:
+      virtual bool is_composite_view(void) const { return true; }
+      virtual bool is_fill_view(void) const { return false; }
+#ifdef DEBUG_HIGH_LEVEL
+      virtual FillView* as_fill_view(void) const
+        { return NULL; }
+      virtual CompositeView* as_composite_view(void) const
+        { return const_cast<CompositeView*>(this); }
+#endif
+    public:
+      virtual DeferredView* simplify(CompositeCloser &closer, 
+                                     const FieldMask &capture_mask);
+    public:
+      virtual void issue_deferred_copies(const TraversalInfo &info,
+                                         MaterializedView *dst,
+                                         const FieldMask &copy_mask,
+                    const LegionMap<Event,FieldMask>::aligned &preconditions,
+                          LegionMap<Event,FieldMask>::aligned &postconditions,
+                                         CopyTracker *tracker = NULL,
+                                         CopyAcrossHelper *helper = NULL);
+    public:
+      static void handle_send_composite_view(Runtime *runtime, 
+                              Deserializer &derez, AddressSpaceID source);
+    public:
+      // The root node for this composite view
+      CompositeNode *const root;
+      CompositeVersionInfo *const version_info;
+    };
+
+    /**
+     * \class CompositeNode
+     * A helper class for representing the frozen state of a region
+     * tree as part of one or more composite views.
+     */
+    class CompositeNode {
+    public:
+      static const AllocationType alloc_type = COMPOSITE_NODE_ALLOC;
+    public:
+      CompositeNode(RegionTreeNode *node, CompositeNode *parent);
+      CompositeNode(const CompositeNode &rhs);
+      ~CompositeNode(void);
+    public:
+      CompositeNode& operator=(const CompositeNode &rhs);
+      void* operator new(size_t count);
+      void operator delete(void *ptr);
+    public:
+      void add_child(CompositeNode *child);
+      void update_child(CompositeNode *child, const FieldMask &mask);
+      void finalize(FieldMask &final_mask);
+      void set_owner_did(DistributedID own_did);
+    public:
+      void capture_physical_state(CompositeCloser &closer, 
+                                  PhysicalState *state, 
+                                  const FieldMask &capture_mask);
+      bool capture_instances(CompositeCloser &closer, 
+                             const FieldMask &capture_mask,
+                     const LegionMap<LogicalView*,FieldMask>::aligned *views);
+      void capture_reductions(const FieldMask &capture_mask,
+                     const LegionMap<ReductionView*,FieldMask>::aligned *views);
+      bool simplify(CompositeCloser &closer, FieldMask &capture_mask,
+                    CompositeNode *new_parent);
+    public:
+      void issue_deferred_copies(const TraversalInfo &info, 
+                                 MaterializedView *dst,
+                                 const FieldMask &copy_mask,
+                                 const VersionInfo &src_version_info,
+              const LegionMap<Event,FieldMask>::aligned &preconditions,
+                    LegionMap<Event,FieldMask>::aligned &postconditions,
+                    LegionMap<Event,FieldMask>::aligned &postreductions,
+                           CopyTracker *tracker, CopyAcrossHelper *helper,
+                           bool check_root = true) const;
+      CompositeNode* find_next_root(RegionTreeNode *target) const;
+      void find_valid_views(const FieldMask &search_mask,
+                      LegionMap<LogicalView*,FieldMask>::aligned &valid) const;
+      void issue_update_copies(const TraversalInfo &info, MaterializedView *dst,
+                       FieldMask copy_mask, const VersionInfo &src_version_info,
+                      const LegionMap<Event,FieldMask>::aligned &preconditions,
+                            LegionMap<Event,FieldMask>::aligned &postconditions,
+                      const LegionMap<LogicalView*,FieldMask>::aligned &views,
+                         CopyTracker *tracker, CopyAcrossHelper *helper) const; 
+      void issue_update_reductions(const TraversalInfo &info, 
+                                   MaterializedView *dst, 
+                                   const FieldMask &copy_mask,
+                                   const VersionInfo &src_version_info,
+                      const LegionMap<Event,FieldMask>::aligned &preconditions,
+                            LegionMap<Event,FieldMask>::aligned &postconditions,
+                         CopyTracker *tracker, CopyAcrossHelper *helper) const;
+    public:
+      void notify_active(void);
+      void notify_inactive(void);
+      void notify_valid(void);
+      void notify_invalid(void);
+    public:
+      RegionTreeNode *const logical_node;
+      CompositeNode *const parent;
+    protected:
+      DistributedID owner_did;
+      FieldMask dirty_mask, reduction_mask;
+      LegionMap<CompositeNode*,FieldMask/*valid fields*/>::aligned children;
+      LegionMap<LogicalView*,FieldMask>::aligned valid_views;
+      LegionMap<ReductionView*,FieldMask>::aligned reduction_views;
+    };
+
+    /**
+     * \class FillView
+     * This is a deferred view that is used for filling in 
+     * fields with a default value.
+     */
+    class FillView : public DeferredView {
+      public:
+      static const AllocationType alloc_type = FILL_VIEW_ALLOC;
+    public:
+      class FillViewValue : public Collectable {
+      public:
+        FillViewValue(const void *v, size_t size)
+          : value(v), value_size(size) { }
+        FillViewValue(const FillViewValue &rhs)
+          : value(NULL), value_size(0) { assert(false); }
+        ~FillViewValue(void)
+        { free(const_cast<void*>(value)); }
+      public:
+        FillViewValue& operator=(const FillViewValue &rhs)
+        { assert(false); return *this; }
+      public:
+        const void *const value;
+        const size_t value_size;
+      };
+    public:
+      FillView(RegionTreeForest *ctx, DistributedID did,
+               AddressSpaceID owner_proc, AddressSpaceID local_proc,
+               RegionTreeNode *node, bool reg_now, FillViewValue *value);
+      FillView(const FillView &rhs);
+      virtual ~FillView(void);
+    public:
+      FillView& operator=(const FillView &rhs);
+    public:
+      virtual bool has_parent(void) const { return false; }
+      virtual LogicalView* get_parent(void) const 
+        { assert(false); return NULL; }
+      virtual LogicalView* get_subview(const ColorPoint &c);
+    public:
+      virtual void notify_active(void);
+      virtual void notify_inactive(void);
+      virtual void notify_valid(void);
+      virtual void notify_invalid(void);
+    public:
+      virtual DistributedID send_view_base(AddressSpaceID target);
+      virtual void send_view_updates(AddressSpaceID target, 
+                                     const FieldMask &update_mask);
+    public:
+      virtual bool is_composite_view(void) const { return false; }
+      virtual bool is_fill_view(void) const { return true; }
+#ifdef DEBUG_HIGH_LEVEL
+      virtual FillView* as_fill_view(void) const
+        { return const_cast<FillView*>(this); }
+      virtual CompositeView* as_composite_view(void) const { return NULL; }
+#endif
+    public:
+      virtual DeferredView* simplify(CompositeCloser &closer, 
+                                     const FieldMask &capture_mask);
+    public:
+      virtual void issue_deferred_copies(const TraversalInfo &info,
+                                         MaterializedView *dst,
+                                         const FieldMask &copy_mask,
+                    const LegionMap<Event,FieldMask>::aligned &preconditions,
+                          LegionMap<Event,FieldMask>::aligned &postconditions,
+                                         CopyTracker *tracker = NULL,
+                                         CopyAcrossHelper *helper = NULL);
+    public:
+      static void handle_send_fill_view(Runtime *runtime, Deserializer &derez,
+                                        AddressSpaceID source);
+    public:
+      FillViewValue *const value;
+    };
+
+#if 0
     /**
      * \class DeferredView
      * A DeferredView class is an abstract class the complements
@@ -1006,6 +1332,7 @@ namespace Legion {
       // Keep track of the child views
       std::map<ColorPoint,FillView*> children;
     };
+#endif
 
     // Some inline definitions for non-debug mode
 #ifndef DEBUG_HIGH_LEVEL

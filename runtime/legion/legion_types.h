@@ -395,7 +395,6 @@ namespace Legion {
       SEND_MATERIALIZED_UPDATE,
       SEND_COMPOSITE_VIEW,
       SEND_FILL_VIEW,
-      SEND_DEFERRED_UPDATE,
       SEND_REDUCTION_VIEW,
       SEND_REDUCTION_UPDATE,
       SEND_INSTANCE_MANAGER,
@@ -493,7 +492,6 @@ namespace Legion {
         "Send Materialized Update",                                   \
         "Send Composite View",                                        \
         "Send Fill View",                                             \
-        "Send Deferred Update",                                       \
         "Send Reduction View",                                        \
         "Send Reduction Update",                                      \
         "Send Instance Manager",                                      \
@@ -652,6 +650,7 @@ namespace Legion {
     class DistributedCollectable;
     class LayoutDescription;
     class PhysicalManager; // base class for instance and reduction
+    class CopyAcrossHelper;
     class LogicalView; // base class for instance and reduction
     class InstanceManager;
     class InstanceKey;
