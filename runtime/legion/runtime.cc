@@ -1223,7 +1223,7 @@ namespace Legion {
 #if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS)
       LegionRuntime::Accessor::RegionAccessor<
         LegionRuntime::Accessor::AccessorType::Generic>
-          result = references.get_field_accessor(runtime->forest, fid);
+          result = references.get_field_accessor(fid);
       result.set_region_untyped(this);
 #ifdef PRIVILEGE_CHECKS
       result.set_privileges_untyped(

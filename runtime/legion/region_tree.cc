@@ -13628,7 +13628,7 @@ namespace Legion {
         if (!!(flush_mask - update_mask))
           log_run.warning("WARNING: No valid instances found for reduction "
                           "fields. This is a result of performing reductions "
-                          "to an uninitialized field. Undefined behavior will "
+                          "to an uninitialized field. Undefined behavior "
                           "may occur.");
         // Now update our physical state
         // Update the valid views.  Don't mark them dirty since we
