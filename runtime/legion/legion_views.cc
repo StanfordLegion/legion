@@ -3506,6 +3506,8 @@ namespace Legion {
       if (!src_instances.empty())
       {
         // This has all our destination preconditions
+        // Only issue copies from fields which have values
+        FieldMask actual_copy_mask;
         LegionMap<Event,FieldMask>::aligned src_preconditions = preconditions;
         for (LegionMap<MaterializedView*,FieldMask>::aligned::const_iterator 
               it = src_instances.begin(); it != src_instances.end(); it++)
@@ -3513,12 +3515,13 @@ namespace Legion {
           it->first->find_copy_preconditions(0/*redop*/, true/*reading*/,
                                              it->second, src_version_info,
                                              src_preconditions);
+          actual_copy_mask |= it->second;
         }
         // issue the grouped copies and put the result in the postconditions
         // We are the intersect
         dst->logical_node->issue_grouped_copies(info, dst, src_preconditions,
-                                 copy_mask, src_instances, src_version_info, 
-                                 postconditions, tracker, 
+                                 actual_copy_mask, src_instances, 
+                                 src_version_info, postconditions, tracker, 
                                  across_helper, logical_node);
       }
       if (!deferred_instances.empty())
