@@ -13607,28 +13607,29 @@ namespace Legion {
       }
       if (!!flush_mask)
       {
-#ifdef DEBUG_HIGH_LEVEL
         FieldMask update_mask;
-#endif
         // Iterate over all the valid instances and issue any reductions
         // to the target that need to be done
         for (LegionMap<LogicalView*,FieldMask>::aligned::iterator it = 
               valid_views.begin(); it != valid_views.end(); it++)
         {
+          if (it->first->is_deferred_view())
+            continue;
           FieldMask overlap = flush_mask & it->second; 
           issue_update_reductions(it->first, overlap, info.version_info,
                                   reduction_views, info.op, tracker);
           // Save the overlap fields
           it->second = overlap;
-#ifdef DEBUG_HIGH_LEVEL
           update_mask |= overlap;
-#endif
         }
-#ifdef DEBUG_HIGH_LEVEL
         // We should have issued reduction operations to at least
-        // one place for every single reduction field.
-        assert(update_mask == flush_mask);
-#endif
+        // one place for every single reduction field, if we didn't
+        // then issue a warning
+        if (!!(flush_mask - update_mask))
+          log_run.warning("WARNING: No valid instances found for reduction "
+                          "fields. This is a result of performing reductions "
+                          "to an uninitialized field. Undefined behavior will "
+                          "may occur.");
         // Now update our physical state
         // Update the valid views.  Don't mark them dirty since we
         // don't want to accidentally invalidate some of our other
