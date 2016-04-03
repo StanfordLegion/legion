@@ -724,6 +724,22 @@ function parser.expr_prefix(p)
       span = ast.span(start, p),
     }
 
+  elseif p:nextif("cross_product_array") then
+    p:expect("(")
+    local lhs = p:expr()
+    p:expect(",")
+    local disjointness = p:disjointness_kind()
+    p:expect(",")
+    local colorings = p:expr()
+    p:expect(")")
+    return ast.unspecialized.expr.CrossProductArray {
+      lhs = lhs,
+      disjointness = disjointness,
+      colorings = colorings,
+      options = ast.default_options(),
+      span = ast.span(start, p),
+    }
+
   elseif p:nextif("list_slice_partition") then
     p:expect("(")
     local partition = p:expr()

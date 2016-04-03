@@ -1652,6 +1652,26 @@ function type_check.expr_cross_product(cx, node)
   }
 end
 
+function type_check.expr_cross_product_array(cx, node)
+  local lhs = type_check.expr(cx, node.lhs)
+  local lhs_type = std.as_read(lhs.expr_type)
+  local lhs_symbol = terralib.newsymbol(lhs_type)
+  local disjointness = node.disjointness
+  local rhs_type = std.partition(disjointness, lhs_type.parent_region_symbol)
+  local rhs_symbol = terralib.newsymbol(rhs_type)
+  local expr_type = std.cross_product(lhs_symbol, rhs_symbol)
+  local colorings = type_check.expr(cx, node.colorings)
+
+  return ast.typed.expr.CrossProductArray {
+    lhs = lhs,
+    disjointness = disjointness,
+    colorings = colorings,
+    expr_type = expr_type,
+    options = node.options,
+    span = node.span,
+  }
+end
+
 function type_check.expr_list_slice_partition(cx, node)
   local partition = type_check.expr(cx, node.partition)
   local partition_type = std.check_read(cx, partition)
@@ -2427,6 +2447,9 @@ function type_check.expr(cx, node)
 
   elseif node:is(ast.specialized.expr.CrossProduct) then
     return type_check.expr_cross_product(cx, node)
+
+  elseif node:is(ast.specialized.expr.CrossProductArray) then
+    return type_check.expr_cross_product_array(cx, node)
 
   elseif node:is(ast.specialized.expr.ListSlicePartition) then
     return type_check.expr_list_slice_partition(cx, node)

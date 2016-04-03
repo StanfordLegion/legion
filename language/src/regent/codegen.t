@@ -3468,6 +3468,74 @@ function codegen.expr_cross_product(cx, node)
     expr_type)
 end
 
+function codegen.expr_cross_product_array(cx, node)
+  local lhs = codegen.expr(cx, node.lhs):read(cx)
+  local colorings = codegen.expr(cx, node.colorings):read(cx)
+  local disjoint = node.disjointness == std.disjoint
+
+  local expr_type = std.as_read(node.expr_type)
+  local actions = quote
+    [lhs.actions];
+    [colorings.actions];
+    [emit_debuginfo(node)]
+  end
+
+  local lr = cx:region(expr_type:parent_region()).logical_region
+  local lp = terralib.newsymbol(c.legion_logical_partition_t, "lp")
+  local product = terralib.newsymbol(
+    c.legion_terra_index_cross_product_t, "cross_product")
+  local colors = terralib.newsymbol(c.legion_color_t[2], "colors")
+  actions = quote
+    var [colors]
+    var start : double = c.legion_get_current_time_in_micros()/double(1e6)
+    var color_domain =
+      c.legion_index_partition_get_color_space(
+        [cx.runtime], [cx.context], [lhs.value].impl.index_partition)
+    regentlib.assert(color_domain.dim == 1, "color domain should be 1D")
+    var start_color = color_domain.rect_data[0]
+    var end_color = color_domain.rect_data[1]
+    regentlib.assert(start_color >= 0 and end_color >= 0,
+      "colors should be non-negative")
+    var [lp] = [lhs.value].impl
+    var lhs_ip = [lp].index_partition
+    var [colors]
+    [colors][0] = c.legion_index_partition_get_color(
+      [cx.runtime], [cx.context], lhs_ip)
+    var other_color = -1
+
+    for color = start_color, end_color + 1 do
+      var lhs_subregion = c.legion_logical_partition_get_logical_subregion_by_color(
+        [cx.runtime], [cx.context], [lp], color)
+      var lhs_subspace = c.legion_index_partition_get_index_subspace(
+        [cx.runtime], [cx.context], lhs_ip, color)
+      var rhs_ip = c.legion_index_partition_create_coloring(
+        [cx.runtime], [cx.context], lhs_subspace, [colorings.value] [color],
+        [disjoint], other_color)
+      var rhs_lp = c.legion_logical_partition_create([cx.runtime], [cx.context],
+        lhs_subregion, rhs_ip)
+      other_color =
+        c.legion_index_partition_get_color([cx.runtime], [cx.context], rhs_ip)
+    end
+
+    [colors][1] = other_color
+    var [product]
+    [product].partition = lhs_ip
+    [product].other_color = other_color
+    var stop : double = c.legion_get_current_time_in_micros()/double(1e6)
+    c.printf("codegen: cross_product_array %e\n", stop - start)
+  end
+
+  return values.value(
+    expr.once_only(
+      actions,
+      `(expr_type {
+          impl = [lp],
+          product = [product],
+          colors = [colors],
+        })),
+    expr_type)
+end
+
 function codegen.expr_list_slice_partition(cx, node)
   local partition_type = std.as_read(node.partition.expr_type)
   local partition = codegen.expr(cx, node.partition):read(cx, partition_type)
@@ -5297,6 +5365,9 @@ function codegen.expr(cx, node)
 
   elseif node:is(ast.typed.expr.CrossProduct) then
     return codegen.expr_cross_product(cx, node)
+
+  elseif node:is(ast.typed.expr.CrossProductArray) then
+    return codegen.expr_cross_product_array(cx, node)
 
   elseif node:is(ast.typed.expr.ListSlicePartition) then
     return codegen.expr_list_slice_partition(cx, node)
