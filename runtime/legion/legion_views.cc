@@ -3574,6 +3574,7 @@ namespace Legion {
             FieldMask overlap = it->second & actual_copy_mask;
             if (!overlap)
               continue;
+            // If we ever hit this assertion we need to merge
 #ifdef DEBUG_HIGH_LEVEL
             assert(src_preconditions.find(it->first) ==
                    src_preconditions.end());
@@ -3586,6 +3587,7 @@ namespace Legion {
           for (LegionMap<Event,FieldMask>::aligned::const_iterator it = 
                 preconditions.begin(); it != preconditions.end(); it++)
           {
+            // If we ever hit this assertion we need to merge
 #ifdef DEBUG_HIGH_LEVEL
             assert(src_preconditions.find(it->first) ==
                    src_preconditions.end());
@@ -3641,9 +3643,9 @@ namespace Legion {
           continue;
         // Perform the reduction
         Event reduce_event = it->first->perform_deferred_reduction(dst,
-            reduce_mask, src_version_info, local_preconditions, 
-            dst->logical_node == it->first->logical_node ? NULL : 
-              info.op, across_helper, it->first->logical_node);
+            reduce_mask, src_version_info, local_preconditions, info.op,
+            across_helper, dst->logical_node == it->first->logical_node ?
+            NULL : it->first->logical_node);
         if (reduce_event.exists())
         {
           postreductions[reduce_event] = overlap;
