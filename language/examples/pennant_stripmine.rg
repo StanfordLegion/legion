@@ -1030,19 +1030,19 @@ task continue_simulation(warmup : bool,
   return warmup or (cycle < cstop and time < tstop)
 end
 
-task read_input_sequential(rz_all : region(zone),
-                           rp_all : region(point),
-                           rs_all : region(side(wild, wild, wild, wild)),
-                           conf : config)
-where reads writes(rz_all, rp_all, rs_all) do
-  return read_input(
-    __runtime(), __context(),
-    __physical(rz_all), __fields(rz_all),
-    __physical(rp_all), __fields(rp_all),
-    __physical(rs_all), __fields(rs_all),
-    conf)
-end
-
+--task read_input_sequential(rz_all : region(zone),
+--                           rp_all : region(point),
+--                           rs_all : region(side(wild, wild, wild, wild)),
+--                           conf : config)
+--where reads writes(rz_all, rp_all, rs_all) do
+--  return read_input(
+--    __runtime(), __context(),
+--    __physical(rz_all), __fields(rz_all),
+--    __physical(rp_all), __fields(rp_all),
+--    __physical(rs_all), __fields(rs_all),
+--    conf)
+--end
+--
 task validate_output_sequential(rz_all : region(zone),
                                 rp_all : region(point),
                                 rs_all : region(side(wild, wild, wild, wild)),
@@ -1105,27 +1105,27 @@ task test()
   regentlib.assert(conf.seq_init or conf.par_init,
                    "enable one of sequential or parallel initialization")
 
-  if conf.seq_init then
-    -- Hack: This had better run on the same node...
-    colorings = unwrap(read_input_sequential(
-      rz_all, rp_all, rs_all, conf))
-  end
+  --if conf.seq_init then
+  --  -- Hack: This had better run on the same node...
+  --  colorings = unwrap(read_input_sequential(
+  --    rz_all, rp_all, rs_all, conf))
+  --end
 
   if conf.par_init then
     var colorings_ = read_partitions(conf)
-    if conf.seq_init then
-      regentlib.assert(colorings.nspans_zones == colorings_.nspans_zones, "bad nspans zones")
-      regentlib.assert(colorings.nspans_points == colorings_.nspans_points, "bad nspans points")
-      c.legion_coloring_destroy(colorings.rz_all_c)
-      c.legion_coloring_destroy(colorings.rz_spans_c)
-      c.legion_coloring_destroy(colorings.rp_all_c)
-      c.legion_coloring_destroy(colorings.rp_all_private_c)
-      c.legion_coloring_destroy(colorings.rp_all_ghost_c)
-      c.legion_coloring_destroy(colorings.rp_all_shared_c)
-      c.legion_coloring_destroy(colorings.rp_spans_c)
-      c.legion_coloring_destroy(colorings.rs_all_c)
-      c.legion_coloring_destroy(colorings.rs_spans_c)
-    end
+    -- if conf.seq_init then
+    --   regentlib.assert(colorings.nspans_zones == colorings_.nspans_zones, "bad nspans zones")
+    --   regentlib.assert(colorings.nspans_points == colorings_.nspans_points, "bad nspans points")
+    --   c.legion_coloring_destroy(colorings.rz_all_c)
+    --   c.legion_coloring_destroy(colorings.rz_spans_c)
+    --   c.legion_coloring_destroy(colorings.rp_all_c)
+    --   c.legion_coloring_destroy(colorings.rp_all_private_c)
+    --   c.legion_coloring_destroy(colorings.rp_all_ghost_c)
+    --   c.legion_coloring_destroy(colorings.rp_all_shared_c)
+    --   c.legion_coloring_destroy(colorings.rp_spans_c)
+    --   c.legion_coloring_destroy(colorings.rs_all_c)
+    --   c.legion_coloring_destroy(colorings.rs_spans_c)
+    -- end
     colorings = colorings_
   end
 
@@ -1141,8 +1141,9 @@ task test()
   var rz_all_p = partition(disjoint, rz_all, colorings.rz_all_c)
 
   -- Partition zones into spans.
-  var rz_spans_p = partition(disjoint, rz_all, colorings.rz_spans_c)
-  var rz_spans = cross_product(rz_all_p, rz_spans_p)
+  --var rz_spans_p = partition(disjoint, rz_all, colorings.rz_spans_c)
+  --var rz_spans = cross_product(rz_all_p, rz_spans_p)
+  var rz_spans = cross_product_array(rz_all_p, disjoint, colorings.rz_spans_c)
 
   -- Partition points into private and ghost regions.
   var rp_all_p = partition(disjoint, rp_all, colorings.rp_all_c)
@@ -1163,18 +1164,23 @@ task test()
     disjoint, rp_all_ghost, colorings.rp_all_shared_c)
 
   -- Partition points into spans.
-  var rp_spans_p = partition(
-    disjoint, rp_all, colorings.rp_spans_c)
-  var rp_spans_private = cross_product(rp_all_private_p, rp_spans_p)
-  var rp_spans_shared = cross_product(rp_all_shared_p, rp_spans_p)
+  --var rp_spans_p = partition(
+  --  disjoint, rp_all, colorings.rp_spans_c)
+  --var rp_spans_private = cross_product(rp_all_private_p, rp_spans_p)
+  --var rp_spans_shared = cross_product(rp_all_shared_p, rp_spans_p)
+  var rp_spans_private =
+    cross_product_array(rp_all_private_p, disjoint, colorings.rp_spans_private_c)
+  var rp_spans_shared =
+    cross_product_array(rp_all_shared_p, disjoint, colorings.rp_spans_shared_c)
 
   -- Partition sides into disjoint pieces by zone.
   var rs_all_p = partition(disjoint, rs_all, colorings.rs_all_c)
 
   -- Partition sides into spans.
-  var rs_spans_p = partition(
-    disjoint, rs_all, colorings.rs_spans_c)
-  var rs_spans = cross_product(rs_all_p, rs_spans_p)
+  --var rs_spans_p = partition(
+  --  disjoint, rs_all, colorings.rs_spans_c)
+  --var rs_spans = cross_product(rs_all_p, rs_spans_p)
+  var rs_spans = cross_product_array(rs_all_p, disjoint, colorings.rs_spans_c)
 
   var end_5 = c.legion_get_current_time_in_micros()/double(1e6)
   c.printf("timing: create partitions %e\n", end_5 - start_5)
