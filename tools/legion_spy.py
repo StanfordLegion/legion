@@ -139,7 +139,7 @@ def check_preconditions(preconditions, op):
             op_ancestor = op
             # First get the contexts at the same depth 
             while pre_ctx.get_depth() < op_ctx.get_depth():
-                op_acnestor = op_ancestor.get_context().op
+                op_ancestor = op_ancestor.get_context().op
                 op_ctx = op_ancestor.get_context()
             while op_ctx.get_depth() < pre_ctx.get_depth():
                 pre_ancestor =  pre_ancestor.get_context().op
@@ -196,7 +196,7 @@ class Point(object):
     def __eq__(self, point):
         assert self.dim == point.dim
         for i in range(self.dim):
-            if self.vals[i] <> other.vals[i]:
+            if self.vals[i] <> point.vals[i]:
                 return False
         return True
 
@@ -1755,7 +1755,7 @@ class PhysicalState(object):
                 if bad is not None:
                     print "ERROR: Missing use precondition for field "+str(self.field)+\
                           " of region requirement "+str(req.index)+" of "+str(op)+\
-                          " on previous "+str(bad)
+                          " (UID "+str(op.uid)+") on previous "+str(bad)
                     return False
             else:
                 for other in preconditions:
@@ -2867,8 +2867,8 @@ class Operation(object):
             assert num_reqs % 2 == 0
             num_copies = num_reqs / 2
             for idx in range(num_copies):
-                if not self.analyze_copy_requirements(depth, idx, reqs[idx], 
-                        idx+num_copies, reqs[idx+num_copies], perform_checks):
+                if not self.analyze_copy_requirements(depth, idx, self.reqs[idx], 
+                        idx+num_copies, self.reqs[idx+num_copies], perform_checks):
                     return False
         elif self.kind == FILL_OP_KIND:
             for index,req in self.reqs.iteritems():
@@ -3365,7 +3365,10 @@ class Instance(object):
 
     def __str__(self):
         #return "Instance %s in %s" % (hex(self.handle), str(self.memory))
-        return "Instance "+hex(self.handle)
+        if self.is_virtual():
+            return "Virtual Instance"
+        else:
+            return "Instance "+hex(self.handle)
 
     __repr__ = __str__
 
@@ -4037,11 +4040,12 @@ class Event(object):
         self.outgoing_copies.add(copy)
 
 class RealmBase(object):
-    __slots__ = ['state', 'creator', 'region', 'intersect', 'start_event', 'finish_event', 
-                 'physical_incoming', 'physical_outgoing', 'generation', 'event_context', 
-                 'analyzed', 'cluster_name', 'reachable_cache']
-    def __init__(self, state):
+    __slots__ = ['state', 'realm_num', 'creator', 'region', 'intersect', 'start_event', 
+                 'finish_event', 'physical_incoming', 'physical_outgoing', 'generation', 
+                 'event_context', 'analyzed', 'cluster_name', 'reachable_cache']
+    def __init__(self, state, realm_num):
         self.state = state
+        self.realm_num = realm_num
         self.creator = None
         self.region = None
         self.intersect = None
@@ -4195,7 +4199,7 @@ class RealmCopy(RealmBase):
     __slots__ = ['start_event', 'finish_event', 'src_fields', 'dst_fields', 
                  'srcs', 'dsts', 'redops', 'node_name']
     def __init__(self, state, finish, realm_num):
-        RealmBase.__init__(self, state)
+        RealmBase.__init__(self, state, realm_num)
         self.finish_event = finish
         if finish.exists():
             finish.add_incoming_copy(self)
@@ -4207,7 +4211,7 @@ class RealmCopy(RealmBase):
         self.node_name = 'realm_copy_'+str(realm_num)
 
     def __str__(self):
-        return self.node_name
+        return "Realm Copy ("+str(self.realm_num)+")"
 
     __repr__ = __str__
 
@@ -4232,7 +4236,10 @@ class RealmCopy(RealmBase):
         self.redops.append(redop)
 
     def print_event_node(self, printer):
-        label = "Realm Copy of "+str(self.region)
+        if self.state.verbose:
+            label = "Realm Copy ("+str(self.realm_num)+") of "+str(self.region)
+        else:
+            label = "Realm Copy of "+str(self.region)
         if self.intersect is not None:
             label += " (intersect with "+str(self.intersect)+")"
         if self.creator is not None:
@@ -4272,7 +4279,7 @@ class RealmCopy(RealmBase):
 class RealmFill(RealmBase):
     __slots__ = ['fields', 'dsts', 'node_name']
     def __init__(self, state, finish, realm_num):
-        RealmBase.__init__(self, state)
+        RealmBase.__init__(self, state, realm_num)
         self.finish_event = finish
         if finish.exists():
             finish.add_incoming_fill(self)
@@ -4281,7 +4288,7 @@ class RealmFill(RealmBase):
         self.node_name = 'realm_fill_'+str(realm_num)
 
     def __str__(self):
-        return self.node_name
+        return "Realm Fill ("+str(self.realm_num)+")"
 
     __repr__ = __str__
 
@@ -4302,7 +4309,10 @@ class RealmFill(RealmBase):
         self.dsts.append(dst)
 
     def print_event_node(self, printer):
-        label = "Realm Fill of "+str(self.region)
+        if self.state.verbose:
+            label = "Realm Fill ("+str(self.realm_num)+") of "+str(self.region)
+        else:
+            label = "Realm Fill of "+str(self.region)
         if self.intersect is not None:
             label += " (intersect with "+str(self.intersect)+")"
         if self.creator is not None:
