@@ -18599,19 +18599,9 @@ namespace Legion {
         // If we are node 0 then we have to launch the top-level task
         if (local_space == 0)
         {
-          // Find the first CPU processor
-          for (Machine::ProcessorQuery::iterator it = local_procs.begin();
-                it != local_procs.end(); it++)
-          {
-            Processor::Kind kind = it->kind(); 
-            if (kind == Processor::LOC_PROC)
-            {
-              top_level_proc = *it;
-              break;
-            }
-          }
-          // If we didn't find one that is very bad
-          if (!top_level_proc.exists())
+          local_procs.only_kind(Processor::LOC_PROC);
+          // If we don't have one that is very bad
+          if (local_procs.count() == 0)
           {
             log_run.error("Machine model contains no CPU processors!");
 #ifdef DEBUG_HIGH_LEVEL
@@ -18619,6 +18609,7 @@ namespace Legion {
 #endif
             exit(ERROR_NO_PROCESSORS);
           }
+          top_level_proc = local_procs.first();
         }
       }
       // Now perform a collective spawn to initialize the runtime everywhere
