@@ -3206,6 +3206,8 @@ class State(object):
         if (e1, e2) not in self.copies:
             return False
         copy = self.copies[(e1, e2)]
+        if iid not in self.instances:
+            return False
         if not self.instances[iid][-1].add_op_user(copy, index):
             return False
         copy.add_instance(index, self.instances[iid][-1])
