@@ -27,6 +27,18 @@
 namespace Legion {
   namespace Mapping {
 
+    /**
+     * \class ShimMapper
+     * The shim mapper class provides some backwards compatibility to 
+     * the old mapper interface for existing mappers. It is not designed
+     * to be particularly fast (lots of translation by copying). The support
+     * for old mapper methods is not complete. Only commonly used old
+     * mapper calls are currently implemented. If there is one that you
+     * used to use, but is not currently implemented please feel free
+     * to add it. Note that when using the ShimMapper only old maper calls
+     * should be overloaded. Overloading new mapper calls will result in
+     * undefined behavior.
+     */
     class ShimMapper : public DefaultMapper {
     public:
       // Our internal classes
@@ -269,6 +281,8 @@ namespace Legion {
                               const SliceTaskInput&           input,
                                     SliceTaskOutput&          output);
       typedef TaskSlice DomainSplit;
+      virtual void handle_message(const MapperContext         ctx,
+                                  const MapperMessage&        message);
     public:
       // Old mapper calls
       virtual void select_task_options(Task *task);
@@ -280,11 +294,14 @@ namespace Legion {
       virtual void notify_mapping_failed(const Mappable *mappable);
       virtual void slice_domain(const Task *task, const Domain &domain,
                                 std::vector<DomainSplit> &slices);
+      virtual void handle_message(Processor source, 
+                                  const void *message, size_t length);
     protected:
       Color get_logical_region_color(LogicalRegion handle);
       bool has_parent_logical_partition(LogicalRegion handle);
       LogicalPartition get_parent_logical_partition(LogicalRegion handle);
       LogicalRegion get_parent_logical_region(LogicalPartition handle);
+      void broadcast_message(const void *message, size_t message_size);
     protected:
       TaskVariantCollection* find_task_variant_collection(MapperContext ctx,
                                         TaskID task_id, const char *task_name);

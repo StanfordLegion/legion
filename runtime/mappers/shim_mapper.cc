@@ -1004,6 +1004,26 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ShimMapper::handle_message(const MapperContext ctx,
+                                    const MapperMessage& message)
+    //--------------------------------------------------------------------------
+    {
+      log_shim.spew("Shim mapper handle_message in %s", get_mapper_name());
+      handle_message(message.sender, message.message, message.size);
+    }
+
+    //--------------------------------------------------------------------------
+    void ShimMapper::handle_message(Processor source,
+                                    const void *message, size_t length)
+    //--------------------------------------------------------------------------
+    {
+      log_shim.spew("Old handle message call for %s", get_mapper_name());
+      // We should never get this call since the base shim mapper
+      // never sends any kind of messages
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
     Color ShimMapper::get_logical_region_color(LogicalRegion handle)
     //--------------------------------------------------------------------------
     {
@@ -1030,6 +1050,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return mapper_rt_get_parent_logical_region(current_ctx, handle);
+    }
+
+    //--------------------------------------------------------------------------
+    void ShimMapper::broadcast_message(const void *message, size_t message_size)
+    //--------------------------------------------------------------------------
+    {
+      mapper_rt_broadcast(current_ctx, message, message_size);
     }
 
     //--------------------------------------------------------------------------
