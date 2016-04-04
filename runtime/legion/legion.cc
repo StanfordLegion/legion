@@ -1313,15 +1313,16 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     InlineLauncher::InlineLauncher(void)
-      : map_id(0), tag(0)
+      : map_id(0), tag(0), layout_constraint_id(0)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     InlineLauncher::InlineLauncher(const RegionRequirement &req,
-                                   MapperID mid /*=0*/, MappingTagID t /*=0*/)
-      : requirement(req), map_id(mid), tag(t)
+                                   MapperID mid /*=0*/, MappingTagID t /*=0*/,
+                                   LayoutConstraintID lay_id /*=0*/)
+      : requirement(req), map_id(mid), tag(t), layout_constraint_id(lay_id)
     //--------------------------------------------------------------------------
     {
     }

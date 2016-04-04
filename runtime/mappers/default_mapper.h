@@ -306,7 +306,7 @@ namespace Legion {
                               const LayoutConstraintSet &constraints, 
                               PhysicalInstance &result, MappingKind kind,
                               bool force_new, bool meets, bool reduction,
-                              const RegionRequirement &req, Processor target);
+                              const RegionRequirement &req);
       void default_report_failed_instance_creation(const Task &task, 
                               unsigned index, Processor target_proc, 
                               Memory target_memory) const;
@@ -343,7 +343,7 @@ namespace Legion {
       const AddressSpace    node_id;
       const Machine         machine;
       const char *const     mapper_name;
-    private:
+    protected:
       mutable unsigned short random_number_generator[3];
     protected: 
       // Make these data structures mutable anticipating when the machine

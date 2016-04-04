@@ -654,7 +654,7 @@ namespace Legion {
        */
       //------------------------------------------------------------------------
       virtual void speculate(const MapperContext      ctx,
-                             const Copy& copy,
+                             const Copy&              copy,
                                    SpeculativeOutput& output) = 0;
       //------------------------------------------------------------------------
 

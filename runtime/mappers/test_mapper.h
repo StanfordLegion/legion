@@ -18,7 +18,7 @@
 #define __TEST_MAPPER_H__
 
 #include "legion.h"
-#include "legion_mapping.h"
+#include "default_mapper.h"
 
 #include <cstdlib>
 #include <cassert>
@@ -33,11 +33,9 @@ namespace Legion {
      * the Legion and Realm runtime systems. The test mapper
      * will make random mapping decisions designed to exercise
      * corner cases in the runtime that might not normally
-     * be explored by normal mapping decisions. The test 
-     * mapper can optionally log its output to be used by
-     * the replay mapper (see replay_mapper.h). 
+     * be explored by normal mapping decisions.
      */
-    class TestMapper : public Mapper {
+    class TestMapper : public DefaultMapper {
     public:
       TestMapper(Machine machine, Processor local, 
                  const char *mapper_name = NULL);
@@ -47,17 +45,10 @@ namespace Legion {
       TestMapper& operator=(const TestMapper &rhs);
     public:
       static const char* create_test_name(Processor p);
-    public:
-      virtual const char* get_mapper_name(void) const;
-      virtual MapperSyncModel get_mapper_sync_model(void) const;
     public: // Task mapping calls
       virtual void select_task_options(const MapperContext    ctx,
                                        const Task&            task,
                                              TaskOptions&     output);
-      virtual void premap_task(const MapperContext      ctx,
-                               const Task&              task, 
-                               const PremapTaskInput&   input,
-                               PremapTaskOutput&        output);
       virtual void slice_task(const MapperContext      ctx,
                               const Task&              task, 
                               const SliceTaskInput&    input,
@@ -70,10 +61,6 @@ namespace Legion {
                                        const Task&                  task,
                                        const SelectVariantInput&    input,
                                              SelectVariantOutput&   output);
-      virtual void postmap_task(const MapperContext      ctx,
-                                const Task&              task,
-                                const PostMapInput&      input,
-                                      PostMapOutput&     output);
       virtual void select_task_sources(const MapperContext        ctx,
                                        const Task&                task,
                                        const SelectTaskSrcInput&  input,
@@ -81,9 +68,6 @@ namespace Legion {
       virtual void speculate(const MapperContext      ctx,
                              const Task&              task,
                                    SpeculativeOutput& output);
-      virtual void report_profiling(const MapperContext      ctx,
-                                    const Task&              task,
-                                    const TaskProfilingInfo& input);
     public: // Inline mapping calls
       virtual void map_inline(const MapperContext        ctx,
                               const InlineMapping&       inline_op,
@@ -93,9 +77,6 @@ namespace Legion {
                                        const InlineMapping&         inline_op,
                                        const SelectInlineSrcInput&  input,
                                              SelectInlineSrcOutput& output);
-      virtual void report_profiling(const MapperContext         ctx,
-                                    const InlineMapping&        inline_op,
-                                    const InlineProfilingInfo&  input);
     public: // Copy mapping calls
       virtual void map_copy(const MapperContext      ctx,
                             const Copy&              copy,
@@ -108,9 +89,6 @@ namespace Legion {
       virtual void speculate(const MapperContext      ctx,
                              const Copy& copy,
                                    SpeculativeOutput& output);
-      virtual void report_profiling(const MapperContext      ctx,
-                                    const Copy&              copy,
-                                    const CopyProfilingInfo& input);
     public: // Close mapping calls
       virtual void map_close(const MapperContext       ctx,
                              const Close&              close,
@@ -120,25 +98,11 @@ namespace Legion {
                                         const Close&               close,
                                         const SelectCloseSrcInput&  input,
                                               SelectCloseSrcOutput& output);
-      virtual void report_profiling(const MapperContext       ctx,
-                                    const Close&              close,
-                                    const CloseProfilingInfo& input);
     public: // Acquire mapping calls
-      virtual void map_acquire(const MapperContext         ctx,
-                               const Acquire&              acquire,
-                               const MapAcquireInput&      input,
-                                     MapAcquireOutput&     output);
       virtual void speculate(const MapperContext         ctx,
                              const Acquire&              acquire,
                                    SpeculativeOutput&    output);
-      virtual void report_profiling(const MapperContext         ctx,
-                                    const Acquire&              acquire,
-                                    const AcquireProfilingInfo& input);
     public: // Release mapping calls
-      virtual void map_release(const MapperContext         ctx,
-                               const Release&              release,
-                               const MapReleaseInput&      input,
-                                     MapReleaseOutput&     output);
       virtual void select_release_sources(const MapperContext       ctx,
                                      const Release&                 release,
                                      const SelectReleaseSrcInput&   input,
@@ -146,25 +110,6 @@ namespace Legion {
       virtual void speculate(const MapperContext         ctx,
                              const Release&              release,
                                    SpeculativeOutput&    output);
-      virtual void report_profiling(const MapperContext         ctx,
-                                    const Release&              release,
-                                    const ReleaseProfilingInfo& input);
-    public: // Task execution mapping calls
-      virtual void configure_context(const MapperContext         ctx,
-                                     const Task&                 task,
-                                           ContextConfigOutput&  output);
-      virtual void select_tunable_value(const MapperContext         ctx,
-                                        const Task&                 task,
-                                        const SelectTunableInput&   input,
-                                              SelectTunableOutput&  output);
-    public: // Must epoch mapping
-      virtual void map_must_epoch(const MapperContext           ctx,
-                                  const MapMustEpochInput&      input,
-                                        MapMustEpochOutput&     output);
-    public: // Dataflow graph mapping
-      virtual void map_dataflow_graph(const MapperContext           ctx,
-                                      const MapDataflowGraphInput&  input,
-                                            MapDataflowGraphOutput& output);
     public: // Mapping control and stealing
       virtual void select_tasks_to_map(const MapperContext          ctx,
                                        const SelectMappingInput&    input,
@@ -175,14 +120,6 @@ namespace Legion {
       virtual void permit_steal_request(const MapperContext         ctx,
                                         const StealRequestInput&    intput,
                                               StealRequestOutput&   output);
-    public: // handling
-      virtual void handle_message(const MapperContext           ctx,
-                                  const MapperMessage&          message);
-      virtual void handle_task_result(const MapperContext           ctx,
-                                      const MapperTaskResult&       result);
-    protected: // help for generating random numbers
-      long generate_random_integer(void) const;
-      double generate_random_real(void) const;
     protected:
       Processor select_random_processor(Processor::Kind kind);
       Processor::Kind select_random_processor_kind(MapperContext ctx, 
@@ -194,12 +131,21 @@ namespace Legion {
       void select_random_source_order(
           const std::vector<PhysicalInstance> &sources,
                 std::deque<PhysicalInstance> &ranking);
-    public:
-      const Machine machine;
-      const Processor local_proc;
-      const char *const mapper_name;
     protected:
-      mutable unsigned short random_number_generator[3];
+      void map_constrained_requirement(MapperContext ctx, 
+          const RegionRequirement &req, MappingKind mapping_kind,
+          const std::vector<LayoutConstraintID> &constraints,
+          std::vector<PhysicalInstance> &chosen_instances,
+          Processor target_proc = Processor::NO_PROC);
+      void map_random_requirement(MapperContext ctx,
+          const RegionRequirement &req,
+          std::vector<PhysicalInstance> &chosen_instances,
+          Processor target_proc = Processor::NO_PROC);
+    protected:
+      long generate_random_integer(void) const 
+        { return default_generate_random_integer(); }
+      double generate_random_real(void) const
+        { return default_generate_random_real(); }
     protected:
       std::map<TaskID,std::map<VariantID,
                                Processor::Kind> > variant_processor_kinds;

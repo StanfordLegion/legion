@@ -1621,6 +1621,7 @@ namespace Legion {
       requirement = launcher.requirement;
       map_id = launcher.map_id;
       tag = launcher.tag;
+      layout_constraint_id = launcher.layout_constraint_id;
       termination_event = UserEvent::create_user_event();
       region = PhysicalRegion(legion_new<PhysicalRegionImpl>(requirement,
                               completion_event, true/*mapped*/, ctx, 
@@ -1740,6 +1741,7 @@ namespace Legion {
       parent_ctx = NULL;
       remap_region = false;
       mapper = NULL;
+      layout_constraint_id = 0;
       profiling_reported = UserEvent::NO_USER_EVENT;
     }
 
@@ -2419,6 +2421,30 @@ namespace Legion {
                           "requirement without reduction privileges for "
                           "inline mapping operation in task %s (ID %lld).",
                           mapper->get_mapper_name(),parent_ctx->get_task_name(),
+                          parent_ctx->get_unique_id());
+#ifdef DEBUG_HIGH_LEVEL
+            assert(false);
+#endif
+            exit(ERROR_INVALID_MAPPER_OUTPUT);
+          }
+        }
+      }
+      if (layout_constraint_id > 0)
+      {
+        // Check the layout constraints are valid
+        LayoutConstraints *constraints = 
+          runtime->find_layout_constraints(layout_constraint_id);
+        for (unsigned idx = 0; idx < chosen_instances.size(); idx++)
+        {
+          PhysicalManager *manager = chosen_instances[idx].get_manager();
+          if (manager->conflicts(constraints))
+          {
+            log_run.error("Invalid mapper output. Mapper %s selected "
+                          "instance for inline mapping (ID %lld) in task %s "
+                          "(ID %lld) which failed to satisfy the corresponding "
+                          "layout constraints.", 
+                          mapper->get_mapper_name(), get_unique_op_id(),
+                          parent_ctx->get_task_name(), 
                           parent_ctx->get_unique_id());
 #ifdef DEBUG_HIGH_LEVEL
             assert(false);

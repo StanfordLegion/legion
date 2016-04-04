@@ -1210,13 +1210,16 @@ namespace Legion {
       InlineLauncher(void);
       InlineLauncher(const RegionRequirement &req,
                      MapperID id = 0,
-                     MappingTagID tag = 0);
+                     MappingTagID tag = 0,
+                     LayoutConstraintID layout_id = 0);
     public:
       inline void add_field(FieldID fid, bool inst = true);
     public:
       RegionRequirement               requirement;
       MapperID                        map_id;
       MappingTagID                    tag;
+    public:
+      LayoutConstraintID              layout_constraint_id;
     };
 
     /**
@@ -1836,6 +1839,7 @@ namespace Legion {
     public:
       // Inline Launcher arguments
       RegionRequirement                 requirement;
+      LayoutConstraintID                layout_constraint_id; 
     public:
       // Parent task for the inline operation
       Task*                             parent_task;

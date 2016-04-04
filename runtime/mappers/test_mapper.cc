@@ -16,11 +16,14 @@
 #include "test_mapper.h"
 
 #define INLINE_RATIO    100 // 1 in 100
+#define REAL_CLOSE_RATIO 100 // 1 in 100 will make a real instance
+#define COPY_VIRTUAL_RATIO 10 // 1 in 10 copies will make a virtual source
+#define INNER_VIRTUAL_RATIO 2 // 1 in 2 virtual inner task region requirements
 
 namespace Legion {
   namespace Mapping {
 
-    LegionRuntime::Logger::Category log_test("test_mapper");
+    LegionRuntime::Logger::Category log_test_mapper("test_mapper");
 
     //--------------------------------------------------------------------------
     /*static*/ const char* TestMapper::create_test_name(Processor p)
@@ -35,8 +38,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     TestMapper::TestMapper(Machine m, Processor local, const char *name)
-      : machine(m), local_proc(local),
-        mapper_name((name == NULL) ? create_test_name(local) : name)
+      : DefaultMapper(m, local, (name == NULL) ? create_test_name(local) : name)
     //--------------------------------------------------------------------------
     {
       // Check to see if there any input arguments to parse
@@ -70,8 +72,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     TestMapper::TestMapper(const TestMapper &rhs)
-      : machine(rhs.machine), local_proc(rhs.local_proc), 
-        mapper_name(rhs.mapper_name)
+      : DefaultMapper(rhs.machine, rhs.local_proc, rhs.mapper_name)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -82,7 +83,6 @@ namespace Legion {
     TestMapper::~TestMapper(void)
     //--------------------------------------------------------------------------
     {
-      free(const_cast<char*>(mapper_name));
     }
 
     //--------------------------------------------------------------------------
@@ -92,21 +92,6 @@ namespace Legion {
       // should never be called
       assert(false);
       return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    const char* TestMapper::get_mapper_name(void) const
-    //--------------------------------------------------------------------------
-    {
-      return mapper_name;
-    }
-
-    //--------------------------------------------------------------------------
-    Mapper::MapperSyncModel TestMapper::get_mapper_sync_model(void) const
-    //--------------------------------------------------------------------------
-    {
-      // Need atomicity to protect our random number generator
-      return SERIALIZED_REENTRANT_MAPPER_MODEL;
     }
 
     //--------------------------------------------------------------------------
@@ -132,20 +117,6 @@ namespace Legion {
         output.stealable = true;
         output.map_locally = ((generate_random_integer() % 2) == 0);
       }
-    }
-
-    //--------------------------------------------------------------------------
-    long TestMapper::generate_random_integer(void) const
-    //--------------------------------------------------------------------------
-    {
-      return nrand48(random_number_generator);
-    }
-    
-    //--------------------------------------------------------------------------
-    double TestMapper::generate_random_real(void) const
-    //--------------------------------------------------------------------------
-    {
-      return erand48(random_number_generator);
     }
 
     //--------------------------------------------------------------------------
@@ -219,28 +190,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TestMapper::premap_task(const MapperContext     ctx,
-                                 const Task&             task,
-                                 const PremapTaskInput&  input,
-                                       PremapTaskOutput& output)
-    //--------------------------------------------------------------------------
-    {
-      for (std::map<unsigned,std::vector<PhysicalInstance> >::const_iterator
-            it = input.valid_instances.begin();
-            it != input.valid_instances.end(); it++)
-      {
-        // If it is restricted, then we can't do anything random
-        if (task.regions[it->first].is_restricted())
-        {
-          output.premapped_instances.insert(*it);
-          continue;
-        }
-        // TODO figure out how to pick a location for all points
-        assert(false);
-      }
-    }
-
-    //--------------------------------------------------------------------------
     void TestMapper::slice_task(const MapperContext      ctx,
                                 const Task&              task,
                                 const SliceTaskInput&    input,
@@ -303,7 +252,184 @@ namespace Legion {
                                     MapTaskOutput&        output)
     //--------------------------------------------------------------------------
     {
+      // Pick a random variant, then pick separate instances for all the 
+      // fields in a region requirement
+      const std::map<VariantID,Processor::Kind> &variant_kinds = 
+        find_task_variants(ctx, task.task_id);
+      std::vector<VariantID> variants;
+      for (std::map<VariantID,Processor::Kind>::const_iterator it = 
+            variant_kinds.begin(); it != variant_kinds.end(); it++)
+      {
+        if (task.target_proc.kind() == it->second)
+          variants.push_back(it->first);
+      }
+      assert(!variants.empty());
+      if (variants.size() > 1)
+      {
+        int chosen = generate_random_integer() % variants.size();
+        output.chosen_variant = variants[chosen];
+      }
+      else
+        output.chosen_variant = variants[0];
+      output.target_procs.push_back(task.target_proc);
+      std::vector<bool> premapped(task.regions.size(), false);
+      for (unsigned idx = 0; idx < input.premapped_regions.size(); idx++)
+      {
+        unsigned index = input.premapped_regions[idx];
+        output.chosen_instances[index] = input.valid_instances[index];
+        premapped[index] = true;
+      }
+      // Get the execution layout constraints for this variant
+      const TaskLayoutConstraintSet &layout_constraints = 
+        mapper_rt_find_task_layout_constraints(ctx, task.task_id, 
+                                               output.chosen_variant);
+      bool is_inner_variant = 
+        mapper_rt_is_inner_variant(ctx, task.task_id, output.chosen_variant);
+      for (unsigned idx = 0; idx < task.regions.size(); idx++)
+      {
+        if (premapped[idx])
+          continue;
+        if (task.regions[idx].is_restricted())
+        {
+          output.chosen_instances[idx] = input.valid_instances[idx];
+          continue;
+        }
+        // If this is an inner task, see if we want to make a virtual instance
+        if (is_inner_variant && 
+            ((generate_random_integer() % INNER_VIRTUAL_RATIO) == 0)) 
+        {
+          output.chosen_instances[idx].push_back(
+              PhysicalInstance::get_virtual_instance());
+          continue;
+        }
+        // See if we have any layout constraints for this index
+        // If we do we have to follow them, otherwise we can 
+        // let all hell break loose and do what we want
+        if (layout_constraints.layouts.find(idx) != 
+              layout_constraints.layouts.end())
+        {
+          std::vector<LayoutConstraintID> constraints;
+          for (std::multimap<unsigned,LayoutConstraintID>::const_iterator it = 
+                layout_constraints.layouts.lower_bound(idx); it !=
+                layout_constraints.layouts.upper_bound(idx); it++)
+            constraints.push_back(it->second);
+          map_constrained_requirement(ctx, task.regions[idx], TASK_MAPPING,
+              constraints, output.chosen_instances[idx], task.target_proc);
+        }
+        else
+          map_random_requirement(ctx, task.regions[idx], 
+                                 output.chosen_instances[idx],
+                                 task.target_proc);
+      }
+      // Give it a random priority
+      output.task_priority = generate_random_integer();
+    }
 
+    //--------------------------------------------------------------------------
+    void TestMapper::map_constrained_requirement(MapperContext ctx,
+        const RegionRequirement &req, MappingKind mapping_kind, 
+        const std::vector<LayoutConstraintID> &constraints,
+        std::vector<PhysicalInstance> &chosen_instances, Processor restricted) 
+    //--------------------------------------------------------------------------
+    {
+      chosen_instances.resize(constraints.size());
+      unsigned output_idx = 0;
+      for (std::vector<LayoutConstraintID>::const_iterator lay_it = 
+            constraints.begin(); lay_it != 
+            constraints.end(); lay_it++, output_idx++)
+      {
+        const LayoutConstraintSet &layout_constraints = 
+          mapper_rt_find_layout_constraints(ctx, *lay_it);
+        // TODO: explore the constraints in more detail and exploit randomness
+        // We'll use the default mapper to fill in any constraint holes for now
+        Machine::MemoryQuery all_memories(machine);
+        if (restricted.exists())
+          all_memories.has_affinity_to(restricted);
+        // This could be a big data structure in a big machine
+        std::map<unsigned,Memory> random_memories;
+        for (Machine::MemoryQuery::iterator it = all_memories.begin();
+              it != all_memories.end(); it++)
+        {
+          random_memories[generate_random_integer()] = *it;
+        }
+        bool made_instance = false;
+        while (!random_memories.empty())
+        {
+          std::map<unsigned,Memory>::iterator it = random_memories.begin();
+          Memory target = it->second;
+          random_memories.erase(it);
+          if (default_make_instance(ctx, target, layout_constraints,
+                chosen_instances[output_idx], mapping_kind, true/*force new*/,
+                false/*meets*/, req.privilege == REDUCE, req))
+          {
+            made_instance = true;
+            break;
+          }
+        }
+        if (!made_instance)
+        {
+          log_test_mapper.error("Test mapper %s ran out of memory",
+                                get_mapper_name());
+          assert(false);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void TestMapper::map_random_requirement(MapperContext ctx,
+        const RegionRequirement &req, 
+        std::vector<PhysicalInstance> &chosen_instances, Processor restricted)
+    //--------------------------------------------------------------------------
+    {
+      // TODO: put in arbitrary constraints to mess with the DMA system
+      LayoutConstraintSet constraints;
+      default_policy_fill_constraints(ctx, constraints, Memory::NO_MEMORY, req);
+      std::vector<LogicalRegion> regions(1, req.region);
+      chosen_instances.resize(req.privilege_fields.size());
+      unsigned output_idx = 0;
+      // Iterate over all the fields and make a separate instance and
+      // put it in random places
+      for (std::set<FieldID>::const_iterator it = req.privilege_fields.begin();
+            it != req.privilege_fields.end(); it++, output_idx++)
+      {
+        // Overwrite the field constraints 
+        std::vector<FieldID> field(1, *it);
+        constraints.field_constraint = FieldConstraint(field, false);
+        // Try a bunch of memories in a random order until we find one 
+        // that succeeds
+        Machine::MemoryQuery all_memories(machine);
+        if (restricted.exists())
+          all_memories.has_affinity_to(restricted);
+        // This could be a big data structure in a big machine
+        std::map<unsigned,Memory> random_memories;
+        for (Machine::MemoryQuery::iterator it = all_memories.begin();
+              it != all_memories.end(); it++)
+        {
+          random_memories[generate_random_integer()] = *it;
+        }
+        bool made_instance = false;
+        while (!random_memories.empty())
+        {
+          std::map<unsigned,Memory>::iterator it = random_memories.begin();
+          Memory target = it->second;
+          random_memories.erase(it);
+          // Try to make the instance, we always make new instances to
+          // generate as much data movement and dependence analysis as
+          // we possibly can, it will also stress the garbage collector
+          if (mapper_rt_create_physical_instance(ctx, target, constraints,
+                                   regions, chosen_instances[output_idx]))
+          {
+            made_instance = true;
+            break;
+          }
+        }
+        if (!made_instance)
+        {
+          log_test_mapper.error("Test mapper %s ran out of memory",
+                                get_mapper_name());
+          assert(false);
+        }
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -323,11 +449,6 @@ namespace Legion {
           variants.push_back(it->first);
       }
       assert(!variants.empty());
-      if (variants.size() == 1)
-      {
-        output.chosen_variant = variants[0];
-        return;
-      }
       mapper_rt_filter_variants(ctx, task, input.chosen_instances, variants);
       assert(!variants.empty());
       if (variants.size() == 1)
@@ -339,33 +460,23 @@ namespace Legion {
       output.chosen_variant = variants[chosen];
     }
 
-    //------------------------------------------------------------------------
-    void TestMapper::postmap_task(const MapperContext   ctx,
-                                  const Task&           task,
-                                  const PostMapInput&   input,
-                                        PostMapOutput&  output)
-    //------------------------------------------------------------------------
-    {
-      // Do nothing 
-    }
-
-    //------------------------------------------------------------------------
+    //--------------------------------------------------------------------------
     void TestMapper::select_task_sources(const MapperContext        ctx,
                                          const Task&                task,
                                          const SelectTaskSrcInput&  input,
                                                SelectTaskSrcOutput& output)
-    //------------------------------------------------------------------------
+    //--------------------------------------------------------------------------
     {
       // Pick a random order
       select_random_source_order(input.source_instances, 
                                  output.chosen_ranking); 
     }
 
-    //------------------------------------------------------------------------
+    //--------------------------------------------------------------------------
     void TestMapper::select_random_source_order(
                                 const std::vector<PhysicalInstance> &sources,
                                       std::deque<PhysicalInstance> &ranking)
-    //------------------------------------------------------------------------
+    //--------------------------------------------------------------------------
     {
       std::vector<bool> handled(sources.size(), false);
       for (int count = sources.size(); count > 1; count--) 
@@ -393,7 +504,165 @@ namespace Legion {
         }
       }
     }
-    
+
+    //--------------------------------------------------------------------------
+    void TestMapper::speculate(const MapperContext            ctx,
+                               const Task&                    task,
+                                     SpeculativeOutput&       output)
+    //--------------------------------------------------------------------------
+    {
+      // TODO: turn on random speculation
+      output.speculate = false;
+    }
+
+    //--------------------------------------------------------------------------
+    void TestMapper::map_inline(const MapperContext        ctx,
+                                const InlineMapping&       inline_op,
+                                const MapInlineInput&      input,
+                                      MapInlineOutput&     output)
+    //--------------------------------------------------------------------------
+    {
+      if (inline_op.layout_constraint_id > 0)
+      {
+        std::vector<LayoutConstraintID> constraints(1, 
+                                          inline_op.layout_constraint_id);
+        map_constrained_requirement(ctx, inline_op.requirement, INLINE_MAPPING,
+                                    constraints, output.chosen_instances);
+      }
+      else
+        map_random_requirement(ctx, inline_op.requirement,
+                               output.chosen_instances);
+    }
+
+    //--------------------------------------------------------------------------
+    void TestMapper::select_inline_sources(const MapperContext    ctx,
+                                     const InlineMapping&         inline_op,
+                                     const SelectInlineSrcInput&  input,
+                                           SelectInlineSrcOutput& output)
+    //--------------------------------------------------------------------------
+    {
+      select_random_source_order(input.source_instances,
+                                 output.chosen_ranking);
+    }
+
+    //--------------------------------------------------------------------------
+    void TestMapper::map_copy(const MapperContext      ctx,
+                              const Copy&              copy,
+                              const MapCopyInput&      input,
+                                    MapCopyOutput&     output)
+    //--------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < copy.src_requirements.size(); idx++)
+      {
+        if (copy.src_requirements[idx].is_restricted())
+        {
+          output.src_instances[idx] = input.src_instances[idx];
+          continue;
+        }
+        if ((copy.dst_requirements[idx].privilege == READ_WRITE) &&
+            ((generate_random_integer() % COPY_VIRTUAL_RATIO) == 0))
+        {
+          output.src_instances[idx].push_back(
+              PhysicalInstance::get_virtual_instance());
+          continue;
+        }
+        map_random_requirement(ctx, copy.src_requirements[idx], 
+                               output.src_instances[idx]);
+      }
+      for (unsigned idx = 0; idx < copy.dst_requirements.size(); idx++)
+      {
+        if (copy.dst_requirements[idx].is_restricted())
+        {
+          output.dst_instances[idx] = input.dst_instances[idx];
+          continue;
+        }
+        map_random_requirement(ctx, copy.dst_requirements[idx],
+                               output.dst_instances[idx]);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void TestMapper::select_copy_sources(const MapperContext          ctx,
+                                         const Copy&                  copy,
+                                         const SelectCopySrcInput&    input,
+                                               SelectCopySrcOutput&   output)
+    //--------------------------------------------------------------------------
+    {
+      select_random_source_order(input.source_instances,
+                                 output.chosen_ranking);
+    }
+
+    //--------------------------------------------------------------------------
+    void TestMapper::speculate(const MapperContext      ctx,
+                               const Copy&              copy,
+                                     SpeculativeOutput& output)
+    //--------------------------------------------------------------------------
+    {
+      // TODO: speculate sometimes
+      output.speculate = false;
+    }
+
+    //--------------------------------------------------------------------------
+    void TestMapper::map_close(const MapperContext       ctx,
+                               const Close&              close,
+                               const MapCloseInput&      input,
+                                     MapCloseOutput&     output)
+    //--------------------------------------------------------------------------
+    {
+      // Figure out if we want to generate a real instance or a composite
+      if ((generate_random_integer() % REAL_CLOSE_RATIO) == 0)
+      {
+        // make real instances for all the fields
+        map_random_requirement(ctx, close.requirement, output.chosen_instances);
+      }
+      else // just make a composite instance
+        output.chosen_instances.push_back(
+                                  PhysicalInstance::get_virtual_instance());
+    }
+
+    //--------------------------------------------------------------------------
+    void TestMapper::select_close_sources(const MapperContext        ctx,
+                                          const Close&               close,
+                                          const SelectCloseSrcInput&  input,
+                                                SelectCloseSrcOutput& output)
+    //--------------------------------------------------------------------------
+    {
+      select_random_source_order(input.source_instances,
+                                 output.chosen_ranking);
+    }
+
+    //--------------------------------------------------------------------------
+    void TestMapper::speculate(const MapperContext         ctx,
+                               const Acquire&              acquire,
+                                     SpeculativeOutput&    output)
+    //--------------------------------------------------------------------------
+    {
+      // TODO: enable speculation
+      output.speculate = false;
+    }
+
+    //--------------------------------------------------------------------------
+    void TestMapper::select_release_sources(const MapperContext       ctx,
+                                       const Release&                 release,
+                                       const SelectReleaseSrcInput&   input,
+                                             SelectReleaseSrcOutput&  output)
+    //--------------------------------------------------------------------------
+    {
+      select_random_source_order(input.source_instances,
+                                 output.chosen_ranking);
+    }
+
+    //--------------------------------------------------------------------------
+    void TestMapper::speculate(const MapperContext         ctx,
+                               const Release&              release,
+                                     SpeculativeOutput&    output)
+    //--------------------------------------------------------------------------
+    {
+      // TODO: enable speculation
+      output.speculate = false;
+    }
+
+
   }; // namespace Mapping 
 }; // namespace Legion
 

@@ -1447,7 +1447,7 @@ namespace Legion {
           // using these constraints
           if (!default_make_instance(ctx, target_memory, index_constraints,
                      instances.back(), TASK_MAPPING, force_new_instances, 
-                     false/*meets*/, false/*reduction*/, req, target_proc))
+                     false/*meets*/, false/*reduction*/, req))
             return false;
         }
         else if (mapper_rt_do_constraints_entail(ctx, 
@@ -1457,7 +1457,7 @@ namespace Legion {
           // so we can just use them directly
           if (!default_make_instance(ctx, target_memory, index_constraints,
                       instances.back(), TASK_MAPPING, force_new_instances, 
-                      true/*meets*/, false/*reduction*/, req, target_proc))
+                      true/*meets*/, false/*reduction*/, req))
             return false;
         }
         else
@@ -1472,7 +1472,7 @@ namespace Legion {
                 false/*contig*/, false/*inorder*/));
           if (!default_make_instance(ctx, target_memory, creation_constraints,
                          instances.back(), TASK_MAPPING, force_new_instances, 
-                         true/*meets*/, false/*reduction*/, req, target_proc))
+                         true/*meets*/, false/*reduction*/, req))
             return false;
         }
       }
@@ -1486,7 +1486,7 @@ namespace Legion {
           FieldConstraint(needed_fields, false/*contig*/, false/*inorder*/));
       if (!default_make_instance(ctx, target_memory, creation_constraints, 
                 instances.back(), TASK_MAPPING, force_new_instances, 
-                true/*meets*/,  false/*reduction*/, req, target_proc))
+                true/*meets*/,  false/*reduction*/, req))
         return false;
       return true;
     }
@@ -1651,7 +1651,7 @@ namespace Legion {
     bool DefaultMapper::default_make_instance(MapperContext ctx, 
         Memory target_memory, const LayoutConstraintSet &constraints,
         PhysicalInstance &result, MappingKind kind, bool force_new, bool meets, 
-        bool reduction, const RegionRequirement &req, Processor target_proc)
+        bool reduction, const RegionRequirement &req)
     //--------------------------------------------------------------------------
     {
       bool created = true;
@@ -1887,43 +1887,82 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       log_mapper.spew("Default map_inline in %s", get_mapper_name());
-      // Copy over all the valid instances, then try to do an acquire on them
-      // and see which instances are no longer valid
-      output.chosen_instances = input.valid_instances;
-      if (!output.chosen_instances.empty())
-        mapper_rt_acquire_and_filter_instances(ctx, output.chosen_instances);
-      // Now see if we have any fields which we still make space for
-      std::set<FieldID> missing_fields = inline_op.requirement.privilege_fields;
-      for (std::vector<PhysicalInstance>::const_iterator it = 
-            output.chosen_instances.begin(); it != 
-            output.chosen_instances.end(); it++)
-      {
-        it->remove_space_fields(missing_fields);
-        if (missing_fields.empty())
-          break;
-      }
-      // If we've satisfied all our fields, then we are done
-      if (missing_fields.empty())
-        return;
-      // Otherwise, let's make an instance for our missing fields
-      Memory target_memory = default_policy_select_target_memory(ctx,
-                                      inline_op.parent_task->current_proc);
+      // check to see if we have any constraints we have to abide by
+      LayoutConstraintSet creation_constraints;
       bool force_new_instances = false;
-      LayoutConstraintID our_layout_id = 
-       default_policy_select_layout_constraints(ctx, target_memory, 
-                                             inline_op.requirement, 
-                                             INLINE_MAPPING,
-                                             true/*needs check*/, 
-                                             force_new_instances);
-      LayoutConstraintSet creation_constraints = 
-                        mapper_rt_find_layout_constraints(ctx, our_layout_id);
-      creation_constraints.add_constraint(
-          FieldConstraint(missing_fields, false/*contig*/, false/*inorder*/));
+      Memory target_memory = Memory::NO_MEMORY;
+      if (inline_op.layout_constraint_id > 0)
+      {
+        // Find our constraints
+        creation_constraints = 
+         mapper_rt_find_layout_constraints(ctx, inline_op.layout_constraint_id);
+        Memory target_memory;
+        if (creation_constraints.memory_constraint.is_valid())
+        {
+          Machine::MemoryQuery valid_mems(machine);
+          valid_mems.has_affinity_to(inline_op.parent_task->current_proc);
+          valid_mems.only_kind(
+              creation_constraints.memory_constraint.get_kind());
+          if (valid_mems.count() == 0)
+          {
+            log_mapper.error("Default mapper error. Mapper %s could find no "
+                             "valid memories for the constraints requested by "
+                             "inline mapping %lld in parent task %s (ID %lld).",
+                             get_mapper_name(), inline_op.get_unique_id(), 
+                             inline_op.parent_task->get_task_name(),
+                             inline_op.parent_task->get_unique_id());
+            assert(false);
+          }
+          target_memory = valid_mems.first(); // just take the first one
+        }
+        else
+          target_memory = default_policy_select_target_memory(ctx,
+                                  inline_op.parent_task->current_proc);
+        if (creation_constraints.field_constraint.field_set.empty())
+          creation_constraints.add_constraint(FieldConstraint(
+                inline_op.requirement.privilege_fields, false/*contig*/));
+      }
+      else
+      {
+        // No constraints so do what we want
+        // Copy over all the valid instances, then try to do an acquire on them
+        // and see which instances are no longer valid
+        output.chosen_instances = input.valid_instances;
+        if (!output.chosen_instances.empty())
+          mapper_rt_acquire_and_filter_instances(ctx, output.chosen_instances);
+        // Now see if we have any fields which we still make space for
+        std::set<FieldID> missing_fields = 
+          inline_op.requirement.privilege_fields;
+        for (std::vector<PhysicalInstance>::const_iterator it = 
+              output.chosen_instances.begin(); it != 
+              output.chosen_instances.end(); it++)
+        {
+          it->remove_space_fields(missing_fields);
+          if (missing_fields.empty())
+            break;
+        }
+        // If we've satisfied all our fields, then we are done
+        if (missing_fields.empty())
+          return;
+        // Otherwise, let's make an instance for our missing fields
+        target_memory = default_policy_select_target_memory(ctx,
+                                        inline_op.parent_task->current_proc);
+        LayoutConstraintID our_layout_id = 
+         default_policy_select_layout_constraints(ctx, target_memory, 
+                                               inline_op.requirement, 
+                                               INLINE_MAPPING,
+                                               true/*needs check*/, 
+                                               force_new_instances);
+        creation_constraints = 
+                          mapper_rt_find_layout_constraints(ctx, our_layout_id);
+        creation_constraints.add_constraint(
+            FieldConstraint(missing_fields, false/*contig*/, false/*inorder*/));
+      }
       output.chosen_instances.resize(output.chosen_instances.size()+1);
       if (!default_make_instance(ctx, target_memory, creation_constraints,
             output.chosen_instances.back(), INLINE_MAPPING, 
             force_new_instances, true/*meets*/, false/*reduction*/, 
-            inline_op.requirement, inline_op.parent_task->current_proc))
+            inline_op.requirement))
       {
         // If we failed to make it that is bad
         log_mapper.error("Default mapper failed allocation for region "
@@ -2053,7 +2092,7 @@ namespace Legion {
       if (!default_make_instance(ctx, target_memory, 
             creation_constraints, instances.back(), 
             COPY_MAPPING, force_new_instances, true/*meets*/, 
-            false/*reduction*/, req, copy.parent_task->current_proc))
+            false/*reduction*/, req))
       {
         // If we failed to make it that is bad
         log_mapper.error("Default mapper failed allocation for "
