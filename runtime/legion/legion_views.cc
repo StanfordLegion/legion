@@ -148,9 +148,6 @@ namespace Legion {
     void LogicalView::defer_collect_user(Event term_event) 
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(context, DEFER_COLLECT_USER_CALL);
-#endif
       // The runtime will add the gc reference to this view when necessary
       runtime->defer_collect_user(this, term_event);
     }
@@ -388,9 +385,6 @@ namespace Legion {
                                                            const ColorPoint &c)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(context, GET_SUBVIEW_CALL);
-#endif
       // This is the common case
       {
         AutoLock v_lock(view_lock, 1, false/*exclusive*/);
@@ -443,9 +437,6 @@ namespace Legion {
                               std::vector<Domain::CopySrcDstField> &copy_fields)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(context, COPY_FIELD_CALL);
-#endif
       std::vector<FieldID> local_fields(1,fid);
       manager->compute_copy_offsets(local_fields, copy_fields); 
     }
@@ -456,9 +447,6 @@ namespace Legion {
                                    CopyAcrossHelper *across_helper)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(context, COPY_TO_CALL);
-#endif
       if (across_helper == NULL)
         manager->compute_copy_offsets(copy_mask, dst_fields);
       else
@@ -470,9 +458,6 @@ namespace Legion {
                                std::vector<Domain::CopySrcDstField> &src_fields)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(context, COPY_FROM_CALL);
-#endif
       manager->compute_copy_offsets(copy_mask, src_fields);
     }
 
@@ -483,9 +468,6 @@ namespace Legion {
                                      CopyAcrossHelper *across_helper)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(context, REDUCE_TO_CALL);
-#endif
       if (across_helper == NULL)
         manager->compute_copy_offsets(copy_mask, dst_fields);
       else
@@ -499,9 +481,6 @@ namespace Legion {
                                std::vector<Domain::CopySrcDstField> &src_fields)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(context, REDUCE_FROM_CALL);
-#endif
       manager->compute_copy_offsets(reduce_mask, src_fields);
     }
 
@@ -510,9 +489,6 @@ namespace Legion {
                                               const FieldMask &user_mask)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(context, HAS_WAR_DEPENDENCE_CALL);
-#endif
       // No WAR dependences for read-only or reduce 
       if (IS_READ_ONLY(usage) || IS_REDUCE(usage))
         return false;
@@ -528,9 +504,6 @@ namespace Legion {
     void MaterializedView::accumulate_events(std::set<Event> &all_events)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(context, ACCUMULATE_EVENTS_CALL);
-#endif
       AutoLock v_lock(view_lock,1,false/*exclusive*/);
       all_events.insert(outstanding_gc_events.begin(),
                         outstanding_gc_events.end());
@@ -542,9 +515,6 @@ namespace Legion {
                                      const FieldMask &copy_mask, bool reading)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(context, ADD_COPY_USER_CALL);
-#endif
       // Quick test, we only need to do this if the copy_term event
       // exists, otherwise the user is already done
       if (copy_term.exists())
@@ -575,9 +545,6 @@ namespace Legion {
                                      const VersionInfo &version_info)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(context, ADD_USER_CALL);
-#endif
       std::set<Event> wait_on_events;
       Event start_use_event = manager->get_use_event();
       if (start_use_event.exists())
@@ -1033,9 +1000,6 @@ namespace Legion {
                                           std::set<Event> &preconditions)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(context, ADD_USER_ABOVE_CALL);
-#endif
       if ((parent != NULL) && !version_info.is_upper_bound_node(logical_node))
       {
         const ColorPoint &local_color = logical_node->get_color();
@@ -1105,9 +1069,6 @@ namespace Legion {
                                           std::set<Event> &preconditions)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(context, ADD_LOCAL_USER_CALL);
-#endif
       std::set<Event> dead_events;
       LegionMap<Event,FieldMask>::aligned filter_previous;
       FieldMask dominated;
@@ -1389,9 +1350,6 @@ namespace Legion {
                              LegionMap<Event,FieldMask>::aligned &preconditions)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(context, FIND_COPY_PRECONDITIONS_CALL);
-#endif
       Event start_use_event = manager->get_use_event();
       if (start_use_event.exists())
       {
@@ -1421,9 +1379,6 @@ namespace Legion {
                              LegionMap<Event,FieldMask>::aligned &preconditions)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(context, FIND_COPY_PRECONDITIONS_ABOVE_CALL);
-#endif
       if ((parent != NULL) && !version_info.is_upper_bound_node(logical_node))
       {
         const ColorPoint &local_point = logical_node->get_color();
@@ -1443,9 +1398,6 @@ namespace Legion {
                              LegionMap<Event,FieldMask>::aligned &preconditions)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(context, FIND_LOCAL_COPY_PRECONDITIONS_CALL);
-#endif
       // First get our set of version data in case we need it, it's really
       // only safe to do this if we are at the bottom of our set of versions
       const FieldVersions *versions = 
@@ -2134,9 +2086,6 @@ namespace Legion {
                                                   const ColorPoint &child_color)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(context, HAS_WAR_DEPENDENCE_ABOVE_CALL);
-#endif
       const ColorPoint &local_color = logical_node->get_color();
       if (has_local_war_dependence(usage, user_mask, child_color, local_color))
         return true;
@@ -2224,9 +2173,6 @@ namespace Legion {
     void MaterializedView::update_versions(const FieldMask &update_mask)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(context, UPDATE_VERSIONS_CALL);
-#endif
       std::vector<VersionID> to_delete;
       LegionMap<VersionID,FieldMask>::aligned new_versions;
       for (LegionMap<VersionID,FieldMask>::aligned::iterator it = 
@@ -4149,9 +4095,6 @@ namespace Legion {
                                           CopyTracker *tracker /*= NULL*/)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(context, PERFORM_REDUCTION_CALL);
-#endif
       std::vector<Domain::CopySrcDstField> src_fields;
       std::vector<Domain::CopySrcDstField> dst_fields;
       bool fold = target->reduce_to(manager->redop, reduce_mask, dst_fields);
@@ -4192,9 +4135,6 @@ namespace Legion {
                                                     RegionTreeNode *intersect)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(context, PERFORM_REDUCTION_CALL);
-#endif
       std::vector<Domain::CopySrcDstField> src_fields;
       std::vector<Domain::CopySrcDstField> dst_fields;
       bool fold = target->reduce_to(manager->redop, red_mask, 
@@ -4233,9 +4173,6 @@ namespace Legion {
                               Operation *op, RegionTreeNode *intersect)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(context, PERFORM_REDUCTION_CALL);
-#endif
       std::vector<Domain::CopySrcDstField> src_fields;
       std::vector<Domain::CopySrcDstField> dst_fields;
       const bool fold = false;
@@ -4420,9 +4357,6 @@ namespace Legion {
                                       const FieldMask &mask, bool reading)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(context, ADD_COPY_USER_CALL);
-#endif
 #ifdef DEBUG_HIGH_LEVEL
       assert(redop == manager->redop);
 #endif
@@ -4465,9 +4399,6 @@ namespace Legion {
                                   const VersionInfo &version_info)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(context, ADD_USER_CALL);
-#endif
 #ifdef DEBUG_HIGH_LEVEL
       if (IS_REDUCE(usage))
         assert(usage.redop == manager->redop);
@@ -4690,9 +4621,6 @@ namespace Legion {
                                   CopyAcrossHelper *across_helper)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(context, REDUCE_TO_CALL);
-#endif
 #ifdef DEBUG_HIGH_LEVEL
       assert(redop == manager->redop);
 #endif
@@ -4710,9 +4638,6 @@ namespace Legion {
                               std::vector<Domain::CopySrcDstField> &src_fields)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(context, REDUCE_FROM_CALL);
-#endif
 #ifdef DEBUG_HIGH_LEVEL
       assert(redop == manager->redop);
 #endif

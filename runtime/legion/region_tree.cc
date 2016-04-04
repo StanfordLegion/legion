@@ -42,28 +42,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       this->lookup_lock = Reservation::create_reservation();
-#ifdef DEBUG_PERF
-      this->perf_trace_lock = Reservation::create_reservation();
-      int max_local_id = 1;
-      int local_space = 
-        Processor::get_executing_processor().address_space();
-      std::set<Processor> procs;
-      runtime->machine.get_all_processors(procs);
-      for (std::set<Processor>::const_iterator it = procs.begin();
-            it != procs.end(); it++)
-      {
-        if (local_space == int(it->address_space()))
-        {
-          int local = it->local_id();
-          if (local > max_local_id)
-            max_local_id = local;
-        }
-      }
-      // Reserve enough space for traces for each processor
-      traces.resize(max_local_id+1);
-      for (unsigned idx = 0; idx < traces.size(); idx++)
-        traces[idx].push_back(PerfTrace()); // empty perf trace for no recording
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -81,10 +59,6 @@ namespace Legion {
     {
       lookup_lock.destroy_reservation();
       lookup_lock = Reservation::NO_RESERVATION;
-#ifdef DEBUG_PERF
-      perf_trace_lock.destroy_reservation();
-      perf_trace_lock = Reservation::NO_RESERVATION;
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -1386,9 +1360,6 @@ namespace Legion {
       SingleTask *parent_ctx = op->get_parent();
       RegionTreeContext ctx = 
         parent_ctx->find_enclosing_context(op->find_parent_index(idx));
-#ifdef DEBUG_PERF
-      begin_perf_trace(REGION_DEPENDENCE_ANALYSIS);
-#endif
 #ifdef DEBUG_HIGH_LEVEL
       assert(ctx.exists());
 #endif
@@ -1433,9 +1404,6 @@ namespace Legion {
                                      false/*closing*/, true/*logical*/,
                        FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES), user_mask);
 #endif
-#ifdef DEBUG_PERF
-      end_perf_trace(Runtime::perf_trace_tolerance);
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -1448,9 +1416,6 @@ namespace Legion {
       SingleTask *parent_ctx = op->get_parent();
       RegionTreeContext ctx = 
         parent_ctx->find_enclosing_context(op->find_parent_index(idx));
-#ifdef DEBUG_PERF
-      begin_perf_trace(REGION_DEPENDENCE_ANALYSIS);
-#endif
 #ifdef DEBUG_HIGH_LEVEL
       assert(ctx.exists());
       assert(req.privilege == REDUCE);
@@ -1481,9 +1446,6 @@ namespace Legion {
                                      false/*premap*/,
                                      false/*closing*/, true/*logical*/,
                        FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES), user_mask);
-#endif
-#ifdef DEBUG_PERF
-      end_perf_trace(Runtime::perf_trace_tolerance);
 #endif
     }
 
@@ -2839,9 +2801,6 @@ namespace Legion {
                                                   AllocateMode mode)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(this, CREATE_NODE_CALL);
-#endif
       IndexSpaceNode *result = new IndexSpaceNode(sp, d, parent, color, 
                                                   kind, mode, this);
 #ifdef DEBUG_HIGH_LEVEL
@@ -2876,9 +2835,6 @@ namespace Legion {
                                                   AllocateMode mode)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(this, CREATE_NODE_CALL);
-#endif
       IndexSpaceNode *result = new IndexSpaceNode(sp, d, ready_event, parent, 
                                                   color, kind, mode, this);
 #ifdef DEBUG_HIGH_LEVEL
@@ -2914,9 +2870,6 @@ namespace Legion {
                                                   AllocateMode mode)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(this, CREATE_NODE_CALL);
-#endif
       IndexSpaceNode *result = new IndexSpaceNode(sp, handle_ready, 
                                                   domain_ready, parent, 
                                                   color, kind, mode, this);
@@ -2952,9 +2905,6 @@ namespace Legion {
                                                  AllocateMode mode)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(this, CREATE_NODE_CALL);
-#endif
       IndexPartNode *result = new IndexPartNode(p, parent, color, color_space,
                                                 disjoint, mode, this);
 #ifdef DEBUG_HIGH_LEVEL
@@ -2990,9 +2940,6 @@ namespace Legion {
                                                  AllocateMode mode)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(this, CREATE_NODE_CALL);
-#endif
       IndexPartNode *result = new IndexPartNode(p, parent, color, color_space,
                                                 ready_event, mode, this);
 #ifdef DEBUG_HIGH_LEVEL
@@ -3023,9 +2970,6 @@ namespace Legion {
     FieldSpaceNode* RegionTreeForest::create_node(FieldSpace space)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(this, CREATE_NODE_CALL);
-#endif
       FieldSpaceNode *result = new FieldSpaceNode(space, this);
 #ifdef DEBUG_HIGH_LEVEL
       assert(result != NULL);
@@ -3049,9 +2993,6 @@ namespace Legion {
                                                   Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(this, CREATE_NODE_CALL);
-#endif
       FieldSpaceNode *result = new FieldSpaceNode(space, this, derez);
 #ifdef DEBUG_HIGH_LEVEL
       assert(result != NULL);
@@ -3075,9 +3016,6 @@ namespace Legion {
                                               PartitionNode *parent)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(this, CREATE_NODE_CALL);
-#endif
 #ifdef DEBUG_HIGH_LEVEL
       if (parent != NULL)
       {
@@ -3135,9 +3073,6 @@ namespace Legion {
                                                  RegionNode *parent)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(this, CREATE_NODE_CALL);
-#endif
 #ifdef DEBUG_HIGH_LEVEL
       assert(parent != NULL);
       assert(p.field_space == parent->handle.field_space);
@@ -3178,9 +3113,6 @@ namespace Legion {
     IndexSpaceNode* RegionTreeForest::get_node(IndexSpace space)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(this, GET_NODE_CALL);
-#endif
       {
         AutoLock l_lock(lookup_lock,1,false/*exclusive*/); 
         std::map<IndexSpace,IndexSpaceNode*>::const_iterator finder = 
@@ -3244,9 +3176,6 @@ namespace Legion {
     IndexPartNode* RegionTreeForest::get_node(IndexPartition part)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(this, GET_NODE_CALL);
-#endif
       {
         AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
         std::map<IndexPartition,IndexPartNode*>::const_iterator finder =
@@ -3310,9 +3239,6 @@ namespace Legion {
     FieldSpaceNode* RegionTreeForest::get_node(FieldSpace space) 
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(this, GET_NODE_CALL);
-#endif
       {
         AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
         std::map<FieldSpace,FieldSpaceNode*>::const_iterator finder = 
@@ -3377,9 +3303,6 @@ namespace Legion {
                                            bool need_check /* = true*/)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(this, GET_NODE_CALL);
-#endif
       // Check to see if the node already exists
       bool has_top_level_region;
       {
@@ -3475,9 +3398,6 @@ namespace Legion {
                                               bool need_check /* = true*/)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(this, GET_NODE_CALL);
-#endif
       // Check to see if the node already exists
       {
         AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
@@ -3614,9 +3534,6 @@ namespace Legion {
     bool RegionTreeForest::are_disjoint(IndexSpace parent, IndexSpace child)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(this, ARE_DISJOINT_CALL);
-#endif
       if (parent == child)
         return false;
       std::vector<ColorPoint> path;
@@ -3668,9 +3585,6 @@ namespace Legion {
     bool RegionTreeForest::are_disjoint(IndexSpace parent, IndexPartition child)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(this, ARE_DISJOINT_CALL);
-#endif
       std::vector<ColorPoint> path;
       if (compute_partition_path(parent, child, path))
         return false;
@@ -3738,9 +3652,6 @@ namespace Legion {
     bool RegionTreeForest::are_disjoint(IndexPartition one, IndexPartition two)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(this, ARE_DISJOINT_CALL);
-#endif
       if (one == two)
         return false;
       IndexPartNode *part_one = get_node(one);
@@ -3821,9 +3732,6 @@ namespace Legion {
                                IndexSpace child, std::vector<ColorPoint> &path)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(this, COMPUTE_PATH_CALL);
-#endif
       IndexSpaceNode *child_node = get_node(child); 
       path.push_back(child_node->color);
       if (parent == child) 
@@ -3853,9 +3761,6 @@ namespace Legion {
                            IndexPartition child, std::vector<ColorPoint> &path)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(this, COMPUTE_PATH_CALL);
-#endif
       IndexPartNode *child_node = get_node(child);
       path.push_back(child_node->color);
       if (child_node->parent == NULL)
@@ -4539,321 +4444,6 @@ namespace Legion {
         const CallRecord &rec = records[*it];
         switch (rec.kind)
         {
-          case CREATE_NODE_CALL:
-            {
-              fprintf(stdout,"  Create Node Call:\n");
-              break;
-            }
-          case GET_NODE_CALL:
-            {
-              fprintf(stdout,"  Get Node Call:\n");
-              break;
-            }
-          case ARE_DISJOINT_CALL:
-            {
-              fprintf(stdout,"  Are Disjoint Call:\n");
-              break;
-            }
-          case COMPUTE_PATH_CALL:
-            {
-              fprintf(stdout,"  Compute Path Call:\n");
-              break;
-            }
-          case CREATE_INSTANCE_CALL:
-            {
-              fprintf(stdout,"  Create Instance Call:\n");
-              break;
-            }
-          case CREATE_REDUCTION_CALL:
-            {
-              fprintf(stdout,"  Create Reduction Call:\n");
-              break;
-            }
-          case PERFORM_PREMAP_CLOSE_CALL:
-            {
-              fprintf(stdout,"  Perform Premap Close Call:\n");
-              break;
-            }
-          case MAPPING_TRAVERSE_CALL:
-            {
-              fprintf(stdout,"  Mapping Traverse Call:\n");
-              break;
-            }
-          case MAP_PHYSICAL_REGION_CALL:
-            {
-              fprintf(stdout,"  Map Physical Region Call:\n");
-              break;
-            }
-          case MAP_REDUCTION_REGION_CALL:
-            {
-              fprintf(stdout,"  Map Reduction Region Call:\n");
-              break;
-            }
-          case REGISTER_LOGICAL_NODE_CALL:
-            {
-              fprintf(stdout,"  Register Logical Node Call:\n");
-              break;
-            }
-          case OPEN_LOGICAL_NODE_CALL:
-            {
-              fprintf(stdout,"  Open Logical Node Call:\n");
-              break;
-            }
-          case CLOSE_LOGICAL_NODE_CALL:
-            {
-              fprintf(stdout,"  Close Logical Node Call:\n");
-              break;
-            }
-          case SIPHON_LOGICAL_CHILDREN_CALL:
-            {
-              fprintf(stdout,"  Siphon Logical Children Call:\n");
-              break;
-            }
-          case PERFORM_LOGICAL_CLOSE_CALL:
-            {
-              fprintf(stdout,"  Perform Logical Close Call:\n");
-              break;
-            }
-          case FILTER_PREV_EPOCH_CALL:
-            {
-              fprintf(stdout,"  Filter Previous Epoch Call:\n");
-              break;
-            }
-          case FILTER_CURR_EPOCH_CALL:
-            {
-              fprintf(stdout,"  Filter Current Epoch Call:\n");
-              break;
-            }
-          case FILTER_CLOSE_CALL:
-            {
-              fprintf(stdout,"  Filter Close Call:\n");
-              break;
-            }
-          case REGISTER_LOGICAL_DEPS_CALL:
-            {
-              fprintf(stdout,"  Register Logical Dependences Call:\n");
-              break;
-            }
-          case CLOSE_PHYSICAL_NODE_CALL:
-            {
-              fprintf(stdout,"  Close Physical Node Call:\n");
-              break;
-            }
-          case SIPHON_PHYSICAL_CHILDREN_CALL:
-            {
-              fprintf(stdout,"  Siphon Physical Children Call:\n");
-              break;
-            }
-          case CLOSE_PHYSICAL_CHILD_CALL:
-            {
-              fprintf(stdout,"  Close Physical Child Call:\n");
-              break;
-            }
-          case FIND_VALID_INSTANCE_VIEWS_CALL:
-            {
-              fprintf(stdout,"  Find Valid Instance Views Call:\n");
-              break;
-            }
-          case FIND_VALID_REDUCTION_VIEWS_CALL:
-            {
-              fprintf(stdout,"  Find Valid Reduction Views Call:\n");
-              break;
-            }
-          case PULL_VALID_VIEWS_CALL:
-            {
-              fprintf(stdout,"  Pull Valid Views Call:\n");
-              break;
-            }
-          case FIND_COPY_ACROSS_INSTANCES_CALL:
-            {
-              fprintf(stdout,"  Find Copy Across Instances Call:\n");
-              break;
-            }
-          case ISSUE_UPDATE_COPIES_CALL:
-            {
-              fprintf(stdout,"  Issue Update Copies Call:\n");
-              break;
-            }
-          case ISSUE_UPDATE_REDUCTIONS_CALL:
-            {
-              fprintf(stdout,"  Issue Update Reductions Call:\n");
-              break;
-            }
-          case PERFORM_COPY_DOMAIN_CALL:
-            {
-              fprintf(stdout,"  Perform Copy Domain Call:\n");
-              break;
-            }
-          case INVALIDATE_INSTANCE_VIEWS_CALL:
-            {
-              fprintf(stdout,"  Invalidate Instance Views Call:\n");
-              break;
-            }
-          case INVALIDATE_REDUCTION_VIEWS_CALL:
-            {
-              fprintf(stdout,"  Invalidate Reduction Views Call:\n");
-              break;
-            }
-          case UPDATE_VALID_VIEWS_CALL:
-            {
-              fprintf(stdout,"  Update Valid Views Call:\n");
-              break;
-            }
-          case UPDATE_REDUCTION_VIEWS_CALL:
-            {
-              fprintf(stdout,"  Update Reduction Views Call:\n");
-              break;
-            }
-          case FLUSH_REDUCTIONS_CALL:
-            {
-              fprintf(stdout,"  Flush Reductions Call:\n");
-              break;
-            }
-          case INITIALIZE_CURRENT_STATE_CALL:
-            {
-              fprintf(stdout,"  Initialize Current State Call:\n");
-              break;
-            }
-          case INVALIDATE_CURRENT_STATE_CALL:
-            {
-              fprintf(stdout,"  Invalidate Current State Call:\n");
-              break;
-            }
-          case PERFORM_DEPENDENCE_CHECKS_CALL:
-            {
-              fprintf(stdout,"  Perform Dependence Checks Call:\n");
-              break;
-            }
-          case PERFORM_CLOSING_CHECKS_CALL:
-            {
-              fprintf(stdout,"  Perform Closing Checks Call:\n");
-              break;
-            }
-          case REMAP_REGION_CALL:
-            {
-              fprintf(stdout,"  Remap Region Call:\n");
-              break;
-            }
-          case REGISTER_REGION_CALL:
-            {
-              fprintf(stdout,"  Register Region Call:\n");
-              break;
-            }
-          case CLOSE_PHYSICAL_STATE_CALL:
-            {
-              fprintf(stdout,"  Close Physical State Call:\n");
-              break;
-            }
-          case GARBAGE_COLLECT_CALL:
-            {
-              fprintf(stdout,"  Garbage Collect Call:\n");
-              break;
-            }
-          case NOTIFY_INVALID_CALL:
-            {
-              fprintf(stdout,"  Notify Invalid Call:\n");
-              break;
-            }
-          case DEFER_COLLECT_USER_CALL:
-            {
-              fprintf(stdout,"  Defer Collect User Call:\n");
-              break;
-            }
-          case GET_SUBVIEW_CALL:
-            {
-              fprintf(stdout,"  Get Subview Call:\n");
-              break;
-            }
-          case COPY_FIELD_CALL:
-            {
-              fprintf(stdout,"  Copy-Field Call:\n");
-              break;
-            }
-          case COPY_TO_CALL:
-            {
-              fprintf(stdout,"  Copy-To Call:\n");
-              break;
-            }
-          case REDUCE_TO_CALL:
-            {
-              fprintf(stdout,"  Reduce-To Call:\n");
-              break;
-            }
-          case COPY_FROM_CALL:
-            {
-              fprintf(stdout,"  Copy-From Call:\n");
-              break;
-            }
-          case REDUCE_FROM_CALL:
-            {
-              fprintf(stdout,"  Reduce-From Call:\n");
-              break;
-            }
-          case HAS_WAR_DEPENDENCE_CALL:
-            {
-              fprintf(stdout,"  Has WAR Dependence Call:\n");
-              break;
-            }
-          case ACCUMULATE_EVENTS_CALL:
-            {
-              fprintf(stdout,"  Accumulate Events Call:\n");
-              break;
-            }
-          case ADD_COPY_USER_CALL:
-            {
-              fprintf(stdout,"  Add Copy User Call:\n");
-              break;
-            }
-          case ADD_USER_CALL:
-            {
-              fprintf(stdout,"  Add User Call:\n");
-              break;
-            }
-          case ADD_USER_ABOVE_CALL:
-            {
-              fprintf(stdout,"  Add User Above Call:\n");
-              break;
-            }
-          case ADD_LOCAL_USER_CALL:
-            {
-              fprintf(stdout,"  Add Local User Call:\n");
-              break;
-            }
-          case FIND_COPY_PRECONDITIONS_CALL:
-            {
-              fprintf(stdout,"  Find Copy Preconditions Call:\n");
-              break;
-            }
-          case FIND_COPY_PRECONDITIONS_ABOVE_CALL:
-            {
-              fprintf(stdout,"  Find Copy Preconditions Above Call:\n");
-              break;
-            }
-          case FIND_LOCAL_COPY_PRECONDITIONS_CALL:
-            {
-              fprintf(stdout,"  Find Local Copy Preconditions Call:\n");
-              break;
-            }
-          case HAS_WAR_DEPENDENCE_ABOVE_CALL:
-            {
-              fprintf(stdout,"  Has WAR Dependence Above Call:\n");
-              break;
-            }
-          case UPDATE_VERSIONS_CALL:
-            {
-              fprintf(stdout,"  Update Versions Call:\n");
-              break;
-            }
-          case CONDENSE_USER_LIST_CALL:
-            {
-              fprintf(stdout,"  Condense User List Call:\n");
-              break;
-            }
-          case PERFORM_REDUCTION_CALL:
-            {
-              fprintf(stdout,"  Perform Reduction Call:\n");
-              break;
-            }
           default:
             assert(false);
         }
@@ -10200,9 +9790,6 @@ namespace Legion {
                                                const bool report_uninitialized)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(context, REGISTER_LOGICAL_NODE_CALL);
-#endif
       CurrentState &state = get_current_state(ctx);
 #ifdef DEBUG_HIGH_LEVEL
       sanity_check_logical_state(state);
@@ -10462,9 +10049,6 @@ namespace Legion {
                                              const bool projecting)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(context, OPEN_LOGICAL_NODE_CALL);
-#endif
       CurrentState &state = get_current_state(ctx);
 #ifdef DEBUG_HIGH_LEVEL
       sanity_check_logical_state(state);
@@ -10569,9 +10153,6 @@ namespace Legion {
                                                const bool report_uninitialized)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(context, REGISTER_LOGICAL_NODE_CALL);
-#endif
       CurrentState &state = get_current_state(ctx);
 #ifdef DEBUG_HIGH_LEVEL
       sanity_check_logical_state(state);
@@ -10810,9 +10391,6 @@ namespace Legion {
                                                RestrictInfo &restrict_info)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(context, OPEN_LOGICAL_NODE_CALL);
-#endif
       CurrentState &state = get_current_state(ctx); 
 #ifdef DEBUG_HIGH_LEVEL
       sanity_check_logical_state(state);
@@ -10920,9 +10498,6 @@ namespace Legion {
                                                const FieldMask &closing_mask)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(context, CLOSE_LOGICAL_NODE_CALL);
-#endif
       CurrentState &state = get_current_state(closer.ctx);
 
       // No need to perform any local checks since they have all been done
@@ -10978,9 +10553,6 @@ namespace Legion {
                                             bool read_only_close)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(context, CLOSE_LOGICAL_NODE_CALL);
-#endif
       CurrentState &state = get_current_state(closer.ctx);
 
       // Perform closing checks on both the current epoch users
@@ -11053,9 +10625,6 @@ namespace Legion {
                                                  FieldMask &open_below)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(context, SIPHON_LOGICAL_CHILDREN_CALL);
-#endif
 #ifdef DEBUG_HIGH_LEVEL
       sanity_check_logical_state(state);
 #endif
@@ -11415,9 +10984,6 @@ namespace Legion {
       // they cannot both share the output_mask
       assert(!allow_next_child || !record_closed_fields);
 #endif
-#ifdef DEBUG_PERF
-      PerfTracer tracer(context, PERFORM_LOGICAL_CLOSE_CALL);
-#endif
       // First, if we have a next child and we know all pairs of children
       // are disjoint, then we can skip a lot of this
       bool removed_fields = false;
@@ -11629,9 +11195,6 @@ namespace Legion {
                                                  const FieldMask &field_mask)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(context, FILTER_PREV_EPOCH_CALL);
-#endif
       for (LegionList<LogicalUser,PREV_LOGICAL_ALLOC>::track_aligned::iterator 
             it = state.prev_epoch_users.begin(); it != 
             state.prev_epoch_users.end(); /*nothing*/)
@@ -11653,9 +11216,6 @@ namespace Legion {
                                                  const FieldMask &field_mask)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(context, FILTER_CURR_EPOCH_CALL);
-#endif
       for (LegionList<LogicalUser,CURR_LOGICAL_ALLOC>::track_aligned::iterator 
             it = state.curr_epoch_users.begin(); it !=
             state.curr_epoch_users.end(); /*nothing*/)
@@ -11823,9 +11383,6 @@ namespace Legion {
                       Operation *op, const FieldMask &field_mask, bool dominate)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(context, REGISTER_LOGICAL_DEPS_CALL);
-#endif
       CurrentState &state = get_current_state(ctx);
       for (LegionList<LogicalUser,CURR_LOGICAL_ALLOC>::track_aligned::iterator 
             it = state.curr_epoch_users.begin(); it != 
@@ -12222,9 +11779,6 @@ namespace Legion {
                                              const FieldMask &closing_mask)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(context, CLOSE_PHYSICAL_NODE_CALL);
-#endif
       // Acquire the physical state of the node to close
       ContextID ctx = closer.info.ctx;
       // Figure out if we have dirty data.  If we do, issue copies back to
@@ -12315,9 +11869,6 @@ namespace Legion {
                                       const std::set<ColorPoint> &next_children)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(context, SIPHON_PHYSICAL_CHILDREN_CALL);
-#endif
 #ifdef DEBUG_HIGH_LEVEL
       assert(state->node == this);
 #endif
@@ -12370,9 +11921,6 @@ namespace Legion {
                                               bool &changed)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(context, CLOSE_PHYSICAL_CHILD_CALL);
-#endif
 #ifdef DEBUG_HIGH_LEVEL
       assert(state->node == this);
 #endif
@@ -12437,9 +11985,6 @@ namespace Legion {
                                              FieldMask &complete_mask)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(context, CLOSE_PHYSICAL_NODE_CALL);
-#endif
       PhysicalState *state = get_physical_state(closer.ctx,closer.version_info);
       // Close down the tree and then determine if we have to capture locally 
       // We don't need to capture data for any fields that are complete below
@@ -12482,9 +12027,6 @@ namespace Legion {
                                                   FieldMask &complete_mask)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(context, SIPHON_PHYSICAL_CHILDREN_CALL);
-#endif
 #ifdef DEBUG_HIGH_LEVEL
       assert(state->node == this);
 #endif
@@ -12568,9 +12110,6 @@ namespace Legion {
                                               FieldMask &complete_mask)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(context, CLOSE_PHYSICAL_CHILD_CALL);
-#endif
 #ifdef DEBUG_HIGH_LEVEL
       assert(state->node == this);
 #endif
@@ -12661,9 +12200,6 @@ namespace Legion {
                         LegionMap<LogicalView*,FieldMask>::aligned &valid_views)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(context, FIND_VALID_INSTANCE_VIEWS_CALL);
-#endif
 #ifdef DEBUG_HIGH_LEVEL
       assert(state->node == this);
 #endif
@@ -12734,9 +12270,6 @@ namespace Legion {
                                           std::set<ReductionView*> &valid_views)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(context, FIND_VALID_REDUCTION_VIEWS_CALL);
-#endif
 #ifdef DEBUG_HIGH_LEVEL
       assert(state->node == this);
 #endif
@@ -12779,9 +12312,6 @@ namespace Legion {
                                                    VersionInfo &version_info)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(context, PULL_VALID_VIEWS_CALL);
-#endif
 #ifdef DEBUG_HIGH_LEVEL
       assert(state->node == this);
 #endif
@@ -12802,9 +12332,6 @@ namespace Legion {
                 LegionMap<DeferredView*,FieldMask>::aligned &deferred_instances)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(context, FIND_COPY_ACROSS_INSTANCES_CALL);
-#endif
       LegionMap<LogicalView*,FieldMask>::aligned valid_views;
       PhysicalState *state = get_physical_state(info.ctx, info.version_info); 
       find_valid_instance_views(info.ctx, state, info.traversal_mask,
@@ -12825,9 +12352,6 @@ namespace Legion {
                                              CopyTracker *tracker /*= NULL*/)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(context, ISSUE_UPDATE_COPIES_CALL);
-#endif
 #ifdef DEBUG_HIGH_LEVEL
       assert(!!copy_mask);
       assert(dst->logical_node == this);
@@ -13281,9 +12805,6 @@ namespace Legion {
                                                  CopyTracker *tracker/*= NULL*/)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(context, ISSUE_UPDATE_REDUCTIONS_CALL);
-#endif
       // We should never get a deferred view in here, this function
       // should only be called when the targets are guaranteed to all
       // be actual physical instances
@@ -13318,9 +12839,6 @@ namespace Legion {
                                                   const FieldMask &invalid_mask)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(context, INVALIDATE_INSTANCE_VIEWS_CALL);
-#endif
 #ifdef DEBUG_HIGH_LEVEL
       assert(state->node == this);
 #endif
@@ -13355,9 +12873,6 @@ namespace Legion {
                                                   const FieldMask &invalid_mask)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(context, INVALIDATE_REDUCTION_VIEWS_CALL);
-#endif
 #ifdef DEBUG_HIGH_LEVEL
       assert(state->node == this);
 #endif
@@ -13383,9 +12898,6 @@ namespace Legion {
                                             bool dirty, LogicalView *new_view)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(context, UPDATE_VALID_VIEWS_CALL);
-#endif
 #ifdef DEBUG_HIGH_LEVEL
       assert(state->node == this);
       if (!new_view->is_deferred_view())
@@ -13423,9 +12935,6 @@ namespace Legion {
                                 const InstanceSet &corresponding_references)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(context, UPDATE_VALID_VIEWS_CALL);
-#endif
 #ifdef DEBUG_HIGH_LEVEL
       assert(state->node == this);
       assert(new_views.size() == corresponding_references.size());
@@ -13469,9 +12978,6 @@ namespace Legion {
                                const InstanceSet &corresponding_references)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(context, UPDATE_VALID_VIEWS_CALL);
-#endif
 #ifdef DEBUG_HIGH_LEVEL
       assert(state->node == this);
       assert(new_views.size() == corresponding_references.size());
@@ -13512,9 +13018,6 @@ namespace Legion {
                                 const InstanceSet &corresponding_references)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(context, UPDATE_VALID_VIEWS_CALL);
-#endif
 #ifdef DEBUG_HIGH_LEVEL
       assert(state->node == this);
       assert(new_views.size() == corresponding_references.size());
@@ -13550,9 +13053,6 @@ namespace Legion {
                                                 ReductionView *new_view) 
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(context, UPDATE_REDUCTION_VIEWS_CALL);
-#endif
 #ifdef DEBUG_HIGH_LEVEL
       assert(state->node == this);
 #endif
@@ -13576,9 +13076,6 @@ namespace Legion {
                                           CopyTracker *tracker /*= NULL*/)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(context, FLUSH_REDUCTIONS_CALL);
-#endif
       // Go through the list of reduction views and see if there are
       // any that don't mesh with the current user and therefore need
       // to be flushed.
@@ -13826,9 +13323,6 @@ namespace Legion {
     void RegionTreeNode::initialize_current_state(ContextID ctx)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(context, INITIALIZE_CURRENT_STATE_CALL);
-#endif
       if (!current_states.has_entry(ctx))
         return;
       CurrentState &state = get_current_state(ctx);
@@ -13840,9 +13334,6 @@ namespace Legion {
                                                   bool logical_users_only)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(context, INVALIDATE_CURRENT_STATE_CALL);
-#endif
       if (!current_states.has_entry(ctx))
         return;
       CurrentState &state = get_current_state(ctx);
@@ -13948,10 +13439,6 @@ namespace Legion {
       GenerationID skip_gen /* = 0*/)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(user.op->runtime->forest, 
-                        PERFORM_DEPENDENCE_CHECKS_CALL);
-#endif
       FieldMask dominator_mask = check_mask;
       // It's not actually sound to assume we dominate something
       // if we don't observe any users of those fields.  Therefore
@@ -14200,10 +13687,6 @@ namespace Legion {
         const FieldMask &check_mask)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(closer.user.op->runtime->forest, 
-                        PERFORM_CLOSING_CHECKS_CALL);
-#endif
       // Since we are performing a close operation on the region
       // tree data structure, we know that we need to register
       // mapping dependences on all of the operations in the 
@@ -15096,9 +14579,6 @@ namespace Legion {
                                      InstanceSet &targets)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(context, REGISTER_REGION_CALL);
-#endif
       PhysicalState *state = get_physical_state(info.ctx, info.version_info);
       if (IS_REDUCE(info.req))
       {
@@ -15291,9 +14771,6 @@ namespace Legion {
                                  InstanceSet &targets)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_PERF
-      PerfTracer tracer(context, CLOSE_PHYSICAL_STATE_CALL);
-#endif
       if (IS_REDUCE(info.req))
       {
         PhysicalState *state = get_physical_state(info.ctx,info.version_info);
