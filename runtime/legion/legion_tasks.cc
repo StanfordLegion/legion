@@ -4731,7 +4731,7 @@ namespace Legion {
       // visible from all the target processors
       std::set<Memory> visible_memories;
       if (!Runtime::unsafe_mapper)
-        find_visible_memories(visible_memories);
+        runtime->find_visible_memories(target_proc, visible_memories);
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
         // If it was early mapped, that was easy
@@ -5075,17 +5075,6 @@ namespace Legion {
           exit(ERROR_INVALID_MAPPER_OUTPUT);
         }
       }
-    }
-
-    //--------------------------------------------------------------------------
-    void SingleTask::find_visible_memories(std::set<Memory> &visible_mems) const
-    //--------------------------------------------------------------------------
-    {
-      // See if our target processor is local or remote
-      if (!runtime->is_local(this->target_proc))
-        runtime->machine.get_visible_memories(this->target_proc, visible_mems);
-      else
-        runtime->find_visible_memories(this->target_proc, visible_mems);
     }
 
     //--------------------------------------------------------------------------

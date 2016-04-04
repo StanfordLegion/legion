@@ -2229,8 +2229,8 @@ namespace Legion {
       if (!requirement.is_no_access())
       {
         std::set<Memory> visible_memories;
-        runtime->machine.get_visible_memories(
-            parent_ctx->get_executing_processor(), visible_memories);
+        runtime->find_visible_memories(parent_ctx->get_executing_processor(),
+                                       visible_memories);
         prepare_for_mapping(valid_instances, visible_memories, 
                             input.valid_instances);
       }

@@ -538,18 +538,12 @@ namespace Legion {
           // enough to span more than our node, put it in gasnet memory
           // otherwise we can fall through to the single node case
           Memory target_memory = Memory::NO_MEMORY;
-          std::set<Memory> visible_memories;
-          machine.get_visible_memories(task.target_proc, visible_memories);
+          Machine::MemoryQuery visible_memories(machine);
+          visible_memories.has_affinity_to(task.target_proc)
+            .only_kind(Memory::GLOBAL_MEM);
           Memory global_memory = Memory::NO_MEMORY;
-          for (std::set<Memory>::const_iterator vit = visible_memories.begin();
-                vit != visible_memories.end(); vit++)
-          {
-            if (vit->kind() == Memory::GLOBAL_MEM)
-            {
-              global_memory = *vit;
-              break;
-            }
-          }
+          if (visible_memories.count() > 0)
+            global_memory = visible_memories.first();
           switch (task.target_proc.kind())
           {
             case Processor::IO_PROC:
@@ -630,24 +624,15 @@ namespace Legion {
         // should be local to a node
         // see where we are mapping  
         Memory target_memory = Memory::NO_MEMORY;
-        std::set<Memory> visible_memories;
-        machine.get_visible_memories(task.target_proc, visible_memories);
+        Machine::MemoryQuery visible_memories(machine);
+        visible_memories.has_affinity_to(task.target_proc);
         switch (task.target_proc.kind())
         {
           case Processor::IO_PROC:
           case Processor::LOC_PROC:
             {
-              // Put these regions in system memory      
-              for (std::set<Memory>::const_iterator it = 
-                   visible_memories.begin(); it != visible_memories.end(); it++)
-              {
-                if (it->kind() == Memory::SYSTEM_MEM)
-                {
-                  target_memory = *it;
-                  break;
-                }
-              }
-              if (!target_memory.exists())
+              visible_memories.only_kind(Memory::SYSTEM_MEM);
+              if (visible_memories.count() == 0)
               {
                 log_mapper.error("Default mapper error. No memory found for "
                     "CPU task %s (ID %lld) which is visible for all points "
@@ -655,21 +640,14 @@ namespace Legion {
                     task.get_unique_id());
                 assert(false);
               }
+              target_memory = visible_memories.first();
               break;
             }
           case Processor::TOC_PROC:
             {
               // Otherwise for GPUs put the instance in zero-copy memory
-              for (std::set<Memory>::const_iterator it = 
-                   visible_memories.begin(); it != visible_memories.end(); it++)
-              {
-                if (it->kind() == Memory::Z_COPY_MEM)
-                {
-                  target_memory = *it;
-                  break;
-                }
-              }
-              if (!target_memory.exists())
+              visible_memories.only_kind(Memory::Z_COPY_MEM);
+              if (visible_memories.count() == 0)
               {
                 log_mapper.error("Default mapper error. No memory found for "
                     "GPU task %s (ID %lld) which is visible for all points "
@@ -677,6 +655,7 @@ namespace Legion {
                     task.get_unique_id());
                 assert(false);
               }
+              target_memory = visible_memories.first();
               break;
             }
           default:
@@ -1518,9 +1497,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Find the visible memories from the processor for the given kind
-      std::set<Memory> visible_memories;
-      machine.get_visible_memories(target_proc, visible_memories);
-      if (visible_memories.empty())
+      Machine::MemoryQuery visible_memories(machine);
+      visible_memories.has_affinity_to(target_proc);
+      if (visible_memories.count() == 0)
       {
         log_mapper.error("No visible memories from processor " IDFMT "! "
                          "This machine is really messed up!", target_proc.id);
@@ -1530,7 +1509,7 @@ namespace Legion {
       Memory chosen = Memory::NO_MEMORY;
       unsigned best_bandwidth = 0;
       std::vector<Machine::ProcessorMemoryAffinity> affinity(1);
-      for (std::set<Memory>::const_iterator it = visible_memories.begin();
+      for (Machine::MemoryQuery::iterator it = visible_memories.begin();
             it != visible_memories.end(); it++)
       {
         affinity.clear();

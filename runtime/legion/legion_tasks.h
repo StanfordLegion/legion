@@ -491,7 +491,6 @@ namespace Legion {
                                     std::vector<InstanceSet> &valid_instances);
     protected: // mapper helper calls
       void validate_target_processors(const std::vector<Processor> &prcs) const;
-      void find_visible_memories(std::set<Memory> &visible_memories) const;
       void validate_variant_selection(MapperManager *local_mapper,
                     VariantImpl *impl, const char *call_name) const;
     protected:

@@ -1613,7 +1613,11 @@ namespace Legion {
       context_states.resize(DEFAULT_CONTEXTS);
       local_scheduler_preconditions.resize(superscalar_width, Event::NO_EVENT);
       // Find our set of visible memories
-      runtime->machine.get_visible_memories(proc, visible_memories);
+      Machine::MemoryQuery vis_mems(runtime->machine);
+      vis_mems.has_affinity_to(proc);
+      for (Machine::MemoryQuery::iterator it = vis_mems.begin();
+            it != vis_mems.end(); it++)
+        visible_memories.insert(*it);
     }
 
     //--------------------------------------------------------------------------
@@ -17266,7 +17270,11 @@ namespace Legion {
         return;
       }
       // Otherwise look up the result
-      machine.get_visible_memories(proc, visible);
+      Machine::MemoryQuery visible_memories(machine);
+      visible_memories.has_affinity_to(proc);
+      for (Machine::MemoryQuery::iterator it = visible_memories.begin();
+            it != visible_memories.end(); it++)
+        visible.insert(*it);
     }
 
     //--------------------------------------------------------------------------
