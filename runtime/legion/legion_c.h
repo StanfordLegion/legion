@@ -1625,12 +1625,29 @@ typedef int coord_t;
   /**
    * @param handle Caller must have ownership of parameter `handle`.
    *
-   * @see LegionRuntime::HighLevel::PhaseBarrier::destroy_phase_barrier()
+   * @see LegionRuntime::HighLevel::HighLevelRuntime::destroy_phase_barrier()
    */
   void
   legion_phase_barrier_destroy(legion_runtime_t runtime,
                                legion_context_t ctx,
                                legion_phase_barrier_t handle);
+
+  /**
+   * @see LegionRuntime::HighLevel::PhaseBarrier::arrive()
+   */
+  void
+  legion_phase_barrier_arrive(legion_runtime_t runtime,
+                              legion_context_t ctx,
+                              legion_phase_barrier_t handle,
+                              size_t count /* = 1 */);
+
+  /**
+   * @see LegionRuntime::HighLevel::PhaseBarrier::wait()
+   */
+  void
+  legion_phase_barrier_wait(legion_runtime_t runtime,
+                            legion_context_t ctx,
+                            legion_phase_barrier_t handle);
 
   /**
    * @return Caller does **NOT** take ownership of return value.
