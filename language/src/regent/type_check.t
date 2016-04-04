@@ -1906,12 +1906,15 @@ end
 function type_check.expr_arrive(cx, node)
   local barrier = type_check.expr(cx, node.barrier)
   local barrier_type = std.check_read(cx, barrier)
-  local value = type_check.expr(cx, node.value)
-  local value_type = std.check_read(cx, value)
-  if not std.is_dynamic_collective(barrier_type) then
-    log.error(node, "type mismatch in argument 1: expected a dynamic collective but got " .. tostring(value_type))
+  local value = node.value and type_check.expr(cx, node.value)
+  local value_type = node.value and std.check_read(cx, value)
+  if not (std.is_phase_barrier(barrier_type) or std.is_dynamic_collective(barrier_type)) then
+    log.error(node, "type mismatch in argument 1: expected a dynamic collective but got " .. tostring(barrier_type))
   end
-  if not std.validate_implicit_cast(value_type, barrier_type.result_type) then
+  if std.is_phase_barrier(barrier_type) and value_type then
+    log.error(node, "type mismatch in arrive: expected 1 argument but got 2")
+  end
+  if std.is_dynamic_collective(barrier_type) and not std.validate_implicit_cast(value_type, barrier_type.result_type) then
     log.error(node, "type mismatch in argument 2: expected " ..
                 tostring(barrier_type.result_type) .. " but got " ..
                 tostring(value_type))
@@ -1921,6 +1924,22 @@ function type_check.expr_arrive(cx, node)
   return ast.typed.expr.Arrive {
     barrier = barrier,
     value = value,
+    expr_type = expr_type,
+    options = node.options,
+    span = node.span,
+  }
+end
+
+function type_check.expr_await(cx, node)
+  local barrier = type_check.expr(cx, node.barrier)
+  local barrier_type = std.check_read(cx, barrier)
+  if not std.is_phase_barrier(barrier_type) then
+    log.error(node, "type mismatch in argument 1: expected a phase barrier but got " .. tostring(barrier_type))
+  end
+  local expr_type = terralib.types.unit
+
+  return ast.typed.expr.Await {
+    barrier = barrier,
     expr_type = expr_type,
     options = node.options,
     span = node.span,
@@ -2415,6 +2434,9 @@ function type_check.expr(cx, node)
 
   elseif node:is(ast.specialized.expr.Arrive) then
     return type_check.expr_arrive(cx, node)
+
+  elseif node:is(ast.specialized.expr.Await) then
+    return type_check.expr_await(cx, node)
 
   elseif node:is(ast.specialized.expr.Copy) then
     return type_check.expr_copy(cx, node)

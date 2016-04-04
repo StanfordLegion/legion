@@ -455,8 +455,12 @@ end
 function pretty.expr_arrive(cx, node)
   return join({
       "arrive(",
-      commas({pretty.expr(cx, node.barrier), pretty.expr(cx, node.value)}),
+      commas({pretty.expr(cx, node.barrier), node.value and pretty.expr(cx, node.value)}),
       ")"})
+end
+
+function pretty.expr_await(cx, node)
+  return join({"await(", pretty.expr(cx, node.barrier), ")"})
 end
 
 function pretty.expr_copy(cx, node)
@@ -636,6 +640,9 @@ function pretty.expr(cx, node)
 
   elseif node:is(ast.typed.expr.Arrive) then
     return pretty.expr_arrive(cx, node)
+
+  elseif node:is(ast.typed.expr.Await) then
+    return pretty.expr_await(cx, node)
 
   elseif node:is(ast.typed.expr.Copy) then
     return pretty.expr_copy(cx, node)

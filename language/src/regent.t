@@ -64,6 +64,7 @@ local language = {
     "allocate_scratch_fields",
     "advance",
     "arrive",
+    "await",
     "arrives",
     "awaits",
     "atomic",

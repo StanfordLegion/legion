@@ -277,6 +277,9 @@ local function get_num_accessed_fields(node)
   elseif node:is(ast.unspecialized.expr.Arrive) then
     return 1
 
+  elseif node:is(ast.unspecialized.expr.Await) then
+    return 1
+
   elseif node:is(ast.unspecialized.expr.DynamicCollectiveGetResult) then
     return 1
 
@@ -1010,7 +1013,15 @@ end
 function specialize.expr_arrive(cx, node)
   return ast.specialized.expr.Arrive {
     barrier = specialize.expr(cx, node.barrier),
-    value = specialize.expr(cx, node.value),
+    value = node.value and specialize.expr(cx, node.value),
+    options = node.options,
+    span = node.span,
+  }
+end
+
+function specialize.expr_await(cx, node)
+  return ast.specialized.expr.Await {
+    barrier = specialize.expr(cx, node.barrier),
     options = node.options,
     span = node.span,
   }
@@ -1192,6 +1203,9 @@ function specialize.expr(cx, node)
 
   elseif node:is(ast.unspecialized.expr.Arrive) then
     return specialize.expr_arrive(cx, node)
+
+  elseif node:is(ast.unspecialized.expr.Await) then
+    return specialize.expr_await(cx, node)
 
   elseif node:is(ast.unspecialized.expr.DynamicCollectiveGetResult) then
     return specialize.expr_dynamic_collective_get_result(cx, node)

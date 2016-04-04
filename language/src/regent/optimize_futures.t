@@ -209,6 +209,9 @@ function analyze_var_flow.expr(cx, node)
   elseif node:is(ast.typed.expr.Arrive) then
     return nil
 
+  elseif node:is(ast.typed.expr.Await) then
+    return nil
+
   elseif node:is(ast.typed.expr.Copy) then
     return nil
 
@@ -774,10 +777,17 @@ end
 
 function optimize_futures.expr_arrive(cx, node)
   local barrier = concretize(optimize_futures.expr(cx, node.barrier))
-  local value = optimize_futures.expr(cx, node.value)
+  local value = node.value and optimize_futures.expr(cx, node.value)
   return node {
     barrier = barrier,
     value = value,
+  }
+end
+
+function optimize_futures.expr_await(cx, node)
+  local barrier = concretize(optimize_futures.expr(cx, node.barrier))
+  return node {
+    barrier = barrier,
   }
 end
 
@@ -983,6 +993,9 @@ function optimize_futures.expr(cx, node)
 
   elseif node:is(ast.typed.expr.Arrive) then
     return optimize_futures.expr_arrive(cx, node)
+
+  elseif node:is(ast.typed.expr.Await) then
+    return optimize_futures.expr_await(cx, node)
 
   elseif node:is(ast.typed.expr.Copy) then
     return optimize_futures.expr_copy(cx, node)

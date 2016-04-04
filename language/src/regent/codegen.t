@@ -4222,30 +4222,64 @@ end
 function codegen.expr_arrive(cx, node)
   local barrier_type = std.as_read(node.barrier.expr_type)
   local barrier = codegen.expr(cx, node.barrier):read(cx, barrier_type)
-  local value_type = std.as_read(node.value.expr_type)
-  local value = codegen.expr(cx, node.value):read(cx, value_type)
+  local value_type = node.value and std.as_read(node.value.expr_type)
+  local value = node.value and codegen.expr(cx, node.value):read(cx, value_type)
   local expr_type = std.as_read(node.expr_type)
   local actions = quote
     [barrier.actions];
-    [value.actions];
+    [value and value.actions];
     [emit_debuginfo(node)]
   end
 
-  if std.is_future(value_type) then
+  if std.is_phase_barrier(barrier_type) then
     actions = quote
       [actions]
-      c.legion_dynamic_collective_defer_arrival(
-        [cx.runtime], [cx.context], [barrier.value].impl,
-        [value.value].__result, 1)
+      c.legion_phase_barrier_arrive(
+        [cx.runtime], [cx.context], [barrier.value].impl, 1)
+    end
+  elseif std.is_dynamic_collective(barrier_type) then
+    if std.is_future(value_type) then
+      actions = quote
+        [actions]
+        c.legion_dynamic_collective_defer_arrival(
+          [cx.runtime], [cx.context], [barrier.value].impl,
+          [value.value].__result, 1)
+      end
+    else
+      actions = quote
+        [actions]
+        var buffer : value_type = [value.value]
+        c.legion_dynamic_collective_arrive(
+          [cx.runtime], [cx.context], [barrier.value].impl,
+          &buffer, [terralib.sizeof(value_type)], 1)
+      end
     end
   else
+    assert(false)
+  end
+
+  return values.value(
+    expr.just(actions, barrier.value),
+    expr_type)
+end
+
+function codegen.expr_await(cx, node)
+  local barrier_type = std.as_read(node.barrier.expr_type)
+  local barrier = codegen.expr(cx, node.barrier):read(cx, barrier_type)
+  local expr_type = std.as_read(node.expr_type)
+  local actions = quote
+    [barrier.actions];
+    [emit_debuginfo(node)]
+  end
+
+  if std.is_phase_barrier(barrier_type) then
     actions = quote
       [actions]
-      var buffer : value_type = [value.value]
-      c.legion_dynamic_collective_arrive(
-        [cx.runtime], [cx.context], [barrier.value].impl,
-        &buffer, [terralib.sizeof(value_type)], 1)
+      c.legion_phase_barrier_wait(
+        [cx.runtime], [cx.context], [barrier.value].impl)
     end
+  else
+    assert(false)
   end
 
   return values.value(
@@ -5215,6 +5249,9 @@ function codegen.expr(cx, node)
 
   elseif node:is(ast.typed.expr.Arrive) then
     return codegen.expr_arrive(cx, node)
+
+  elseif node:is(ast.typed.expr.Await) then
+    return codegen.expr_await(cx, node)
 
   elseif node:is(ast.typed.expr.Copy) then
     return codegen.expr_copy(cx, node)
