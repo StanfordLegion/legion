@@ -1039,7 +1039,11 @@ void PennantMapper::select_task_options(Task *task)
       Color index = get_logical_region_color(task->regions[0].region);
       std::vector<Processor> &local_procs =
         sysmem_local_procs[proc_sysmems[task->target_proc]];
-      task->target_proc = local_procs[(index % (local_procs.size() - 1)) + 1];
+      if (local_procs.size() > 1) {
+        task->target_proc = local_procs[(index % (local_procs.size() - 1)) + 1];
+      } else {
+        task->target_proc = local_procs[0];
+      }
     }
   }
 }
