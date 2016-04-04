@@ -6934,7 +6934,7 @@ namespace Legion {
 #ifdef DEBUG_HIGH_LEVEL
       assert(utility_group.exists());
 #endif
- 
+      Machine::ProcessorQuery all_procs(machine); 
       // For each of the processors in our local set, construct a manager
       for (std::set<Processor>::const_iterator it = local_procs.begin();
             it != local_procs.end(); it++)
@@ -6942,14 +6942,12 @@ namespace Legion {
 #ifdef DEBUG_HIGH_LEVEL
         assert((*it).kind() != Processor::UTIL_PROC);
 #endif
-	std::set<Processor> all_procs;
-	machine.get_all_processors(all_procs);
         ProcessorManager *manager = new ProcessorManager(*it,
 				    (*it).kind(), this,
                                     superscalar_width,
                                     DEFAULT_MAPPER_SLOTS, 
                                     stealing_disabled,
-				    all_procs.size()-1);
+				    all_procs.count()-1);
         proc_managers[*it] = manager;
         Mapper *mapper = new Mapping::DefaultMapper(machine, *it);
         MapperManager *wrapper = wrap_mapper(this, mapper, 0, *it);
@@ -7481,9 +7479,8 @@ namespace Legion {
       args.mpi_rank = rank;
       args.source_space = address_space;
       std::set<AddressSpace> sent_targets;
-      std::set<Processor> all_procs;
-      machine.get_all_processors(all_procs);
-      for (std::set<Processor>::const_iterator it = all_procs.begin();
+      Machine::ProcessorQuery all_procs(machine);
+      for (Machine::ProcessorQuery::iterator it = all_procs.begin();
             it != all_procs.end(); it++)
       {
         AddressSpace target_space = it->address_space();
@@ -16220,15 +16217,14 @@ namespace Legion {
     {
       std::set<Event> shutdown_events;
       // Launch tasks to shutdown all the runtime instances
-      std::set<Processor> all_procs;
-      machine.get_all_processors(all_procs);
+      Machine::ProcessorQuery all_procs(machine);
       Realm::ProfilingRequestSet empty_requests;
       // TODO: Make this work with Sam's internal collective framework
       if (Runtime::separate_runtime_instances)
       {
         // If we are doing separate runtime instances, run it once on every
         // processor since we have separate runtimes for every processor
-        for (std::set<Processor>::const_iterator it = all_procs.begin();
+        for (Machine::ProcessorQuery::iterator it = all_procs.begin();
               it != all_procs.end(); it++)
         {
           shutdown_events.insert(
@@ -16240,7 +16236,7 @@ namespace Legion {
       {
         // In the normal case we just have to run this once on every node
         std::set<AddressSpace> shutdown_spaces;
-        for (std::set<Processor>::const_iterator it = all_procs.begin();
+        for (Machine::ProcessorQuery::iterator it = all_procs.begin();
               it != all_procs.end(); it++)
         {
           AddressSpace space = it->address_space();
@@ -18569,9 +18565,9 @@ namespace Legion {
         exit(ERROR_TRACING_ALLOCATION_WITH_SEPARATE);
 #endif
         // Check for utility processors
-        std::set<Processor> util_procs;
-        machine.get_local_processors_by_kind(util_procs, Processor::UTIL_PROC);
-        if (!util_procs.empty())
+        Machine::ProcessorQuery util_procs(machine);
+        util_procs.local_address_space().only_kind(Processor::UTIL_PROC);
+        if (util_procs.count() > 0)
         {
           log_run.error("Separate runtime instances are not "
                         "supported when running with explicit "
@@ -18586,14 +18582,14 @@ namespace Legion {
       // and also see if we are supposed to launch the top-level task
       Processor top_level_proc = Processor::NO_PROC;
       {
-        std::set<Processor> local_procs;
-        machine.get_local_processors(local_procs);
-        if (local_procs.size() > MAX_NUM_PROCS)
+        Machine::ProcessorQuery local_procs(machine);
+        local_procs.local_address_space();
+        if (local_procs.count() > MAX_NUM_PROCS)
         {
           log_run.error("Maximum number of local processors %ld exceeds "
                         "compile time maximum of %d.  Change the value "
                         "in legion_config.h and recompile.",
-                        local_procs.size(), MAX_NUM_PROCS);
+                        local_procs.count(), MAX_NUM_PROCS);
 #ifdef DEBUG_HIGH_LEVEL
           assert(false);
 #endif
@@ -18604,7 +18600,7 @@ namespace Legion {
         if (local_space == 0)
         {
           // Find the first CPU processor
-          for (std::set<Processor>::const_iterator it = local_procs.begin();
+          for (Machine::ProcessorQuery::iterator it = local_procs.begin();
                 it != local_procs.end(); it++)
           {
             Processor::Kind kind = it->kind(); 
@@ -19148,10 +19144,9 @@ namespace Legion {
       if (!legion_spy_enabled)
         return;
       std::set<Processor::Kind> proc_kinds;
-      std::set<Processor> all_procs;
-      machine.get_all_processors(all_procs);
+      Machine::ProcessorQuery all_procs(machine);
       // Log processors
-      for (std::set<Processor>::const_iterator it = all_procs.begin();
+      for (Machine::ProcessorQuery::iterator it = all_procs.begin();
             it != all_procs.end(); it++)
       {
         Processor::Kind kind = it->kind();
@@ -19192,10 +19187,9 @@ namespace Legion {
         LegionSpy::log_processor(it->id, kind);
       }
       // Log memories
-      std::set<Memory> all_mems;
       std::set<Memory::Kind> mem_kinds;
-      machine.get_all_memories(all_mems);
-      for (std::set<Memory>::const_iterator it = all_mems.begin();
+      Machine::MemoryQuery all_mems(machine);
+      for (Machine::MemoryQuery::iterator it = all_mems.begin();
             it != all_mems.end(); it++)
       {
         Memory::Kind kind = it->kind();
@@ -19270,8 +19264,9 @@ namespace Legion {
         LegionSpy::log_memory(it->id, it->capacity(), it->kind());
       }
       // Log Proc-Mem Affinity
-      for (std::set<Processor>::const_iterator pit = all_procs.begin();
-            pit != all_procs.end(); pit++)
+      Machine::ProcessorQuery all_procs2(machine);
+      for (Machine::ProcessorQuery::iterator pit = all_procs2.begin();
+            pit != all_procs2.end(); pit++)
       {
         std::vector<ProcessorMemoryAffinity> affinities;
         machine.get_proc_mem_affinity(affinities, *pit);
@@ -19283,8 +19278,9 @@ namespace Legion {
         }
       }
       // Log Mem-Mem Affinity
-      for (std::set<Memory>::const_iterator mit = all_mems.begin();
-            mit != all_mems.begin(); mit++)
+      Machine::MemoryQuery all_mems2(machine);
+      for (Machine::MemoryQuery::iterator mit = all_mems2.begin();
+            mit != all_mems2.begin(); mit++)
       {
         std::vector<MemoryMemoryAffinity> affinities;
         machine.get_mem_mem_affinity(affinities, *mit);

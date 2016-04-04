@@ -98,9 +98,8 @@ namespace Legion {
         stealing_enabled = false;
       }
       // Get all the processors and gpus on the local node
-      std::set<Processor> all_procs;
-      machine.get_all_processors(all_procs);
-      for (std::set<Processor>::const_iterator it = all_procs.begin();
+      Machine::ProcessorQuery all_procs(machine);
+      for (Machine::ProcessorQuery::iterator it = all_procs.begin();
             it != all_procs.end(); it++)
       {
         AddressSpace node = it->address_space();
@@ -2337,9 +2336,8 @@ namespace Legion {
       // do must epochs for anthing but CPUs at the moment.
       if (total_nodes > 1)
       {
-        std::set<Processor> all_procs;
-        machine.get_all_processors(all_procs);
-        std::set<Processor>::const_iterator proc_finder = all_procs.begin();
+        Machine::ProcessorQuery all_procs(machine);
+        Machine::ProcessorQuery::iterator proc_finder = all_procs.begin();
         for (unsigned idx = 0; idx < input.tasks.size(); idx++)
         {
           // Find the next CPU
