@@ -862,12 +862,24 @@ function parser.expr_prefix(p)
   elseif p:nextif("arrive") then
     p:expect("(")
     local barrier = p:expr()
-    p:expect(",")
-    local value = p:expr()
+    local value = false
+    if p:nextif(",") then
+      value = p:expr()
+    end
     p:expect(")")
     return ast.unspecialized.expr.Arrive {
       barrier = barrier,
       value = value,
+      options = ast.default_options(),
+      span = ast.span(start, p),
+    }
+
+  elseif p:nextif("await") then
+    p:expect("(")
+    local barrier = p:expr()
+    p:expect(")")
+    return ast.unspecialized.expr.Await {
+      barrier = barrier,
       options = ast.default_options(),
       span = ast.span(start, p),
     }

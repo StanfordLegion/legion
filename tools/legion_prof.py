@@ -43,6 +43,8 @@ mem_desc_pat = re.compile(prefix + r'Prof Mem Desc (?P<mid>[a-f0-9]+) (?P<kind>[
 # Extensions for messages
 message_desc_pat = re.compile(prefix + r'Prof Message Desc (?P<mid>[0-9]+) (?P<desc>[a-zA-Z0-9_ ]+)')
 message_info_pat = re.compile(prefix + r'Prof Message Info (?P<mid>[0-9]+) (?P<pid>[a-f0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)')
+# Self-profiling
+proftask_info_pat = re.compile(prefix + r'Prof ProfTask Info (?P<pid>[a-f0-9]+) (?P<opid>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)')
 
 # Make sure this is up to date with lowlevel.h
 processor_kinds = {
@@ -261,7 +263,7 @@ class TaskRange(TimeRange):
             title += (' '+self.task.get_initiation())
         title += (' '+self.task.get_timing())
         if not self.task.is_task:
-            color = "#555555"
+            color = self.task.color or "#555555"
         else:
             color = self.task.variant.color
         if len(self.task.wait_intervals) > 0:
@@ -786,6 +788,7 @@ class Operation(object):
         self.is_task = False
         self.is_meta = False
         self.is_multi = False
+        self.is_proftask = False
         self.name = 'Operation '+str(op_id)
         self.variant = None
         self.task_kind = None
@@ -805,12 +808,13 @@ class Operation(object):
         if self.is_task:
             assert self.variant is not None
             self.color = self.variant.color
+        elif self.is_proftask:
+            self.color = '#FFCOCB' # Pink
+        elif self.kind is None:
+            self.color = '#000000' # Black
         else:
-            if self.kind is None:
-                self.color = '#000000' # Black
-            else:
-                assert self.kind_num in color_map
-                self.color = color_map[self.kind_num]
+            assert self.kind_num in color_map
+            self.color = color_map[self.kind_num]
 
     def get_color(self):
         assert self.color is not None
@@ -845,6 +849,8 @@ class Operation(object):
         elif self.is_multi:
             assert self.task_kind is not None
             return self.task_kind.name+' '+self.get_info()
+        elif self.is_proftask:
+            return 'ProfTask' + (' <{:d}>'.format(self.op_id) if self.op_id > 0 else '')
         else:
             if self.kind is None:
                 return 'Operation '+self.get_info()
@@ -1312,6 +1318,13 @@ class State(object):
                                           long(m.group('start')),
                                           long(m.group('stop')))
                     continue
+                m = proftask_info_pat.match(line)
+                if m is not None:
+                    self.log_proftask_info(int(m.group('pid'),16),
+                                           long(m.group('opid')),
+                                           read_time(m.group('start')),
+                                           read_time(m.group('stop')))
+                    continue
                 # If we made it here then we failed to match
                 matches -= 1 
                 print 'Skipping line: %s' % line.strip()
@@ -1492,6 +1505,20 @@ class State(object):
         message = Message(self.message_kinds[kind], start, stop)
         proc = self.find_processor(proc_id)
         proc.add_message(message)
+
+    def log_proftask_info(self, proc_id, op_id, start, stop):
+        assert start <= stop
+        task = Operation(op_id)
+        # we don't have a unique op_id for the profiling task itself, so we don't add to
+        #  self.operations, but that means we have to pick a color here
+        task.color = '#FFC0CB'  # Pink
+        task.is_proftask = True
+        task.create = start
+        task.ready = start
+        task.start = start
+        task.stop = stop
+        proc = self.find_processor(proc_id)
+        proc.add_task(task)
 
     def find_processor(self, proc_id):
         if proc_id not in self.processors:

@@ -2445,6 +2445,27 @@ legion_phase_barrier_destroy(legion_runtime_t runtime_,
   runtime->destroy_phase_barrier(ctx, handle);
 }
 
+void
+legion_phase_barrier_arrive(legion_runtime_t runtime_,
+                            legion_context_t ctx_,
+                            legion_phase_barrier_t handle_,
+                            size_t count /* = 1 */)
+{
+  PhaseBarrier handle = CObjectWrapper::unwrap(handle_);
+
+  handle.arrive(count);
+}
+
+void
+legion_phase_barrier_wait(legion_runtime_t runtime_,
+                          legion_context_t ctx_,
+                          legion_phase_barrier_t handle_)
+{
+  PhaseBarrier handle = CObjectWrapper::unwrap(handle_);
+
+  handle.wait();
+}
+
 legion_phase_barrier_t
 legion_phase_barrier_advance(legion_runtime_t runtime_,
                              legion_context_t ctx_,

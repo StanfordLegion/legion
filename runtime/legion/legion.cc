@@ -714,12 +714,13 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
       assert(phase_barrier.exists());
 #endif
-      if (!phase_barrier.has_triggered())
+      Event e = phase_barrier.get_previous_phase();
+      if (!e.has_triggered())
       {
         Processor proc = Processor::get_executing_processor();
         Internal *rt = Internal::get_runtime(proc);
         rt->pre_wait(proc);
-        phase_barrier.wait();
+        e.wait();
         rt->post_wait(proc);
       }
     }

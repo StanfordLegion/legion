@@ -26,6 +26,8 @@
 #include <deque>
 #include <algorithm>
 
+#define LEGION_PROF_SELF_PROFILE
+
 namespace LegionRuntime {
   namespace HighLevel {
 
@@ -118,6 +120,14 @@ namespace LegionRuntime {
         Processor proc;
       };
 #endif
+#ifdef LEGION_PROF_SELF_PROFILE
+      struct ProfTaskInfo {
+      public:
+	Processor proc;
+	UniqueID op_id;
+	unsigned long long start, stop;
+      };
+#endif
     public:
       LegionProfInstance(LegionProfiler *owner);
       LegionProfInstance(const LegionProfInstance &rhs);
@@ -156,6 +166,12 @@ namespace LegionRuntime {
                           unsigned long long start,
                           unsigned long long stop);
 #endif
+#ifdef LEGION_PROF_SELF_PROFILE
+    public:
+      void record_proftask(Processor p, UniqueID op_id,
+			   unsigned long long start,
+			   unsigned long long stop);
+#endif
     public:
       void dump_state(void);
     private:
@@ -174,6 +190,10 @@ namespace LegionRuntime {
 #ifdef LEGION_PROF_MESSAGES
     private:
       std::deque<MessageInfo> message_infos;
+#endif
+#ifdef LEGION_PROF_SELF_PROFILE
+    private:
+      std::deque<ProfTaskInfo> prof_task_infos;
 #endif
     };
 
