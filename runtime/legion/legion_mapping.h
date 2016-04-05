@@ -1095,7 +1095,7 @@ namespace Legion {
       };
       //------------------------------------------------------------------------
       virtual void permit_steal_request(const MapperContext         ctx,
-                                        const StealRequestInput&    intput,
+                                        const StealRequestInput&    input,
                                               StealRequestOutput&   output) = 0;
       //------------------------------------------------------------------------
     public: // Handling

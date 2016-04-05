@@ -14,11 +14,14 @@
  */
 
 #include "test_mapper.h"
+#include <sys/time.h>
 
 #define INLINE_RATIO    100 // 1 in 100
 #define REAL_CLOSE_RATIO 100 // 1 in 100 will make a real instance
 #define COPY_VIRTUAL_RATIO 10 // 1 in 10 copies will make a virtual source
 #define INNER_VIRTUAL_RATIO 2 // 1 in 2 virtual inner task region requirements
+#define REDISTRIBUTE_RATIO 10 // 1 in 10 we will send a task to a new processor
+#define STEAL_PERMIT_RATIO 2 // 1 in 2 chance a steal will succeed
 
 namespace Legion {
   namespace Mapping {
@@ -59,7 +62,11 @@ namespace Legion {
         }
       }
       if (seed == -1)
-        seed = local_proc.id;
+      {
+        struct timeval tv;
+        gettimeofday(&tv, NULL);
+        seed = ((long long)tv.tv_sec) * 1000 + ((long long)tv.tv_usec) / 1000;
+      }
       // Initialize our random number generator
       const size_t short_bits = 8*sizeof(unsigned short);
       long long short_mask = 0;
@@ -358,6 +365,8 @@ namespace Legion {
           std::map<unsigned,Memory>::iterator it = random_memories.begin();
           Memory target = it->second;
           random_memories.erase(it);
+          if (target.capacity() == 0)
+            continue;
           if (default_make_instance(ctx, target, layout_constraints,
                 chosen_instances[output_idx], mapping_kind, true/*force new*/,
                 false/*meets*/, req.privilege == REDUCE, req))
@@ -381,9 +390,7 @@ namespace Legion {
         std::vector<PhysicalInstance> &chosen_instances, Processor restricted)
     //--------------------------------------------------------------------------
     {
-      // TODO: put in arbitrary constraints to mess with the DMA system
-      LayoutConstraintSet constraints;
-      default_policy_fill_constraints(ctx, constraints, Memory::NO_MEMORY, req);
+      
       std::vector<LogicalRegion> regions(1, req.region);
       chosen_instances.resize(req.privilege_fields.size());
       unsigned output_idx = 0;
@@ -392,9 +399,7 @@ namespace Legion {
       for (std::set<FieldID>::const_iterator it = req.privilege_fields.begin();
             it != req.privilege_fields.end(); it++, output_idx++)
       {
-        // Overwrite the field constraints 
         std::vector<FieldID> field(1, *it);
-        constraints.field_constraint = FieldConstraint(field, false);
         // Try a bunch of memories in a random order until we find one 
         // that succeeds
         Machine::MemoryQuery all_memories(machine);
@@ -413,6 +418,13 @@ namespace Legion {
           std::map<unsigned,Memory>::iterator it = random_memories.begin();
           Memory target = it->second;
           random_memories.erase(it);
+          if (target.capacity() == 0)
+            continue;
+          // TODO: put in arbitrary constraints to mess with the DMA system
+          LayoutConstraintSet constraints;
+          default_policy_fill_constraints(ctx, constraints, target, req);
+          // Overwrite the field constraints 
+          constraints.field_constraint = FieldConstraint(field, false);
           // Try to make the instance, we always make new instances to
           // generate as much data movement and dependence analysis as
           // we possibly can, it will also stress the garbage collector
@@ -662,6 +674,67 @@ namespace Legion {
       output.speculate = false;
     }
 
+    //--------------------------------------------------------------------------
+    void TestMapper::select_tasks_to_map(const MapperContext          ctx,
+                                         const SelectMappingInput&    input,
+                                               SelectMappingOutput&   output)
+    //--------------------------------------------------------------------------
+    {
+      // Pick a random task to map
+      unsigned map_index = generate_random_integer() % input.ready_tasks.size();
+      std::list<const Task*>::const_iterator it = input.ready_tasks.begin();
+      for (unsigned idx = 0; idx < map_index; idx++) it++;
+      output.map_tasks.insert(*it);
+      // Maybe send another task to a different processor
+      if ((input.ready_tasks.size() > 1) && 
+          ((generate_random_integer() % REDISTRIBUTE_RATIO) == 0))
+      {
+        unsigned distribute_index = 
+          generate_random_integer() % (input.ready_tasks.size()-1);
+        std::list<const Task*>::const_iterator it2 = input.ready_tasks.begin();
+        for (unsigned idx = 0; idx < distribute_index; idx++)
+        {
+          // Skip the one we are mapping
+          if (it2 == it)
+            it2++;
+          it2++;
+        }
+        // Pick a random processor of the same kind
+        Processor target = select_random_processor(local_proc.kind()); 
+        if (target != local_proc)
+          output.relocate_tasks[*it2] = target; 
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void TestMapper::select_steal_targets(const MapperContext         ctx,
+                                          const SelectStealingInput&  input,
+                                                SelectStealingOutput& output)
+    //--------------------------------------------------------------------------
+    {
+      // Always send a steal request
+      Processor target = select_random_processor(local_proc.kind());
+      if ((target != local_proc) && 
+          (input.blacklist.find(target) == input.blacklist.end()))
+        output.targets.insert(target);
+    }
+
+    //--------------------------------------------------------------------------
+    void TestMapper::permit_steal_request(const MapperContext         ctx,
+                                          const StealRequestInput&    input,
+                                                StealRequestOutput&   output)
+    //--------------------------------------------------------------------------
+    {
+      if ((generate_random_integer() % STEAL_PERMIT_RATIO) == 0)
+      {
+        unsigned index = 
+          generate_random_integer() % input.stealable_tasks.size();
+        std::vector<const Task*>::const_iterator it = 
+          input.stealable_tasks.begin();
+        for (unsigned idx = 0; idx < index; idx++) it++;
+        output.stolen_tasks.insert(*it);
+      }
+    }
 
   }; // namespace Mapping 
 }; // namespace Legion

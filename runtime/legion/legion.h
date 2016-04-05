@@ -4405,6 +4405,9 @@ namespace Legion {
        * -hl:registration Record the mapping from low-level task IDs to
        *              task variant names for debugging low-level runtime
        *              error messages.
+       * -hl:test     Replace the default mapper with the test mapper
+       *              which will generate sound but random mapping 
+       *              decision in order to stress-test the runtime.
        * -------------
        *  Profiling
        * -------------

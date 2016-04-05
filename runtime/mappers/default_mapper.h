@@ -230,7 +230,7 @@ namespace Legion {
                                         const SelectStealingInput&  input,
                                               SelectStealingOutput& output);
       virtual void permit_steal_request(const MapperContext         ctx,
-                                        const StealRequestInput&    intput,
+                                        const StealRequestInput&    input,
                                               StealRequestOutput&   output);
     public: // handling
       virtual void handle_message(const MapperContext           ctx,

@@ -22,6 +22,7 @@
 #include "legion_utilities.h"
 #include "region_tree.h"
 #include "default_mapper.h"
+#include "test_mapper.h"
 #include "legion_spy.h"
 #include "legion_profiling.h"
 #include "legion_instances.h"
@@ -6939,7 +6940,7 @@ namespace Legion {
       assert(utility_group.exists());
 #endif
       Machine::ProcessorQuery all_procs(machine); 
-      // For each of the processors in our local set, construct a manager
+      // For each of the processors in our local set construct a manager
       for (std::set<Processor>::const_iterator it = local_procs.begin();
             it != local_procs.end(); it++)
       {
@@ -6953,9 +6954,6 @@ namespace Legion {
                                     stealing_disabled,
 				    all_procs.count()-1);
         proc_managers[*it] = manager;
-        Mapper *mapper = new Mapping::DefaultMapper(machine, *it);
-        MapperManager *wrapper = wrap_mapper(this, mapper, 0, *it);
-        manager->add_mapper(0, wrapper, false/*check*/, true/*owns*/); 
       }
       // Initialize the message manager array so that we can construct
       // message managers lazily as they are needed
@@ -7000,23 +6998,6 @@ namespace Legion {
       for (unsigned idx = ARGUMENT_MAP_ALLOC; idx < LAST_ALLOC; idx++)
         allocation_manager[((AllocationType)idx)] = AllocationTracker();
 #endif
-      // Set up the profiler if it was requested
-      // If it is less than zero, all nodes enabled by default, otherwise
-      // we have to be less than the maximum number to enable profiling
-      if (address_space < Runtime::num_profiling_nodes)
-      {
-        HLR_TASK_DESCRIPTIONS(hlr_task_descriptions);
-        profiler = new LegionProfiler((local_utils.empty() ? 
-                                      Processor::NO_PROC : utility_group), 
-                                      machine, HLR_LAST_TASK_ID,
-                                      hlr_task_descriptions, 
-                                      Operation::LAST_OP_KIND, 
-                                      Operation::op_names); 
-#ifdef LEGION_PROF_MESSAGES
-        HLR_MESSAGE_DESCRIPTIONS(hlr_message_descriptions);
-        profiler->record_message_kinds(hlr_message_descriptions,LAST_SEND_KIND);
-#endif
-      }
 #ifdef LEGION_GC
       {
         REFERENCE_NAMES_ARRAY(reference_names);
@@ -7029,58 +7010,6 @@ namespace Legion {
 #ifdef DEBUG_SHUTDOWN_HANG
       outstanding_counts.resize(HLR_LAST_TASK_ID, 0);
 #endif
-      // Check to see which operations we buffered before the 
-      // runtime started that we now need to do
-      std::deque<PendingVariantRegistration*> &pending_variants = 
-        get_pending_variant_table();
-      const size_t num_static_variants = 
-        TASK_ID_AVAILABLE + pending_variants.size();
-      if (!pending_variants.empty())
-      {
-        for (std::deque<PendingVariantRegistration*>::const_iterator it =
-              pending_variants.begin(); it != pending_variants.end(); it++)
-        {
-          (*it)->perform_registration(this);
-          // avoid races on seaparte runtime instances
-          if (!Runtime::separate_runtime_instances)
-            delete *it;
-        }
-        // avoid races on separate runtime instances
-        if (!Runtime::separate_runtime_instances)
-          pending_variants.clear();
-      }
-      // All the runtime instances registered the static variants
-      // starting at 1 and counting by 1, so just increment our
-      // unique_variant_id until it is greater than the
-      // number of static variants, no need to use atomics
-      // here since we are still initializing the runtime
-      while (unique_variant_id <= num_static_variants)
-        unique_variant_id += runtime_stride;
-      // Register any pending constraint sets
-      std::map<LayoutConstraintID,LayoutConstraintRegistrar> 
-        &pending_constraints = get_pending_constraint_table();
-      if (!pending_constraints.empty())
-      {
-        // Update the next available constraint
-        while (pending_constraints.find(unique_constraint_id) !=
-                pending_constraints.end())
-          unique_constraint_id += runtime_stride;
-        // Now do the registrations
-        for (std::map<LayoutConstraintID,LayoutConstraintRegistrar>::
-              const_iterator it = pending_constraints.begin(); 
-              it != pending_constraints.end(); it++)
-        {
-          register_layout(it->second, it->first);
-        }
-        // avoid races if we are doing separate runtime creation
-        if (!Runtime::separate_runtime_instances)
-          pending_constraints.clear();
-      } 
-
-      // Before launching the top level task, see if the user requested
-      // a callback to be performed before starting the application
-      if (Runtime::registration_callback != NULL)
-        (*Runtime::registration_callback)(machine, external, local_procs);
     }
 
     //--------------------------------------------------------------------------
@@ -7469,6 +7398,122 @@ namespace Legion {
       // should never be called
       assert(false);
       return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::register_static_variants(void)
+    //--------------------------------------------------------------------------
+    {
+      std::deque<PendingVariantRegistration*> &pending_variants = 
+        get_pending_variant_table();
+      const size_t num_static_variants = 
+        TASK_ID_AVAILABLE + pending_variants.size();
+      if (!pending_variants.empty())
+      {
+        for (std::deque<PendingVariantRegistration*>::const_iterator it =
+              pending_variants.begin(); it != pending_variants.end(); it++)
+        {
+          (*it)->perform_registration(this);
+          // avoid races on seaparte runtime instances
+          if (!Runtime::separate_runtime_instances)
+            delete *it;
+        }
+        // avoid races on separate runtime instances
+        if (!Runtime::separate_runtime_instances)
+          pending_variants.clear();
+      }
+      // All the runtime instances registered the static variants
+      // starting at 1 and counting by 1, so just increment our
+      // unique_variant_id until it is greater than the
+      // number of static variants, no need to use atomics
+      // here since we are still initializing the runtime
+      while (unique_variant_id <= num_static_variants)
+        unique_variant_id += runtime_stride;
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::register_static_constraints(void)
+    //--------------------------------------------------------------------------
+    {
+      // Register any pending constraint sets
+      std::map<LayoutConstraintID,LayoutConstraintRegistrar> 
+        &pending_constraints = get_pending_constraint_table();
+      if (!pending_constraints.empty())
+      {
+        // Update the next available constraint
+        while (pending_constraints.find(unique_constraint_id) !=
+                pending_constraints.end())
+          unique_constraint_id += runtime_stride;
+        // Now do the registrations
+        for (std::map<LayoutConstraintID,LayoutConstraintRegistrar>::
+              const_iterator it = pending_constraints.begin(); 
+              it != pending_constraints.end(); it++)
+        {
+          register_layout(it->second, it->first);
+        }
+        // avoid races if we are doing separate runtime creation
+        if (!Runtime::separate_runtime_instances)
+          pending_constraints.clear();
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::initialize_legion_prof(void)
+    //--------------------------------------------------------------------------
+    {
+      HLR_TASK_DESCRIPTIONS(hlr_task_descriptions);
+      profiler = new LegionProfiler((local_utils.empty() ? 
+                                    Processor::NO_PROC : utility_group), 
+                                    machine, HLR_LAST_TASK_ID,
+                                    hlr_task_descriptions, 
+                                    Operation::LAST_OP_KIND, 
+                                    Operation::op_names); 
+#ifdef LEGION_PROF_MESSAGES
+      HLR_MESSAGE_DESCRIPTIONS(hlr_message_descriptions);
+      profiler->record_message_kinds(hlr_message_descriptions, LAST_SEND_KIND);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::initialize_mappers(void)
+    //--------------------------------------------------------------------------
+    {
+      if (Runtime::replay_file == NULL) // This is the normal path
+      {
+        if (enable_test_mapper)
+        {
+          // Make test mappers for everyone
+          for (std::map<Processor,ProcessorManager*>::const_iterator it = 
+                proc_managers.begin(); it != proc_managers.end(); it++)
+          {
+            Mapper *mapper = new Mapping::TestMapper(machine, it->first);
+            MapperManager *wrapper = wrap_mapper(this, mapper, 0, it->first);
+            it->second->add_mapper(0, wrapper, false/*check*/, true/*owns*/);
+          }
+        }
+        else
+        {
+          // Make default mappers for everyone
+          for (std::map<Processor,ProcessorManager*>::const_iterator it = 
+                proc_managers.begin(); it != proc_managers.end(); it++)
+          {
+            Mapper *mapper = new Mapping::DefaultMapper(machine, it->first);
+            MapperManager *wrapper = wrap_mapper(this, mapper, 0, it->first);
+            it->second->add_mapper(0, wrapper, false/*check*/, true/*owns*/);
+          }
+        }
+        // Now ask the application what it wants to do
+        if (Runtime::registration_callback != NULL)
+        {
+          log_run.info("Invoking mapper registration callback function...");
+          (*Runtime::registration_callback)(machine, external, local_procs);
+          log_run.info("Completed execution of mapper registration callback");
+        }
+      }
+      else // This is the replay/debug path
+      {
+        assert(false);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -18237,6 +18282,8 @@ namespace Legion {
 #endif
     /*static*/ bool Runtime::dynamic_independence_tests = true;
     /*static*/ bool Runtime::legion_spy_enabled = false;
+    /*static*/ bool Runtime::enable_test_mapper = false;
+    /*static*/ const char* Runtime::replay_file = NULL;
     /*static*/ int Runtime::mpi_rank = -1;
     /*static*/ unsigned Runtime::mpi_rank_table[MAX_NUM_NODES];
     /*static*/ unsigned Runtime::remaining_mpi_notifications = 0;
@@ -18355,6 +18402,8 @@ namespace Legion {
 #else
         legion_spy_enabled = false;
 #endif
+        enable_test_mapper = false;
+        replay_file = NULL;
         initial_task_window_size = DEFAULT_MAX_TASK_WINDOW;
         initial_task_window_hysteresis = DEFAULT_TASK_WINDOW_HYSTERESIS;
         initial_tasks_to_schedule = DEFAULT_MIN_TASKS_TO_SCHEDULE;
@@ -18395,6 +18444,7 @@ namespace Legion {
           if (!strcmp(argv[i],"-hl:no_dyn"))
             dynamic_independence_tests = false;
           BOOL_ARG("-hl:spy",legion_spy_enabled);
+          BOOL_ARG("-hl:test",enable_test_mapper);
 #ifdef DEBUG_HIGH_LEVEL
           BOOL_ARG("-hl:tree",logging_region_tree_state);
           BOOL_ARG("-hl:verbose",verbose_logging);
@@ -19367,9 +19417,16 @@ namespace Legion {
       {
         runtime_map[it->local_id()] = local_rt;
       }
+      // Do the rest of our initialization
+      local_rt->register_static_variants();
+      local_rt->register_static_constraints();
+      if (local_space_id < Runtime::num_profiling_nodes)
+        local_rt->initialize_legion_prof();
       // If we have an MPI rank, then build the maps
       if (Runtime::mpi_rank >= 0)
         local_rt->construct_mpi_rank_tables(p, Runtime::mpi_rank);
+      // Finally do the application initialization of mappers
+      local_rt->initialize_mappers();
     }
 
     //--------------------------------------------------------------------------

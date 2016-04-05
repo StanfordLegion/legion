@@ -2550,7 +2550,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void DefaultMapper::permit_steal_request(const MapperContext         ctx,
-                                             const StealRequestInput&    intput,
+                                             const StealRequestInput&    input,
                                                    StealRequestOutput&   output)
     //--------------------------------------------------------------------------
     {

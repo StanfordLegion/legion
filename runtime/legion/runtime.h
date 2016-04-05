@@ -1282,6 +1282,10 @@ namespace Legion {
     public:
       Runtime& operator=(const Runtime &rhs);
     public:
+      void register_static_variants(void);
+      void register_static_constraints(void);
+      void initialize_legion_prof(void);
+      void initialize_mappers(void);
       void construct_mpi_rank_tables(Processor proc, int rank);
       void launch_top_level_task(Processor target);
       Event launch_mapper_task(Mapper *mapper, Processor proc, 
@@ -2618,6 +2622,8 @@ namespace Legion {
       static bool unsafe_mapper;
       static bool dynamic_independence_tests;
       static bool legion_spy_enabled;
+      static bool enable_test_mapper;
+      static const char* replay_file;
       static int mpi_rank;
       static unsigned mpi_rank_table[MAX_NUM_NODES];
       static unsigned remaining_mpi_notifications;
