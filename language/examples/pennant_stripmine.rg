@@ -1344,7 +1344,10 @@ task test()
   end
 
   if conf.par_init then
+    var colorings_ = read_partitions(conf)
     if conf.seq_init then
+      regentlib.assert(colorings.nspans_zones == colorings_.nspans_zones, "bad nspans zones")
+      regentlib.assert(colorings.nspans_points == colorings_.nspans_points, "bad nspans points")
       c.legion_coloring_destroy(colorings.rz_all_c)
       c.legion_coloring_destroy(colorings.rz_spans_c)
       c.legion_coloring_destroy(colorings.rp_all_c)
@@ -1355,7 +1358,7 @@ task test()
       c.legion_coloring_destroy(colorings.rs_all_c)
       c.legion_coloring_destroy(colorings.rs_spans_c)
     end
-    colorings = read_partitions(conf)
+    colorings = colorings_
   end
 
   conf.nspans_zones = colorings.nspans_zones
