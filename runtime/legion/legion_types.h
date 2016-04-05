@@ -187,6 +187,7 @@ namespace Legion {
   namespace Mapping {
     class Mappable; 
     class PhysicalInstance;
+    class MapperEvent;
     class ProfilingRequestSet;
     class Mapper;
     class DefaultMapper;
@@ -701,6 +702,7 @@ namespace Legion {
     class MapperManager;
     class SerializingManager;
     class ConcurrentManager;
+    typedef Mapping::MapperEvent MapperEvent;
 
 #define FRIEND_ALL_RUNTIME_CLASSES                          \
     friend class Legion::Runtime;                           \
@@ -797,7 +799,6 @@ namespace Legion {
   typedef Realm::Processor Processor;
   typedef Realm::CodeDescriptor CodeDescriptor;
   typedef Realm::Event Event;
-  typedef Realm::Event MapperEvent;
   typedef Realm::UserEvent UserEvent;
   typedef Realm::Reservation Reservation;
   typedef Realm::Barrier Barrier;

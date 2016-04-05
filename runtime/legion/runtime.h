@@ -467,7 +467,7 @@ namespace Legion {
       ProcessorManager(Processor proc, Processor::Kind proc_kind,
                        Runtime *rt,
                        unsigned width, unsigned default_mappers,  
-                       bool no_steal, unsigned max_steals);
+                       unsigned max_steals, bool no_steal, bool replay);
       ProcessorManager(const ProcessorManager &rhs);
       ~ProcessorManager(void);
     public:
@@ -510,10 +510,12 @@ namespace Legion {
       const Processor::Kind proc_kind;
       // Effective super-scalar width of the runtime
       const unsigned superscalar_width;
-      // Is stealing disabled 
-      const bool stealing_disabled;
       // Maximum number of outstanding steals permitted by any mapper
       const unsigned max_outstanding_steals;
+      // Is stealing disabled 
+      const bool stealing_disabled;
+      // are we doing replay execution
+      const bool replay_execution;
     protected:
       // Local queue state
       Reservation local_queue_lock;
@@ -2623,6 +2625,7 @@ namespace Legion {
       static bool dynamic_independence_tests;
       static bool legion_spy_enabled;
       static bool enable_test_mapper;
+      static bool legion_ldb_enabled;
       static const char* replay_file;
       static int mpi_rank;
       static unsigned mpi_rank_table[MAX_NUM_NODES];

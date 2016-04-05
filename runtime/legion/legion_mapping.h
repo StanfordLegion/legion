@@ -96,6 +96,27 @@ namespace Legion {
       std::set<FieldID>  fields;
     };
 
+    /**
+     * \class MapperEvent
+     * A mapper event is a mechanism through which mappers
+     * are allowed to preempt a mapper call until a later
+     * time when the mapper is ready to resume execution 
+     */
+    class MapperEvent {
+    public:
+      MapperEvent(void)
+        : mapper_event_id(0) { }
+      FRIEND_ALL_RUNTIME_CLASSES
+    public:
+      inline bool exists(void) const { return (mapper_event_id > 0); }
+      inline bool operator==(const MapperEvent &rhs) const 
+        { return (mapper_event_id == rhs.mapper_event_id); }
+      inline bool operator<(const MapperEvent &rhs) const
+        { return (mapper_event_id < rhs.mapper_event_id); }
+    protected:
+      unsigned mapper_event_id;
+    };
+
     // Set of profiling requests for task launches
     // This struct will be filled out by the new faults
     // branch so it's just here as a place holder for now
@@ -1194,6 +1215,17 @@ namespace Legion {
 
       //MapperEvent mapper_rt_merge_mapper_events(MapperContext ctx,
       //                              const std::set<MapperEvent> &events)const;
+    protected:
+      //------------------------------------------------------------------------
+      // Methods for managing mapper events 
+      //------------------------------------------------------------------------
+      MapperEvent mapper_rt_create_mapper_event(MapperContext ctx) const;
+      bool mapper_rt_has_mapper_event_triggered(MapperContext ctx,
+                                                MapperEvent event) const;
+      void mapper_rt_trigger_mapper_event(MapperContext ctx, 
+                                          MapperEvent event) const;
+      void mapper_rt_wait_on_mapper_event(MapperContext ctx,
+                                          MapperEvent event) const;
     protected:
       //------------------------------------------------------------------------
       // Methods for managing constraint information

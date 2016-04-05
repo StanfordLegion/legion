@@ -21,14 +21,16 @@
 #include "legion_trace.h"
 #include "legion_utilities.h"
 #include "region_tree.h"
-#include "default_mapper.h"
-#include "test_mapper.h"
 #include "legion_spy.h"
 #include "legion_profiling.h"
 #include "legion_instances.h"
 #include "legion_views.h"
 #include "mapper_manager.h"
 #include "garbage_collection.h"
+#include "default_mapper.h"
+#include "test_mapper.h"
+#include "replay_mapper.h"
+#include "debug_mapper.h"
 #ifdef HANG_TRACE
 #include <signal.h>
 #include <execinfo.h>
@@ -1597,11 +1599,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ProcessorManager::ProcessorManager(Processor proc, Processor::Kind kind,
                                        Runtime *rt, unsigned width, 
-                                       unsigned def_mappers, bool no_steal, 
-                                       unsigned max_steals)
+                                       unsigned def_mappers,unsigned max_steals,
+                                       bool no_steal, bool replay)
       : runtime(rt), local_proc(proc), proc_kind(kind), 
-        superscalar_width(width), 
-        stealing_disabled(no_steal), max_outstanding_steals(max_steals),
+        superscalar_width(width), max_outstanding_steals(max_steals),
+        stealing_disabled(no_steal), replay_execution(replay),
         next_local_index(0),
         task_scheduler_enabled(false), total_active_contexts(0)
     //--------------------------------------------------------------------------
@@ -1625,8 +1627,8 @@ namespace Legion {
     ProcessorManager::ProcessorManager(const ProcessorManager &rhs)
       : runtime(NULL), local_proc(Processor::NO_PROC),
         proc_kind(Processor::LOC_PROC),
-        superscalar_width(0), stealing_disabled(false), 
-        max_outstanding_steals(0), next_local_index(0),
+        superscalar_width(0), max_outstanding_steals(0),
+        stealing_disabled(false), replay_execution(false), next_local_index(0),
         task_scheduler_enabled(false), total_active_contexts(0)
     //--------------------------------------------------------------------------
     {
@@ -1672,6 +1674,9 @@ namespace Legion {
                                       bool check, bool own)
     //--------------------------------------------------------------------------
     {
+      // Don't do this if we are doing replay execution
+      if (replay_execution)
+        return;
       log_run.spew("Adding mapper %d on processor " IDFMT "", 
                           mid, local_proc.id);
 #ifdef DEBUG_HIGH_LEVEL
@@ -1703,6 +1708,9 @@ namespace Legion {
     void ProcessorManager::replace_default_mapper(MapperManager *m, bool own)
     //--------------------------------------------------------------------------
     {
+      // Don't do this if we are doing replay execution
+      if (replay_execution)
+        return;
       AutoLock m_lock(mapper_lock);
       std::map<MapperID,std::pair<MapperManager*,bool> >::iterator finder = 
         mappers.find(0);
@@ -1719,6 +1727,16 @@ namespace Legion {
                                                  bool need_lock) const
     //--------------------------------------------------------------------------
     {
+      // Easy case if we are doing replay execution
+      if (replay_execution)
+      {
+        std::map<MapperID,std::pair<MapperManager*,bool> >::const_iterator
+          finder = mappers.find(0);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(finder != mappers.end());
+#endif
+        return finder->second.first;
+      }
       // This call is frequently called from application tasks that are
       // launching sub-tasks and therefore can never block on an acquire
       Event precondition = Event::NO_EVENT;
@@ -6951,8 +6969,9 @@ namespace Legion {
 				    (*it).kind(), this,
                                     superscalar_width,
                                     DEFAULT_MAPPER_SLOTS, 
+				    all_procs.count()-1,
                                     stealing_disabled,
-				    all_procs.count()-1);
+                                    (replay_file != NULL));
         proc_managers[*it] = manager;
       }
       // Initialize the message manager array so that we can construct
@@ -7512,7 +7531,30 @@ namespace Legion {
       }
       else // This is the replay/debug path
       {
+        // This path is not quite ready yet
         assert(false);
+        if (legion_ldb_enabled)
+        {
+          for (std::map<Processor,ProcessorManager*>::const_iterator it = 
+                proc_managers.begin(); it != proc_managers.end(); it++)
+          {
+            Mapper *mapper = 
+              new Mapping::DebugMapper(machine, it->first, replay_file);
+            MapperManager *wrapper = wrap_mapper(this, mapper, 0, it->first);
+            it->second->add_mapper(0, wrapper, false/*check*/, true/*owns*/);
+          }
+        }
+        else
+        {
+          for (std::map<Processor,ProcessorManager*>::const_iterator it =
+                proc_managers.begin(); it != proc_managers.end(); it++)
+          {
+            Mapper *mapper = 
+              new Mapping::ReplayMapper(machine, it->first, replay_file);
+            MapperManager *wrapper = wrap_mapper(this, mapper, 0, it->first);
+            it->second->add_mapper(0, wrapper, false/*check*/, true/*owns*/);
+          }
+        }
       }
     }
 
@@ -7650,12 +7692,16 @@ namespace Legion {
     void Runtime::process_mapper_task_result(const MapperTaskArgs *args)
     //--------------------------------------------------------------------------
     {
+#if 0
       MapperManager *mapper = find_mapper(args->proc, args->map_id);
       Mapper::MapperTaskResult result;
       result.mapper_event = args->event;
       result.result = args->future->get_untyped_result();
       result.result_size = args->future->get_untyped_size();
       mapper->invoke_handle_task_result(&result);
+#else
+      assert(false); // update this
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -18286,6 +18332,7 @@ namespace Legion {
     /*static*/ bool Runtime::dynamic_independence_tests = true;
     /*static*/ bool Runtime::legion_spy_enabled = false;
     /*static*/ bool Runtime::enable_test_mapper = false;
+    /*static*/ bool Runtime::legion_ldb_enabled = false;
     /*static*/ const char* Runtime::replay_file = NULL;
     /*static*/ int Runtime::mpi_rank = -1;
     /*static*/ unsigned Runtime::mpi_rank_table[MAX_NUM_NODES];
@@ -18406,6 +18453,7 @@ namespace Legion {
         legion_spy_enabled = false;
 #endif
         enable_test_mapper = false;
+        legion_ldb_enabled = false;
         replay_file = NULL;
         initial_task_window_size = DEFAULT_MAX_TASK_WINDOW;
         initial_task_window_hysteresis = DEFAULT_TASK_WINDOW_HYSTERESIS;
@@ -18448,6 +18496,17 @@ namespace Legion {
             dynamic_independence_tests = false;
           BOOL_ARG("-hl:spy",legion_spy_enabled);
           BOOL_ARG("-hl:test",enable_test_mapper);
+          if (!strcmp(argv[i],"-hl:replay"))
+          {
+            replay_file = argv[++i];
+            continue;
+          }
+          if (!strcmp(argv[i],"-hl:ldb"))
+          {
+            replay_file = argv[++i];
+            legion_ldb_enabled = true;
+            continue;
+          }
 #ifdef DEBUG_HIGH_LEVEL
           BOOL_ARG("-hl:tree",logging_region_tree_state);
           BOOL_ARG("-hl:verbose",verbose_logging);

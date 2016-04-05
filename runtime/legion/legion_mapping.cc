@@ -271,6 +271,37 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    MapperEvent Mapper::mapper_rt_create_mapper_event(MapperContext ctx) const
+    //--------------------------------------------------------------------------
+    {
+      return ctx->manager->create_mapper_event(ctx);
+    }
+
+    //--------------------------------------------------------------------------
+    bool Mapper::mapper_rt_has_mapper_event_triggered(MapperContext ctx,
+                                                      MapperEvent event) const
+    //--------------------------------------------------------------------------
+    {
+      return ctx->manager->has_mapper_event_triggered(ctx, event);
+    }
+
+    //--------------------------------------------------------------------------
+    void Mapper::mapper_rt_trigger_mapper_event(MapperContext ctx, 
+                                                MapperEvent event) const
+    //--------------------------------------------------------------------------
+    {
+      ctx->manager->trigger_mapper_event(ctx, event);
+    }
+
+    //--------------------------------------------------------------------------
+    void Mapper::mapper_rt_wait_on_mapper_event(MapperContext ctx,
+                                                MapperEvent event) const
+    //--------------------------------------------------------------------------
+    {
+      ctx->manager->wait_on_mapper_event(ctx, event);
+    }
+
+    //--------------------------------------------------------------------------
     const ExecutionConstraintSet& Mapper::mapper_rt_find_execution_constraints(
                          MapperContext ctx, TaskID task_id, VariantID vid) const
     //--------------------------------------------------------------------------

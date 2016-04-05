@@ -47,7 +47,7 @@ namespace Legion {
     MapperManager::MapperManager(Runtime *rt, Mapping::Mapper *mp, 
                                  MapperID mid, Processor p)
       : runtime(rt), mapper(mp), mapper_id(mid), processor(p),
-        mapper_lock(Reservation::create_reservation())
+        mapper_lock(Reservation::create_reservation()), next_mapper_event(1)
     //--------------------------------------------------------------------------
     {
     }
@@ -957,6 +957,84 @@ namespace Legion {
       pause_mapper_call(ctx);
       runtime->process_mapper_broadcast(mapper_id, processor, message,
                                         message_size, radix, 1/*index*/);
+      resume_mapper_call(ctx);
+    }
+
+    //--------------------------------------------------------------------------
+    MapperEvent MapperManager::create_mapper_event(MappingCallInfo *ctx)
+    //--------------------------------------------------------------------------
+    {
+      pause_mapper_call(ctx);
+      MapperEvent result;
+      UserEvent event = UserEvent::create_user_event();
+      {
+        AutoLock m_lock(mapper_lock);
+        result.mapper_event_id = next_mapper_event++;
+        mapper_events[result.mapper_event_id] = event;
+      }
+      resume_mapper_call(ctx);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    bool MapperManager::has_mapper_event_triggered(MappingCallInfo *ctx,
+                                                   MapperEvent event)
+    //--------------------------------------------------------------------------
+    {
+      pause_mapper_call(ctx);
+      bool triggered = true;
+      Event wait_on = Event::NO_EVENT;
+      {
+        AutoLock m_lock(mapper_lock, 1, false/*exclusive*/); 
+        std::map<unsigned,UserEvent>::const_iterator finder = 
+          mapper_events.find(event.mapper_event_id);
+        if (finder != mapper_events.end())
+          wait_on = finder->second;
+      }
+      if (wait_on.exists())
+        triggered = wait_on.has_triggered();
+      resume_mapper_call(ctx);
+      return triggered;
+    }
+    
+    //--------------------------------------------------------------------------
+    void MapperManager::trigger_mapper_event(MappingCallInfo *ctx, 
+                                             MapperEvent event)
+    //--------------------------------------------------------------------------
+    {
+      pause_mapper_call(ctx);
+      UserEvent to_trigger = UserEvent::NO_USER_EVENT;
+      {
+        AutoLock m_lock(mapper_lock);
+        std::map<unsigned,UserEvent>::iterator finder = 
+          mapper_events.find(event.mapper_event_id);
+        if (finder != mapper_events.end())
+        {
+          to_trigger = finder->second;
+          mapper_events.erase(finder);
+        }
+      }
+      if (to_trigger.exists())
+        to_trigger.trigger();
+      resume_mapper_call(ctx);
+    }
+    
+    //--------------------------------------------------------------------------
+    void MapperManager::wait_on_mapper_event(MappingCallInfo *ctx,
+                                             MapperEvent event)
+    //--------------------------------------------------------------------------
+    {
+      pause_mapper_call(ctx);
+      Event wait_on = Event::NO_EVENT;
+      {
+        AutoLock m_lock(mapper_lock);
+        std::map<unsigned,UserEvent>::iterator finder = 
+          mapper_events.find(event.mapper_event_id);
+        if (finder != mapper_events.end())
+          wait_on = finder->second;
+      }
+      if (wait_on.exists())
+        wait_on.wait();
       resume_mapper_call(ctx);
     }
 

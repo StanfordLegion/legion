@@ -288,6 +288,11 @@ namespace Legion {
       void broadcast(MappingCallInfo *info, const void *message, 
                      size_t message_size, int radix);
     public:
+      MapperEvent create_mapper_event(MappingCallInfo *ctx);
+      bool has_mapper_event_triggered(MappingCallInfo *ctx, MapperEvent event);
+      void trigger_mapper_event(MappingCallInfo *ctx, MapperEvent event);
+      void wait_on_mapper_event(MappingCallInfo *ctx, MapperEvent event);
+    public:
       const ExecutionConstraintSet& 
         find_execution_constraints(MappingCallInfo *ctx, 
             TaskID task_id, VariantID vid);
@@ -508,6 +513,9 @@ namespace Legion {
       Reservation mapper_lock;
     protected:
       std::vector<MappingCallInfo*> available_infos;
+    protected:
+      unsigned next_mapper_event;
+      std::map<unsigned,UserEvent> mapper_events;
     };
 
     /**
