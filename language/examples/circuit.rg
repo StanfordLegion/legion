@@ -640,6 +640,10 @@ terra wait_for(x : int)
   return x
 end
 
+terra wait_for_coloring(c : c.legion_coloring_t)
+  return c
+end
+
 task dump_task(rpn : region(node),
                rsn : region(node),
                rgn : region(node),
@@ -717,6 +721,7 @@ do
     c.legion_coloring_ensure_color(ghost_node_map, i)
   end
 
+  var start_ts : double = c.legion_get_current_time_in_micros()/double(1e6)
   var idx = 0
   for range in ghost_ranges do
     c.legion_coloring_add_range(ghost_node_map,
@@ -725,6 +730,8 @@ do
       c.legion_ptr_t { value = range.last })
     idx += 1
   end
+  var end_ts : double = c.legion_get_current_time_in_micros()/double(1e6)
+  c.printf("create_ghost_node_map: main_loop %e\n", end_ts - start_ts)
 
   return ghost_node_map
 end
@@ -820,11 +827,22 @@ task toplevel()
   flush_stdout()
   var start_5 : double = c.legion_get_current_time_in_micros()/double(1e6)
 
+  var coloring = c.legion_coloring_create()
+  var snpp = conf.shared_nodes_per_piece
+  var num_shared_nodes = conf.num_pieces * snpp
+  for i = 0, num_pieces do
+    c.legion_coloring_add_range(coloring, i,
+      c.legion_ptr_t { value = 0 },
+      c.legion_ptr_t { value = num_shared_nodes - 1 })
+  end
+  var rp_all_shared = partition(aliased, all_shared, coloring)
+
+  __demand(__spmd, __block)
   for j = 0, 1 do
-    __demand(__parallel)
+    --__demand(__parallel)
     for i = 0, num_pieces do
       init_piece(i, conf, rp_ghost_ranges[i],
-                 rp_private[i], rp_shared[i], all_shared, rp_wires[i])
+                 rp_private[i], rp_shared[i], rp_all_shared[i], rp_wires[i])
     end
   end
 
@@ -833,11 +851,16 @@ task toplevel()
   flush_stdout()
   var start_6 : double = c.legion_get_current_time_in_micros()/double(1e6)
 
-  var ghost_node_map = create_ghost_node_map(conf, ghost_ranges)
+  var ghost_node_map = wait_for_coloring(create_ghost_node_map(conf, ghost_ranges))
+
+  var start_6_1 : double = c.legion_get_current_time_in_micros()/double(1e6)
+  c.printf("timing: create ghost node map %e\n", start_6_1 - start_6)
+  flush_stdout()
+
   var rp_ghost = partition(aliased, all_shared, ghost_node_map)
 
   var end_6 : double = c.legion_get_current_time_in_micros()/double(1e6)
-  c.printf("timing: create ghost node map %e\n", end_6 - start_6)
+  c.printf("timing: create ghost partition %e\n", end_6 - start_6_1)
   flush_stdout()
   var start_7 : double = c.legion_get_current_time_in_micros()/double(1e6)
 
