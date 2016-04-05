@@ -559,6 +559,11 @@ terra read_config()
     conf.spansize = c.atoll(spansize)
   end
 
+  var print_ts = get_optional_arg("-print_ts")
+  if print_ts ~= nil then
+    conf.print_ts = [bool](c.atoll(print_ts))
+  end
+
   -- Read parameters from input file.
   [config_fields_input:map(function(field)
        if field.is_linked_field then

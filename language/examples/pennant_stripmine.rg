@@ -1069,6 +1069,7 @@ do
 
   var enable = conf.enable and not conf.warmup
   var warmup = conf.warmup and conf.enable
+  var print_ts = conf.print_ts
 
   var interval = 100
   var start_time = c.legion_get_current_time_in_micros()/1.e6
@@ -1102,13 +1103,15 @@ do
       last_time = current_time
     end
 
+    print_ts = conf.print_ts and cycle == 0
+
     __demand(__parallel)
     for i = 0, conf.npieces do
       adv_pos_half(rp_all_private_p[i],
                    rp_spans_private[i],
                    dt,
                    conf.nspans_points,
-                   enable, conf.print_ts)
+                   enable, print_ts)
     end
     __demand(__parallel)
     for i = 0, conf.npieces do
@@ -1116,7 +1119,7 @@ do
                    rp_spans_shared[i],
                    dt,
                    conf.nspans_points,
-                   enable, conf.print_ts)
+                   enable, print_ts)
     end
 
     __demand(__parallel)
@@ -1163,6 +1166,8 @@ do
                            enable)
     end
 
+    print_ts = conf.print_ts and cycle == cstop - 1
+
     dthydro = dtmax
     __demand(__parallel)
     for i = 0, conf.npieces do
@@ -1170,7 +1175,7 @@ do
                                  rz_spans[i],
                                  dt, dtmax, cfl, cflv,
                                  conf.nspans_zones,
-                                 enable, conf.print_ts)
+                                 enable, print_ts)
     end
 
     cycle += 1
