@@ -279,6 +279,22 @@ namespace LegionRuntime {
     }
 #endif
 
+#ifdef LEGION_PROF_SELF_PROFILE
+    //--------------------------------------------------------------------------
+    void LegionProfInstance::record_proftask(Processor proc, UniqueID op_id,
+					     unsigned long long start,
+					     unsigned long long stop)
+    //--------------------------------------------------------------------------
+    {
+      prof_task_infos.push_back(ProfTaskInfo());
+      ProfTaskInfo &info = prof_task_infos.back();
+      info.proc = proc;
+      info.op_id = op_id;
+      info.start = start;
+      info.stop = stop;
+    }
+#endif
+
     //--------------------------------------------------------------------------
     void LegionProfInstance::dump_state(void)
     //--------------------------------------------------------------------------
@@ -367,6 +383,14 @@ namespace LegionRuntime {
       {
         log_prof.info("Prof Message Info %u " IDFMT " %llu %llu",
                       it->kind, it->proc.id, it->start, it->stop);
+      }
+#endif
+#ifdef LEGION_PROF_SELF_PROFILE
+      for (std::deque<ProfTaskInfo>::const_iterator it = prof_task_infos.begin();
+            it != prof_task_infos.end(); it++)
+      {
+        log_prof.info("Prof ProfTask Info " IDFMT " %llu %llu %llu",
+                      it->proc.id, it->op_id, it->start, it->stop);
       }
 #endif
       task_kinds.clear();
@@ -722,6 +746,9 @@ namespace LegionRuntime {
                                          size_t size)
     //--------------------------------------------------------------------------
     {
+#ifdef LEGION_PROF_SELF_PROFILE
+      long long t_start = Realm::Clock::current_time_in_nanoseconds();
+#endif
       size_t local_id = p.local_id(); 
 #ifdef DEBUG_HIGH_LEVEL
       assert(local_id < MAX_NUM_PROCS);
@@ -849,6 +876,10 @@ namespace LegionRuntime {
         default:
           assert(false);
       }
+#ifdef LEGION_PROF_SELF_PROFILE
+      long long t_stop = Realm::Clock::current_time_in_nanoseconds();
+      instances[local_id]->record_proftask(p, info->op_id, t_start, t_stop);
+#endif
     }
 
     //--------------------------------------------------------------------------
