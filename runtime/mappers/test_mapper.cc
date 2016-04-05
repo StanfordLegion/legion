@@ -503,7 +503,7 @@ namespace Legion {
         }
         while (!handled[index])
           index++;
-        assert(index < sources.size());
+        assert(index < int(sources.size()));
         ranking.push_back(sources[index]);
       }
       // Do the last one

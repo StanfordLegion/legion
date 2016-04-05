@@ -13831,7 +13831,10 @@ namespace Legion {
           for ( ; it != targets.upper_bound(target); it++)
             thieves.push_back(it->second);
           finder->second->process_steal_request(thief, thieves);
+          
         }
+        if (it == targets.end())
+          break;
       }
     }
 
