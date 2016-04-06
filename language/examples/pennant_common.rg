@@ -1306,84 +1306,79 @@ where reads writes(rz_spans, rp_spans_private, rp_spans_shared, rs_spans) do
   var znump = 4
   var zspansize = conf.spansize/znump
 
+  var pcx, pcy = piece % conf.numpcx, piece / conf.numpcx
+
   -- Zones and sides.
-  for pcy = 0, conf.numpcy do
-    for pcx = 0, conf.numpcx do
-      var piece = pcy * conf.numpcx + pcx
-      var {first_z = _0, last_z = _1} = block_z(conf, pcx, pcy)
+  do
+    var {first_z = _0, last_z = _1} = block_z(conf, pcx, pcy)
 
-      var span_i = 0
-      for z = first_z, last_z, zspansize do
-        var zs = unsafe_cast(ptr(span, rz_spans), piece * conf.nspans_zones + span_i)
-        var ss = unsafe_cast(ptr(span, rs_spans), piece * conf.nspans_zones + span_i)
+    var span_i = 0
+    for z = first_z, last_z, zspansize do
+      var zs = unsafe_cast(ptr(span, rz_spans), piece * conf.nspans_zones + span_i)
+      var ss = unsafe_cast(ptr(span, rs_spans), piece * conf.nspans_zones + span_i)
 
-        var z_span = { start = z, stop = min(z + zspansize, last_z) } -- exclusive
-        var s_span = { start = z * znump, stop = min(z + zspansize, last_z) * znump } -- exclusive
-        if conf.seq_init then regentlib.assert(zs.start == z_span.start and zs.stop == z_span.stop, "bad value: zone span") end
-        if conf.seq_init then regentlib.assert(ss.start == s_span.start and ss.stop == s_span.stop, "bad value: side span") end
+      var z_span = { start = z, stop = min(z + zspansize, last_z) } -- exclusive
+      var s_span = { start = z * znump, stop = min(z + zspansize, last_z) * znump } -- exclusive
+      if conf.seq_init then regentlib.assert(zs.start == z_span.start and zs.stop == z_span.stop, "bad value: zone span") end
+      if conf.seq_init then regentlib.assert(ss.start == s_span.start and ss.stop == s_span.stop, "bad value: side span") end
 
-        @zs = z_span
-        @ss = s_span
-        span_i = span_i + 1
-      end
-      regentlib.assert(span_i <= conf.nspans_zones, "zone span overflow")
+      @zs = z_span
+      @ss = s_span
+      span_i = span_i + 1
     end
+    regentlib.assert(span_i <= conf.nspans_zones, "zone span overflow")
   end
 
   -- Points: private spans.
-  for pcy = 0, conf.numpcy do
-    for pcx = 0, conf.numpcx do
-      var piece = pcy * conf.numpcx + pcx
-      var { first_p = _0, last_p = _1 } = block_p(conf, pcx, pcy)
+  do
+    var piece = pcy * conf.numpcx + pcx
+    var { first_p = _0, last_p = _1 } = block_p(conf, pcx, pcy)
 
-      var span_i = 0
-      for p = first_p, last_p, conf.spansize do
-        var ps = unsafe_cast(ptr(span, rp_spans_private), piece * conf.nspans_points + span_i)
+    var span_i = 0
+    for p = first_p, last_p, conf.spansize do
+      var ps = unsafe_cast(ptr(span, rp_spans_private), piece * conf.nspans_points + span_i)
 
-        var p_span = { start = p, stop = min(p + conf.spansize, last_p) } -- exclusive
-        if conf.seq_init then regentlib.assert(ps.start == p_span.start and ps.stop == p_span.stop, "bad value: private point span") end
+      var p_span = { start = p, stop = min(p + conf.spansize, last_p) } -- exclusive
+      if conf.seq_init then regentlib.assert(ps.start == p_span.start and ps.stop == p_span.stop, "bad value: private point span") end
 
-        @ps = p_span
+      @ps = p_span
 
-        span_i = span_i + 1
-      end
+      span_i = span_i + 1
     end
   end
 
   -- Points: shared spans.
-  for pcy = 0, conf.numpcy do
-    for pcx = 0, conf.numpcx do
-      var piece = pcy * conf.numpcx + pcx
+  do
+    var piece = pcy * conf.numpcx + pcx
 
-      var right = ghost_right_p(conf, pcx, pcy)
-      var bottom = ghost_bottom_p(conf, pcx, pcy)
-      var bottom_right = ghost_bottom_right_p(conf, pcx, pcy)
+    var right = ghost_right_p(conf, pcx, pcy)
+    var bottom = ghost_bottom_p(conf, pcx, pcy)
+    var bottom_right = ghost_bottom_right_p(conf, pcx, pcy)
 
-      var first_p, last_p = -1, -1
-      if right._0 < right._1 then
-        first_p = right._0
-        last_p = right._1
-      end
-      if bottom._0 < bottom._1 then
-        if first_p < 0 then first_p = bottom._0 end
-        last_p = bottom._1
-      end
-      if bottom_right._0 < bottom_right._1 then
-        if first_p < 0 then first_p = bottom_right._0 end
-        last_p = bottom_right._1
-      end
+    var first_p, last_p = -1, -1
+    if right._0 < right._1 then
+      first_p = right._0
+      last_p = right._1
+    end
+    if bottom._0 < bottom._1 then
+      if first_p < 0 then first_p = bottom._0 end
+      last_p = bottom._1
+    end
+    if bottom_right._0 < bottom_right._1 then
+      if first_p < 0 then first_p = bottom_right._0 end
+      last_p = bottom_right._1
+    end
 
-      var span_i = 0
-      for p = first_p, last_p, conf.spansize do
-        var ps = unsafe_cast(ptr(span, rp_spans_shared), piece * conf.nspans_points + span_i)
+    var span_i = 0
+    for p = first_p, last_p, conf.spansize do
+      var ps = unsafe_cast(ptr(span, rp_spans_shared), piece * conf.nspans_points + span_i)
 
-        var p_span = { start = p, stop = min(p + conf.spansize, last_p) } -- exclusive
-        if conf.seq_init then regentlib.assert(ps.start == p_span.start and ps.stop == p_span.stop, "bad value: private point span") end
+      var p_span = { start = p, stop = min(p + conf.spansize, last_p) } -- exclusive
+      if conf.seq_init then regentlib.assert(ps.start == p_span.start and ps.stop == p_span.stop, "bad value: private point span") end
 
-        @ps = p_span
+      @ps = p_span
 
-        span_i = span_i + 1
-      end
+      span_i = span_i + 1
     end
   end
 end
