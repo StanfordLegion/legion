@@ -1537,6 +1537,30 @@ legion_index_partition_create_by_preimage(
   return CObjectWrapper::wrap(ip);
 }
 
+bool
+legion_index_partition_is_disjoint(legion_runtime_t runtime_,
+                                   legion_context_t ctx_,
+                                   legion_index_partition_t handle_)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  IndexPartition handle = CObjectWrapper::unwrap(handle_);
+
+  return runtime->is_index_partition_disjoint(ctx, handle);
+}
+
+bool
+legion_index_partition_is_complete(legion_runtime_t runtime_,
+                                   legion_context_t ctx_,
+                                   legion_index_partition_t handle_)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  IndexPartition handle = CObjectWrapper::unwrap(handle_);
+
+  return runtime->is_index_partition_complete(ctx, handle);
+}
+
 legion_index_space_t
 legion_index_partition_get_index_subspace(legion_runtime_t runtime_,
                                           legion_context_t ctx_,

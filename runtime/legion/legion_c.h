@@ -910,6 +910,22 @@ typedef int coord_t;
     bool allocable /* = false */);
 
   /**
+   * @see LegionRuntime::HighLevel::Runtime::is_index_partition_disjoint()
+   */
+  bool
+  legion_index_partition_is_disjoint(legion_runtime_t runtime,
+                                     legion_context_t ctx,
+                                     legion_index_partition_t handle);
+
+  /**
+   * @see LegionRuntime::HighLevel::Runtime::is_index_partition_complete()
+   */
+  bool
+  legion_index_partition_is_complete(legion_runtime_t runtime,
+                                     legion_context_t ctx,
+                                     legion_index_partition_t handle);
+
+  /**
    * @return Caller does **NOT** take ownership of return value.
    *
    * @see LegionRuntime::HighLevel::Runtime::get_index_subspace()
