@@ -14,25 +14,22 @@
 
 -- runs-with:
 -- [
--- ]
-
--- For now, don't run.
-
 --   ["pennant.tests/sedovsmall/sedovsmall.pnt",
---    "-npieces", "1", "-seq_init", "1", "-par_init", "1"],
+--    "-npieces", "1", "-seq_init", "1", "-par_init", "0", "-fvectorize", "0"],
 --   ["pennant.tests/sedovsmall/sedovsmall.pnt",
---    "-npieces", "2", "-ll:cpu", "2", "-seq_init", "1", "-par_init", "1",
+--    "-npieces", "2", "-ll:cpu", "2", "-seq_init", "1", "-par_init", "0", "-fvectorize", "0",
 --    "-absolute", "1e-6", "-relative", "1e-6", "-relative_absolute", "1e-9"],
 --   ["pennant.tests/sedov/sedov.pnt",
---    "-npieces", "1", "-seq_init", "1", "-par_init", "1",
+--    "-npieces", "1", "-seq_init", "1", "-par_init", "0", "-fvectorize", "0",
 --    "-absolute", "2e-6", "-relative", "1e-8", "-relative_absolute", "1e-10"],
 --   ["pennant.tests/sedov/sedov.pnt",
---    "-npieces", "3", "-ll:cpu", "3", "-seq_init", "1", "-par_init", "1",
+--    "-npieces", "3", "-ll:cpu", "3", "-seq_init", "1", "-par_init", "0", "-fvectorize", "0",
 --    "-absolute", "2e-6", "-relative", "1e-8", "-relative_absolute", "1e-10"],
 --   ["pennant.tests/leblanc/leblanc.pnt",
---    "-npieces", "1", "-seq_init", "1", "-par_init", "1"],
+--    "-npieces", "1", "-seq_init", "1", "-par_init", "0", "-fvectorize", "0"],
 --   ["pennant.tests/leblanc/leblanc.pnt",
---    "-npieces", "2", "-ll:cpu", "2", "-seq_init", "1", "-par_init", "1"]
+--    "-npieces", "2", "-ll:cpu", "2", "-seq_init", "1", "-par_init", "0", "-fvectorize", "0"]
+-- ]
 
 -- Inspired by https://github.com/losalamos/PENNANT
 
@@ -1114,6 +1111,64 @@ where reads writes(rz_all, rp_all, rs_all) do
     conf)
 end
 
+terra get_raw_span(runtime : c.legion_runtime_t, ctx : c.legion_context_t,
+                   r : c.legion_logical_region_t)
+  var it = c.legion_index_iterator_create(runtime, ctx, r.index_space)
+  while c.legion_index_iterator_has_next(it) do
+    var count : c.size_t = 0
+    var start = c.legion_index_iterator_next_span(it, &count, -1)
+    regentlib.assert(not c.legion_index_iterator_has_next(it), "multiple spans")
+
+    return span { start = start.value, stop = start.value + count }
+  end
+  return span { start = 0, stop = 0 }
+end
+
+task read_spans_sequential(
+  rz_all : region(zone),
+  rz_all_p : partition(disjoint, rz_all),
+  rz_spans_p : partition(disjoint, rz_all),
+  rz_spans_x : cross_product(rz_all_p, rz_spans_p),
+  rp_all : region(point),
+  rp_all_private : region(point),
+  rp_all_private_p : partition(disjoint, rp_all_private),
+  rp_all_ghost : region(point),
+  rp_all_shared_p : partition(disjoint, rp_all_ghost),
+  rp_spans_p : partition(disjoint, rp_all),
+  rp_spans_private_x : cross_product(rp_all_private_p, rp_spans_p),
+  rp_spans_shared_x : cross_product(rp_all_shared_p, rp_spans_p),
+  rs_all : region(side(wild, wild, wild, wild)),
+  rs_all_p : partition(disjoint, rs_all),
+  rs_spans_p : partition(disjoint, rs_all),
+  rs_spans_x : cross_product(rs_all_p, rs_spans_p),
+  rz_spans : region(span),
+  rp_spans_private : region(span),
+  rp_spans_shared : region(span),
+  rs_spans : region(span),
+  conf : config)
+where
+  reads writes(rz_spans, rp_spans_private, rp_spans_shared, rs_spans)
+do
+  for i = 0, conf.npieces do
+    for j = 0, conf.nspans_zones do
+      var z = unsafe_cast(ptr(span, rz_spans), i*conf.nspans_zones + j)
+      rz_spans[z] = get_raw_span(__runtime(), __context(), __raw(rz_spans_x[i][j]))
+    end
+    for j = 0, conf.nspans_zones do
+      var s = unsafe_cast(ptr(span, rs_spans), i*conf.nspans_zones + j)
+      rs_spans[s] = get_raw_span(__runtime(), __context(), __raw(rs_spans_x[i][j]))
+    end
+    for j = 0, conf.nspans_points do
+      var p = unsafe_cast(ptr(span, rp_spans_private), i*conf.nspans_points + j)
+      rp_spans_private[p] = get_raw_span(__runtime(), __context(), __raw(rp_spans_private_x[i][j]))
+    end
+    for j = 0, conf.nspans_points do
+      var p = unsafe_cast(ptr(span, rp_spans_shared), i*conf.nspans_points + j)
+      rp_spans_shared[p] = get_raw_span(__runtime(), __context(), __raw(rp_spans_shared_x[i][j]))
+    end
+  end
+end
+
 task validate_output_sequential(rz_all : region(zone),
                                 rp_all : region(point),
                                 rs_all : region(side(wild, wild, wild, wild)),
@@ -1205,14 +1260,10 @@ task test()
   -- Partition sides into disjoint pieces by zone.
   var rs_all_p = partition(disjoint, rs_all, colorings.rs_all_c)
 
-  -- Create spans.
+  -- Create regions and partitions for spans.
   var rz_spans = region(ispace(ptr, conf.npieces * conf.nspans_zones), span)
   new(ptr(span, rz_spans), conf.npieces * conf.nspans_zones)
   var rz_spans_p = partition(equal, rz_spans, ispace(int1d, conf.npieces))
-
-  var rs_spans = region(ispace(ptr, conf.npieces * conf.nspans_zones), span)
-  new(ptr(span, rs_spans), conf.npieces * conf.nspans_zones)
-  var rs_spans_p = partition(equal, rs_spans, ispace(int1d, conf.npieces))
 
   var rp_spans_private = region(ispace(ptr, conf.npieces * conf.nspans_points), span)
   new(ptr(span, rp_spans_private), conf.npieces * conf.nspans_points)
@@ -1222,10 +1273,37 @@ task test()
   new(ptr(span, rp_spans_shared), conf.npieces * conf.nspans_points)
   var rp_spans_shared_p = partition(equal, rp_spans_shared, ispace(int1d, conf.npieces))
 
+  var rs_spans = region(ispace(ptr, conf.npieces * conf.nspans_zones), span)
+  new(ptr(span, rs_spans), conf.npieces * conf.nspans_zones)
+  var rs_spans_p = partition(equal, rs_spans, ispace(int1d, conf.npieces))
+
   fill(rz_spans.{start, stop}, 0)
-  fill(rs_spans.{start, stop}, 0)
   fill(rp_spans_private.{start, stop}, 0)
   fill(rp_spans_shared.{start, stop}, 0)
+  fill(rs_spans.{start, stop}, 0)
+
+  -- Handle sequential span initialization.
+  if conf.seq_init then
+    var rz_spans_p = partition(disjoint, rz_all, colorings.rz_spans_c)
+    var rz_spans_x = cross_product(rz_all_p, rz_spans_p)
+
+    var rp_spans_p = partition(
+      disjoint, rp_all, colorings.rp_spans_c)
+    var rp_spans_private_x = cross_product(rp_all_private_p, rp_spans_p)
+    var rp_spans_shared_x = cross_product(rp_all_shared_p, rp_spans_p)
+
+    var rs_spans_p = partition(
+      disjoint, rs_all, colorings.rs_spans_c)
+    var rs_spans_x = cross_product(rs_all_p, rs_spans_p)
+
+    read_spans_sequential(
+      rz_all, rz_all_p, rz_spans_p, rz_spans_x,
+      rp_all, rp_all_private, rp_all_private_p, rp_all_ghost, rp_all_shared_p,
+      rp_spans_p, rp_spans_private_x, rp_spans_shared_x,
+      rs_all, rs_all_p, rs_spans_p, rs_spans_x,
+      rz_spans, rp_spans_private, rp_spans_shared, rs_spans,
+      conf)
+  end
 
   var par_init = [int64](conf.par_init)
 
@@ -1255,8 +1333,8 @@ task test()
   var uinitradial = conf.uinitradial
   var vfix = {x = 0.0, y = 0.0}
 
-  var enable = conf.enable and not conf.warmup
-  var warmup = conf.warmup and conf.enable
+  var enable = true -- conf.enable and not conf.warmup
+  var warmup = false -- conf.warmup and conf.enable
   var requested_print_ts = conf.print_ts
   var print_ts = requested_print_ts
 
