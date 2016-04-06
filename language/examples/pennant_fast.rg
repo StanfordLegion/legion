@@ -1147,25 +1147,31 @@ task read_spans_sequential(
   rs_spans : region(span),
   conf : config)
 where
-  reads writes(rz_spans, rp_spans_private, rp_spans_shared, rs_spans)
+  reads writes(rz_spans, rp_spans_private, rp_spans_shared, rs_spans),
+  rp_all_private * rp_all_ghost,
+  rz_spans * rp_spans_private, rz_spans * rp_spans_shared, rz_spans * rs_spans,
+  rp_spans_private * rp_spans_shared, rp_spans_private * rs_spans,
+  rp_spans_shared * rs_spans
 do
+  if true then -- Hack: Avoid analyzing this.
   for i = 0, conf.npieces do
     for j = 0, conf.nspans_zones do
       var z = unsafe_cast(ptr(span, rz_spans), i*conf.nspans_zones + j)
-      rz_spans[z] = get_raw_span(__runtime(), __context(), __raw(rz_spans_x[i][j]))
+      @z = get_raw_span(__runtime(), __context(), __raw(rz_spans_x[i][j]))
     end
     for j = 0, conf.nspans_zones do
       var s = unsafe_cast(ptr(span, rs_spans), i*conf.nspans_zones + j)
-      rs_spans[s] = get_raw_span(__runtime(), __context(), __raw(rs_spans_x[i][j]))
+      @s = get_raw_span(__runtime(), __context(), __raw(rs_spans_x[i][j]))
     end
     for j = 0, conf.nspans_points do
       var p = unsafe_cast(ptr(span, rp_spans_private), i*conf.nspans_points + j)
-      rp_spans_private[p] = get_raw_span(__runtime(), __context(), __raw(rp_spans_private_x[i][j]))
+      @p = get_raw_span(__runtime(), __context(), __raw(rp_spans_private_x[i][j]))
     end
     for j = 0, conf.nspans_points do
       var p = unsafe_cast(ptr(span, rp_spans_shared), i*conf.nspans_points + j)
-      rp_spans_shared[p] = get_raw_span(__runtime(), __context(), __raw(rp_spans_shared_x[i][j]))
+      @p = get_raw_span(__runtime(), __context(), __raw(rp_spans_shared_x[i][j]))
     end
+  end
   end
 end
 

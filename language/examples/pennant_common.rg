@@ -1296,7 +1296,12 @@ task initialize_spans(conf : config,
                       rp_spans_private : region(span),
                       rp_spans_shared : region(span),
                       rs_spans : region(span))
-where reads writes(rz_spans, rp_spans_private, rp_spans_shared, rs_spans) do
+where
+  reads writes(rz_spans, rp_spans_private, rp_spans_shared, rs_spans),
+  rz_spans * rp_spans_private, rz_spans * rp_spans_shared, rz_spans * rs_spans,
+  rp_spans_private * rp_spans_shared, rp_spans_private * rs_spans,
+  rp_spans_shared * rs_spans
+do
   -- Unfortunately, this duplicates a lot of functionality in read_partitions.
 
   regentlib.assert(conf.compact, "parallel initialization requires compact")
