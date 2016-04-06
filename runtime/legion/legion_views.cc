@@ -170,8 +170,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     InstanceView::InstanceView(RegionTreeForest *ctx, DistributedID did,
                                AddressSpaceID owner_sp, AddressSpaceID local_sp,
-                               RegionTreeNode *node, bool register_now)
-      : LogicalView(ctx, did, owner_sp, local_sp, node, register_now)
+                               RegionTreeNode *node, SingleTask *own_ctx,
+                               bool register_now)
+      : LogicalView(ctx, did, owner_sp, local_sp, node, register_now),
+        owner_context(own_ctx)
     //--------------------------------------------------------------------------
     {
     }
@@ -221,8 +223,9 @@ namespace Legion {
                                RegionTreeForest *ctx, DistributedID did,
                                AddressSpaceID own_addr, AddressSpaceID loc_addr,
                                RegionTreeNode *node, InstanceManager *man,
-                               MaterializedView *par, bool register_now) 
-      : InstanceView(ctx, did, own_addr, loc_addr, node, register_now), 
+                               MaterializedView *par, SingleTask *own_ctx,
+                               bool register_now) 
+      : InstanceView(ctx, did, own_addr, loc_addr, node, own_ctx, register_now),
         manager(man), parent(par)
     //--------------------------------------------------------------------------
     {
@@ -251,7 +254,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     MaterializedView::MaterializedView(const MaterializedView &rhs)
-      : InstanceView(NULL, 0, 0, 0, NULL, false),
+      : InstanceView(NULL, 0, 0, 0, NULL, NULL, false),
         manager(NULL), parent(NULL)
     //--------------------------------------------------------------------------
     {
@@ -397,7 +400,7 @@ namespace Legion {
       MaterializedView *child_view = legion_new<MaterializedView>(context,
                                             did, owner_space, local_space,
                                             child_node, manager, this, 
-                                            false/*don't register*/);
+                                            owner_context, false/*register*/);
       // Retake the lock and try and add it, see if
       // someone else added the child in the meantime
       bool free_child_view = false;
@@ -2434,7 +2437,7 @@ namespace Legion {
                                       did, owner_space, runtime->address_space,
                                       target_node, inst_manager, 
                                       (MaterializedView*)NULL/*parent*/,
-                                      false/*don't register yet*/);
+                                      context_uid, false/*don't register yet*/);
       if (!target_node->register_logical_view(new_view))
       {
         if (new_view->remove_base_resource_ref(REMOTE_DID_REF))
@@ -4018,8 +4021,9 @@ namespace Legion {
     ReductionView::ReductionView(RegionTreeForest *ctx, DistributedID did,
                                  AddressSpaceID own_sp, AddressSpaceID loc_sp,
                                  RegionTreeNode *node, ReductionManager *man,
-                                 bool register_now)
-      : InstanceView(ctx, did, own_sp, loc_sp, node, register_now), manager(man)
+                                 UniqueID ctx_uid, bool register_now)
+      : InstanceView(ctx, did, own_sp, loc_sp, node, ctx_uid, register_now), 
+        manager(man)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -4038,7 +4042,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ReductionView::ReductionView(const ReductionView &rhs)
-      : InstanceView(NULL, 0, 0, 0, NULL, false), manager(NULL)
+      : InstanceView(NULL, 0, 0, 0, NULL, 0, false), manager(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -4966,7 +4970,7 @@ namespace Legion {
       ReductionView *new_view = legion_new<ReductionView>(runtime->forest,
                                    did, owner_space, runtime->address_space,
                                    target_node, red_manager,
-                                   false/*don't register yet*/);
+                                   context_uid, false/*don't register yet*/);
       if (!target_node->register_logical_view(new_view))
       {
         if (new_view->remove_base_resource_ref(REMOTE_DID_REF))

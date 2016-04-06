@@ -97,7 +97,8 @@ namespace Legion {
     public:
       InstanceView(RegionTreeForest *ctx, DistributedID did,
                    AddressSpaceID owner_proc, AddressSpaceID local_space,
-                   RegionTreeNode *node, bool register_now);
+                   RegionTreeNode *node, SingleTask *owner_context,
+                   bool register_now);
       virtual ~InstanceView(void);
     public:
       virtual bool is_instance_view(void) const;
@@ -168,6 +169,8 @@ namespace Legion {
     public:
       inline InstanceView* get_instance_subview(const ColorPoint &c) 
         { return get_subview(c)->as_instance_view(); }
+    public:
+      const SingleTask *owner_context;
     };
 
     /**
@@ -195,7 +198,8 @@ namespace Legion {
       MaterializedView(RegionTreeForest *ctx, DistributedID did,
                        AddressSpaceID owner_proc, AddressSpaceID local_proc,
                        RegionTreeNode *node, InstanceManager *manager,
-                       MaterializedView *parent, bool register_now); 
+                       MaterializedView *parent, SingleTask *owner_context,
+                       bool register_now); 
       MaterializedView(const MaterializedView &rhs);
       virtual ~MaterializedView(void);
     public:
@@ -431,7 +435,7 @@ namespace Legion {
       ReductionView(RegionTreeForest *ctx, DistributedID did,
                     AddressSpaceID owner_proc, AddressSpaceID local_proc,
                     RegionTreeNode *node, ReductionManager *manager,
-                    bool register_now);
+                    SingleTask *owner_context, bool register_now);
       ReductionView(const ReductionView &rhs);
       virtual ~ReductionView(void);
     public:
