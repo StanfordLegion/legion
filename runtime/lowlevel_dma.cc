@@ -585,7 +585,7 @@ namespace LegionRuntime {
 	    log_dma.debug("dma request %p - no index space metadata yet", this);
 	    if(just_check) return false;
 
-	    Event e = is_impl->lock.acquire(1, false);
+	    Event e = is_impl->lock.acquire(1, false, ReservationImpl::ACQUIRE_BLOCKING);
 	    if(e.has_triggered()) {
 	      log_dma.debug("request %p - index space metadata invalid - instant trigger", this);
 	      is_impl->lock.release();
@@ -3402,7 +3402,7 @@ namespace LegionRuntime {
 	    log_dma.debug("dma request %p - no index space metadata yet", this);
 	    if(just_check) return false;
 
-	    Event e = is_impl->lock.acquire(1, false);
+	    Event e = is_impl->lock.acquire(1, false, ReservationImpl::ACQUIRE_BLOCKING);
 	    if(e.has_triggered()) {
 	      log_dma.debug("request %p - index space metadata invalid - instant trigger", this);
 	      is_impl->lock.release();
@@ -3472,7 +3472,7 @@ namespace LegionRuntime {
 	  log_dma.debug("request %p - before event triggered", this);
 	  if(inst_lock_needed) {
 	    // request an exclusive lock on the instance to protect reductions
-	    inst_lock_event = get_runtime()->get_instance_impl(dst.inst)->lock.acquire(0, true /*excl*/);
+	    inst_lock_event = get_runtime()->get_instance_impl(dst.inst)->lock.acquire(0, true /*excl*/, ReservationImpl::ACQUIRE_BLOCKING);
 	    state = STATE_INST_LOCK;
 	    log_dma.debug("request %p - instance lock acquire event " IDFMT "/%d",
 			 this, inst_lock_event.id, inst_lock_event.gen);
@@ -4001,7 +4001,7 @@ namespace LegionRuntime {
 	    log_dma.debug("dma request %p - no index space metadata yet", this);
 	    if(just_check) return false;
 
-	    Event e = is_impl->lock.acquire(1, false);
+	    Event e = is_impl->lock.acquire(1, false, ReservationImpl::ACQUIRE_BLOCKING);
 	    if(e.has_triggered()) {
 	      log_dma.debug("request %p - index space metadata invalid - instant trigger", this);
 	      is_impl->lock.release();

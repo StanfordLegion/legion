@@ -216,9 +216,20 @@ namespace LegionRuntime {
                Event wait_on = Event::NO_EVENT)
         : low_lock(r)
       {
+#define AUTOLOCK_USE_TRY_ACQUIRE
+#ifdef AUTOLOCK_USE_TRY_ACQUIRE
+	Event retry_event = r.try_acquire(false /*!retry*/,
+	                                  mode, exclusive, wait_on);
+	while(retry_event.exists()) {
+ 	  retry_event.wait();
+	  retry_event = r.try_acquire(true /*retry*/,
+				      mode, exclusive, wait_on);
+	}
+#else
         Event lock_event = r.acquire(mode,exclusive,wait_on);
         if (lock_event.exists())
           lock_event.wait();
+#endif
       }
     public:
       AutoLock(const AutoLock &rhs)
