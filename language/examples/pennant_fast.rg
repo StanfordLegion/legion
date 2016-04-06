@@ -1622,27 +1622,27 @@ task test()
   fill(rs_spans.{start, stop}, 0)
 
   -- Handle sequential span initialization.
-  if conf.seq_init then
-    var rz_spans_p = partition(disjoint, rz_all, colorings.rz_spans_c)
-    var rz_spans_x = cross_product(rz_all_p, rz_spans_p)
+  --if conf.seq_init then
+  --  var rz_spans_p = partition(disjoint, rz_all, colorings.rz_spans_c)
+  --  var rz_spans_x = cross_product(rz_all_p, rz_spans_p)
 
-    var rp_spans_p = partition(
-      disjoint, rp_all, colorings.rp_spans_c)
-    var rp_spans_private_x = cross_product(rp_all_private_p, rp_spans_p)
-    var rp_spans_shared_x = cross_product(rp_all_shared_p, rp_spans_p)
+  --  var rp_spans_p = partition(
+  --    disjoint, rp_all, colorings.rp_spans_c)
+  --  var rp_spans_private_x = cross_product(rp_all_private_p, rp_spans_p)
+  --  var rp_spans_shared_x = cross_product(rp_all_shared_p, rp_spans_p)
 
-    var rs_spans_p = partition(
-      disjoint, rs_all, colorings.rs_spans_c)
-    var rs_spans_x = cross_product(rs_all_p, rs_spans_p)
+  --  var rs_spans_p = partition(
+  --    disjoint, rs_all, colorings.rs_spans_c)
+  --  var rs_spans_x = cross_product(rs_all_p, rs_spans_p)
 
-    read_spans_sequential(
-      rz_all, rz_all_p, rz_spans_p, rz_spans_x,
-      rp_all, rp_all_private, rp_all_private_p, rp_all_ghost, rp_all_shared_p,
-      rp_spans_p, rp_spans_private_x, rp_spans_shared_x,
-      rs_all, rs_all_p, rs_spans_p, rs_spans_x,
-      rz_spans, rp_spans_private, rp_spans_shared, rs_spans,
-      conf)
-  end
+  --  read_spans_sequential(
+  --    rz_all, rz_all_p, rz_spans_p, rz_spans_x,
+  --    rp_all, rp_all_private, rp_all_private_p, rp_all_ghost, rp_all_shared_p,
+  --    rp_spans_p, rp_spans_private_x, rp_spans_shared_x,
+  --    rs_all, rs_all_p, rs_spans_p, rs_spans_x,
+  --    rz_spans, rp_spans_private, rp_spans_shared, rs_spans,
+  --    conf)
+  --end
 
   var par_init = [int64](conf.par_init)
 

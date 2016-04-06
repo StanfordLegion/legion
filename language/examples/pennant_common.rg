@@ -1308,7 +1308,7 @@ terra read_partitions(conf : config) : mesh_colorings
       var span = 0
       for p = first_p, last_p, conf.spansize do
         c.legion_coloring_add_range(
-          result.rp_spans_c[piece], span,
+          result.rp_spans_shared_c[piece], span,
           ptr_t(p), ptr_t(min(p + conf.spansize, last_p) - 1)) -- inclusive
         span = span + 1
       end
