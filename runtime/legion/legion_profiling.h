@@ -112,14 +112,12 @@ namespace LegionRuntime {
         size_t total_bytes;
         unsigned long long create, destroy;
       };
-#ifdef LEGION_PROF_MESSAGES
       struct MessageInfo {
       public:
         MessageKind kind;
         unsigned long long start, stop;
         Processor proc;
       };
-#endif
 #ifdef LEGION_PROF_SELF_PROFILE
       struct ProfTaskInfo {
       public:
@@ -160,12 +158,10 @@ namespace LegionRuntime {
       void process_inst(UniqueID op_id,
                   Realm::ProfilingMeasurements::InstanceTimeline *timeline,
                   Realm::ProfilingMeasurements::InstanceMemoryUsage *usage);
-#ifdef LEGION_PROF_MESSAGES
     public:
       void record_message(Processor proc, MessageKind kind, 
                           unsigned long long start,
                           unsigned long long stop);
-#endif
 #ifdef LEGION_PROF_SELF_PROFILE
     public:
       void record_proftask(Processor p, UniqueID op_id,
@@ -187,10 +183,8 @@ namespace LegionRuntime {
       std::deque<CopyInfo> copy_infos;
       std::deque<FillInfo> fill_infos;
       std::deque<InstInfo> inst_infos;
-#ifdef LEGION_PROF_MESSAGES
     private:
       std::deque<MessageInfo> message_infos;
-#endif
 #ifdef LEGION_PROF_SELF_PROFILE
     private:
       std::deque<ProfTaskInfo> prof_task_infos;
@@ -267,13 +261,11 @@ namespace LegionRuntime {
     public:
       // Dump all the results
       void finalize(void);
-#ifdef LEGION_PROF_MESSAGES
     public:
       void record_message_kinds(const char *const *const message_names,
                                 unsigned int num_message_kinds);
       void record_message(MessageKind kind, unsigned long long start,
                           unsigned long long stop);
-#endif
     public:
       const Processor target_proc;
       inline bool has_outstanding_requests(void)

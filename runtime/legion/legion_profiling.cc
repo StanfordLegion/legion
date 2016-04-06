@@ -263,7 +263,6 @@ namespace LegionRuntime {
       info.destroy = timeline->delete_time;
     }
 
-#ifdef LEGION_PROF_MESSAGES
     //--------------------------------------------------------------------------
     void LegionProfInstance::record_message(Processor proc, MessageKind kind, 
                                             unsigned long long start,
@@ -277,7 +276,6 @@ namespace LegionRuntime {
       info.stop = stop;
       info.proc = proc;
     }
-#endif
 
 #ifdef LEGION_PROF_SELF_PROFILE
     //--------------------------------------------------------------------------
@@ -377,14 +375,12 @@ namespace LegionRuntime {
                       it->op_id, it->inst.id, it->mem.id, it->total_bytes,
                       it->create, it->destroy);
       }
-#ifdef LEGION_PROF_MESSAGES
       for (std::deque<MessageInfo>::const_iterator it = message_infos.begin();
             it != message_infos.end(); it++)
       {
         log_prof.info("Prof Message Info %u " IDFMT " %llu %llu",
                       it->kind, it->proc.id, it->start, it->stop);
       }
-#endif
 #ifdef LEGION_PROF_SELF_PROFILE
       for (std::deque<ProfTaskInfo>::const_iterator it = prof_task_infos.begin();
             it != prof_task_infos.end(); it++)
@@ -401,9 +397,7 @@ namespace LegionRuntime {
       meta_infos.clear();
       copy_infos.clear();
       inst_infos.clear();
-#ifdef LEGION_PROF_MESSAGES
       message_infos.clear();
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -893,7 +887,6 @@ namespace LegionRuntime {
       }
     }
 
-#ifdef LEGION_PROF_MESSAGES
     //--------------------------------------------------------------------------
     void LegionProfiler::record_message_kinds(const char *const *const
                                   message_names, unsigned int num_message_kinds)
@@ -920,7 +913,6 @@ namespace LegionRuntime {
         instances[local_id] = new LegionProfInstance(this);
       instances[local_id]->record_message(current, kind, start, stop);
     }
-#endif
 
   };
 };

@@ -2900,9 +2900,11 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     VirtualChannel::VirtualChannel(VirtualChannelKind kind, 
-        AddressSpaceID local_address_space, size_t max_message_size)
+        AddressSpaceID local_address_space, 
+        size_t max_message_size, bool profile)
       : sending_buffer((char*)malloc(max_message_size)), 
-        sending_buffer_size(max_message_size), observed_recent(false)
+        sending_buffer_size(max_message_size), 
+        observed_recent(false), profile_messages(profile)
     //--------------------------------------------------------------------------
     {
       send_lock = Reservation::create_reservation();
@@ -2936,7 +2938,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     VirtualChannel::VirtualChannel(const VirtualChannel &rhs)
-      : sending_buffer(NULL), sending_buffer_size(0)
+      : sending_buffer(NULL), sending_buffer_size(0), profile_messages(false)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -3107,6 +3109,8 @@ namespace LegionRuntime {
                                          const char *args, size_t arglen)
     //--------------------------------------------------------------------------
     {
+      // For profiling if we are doing it
+      unsigned long long start, stop;
       for (unsigned idx = 0; idx < num_messages; idx++)
       {
         // Pull off the message kind and the size of the message
@@ -3127,10 +3131,8 @@ namespace LegionRuntime {
         if (idx == (num_messages-1))
           assert(message_size == arglen);
 #endif
-#ifdef LEGION_PROF_MESSAGES
-        unsigned long long start = 
-          Realm::Clock::current_time_in_microseconds();
-#endif
+        if (profile_messages)
+          start = Realm::Clock::current_time_in_microseconds();
         // Build the deserializer
         Deserializer derez(args,message_size);
         switch (kind)
@@ -3606,12 +3608,14 @@ namespace LegionRuntime {
           default:
             assert(false); // should never get here
         }
-#ifdef LEGION_PROF_MESSAGES
-        unsigned long long stop = 
-          Realm::Clock::current_time_in_microseconds();
-        if (runtime->profiler != NULL)
-          runtime->profiler->record_message(kind, start, stop);
+        if (profile_messages)
+        {
+          stop = Realm::Clock::current_time_in_microseconds();
+#ifdef DEBUG_HIGH_LEVEL
+          assert(runtime->profiler != NULL);
 #endif
+          runtime->profiler->record_message(kind, start, stop);
+        }
         // Update the args and arglen
         args += message_size;
         arglen -= message_size;
@@ -3712,7 +3716,7 @@ namespace LegionRuntime {
       for (unsigned idx = 0; idx < MAX_NUM_VIRTUAL_CHANNELS; idx++)
       {
         new (channels+idx) VirtualChannel((VirtualChannelKind)idx,
-                              rt->address_space, max_message_size);
+            rt->address_space, max_message_size, (runtime->profiler != NULL));
       }
     }
 
@@ -5325,10 +5329,8 @@ namespace LegionRuntime {
                                       hlr_task_descriptions, 
                                       Operation::LAST_OP_KIND, 
                                       Operation::op_names); 
-#ifdef LEGION_PROF_MESSAGES
         HLR_MESSAGE_DESCRIPTIONS(hlr_message_descriptions);
         profiler->record_message_kinds(hlr_message_descriptions,LAST_SEND_KIND);
-#endif
       }
 #ifdef LEGION_GC
       {
