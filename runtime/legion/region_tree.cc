@@ -8124,7 +8124,7 @@ namespace LegionRuntime {
       derez.deserialize(to_trigger);
       IndexPartNode *target = forest->get_node(handle);
       //target->send_node(source, true/*up*/, true/*down*/);
-      target->send_node(source, false/*up*/, false/*down*/);
+      target->send_node(source, true/*up*/, false/*down*/);
       Serializer rez;
       rez.serialize(to_trigger);
       forest->runtime->send_index_partition_return(source, rez);
