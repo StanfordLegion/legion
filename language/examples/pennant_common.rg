@@ -287,6 +287,11 @@ fspace side(rz : region(zone),
   cqe2 :   vec2,         -- ??????????
 }
 
+fspace span {
+  start : int64,
+  stop  : int64,
+}
+
 --
 -- Command Line Processing
 --
