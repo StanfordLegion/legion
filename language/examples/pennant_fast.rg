@@ -15,20 +15,20 @@
 -- runs-with:
 -- [
 --   ["pennant.tests/sedovsmall/sedovsmall.pnt",
---    "-npieces", "1", "-seq_init", "1", "-par_init", "0", "-fvectorize", "0"],
+--    "-npieces", "1", "-seq_init", "1", "-par_init", "1", "-fvectorize", "0"],
 --   ["pennant.tests/sedovsmall/sedovsmall.pnt",
---    "-npieces", "2", "-ll:cpu", "2", "-seq_init", "1", "-par_init", "0", "-fvectorize", "0",
+--    "-npieces", "2", "-ll:cpu", "2", "-seq_init", "1", "-par_init", "1", "-fvectorize", "0",
 --    "-absolute", "1e-6", "-relative", "1e-6", "-relative_absolute", "1e-9"],
 --   ["pennant.tests/sedov/sedov.pnt",
---    "-npieces", "1", "-seq_init", "1", "-par_init", "0", "-fvectorize", "0",
+--    "-npieces", "1", "-seq_init", "1", "-par_init", "1", "-fvectorize", "0",
 --    "-absolute", "2e-6", "-relative", "1e-8", "-relative_absolute", "1e-10"],
 --   ["pennant.tests/sedov/sedov.pnt",
---    "-npieces", "3", "-ll:cpu", "3", "-seq_init", "1", "-par_init", "0", "-fvectorize", "0",
+--    "-npieces", "3", "-ll:cpu", "3", "-seq_init", "1", "-par_init", "1", "-fvectorize", "0",
 --    "-absolute", "2e-6", "-relative", "1e-8", "-relative_absolute", "1e-10"],
 --   ["pennant.tests/leblanc/leblanc.pnt",
---    "-npieces", "1", "-seq_init", "1", "-par_init", "0", "-fvectorize", "0"],
+--    "-npieces", "1", "-seq_init", "1", "-par_init", "1", "-fvectorize", "0"],
 --   ["pennant.tests/leblanc/leblanc.pnt",
---    "-npieces", "2", "-ll:cpu", "2", "-seq_init", "1", "-par_init", "0", "-fvectorize", "0"]
+--    "-npieces", "2", "-ll:cpu", "2", "-seq_init", "1", "-par_init", "1", "-fvectorize", "0"]
 -- ]
 
 -- Inspired by https://github.com/losalamos/PENNANT
@@ -1358,6 +1358,13 @@ task test()
                             rp_all_shared_p[i],
                             rp_all_ghost_p[i],
                             rs_all_p[i])
+      end
+
+      -- __demand(__parallel)
+      for i = 0, npieces do
+        initialize_spans(
+          conf, i,
+          rz_spans_p[i], rp_spans_private_p[i], rp_spans_shared_p[i], rs_spans_p[i])
       end
     end
 
