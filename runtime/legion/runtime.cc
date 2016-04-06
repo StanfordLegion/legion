@@ -3110,7 +3110,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       // For profiling if we are doing it
-      unsigned long long start, stop;
+      unsigned long long start = 0, stop = 0;
       for (unsigned idx = 0; idx < num_messages; idx++)
       {
         // Pull off the message kind and the size of the message
