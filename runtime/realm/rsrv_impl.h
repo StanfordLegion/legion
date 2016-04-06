@@ -74,6 +74,8 @@ namespace Realm {
       NodeSet remote_waiter_mask, remote_sharer_mask;
       //std::list<LockWaiter *> local_waiters; // set of local threads that are waiting on lock
       std::map<unsigned, std::deque<Event> > local_waiters;
+      std::map<unsigned, unsigned> retry_count;
+      std::map<unsigned, Event> retry_events;
       bool requested; // do we have a request for the lock in flight?
 
       // local data protected by lock
@@ -85,8 +87,23 @@ namespace Realm {
       static ReservationImpl *first_free;
       ReservationImpl *next_free;
 
+      enum AcquireType {
+	// normal Reservation::acquire() - returns an event when the reservation is granted
+	ACQUIRE_BLOCKING,
+
+	// Reservation::try_acquire() - grants immediately or returns an event for when a retry should be performed
+	ACQUIRE_NONBLOCKING,
+
+	// a retried version of try_acquire()
+	ACQUIRE_NONBLOCKING_RETRY,
+
+	// used when the try_acquire is preconditioned on something else first, so we never grant, but record a retry'er
+	ACQUIRE_NONBLOCKING_PLACEHOLDER,
+      };
+
       // creates an Event if needed to describe when reservation is granted
       Event acquire(unsigned new_mode, bool exclusive,
+		    AcquireType acquire_type,
 		    Event after_lock = Event::NO_EVENT);
 
       bool select_local_waiters(std::deque<Event>& to_wake);
