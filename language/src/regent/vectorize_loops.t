@@ -25,6 +25,8 @@ local symbol_table = require("regent/symbol_table")
 
 local min = math.min
 
+local bounds_checks = std.config["bounds-checks"]
+
 -- vectorizer
 
 local SIMD_REG_SIZE
@@ -1016,7 +1018,11 @@ function vectorize_loops.stat_top(node)
 end
 
 function vectorize_loops.entry(node)
-  return vectorize_loops.stat_top(node)
+  if bounds_checks then
+    return node
+  else
+    return vectorize_loops.stat_top(node)
+  end
 end
 
 return vectorize_loops
