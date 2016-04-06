@@ -105,6 +105,7 @@ local language = {
     "region",
     "simultaneous",
     "static_cast",
+    "unsafe_cast",
     "wild", -- reserved for future use
     "with_scratch_fields",
     "where",

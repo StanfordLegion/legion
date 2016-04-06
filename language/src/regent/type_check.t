@@ -1115,7 +1115,7 @@ function type_check.expr_dynamic_cast(cx, node)
   if not std.is_bounded_type(node.expr_type) then
     log.error(node, "dynamic_cast requires ptr type as argument 1, got " .. tostring(node.expr_type))
   end
-  if not (std.is_index_type(value_type) or std.is_bounded_type(value_type)) then
+  if not std.validate_implicit_cast(value_type, node.expr_type.index_type) then
     log.error(node, "dynamic_cast requires ptr as argument 2, got " .. tostring(value_type))
   end
   if std.is_bounded_type(value_type) and not std.type_eq(node.expr_type.points_to_type, value_type.points_to_type) then
@@ -1163,6 +1163,32 @@ function type_check.expr_static_cast(cx, node)
   return ast.typed.expr.StaticCast {
     value = value,
     parent_region_map = parent_region_map,
+    expr_type = expr_type,
+    options = node.options,
+    span = node.span,
+  }
+end
+
+function type_check.expr_unsafe_cast(cx, node)
+  local value = type_check.expr(cx, node.value)
+  local value_type = std.check_read(cx, value)
+  local expr_type = node.expr_type
+
+  if not std.is_bounded_type(expr_type) then
+    log.error(node, "unsafe_cast requires ptr type as argument 1, got " .. tostring(expr_type))
+  end
+  if #expr_type:bounds() ~= 1 then
+    log.error(node, "unsafe_cast requires single ptr type as argument 1, got " .. tostring(expr_type))
+  end
+  if not std.validate_implicit_cast(value_type, node.expr_type.index_type) then
+    log.error(node, "unsafe_cast requires ptr as argument 2, got " .. tostring(value_type))
+  end
+  if std.is_bounded_type(value_type) and not std.type_eq(node.expr_type.points_to_type, value_type.points_to_type) then
+    log.error(node, "incompatible pointers for unsafe_cast: " .. tostring(expr_type) .. " and " .. tostring(value_type))
+  end
+
+  return ast.typed.expr.UnsafeCast {
+    value = value,
     expr_type = expr_type,
     options = node.options,
     span = node.span,
@@ -2374,6 +2400,9 @@ function type_check.expr(cx, node)
 
   elseif node:is(ast.specialized.expr.StaticCast) then
     return type_check.expr_static_cast(cx, node)
+
+  elseif node:is(ast.specialized.expr.UnsafeCast) then
+    return type_check.expr_unsafe_cast(cx, node)
 
   elseif node:is(ast.specialized.expr.Ispace) then
     return type_check.expr_ispace(cx, node)

@@ -12,15 +12,15 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
+-- fails-with:
+-- assertion failed: pointer ptr(int32, $t) is out-of-bounds
+
 import "regent"
 
 local c = regentlib.c
 
 task main()
-  var r = region(ispace(ptr, 5), int)
-  var x = new(ptr(int, r))
-
-  var y = dynamic_cast(ptr(int, r), 0)
-  regentlib.assert(not isnull(y), "test failed")
+  var t = region(ispace(ptr, 5), int)
+  var y = unsafe_cast(ptr(int, t), 0)
 end
 regentlib.start(main)

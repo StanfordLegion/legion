@@ -2815,13 +2815,15 @@ end
 
 function codegen.expr_dynamic_cast(cx, node)
   local value = codegen.expr(cx, node.value):read(cx)
+  local value_type = std.as_read(node.value.expr_type)
   local expr_type = std.as_read(node.expr_type)
-
   local actions = quote
     [value.actions];
     [emit_debuginfo(node)]
   end
-  local input = `([value.value].__ptr)
+
+  local input = `([std.implicit_cast(value_type, expr_type.index_type, value.value)].__ptr)
+
   local result
   local regions = expr_type:bounds()
   if #regions == 1 then
@@ -2958,6 +2960,44 @@ function codegen.expr_static_cast(cx, node)
   end
 
   return values.value(expr.once_only(actions, result), expr_type)
+end
+
+function codegen.expr_unsafe_cast(cx, node)
+  local value = codegen.expr(cx, node.value):read(cx)
+  local value_type = std.as_read(node.value.expr_type)
+  local expr_type = std.as_read(node.expr_type)
+  local actions = quote
+    [value.actions];
+    [emit_debuginfo(node)]
+  end
+
+  local input = `([std.implicit_cast(value_type, expr_type.index_type, value.value)].__ptr)
+
+  local result = terralib.newsymbol(expr_type, "result")
+  if bounds_checks then
+    local regions = expr_type:bounds()
+    assert(#regions == 1)
+    local region = regions[1]
+    assert(cx:has_region(region))
+    local lr = `([cx:region(region).logical_region].impl)
+
+    local check = terralib.newsymbol(c.legion_ptr_t, "check")
+    actions = quote
+      [actions]
+      var [check] = c.legion_ptr_safe_cast([cx.runtime], [cx.context], [input], [lr])
+      if c.legion_ptr_is_null([check]) then
+        std.assert(false, ["pointer " .. tostring(expr_type) .. " is out-of-bounds"])
+      end
+      var [result] = [expr_type]({ __ptr = [check] })
+    end
+  else
+    actions = quote
+      [actions]
+      var [result] = [expr_type]({ __ptr = [input] })
+    end
+  end
+
+  return values.value(expr.just(actions, result), expr_type)
 end
 
 function codegen.expr_ispace(cx, node)
@@ -5186,6 +5226,9 @@ function codegen.expr(cx, node)
 
   elseif node:is(ast.typed.expr.StaticCast) then
     return codegen.expr_static_cast(cx, node)
+
+  elseif node:is(ast.typed.expr.UnsafeCast) then
+    return codegen.expr_unsafe_cast(cx, node)
 
   elseif node:is(ast.typed.expr.Ispace) then
     return codegen.expr_ispace(cx, node)

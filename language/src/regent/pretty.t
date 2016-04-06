@@ -306,6 +306,10 @@ function pretty.expr_static_cast(cx, node)
   return join({"static_cast(", commas({tostring(node.expr_type), pretty.expr(cx, node.value)}), ")"})
 end
 
+function pretty.expr_unsafe_cast(cx, node)
+  return join({"unsafe_cast(", commas({tostring(node.expr_type), pretty.expr(cx, node.value)}), ")"})
+end
+
 function pretty.expr_ispace(cx, node)
   return join({
       "ispace(",
@@ -577,6 +581,9 @@ function pretty.expr(cx, node)
 
   elseif node:is(ast.typed.expr.StaticCast) then
     return pretty.expr_static_cast(cx, node)
+
+  elseif node:is(ast.typed.expr.UnsafeCast) then
+    return pretty.expr_unsafe_cast(cx, node)
 
   elseif node:is(ast.typed.expr.Ispace) then
     return pretty.expr_ispace(cx, node)

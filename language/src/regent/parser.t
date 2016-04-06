@@ -596,6 +596,19 @@ function parser.expr_prefix(p)
       span = ast.span(start, p),
     }
 
+  elseif p:nextif("unsafe_cast") then
+    p:expect("(")
+    local type_expr = p:luaexpr()
+    p:expect(",")
+    local value = p:expr()
+    p:expect(")")
+    return ast.unspecialized.expr.UnsafeCast {
+      type_expr = type_expr,
+      value = value,
+      options = ast.default_options(),
+      span = ast.span(start, p),
+    }
+
   elseif p:nextif("ispace") then
     p:expect("(")
     local index_type_expr = p:luaexpr()

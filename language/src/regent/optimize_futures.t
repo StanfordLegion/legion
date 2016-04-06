@@ -146,6 +146,9 @@ function analyze_var_flow.expr(cx, node)
   elseif node:is(ast.typed.expr.StaticCast) then
     return nil
 
+  elseif node:is(ast.typed.expr.UnsafeCast) then
+    return nil
+
   elseif node:is(ast.typed.expr.Ispace) then
     return nil
 
@@ -601,6 +604,11 @@ function optimize_futures.expr_static_cast(cx, node)
   return node { value = value }
 end
 
+function optimize_futures.expr_unsafe_cast(cx, node)
+  local value = concretize(optimize_futures.expr(cx, node.value))
+  return node { value = value }
+end
+
 function optimize_futures.expr_ispace(cx, node)
   local extent = concretize(optimize_futures.expr(cx, node.extent))
   local start = node.start and
@@ -930,6 +938,9 @@ function optimize_futures.expr(cx, node)
 
   elseif node:is(ast.typed.expr.StaticCast) then
     return optimize_futures.expr_static_cast(cx, node)
+
+  elseif node:is(ast.typed.expr.UnsafeCast) then
+    return optimize_futures.expr_unsafe_cast(cx, node)
 
   elseif node:is(ast.typed.expr.Ispace) then
     return optimize_futures.expr_ispace(cx, node)
