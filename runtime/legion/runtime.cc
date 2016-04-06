@@ -6888,14 +6888,13 @@ namespace Legion {
         unique_constraint_id((unique == 0) ? runtime_stride : unique),
         unique_task_id(get_current_static_task_id()+unique),
         unique_mapper_id(get_current_static_mapper_id()+unique),
-        available_lock(Reservation::create_reservation()), total_contexts(0),
         group_lock(Reservation::create_reservation()),
         distributed_id_lock(Reservation::create_reservation()),
         unique_distributed_id((unique == 0) ? runtime_stride : unique),
         distributed_collectable_lock(Reservation::create_reservation()),
         gc_epoch_lock(Reservation::create_reservation()), gc_epoch_counter(0),
         future_lock(Reservation::create_reservation()),
-        remote_lock(Reservation::create_reservation()),
+        context_lock(Reservation::create_reservation()),
         random_lock(Reservation::create_reservation()),
         individual_task_lock(Reservation::create_reservation()), 
         point_task_lock(Reservation::create_reservation()),
@@ -7387,8 +7386,6 @@ namespace Legion {
       message_manager_lock = Reservation::NO_RESERVATION;
       memory_managers.clear();
       projection_functors.clear();
-      available_lock.destroy_reservation();
-      available_lock = Reservation::NO_RESERVATION;
       group_lock.destroy_reservation();
       group_lock = Reservation::NO_RESERVATION;
       distributed_id_lock.destroy_reservation();
@@ -7399,8 +7396,8 @@ namespace Legion {
       gc_epoch_lock = Reservation::NO_RESERVATION;
       future_lock.destroy_reservation();
       future_lock = Reservation::NO_RESERVATION;
-      remote_lock.destroy_reservation();
-      remote_lock = Reservation::NO_RESERVATION;
+      context_lock.destroy_reservation();
+      context_lock = Reservation::NO_RESERVATION;
       shutdown_lock.destroy_reservation();
       shutdown_lock = Reservation::NO_RESERVATION;
 
@@ -15859,73 +15856,7 @@ namespace Legion {
       }
       else
         return target.spawn(HLR_TASK_ID, args, arglen, precondition, priority);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::allocate_context(SingleTask *task)
-    //--------------------------------------------------------------------------
-    {
-      // Try getting something off the list of available contexts
-      AutoLock avail_lock(available_lock);
-      if (!available_contexts.empty())
-      {
-        task->assign_context(available_contexts.front());
-        available_contexts.pop_front();
-        return;
-      }
-      // If we failed to get a context, double the number of total 
-      // contexts and then update the forest nodes to have the right
-      // number of contexts available
-      task->assign_context(RegionTreeContext(total_contexts));
-      for (unsigned idx = 1; idx < total_contexts; idx++)
-      {
-        available_contexts.push_back(RegionTreeContext(total_contexts+idx));
-      }
-      // Mark that we doubled the total number of contexts
-      // Very important that we do this before calling the
-      // RegionTreeForest's resize method!
-      total_contexts *= 2;
-#if 0
-      if (total_contexts > MAX_CONTEXTS)
-      {
-        log_run.error("ERROR: Maximum number of allowed contexts %d "
-                            "exceeded when initializing task %s (UID %lld). "
-                            "Please change 'MAX_CONTEXTS' at top "
-                            "of legion_config.h and recompile. It is also "
-                            "possible to reduce context usage by annotating "
-                            "task variants as leaf tasks since leaf tasks do "
-                            "not require context allocation.",
-                            MAX_CONTEXTS, task->get_task_name(),
-                            task->get_unique_id());
-#ifdef DEBUG_HIGH_LEVEL
-        assert(false);
-#endif
-        exit(ERROR_EXCEEDED_MAX_CONTEXTS);
-      }
-#endif
-#ifdef DEBUG_HIGH_LEVEL
-      assert(!available_contexts.empty());
-#endif
-      // Tell all the processor managers about the additional contexts
-      for (std::map<Processor,ProcessorManager*>::const_iterator it = 
-            proc_managers.begin(); it != proc_managers.end(); it++)
-      {
-        it->second->update_max_context_count(total_contexts); 
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::free_context(SingleTask *task)
-    //--------------------------------------------------------------------------
-    {
-      RegionTreeContext context = task->release_context();
-#ifdef DEBUG_HIGH_LEVEL
-      assert(context.exists());
-      forest->check_context_state(context);
-#endif
-      AutoLock avail_lock(available_lock);
-      available_contexts.push_back(context);
-    }
+    } 
 
     //--------------------------------------------------------------------------
     DistributedID Runtime::get_available_distributed_id(bool need_cont,
@@ -17259,27 +17190,32 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       {
-        AutoLock rem_lock(remote_lock,1,false/*exclusive*/);
-        std::map<UniqueID,RemoteTask*>::const_iterator finder = 
-          remote_contexts.find(uid);
-        if (finder != remote_contexts.end())
-          return finder->second;
+        AutoLock ctx_lock(context_lock,1,false/*exclusive*/);
+        std::map<UniqueID,std::pair<SingleTask*,bool> >::const_iterator 
+          finder = current_contexts.find(uid);
+        if (finder != current_contexts.end())
+        {
+#ifdef DEBUG_HIGH_LEVEL
+          assert(finder->second.second); // make sure it is remote
+#endif
+          return static_cast<RemoteTask*>(it->second.first);
+        }
       }
       // Otherwise we need to make one
       RemoteTask *remote_ctx = get_available_remote_task(false);
       RemoteTask *result = remote_ctx;
       bool lost_race = false;
       {
-        AutoLock rem_lock(remote_lock);
-        std::map<UniqueID,RemoteTask*>::const_iterator finder = 
-          remote_contexts.find(uid);
-        if (finder != remote_contexts.end())
+        AutoLock ctx_lock(context_lock);
+        std::map<UniqueID,std::pair<SingleTask*,bool> >::const_iterator
+          finder = current_contexts.find(uid);
+        if (finder != current_contexts.end())
         {
           lost_race = true;
           result = finder->second;
         }
         else // Put it in the map
-          remote_contexts[uid] = remote_ctx;
+          current_contexts[uid] = std::pair<SingleTask*,bool>(remote_ctx, true);
       }
       if (lost_race)
         free_remote_task(remote_ctx);
@@ -17309,27 +17245,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    SingleTask* Runtime::find_remote_context(UniqueID uid, 
-                                             SingleTask *remote_parent_ctx)
-    //--------------------------------------------------------------------------
-    {
-      // See if we can find it in the set of remote contexts, if
-      // not then we must be local so return the remote parent ctx
-      AutoLock rem_lock(remote_lock,1,false/*exclusive*/);
-      std::map<UniqueID,RemoteTask*>::const_iterator finder = 
-        remote_contexts.find(uid);
-      if (finder != remote_contexts.end())
-        return finder->second;
-      return remote_parent_ctx;
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::release_remote_context(UniqueID remote_owner_uid)
     //--------------------------------------------------------------------------
     {
       RemoteTask *remote_task;
       {
-        AutoLock rem_lock(remote_lock);
+        AutoLock ctx_lock(context_lock);
         std::map<UniqueID,RemoteTask*>::iterator finder = 
           remote_contexts.find(remote_owner_uid);
 #ifdef DEBUG_HIGH_LEVEL
@@ -17340,6 +17261,81 @@ namespace Legion {
       }
       // Now we can deactivate it
       remote_task->deactivate();
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::allocate_local_context(SingleTask *task)
+    //--------------------------------------------------------------------------
+    {
+      UniqueID context_uid = task->get_unique_op_id();
+      // Try getting something off the list of available contexts
+      AutoLock ctx_lock(context_lock);
+      if (!available_contexts.empty())
+      {
+        task->assign_context(available_contexts.front());
+        available_contexts.pop_front();
+        return;
+      }
+      // If we failed to get a context, double the number of total 
+      // contexts and then update the forest nodes to have the right
+      // number of contexts available
+      task->assign_context(RegionTreeContext(total_contexts));
+      for (unsigned idx = 1; idx < total_contexts; idx++)
+      {
+        available_contexts.push_back(RegionTreeContext(total_contexts+idx));
+      }
+      // Mark that we doubled the total number of contexts
+      // Very important that we do this before calling the
+      // RegionTreeForest's resize method!
+      total_contexts *= 2;
+#ifdef DEBUG_HIGH_LEVEL
+      assert(!available_contexts.empty());
+#endif
+      // Tell all the processor managers about the additional contexts
+      for (std::map<Processor,ProcessorManager*>::const_iterator it = 
+            proc_managers.begin(); it != proc_managers.end(); it++)
+      {
+        it->second->update_max_context_count(total_contexts); 
+      }
+      // Finally save us in the set of contexts
+#ifdef DEBUG_HIGH_LEVEL
+      assert(current_contexts.find(context_uid) == current_contexts.end());
+#endif
+      current_contexts[context_uid] = std::pair<SingleTask,bool>(task, false);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::free_local_context(SingleTask *task)
+    //--------------------------------------------------------------------------
+    {
+      UniqueID context_uid = task->get_unique_op_id();
+      RegionTreeContext context = task->release_context();
+#ifdef DEBUG_HIGH_LEVEL
+      assert(context.exists());
+      forest->check_context_state(context);
+#endif
+      AutoLock ctx_lock(context_lock);
+      available_contexts.push_back(context);
+      // Remove use from the set of contexts
+      std::map<UniqueID,std::pair<SingleTask,bool> >::iterator finder = 
+        current_contexts.find(task);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(finder != current_contexts.end());
+#endif
+      current_contexts.erase(finder);
+    }
+
+    //--------------------------------------------------------------------------
+    SingleTask* Runtime::find_context(UniqueID context_uid)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock ctx_lock(context_lock,1,false/*exclusive*/);
+      std::map<UniqueID,std::pair<SingleTask*,bool> >::const_iterator
+        finder = current_contexts.find(context_uid);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(finder != current_contexts.end());
+#endif
+      return finder->second.first;
     }
 
     //--------------------------------------------------------------------------

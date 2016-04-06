@@ -687,10 +687,7 @@ namespace Legion {
             rez.serialize(manager_did);
             rez.serialize(logical_node->as_region_node()->handle);
             rez.serialize(owner_space);
-            // Find the context UID since we don't store it
-            // Must be the root view (parent == NULL) for this to work
-            UniqueID context_uid = manager->find_context_uid(this);
-            rez.serialize(context_uid);
+            rez.serialize<UniqueID>(context_owner->get_context_id());
           }
           runtime->send_materialized_view(target, rez);
         }
@@ -2432,12 +2429,12 @@ namespace Legion {
       assert(!phy_man->is_reduction_manager());
 #endif
       InstanceManager *inst_manager = phy_man->as_instance_manager();
-
+      SingleTask *context_owner = runtime->find_context(context_uid);
       MaterializedView *new_view = legion_new<MaterializedView>(runtime->forest,
                                       did, owner_space, runtime->address_space,
                                       target_node, inst_manager, 
                                       (MaterializedView*)NULL/*parent*/,
-                                      context_uid, false/*don't register yet*/);
+                                      context_owner, false/*register*/);
       if (!target_node->register_logical_view(new_view))
       {
         if (new_view->remove_base_resource_ref(REMOTE_DID_REF))
@@ -4742,9 +4739,7 @@ namespace Legion {
           rez.serialize(manager_did);
           rez.serialize(logical_node->as_region_node()->handle);
           rez.serialize(owner_space);
-          // We only store this UID in the manager, so look it up here
-          UniqueID context_uid = manager->find_context_uid(this);
-          rez.serialize(context_uid);
+          rez.serialize<UniqueID>(context_owner->get_context_id());
         }
         runtime->send_reduction_view(target, rez);
         update_remote_instances(target);
@@ -4966,11 +4961,11 @@ namespace Legion {
       assert(phy_man->is_reduction_manager());
 #endif
       ReductionManager *red_manager = phy_man->as_reduction_manager();
-
+      SingleTask *context_owner = runtime->find_context(context_uid);
       ReductionView *new_view = legion_new<ReductionView>(runtime->forest,
                                    did, owner_space, runtime->address_space,
                                    target_node, red_manager,
-                                   context_uid, false/*don't register yet*/);
+                                   context_owner, false/*register*/);
       if (!target_node->register_logical_view(new_view))
       {
         if (new_view->remove_base_resource_ref(REMOTE_DID_REF))

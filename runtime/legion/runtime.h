@@ -2104,10 +2104,7 @@ namespace Legion {
                                     HLRTaskID tid, HLRPriority hlr_priority,
                                     Operation *op = NULL,
                                     Event precondition = Event::NO_EVENT, 
-                                    Processor proc = Processor::NO_PROC);
-    public:
-      void allocate_context(SingleTask *task);
-      void free_context(SingleTask *task);
+                                    Processor proc = Processor::NO_PROC); 
     public:
       DistributedID get_available_distributed_id(bool need_cont, 
                                                  bool has_lock = false);
@@ -2248,8 +2245,10 @@ namespace Legion {
     public:
       RemoteTask* find_or_init_remote_context(UniqueID uid, Processor orig,
                                               SingleTask *remote_parent_ctx); 
-      SingleTask* find_remote_context(UniqueID uid, SingleTask *remote_ctx);
       void release_remote_context(UniqueID remote_owner_uid);
+      void allocate_local_context(SingleTask *task);
+      void free_local_context(SingleTask *task);
+      SingleTask* find_context(UniqueID context_uid);
     public:
       bool is_local(Processor proc) const;
       void find_visible_memories(Processor proc, std::set<Memory> &visible);
@@ -2397,11 +2396,7 @@ namespace Legion {
     protected:
       // For MPI Inter-operability
       std::map<int,AddressSpace> forward_mpi_mapping;
-      std::map<AddressSpace,int> reverse_mpi_mapping;
-    protected:
-      Reservation available_lock;
-      unsigned total_contexts;
-      std::deque<RegionTreeContext> available_contexts;
+      std::map<AddressSpace,int> reverse_mpi_mapping; 
     protected:
       Reservation group_lock;
       LegionMap<uint64_t,LegionDeque<ProcessorGroupInfo>::aligned,
@@ -2429,9 +2424,11 @@ namespace Legion {
     protected:
       // The runtime keeps track of remote contexts so they
       // can be re-used by multiple tasks that get sent remotely
-      Reservation remote_lock;
-      LegionMap<UniqueID,RemoteTask*,
-                RUNTIME_REMOTE_ALLOC>::tracked remote_contexts;
+      Reservation context_lock;
+      LegionMap<UniqueID,std::pair<SingleTask*,bool/*remote*/>,
+                RUNTIME_REMOTE_ALLOC> current_contexts;
+      unsigned total_contexts;
+      std::deque<RegionTreeContext> available_contexts;
     protected:
       // For generating random numbers
       Reservation random_lock;

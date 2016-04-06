@@ -2384,7 +2384,7 @@ namespace Legion {
       assert(pending_frames == 0);
 #endif
       if (context.exists())
-        runtime->free_context(this);
+        runtime->free_local_context(this);
     }
 
     //--------------------------------------------------------------------------
@@ -5699,7 +5699,7 @@ namespace Legion {
         if (!variant->is_leaf() || has_virtual_instances())
         {
           // Request a context from the runtime
-          runtime->allocate_context(this);
+          runtime->allocate_local_context(this);
           initial_region_count = regions.size();
           // Have the mapper configure the properties of the context
           context_configuration.max_window_size = 
@@ -7647,10 +7647,10 @@ namespace Legion {
       rez.serialize(remote_outermost_context);
       rez.serialize(remote_owner_uid);
       rez.serialize(remote_parent_ctx);
-      parent_ctx->pack_parent_task(rez, addr_target);
       if (!is_locally_mapped())
         pack_version_infos(rez, version_infos);
       pack_restrict_infos(rez, restrict_infos);
+      parent_ctx->pack_parent_task(rez, addr_target);
       // Mark that we sent this task remotely
       sent_remotely = true;
       // If this task is remote, then deactivate it, otherwise
@@ -7672,22 +7672,16 @@ namespace Legion {
       current_proc = current;
       derez.deserialize(remote_owner_uid);
       derez.deserialize(remote_parent_ctx);
-      RemoteTask *remote_ctx = 
-        runtime->find_or_init_remote_context(remote_owner_uid, orig_proc,
-                                             remote_parent_ctx);
-      remote_ctx->unpack_parent_task(derez);
       if (!is_locally_mapped())
         unpack_version_infos(derez, version_infos);
       unpack_restrict_infos(derez, restrict_infos);
-      // Add our enclosing parent regions to the list of 
-      // top regions maintained by the remote context
-      for (unsigned idx = 0; idx < regions.size(); idx++)
-        remote_ctx->add_top_region(regions[idx].parent);
-      // Now save the remote context as our parent context
-      parent_ctx = remote_ctx;
       // Quick check to see if we've been sent back to our original node
       if (!is_remote())
       {
+#ifdef DEBUG_HIGH_LEVEL
+        // Need to make the deserializer happy in debug mode
+        derez.advance_pointer(derez.get_remaining_bytes());
+#endif
         // If we were sent back then mark that we are no longer remote
         sent_remotely = false;
         // Put the original instance back on the mapping queue and
@@ -7697,6 +7691,16 @@ namespace Legion {
         deactivate();
         return false;
       }
+      RemoteTask *remote_ctx = 
+        runtime->find_or_init_remote_context(remote_owner_uid, orig_proc,
+                                             remote_parent_ctx);
+      remote_ctx->unpack_parent_task(derez);
+      // Add our enclosing parent regions to the list of 
+      // top regions maintained by the remote context
+      for (unsigned idx = 0; idx < regions.size(); idx++)
+        remote_ctx->add_top_region(regions[idx].parent);
+      // Now save the remote context as our parent context
+      parent_ctx = remote_ctx;
       // Check to see if we had no virtual mappings and everything
       // was pre-mapped and we're remote then we can mark this
       // task as being mapped
@@ -8607,28 +8611,11 @@ namespace Legion {
         remote_instances.clear();
       }
       top_level_regions.clear();
-      if (context.exists())
-        runtime->free_context(this);
       deactivate_wrapper();
       // Context is freed in deactivate single
       runtime->free_remote_task(this);
     }
     
-    //--------------------------------------------------------------------------
-    void RemoteTask::initialize_remote(UniqueID uid, SingleTask *remote_parent,
-                                       bool is_top_level)
-    //--------------------------------------------------------------------------
-    {
-      remote_owner_uid = uid;
-      remote_parent_ctx = remote_parent;
-      is_top_level_context = is_top_level;
-      runtime->allocate_context(this);
-#ifdef DEBUG_HIGH_LEVEL
-      assert(context.exists());
-      runtime->forest->check_context_state(context);
-#endif
-    } 
-
     //--------------------------------------------------------------------------
     void RemoteTask::unpack_parent_task(Deserializer &derez)
     //--------------------------------------------------------------------------
@@ -10857,7 +10844,6 @@ namespace Legion {
       rez.serialize(locally_mapped);
       rez.serialize(remote_owner_uid);
       rez.serialize(remote_parent_ctx);
-      parent_ctx->pack_parent_task(rez, addr_target);
       if (!is_locally_mapped())
         pack_version_infos(rez, version_infos);
       if (is_remote())
@@ -10868,6 +10854,8 @@ namespace Legion {
       {
         points[idx]->pack_task(rez, target);
       }
+      // Pack this last
+      parent_ctx->pack_parent_task(rez, addr_target);
       bool deactivate_now = true;
       if (!is_remote() && is_locally_mapped())
       {
@@ -10906,23 +10894,9 @@ namespace Legion {
       derez.deserialize(locally_mapped);
       derez.deserialize(remote_owner_uid);
       derez.deserialize(remote_parent_ctx);
-      RemoteTask *remote_ctx = 
-        runtime->find_or_init_remote_context(remote_owner_uid, orig_proc,
-                                             remote_parent_ctx);
-      remote_ctx->unpack_parent_task(derez);
       if (!is_locally_mapped())
         unpack_version_infos(derez, version_infos);
       unpack_restrict_infos(derez, restrict_infos);
-      // Add our parent regions to the list of top regions
-      for (unsigned idx = 0; idx < regions.size(); idx++)
-        remote_ctx->add_top_region(regions[idx].parent);
-      // Quick check to see if we ended up back on the original node
-      if (!is_remote())
-        parent_ctx = index_owner->parent_ctx;
-      else
-        parent_ctx = remote_ctx;
-      if (Runtime::legion_spy_enabled)
-        LegionSpy::log_slice_slice(remote_unique_id, get_unique_id());
       if (Runtime::legion_spy_enabled)
         LegionSpy::log_slice_slice(remote_unique_id, get_unique_id());
       if (runtime->profiler != NULL)
@@ -10942,6 +10916,26 @@ namespace Legion {
           LegionSpy::log_slice_point(get_unique_id(), 
                                      point->get_unique_id(),
                                      point->index_point);
+      }
+      // Check to see if we ended up back on the original node
+      if (is_remote())
+      {
+        RemoteTask *remote_ctx = 
+          runtime->find_or_init_remote_context(remote_owner_uid, orig_proc,
+                                               remote_parent_ctx);
+        remote_ctx->unpack_parent_task(derez);
+        // Add our parent regions to the list of top regions
+        for (unsigned idx = 0; idx < regions.size(); idx++)
+          remote_ctx->add_top_region(regions[idx].parent);
+        parent_ctx = remote_ctx;
+      }
+      else
+      {
+#ifdef DEBUG_HIGH_LEVEL
+        // Make the deserializer happy
+        derez.advance_point(derez.get_remaining_bytes());
+#endif
+        parent_ctx = index_owner->parent_ctx;
       }
       // Return true to add this to the ready queue
       return true;

@@ -1019,8 +1019,6 @@ namespace Legion {
     public:
       virtual int get_depth(void) const;
     public:
-      void initialize_remote(UniqueID uid, SingleTask *remote_parent,
-                             bool is_top_level);
       void unpack_parent_task(Deserializer &derez);
     public:
       virtual void activate(void);
