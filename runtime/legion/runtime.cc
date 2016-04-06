@@ -16059,11 +16059,13 @@ namespace LegionRuntime {
       // Make sure that the requested node is a valid request
       if ((req.handle_type == SINGULAR) || (req.handle_type == REG_PROJECTION))
       {
+        forest->get_node(req.region);
         if (!forest->has_node(req.region))
           return ERROR_INVALID_REGION_HANDLE;
       }
       else
       {
+        forest->get_node(req.partition);
         if (!forest->has_node(req.partition))
           return ERROR_INVALID_PARTITION_HANDLE;
       }
