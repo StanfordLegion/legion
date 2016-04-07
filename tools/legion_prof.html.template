@@ -580,6 +580,8 @@
         var min_feature_time = min_feature_width / f;
         var min_gap_time = min_gap_width / f;
         for (var level in items) {
+          // gap merging below assumes intervals are sorted - do that first
+          items[level].sort(function(a,b) { return a.start - b.start; });
           for (var i = 0; i < items[level].length; ++i) {
             var d = items[level][i];
             var start = d.start;
