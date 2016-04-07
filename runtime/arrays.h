@@ -40,11 +40,7 @@ CUDAPREFIX static inline int imax(int a, int b) { return (a > b) ? a : b; }
 
 namespace LegionRuntime {
   namespace Arrays {
-#ifdef POINTS_ARE_64BIT
     typedef ptrdiff_t coord_t;
-#else
-    typedef int coord_t;
-#endif
 
     template <unsigned DIM>
     class Point {

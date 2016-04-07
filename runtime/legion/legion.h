@@ -1609,8 +1609,8 @@ namespace LegionRuntime {
     private:
       Enumerator *enumerator;
       bool finished;
-      int current_pointer;
-      int remaining_elmts;
+      off_t current_pointer;
+      size_t remaining_elmts;
     };
 
  

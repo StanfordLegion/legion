@@ -1686,10 +1686,10 @@ function std.index_type(base_type, displayname)
       return quote
         var v = [expr].__ptr
       in
-        pt { x = arrayof(int, [fields:map(function(field) return `(v.[field]) end)]) }
+        pt { x = arrayof(int64, [fields:map(function(field) return `(v.[field]) end)]) }
       end
     else
-      return quote var v = [expr].__ptr in pt { x = arrayof(int, v) } end
+      return quote var v = [expr].__ptr in pt { x = arrayof(int64, v) } end
     end
   end
 
@@ -2006,7 +2006,7 @@ end
 std.vptr = terralib.memoize(function(width, points_to_type, ...)
   local bounds = terralib.newlist({...})
 
-  local vec = vector(uint32, width)
+  local vec = vector(int64, width)
   local struct legion_vptr_t {
     value : vec
   }

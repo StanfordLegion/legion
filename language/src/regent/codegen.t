@@ -2544,7 +2544,7 @@ function codegen.expr_call(cx, node)
         c.legion_must_epoch_launcher_add_single_task(
           [cx.must_epoch],
           c.legion_domain_point_from_point_1d(
-            c.legion_point_1d_t { x = arrayof(int, [cx.must_epoch_point]) }),
+            c.legion_point_1d_t { x = arrayof(int64, [cx.must_epoch_point]) }),
           [launcher])
         [cx.must_epoch_point] = [cx.must_epoch_point] + 1
       end
@@ -3329,9 +3329,9 @@ function codegen.expr_image(cx, node)
   local field_path
   if #fields_i ~= 1 then
     assert(#fields_i == 2)
-    -- Hack: This will fail if the index type ever becomes uint32.
+    -- Hack: This will fail if the index type ever becomes in64.
     local match = data.filter(
-      function(i) return std.type_eq(field_types[i], uint32) end,
+      function(i) return std.type_eq(field_types[i], int64) end,
       fields_i)
     assert(#match == 1)
     field_path = field_paths[match[1]]
@@ -3388,9 +3388,9 @@ function codegen.expr_preimage(cx, node)
   local field_path
   if #fields_i ~= 1 then
     assert(#fields_i == 2)
-    -- Hack: This will fail if the index type ever becomes uint32.
+    -- Hack: This will fail if the index type ever becomes int64.
     local match = data.filter(
-      function(i) return std.type_eq(field_types[i], uint32) end,
+      function(i) return std.type_eq(field_types[i], int64) end,
       fields_i)
     assert(#match == 1)
     field_path = field_paths[match[1]]
@@ -6044,7 +6044,7 @@ function codegen.stat_index_launch(cx, node)
       c.legion_argument_map_set_point(
         [argument_map],
         c.legion_domain_point_from_point_1d(
-          c.legion_point_1d_t { x = arrayof(int32, [node.symbol]) }),
+          c.legion_point_1d_t { x = arrayof(int64, [node.symbol]) }),
         [task_args], true)
     end
     var g_args : c.legion_task_argument_t
@@ -6054,8 +6054,8 @@ function codegen.stat_index_launch(cx, node)
       [fn.value:gettaskid()],
       c.legion_domain_from_rect_1d(
         c.legion_rect_1d_t {
-          lo = c.legion_point_1d_t { x = arrayof(int32, [domain1]) },
-          hi = c.legion_point_1d_t { x = arrayof(int32, [domain2] - 1) },
+          lo = c.legion_point_1d_t { x = arrayof(int64, [domain1]) },
+          hi = c.legion_point_1d_t { x = arrayof(int64, [domain2] - 1) },
         }),
       g_args, [argument_map],
       c.legion_predicate_true(), false, 0, 0)

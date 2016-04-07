@@ -6194,12 +6194,14 @@ namespace LegionRuntime {
         for (std::set<ptr_t>::const_iterator pit = pcoloring.points.begin();
               pit != pcoloring.points.end(); pit++)
         {
-          child_mask.enable(*pit,1);
+          child_mask.enable(pit->value,1);
         }
         for (std::set<std::pair<ptr_t,ptr_t> >::const_iterator pit = 
               pcoloring.ranges.begin(); pit != pcoloring.ranges.end(); pit++)
         {
-          child_mask.enable(pit->first.value, pit->second - pit->first + 1);
+          if (pit->second.value >= pit->first.value)
+            child_mask.enable(pit->first.value,
+                (size_t)(pit->second.value - pit->first.value) + 1);
         }
         Realm::IndexSpace child_space = 
           Realm::IndexSpace::create_index_space(
@@ -6287,12 +6289,14 @@ namespace LegionRuntime {
           for (std::set<ptr_t>::const_iterator it = pcoloring.points.begin();
                 it != pcoloring.points.end(); it++)
           {
-            child_mask.enable(*it,1);
+            child_mask.enable(it->value,1);
           }
           for (std::set<std::pair<ptr_t,ptr_t> >::const_iterator it = 
                 pcoloring.ranges.begin(); it != pcoloring.ranges.end(); it++)
           {
-            child_mask.enable(it->first.value, it->second-it->first+1);
+            if (it->second.value >= it->first.value)
+              child_mask.enable(it->first.value,
+                  (size_t)(it->second.value - it->first.value) + 1);
           }
         }
         else
@@ -6641,7 +6645,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
             assert(finder != child_masks.end());
 #endif
-            finder->second.enable(cur_ptr);
+            finder->second.enable(cur_ptr.value);
           }
         }
         // Now make the index spaces and their domains
