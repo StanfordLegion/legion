@@ -927,7 +927,7 @@ function vectorize_loops.stat_for_list(node)
   cx.demanded = node.options.vectorize:is(ast.options.Demand)
 
   local vectorizable = check_vectorizability.block(cx, node.block)
-  if vectorizable then
+  if vectorizable and not bounds_checks then
     return vectorize.stat_for_list(cx, node)
   else
     return node { block = node.block }
@@ -1031,11 +1031,7 @@ function vectorize_loops.stat_top(node)
 end
 
 function vectorize_loops.entry(node)
-  if bounds_checks then
-    return node
-  else
-    return vectorize_loops.stat_top(node)
-  end
+  return vectorize_loops.stat_top(node)
 end
 
 return vectorize_loops
