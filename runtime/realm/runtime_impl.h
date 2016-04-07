@@ -36,6 +36,7 @@
 #include "machine_impl.h"
 
 #include "threads.h"
+#include "sampling.h"
 
 #include "module.h"
 
@@ -238,11 +239,14 @@ namespace Realm {
 
       OperationTable optable;
 
+      SamplingProfiler sampling_profiler;
+
     public:
       // used by modules to add processors, memories, etc.
       void add_memory(MemoryImpl *m);
       void add_processor(ProcessorImpl *p);
       void add_dma_channel(DMAChannel *c);
+      void add_code_translator(CodeTranslator *t);
 
       void add_proc_mem_affinity(const Machine::ProcessorMemoryAffinity& pma);
       void add_mem_mem_affinity(const Machine::MemoryMemoryAffinity& mma);
@@ -253,12 +257,15 @@ namespace Realm {
 
       const std::vector<DMAChannel *>& get_dma_channels(void) const;
 
+      const std::vector<CodeTranslator *>& get_code_translators(void) const;
+
     protected:
       ID::IDType num_local_memories, num_local_processors;
 
       ModuleRegistrar module_registrar;
       std::vector<Module *> modules;
       std::vector<DMAChannel *> dma_channels;
+      std::vector<CodeTranslator *> code_translators;
     };
 
     extern RuntimeImpl *runtime_singleton;

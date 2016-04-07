@@ -419,7 +419,9 @@ static void generate_mesh(config &conf,
   // Do calculations common to all mesh types:
   std::vector<int64_t> zxbounds;
   std::vector<int64_t> zybounds;
-  calc_mesh_num_pieces(conf);
+  if (conf.numpcx <= 0 || conf.numpcy <= 0) {
+    calc_mesh_num_pieces(conf);
+  }
   zxbounds.push_back(-1);
   for (int pcx = 1; pcx < conf.numpcx; ++pcx)
     zxbounds.push_back(pcx * conf.nzx / conf.numpcx);
@@ -1121,8 +1123,14 @@ bool PennantMapper::map_task(Task *task)
         num_fields = 17;
       } else if (name == "rs_all") {
         num_fields = 34;
-      } else if (name == "rm_all") {
-        num_fields = 20;
+      } else if (name == "rz_spans") {
+        num_fields = 2;
+      } else if (name == "rs_spans") {
+        num_fields = 2;
+      } else if (name == "rp_spans_private") {
+        num_fields = 2;
+      } else if (name == "rp_spans_shared") {
+        num_fields = 2;
       } else {
         assert(false);
       }

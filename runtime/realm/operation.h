@@ -54,6 +54,8 @@ namespace Realm {
     // returns false if a subclass wants to try some other means to cancel an operation
     virtual bool attempt_cancellation(int error_code, const void *reason_data, size_t reason_size);
 
+    bool cancellation_requested(void) const;
+
     virtual void print(std::ostream& os) const = 0;
 
     // abstract class to describe asynchronous work started by an operation
@@ -78,6 +80,9 @@ namespace Realm {
     //  the operation)
     void add_async_work_item(AsyncWorkItem *item);
 
+    // used to record event wait intervals, if desired
+    ProfilingMeasurements::OperationEventWaits::WaitInterval *create_wait_interval(Event e);
+
   protected:
     // called by AsyncWorkItem::mark_finished from an arbitrary thread
     void work_item_finished(AsyncWorkItem *item, bool successful);
@@ -99,6 +104,8 @@ namespace Realm {
     typedef ProfilingMeasurements::OperationStatus Status;
     ProfilingMeasurements::OperationStatus status;
     ProfilingMeasurements::OperationTimeline timeline;
+    bool wants_event_waits;
+    ProfilingMeasurements::OperationEventWaits waits;
     ProfilingRequestSet requests; 
     ProfilingMeasurementCollection measurements;
 

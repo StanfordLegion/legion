@@ -27,6 +27,7 @@ namespace Realm {
   template <typename T, typename LT>
   inline PriorityQueue<T, LT>::PriorityQueue(void)
     : highest_priority (PRI_NEG_INF)
+    , entries_in_queue (0)
   {
   }
 
@@ -50,6 +51,10 @@ namespace Realm {
     else if(priority < PRI_MIN_FINITE)
       priority = PRI_MIN_FINITE;
 
+    // increase the entry count, if we care
+    if(entries_in_queue)
+      (*entries_in_queue) += 1;
+
     // step 2: take the lock
     lock.lock();
 
@@ -66,6 +71,8 @@ namespace Realm {
 	// item was taken, so restore original highest priority and exit
 	highest_priority = orig_highest;
 	lock.unlock();
+	if(entries_in_queue)
+	  (*entries_in_queue) -= 1;
 	return;
       }
     }
@@ -122,6 +129,10 @@ namespace Realm {
 
     // release lock and then return result
     lock.unlock();
+
+    // decrease the entry count, if we care
+    if(entries_in_queue)
+      (*entries_in_queue) -= 1;
 
     if(item_priority)
       *item_priority = priority;
@@ -214,6 +225,12 @@ namespace Realm {
 
     // got through all the callbacks and nobody wanted it
     return false;
+  }
+
+  template <typename T, typename LT>
+  inline void PriorityQueue<T, LT>::set_gauge(ProfilingGauges::AbsoluteRangeGauge<int> *new_gauge)
+  {
+    entries_in_queue = new_gauge;
   }
 
 }; // namespace Realm

@@ -246,6 +246,20 @@ namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
   //
+  // class CancellationException
+
+  CancellationException::CancellationException(void)
+    : ExecutionException(Faults::ERROR_CANCELLED, 0, 0)
+  {}
+
+  const char *CancellationException::what(void) const throw()
+  {
+    return "CancellationException";
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
   // class PoisonedEventException
 
   PoisonedEventException::PoisonedEventException(Event _event)

@@ -38,13 +38,15 @@ enum { MSGID_LONG_EXTENSION = 253,
 static int payload_count = 0;
 #endif
 
+LegionRuntime::Logger::Category log_amsg("activemsg");
+
 #ifdef ACTIVE_MESSAGE_TRACE
-LegionRuntime::Logger::Category log_active_message("amtrace");
+LegionRuntime::Logger::Category log_amsg_trace("amtrace");
 
 void record_am_handler(int handler_id, const char *description, bool reply)
 {
-  log_active_message.info("AM Handler: %d %s %s\n", handler_id, description,
-                          (reply ? "Reply" : "Request"));
+  log_amsg_trace.info("AM Handler: %d %s %s\n", handler_id, description,
+		      (reply ? "Reply" : "Request"));
 }
 #endif
 
@@ -1111,8 +1113,8 @@ public:
 		 lmb_w_bases[flip_buffer]+lmb_size, flip_count);
 #endif
 #ifdef ACTIVE_MESSAGE_TRACE
-          log_active_message.info("Active Message Request: %d %d 2 0",
-                                  MSGID_FLIP_REQ, peer);
+          log_amsg_trace.info("Active Message Request: %d %d 2 0",
+			      MSGID_FLIP_REQ, peer);
 #endif
 #ifdef DETAILED_MESSAGE_TIMING
 	  CurrentTime start_time;
@@ -1331,10 +1333,10 @@ protected:
     __sync_fetch_and_add(&sent_messages, 1);
 #endif
 #ifdef ACTIVE_MESSAGE_TRACE
-    log_active_message.info("Active Message Request: %d %d %d %ld",
-                            hdr->msgid, peer, hdr->num_args, 
-                            (hdr->payload_mode == PAYLOAD_NONE) ? 
-                              0 : hdr->payload_size);
+    log_amsg_trace.info("Active Message Request: %d %d %d %ld",
+			hdr->msgid, peer, hdr->num_args, 
+			(hdr->payload_mode == PAYLOAD_NONE) ? 
+			  0 : hdr->payload_size);
 #endif
     switch(hdr->num_args) {
     case 1:
@@ -1550,8 +1552,8 @@ protected:
       __sync_fetch_and_add(&sent_messages, 1);
 #endif
 #ifdef ACTIVE_MESSAGE_TRACE
-      log_active_message.info("Active Message Request: %d %d %d %ld",
-                              hdr->msgid, peer, hdr->num_args, size); 
+      log_amsg_trace.info("Active Message Request: %d %d %d %ld",
+			  hdr->msgid, peer, hdr->num_args, size); 
 #endif
       switch(hdr->num_args) {
       case 1:
@@ -2115,10 +2117,10 @@ void init_endpoints(gasnet_handlerentry_t *handlers, int hcount,
 			total_lmb_size);
 
   if(gasnet_mynode() == 0) {
-    printf("Pinned Memory Usage: GASNET=%d, RMEM=%d, LMB=%zd, SDP=%zd, total=%zd\n",
-	   gasnet_mem_size_in_mb, registered_mem_size_in_mb,
-	   total_lmb_size >> 20, srcdatapool_size >> 20,
-	   attach_size >> 20);
+    log_amsg.info("Pinned Memory Usage: GASNET=%d, RMEM=%d, LMB=%zd, SDP=%zd, total=%zd\n",
+		  gasnet_mem_size_in_mb, registered_mem_size_in_mb,
+		  total_lmb_size >> 20, srcdatapool_size >> 20,
+		  attach_size >> 20);
 #ifdef DEBUG_REALM_STARTUP
     LegionRuntime::TimeStamp ts("entering gasnet_attach", false);
     fflush(stdout);

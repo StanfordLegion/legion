@@ -25,6 +25,8 @@ local symbol_table = require("regent/symbol_table")
 
 local min = math.min
 
+local bounds_checks = std.config["bounds-checks"]
+
 -- vectorizer
 
 local SIMD_REG_SIZE
@@ -249,6 +251,11 @@ function flip_types.expr(cx, simd_width, symbol, node)
       }
     end
 
+  elseif node:is(ast.typed.expr.UnsafeCast) then
+    if cx:lookup_expr_type(node) == V then
+      new_node.value = flip_types.expr(cx, simd_width, symbol, node.value)
+    end
+
   elseif node:is(ast.typed.expr.Deref) then
 
   elseif node:is(ast.typed.expr.ID) then
@@ -406,6 +413,9 @@ function min_simd_width.expr(cx, reg_size, node)
 
   elseif node:is(ast.typed.expr.Cast) then
     simd_width = min(simd_width, min_simd_width.expr(cx, reg_size, node.arg))
+
+  elseif node:is(ast.typed.expr.UnsafeCast) then
+    simd_width = min(simd_width, min_simd_width.expr(cx, reg_size, node.value))
 
   elseif node:is(ast.typed.expr.Deref) then
     simd_width = min(simd_width, min_simd_width.expr(cx, reg_size, node.value))
@@ -663,6 +673,12 @@ function check_vectorizability.stat(cx, node)
       cx:report_error_when_demanded(node,
         error_prefix .. "an expression as a statement")
 
+    elseif node:is(ast.typed.stat.BeginTrace) then
+      cx:report_error_when_demanded(node, error_prefix .. "a trace statement")
+
+    elseif node:is(ast.typed.stat.EndTrace) then
+      cx:report_error_when_demanded(node, error_prefix .. "a trace statement")
+
     else
       assert(false, "unexpected node type " .. tostring(node:type()))
     end
@@ -753,6 +769,11 @@ function check_vectorizability.expr(cx, node)
   elseif node:is(ast.typed.expr.Cast) then
     if not check_vectorizability.expr(cx, node.arg) then return false end
     cx:assign_expr_type(node, cx:lookup_expr_type(node.arg))
+    return true
+
+  elseif node:is(ast.typed.expr.UnsafeCast) then
+    if not check_vectorizability.expr(cx, node.value) then return false end
+    cx:assign_expr_type(node, cx:lookup_expr_type(node.value))
     return true
 
   elseif node:is(ast.typed.expr.Deref) then
@@ -975,10 +996,19 @@ function vectorize_loops.stat(node)
   elseif node:is(ast.typed.stat.Expr) then
     return node
 
+  elseif node:is(ast.typed.stat.BeginTrace) then
+    return node
+
+  elseif node:is(ast.typed.stat.EndTrace) then
+    return node
+
   elseif node:is(ast.typed.stat.MapRegions) then
     return node
 
   elseif node:is(ast.typed.stat.UnmapRegions) then
+    return node
+
+  elseif node:is(ast.typed.stat.RawDelete) then
     return node
 
   else
@@ -1001,7 +1031,11 @@ function vectorize_loops.stat_top(node)
 end
 
 function vectorize_loops.entry(node)
-  return vectorize_loops.stat_top(node)
+  if bounds_checks then
+    return node
+  else
+    return vectorize_loops.stat_top(node)
+  end
 end
 
 return vectorize_loops

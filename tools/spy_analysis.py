@@ -131,10 +131,15 @@ def generate_html_op_label(title, requirements, instances, color, verbose):
         req = requirements[i]
         region_name = req.region_node.get_name()
         priv = req.get_privilege_and_coherence()
-        if region_name <> None:
-            line = ["Region " + str(i), region_name+" (priv: "+priv+")"]
+        if req.is_reg:
+            prefix = "Region"
         else:
-            line = [{"label" : "Region "+str(i)+" (priv:"+priv+")", "colspan" : 2}]
+            prefix = "Partition"
+
+        if region_name <> None:
+            line = [prefix + " " + str(i), region_name+" (priv: "+priv+")"]
+        else:
+            line = [{"label" : prefix+" "+str(i)+" (priv:"+priv+")", "colspan" : 2}]
         lines.append(line)
         req_summary = 'index:%s,field:%s,tree:%s' % \
                 (hex(req.region_node.index_node.uid),
@@ -186,7 +191,9 @@ def generate_html_instance_label(title, instance, color, verbose):
             '</table>'
 
 def compute_dependence_type(req1, req2):
-    if req1.is_read_only() and req2.is_read_only():
+    if req1.is_no_access() or req2.is_no_access():
+        return NO_DEPENDENCE
+    elif req1.is_read_only() and req2.is_read_only():
         return NO_DEPENDENCE
     elif req1.is_reduce() and req2.is_reduce():
         if req1.redop == req2.redop:
@@ -823,11 +830,11 @@ class Operation(object):
         return True
 
     def add_logical_incoming(self, op):
-        assert op <> self
+        #assert op <> self
         self.logical_incoming.add(op)
 
     def add_logical_outgoing(self, op):
-        assert op <> self
+        #assert op <> self
         self.logical_outgoing.add(op)
 
     def get_logical_mark(self, idx):
@@ -1429,20 +1436,21 @@ class CopyOp(Operation):
         return (cidx, cidx + self.get_num_copies())
 
     def print_base_node(self, printer, logical):
-        title = self.get_name() + ' in '+self.ctx.get_name()
-        # TODO: reduction copy-across operations should also be tracked
-        #if self.redop <> 0:
-        #    title = 'Reduction ' + title
-        lines = [[{ "label" : title, "colspan" : 3 }]]
-
-        color = 'darkgoldenrod3'
         size = 14
-        # TODO: reduction copy-across operations should also be tracked
-        #if self.redop <> 0:
-        #    lines.append(["Reduction Op", {"colspan" : 2, "label" : str(self.redop)}])
-        #    color = 'tomato 3'
+        title = self.get_name() + ' in '+self.ctx.get_name()
+        color = 'darkgoldenrod3'
 
         num_copies = len(self.reqs) / 2
+        for cidx in range(0, num_copies):
+            (src_idx, dst_idx) = self.get_index_pair(cidx)
+            dst_req = self.get_requirement(dst_idx)
+            if dst_req.redop <> 0:
+                title = 'Reduction ' + title
+                color = 'tomato'
+                break
+
+        lines = [[{ "label" : title, "colspan" : 3 }]]
+
         for cidx in range(0, num_copies):
             (src_idx, dst_idx) = self.get_index_pair(cidx)
             src_req = self.get_requirement(src_idx)
@@ -1484,13 +1492,9 @@ class CopyOp(Operation):
                         first_field = False
                     lines.append(line)
 
-            # TODO: reduction copy-across operations should also be tracked
-            #if self.redop <> 0:
-            #    max_blocking = max(src_inst.blocking, dst_inst.blocking)
-            #    min_blocking = min(src_inst.blocking, dst_inst.blocking)
-            #    if max_blocking > 1 and min_blocking == 1:
-            #        color = 'red'
-            #        size = 16
+            if dst_req.redop <> 0:
+                lines.append(["Reduction Op",
+                              {"colspan" : 2, "label" : str(dst_req.redop)}])
 
         label = '<table border="0" cellborder="1" cellspacing="0" cellpadding="3" bgcolor="%s">' % color + \
                 "".join([wrap_with_trtd(line) for line in lines]) +\
@@ -2046,8 +2050,11 @@ class Requirement(object):
         assert fid not in self.fields
         self.fields.append(fid)
 
+    def is_no_access(self):
+        return self.priv == NO_ACCESS
+
     def is_read_only(self):
-        return (self.priv == NO_ACCESS) or (self.priv == READ_ONLY)
+        return self.priv == READ_ONLY
 
     def has_write(self):
         return (self.priv == READ_WRITE) or (self.priv == REDUCE) or (self.priv == WRITE_ONLY)
@@ -2690,7 +2697,7 @@ class GraphPrinter(object):
         self.filename = path+name+'.dot'
         self.out = open(self.filename,'w')
         self.depth = 0
-        self.println('digraph '+name)
+        self.println('digraph "'+name+'"')
         self.println('{')
         self.down()
         #self.println('aspect = ".00001,100";')
@@ -2712,13 +2719,15 @@ class GraphPrinter(object):
         pdf_file = self.name+".pdf"
         try:
             if simplify:
-                command = ['tred ' + dot_file + ' | dot -Tpdf -o '+pdf_file]
+                tred = subprocess.Popen(['tred', dot_file], stdout=subprocess.PIPE)
+                dot = subprocess.Popen(['dot', '-Tpdf', '-o', pdf_file], stdin=tred.stdout)
+                if dot.wait() != 0:
+                    raise Exception('DOT failed')
             else:
-                command = ['dot -Tpdf -o'+pdf_file+' '+dot_file]
-            subprocess.check_call(command,shell=True)
+                subprocess.check_call(['dot', '-Tpdf', '-o', pdf_file, dot_file])
         except:
             print "WARNING: DOT failure, image for graph "+str(self.name)+" not generated"
-            subprocess.call(['rm -f core '+pdf_file],shell=True)
+            subprocess.call(['rm', '-f', 'core', pdf_file])
 
     def up(self):
         assert self.depth > 0
@@ -3202,6 +3211,10 @@ class State(object):
         if (e1, e2) not in self.copies:
             return False
         copy = self.copies[(e1, e2)]
+        if iid not in self.instances:
+            return False
+        if not self.instances[iid][-1].add_op_user(copy, index):
+            return False
         copy.add_instance(index, self.instances[iid][-1])
         return True
 
@@ -3428,6 +3441,7 @@ class State(object):
     def check_instance_dependences(self):
         for versions in self.instances.itervalues():
             for instance in versions:
+                # TODO: deal with simultaneous properly
                 if instance.is_simultaneous():
                     continue
                 print "Checking physical instance "+hex(instance.iid)+"..."
@@ -3436,6 +3450,8 @@ class State(object):
                         for req1 in reqs1:
                             for op2, reqs2 in op_users.iteritems():
                                 for req2 in reqs2:
+                                    if ((field == 145) and (instance.iid == 16140901064495857727L) and ((op1.uid == 77) or (op2.uid == 77))):
+                                        print "HELLO THERE"
                                     if op1 != op2 and \
                                             self.compute_dependence(req1, req2) in \
                                             (TRUE_DEPENDENCE, ANTI_DEPENDENCE):
@@ -3444,7 +3460,8 @@ class State(object):
                                                 return False
                                             return True
                                         def traverse_op(node, traverser):
-                                            traverser.found = traverser.target == node or traverser.found
+                                            if traverser.target == node or traverser.found:
+                                                traverser.found = True
                                             return not traverser.found
                                         def post_traverse(node, traverser):
                                             pass

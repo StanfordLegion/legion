@@ -86,9 +86,11 @@ namespace LegionRuntime {
       static inline void log_index_partition(IDType parent_id, 
                 IDType unique_id, bool disjoint, const DomainPoint& point)
       {
-        log_spy.info("Index Partition " IDFMT " " IDFMT " %u %u %u %u %u",
-                    parent_id, unique_id, disjoint, point.dim, point.point_data[0],
-                    point.point_data[1], point.point_data[2]);
+        log_spy.info("Index Partition " IDFMT " " IDFMT " %u %u %d %d %d",
+                    parent_id, unique_id, disjoint, point.dim, 
+                    (int)point.point_data[0],
+                    (int)point.point_data[1],
+                    (int)point.point_data[2]);
       }
 
       static inline void log_index_partition_name(IDType unique_id,
@@ -101,9 +103,11 @@ namespace LegionRuntime {
       static inline void log_index_subspace(IDType parent_id, 
                               IDType unique_id, const DomainPoint& point)
       {
-        log_spy.info("Index Subspace " IDFMT " " IDFMT " %u %u %u %u",
-                          parent_id, unique_id, point.dim, point.point_data[0],
-                          point.point_data[1], point.point_data[2]);
+        log_spy.info("Index Subspace " IDFMT " " IDFMT " %u %d %d %d",
+                          parent_id, unique_id, point.dim, 
+                          (int)point.point_data[0],
+                          (int)point.point_data[1],
+                          (int)point.point_data[2]);
       }
 
       static inline void log_index_space_independence(IDType parent_id,
@@ -297,10 +301,10 @@ namespace LegionRuntime {
       static inline void log_slice_point(UniqueID slice_id, UniqueID point_id,
                                          const DomainPoint &point)
       {
-        log_spy.info("Slice Point %llu %llu %u %u %u %u", 
+        log_spy.info("Slice Point %llu %llu %u %d %d %d", 
             slice_id, point_id,
-            point.dim, point.point_data[0],
-            point.point_data[1], point.point_data[2]);
+            point.dim, (int)point.point_data[0],
+            (int)point.point_data[1], (int)point.point_data[2]);
       }
 
       static inline void log_point_point(UniqueID p1, UniqueID p2)

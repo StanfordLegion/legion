@@ -37,6 +37,7 @@ namespace Realm {
     status.error_code = 0;
     measurements.import_requests(requests); 
     timeline.record_create_time();
+    wants_event_waits = measurements.wants_measurement<ProfilingMeasurements::OperationEventWaits>();
   }
 
   inline void Operation::add_reference(void)
@@ -74,6 +75,24 @@ namespace Realm {
 
     if(remaining == 0)
       mark_completed();
+  }
+
+  inline bool Operation::cancellation_requested(void) const
+  {
+    return status.result == Status::INTERRUPT_REQUESTED;
+  }
+
+  // used to record event wait intervals, if desired
+  inline ProfilingMeasurements::OperationEventWaits::WaitInterval *Operation::create_wait_interval(Event e)
+  {
+    if(wants_event_waits) {
+      size_t idx = waits.intervals.size();
+      waits.intervals.resize(idx + 1);
+      ProfilingMeasurements::OperationEventWaits::WaitInterval *interval = &waits.intervals[idx];
+      interval->wait_event = e;
+      return interval;
+    } else 
+      return 0;
   }
 
 

@@ -349,13 +349,13 @@ namespace Realm {
         return false;
       }
 
-      int& operator[](unsigned index)
+      coord_t& operator[](unsigned index)
       {
         assert(index < MAX_POINT_DIM);
         return point_data[index];
       }
 
-      const int& operator[](unsigned index) const
+      const coord_t& operator[](unsigned index) const
       {
         assert(index < MAX_POINT_DIM);
         return point_data[index];
@@ -386,7 +386,7 @@ namespace Realm {
 	return dp;
       }
 
-      int get_index(void) const
+      coord_t get_index(void) const
       {
 	assert(dim == 0);
 	return point_data[0];
@@ -404,7 +404,7 @@ namespace Realm {
     protected:
     public:
       int dim;
-      int point_data[MAX_POINT_DIM];
+      coord_t point_data[MAX_POINT_DIM];
     };
   inline std::ostream& operator<<(std::ostream& os, const DomainPoint& dp) {
     switch(dp.dim) {
@@ -941,7 +941,7 @@ namespace Realm {
     public:
       IDType is_id;
       int dim;
-      int rect_data[2 * MAX_RECT_DIM];
+      coord_t rect_data[2 * MAX_RECT_DIM];
 
     public:
       // simple instance creation for the lazy

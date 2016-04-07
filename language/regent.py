@@ -20,27 +20,38 @@ import os, platform, subprocess, sys
 
 os_name = platform.system()
 
-root_dir = os.path.dirname(os.path.realpath(__file__))
-legion_dir = os.path.dirname(root_dir)
+# Find Regent.
+regent_dir = os.path.dirname(os.path.realpath(__file__))
+terra_dir = os.path.join(regent_dir, 'terra')
 
-terra_dir = os.path.join(root_dir, 'terra')
-
-runtime_dir = os.path.join(legion_dir, 'runtime')
+# Find Legion (in the environment, or relative to Regent).
+if 'LG_RT_DIR' in os.environ:
+    runtime_dir = os.path.realpath(os.environ['LG_RT_DIR'])
+else:
+    runtime_dir = os.path.join(os.path.dirname(regent_dir), 'runtime')
 realm_dir = os.path.join(runtime_dir, 'realm')
 mapper_dir = os.path.join(runtime_dir, 'mappers')
 legion_runtime_dir = os.path.join(runtime_dir, 'legion')
-bindings_dir = os.path.join(legion_dir, 'bindings', 'terra')
-# CUDA directoy is hard-coded, but should be entered via an shell variable
-cuda_dir = "/usr/local/cuda/include"
+bindings_dir = os.path.join(os.path.dirname(runtime_dir), 'bindings', 'terra')
+
+# Find CUDA.
+if 'CUDA' in os.environ:
+    cuda_dir = os.path.realpath(os.environ['CUDA'])
+elif 'CUDATOOLKIT_HOME' in os.environ:
+    cuda_dir = os.path.realpath(os.environ['CUDATOOLKIT_HOME'])
+else:
+    cuda_dir = None
+cuda_include_dir = os.path.join(cuda_dir, 'include') if cuda_dir is not None else None
 
 include_path = [
     bindings_dir,
     runtime_dir,
-    cuda_dir,
     realm_dir,
     mapper_dir,
     legion_runtime_dir,
 ]
+if cuda_include_dir is not None:
+    include_path.append(cuda_include_dir)
 
 LD_LIBRARY_PATH = 'LD_LIBRARY_PATH'
 if os_name == 'Darwin':
@@ -58,11 +69,18 @@ def regent(args, env = {}, **kwargs):
     if not os.path.exists(terra_exe):
         terra_exe = os.path.join(terra_dir, 'bin', 'terra')
 
-    terra_path = (
-        ['?.t'] +
-        ([os.path.join(os.path.dirname(os.path.realpath(args[0])), '?.t')]
-          if len(args) >= 1 and os.path.exists(args[0]) else []) +
-        [os.path.join(root_dir, 'src', '?.t'),
+    if 'TERRA_PATH' in os.environ:
+        terra_path = [os.path.realpath(os.environ['TERRA_PATH'])]
+    else:
+        terra_path = []
+
+    normal_args = [arg for arg in args if not arg.startswith('-')]
+    terra_path += (
+        ['?.t', '?.rg'] +
+        ([os.path.join(os.path.dirname(os.path.realpath(normal_args[0])), '?.t'),
+          os.path.join(os.path.dirname(os.path.realpath(normal_args[0])), '?.rg')]
+          if len(normal_args) >= 1 and os.path.exists(normal_args[0]) else []) +
+        [os.path.join(regent_dir, 'src', '?.t'),
         os.path.join(terra_dir, 'tests', 'lib', '?.t'),
         os.path.join(terra_dir, 'release', 'include', '?.t'),
         os.path.join(bindings_dir, '?.t')])
@@ -71,6 +89,7 @@ def regent(args, env = {}, **kwargs):
         'TERRA_PATH': ';'.join(terra_path),
         LD_LIBRARY_PATH: ':'.join(lib_path),
         'INCLUDE_PATH': ';'.join(include_path),
+        'LG_RT_DIR': runtime_dir,
     }
 
     cmd = []
@@ -78,7 +97,7 @@ def regent(args, env = {}, **kwargs):
         cmd = cmd + (os.environ['LAUNCHER'].split()
                      if 'LAUNCHER' in os.environ else [])
     cmd = cmd + [terra_exe] + args
-    cmd_env = dict(os.environ.iteritems())
+    cmd_env = dict(os.environ.items())
     cmd_env.update(terra_env)
     cmd_env.update(env)
     return subprocess.Popen(

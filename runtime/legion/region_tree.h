@@ -181,6 +181,7 @@ namespace LegionRuntime {
       IndexSpaceAllocator* get_index_space_allocator(IndexSpace handle);
       size_t get_domain_volume(IndexSpace handle);
       bool is_index_partition_disjoint(IndexPartition p);
+      bool is_index_partition_complete(IndexPartition p);
     public:
       void create_field_space(FieldSpace handle);
       void destroy_field_space(FieldSpace handle, AddressSpaceID source);
@@ -188,23 +189,12 @@ namespace LegionRuntime {
       // allocation.  It is an error if the field already existed and the
       // allocation was not local.
       bool allocate_field(FieldSpace handle, size_t field_size, 
-                          FieldID fid, bool local, CustomSerdezID serdez_id);
-      void free_field(FieldSpace handle, FieldID fid, AddressSpaceID source);
+                    FieldID fid, CustomSerdezID serdez_id, bool local = false);
+      void free_field(FieldSpace handle, FieldID fid);
       void allocate_fields(FieldSpace handle, const std::vector<size_t> &sizes,
                            const std::vector<FieldID> &resulting_fields,
                            CustomSerdezID serdez_id);
-      void free_fields(FieldSpace handle, const std::set<FieldID> &to_free,
-                       AddressSpaceID source);
-      void allocate_field_index(FieldSpace handle, size_t field_size, 
-                                FieldID fid, unsigned index, 
-                                CustomSerdezID serdez_id,
-                                AddressSpaceID source);
-      void allocate_field_indexes(FieldSpace handle, 
-                                  const std::vector<FieldID> &resulting_fields,
-                                  const std::vector<size_t> &sizes,
-                                  const std::vector<unsigned> &indexes,
-                                  CustomSerdezID serdez_id,
-                                  AddressSpaceID source);
+      void free_fields(FieldSpace handle, const std::vector<FieldID> &to_free);
       void get_all_fields(FieldSpace handle, std::set<FieldID> &fields);
       void get_all_regions(FieldSpace handle, std::set<LogicalRegion> &regions);
       size_t get_field_size(FieldSpace handle, FieldID fid);
@@ -429,10 +419,12 @@ namespace LegionRuntime {
                         const InstanceRef &dst_ref,
                         Event precondition);
       // This takes ownership of the value buffer
-      void fill_fields(RegionTreeContext ctx,
-                       const RegionRequirement &req,
-                       const void *value, size_t value_size,
-                       VersionInfo &version_info);
+      Event fill_fields(RegionTreeContext ctx, Operation *op,
+                        const RegionRequirement &req,
+                        const void *value, size_t value_size,
+                        VersionInfo &version_info,
+                        RestrictInfo &restrict_info,
+                        MappingRef &map_ref, Event precondition);
       InstanceRef attach_file(RegionTreeContext ctx,
                               const RegionRequirement &req,
                               AttachOp *attach_op,
@@ -470,7 +462,8 @@ namespace LegionRuntime {
       IndexPartNode*  create_node(IndexPartition p, IndexSpaceNode *par,
                                   ColorPoint color, Domain color_space,
                                   Event ready_event, AllocateMode mode);
-      FieldSpaceNode* create_node(FieldSpace space, Event dist_alloc);
+      FieldSpaceNode* create_node(FieldSpace space);
+      FieldSpaceNode* create_node(FieldSpace space, Deserializer &derez);
       RegionNode*     create_node(LogicalRegion r, PartitionNode *par);
       PartitionNode*  create_node(LogicalPartition p, RegionNode *par);
     public:
@@ -597,19 +590,25 @@ namespace LegionRuntime {
                                        const void *buffer, size_t size,
                                        bool is_mutable);
     public:
-      void retrieve_semantic_information(IndexSpace handle, SemanticTag tag,
-                                         const void *&result, size_t &size);
-      void retrieve_semantic_information(IndexPartition handle, SemanticTag tag,
-                                         const void *&result, size_t &size);
-      void retrieve_semantic_information(FieldSpace handle, SemanticTag tag,
-                                         const void *&result, size_t &size);
-      void retrieve_semantic_information(FieldSpace handle, FieldID fid,
+      bool retrieve_semantic_information(IndexSpace handle, SemanticTag tag,
+                                         const void *&result, size_t &size,
+                                         bool can_fail, bool wait_until);
+      bool retrieve_semantic_information(IndexPartition handle, SemanticTag tag,
+                                         const void *&result, size_t &size,
+                                         bool can_fail, bool wait_until);
+      bool retrieve_semantic_information(FieldSpace handle, SemanticTag tag,
+                                         const void *&result, size_t &size,
+                                         bool can_fail, bool wait_until);
+      bool retrieve_semantic_information(FieldSpace handle, FieldID fid,
                                          SemanticTag tag,
-                                         const void *&result, size_t &size);
-      void retrieve_semantic_information(LogicalRegion handle, SemanticTag tag,
-                                         const void *&result, size_t &size);
-      void retrieve_semantic_information(LogicalPartition part, SemanticTag tag,
-                                         const void *&result, size_t &size);
+                                         const void *&result, size_t &size,
+                                         bool can_fail, bool wait_until);
+      bool retrieve_semantic_information(LogicalRegion handle, SemanticTag tag,
+                                         const void *&result, size_t &size,
+                                         bool can_fail, bool wait_until);
+      bool retrieve_semantic_information(LogicalPartition part, SemanticTag tag,
+                                         const void *&result, size_t &size,
+                                         bool can_fail, bool wait_until);
     public:
       Internal *const runtime;
     protected:
@@ -623,6 +622,12 @@ namespace LegionRuntime {
       std::map<LogicalRegion,RegionNode*>     region_nodes;
       std::map<LogicalPartition,PartitionNode*> part_nodes;
       std::map<RegionTreeID,RegionNode*>        tree_nodes;
+    private:
+      // pending events for requested nodes
+      std::map<IndexSpace,Event>       index_space_requests;
+      std::map<IndexPartition,Event>    index_part_requests;
+      std::map<FieldSpace,Event>       field_space_requests;
+      std::map<RegionTreeID,Event>     region_tree_requests;
     public:
       static bool are_disjoint(const Domain &left,
                                const Domain &right);
@@ -822,10 +827,11 @@ namespace LegionRuntime {
     public:
       void attach_semantic_information(SemanticTag tag, AddressSpaceID source,
                              const void *buffer, size_t size, bool is_mutable);
-      void retrieve_semantic_information(SemanticTag tag,
-                                         const void *&result, size_t &size);
+      bool retrieve_semantic_information(SemanticTag tag,
+                                         const void *&result, size_t &size,
+                                         bool can_fail, bool wait_until);
       virtual void send_semantic_request(AddressSpaceID target, 
-                                         SemanticTag tag) = 0;
+        SemanticTag tag, bool can_fail, bool wait_until, UserEvent ready) = 0;
       virtual void send_semantic_info(AddressSpaceID target, SemanticTag tag,
                         const void *buffer, size_t size, bool is_mutable) = 0;
     public:
@@ -920,10 +926,11 @@ namespace LegionRuntime {
       virtual void get_colors(std::set<ColorPoint> &colors);
     public:
       virtual void send_semantic_request(AddressSpaceID target, 
-                                         SemanticTag tag);
+           SemanticTag tag, bool can_fail, bool wait_until, UserEvent ready);
       virtual void send_semantic_info(AddressSpaceID target, SemanticTag tag,
                            const void *buffer, size_t size, bool is_mutable);
-      void process_semantic_request(SemanticTag tag, AddressSpaceID source);
+      void process_semantic_request(SemanticTag tag, AddressSpaceID source,
+                            bool can_fail, bool wait_until, UserEvent ready);
       static void handle_semantic_request(RegionTreeForest *forest,
                                  Deserializer &derez, AddressSpaceID source);
       static void handle_semantic_info(RegionTreeForest *forest,
@@ -1075,10 +1082,11 @@ namespace LegionRuntime {
       virtual void get_colors(std::set<ColorPoint> &colors);
     public:
       virtual void send_semantic_request(AddressSpaceID target, 
-                                         SemanticTag tag);
+             SemanticTag tag, bool can_fail, bool wait_until, UserEvent ready);
       virtual void send_semantic_info(AddressSpaceID target, SemanticTag tag,
                              const void *buffer, size_t size, bool is_mutable);
-      void process_semantic_request(SemanticTag tag, AddressSpaceID source);
+      void process_semantic_request(SemanticTag tag, AddressSpaceID source,
+                              bool can_fail, bool wait_until, UserEvent ready);
       static void handle_semantic_request(RegionTreeForest *forest,
                                    Deserializer &derez, AddressSpaceID source);
       static void handle_semantic_info(RegionTreeForest *forest,
@@ -1178,55 +1186,23 @@ namespace LegionRuntime {
       struct FieldInfo {
       public:
         FieldInfo(void) : field_size(0), idx(0), serdez_id(0),
-                          local(false), destroyed(false) { }
-        FieldInfo(size_t size, unsigned id, bool loc, CustomSerdezID sid)
-          : field_size(size), idx(id), serdez_id(sid),
-            local(loc), destroyed(false) { }
+                          destroyed(false) { }
+        FieldInfo(size_t size, unsigned id, CustomSerdezID sid)
+          : field_size(size), idx(id), serdez_id(sid), destroyed(false) { }
       public:
         size_t field_size;
         unsigned idx;
         CustomSerdezID serdez_id;
-        bool local;
         bool destroyed;
       };
-      struct SendFieldAllocationFunctor {
+      struct FindTargetsFunctor {
       public:
-        SendFieldAllocationFunctor(FieldSpace h, FieldID f, size_t s,
-                                   unsigned i, CustomSerdezID sid,
-                                   Internal *rt)
-          : handle(h), field(f), size(s), index(i), 
-            serdez_id(sid), runtime(rt) { }
+        FindTargetsFunctor(std::deque<AddressSpaceID> &t)
+          : targets(t) { }
       public:
         void apply(AddressSpaceID target);
       private:
-        FieldSpace handle;
-        FieldID field;
-        size_t size;
-        unsigned index;
-        CustomSerdezID serdez_id;
-        Internal *runtime;
-      };
-      struct SendFieldDestructionFunctor {
-      public:
-        SendFieldDestructionFunctor(FieldSpace h, FieldID f, Internal *rt)
-          : handle(h), field(f), runtime(rt) { }
-      public:
-        void apply(AddressSpaceID target);
-      private:
-        FieldSpace handle;
-        FieldID field;
-        Internal *runtime;
-      };
-      struct UpgradeFunctor {
-      public:
-        UpgradeFunctor(std::map<AddressSpaceID,UserEvent> &ts,
-                       std::set<Event> &pre)
-          : to_send(ts), preconditions(pre) { }
-      public:
-        void apply(AddressSpaceID target);
-      private:
-        std::map<AddressSpaceID,UserEvent> &to_send;
-        std::set<Event> &preconditions;
+        std::deque<AddressSpaceID> &targets;
       };
       struct SemanticRequestArgs {
         HLRTaskID hlr_id;
@@ -1242,8 +1218,9 @@ namespace LegionRuntime {
         AddressSpaceID source;
       };
     public:
-      FieldSpaceNode(FieldSpace sp, Event dist_alloc,
-                     RegionTreeForest *ctx);
+      FieldSpaceNode(FieldSpace sp, RegionTreeForest *ctx);
+      FieldSpaceNode(FieldSpace sp, RegionTreeForest *ctx,
+                     Deserializer &derez);
       FieldSpaceNode(const FieldSpaceNode &rhs);
       ~FieldSpaceNode(void);
     public:
@@ -1259,17 +1236,18 @@ namespace LegionRuntime {
                                        AddressSpaceID source,
                                        const void *buffer, size_t size,
                                        bool is_mutable);
-      void retrieve_semantic_information(SemanticTag tag,
-                                         const void *&result, size_t &size);
-      void retrieve_semantic_information(FieldID fid, SemanticTag tag,
-                                         const void *&result, size_t &size);
+      bool retrieve_semantic_information(SemanticTag tag,
+             const void *&result, size_t &size, bool can_fail, bool wait_until);
+      bool retrieve_semantic_information(FieldID fid, SemanticTag tag,
+             const void *&result, size_t &size, bool can_fail, bool wait_until);
       void send_semantic_info(AddressSpaceID target, SemanticTag tag,
                              const void *result, size_t size, bool is_mutable);
       void send_semantic_field_info(AddressSpaceID target, FieldID fid,
             SemanticTag tag, const void *result, size_t size, bool is_mutable);
-      void process_semantic_request(SemanticTag tag, AddressSpaceID source);
+      void process_semantic_request(SemanticTag tag, AddressSpaceID source,
+                              bool can_fail, bool wait_until, UserEvent ready);
       void process_semantic_field_request(FieldID fid, SemanticTag tag, 
-                                          AddressSpaceID source);
+       AddressSpaceID source, bool can_fail, bool wait_until, UserEvent ready);
       static void handle_semantic_request(RegionTreeForest *forest,
                                    Deserializer &derez, AddressSpaceID source);
       static void handle_field_semantic_request(RegionTreeForest *forest,
@@ -1279,12 +1257,17 @@ namespace LegionRuntime {
       static void handle_field_semantic_info(RegionTreeForest *forest,
                                    Deserializer &derez, AddressSpaceID source);
     public:
-      void allocate_field(FieldID fid, size_t size, bool local, 
-                          CustomSerdezID serdez_id);
-      void allocate_field_index(FieldID fid, size_t size, 
-                                AddressSpaceID runtime, unsigned index,
-                                CustomSerdezID serdez_id);
+      Event allocate_field(FieldID fid, size_t size,
+                           CustomSerdezID serdez_id);
+      Event allocate_fields(const std::vector<size_t> &sizes,
+                            const std::vector<FieldID> &fids,
+                            CustomSerdezID serdez_id);
       void free_field(FieldID fid, AddressSpaceID source);
+      void free_fields(const std::vector<FieldID> &to_free,
+                       AddressSpaceID source);
+    protected:
+      void process_alloc_notification(Deserializer &derez);
+    public:
       bool has_field(FieldID fid);
       size_t get_field_size(FieldID fid);
       void get_all_fields(std::set<FieldID> &to_set);
@@ -1294,11 +1277,10 @@ namespace LegionRuntime {
                          std::set<FieldID> &to_set);
     public:
       void add_instance(RegionNode *inst);
+      Event add_instance(LogicalRegion top_handle, AddressSpaceID source);
       bool has_instance(RegionTreeID tid);
-      void add_creation_source(AddressSpaceID source);
       void destroy_node(AddressSpaceID source);
     public:
-      void transform_field_mask(FieldMask &mask, AddressSpaceID source);
       FieldMask get_field_mask(const std::set<FieldID> &fields) const;
       unsigned get_field_index(FieldID fid) const;
       void get_field_indexes(const std::set<FieldID> &fields,
@@ -1336,9 +1318,6 @@ namespace LegionRuntime {
                                    const std::vector<CustomSerdezID> &serdez);
       LayoutDescription* register_layout_description(LayoutDescription *desc);
     public:
-      void upgrade_distributed_alloc(UserEvent to_trigger);
-      void process_upgrade(UserEvent to_trigger, Event ready_event);
-    public:
       void send_node(AddressSpaceID target);
       static void handle_node_creation(RegionTreeForest *context,
                                        Deserializer &derez, 
@@ -1348,15 +1327,20 @@ namespace LegionRuntime {
                                       Deserializer &derez,
                                       AddressSpaceID source);
       static void handle_node_return(Deserializer &derez);
-      static void handle_distributed_alloc_request(RegionTreeForest *forest,
-                                                   Deserializer &derez);
-      static void handle_distributed_alloc_upgrade(RegionTreeForest *forest,
-                                                   Deserializer &derez);
     public:
       static void handle_remote_instance_creation(RegionTreeForest *forest,
                                 Deserializer &derez, AddressSpaceID source);
       static void handle_remote_reduction_creation(RegionTreeForest *forest,
                                 Deserializer &derez, AddressSpaceID source);
+    public:
+      static void handle_alloc_request(RegionTreeForest *forest,
+                                       Deserializer &derez);
+      static void handle_alloc_notification(RegionTreeForest *forest,
+                                            Deserializer &derez);
+      static void handle_top_alloc(RegionTreeForest *forest,
+                                   Deserializer &derez, AddressSpaceID source);
+      static void handle_field_free(RegionTreeForest *forest,
+                                    Deserializer &derez, AddressSpaceID source);
     public:
       // Help with debug printing
       char* to_string(const FieldMask &mask) const;
@@ -1365,11 +1349,12 @@ namespace LegionRuntime {
     protected:
       // Assume we are already holding the node lock
       // when calling these methods
-      unsigned allocate_index(bool local, int goal=-1);
+      int allocate_index(void);
       void free_index(unsigned index);
     public:
       const FieldSpace handle;
       const bool is_owner;
+      const AddressSpaceID owner;
       RegionTreeForest *const context;
     public:
       NodeSet creation_set;
@@ -1377,21 +1362,9 @@ namespace LegionRuntime {
     private:
       Reservation node_lock;
       // Top nodes in the trees for which this field space is used
-      std::set<RegionNode*> logical_nodes;
+      std::set<LogicalRegion> logical_trees;
       std::map<FieldID,FieldInfo> fields;
-      FieldMask allocated_indexes;
-      int next_allocation_index; // for use in the random case
-    private:
-      /*
-       * Every field space contains a permutation transformer that
-       * can translate a field mask from any other node onto
-       * this node, this is only necessary when we are doing
-       * distributed field allocations on multiple nodes.
-       */
-      LegionMap<AddressSpaceID,FieldPermutation>::aligned transformers;
-      // Track if we are in a distributed allocation mode
-      // and if not, are we the owner space
-      Event distributed_allocation;
+      FieldMask available_indexes;
     private:
       // Keep track of the layouts associated with this field space
       // Index them by their hash of their field mask to help
@@ -1441,10 +1414,10 @@ namespace LegionRuntime {
     public:
       void attach_semantic_information(SemanticTag tag, AddressSpaceID source,
                             const void *buffer, size_t size, bool is_mutable);
-      void retrieve_semantic_information(SemanticTag tag,
-                                         const void *&result, size_t &size);
+      bool retrieve_semantic_information(SemanticTag tag,
+           const void *&result, size_t &size, bool can_fail, bool wait_until);
       virtual void send_semantic_request(AddressSpaceID target, 
-                                         SemanticTag tag) = 0;
+          SemanticTag tag, bool can_fail, bool wait_until, UserEvent ready) = 0;
       virtual void send_semantic_info(AddressSpaceID target, SemanticTag tag,
                           const void *buffer, size_t size, bool is_mutable) = 0;
     public:
@@ -1901,10 +1874,11 @@ namespace LegionRuntime {
                             Deserializer &derez, AddressSpaceID source);
     public:
       virtual void send_semantic_request(AddressSpaceID target, 
-                                         SemanticTag tag);
+             SemanticTag tag, bool can_fail, bool wait_until, UserEvent ready);
       virtual void send_semantic_info(AddressSpaceID target, SemanticTag tag,
                              const void *buffer, size_t size, bool is_mutable);
-      void process_semantic_request(SemanticTag tag, AddressSpaceID source);
+      void process_semantic_request(SemanticTag tag, AddressSpaceID source,
+                              bool can_fail, bool wait_until, UserEvent ready);
       static void handle_semantic_request(RegionTreeForest *forest,
                                    Deserializer &derez, AddressSpaceID source);
       static void handle_semantic_info(RegionTreeForest *forest,
@@ -1967,6 +1941,11 @@ namespace LegionRuntime {
       void fill_fields(ContextID ctx, const FieldMask &fill_mask,
                        const void *value, size_t value_size, 
                        VersionInfo &version_info);
+      Event eager_fill_fields(ContextID ctx, Operation *op,
+                              const FieldMask &fill_mask,
+                              const void *value, size_t value_size,
+                              VersionInfo &version_info, InstanceView *target,
+                              Event precondition);
       InstanceRef attach_file(ContextID ctx, const FieldMask &attach_mask,
                              const RegionRequirement &req, AttachOp *attach_op,
                              VersionInfo &version_info);
@@ -2076,10 +2055,11 @@ namespace LegionRuntime {
       virtual void send_node(AddressSpaceID target);
     public:
       virtual void send_semantic_request(AddressSpaceID target, 
-                                         SemanticTag tag);
+             SemanticTag tag, bool can_fail, bool wait_until, UserEvent ready);
       virtual void send_semantic_info(AddressSpaceID target, SemanticTag tag,
                              const void *buffer, size_t size, bool is_mutable);
-      void process_semantic_request(SemanticTag tag, AddressSpaceID source);
+      void process_semantic_request(SemanticTag tag, AddressSpaceID source,
+                              bool can_fail, bool wait_until, UserEvent ready);
       static void handle_semantic_request(RegionTreeForest *forest,
                                    Deserializer &derez, AddressSpaceID source);
       static void handle_semantic_info(RegionTreeForest *forest,

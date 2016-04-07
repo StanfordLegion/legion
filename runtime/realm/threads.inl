@@ -79,7 +79,9 @@ namespace Realm {
   inline Thread::Thread(ThreadScheduler *_scheduler)
     : state(STATE_CREATED)
     , scheduler(_scheduler)
+    , current_op(0)
     , exception_handler_count(0)
+    , signal_count(0)
   {
   }
 
@@ -157,7 +159,7 @@ namespace Realm {
   template <typename CONDTYPE>
   class ThreadWaker : public CONDTYPE::Callback {
   public:
-    ThreadWaker(Thread *_thread);
+    ThreadWaker(const CONDTYPE& cond, Thread *_thread);
     void operator()(bool _poisoned);
 
     Thread *thread;
@@ -165,8 +167,8 @@ namespace Realm {
   };
 
   template <typename CONDTYPE>
-  ThreadWaker<CONDTYPE>::ThreadWaker(Thread *_thread)
-    : thread(_thread)
+  ThreadWaker<CONDTYPE>::ThreadWaker(const CONDTYPE& cond, Thread *_thread)
+    : CONDTYPE::Callback(cond), thread(_thread)
   {
   }
 
@@ -183,6 +185,13 @@ namespace Realm {
     case Thread::STATE_BLOCKING:
       {
 	// we caught it before it went to sleep, so nothing to do
+	break;
+      }
+
+    case Thread::STATE_ALERTED:
+      {
+	// it was asleep, but it's being awakened due to an alert, and will 
+	// notice that we've set the state to READY
 	break;
       }
 
@@ -206,10 +215,15 @@ namespace Realm {
   /*static*/ void Thread::wait_for_condition(const CONDTYPE& cond, bool& poisoned)
   {
     Thread *thread = self();
+
+    // we're interacting with the scheduler, so check for signals first
+    if(thread->signal_count > 0)
+      thread->process_signals();
+
     // first, indicate our intent to sleep
     thread->update_state(STATE_BLOCKING);
     // now create the callback so we know when to wake up
-    ThreadWaker<CONDTYPE> cb(thread);
+    ThreadWaker<CONDTYPE> cb(cond, thread);
     cond.add_callback(cb);
 
     // now tell the scheduler we are blocking
@@ -219,11 +233,33 @@ namespace Realm {
 
     // poison propagates to caller
     poisoned = cb.poisoned;
+
+    // check signals again on the way out (async ones should have woken us already,
+    //  but synchronous ones do not)
+    if(thread->signal_count > 0)
+      thread->process_signals();
   }
 
   inline bool Thread::exceptions_permitted(void) const
   {
     return (exception_handler_count > 0);
+  }
+
+  inline void Thread::start_operation(Operation *op)
+  {
+    assert(current_op == 0);
+    current_op = op;
+  }
+
+  inline void Thread::stop_operation(Operation *op)
+  {
+    assert(current_op == op);
+    current_op = 0;
+  }
+
+  inline Operation *Thread::get_operation(void) const
+  {
+    return current_op;
   }
 
 

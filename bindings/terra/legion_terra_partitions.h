@@ -32,8 +32,19 @@ extern "C" {
 
 typedef struct legion_terra_index_cross_product_t {
   legion_index_partition_t partition;
-  legion_index_partition_t other;
+  legion_color_t other_color;
 } legion_terra_index_cross_product_t;
+
+typedef struct legion_terra_index_space_list_t {
+  legion_index_space_t space;
+  size_t count;
+  legion_index_space_t *subspaces;
+} legion_terra_index_space_list_t;
+
+typedef struct legion_terra_index_space_list_list_t {
+  size_t count;
+  legion_terra_index_space_list_t *sublists;
+} legion_terra_index_space_list_list_t;
 
 typedef struct legion_terra_cached_index_iterator_t {
   void *impl;
@@ -50,8 +61,35 @@ legion_terra_index_cross_product_t
 legion_terra_index_cross_product_create_multi(
   legion_runtime_t runtime,
   legion_context_t ctx,
-  legion_index_partition_t *partitions,
+  legion_index_partition_t *partitions, // input
+  legion_color_t *colors, // output
   size_t npartitions);
+
+legion_terra_index_space_list_list_t
+legion_terra_index_cross_product_create_list(
+  legion_runtime_t runtime,
+  legion_context_t ctx,
+  legion_terra_index_space_list_t lhs,
+  legion_terra_index_space_list_t rhs);
+
+legion_terra_index_space_list_list_t
+legion_terra_index_cross_product_create_list_shallow(
+  legion_runtime_t runtime,
+  legion_context_t ctx,
+  legion_terra_index_space_list_t lhs,
+  legion_terra_index_space_list_t rhs);
+
+legion_terra_index_space_list_list_t
+legion_terra_index_cross_product_create_list_complete(
+  legion_runtime_t runtime,
+  legion_context_t ctx,
+  legion_terra_index_space_list_t lhs,
+  legion_terra_index_space_list_list_t product,
+  bool consistent_ids);
+
+void
+legion_terra_index_space_list_list_destroy(
+  legion_terra_index_space_list_list_t list);
 
 legion_index_partition_t
 legion_terra_index_cross_product_get_partition(

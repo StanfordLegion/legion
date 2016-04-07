@@ -144,7 +144,8 @@ namespace LegionRuntime {
     public:
       void merge(const VersionInfo &rhs, const FieldMask &mask);
       void apply_mapping(ContextID ctx, AddressSpaceID target,
-                         std::set<Event> &applied_conditions);
+                         std::set<Event> &applied_conditions,
+			 bool copy_previous = false);
       void apply_close(ContextID ctx, AddressSpaceID target,
              const LegionMap<ColorPoint,FieldMask>::aligned &closed_children,
                        std::set<Event> &applied_conditions); 
@@ -226,6 +227,12 @@ namespace LegionRuntime {
             continue;
           restrictions[it->first] = overlap;
         }
+      }
+      inline void populate_restrict_fields(FieldMask &to_fill) const
+      {
+        for (LegionMap<LogicalRegion,FieldMask>::aligned::const_iterator it = 
+              restrictions.begin(); it != restrictions.end(); it++)
+          to_fill |= it->second;
       }
     public:
       void pack_info(Serializer &rez);

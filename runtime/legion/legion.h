@@ -71,6 +71,7 @@ namespace LegionRuntime {
       inline IndexTreeID get_tree_id(void) const { return tid; }
       inline bool exists(void) const { return (id != 0); }
     private:
+      friend std::ostream& operator<<(std::ostream& os, const IndexSpace& is);
       IndexSpaceID id;
       IndexTreeID tid;
     };
@@ -133,6 +134,7 @@ namespace LegionRuntime {
       inline FieldSpaceID get_id(void) const { return id; }
       inline bool exists(void) const { return (id != 0); }
     private:
+      friend std::ostream& operator<<(std::ostream& os, const FieldSpace& fs);
       FieldSpaceID id;
     };
 
@@ -171,6 +173,7 @@ namespace LegionRuntime {
       inline RegionTreeID get_tree_id(void) const { return tree_id; }
       inline bool exists(void) const { return (tree_id != 0); } 
     private:
+      friend std::ostream& operator<<(std::ostream& os, const LogicalRegion& lr);
       // These are private so the user can't just arbitrarily change them
       RegionTreeID tree_id;
       IndexSpace index_space;
@@ -667,6 +670,7 @@ namespace LegionRuntime {
     public:
       bool operator<(const PhaseBarrier &rhs) const;
       bool operator==(const PhaseBarrier &rhs) const;
+      bool operator!=(const PhaseBarrier &rhs) const;
     public:
       void arrive(unsigned count = 1);
       void wait(void);
@@ -674,6 +678,7 @@ namespace LegionRuntime {
       Barrier get_barrier(void) const { return phase_barrier; }
     protected:
       Barrier phase_barrier;
+      friend std::ostream& operator<<(std::ostream& os, const PhaseBarrier& pb);
     };
 
    /**
@@ -1014,6 +1019,14 @@ namespace LegionRuntime {
        */
       template<typename T>
       static inline Future from_value(Runtime *rt, const T &value);
+
+      /**
+       * Generates a future from an untyped pointer.  No
+       * serialization is performed.
+       */
+      static inline Future from_untyped_pointer(Runtime *rt,
+						const void *buffer,
+						size_t bytes);
     private:
       void* get_untyped_result(void); 
     };
@@ -1292,6 +1305,38 @@ namespace LegionRuntime {
       MappingTagID                    tag;
     };
 
+    /**
+     * \struct FillLauncher
+     * Fill launchers are objects that describe the parameters
+     * for issuing a fill operation.
+     * @see Runtime
+     */
+    struct FillLauncher {
+    public:
+      FillLauncher(void);
+      FillLauncher(LogicalRegion handle, LogicalRegion parent,
+                   TaskArgument arg, Predicate pred = Predicate::TRUE_PRED);
+      FillLauncher(LogicalRegion handle, LogicalRegion parent,
+                   Future f, Predicate pred = Predicate::TRUE_PRED);
+    public:
+      inline void set_argument(TaskArgument arg);
+      inline void set_future(Future f);
+      inline void add_field(FieldID fid);
+      inline void add_grant(Grant g);
+      inline void add_wait_barrier(PhaseBarrier bar);
+      inline void add_arrival_barrier(PhaseBarrier bar);
+    public:
+      LogicalRegion                   handle;
+      LogicalRegion                   parent;
+      TaskArgument                    argument;
+      Future                          future;
+      Predicate                       predicate;
+      std::set<FieldID>               fields;
+      std::vector<Grant>              grants;
+      std::vector<PhaseBarrier>       wait_barriers;
+      std::vector<PhaseBarrier>       arrive_barriers;
+    };
+
     //==========================================================================
     //                          Task Variant Registrars 
     //==========================================================================
@@ -1350,6 +1395,9 @@ namespace LegionRuntime {
       TaskVariantRegistrar(TaskID task_id, bool global = true,
                            GeneratorContext ctx = NULL,
                            const char *variant_name = NULL);
+      TaskVariantRegistrar(TaskID task_id, const char *variant_name,
+			   bool global = true,
+                           GeneratorContext ctx = NULL);
     public: // Add execution constraints
       inline TaskVariantRegistrar& 
         add_constraint(const ISAConstraint &constraint);
@@ -1534,9 +1582,9 @@ namespace LegionRuntime {
      */
     class IndexIterator {
     public:
-      IndexIterator(const Domain &dom);
-      IndexIterator(Runtime *rt, Context ctx, IndexSpace space);
-      IndexIterator(Runtime *rt, Context ctx, LogicalRegion lr);
+      IndexIterator(const Domain &dom, ptr_t start = ptr_t());
+      IndexIterator(Runtime *rt, Context ctx, IndexSpace space, ptr_t start = ptr_t());
+      IndexIterator(Runtime *rt, Context ctx, LogicalRegion lr, ptr_t start = ptr_t());
       IndexIterator(const IndexIterator &rhs);
       ~IndexIterator(void);
     public:
@@ -3834,6 +3882,14 @@ namespace LegionRuntime {
       bool is_index_partition_disjoint(Context ctx, IndexPartition p);
 
       /**
+       * Return whether a given index partition is complete
+       * @param ctx enclosing task context
+       * @param p index partition handle
+       * @return whether the index partition is complete
+       */
+      bool is_index_partition_complete(Context ctx, IndexPartition p);
+
+      /**
        * Get an index subspace from a partition with a given
        * color point.
        * @param ctx enclosing task context
@@ -4467,6 +4523,14 @@ namespace LegionRuntime {
       void fill_fields(Context ctx, LogicalRegion handle, LogicalRegion parent,
                        const std::set<FieldID> &fields,
                        Future f, Predicate pred = Predicate::TRUE_PRED);
+
+      /**
+       * Perform a fill operation using a launcher which specifies
+       * all of the parameters of the launch.
+       * @param ctx enclosing task context
+       * @param launcher the launcher that describes the fill operation
+       */
+      void fill_fields(Context ctx, const FillLauncher &launcher);
     public:
       //------------------------------------------------------------------------
       // File Operations
@@ -5130,9 +5194,14 @@ namespace LegionRuntime {
        * @param tag semantic tag
        * @param result pointer to assign to the semantic buffer
        * @param size where to write the size of the semantic buffer
+       * @param can_fail query allowed to fail
+       * @param wait_until_ready wait indefinitely for the tag
+       * @return true if the query succeeds
        */
-      void retrieve_semantic_information(TaskID task_id, SemanticTag tag,
-                                         const void *&result, size_t &size);
+      bool retrieve_semantic_information(TaskID task_id, SemanticTag tag,
+                                         const void *&result, size_t &size,
+                                         bool can_fail = false,
+                                         bool wait_until_ready = false);
 
       /**
        * Retrieve semantic information for an index space
@@ -5140,9 +5209,14 @@ namespace LegionRuntime {
        * @param tag semantic tag
        * @param result pointer to assign to the semantic buffer
        * @param size where to write the size of the semantic buffer
+       * @param can_fail query allowed to fail
+       * @param wait_until_ready wait indefinitely for the tag
+       * @return true if the query succeeds
        */
-      void retrieve_semantic_information(IndexSpace handle, SemanticTag tag,
-                                         const void *&result, size_t &size);
+      bool retrieve_semantic_information(IndexSpace handle, SemanticTag tag,
+                                         const void *&result, size_t &size,
+                                         bool can_fail = false,
+                                         bool wait_until_ready = false);
 
       /**
        * Retrieve semantic information for an index partition 
@@ -5150,9 +5224,14 @@ namespace LegionRuntime {
        * @param tag semantic tag
        * @param result pointer to assign to the semantic buffer
        * @param size where to write the size of the semantic buffer
+       * @param can_fail query allowed to fail
+       * @param wait_until_ready wait indefinitely for the tag
+       * @return true if the query succeeds
        */
-      void retrieve_semantic_information(IndexPartition handle, SemanticTag tag,
-                                         const void *&result, size_t &size);
+      bool retrieve_semantic_information(IndexPartition handle, SemanticTag tag,
+                                         const void *&result, size_t &size,
+                                         bool can_fail = false,
+                                         bool wait_until_ready = false);
 
       /**
        * Retrieve semantic information for a field space
@@ -5160,9 +5239,14 @@ namespace LegionRuntime {
        * @param tag semantic tag
        * @param result pointer to assign to the semantic buffer
        * @param size where to write the size of the semantic buffer
+       * @param can_fail query allowed to fail
+       * @param wait_until_ready wait indefinitely for the tag
+       * @return true if the query succeeds
        */
-      void retrieve_semantic_information(FieldSpace handle, SemanticTag tag,
-                                         const void *&result, size_t &size);
+      bool retrieve_semantic_information(FieldSpace handle, SemanticTag tag,
+                                         const void *&result, size_t &size,
+                                         bool can_fail = false,
+                                         bool wait_until_ready = false);
 
       /**
        * Retrieve semantic information for a specific field 
@@ -5171,10 +5255,15 @@ namespace LegionRuntime {
        * @param tag semantic tag
        * @param result pointer to assign to the semantic buffer
        * @param size where to write the size of the semantic buffer
+       * @param can_fail query allowed to fail
+       * @param wait_until_ready wait indefinitely for the tag
+       * @return true if the query succeeds
        */
-      void retrieve_semantic_information(FieldSpace handle, FieldID fid, 
+      bool retrieve_semantic_information(FieldSpace handle, FieldID fid, 
                                          SemanticTag tag,
-                                         const void *&result, size_t &size);
+                                         const void *&result, size_t &size,
+                                         bool can_fail = false,
+                                         bool wait_until_ready = false);
 
       /**
        * Retrieve semantic information for a logical region 
@@ -5182,9 +5271,14 @@ namespace LegionRuntime {
        * @param tag semantic tag
        * @param result pointer to assign to the semantic buffer
        * @param size where to write the size of the semantic buffer
+       * @param can_fail query allowed to fail
+       * @param wait_until_ready wait indefinitely for the tag
+       * @return true if the query succeeds
        */
-      void retrieve_semantic_information(LogicalRegion handle, SemanticTag tag,
-                                         const void *&result, size_t &size);
+      bool retrieve_semantic_information(LogicalRegion handle, SemanticTag tag,
+                                         const void *&result, size_t &size,
+                                         bool can_fail = false,
+                                         bool wait_until_ready = false);
 
       /**
        * Retrieve semantic information for a logical partition
@@ -5192,10 +5286,15 @@ namespace LegionRuntime {
        * @param tag semantic tag
        * @param result pointer to assign to the semantic buffer
        * @param size where to write the size of the semantic buffer
+       * @param can_fail query allowed to fail
+       * @param wait_until_ready wait indefinitely for the tag
+       * @return true if the query succeeds
        */
-      void retrieve_semantic_information(LogicalPartition handle, 
+      bool retrieve_semantic_information(LogicalPartition handle, 
                                          SemanticTag tag,
-                                         const void *&result, size_t &size);
+                                         const void *&result, size_t &size,
+                                         bool can_fail = false,
+                                         bool wait_until_ready = false);
 
       /**
        * Retrieve the name of a task
@@ -5414,7 +5513,7 @@ namespace LegionRuntime {
        *              require the runtime to be compiled with -DLEGION_SPY.
        * -hl:prof <int> Specify the number of nodes on which to enable
        *              profiling information to be collected.  By default
-       *              all nodes are enabled.  Zero will disable all
+       *              all nodes are disabled. Zero will disable all
        *              profiling while each number greater than zero will
        *              profile on that number of nodes.
        *
@@ -5692,6 +5791,22 @@ namespace LegionRuntime {
                                       const UDT &user_data);
 
       /**
+       * Dynamically register a new task variant with the runtime that
+       * has already built in the necessary preamble/postamble (i.e.
+       * calls to LegionTaskWrapper::legion_task_{pre,post}amble)
+       * @param registrar the task variant registrar for describing the task
+       * @param codedesc the code descriptor for the pre-wrapped task
+       * @param user_data pointer to optional user data to associate with the
+       * task variant
+       * @param user_len size of optional user_data in bytes
+       * @return variant ID for the task
+       */
+      VariantID register_task_variant(const TaskVariantRegistrar &registrar,
+				      const CodeDescriptor &codedesc,
+				      const void *user_data = NULL,
+				      size_t user_len = 0);
+
+      /**
        * Statically register a new task variant with the runtime with
        * a non-void return type prior to the runtime starting. This call
        * must be made on all nodes and it will fail if done after the
@@ -5791,6 +5906,26 @@ namespace LegionRuntime {
       static void preregister_task_generator(
                                    const TaskGeneratorRegistrar &registrar);
                                    
+
+      /**
+       * Statically register a new task variant with the runtime that
+       * has already built in the necessary preamble/postamble (i.e.
+       * calls to LegionTaskWrapper::legion_task_{pre,post}amble).
+       * This call must be made on all nodes and it will fail if done 
+       * after the Runtime::start method has been invoked.
+       * @param registrar the task variant registrar for describing the task
+       * @param codedesc the code descriptor for the pre-wrapped task
+       * @param user_data pointer to optional user data to associate with the
+       * task variant
+       * @param user_len size of optional user_data in bytes
+       * @return variant ID for the task
+       */
+      static VariantID preregister_task_variant(
+              const TaskVariantRegistrar &registrar,
+	      const CodeDescriptor &codedesc,
+	      const void *user_data = NULL,
+	      size_t user_len = 0,
+	      const char *task_name = NULL);
 
     public:
       // ------------------ Deprecated task registration -----------------------

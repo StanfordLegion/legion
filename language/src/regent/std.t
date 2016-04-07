@@ -23,8 +23,6 @@ local std = {}
 
 std.config, std.args = config.parse_args()
 
-if std.config["cuda"] then cudahelper = require("regent/cudahelper") end
-
 -- #####################################
 -- ## Legion Bindings
 -- #################
@@ -38,6 +36,8 @@ local c = terralib.includecstring([[
 #include <stdlib.h>
 ]])
 std.c = c
+
+if std.config["cuda"] then cudahelper = require("regent/cudahelper") end
 
 -- #####################################
 -- ## Utilities
@@ -583,6 +583,10 @@ function std.is_phase_barrier(t)
   return terralib.types.istype(t) and rawget(t, "is_phase_barrier")
 end
 
+function std.is_dynamic_collective(t)
+  return terralib.types.istype(t) and rawget(t, "is_dynamic_collective")
+end
+
 function std.is_unpack_result(t)
   return terralib.types.istype(t) and rawget(t, "is_unpack_result")
 end
@@ -815,7 +819,8 @@ local function type_isomorphic(param_type, arg_type, check, mapping)
   if std.is_ispace(param_type) and std.is_ispace(arg_type) then
     return std.type_eq(param_type.index_type, arg_type.index_type, mapping)
   elseif std.is_region(param_type) and std.is_region(arg_type) then
-      return std.type_eq(param_type.fspace_type, arg_type.fspace_type, mapping)
+    return std.type_eq(param_type:ispace(), arg_type:ispace(), mapping) and
+      std.type_eq(param_type.fspace_type, arg_type.fspace_type, mapping)
   elseif std.is_partition(param_type) and std.is_partition(arg_type) then
     return (param_type:is_disjoint() == arg_type:is_disjoint()) and
       (check(param_type:parent_region(), arg_type:parent_region(), mapping))
@@ -926,6 +931,15 @@ function std.validate_args(node, params, args, isvararg, return_type, mapping, s
         log.error(node, "type mismatch in argument " .. tostring(i) ..
                     ": expected " .. tostring(param_as_arg_type) ..
                     " but got " .. tostring(arg))
+      end
+
+      -- Special case for regions: allow the index spaces to unify.
+      if std.is_region(param_type) and
+        type_compatible(param_type:ispace(), arg_type:ispace()) and
+        not (mapping[param] or mapping[param_type]) and
+        type_isomorphic(param_type:ispace(), arg_type:ispace(), mapping)
+      then
+        mapping[param_type:ispace()] = arg_type:ispace()
       end
 
       mapping[param] = arg
@@ -1214,10 +1228,12 @@ function std.get_field(t, f)
 end
 
 function std.get_field_path(value_type, field_path)
+  local field_type = value_type
   for _, field_name in ipairs(field_path) do
-    value_type = std.get_field(value_type, field_name)
+    field_type = std.get_field(field_type, field_name)
+    assert(field_type, tostring(value_type) .. " has no field " .. tostring(field_path))
   end
-  return value_type
+  return field_type
 end
 
 function std.implicit_cast(from, to, expr)
@@ -1700,6 +1716,10 @@ function std.ispace(index_type)
   st.index_type = index_type
   st.dim = index_type.dim
 
+  function st:is_opaque()
+    return self.index_type:is_opaque()
+  end
+
   function st:force_cast(from, to, expr)
     assert(std.is_ispace(from) and std.is_ispace(to))
     return `([to] { impl = [expr].impl })
@@ -1743,6 +1763,10 @@ function std.region(ispace_symbol, fspace_type)
     return ispace
   end
 
+  function st:is_opaque()
+    return self:ispace():is_opaque()
+  end
+
   function st:fspace()
     return st.fspace_type
   end
@@ -1765,11 +1789,19 @@ function std.region(ispace_symbol, fspace_type)
     local id = next_region_id
     next_region_id = next_region_id + 1
     function st.metamethods.__typename(st)
-      return "region#" .. tostring(id) .. "(" .. tostring(st.fspace_type) .. ")"
+      if st:is_opaque() then
+        return "region#" .. tostring(id) .. "(" .. tostring(st.fspace_type) .. ")"
+      else
+        return "region#" .. tostring(id) .. "(" .. tostring(st:ispace()) .. ", " .. tostring(st.fspace_type) .. ")"
+      end
     end
   else
     function st.metamethods.__typename(st)
-      return "region(" .. tostring(st.fspace_type) .. ")"
+      if st:is_opaque() then
+        return "region(" .. tostring(st.fspace_type) .. ")"
+      else
+        return "region(" .. tostring(st:ispace()) .. ", " .. tostring(st.fspace_type) .. ")"
+      end
     end
   end
 
@@ -1828,13 +1860,16 @@ function std.partition(disjointness, region)
   function st:subregion_constant(i)
     assert(type(i) == "number" or terralib.issymbol(i))
     if not self.subregions[i] then
-      self.subregions[i] = std.region(self:parent_region().fspace_type)
+      self.subregions[i] = self:subregion_dynamic()
     end
     return self.subregions[i]
   end
 
   function st:subregion_dynamic()
-    return std.region(self:parent_region().fspace_type)
+    local parent = self:parent_region()
+    return std.region(
+      terralib.newsymbol(std.ispace(parent:ispace().index_type)),
+      parent.fspace_type)
   end
 
   function st:force_cast(from, to, expr)
@@ -1877,7 +1912,7 @@ function std.cross_product(...)
   st.entries = terralib.newlist({
       { "impl", c.legion_logical_partition_t },
       { "product", c.legion_terra_index_cross_product_t },
-      { "partitions", c.legion_index_partition_t[#partition_symbols] },
+      { "colors", c.legion_color_t[#partition_symbols] },
   })
 
   st.is_cross_product = true
@@ -1954,7 +1989,7 @@ function std.cross_product(...)
   function st:force_cast(from, to, expr)
     assert(std.is_cross_product(from) and std.is_cross_product(to))
     -- FIXME: Potential for double (triple) evaluation here.
-    return `([to] { impl = [expr].impl, product = [expr].product, partitions = [expr].partitions })
+    return `([to] { impl = [expr].impl, product = [expr].product, colors = [expr].colors })
   end
 
   function st:hash()
@@ -2146,7 +2181,7 @@ std.future = terralib.memoize(function(result_type)
   return st
 end)
 
-std.list = terralib.memoize(function(element_type, partition_type, privilege_depth)
+std.list = terralib.memoize(function(element_type, partition_type, privilege_depth, region_root, shallow)
   if not terralib.types.istype(element_type) then
     error("list expected a type as argument 1, got " .. tostring(element_type))
   end
@@ -2155,19 +2190,34 @@ std.list = terralib.memoize(function(element_type, partition_type, privilege_dep
     error("list expected a partition type as argument 2, got " .. tostring(partition_type))
   end
 
+  if privilege_depth and type(privilege_depth) ~= "number" then
+    error("list expected a number as argument 3, got " .. tostring(privilege_depth))
+  end
+
+  if region_root and not std.is_region(region_root) then
+    error("list expected a region type as argument 4, got " .. tostring(region_root))
+  end
+
+  if shallow and not type(shallow) == "boolean" then
+    error("list expected a boolean as argument 5, got " .. tostring(shallow))
+  end
+
+  if region_root and privilege_depth and privilege_depth ~= 0 then
+    error("list privilege depth and region root are mutually exclusive")
+  end
+
   local st = terralib.types.newstruct("list")
   st.entries = terralib.newlist({
       { "__size", uint64 }, -- in elements
       { "__data", &opaque },
   })
-  if partition_type then
-    st.entries:insert({ "__partition", c.legion_logical_partition_t })
-  end
 
   st.is_list = true
   st.element_type = element_type
   st.partition_type = partition_type or false
   st.privilege_depth = privilege_depth or 0
+  st.region_root = region_root or false
+  st.shallow = shallow or false
 
   function st:is_list_of_regions()
     return std.is_region(self.element_type) or
@@ -2240,14 +2290,14 @@ std.list = terralib.memoize(function(element_type, partition_type, privilege_dep
       local slice_type = self:subregion_dynamic()
       for i = 1 + strip_levels, self:list_depth() do
         slice_type = std.list(
-          slice_type, self:partition(), self.privilege_depth)
+          slice_type, self:partition(), self.privilege_depth, self.region_root, self.shallow)
       end
       return slice_type
     elseif std.is_list_of_partitions(self) then
       local slice_type = self:subpartition_dynamic()
       for i = 1 + strip_levels, self:list_depth() do
         slice_type = std.list(
-          slice_type, self:partition(), self.privilege_depth)
+          slice_type, self:partition(), self.privilege_depth, self.region_root, self.shallow)
       end
       return slice_type
     else
@@ -2274,15 +2324,21 @@ std.list = terralib.memoize(function(element_type, partition_type, privilege_dep
       return `([to] {
           __size = [expr].__size,
           __data = [expr].__data,
-          __partition = [expr].__partition,
         })
     else
       return `([to] { __size = [expr].__size, __data = [expr].__data })
     end
   end
 
-  function st.metamethods.__typename(st)
-    return "list(" .. tostring(st.element_type) .. ")"
+  if std.config["debug"] then
+    function st.metamethods.__typename(st)
+      return "list(" .. tostring(st.element_type) .. ", " .. tostring(st.partition_type) .. ", " ..
+        tostring(st.privilege_depth) .. ", " .. tostring(st.region_root) .. ", " .. tostring(st.shallow) .. ")"
+    end
+  else
+    function st.metamethods.__typename(st)
+      return "list(" .. tostring(st.element_type) .. ")"
+    end
   end
 
   return st
@@ -2302,6 +2358,27 @@ do
     return 0
   end
 end
+
+std.dynamic_collective = terralib.memoize(function(result_type)
+  if not terralib.types.istype(result_type) then
+    error("dynamic_collective expected a type as argument 1, got " .. tostring(result_type))
+  end
+  assert(not std.is_rawref(result_type))
+
+  local st = terralib.types.newstruct("dynamic_collective")
+  st.entries = terralib.newlist({
+      { "impl", c.legion_dynamic_collective_t },
+  })
+
+  st.is_dynamic_collective = true
+  st.result_type = result_type
+
+  function st.metamethods.__typename(st)
+    return "dynamic_collective(" .. tostring(st.result_type) .. ")"
+  end
+
+  return st
+end)
 
 do
   local function field_name(field)
@@ -2609,10 +2686,6 @@ function task:get_config_options()
   return self.config_options
 end
 
-function task:settaskid(taskid)
-  self.taskid = taskid
-end
-
 function task:gettaskid()
   return self.taskid
 end
@@ -2692,17 +2765,22 @@ function task:__tostring()
   return tostring(self:getname())
 end
 
-function std.newtask(name)
-  assert(data.is_tuple(name))
-  local terra proto
-  proto.name = name:mkstring(".")
-  return setmetatable({
-    definition = proto,
-    taskid = terralib.global(c.legion_task_id_t),
-    name = name,
-    cuda = false,
-    inline = false,
-  }, task)
+do
+  local next_task_id = 1
+  function std.newtask(name)
+    assert(data.is_tuple(name))
+    local terra proto
+    proto.name = name:mkstring(".")
+    local task_id = next_task_id
+    next_task_id = next_task_id + 1
+    return setmetatable({
+      definition = proto,
+      taskid = terralib.constant(c.legion_task_id_t, task_id),
+      name = name,
+      cuda = false,
+      inline = false,
+    }, task)
+  end
 end
 
 function std.is_task(x)
@@ -2878,13 +2956,18 @@ function std.register_task(task)
   tasks:insert(task)
 end
 
+local function zero(value_type) return terralib.cast(value_type, 0) end
+local function one(value_type) return terralib.cast(value_type, 1) end
+local function min_value(value_type) return terralib.cast(value_type, -math.huge) end
+local function max_value(value_type) return terralib.cast(value_type, math.huge) end
+
 local reduction_ops = terralib.newlist({
-    {op = "+", name = "plus"},
-    {op = "-", name = "minus"},
-    {op = "*", name = "times"},
-    {op = "/", name = "divide"},
-    {op = "max", name = "max"},
-    {op = "min", name = "min"},
+    {op = "+", name = "plus", init = zero},
+    {op = "-", name = "minus", init = zero},
+    {op = "*", name = "times", init = one},
+    {op = "/", name = "divide", init = one},
+    {op = "max", name = "max", init = min_value},
+    {op = "min", name = "min", init = max_value},
 })
 
 local reduction_types = terralib.newlist({
@@ -2893,9 +2976,16 @@ local reduction_types = terralib.newlist({
     int32,
 })
 
-std.reduction_op_ids = {}
+std.reduction_op_init = {}
+for _, op in ipairs(reduction_ops) do
+  std.reduction_op_init[op.op] = {}
+  for _, op_type in ipairs(reduction_types) do
+    std.reduction_op_init[op.op][op_type] = op.init(op_type)
+  end
+end
 
 -- Prefill the table of reduction op IDs.
+std.reduction_op_ids = {}
 do
   local base_op_id = 101
   for _, op in ipairs(reduction_ops) do
@@ -2910,21 +3000,10 @@ do
   end
 end
 
-function std.start(main_task)
+function std.setup(main_task, extra_setup_thunk)
   assert(std.is_task(main_task))
-  local next_task_id = 0
   local task_registrations = tasks:map(
     function(task)
-      local task_id
-      if not task:is_variant_task() then
-        next_task_id = next_task_id + 1
-        task_id = next_task_id
-        task:gettaskid():set(task_id)
-      else
-        local source_variant = task:get_source_variant()
-        task_id = source_variant:gettaskid():get()
-      end
-
       local return_type = task:getdefinition():gettype().returntype
       local result_type_bucket = std.type_size_bucket_name(return_type)
       local register = c["legion_runtime_register_task" .. result_type_bucket]
@@ -2935,7 +3014,7 @@ function std.start(main_task)
       if task:getcuda() then proc_type = c.TOC_PROC end
 
       return quote [register](
-        task_id,
+        [task:gettaskid()],
         proc_type,
         true,
         true,
@@ -2977,6 +3056,30 @@ function std.start(main_task)
     end
   end
 
+  local extra_setup = quote end
+  if extra_setup_thunk then
+    extra_setup = quote
+      [extra_setup_thunk]()
+    end
+  end
+
+  local terra main(argc : int, argv : &rawstring)
+    [task_registrations];
+    [reduction_registrations];
+    [extra_setup];
+    c.legion_runtime_set_top_level_task_id([main_task:gettaskid()])
+    return c.legion_runtime_start(argc, argv, false)
+  end
+
+  local names = {main = main}
+  return main, names
+end
+
+function std.start(main_task)
+  if std.config["pretty"] then os.exit() end
+
+  local main = std.setup(main_task)
+
   local args = std.args
   local argc = #args
   local argv = terralib.newsymbol((&int8)[argc], "argv")
@@ -2987,14 +3090,22 @@ function std.start(main_task)
     end)
   end
 
-  local terra main()
+  local terra wrapper()
     [argv_setup];
-    [task_registrations];
-    [reduction_registrations]
-    c.legion_runtime_set_top_level_task_id([main_task:gettaskid()])
-    return c.legion_runtime_start(argc, argv, false)
+    return main([argc], [argv])
   end
-  main()
+  wrapper()
+end
+
+function std.saveobj(main_task, filename, filetype)
+  local main, names = std.setup(main_task)
+  local lib_dir = os.getenv("LG_RT_DIR") .. "/../bindings/terra"
+
+  if filetype ~= nil then
+    terralib.saveobj(filename, filetype, names, {"-L" .. lib_dir, "-llegion_terra"})
+  else
+    terralib.saveobj(filename, names, {"-L" .. lib_dir, "-llegion_terra"})
+  end
 end
 
 -- #####################################

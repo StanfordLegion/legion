@@ -132,7 +132,10 @@ namespace Realm {
   /*static*/ void DetailedTimer::init_timers(void)
   {
     // Create the key for the thread local data
-    int ret = pthread_key_create(&thread_timer_key,thread_timer_free);
+#ifndef NDEBUG
+    int ret =
+#endif
+      pthread_key_create(&thread_timer_key,thread_timer_free);
     assert(ret == 0);
   }
   

@@ -433,6 +433,11 @@ function optimize_inlines.stat_expr(cx, node)
   return annotate(node, usage, usage)
 end
 
+function optimize_inlines.stat_raw_delete(cx, node)
+  local usage = analyze_usage(cx, node)
+  return annotate(node, usage, usage)
+end
+
 function optimize_inlines.stat(cx, node)
   if node:is(ast.typed.stat.If) then
     return optimize_inlines.stat_if(cx, node)
@@ -478,6 +483,9 @@ function optimize_inlines.stat(cx, node)
 
   elseif node:is(ast.typed.stat.Expr) then
     return optimize_inlines.stat_expr(cx, node)
+
+  elseif node:is(ast.typed.stat.RawDelete) then
+    return optimize_inlines.stat_raw_delete(cx, node)
 
   else
     assert(false, "unexpected node type " .. tostring(node:type()))

@@ -93,6 +93,7 @@ namespace Realm {
       }
 
       assert(0);
+      return Processor::NO_PROC;
     }
 
     void Processor::get_group_members(std::vector<Processor>& members)
@@ -192,8 +193,10 @@ namespace Realm {
       get_runtime()->optable.add_local_operation(finish_event, tro);
       // we haven't told anybody about this operation yet, so cancellation really shouldn't
       //  be possible
-      bool ok_to_run = (tro->mark_ready() &&
-			tro->mark_started());
+#ifndef NDEBUG
+      bool ok_to_run =
+#endif
+	(tro->mark_ready() && tro->mark_started());
       assert(ok_to_run);
 
       std::vector<Processor> local_procs;
@@ -277,10 +280,13 @@ namespace Realm {
       TaskRegistration *tro = new TaskRegistration(codedesc, 
 						   ByteArrayRef(user_data, user_data_len),
 						   finish_event, prs);
+      get_runtime()->optable.add_local_operation(finish_event, tro);
       // we haven't told anybody about this operation yet, so cancellation really shouldn't
       //  be possible
-      bool ok_to_run = (tro->mark_ready() &&
-			tro->mark_started());
+#ifndef NDEBUG
+      bool ok_to_run =
+#endif
+	(tro->mark_ready() && tro->mark_started());
       assert(ok_to_run);
 
       // do local processors first
@@ -390,11 +396,13 @@ namespace Realm {
     ProcessorGroup::ProcessorGroup(void)
       : ProcessorImpl(Processor::NO_PROC, Processor::PROC_GROUP),
 	members_valid(false), members_requested(false), next_free(0)
+      , ready_task_count(0)
     {
     }
 
     ProcessorGroup::~ProcessorGroup(void)
     {
+      delete ready_task_count;
     }
 
     void ProcessorGroup::init(Processor _me, int _owner)
@@ -423,6 +431,11 @@ namespace Realm {
 
       members_requested = true;
       members_valid = true;
+
+      // now that we exist, profile our queue depth
+      std::string gname = stringbuilder() << "realm/proc " << me << "/ready tasks";
+      ready_task_count = new ProfilingGauges::AbsoluteRangeGauge<int>(gname);
+      task_queue.set_gauge(ready_task_count);
     }
 
     void ProcessorGroup::get_group_members(std::vector<Processor>& member_list)
@@ -483,8 +496,11 @@ namespace Realm {
       if(poisoned) {
 	// cancel the task - this has to work
 	log_poison.info() << "cancelling poisoned task - task=" << task << " after=" << task->get_finish_event();
-	bool did_cancel = task->attempt_cancellation(Realm::Faults::ERROR_POISONED_PRECONDITION,
-						     &e, sizeof(e));	
+#ifndef NDEBUG
+	bool did_cancel =
+#endif
+	  task->attempt_cancellation(Realm::Faults::ERROR_POISONED_PRECONDITION,
+				     &e, sizeof(e));	
 	assert(did_cancel);
 	task->mark_finished(false);
 	return true;
@@ -553,13 +569,17 @@ namespace Realm {
     r_args.priority = priority;
     r_args.user_arglen = arglen;
     
-    if(!prs) {
+    if(!prs || prs->empty()) {
       // no profiling, so task args are the only payload
       Message::request(target, r_args, args, arglen, PAYLOAD_COPY);
     } else {
       // need to serialize both the task args and the profiling request
       //  into a single payload
-      Serialization::DynamicBufferSerializer dbs(arglen + 4096);  // assume profiling requests are < 4K
+      // allocate a little extra initial space for the profiling requests, but not too
+      //  much in case the copy sits around outside the srcdatapool for a long time
+      // (if we need more than this, we'll pay for a realloc during serialization, but it
+      //  will still work correctly)
+      Serialization::DynamicBufferSerializer dbs(arglen + 512);
 
       dbs.append_bytes(args, arglen);
       dbs << *prs;
@@ -583,9 +603,10 @@ namespace Realm {
     ByteArray userdata;
 
     Serialization::FixedBufferDeserializer fbd(data, datalen);
-    bool ok = ((fbd >> procs) &&
-	       (fbd >> codedesc) &&
-	       (fbd >> userdata));
+#ifndef NDEBUG
+    bool ok =
+#endif
+      ((fbd >> procs) && (fbd >> codedesc) && (fbd >> userdata));
     assert(ok && (fbd.bytes_left() == 0));
 
     if(procs.empty()) {
@@ -716,9 +737,11 @@ namespace Realm {
   //
 
   LocalTaskProcessor::LocalTaskProcessor(Processor _me, Processor::Kind _kind)
-    : ProcessorImpl(_me, _kind), sched(0)
+    : ProcessorImpl(_me, _kind)
+    , sched(0)
+    , ready_task_count(stringbuilder() << "realm/proc " << me << "/ready tasks")
   {
-    // nothing really happens until we get a scheduler
+    task_queue.set_gauge(&ready_task_count);
   }
 
   LocalTaskProcessor::~LocalTaskProcessor(void)
@@ -801,23 +824,24 @@ namespace Realm {
     Processor::TaskFuncPtr fnptr;
     const FunctionPointerImplementation *fpi = codedesc.find_impl<FunctionPointerImplementation>();
 
-    while(!fpi) {
-#ifdef REALM_USE_DLFCN
-      // can we make it from a DSO reference?
-      const DSOReferenceImplementation *dsoref = codedesc.find_impl<DSOReferenceImplementation>();
-      if(dsoref) {
-        FunctionPointerImplementation *newfpi = cvt_dsoref_to_fnptr(dsoref);
-	if(newfpi) {
-	  codedesc.add_implementation(newfpi);
-	  fpi = newfpi;
-	  continue;
-        }
-      }
-#endif
-
-      // no other options?  give up
-      assert(0);
+    // if we don't have a function pointer implementation, see if we can make one
+    if(!fpi) {
+      const std::vector<CodeTranslator *>& translators = get_runtime()->get_code_translators();
+      for(std::vector<CodeTranslator *>::const_iterator it = translators.begin();
+	  it != translators.end();
+	  it++)
+	if((*it)->can_translate<FunctionPointerImplementation>(codedesc)) {
+	  FunctionPointerImplementation *newfpi = (*it)->translate<FunctionPointerImplementation>(codedesc);
+	  if(newfpi) {
+	    log_taskreg.info() << "function pointer created: trans=" << (*it)->name << " fnptr=" << (void *)(newfpi->fnptr);
+	    codedesc.add_implementation(newfpi);
+	    fpi = newfpi;
+	    break;
+	  }
+	}
     }
+
+    assert(fpi != 0);
 
     fnptr = (Processor::TaskFuncPtr)(fpi->fnptr);
 
@@ -844,7 +868,7 @@ namespace Realm {
 
     const TaskTableEntry& tte = it->second;
 
-    log_taskreg.debug() << "task " << func_id << " executing on " << me << ": " << tte.fnptr;
+    log_taskreg.debug() << "task " << func_id << " executing on " << me << ": " << ((void *)(tte.fnptr));
 
     (tte.fnptr)(task_args.base(), task_args.size(),
 		tte.user_data.base(), tte.user_data.size(),
@@ -989,10 +1013,14 @@ namespace Realm {
 				     Event _finish_event, const ProfilingRequestSet &_requests)
     : Operation(_finish_event, _requests)
     , codedesc(_codedesc), userdata(_userdata)
-  {}
+  {
+    log_taskreg.debug() << "task registration created: op=" << (void *)this << " finish=" << _finish_event;
+  }
 
   TaskRegistration::~TaskRegistration(void)
-  {}
+  {
+    log_taskreg.debug() << "task registration destroyed: op=" << (void *)this;
+  }
 
   void TaskRegistration::print(std::ostream& os) const
   {

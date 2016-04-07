@@ -32,7 +32,6 @@ void sigalrm_handler(int sig)
 
 // some of the code in here needs the fault-tolerance stuff in Realm to show up
 #define TRACK_MACHINE_UPDATES
-#define TEST_FAULTS
 
 #ifdef TRACK_MACHINE_UPDATES
 class MyMachineUpdateTracker : public Machine::MachineUpdateSubscriber {
@@ -62,12 +61,28 @@ public:
 MyMachineUpdateTracker tracker;
 #endif
 
+struct ChildTaskArgs {
+  bool inject_fault;
+  bool hang;
+  int sleep_useconds;
+  Event wait_on;
+};
+
 void child_task(const void *args, size_t arglen, 
 		const void *userdata, size_t userlen, Processor p)
 {
   log_app.print() << "starting task on processor " << p;
-  sleep(1);
-#ifdef TEST_FAULTS
+  assert(arglen == sizeof(ChildTaskArgs));
+  const ChildTaskArgs& cargs = *(const ChildTaskArgs *)args;
+  if(cargs.wait_on.exists()) {
+    cargs.wait_on.wait();
+  }
+  if(cargs.hang) {
+    // create a user event and wait on it - hangs unless somebody cancels us
+    UserEvent::create_user_event().wait();
+  } else
+    usleep(cargs.sleep_useconds);
+#ifdef REALM_USE_EXCEPTIONS
   bool inject_fault = *(const bool *)args;
   if(inject_fault) {
     int buffer[4];
@@ -75,11 +90,9 @@ void child_task(const void *args, size_t arglen,
     buffer[1] = 22;
     buffer[2] = 33;
     buffer[3] = 44;
-#ifdef REALM_USE_EXCEPTIONS
     // this causes a fatal error if Realm doesn't have exception support, so don't
     //  do it in that case
     Processor::report_execution_fault(44, buffer, 4*sizeof(int));
-#endif
   }
 #endif
   log_app.print() << "ending task on processor " << p;
@@ -94,7 +107,7 @@ void response_task(const void *args, size_t arglen,
   log_app.print() << "profiling response task on processor " << p;
   printf("got profiling response - %zd bytes\n", arglen);
   printf("Bytes:");
-  for(size_t i = 0; i < arglen; i++)
+  for(size_t i = 0; (i < arglen) && (i < 256); i++)
     printf(" %02x", ((unsigned char *)args)[i]);
   printf("\n");
 
@@ -124,7 +137,24 @@ void response_task(const void *args, size_t arglen,
   } else
     printf("no timeline\n");
 
-  if(pr.has_measurement<OperationBacktrace>()) {
+  if(pr.has_measurement<OperationEventWaits>()) {
+    OperationEventWaits *op_waits = pr.get_measurement<OperationEventWaits>();
+    printf("op waits = %zd", op_waits->intervals.size());
+    if(!op_waits->intervals.empty()) {
+      printf(" [");
+      for(std::vector<OperationEventWaits::WaitInterval>::const_iterator it = op_waits->intervals.begin();
+	  it != op_waits->intervals.end();
+	  it++)
+	printf(" (%lld %lld %lld %llx/%d)",
+	       it->wait_start, it->wait_ready, it->wait_end, it->wait_event.id, it->wait_event.gen);
+      printf(" ]\n");
+    } else
+      printf("\n");
+    delete op_waits;
+  } else
+    printf("no event wait data\n");
+
+  if(0&&pr.has_measurement<OperationBacktrace>()) {
     OperationBacktrace *op_backtrace = pr.get_measurement<OperationBacktrace>();
     std::cout << "op backtrace = " << op_backtrace->backtrace;
     delete op_backtrace;
@@ -192,29 +222,69 @@ void top_level_task(const void *args, size_t arglen,
   prs.add_request(profile_cpu, RESPONSE_TASK, &first_cpu, sizeof(first_cpu))
     .add_measurement<OperationStatus>()
     .add_measurement<OperationTimeline>()
+    .add_measurement<OperationEventWaits>()
     .add_measurement<OperationBacktrace>();
 
   // we expect (exactly) three responses
-  response_counter = Barrier::create_barrier(3);
-  expected_responses_remaining = 3;
+  expected_responses_remaining = 7;
+  response_counter = Barrier::create_barrier(expected_responses_remaining);
 
-  bool inject_fault = false;
-  Event e1 = first_cpu.spawn(CHILD_TASK, &inject_fault, sizeof(inject_fault), prs);
-  inject_fault = true;
-  Event e2 = first_cpu.spawn(CHILD_TASK, &inject_fault, sizeof(inject_fault), prs, e1);
-  inject_fault = false;
-  Event e3 = first_cpu.spawn(CHILD_TASK, &inject_fault, sizeof(inject_fault), prs, e2);
+  // give ourselves 15 seconds for the tasks, and their profiling responses, to finish
+  alarm(15);
 
-  // give ourselves 5 seconds for the tasks, and their profiling responses, to finish
-  alarm(5);
+  ChildTaskArgs cargs;
+  cargs.inject_fault = false;
+  cargs.sleep_useconds = 100000;
+  cargs.hang = false;
+  cargs.wait_on = Event::NO_EVENT;
+  Event e1 = first_cpu.spawn(CHILD_TASK, &cargs, sizeof(cargs), prs);
 
-  bool poisoned = false;
-#ifdef TEST_FAULTS
-  e3.wait_faultaware(poisoned);
-#else
-  e3.wait();
-#endif
-  printf("done! (poisoned=%d)\n", poisoned);
+  cargs.inject_fault = true;
+  Event e2 = first_cpu.spawn(CHILD_TASK, &cargs, sizeof(cargs), prs, e1);
+  cargs.inject_fault = false;
+  Event e3 = first_cpu.spawn(CHILD_TASK, &cargs, sizeof(cargs), prs, e2);
+
+  {
+    bool poisoned = false;
+    e3.wait_faultaware(poisoned);
+    printf("e3 done! (poisoned=%d)\n", poisoned);
+  }
+
+  // test event wait profiling
+  {
+    UserEvent u = UserEvent::create_user_event();
+    cargs.wait_on = u;
+    Event e4 = first_cpu.spawn(CHILD_TASK, &cargs, sizeof(cargs), prs);
+    cargs.wait_on = Event::NO_EVENT;
+    cargs.sleep_useconds = 500000;
+    Event e5 = first_cpu.spawn(CHILD_TASK, &cargs, sizeof(cargs), prs);
+    u.trigger(e5);
+    e4.wait();
+  }
+
+  // test cancellation - first of a task that is "running"
+  {
+    cargs.sleep_useconds = 5000000;
+    Event e4 = first_cpu.spawn(CHILD_TASK, &cargs, sizeof(cargs), prs);
+    sleep(2);
+    int info = 111;
+    e4.cancel_operation(&info, sizeof(info));
+    bool poisoned = false;
+    e4.wait_faultaware(poisoned);
+    assert(poisoned);
+  }
+
+  // now cancellatin of an event that is blocked on some event
+  {
+    cargs.hang = true;
+    Event e5 = first_cpu.spawn(CHILD_TASK, &cargs, sizeof(cargs), prs);
+    sleep(2);
+    int info = 112;
+    e5.cancel_operation(&info, sizeof(info));
+    bool poisoned = false;
+    e5.wait_faultaware(poisoned);
+    assert(poisoned);
+  }
 
   printf("waiting for profiling responses...\n");
   response_counter.wait();

@@ -13,7 +13,10 @@
 -- limitations under the License.
 
 local legion_c = terralib.includec("legion_c.h")
-local legion_terra = terralib.includec("legion_terra.h")
+local legion_terra = terralib.includecstring([[
+#include "legion_terra.h"
+#include "legion_terra_tasks.h"
+]])
 local std = terralib.includec("stdlib.h")
 
 require 'legionlib-util'

@@ -1113,7 +1113,6 @@ namespace LegionRuntime {
 #endif
               FieldMask user_mask;
               derez.deserialize(user_mask);
-              field_node->transform_field_mask(user_mask, source);
               if (need_reference[index])
                 users[index]->add_reference();
               else
@@ -1129,7 +1128,6 @@ namespace LegionRuntime {
             // Just one user
             FieldMask user_mask;
             derez.deserialize(user_mask);
-            field_node->transform_field_mask(user_mask, source);
             if (need_reference[index])
               users[index]->add_reference();
             else
@@ -1162,7 +1160,6 @@ namespace LegionRuntime {
 #endif
               FieldMask user_mask;
               derez.deserialize(user_mask);
-              field_node->transform_field_mask(user_mask, source);
               if (need_reference[index])
                 users[index]->add_reference();
               else
@@ -1178,7 +1175,6 @@ namespace LegionRuntime {
             // Just one user
             FieldMask user_mask;
             derez.deserialize(user_mask);
-            field_node->transform_field_mask(user_mask, source);
             if (need_reference[index])
               users[index]->add_reference();
             else
@@ -1645,8 +1641,10 @@ namespace LegionRuntime {
 #ifdef DEBUG_PERF
       PerfTracer tracer(context, FIND_LOCAL_COPY_PRECONDITIONS_CALL);
 #endif
-      // First get our set of version data in case we need it 
-      const FieldVersions *versions = version_info.get_versions(logical_node);
+      // First get our set of version data in case we need it, it's really
+      // only safe to do this if we are at the bottom of our set of versions
+      const FieldVersions *versions = 
+        child_color.is_valid() ? NULL : version_info.get_versions(logical_node);
       std::set<Event> dead_events;
       LegionMap<Event,FieldMask>::aligned filter_previous;
       FieldMask dominated;
@@ -1832,8 +1830,8 @@ namespace LegionRuntime {
       // can see if we are writing the same version number
       // in which case there is no need for a dependence, thank
       // you wonchan and mini-aero for raising this case
-      if (!reading && (redop == 0) && !IS_REDUCE(user->usage) &&
-          user->same_versions(overlap, versions))
+      if (!reading && (redop == 0) && (versions != NULL) &&
+          !IS_REDUCE(user->usage) && user->same_versions(overlap, versions))
       {
         non_dominated |= overlap;
         return;
@@ -1875,8 +1873,8 @@ namespace LegionRuntime {
         return;
       if ((redop > 0) && (user->usage.redop == redop))
         return;
-      if (!reading && (redop == 0) && !IS_REDUCE(user->usage) &&
-          user->same_versions(overlap, versions))
+      if (!reading && (redop == 0) && (versions != NULL) &&
+          !IS_REDUCE(user->usage) && user->same_versions(overlap, versions))
         return;
       // Otherwise record the dependence
       LegionMap<Event,FieldMask>::aligned::iterator finder = 
@@ -3224,7 +3222,6 @@ namespace LegionRuntime {
     {
       size_t num_epochs;
       derez.deserialize(num_epochs);
-      FieldSpaceNode *field_node = logical_node->column_source;
       AutoLock v_lock(view_lock);
       for (unsigned idx = 0; idx < num_epochs; idx++)
       {
@@ -3236,7 +3233,6 @@ namespace LegionRuntime {
         derez.deserialize(epoch.redop);
         FieldMask valid_fields;
         derez.deserialize(valid_fields);
-        field_node->transform_field_mask(valid_fields, source);
         epoch.valid_fields |= valid_fields;
         reduction_mask |= valid_fields;
         size_t num_reductions;
@@ -3533,7 +3529,6 @@ namespace LegionRuntime {
         new_node->add_reference();
         FieldMask &mask = roots[new_node];
         derez.deserialize(mask);
-        logical_node->column_source->transform_field_mask(mask, source);
         new_node->set_owner_did(did);
       }
     }
@@ -3588,8 +3583,6 @@ namespace LegionRuntime {
         derez.deserialize(handle);
         target_node = runtime->forest->get_node(handle);
       }
-      // Transform the fields mask 
-      target_node->column_source->transform_field_mask(valid_mask, source);
       CompositeView *new_view = legion_new<CompositeView>(runtime->forest,
                             did, owner, target_node, runtime->address_space,
                             valid_mask, false/*register now*/);
@@ -5043,9 +5036,7 @@ namespace LegionRuntime {
                                               AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      FieldSpaceNode *field_node = logical_node->column_source;
       derez.deserialize(dirty_mask); 
-      field_node->transform_field_mask(dirty_mask, source);
       size_t num_valid_views;
       derez.deserialize(num_valid_views);
       for (unsigned idx = 0; idx < num_valid_views; idx++)
@@ -5056,7 +5047,6 @@ namespace LegionRuntime {
         view->add_base_resource_ref(COMPOSITE_NODE_REF);
         FieldMask &mask = valid_views[view];
         derez.deserialize(mask);
-        field_node->transform_field_mask(mask, source);
       }
       size_t num_open_children;
       derez.deserialize(num_open_children);
@@ -5071,7 +5061,6 @@ namespace LegionRuntime {
         new_node->add_reference();
         derez.deserialize<bool>(info.complete);
         derez.deserialize(info.open_fields);
-        field_node->transform_field_mask(info.open_fields, source);
         new_node->unpack_composite_tree(derez, source);
       }
     }
@@ -6706,7 +6695,6 @@ namespace LegionRuntime {
           {
             FieldMask user_mask;
             derez.deserialize(user_mask);
-            field_node->transform_field_mask(user_mask, source);
             add_physical_user(red_users[reduction_index++], false/*reading*/,
                               red_event, user_mask);
           }
@@ -6729,7 +6717,6 @@ namespace LegionRuntime {
           {
             FieldMask user_mask;
             derez.deserialize(user_mask);
-            field_node->transform_field_mask(user_mask, source);
             add_physical_user(read_users[reading_index++], true/*reading*/,
                               read_event, user_mask);
           }

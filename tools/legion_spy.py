@@ -18,12 +18,11 @@
 import subprocess
 import sys, os, shutil
 import string
+import tempfile
 from getopt import getopt
 from spy_parser import parse_log_file
 from spy_analysis import *
 #from spy_state import *
-
-temp_dir = ".cent/"
 
 def usage():
     print "Usage: "+sys.argv[0]+" [-l -c -p -m -r -i -k -s -v -P -D -Q] <file_name>"
@@ -39,7 +38,7 @@ def usage():
     print "  -Q : dump event paths between every two operations in the event graph"
     sys.exit(1)
 
-def main():
+def main(temp_dir):
     if len(sys.argv) < 2:
         usage()
 
@@ -141,19 +140,17 @@ def main():
     print 'Legion Spy analysis complete.  Exiting...'
     if keep_temp_files:
         try:
-            subprocess.check_call(['cp '+temp_dir+'* .'],shell=True)
+            subprocess.check_call('cp', temp_dir+'.', '.')
         except:
             print 'WARNING: Unable to copy temporary files into current directory'
 
 if __name__ == "__main__":
+    temp_dir = tempfile.mkdtemp()+'/'
     try:
-        os.mkdir(temp_dir)
         sys.setrecursionlimit(10000)
-        main()
+        main(temp_dir)
+    finally:
         shutil.rmtree(temp_dir)
-    except:
-        shutil.rmtree(temp_dir)
-        raise
 
 # EOF
 

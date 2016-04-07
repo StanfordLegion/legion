@@ -26,6 +26,8 @@
 #include <deque>
 #include <algorithm>
 
+#define LEGION_PROF_SELF_PROFILE
+
 namespace LegionRuntime {
   namespace HighLevel {
 
@@ -64,12 +66,22 @@ namespace LegionRuntime {
         UniqueID op_id;
         TaskID task_id;
       };
+      struct SliceOwner {
+      public:
+        UniqueID parent_id;
+        UniqueID op_id;
+      };
+      struct WaitInfo {
+      public:
+        unsigned long long wait_start, wait_ready, wait_end;
+      };
       struct TaskInfo {
       public:
         UniqueID op_id;
         VariantID variant_id;
         Processor proc;
         unsigned long long create, ready, start, stop;
+        std::deque<WaitInfo> wait_intervals;
       };
       struct MetaInfo {
       public:
@@ -77,6 +89,7 @@ namespace LegionRuntime {
         unsigned hlr_id;
         Processor proc;
         unsigned long long create, ready, start, stop;
+        std::deque<WaitInfo> wait_intervals;
       };
       struct CopyInfo {
       public:
@@ -99,12 +112,18 @@ namespace LegionRuntime {
         size_t total_bytes;
         unsigned long long create, destroy;
       };
-#ifdef LEGION_PROF_MESSAGES
       struct MessageInfo {
       public:
         MessageKind kind;
         unsigned long long start, stop;
         Processor proc;
+      };
+#ifdef LEGION_PROF_SELF_PROFILE
+      struct ProfTaskInfo {
+      public:
+	Processor proc;
+	UniqueID op_id;
+	unsigned long long start, stop;
       };
 #endif
     public:
@@ -120,13 +139,16 @@ namespace LegionRuntime {
                                  const char *variant_name);
       void register_operation(Operation *op);
       void register_multi_task(Operation *op, TaskID kind);
+      void register_slice_owner(UniqueID pid, UniqueID id);
     public:
       void process_task(size_t id, UniqueID op_id, 
                   Realm::ProfilingMeasurements::OperationTimeline *timeline,
-                  Realm::ProfilingMeasurements::OperationProcessorUsage *usage);
+                  Realm::ProfilingMeasurements::OperationProcessorUsage *usage,
+                  Realm::ProfilingMeasurements::OperationEventWaits *waits);
       void process_meta(size_t id, UniqueID op_id,
                   Realm::ProfilingMeasurements::OperationTimeline *timeline,
-                  Realm::ProfilingMeasurements::OperationProcessorUsage *usage);
+                  Realm::ProfilingMeasurements::OperationProcessorUsage *usage,
+                  Realm::ProfilingMeasurements::OperationEventWaits *waits);
       void process_copy(UniqueID op_id,
                   Realm::ProfilingMeasurements::OperationTimeline *timeline,
                   Realm::ProfilingMeasurements::OperationMemoryUsage *usage);
@@ -136,11 +158,15 @@ namespace LegionRuntime {
       void process_inst(UniqueID op_id,
                   Realm::ProfilingMeasurements::InstanceTimeline *timeline,
                   Realm::ProfilingMeasurements::InstanceMemoryUsage *usage);
-#ifdef LEGION_PROF_MESSAGES
     public:
       void record_message(Processor proc, MessageKind kind, 
                           unsigned long long start,
                           unsigned long long stop);
+#ifdef LEGION_PROF_SELF_PROFILE
+    public:
+      void record_proftask(Processor p, UniqueID op_id,
+			   unsigned long long start,
+			   unsigned long long stop);
 #endif
     public:
       void dump_state(void);
@@ -150,15 +176,18 @@ namespace LegionRuntime {
       std::deque<TaskVariant>       task_variants;
       std::deque<OperationInstance> operation_instances;
       std::deque<MultiTask>         multi_tasks;
+      std::deque<SliceOwner>        slice_owners;
     private:
       std::deque<TaskInfo> task_infos;
       std::deque<MetaInfo> meta_infos;
       std::deque<CopyInfo> copy_infos;
       std::deque<FillInfo> fill_infos;
       std::deque<InstInfo> inst_infos;
-#ifdef LEGION_PROF_MESSAGES
     private:
       std::deque<MessageInfo> message_infos;
+#ifdef LEGION_PROF_SELF_PROFILE
+    private:
+      std::deque<ProfTaskInfo> prof_task_infos;
 #endif
     };
 
@@ -202,6 +231,7 @@ namespace LegionRuntime {
       // Operations
       void register_operation(Operation *op);
       void register_multi_task(Operation *op, TaskID task_id);
+      void register_slice_owner(UniqueID pid, UniqueID id);
     public:
       void add_task_request(Realm::ProfilingRequestSet &requests, 
                             TaskID tid, SingleTask *task);
@@ -231,13 +261,11 @@ namespace LegionRuntime {
     public:
       // Dump all the results
       void finalize(void);
-#ifdef LEGION_PROF_MESSAGES
     public:
       void record_message_kinds(const char *const *const message_names,
                                 unsigned int num_message_kinds);
       void record_message(MessageKind kind, unsigned long long start,
                           unsigned long long stop);
-#endif
     public:
       const Processor target_proc;
       inline bool has_outstanding_requests(void)

@@ -24,10 +24,12 @@ local default_options = {
   ["debug"] = false,
   ["no-dynamic-branches"] = true,
   ["no-dynamic-branches-assert"] = false,
+  ["pretty"] = false,
   ["index-launches"] = true,
   ["futures"] = true,
   ["inlines"] = true,
   ["leaf"] = true,
+  ["trace"] = true,
   ["vectorize"] = true,
   ["task-inlines"] = true,
 }
@@ -63,7 +65,10 @@ function config.parse_args()
       if rawargs[i+1] == nil or tonumber(rawargs[i+1]) == nil then
         error("option " .. rawargs[i] .. " missing argument")
       end
-      local v = tonumber(rawargs[i+1]) ~= 0
+      local v = tonumber(rawargs[i+1])
+      if type(default_options[k]) == "boolean" then
+        v = v~= 0
+      end
       options[k] = v
       i = i + 1
     else

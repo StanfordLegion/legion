@@ -1041,6 +1041,48 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    inline void FillLauncher::set_argument(TaskArgument arg)
+    //--------------------------------------------------------------------------
+    {
+      argument = arg;
+    }
+
+    //--------------------------------------------------------------------------
+    inline void FillLauncher::set_future(Future f)
+    //--------------------------------------------------------------------------
+    {
+      future = f;
+    }
+
+    //--------------------------------------------------------------------------
+    inline void FillLauncher::add_field(FieldID fid)
+    //--------------------------------------------------------------------------
+    {
+      fields.insert(fid);
+    }
+
+    //--------------------------------------------------------------------------
+    inline void FillLauncher::add_grant(Grant g)
+    //--------------------------------------------------------------------------
+    {
+      grants.push_back(g);
+    }
+
+    //--------------------------------------------------------------------------
+    inline void FillLauncher::add_wait_barrier(PhaseBarrier pb)
+    //--------------------------------------------------------------------------
+    {
+      wait_barriers.push_back(pb);
+    }
+
+    //--------------------------------------------------------------------------
+    inline void FillLauncher::add_arrival_barrier(PhaseBarrier pb)
+    //--------------------------------------------------------------------------
+    {
+      arrive_barriers.push_back(pb);
+    }
+
+    //--------------------------------------------------------------------------
     inline void MustEpochLauncher::add_single_task(const DomainPoint &point,
                                                    const TaskLauncher &launcher)
     //--------------------------------------------------------------------------
@@ -1246,6 +1288,16 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
+    /*static*/ inline Future Future::from_untyped_pointer(Runtime *rt,
+							  const void *buffer,
+							  size_t bytes)
+    //--------------------------------------------------------------------------
+    {
+      return LegionSerialization::from_value_helper(rt, buffer, bytes,
+						    false /*!owned*/);
+    }
+
+    //--------------------------------------------------------------------------
     template<typename T>
     inline T FutureMap::get_result(const DomainPoint &dp)
     //--------------------------------------------------------------------------
@@ -1435,23 +1487,24 @@ namespace LegionRuntime {
                 case 1:
                   fprintf(stderr, "ERROR: colors %d and %d of partition %d are "
                                   "not disjoint rectangles as they should be!",
-                                   (it1->first)[0], (it2->first)[0], result.id);
+                                   (int)(it1->first)[0],
+                                   (int)(it2->first)[0], result.id);
                   break;
                 case 2:
                   fprintf(stderr, "ERROR: colors (%d, %d) and (%d, %d) of "
                                   "partition %d are not disjoint rectangles "
                                   "as they should be!",
-                                  (it1->first)[0], (it1->first)[1],
-                                  (it2->first)[0], (it2->first)[1],
+                                  (int)(it1->first)[0], (int)(it1->first)[1],
+                                  (int)(it2->first)[0], (int)(it2->first)[1],
                                   result.id);
                   break;
                 case 3:
                   fprintf(stderr, "ERROR: colors (%d, %d, %d) and (%d, %d, %d) "
                                   "of partition %d are not disjoint rectangles "
                                   "as they should be!",
-                                  (it1->first)[0], (it1->first)[1],
-                                  (it1->first)[2], (it2->first)[0],
-                                  (it2->first)[1], (it2->first)[2],
+                                  (int)(it1->first)[0], (int)(it1->first)[1],
+                                  (int)(it1->first)[2], (int)(it2->first)[0],
+                                  (int)(it2->first)[1], (int)(it2->first)[2],
                                   result.id);
                   break;
                 default:
@@ -1625,6 +1678,19 @@ namespace LegionRuntime {
                          Context, Runtime*, const UDT&)>
       static void legion_udt_task_wrapper(const void*, size_t, 
                                           const void*, size_t, Processor);
+
+    public:
+      // Do-it-yourself pre/post-ambles for code generators
+      static void legion_task_preamble(const void *data,
+				       size_t datalen,
+				       Processor p,
+				       const Task *& task,
+				       const std::vector<PhysicalRegion> *& regionsptr,
+				       Context& ctx,
+				       Runtime *& runtime);
+      static void legion_task_postamble(Runtime *runtime, Context ctx,
+					const void *retvalptr = NULL,
+					size_t retvalsize = 0);
     };
     
     //--------------------------------------------------------------------------
@@ -2108,6 +2174,38 @@ namespace LegionRuntime {
       unsigned r = static_cast<unsigned>(right);
       l ^= r;
       return left = static_cast<AllocateMode>(l);
+    }
+
+    //--------------------------------------------------------------------------
+    inline std::ostream& operator<<(std::ostream& os, const LogicalRegion& lr)
+    //--------------------------------------------------------------------------
+    {
+      os << "LogicalRegion(" << lr.tree_id << "," << lr.index_space << "," << lr.field_space << ")";
+      return os;
+    }
+
+    //--------------------------------------------------------------------------
+    inline std::ostream& operator<<(std::ostream& os, const IndexSpace& is)
+    //--------------------------------------------------------------------------
+    {
+      os << "IndexSpace(" << is.id << "," << is.tid << ")";
+      return os;
+    }
+
+    //--------------------------------------------------------------------------
+    inline std::ostream& operator<<(std::ostream& os, const FieldSpace& fs)
+    //--------------------------------------------------------------------------
+    {
+      os << "FieldSpace(" << fs.id << ")";
+      return os;
+    }
+
+    //--------------------------------------------------------------------------
+    inline std::ostream& operator<<(std::ostream& os, const PhaseBarrier& pb)
+    //--------------------------------------------------------------------------
+    {
+      os << "PhaseBarrier(" << pb.phase_barrier << ")";
+      return os;
     }
 
   };
