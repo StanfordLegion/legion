@@ -1016,7 +1016,7 @@ namespace Realm {
     {
       // adjust starting point to our first_element, and make sure span fits
       ptr -= first_element;
-      if((ptr < 0) || (ptr >= num_elements))
+      if((ptr < 0) || (ptr >= (off_t)num_elements))
 	return false;
 
       if(raw_data != 0) {
