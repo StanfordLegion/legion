@@ -2326,7 +2326,7 @@ legion_index_allocator_destroy(legion_index_allocator_t handle_)
 
 legion_ptr_t
 legion_index_allocator_alloc(legion_index_allocator_t allocator_,
-                             unsigned num_elements)
+                             size_t num_elements)
 {
   IndexAllocator allocator = CObjectWrapper::unwrap(allocator_);
   ptr_t ptr = allocator.alloc(num_elements);
@@ -2336,7 +2336,7 @@ legion_index_allocator_alloc(legion_index_allocator_t allocator_,
 void
 legion_index_allocator_free(legion_index_allocator_t allocator_,
                             legion_ptr_t ptr_,
-                            unsigned num_elements)
+                            size_t num_elements)
 {
   IndexAllocator allocator = CObjectWrapper::unwrap(allocator_);
   ptr_t ptr = CObjectWrapper::unwrap(ptr_);

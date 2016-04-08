@@ -53,7 +53,7 @@ namespace Realm {
       off_t find_enabled(size_t count = 1, off_t start = 0) const;
       off_t find_disabled(size_t count = 1, off_t start = 0) const;
 
-      bool is_set(unsigned ptr) const;
+      bool is_set(off_t ptr) const;
       size_t pop_count(bool enabled = true) const;
       bool operator!(void) const;
       bool operator==(const ElementMask &other) const;
@@ -1044,9 +1044,9 @@ namespace Realm {
       IndexSpaceAllocator(const IndexSpaceAllocator& to_copy)
 	: impl(to_copy.impl) {}
 
-      unsigned alloc(size_t count = 1) const;
-      void reserve(unsigned ptr, size_t count = 1) const;
-      void free(unsigned ptr, size_t count = 1) const;
+      off_t alloc(size_t count = 1) const;
+      void reserve(off_t ptr, size_t count = 1) const;
+      void free(off_t ptr, size_t count = 1) const;
 
       template <typename LIN>
       void reserve(const LIN& linearizer, LegionRuntime::Arrays::Point<LIN::IDIM> point) const;

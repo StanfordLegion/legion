@@ -671,19 +671,19 @@ namespace Realm {
   // class IndexSpaceAllocator
   //
 
-    unsigned IndexSpaceAllocator::alloc(size_t count /*= 1*/) const
+    off_t IndexSpaceAllocator::alloc(size_t count /*= 1*/) const
     {
       DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
       return ((IndexSpaceAllocatorImpl *)impl)->alloc_elements(count);
     }
 
-    void IndexSpaceAllocator::reserve(unsigned ptr, size_t count /*= 1  */) const
+    void IndexSpaceAllocator::reserve(off_t ptr, size_t count /*= 1  */) const
     {
       DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
       return ((IndexSpaceAllocatorImpl *)impl)->reserve_elements(ptr, count);
     }
 
-    void IndexSpaceAllocator::free(unsigned ptr, size_t count /*= 1  */) const
+    void IndexSpaceAllocator::free(off_t ptr, size_t count /*= 1  */) const
     {
       DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
       return ((IndexSpaceAllocatorImpl *)impl)->free_elements(ptr, count);
@@ -1012,7 +1012,7 @@ namespace Realm {
       assert(0);
     }
 
-    bool ElementMask::is_set(unsigned ptr) const
+    bool ElementMask::is_set(off_t ptr) const
     {
       // adjust starting point to our first_element, and make sure span fits
       ptr -= first_element;
@@ -1735,7 +1735,7 @@ namespace Realm {
     {
     }
 
-    unsigned IndexSpaceAllocatorImpl::alloc_elements(size_t count /*= 1 */)
+    off_t IndexSpaceAllocatorImpl::alloc_elements(size_t count /*= 1 */)
     {
       SharedAccess<IndexSpaceImpl> is_data(is_impl);
       assert((is_data->valid_mask_owners >> gasnet_mynode()) & 1);
@@ -1747,7 +1747,7 @@ namespace Realm {
       return start;
     }
 
-    void IndexSpaceAllocatorImpl::reserve_elements(unsigned ptr, size_t count /*= 1 */)
+    void IndexSpaceAllocatorImpl::reserve_elements(off_t ptr, size_t count /*= 1 */)
     {
       // for now, do updates of valid masks immediately
       IndexSpaceImpl *impl = is_impl;
@@ -1761,7 +1761,7 @@ namespace Realm {
       }
     }
 
-    void IndexSpaceAllocatorImpl::free_elements(unsigned ptr, size_t count /*= 1*/)
+    void IndexSpaceAllocatorImpl::free_elements(off_t ptr, size_t count /*= 1*/)
     {
       // for now, do updates of valid masks immediately
       IndexSpaceImpl *impl = is_impl;

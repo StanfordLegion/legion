@@ -97,11 +97,11 @@ namespace Realm {
 
       ~IndexSpaceAllocatorImpl(void);
 
-      unsigned alloc_elements(size_t count = 1);
+      off_t alloc_elements(size_t count = 1);
 
-      void reserve_elements(unsigned ptr, size_t count = 1);
+      void reserve_elements(off_t ptr, size_t count = 1);
 
-      void free_elements(unsigned ptr, size_t count = 1);
+      void free_elements(off_t ptr, size_t count = 1);
 
       IndexSpaceImpl *is_impl;
     };

@@ -1514,7 +1514,7 @@ typedef ptrdiff_t coord_t;
    */
   legion_ptr_t
   legion_index_allocator_alloc(legion_index_allocator_t allocator,
-                               unsigned num_elements /* = 1 */);
+                               size_t num_elements /* = 1 */);
 
   /**
    * @see LegionRuntime::HighLevel::IndexAllocator::free()
@@ -1522,7 +1522,7 @@ typedef ptrdiff_t coord_t;
   void
   legion_index_allocator_free(legion_index_allocator_t allocator,
                               legion_ptr_t ptr,
-                              unsigned num_elements /* = 1 */);
+                              size_t num_elements /* = 1 */);
 
   /**
    * @return Caller takes ownership of return value.
