@@ -348,7 +348,10 @@ namespace Legion {
       MAPPER_VIRTUAL_CHANNEL = 4,
       SEMANTIC_INFO_VIRTUAL_CHANNEL = 5,
       LAYOUT_CONSTRAINT_VIRTUAL_CHANNEL = 6,
-      MAX_NUM_VIRTUAL_CHANNELS = 7, // this one must be last
+      CONTEXT_VIRTUAL_CHANNEL = 7,
+      MANAGER_VIRTUAL_CHANNEL = 8,
+      VIEW_VIRTUAL_CHANNEL = 9,
+      MAX_NUM_VIRTUAL_CHANNELS = 10, // this one must be last
     };
 
     enum MessageKind {
@@ -390,7 +393,6 @@ namespace Legion {
       DISTRIBUTED_RESOURCE_UPDATE,
       DISTRIBUTED_CREATE_ADD,
       DISTRIBUTED_CREATE_REMOVE,
-      VIEW_REMOTE_REGISTRATION,
       SEND_BACK_ATOMIC,
       SEND_MATERIALIZED_VIEW,
       SEND_MATERIALIZED_UPDATE,
@@ -401,6 +403,7 @@ namespace Legion {
       SEND_INSTANCE_MANAGER,
       SEND_REDUCTION_MANAGER,
       SEND_CREATE_TOP_VIEW_REQUEST,
+      SEND_CREATE_TOP_VIEW_RESPONSE,
       SEND_FUTURE,
       SEND_FUTURE_RESULT,
       SEND_FUTURE_SUBSCRIPTION,
@@ -420,8 +423,9 @@ namespace Legion {
       SEND_FIELD_SEMANTIC_INFO,
       SEND_LOGICAL_REGION_SEMANTIC_INFO,
       SEND_LOGICAL_PARTITION_SEMANTIC_INFO,
-      SEND_SUBSCRIBE_REMOTE_CONTEXT,
-      SEND_FREE_REMOTE_CONTEXT,
+      SEND_REMOTE_CONTEXT_REQUEST,
+      SEND_REMOTE_CONTEXT_RESPONSE,
+      SEND_REMOTE_CONTEXT_FREE,
       SEND_VERSION_STATE_PATH,
       SEND_VERSION_STATE_INIT,
       SEND_VERSION_STATE_REQUEST,
@@ -487,7 +491,6 @@ namespace Legion {
         "Distributed Resource Update",                                \
         "Distributed Create Add",                                     \
         "Distributed Create Remove",                                  \
-        "View Remote Registration",                                   \
         "Send Back Atomic",                                           \
         "Send Materialized View",                                     \
         "Send Materialized Update",                                   \
@@ -498,6 +501,7 @@ namespace Legion {
         "Send Instance Manager",                                      \
         "Send Reduction Manager",                                     \
         "Send Create Top View Request",                               \
+        "Send Create Top View Response",                              \
         "Send Future",                                                \
         "Send Future Result",                                         \
         "Send Future Subscription",                                   \
@@ -517,8 +521,9 @@ namespace Legion {
         "Send Field Semantic Info",                                   \
         "Send Logical Region Semantic Info",                          \
         "Send Logical Partition Semantic Info",                       \
-        "Send Subscribe Remote Context",                              \
-        "Send Free Remote Context",                                   \
+        "Send Remote Context Request",                                \
+        "Send Remote Context Response",                               \
+        "Send Remote Context Free",                                   \
         "Send Version State Path",                                    \
         "Send Version State Init",                                    \
         "Send Version State Request",                                 \

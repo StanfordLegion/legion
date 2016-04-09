@@ -206,10 +206,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     TraversalInfo::TraversalInfo(ContextID c, Operation *o,
-                                 const RegionRequirement &r, VersionInfo &info,
-                                 const FieldMask &k)
-      : ctx(c), op(o), req(r), version_info(info), traversal_mask(k),
-        context_uid(o->get_parent()->get_context_uid())
+                                 const RegionRequirement &r,unsigned parent_idx,
+                                 VersionInfo &info, const FieldMask &k)
+      : ctx(c), op(o), req(r), parent_req_index(parent_idx), version_info(info),
+        traversal_mask(k), context_uid(o->get_parent()->get_context_uid())
     //--------------------------------------------------------------------------
     {
     }
@@ -343,8 +343,6 @@ namespace Legion {
         assert(it->second.physical_state == NULL);
       }
 #endif
-      if (!top_views.empty())
-        release_top_views();
       // If we still have a buffer, then free it now
       if (packed_buffer != NULL)
         free(packed_buffer);
@@ -471,8 +469,6 @@ namespace Legion {
         // version manager references in case this operation
         // fails to complete
       }
-      if (!top_views.empty())
-        release_top_views();
     }
 
     //--------------------------------------------------------------------------
@@ -509,8 +505,6 @@ namespace Legion {
                                 target, closed_children, applied_conditions);
         }
       }
-      if (!top_views.empty())
-        release_top_views();
     }
 
     //--------------------------------------------------------------------------
@@ -596,31 +590,6 @@ namespace Legion {
         assert(previous_fields * it->second);
         previous_fields |= it->second;
       }
-    }
-
-    //--------------------------------------------------------------------------
-    void VersionInfo::record_top_view(InstanceView *view, bool created)
-    //--------------------------------------------------------------------------
-    {
-      // If it wasn't created, check to see ifw e already hold a reference
-      if (!created && (top_views.find(view) != top_views.end()))
-        return;
-      // Add a resource reference and record it
-      view->add_base_resource_ref(VERSION_INFO_REF);
-      top_views.insert(view);
-    }
-
-    //--------------------------------------------------------------------------
-    void VersionInfo::release_top_views(void)
-    //--------------------------------------------------------------------------
-    {
-      for (std::set<InstanceView*>::const_iterator it = top_views.begin();
-            it != top_views.end(); it++)
-      {
-        if ((*it)->remove_base_resource_ref(VERSION_INFO_REF))
-          LogicalView::delete_logical_view(*it);
-      }
-      top_views.clear();
     }
 
     //--------------------------------------------------------------------------
@@ -5616,6 +5585,7 @@ namespace Legion {
       }
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void VersionState::handle_version_state_response(AddressSpaceID source,
      UserEvent to_trigger, VersionRequestKind request_kind, Deserializer &derez)
@@ -5845,6 +5815,7 @@ namespace Legion {
         to_trigger.trigger();
       }
     }
+#endif
 
     //--------------------------------------------------------------------------
     /*static*/ void VersionState::process_version_state_path_only(

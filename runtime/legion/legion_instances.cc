@@ -672,119 +672,31 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalManager::register_logical_top_view(UniqueID context_uid,
-                                                    InstanceView *top_view)
+    InstanceView* PhysicalManager::create_logical_top_view(SingleTask *context)
     //--------------------------------------------------------------------------
     {
-      UserEvent to_trigger = UserEvent::NO_USER_EVENT;
-      {
-        // Co-opt the gc lock for synchronization
-        AutoLock gc(gc_lock);
 #ifdef DEBUG_HIGH_LEVEL
-        assert(top_views.find(context_uid) == top_views.end());
-        assert(top_reverse.find(top_view) == top_reverse.end());
+      assert(is_owner()); // should always be on the owner node
 #endif
-        top_views[context_uid] = top_view;
-        top_reverse[top_view] = context_uid;
-        // See if we have any events to trigger
-        std::map<UniqueID,UserEvent>::const_iterator finder = 
-          pending_views.find(context_uid);
-        if (finder != pending_views.end())
-          to_trigger = finder->second;
-        else
-          return;
-      }
-      to_trigger.trigger();
-    }
-
-    //--------------------------------------------------------------------------
-    void PhysicalManager::unregister_logical_top_view(InstanceView *top_view)
-    //--------------------------------------------------------------------------
-    {
-      // Co-opt the gc lock for synchronization
+      // Make the view first
+      InstanceView *result = create_top_view(context);
+      // Save the context to be notified when we deleted
+      GenerationID gen = context->get_generation();
       AutoLock gc(gc_lock);
-      std::map<InstanceView*,UniqueID>::iterator finder = 
-        top_reverse.find(top_view);
-#ifdef DEBUG_HIGH_LEVEL
-      assert(finder != top_reverse.end());
-      assert(top_views.find(finder->second) != top_views.end());
-#endif
-      top_views.erase(finder->second);
-      top_reverse.erase(finder);
-    }
-
-    //--------------------------------------------------------------------------
-    UniqueID PhysicalManager::find_context_uid(InstanceView *top_view) const
-    //--------------------------------------------------------------------------
-    {
-      // Co-opt the gc lock for synchronization
-      AutoLock gc(gc_lock,1,false/*exclusive*/);
-      std::map<InstanceView*,UniqueID>::const_iterator finder = 
-        top_reverse.find(top_view);
-#ifdef DEBUG_HIGH_LEVEL
-      assert(finder != top_reverse.end());
-#endif
-      return finder->second;
-    }
-
-    //--------------------------------------------------------------------------
-    InstanceView* PhysicalManager::find_or_create_logical_top_view(
-                                UniqueID context_uid, VersionInfo *version_info)
-    //--------------------------------------------------------------------------
-    {
-      // See if we've already got it
-      bool need_creation = false;
-      Event wait_on = Event::NO_EVENT;
-      {
-        AutoLock gc(gc_lock);
-        std::map<UniqueID,InstanceView*>::const_iterator finder = 
-          top_views.find(context_uid);
-        if (finder != top_views.end())
-        {
-          if (version_info != NULL)
-            version_info->record_top_view(finder->second, false/*create*/);
-          return finder->second;
-        }
-        // If we didn't find it, see if someone else is already making it
-        std::map<UniqueID,UserEvent>::const_iterator pending_finder = 
-          pending_views.find(context_uid);
-        if (pending_finder == pending_views.end())
-        {
-          need_creation = true;
-          UserEvent make_event = UserEvent::create_user_event();
-          pending_views[context_uid] = make_event;
-          wait_on = make_event;
-        }
-        else
-          wait_on = pending_finder->second;
-      }
-      if (need_creation)
-      {
-        // See if we are local or remote
-        if (!is_owner())
-        {
-          Serializer rez;
-          {
-            RezCheck z(rez);
-            rez.serialize(did);
-            rez.serialize(context_uid);
-          }
-          runtime->send_create_top_view_request(owner_space, rez);
-        }
-        else // we're the owner so make the view
-          return create_logical_top_view(context_uid, version_info);
-      }
-      // Wait for the results
-      wait_on.wait();
-      AutoLock gc(gc_lock,1,false/*exclusive*/);
-#ifdef DEBUG_HIGH_LEVEL
-      // It better be there when this gets triggered
-      assert(top_views.find(context_uid) != top_views.end());
-#endif
-      InstanceView *result = top_views[context_uid];
-      if (version_info != NULL)
-        version_info->record_top_view(result, false/*create*/);
+      // Perfectly alright to overwrite earlier generations
+      active_contexts[context] = gen;
       return result;
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalManager::unregister_active_context(SingleTask *context)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock gc(gc_lock);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(active_contexts.find(context) != active_contexts.end());
+#endif
+      active_contexts.erase(context);
     }
 
     //--------------------------------------------------------------------------
@@ -943,6 +855,15 @@ namespace Legion {
       else
         instance.destroy(deferred_event);
 #endif
+      // Notify any contexts of our deletion
+      // No need to hold the lock, there should be no more contexts
+      // being added since we are being deleted
+      for (std::map<SingleTask*,GenerationID>::const_iterator it = 
+            active_contexts.begin(); it != active_contexts.end(); it++)
+      {
+        it->first->notify_instance_deletion(
+            const_cast<PhysicalManager*>(this), it->second);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -969,29 +890,6 @@ namespace Legion {
       }
       else
         legion_delete(manager->as_instance_manager());
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void PhysicalManager::handle_create_top_view_request(
-                   Runtime *runtime, AddressSpaceID source, Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      DistributedID did;
-      derez.deserialize(did);
-      UniqueID context_uid;
-      derez.deserialize(context_uid);
-#ifdef DEBUG_HIGH_LEVEL
-      PhysicalManager *manager = dynamic_cast<PhysicalManager*>(
-          runtime->find_distributed_collectable(did));
-      assert(manager != NULL);
-#else
-      PhysicalManager *manager = static_cast<PhysicalManager*>(
-          runtime->find_distributed_collectable(did));
-#endif
-      InstanceView *target_view = 
-        manager->find_or_create_logical_top_view(context_uid, NULL);
-      target_view->send_view_base(source);
     }
 
     /////////////////////////////////////////////////////////////
@@ -1143,22 +1041,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    InstanceView* InstanceManager::create_logical_top_view(UniqueID ctx_uid,
-                                                      VersionInfo *version_info)
+    InstanceView* InstanceManager::create_top_view(SingleTask *own_ctx) const
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(is_owner());
+#endif
       DistributedID view_did = 
         context->runtime->get_available_distributed_id(false);
-      MaterializedView *result = legion_new<MaterializedView>(context, view_did,
-                                                context->runtime->address_space,
-                                                context->runtime->address_space,
-                                                region_node, this,
-                                            ((MaterializedView*)NULL/*parent*/),
-                                                true/*register now*/);
-      if (version_info != NULL)
-        version_info->record_top_view(result, true/*create*/);
-      register_logical_top_view(ctx_uid, result);
-      return result;
+      return legion_new<MaterializedView>(context, view_did, owner_space,
+                                          owner_space, region_node,
+                                          const_cast<InstanceManager*>(this),
+                                          (MaterializedView*)NULL/*parent*/, 
+                                          own_ctx, true/*register now*/);
     }
 
     //--------------------------------------------------------------------------
@@ -1548,20 +1443,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    InstanceView* ReductionManager::create_logical_top_view(
-                                UniqueID context_uid, VersionInfo *version_info)
+    InstanceView* ReductionManager::create_top_view(SingleTask *own_ctx) const
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(is_owner());
+#endif
       DistributedID view_did = 
         context->runtime->get_available_distributed_id(false);
-      ReductionView *result = legion_new<ReductionView>(context, view_did,
-                                                context->runtime->address_space,
-                                                context->runtime->address_space,
-                                                region_node, this, true/*reg*/);
-      if (version_info != NULL)
-        version_info->record_top_view(result, true/*create*/);
-      register_logical_top_view(context_uid, result);
-      return result;
+      return legion_new<ReductionView>(context, view_did, owner_space,
+                                       owner_space, region_node, 
+                                       const_cast<ReductionManager*>(this),
+                                       own_ctx, true/*register now*/);
     }
 
     /////////////////////////////////////////////////////////////
@@ -2060,8 +1953,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    InstanceView* VirtualManager::create_logical_top_view(UniqueID context_uid,
-                                                      VersionInfo *version_info)
+    InstanceView* VirtualManager::create_top_view(SingleTask *context) const
     //--------------------------------------------------------------------------
     {
       // should never be called

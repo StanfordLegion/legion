@@ -226,7 +226,6 @@ namespace Legion {
           rez.serialize(it->second);
         }
       }
-      // Can't be sending inline tasks remotely
       rez.serialize(early_mapped_regions.size());
       for (std::map<unsigned,InstanceSet>::iterator it = 
             early_mapped_regions.begin(); it != 
@@ -235,6 +234,7 @@ namespace Legion {
         rez.serialize(it->first);
         it->second.pack_references(rez, target);
       }
+      rez.serialize<UniqueID>(parent_ctx->get_context_id()); 
     }
 
     //--------------------------------------------------------------------------
@@ -332,6 +332,14 @@ namespace Legion {
       }
       // Parent requirement indexes don't mean anything remotely
       parent_req_indexes.resize(regions.size(), 0);
+      // A little bit of magic here to see how far up the tree we will be
+      // able to go in the task tree for mappers. 
+      UniqueID parent_context_uid;
+      derez.deserialize(parent_context_uid);
+      // See if we have it, if not there is nothing we can do.
+      // DO NOT CHANGE THIS UNLESS YOU THINK REALLY HARD ABOUT VIRTUAL 
+      // CHANNELS AND HOW CONTEXT META-DATA IS MOVED!
+      parent_task = runtime->find_context(parent_context_uid, true);
     }
 
     //--------------------------------------------------------------------------
@@ -385,6 +393,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       initialize_speculation(ctx, track, regions.size(), p);
+      parent_task = ctx; // initialize the parent task
       // Fill in default values for all of the Task fields
       orig_proc = ctx->get_executing_processor();
       current_proc = orig_proc;
@@ -1572,6 +1581,7 @@ namespace Legion {
       this->steal_count = rhs->steal_count;
       this->stealable = can_steal;
       this->speculated = rhs->speculated;
+      this->parent_task = rhs->parent_task;
       // Premapping should never get cloned
       this->map_locally = rhs->map_locally;
       // From TaskOp
@@ -1739,6 +1749,7 @@ namespace Legion {
         // Do the premapping
         runtime->forest->physical_traverse_path(req_ctx, privilege_path,
                                                 regions[*it],
+                                                parent_req_indexes[*it],
                                                 version_info, this, 
                                                 true/*find valid*/, valid
 #ifdef DEBUG_HIGH_LEVEL
@@ -1925,7 +1936,8 @@ namespace Legion {
         set_current_mapping_index(*it);
         // Passed all the error checking tests so register it
         runtime->forest->physical_register_only(req_ctx, 
-                              regions[*it], version_info, 
+                              regions[*it], parent_req_indexes[*it],
+                              version_info, 
                               this, completion_event, chosen_instances
 #ifdef DEBUG_HIGH_LEVEL
                               , *it, get_logging_name(), unique_op_id
@@ -2378,7 +2390,17 @@ namespace Legion {
         valid_wait_event = false;
         window_wait.trigger();
       }
+      // Clean up our instance top views
+      for (std::map<PhysicalManager*,InstanceView*>::const_iterator it = 
+            instance_top_views.begin(); it != instance_top_views.end(); it++)
+      {
+        it->first->unregister_active_context(this);
+        if (it->second->remove_base_resource_ref(CONTEXT_REF))
+          LogicalView::delete_logical_view(it->second);
+      }
+      instance_top_views.clear();
 #ifdef DEBUG_HIGH_LEVEL
+      assert(pending_top_views.empty());
       assert(outstanding_subtasks == 0);
       assert(pending_subtasks == 0);
       assert(pending_frames == 0);
@@ -2419,9 +2441,11 @@ namespace Legion {
     {
       if (!has_virtual_instances_cached)
       {
-        for (unsigned idx = 0; idx < physical_instances.size(); idx++)
+        // Hold the lock when testing this
+        AutoLock o_lock(op_lock, 1, false/*exclusive*/);
+        for (unsigned idx = 0; idx < initial_region_count; idx++)
         {
-          if (physical_instances[idx].has_composite_ref())
+          if (virtual_mapped[idx])
           {
             has_virtual_instances_result = true;
             break;
@@ -2430,6 +2454,26 @@ namespace Legion {
         has_virtual_instances_cached = true;
       }
       return has_virtual_instances_result;
+    }
+
+    //--------------------------------------------------------------------------
+    bool SingleTask::is_virtual_mapped(unsigned index) const
+    //--------------------------------------------------------------------------
+    {
+      if (index >= initial_region_count)
+        return false; // new region, not actually virtually mapped
+      AutoLock o_lock(op_lock, 1, false/*exclusive*/);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(index < virtual_mapped.size());
+#endif
+      return virtual_mapped[index];
+    }
+
+    //--------------------------------------------------------------------------
+    bool SingleTask::is_created_region(unsigned index) const
+    //--------------------------------------------------------------------------
+    {
+      return (index >= initial_region_count);
     }
 
     //--------------------------------------------------------------------------
@@ -2715,38 +2759,43 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SingleTask::pack_parent_task(Serializer &rez, AddressSpaceID target)
+    void SingleTask::pack_remote_context(Serializer &rez, AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
-      // Starting with this context, pack up all the enclosing local fields
-      LegionDeque<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::tracked locals = 
-                                                                  local_fields;
-      // Get all the local fields from our enclosing contexts
-      find_enclosing_local_fields(locals);
-      RezCheck z(rez);
       int depth = get_depth();
       rez.serialize(depth);
-      // See if we need to pack up base task information
-      bool need_pack_base = !has_remote_instance(target);
-      rez.serialize<bool>(need_pack_base);
-      if (need_pack_base)
+      // We have to hold the lock when packing some of these things
+      {
+        AutoLock o_lock(op_lock, 1, false/*exclusive*/);
+        // See if we need to pack up base task information
         pack_base_task(rez, target);
-      // Now pack them all up
+        // Pack up our virtual mapping information
+        rez.serialize(initial_region_count);
+        std::vector<unsigned> virtual_indexes;
+        for (unsigned idx = 0; idx < initial_region_count; idx++)
+        {
+          if (virtual_mapped[idx])
+            virtual_indexes.push_back(idx);
+        }
+        rez.serialize<size_t>(virtual_indexes.size());
+        for (unsigned idx = 0; idx < virtual_indexes.size(); idx++)
+          rez.serialize(virtual_indexes[idx]);
+      }
+      // Now pack up any local fields 
+      LegionDeque<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::tracked locals = 
+                                                                  local_fields;
+      find_enclosing_local_fields(locals);
       size_t num_local = locals.size();
       rez.serialize(num_local);
       for (unsigned idx = 0; idx < locals.size(); idx++)
         rez.serialize(locals[idx]);
     }
 
-    //-------------------------------------------------------------------------
-    void SingleTask::pack_remote_ctx_info(Serializer &rez)
+    //--------------------------------------------------------------------------
+    void SingleTask::unpack_remote_context(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      // Assume we are the owner in this case
-      UniqueID remote_owner_proxy = get_unique_id();
-      rez.serialize(remote_owner_proxy);
-      SingleTask *proxy_this = this;
-      rez.serialize(proxy_this);
+      assert(false); // should only be called for RemoteTask
     }
 
     //--------------------------------------------------------------------------
@@ -5288,7 +5337,8 @@ namespace Legion {
         set_current_mapping_index(idx);
         // apply the results of the mapping to the tree
         runtime->forest->physical_register_only(enclosing_contexts[idx],
-                                    regions[idx], get_version_info(idx), 
+                                    regions[idx], parent_req_indexes[idx],
+                                    get_version_info(idx), 
                                     this, local_termination_event, 
                                     physical_instances[idx]
 #ifdef DEBUG_HIGH_LEVEL
@@ -5323,8 +5373,9 @@ namespace Legion {
         RegionTreePath path;
         initialize_mapping_path(path, regions[idx], regions[idx].region);
         runtime->forest->physical_traverse_path(enclosing_contexts[idx],
-                              path, regions[idx], get_version_info(idx), 
-                              this, true/*valid*/, postmap_valid[idx]
+                              path, regions[idx], parent_req_indexes[idx],
+                              get_version_info(idx), this, true/*valid*/, 
+                              postmap_valid[idx]
 #ifdef DEBUG_HIGH_LEVEL
                               , idx, get_logging_name()
                               , unique_op_id
@@ -5466,9 +5517,9 @@ namespace Legion {
         // Register this with a no-event so that the instance can
         // be used as soon as it is valid from the copy to it
         runtime->forest->physical_register_only(enclosing_contexts[idx],
-                          regions[idx], get_version_info(idx),
-                          this, Event::NO_EVENT/*done immediately*/,
-                          result
+                          regions[idx], parent_req_indexes[idx],
+                          get_version_info(idx), this, 
+                          Event::NO_EVENT/*done immediately*/, result
 #ifdef DEBUG_HIGH_LEVEL
                           , idx, get_logging_name(), unique_op_id
 #endif
@@ -5508,7 +5559,7 @@ namespace Legion {
         {
           runtime->forest->initialize_current_context(context,
               clone_requirements[idx], physical_instances[idx],
-              unmap_events[idx], unique_op_id, top_views);
+              unmap_events[idx], this, idx, top_views);
 #ifdef DEBUG_HIGH_LEVEL
           assert(!physical_instances[idx].empty());
 #endif
@@ -5568,6 +5619,205 @@ namespace Legion {
                                                     regions[idx].region,
                                                     true/*logical only*/);
       }
+    }
+
+    //--------------------------------------------------------------------------
+    InstanceView* SingleTask::create_logical_top_view(PhysicalManager *manager,
+                                                      unsigned index)
+    //--------------------------------------------------------------------------
+    {
+      // First check to see if we are the owner node for this manager
+      // if not we have to send the message there since the context
+      // on that node is actually the point of serialization
+      if (!manager->is_owner())
+      {
+        InstanceView *volatile result = NULL;
+        UserEvent wait_on = UserEvent::create_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize<UniqueID>(get_context_id());
+          rez.serialize(manager->did);
+          rez.serialize(index);
+          rez.serialize<InstanceView**>(const_cast<InstanceView**>(&result));
+          rez.serialize(wait_on); 
+        }
+        runtime->send_create_top_view_request(manager->owner_space, rez);
+        wait_on.wait();
+#ifdef DEBUG_HIGH_LEVEL
+        assert(result != NULL); // when we wake up we should have the result
+#endif
+        return result;
+      }
+      // First we need to either find or make the instance view
+      InstanceView *result = NULL;
+      do
+      {
+        // No virtual mappings, check to see if we already have the 
+        // instance, if we do, return it, otherwise make it and save it
+        Event wait_on = Event::NO_EVENT;
+        {
+          AutoLock o_lock(op_lock);
+          std::map<PhysicalManager*,InstanceView*>::const_iterator finder = 
+            instance_top_views.find(manager);
+          if (finder != instance_top_views.end())
+          {
+            result = finder->second;
+            break; // we've already go the view, jump to the end
+          }
+          // See if someone else is already making it
+          std::map<PhysicalManager*,UserEvent>::iterator pending_finder =
+            pending_top_views.find(manager);
+          if (pending_finder == pending_top_views.end())
+            // mark that we are making it
+            pending_top_views[manager] = UserEvent::NO_USER_EVENT;
+          else
+          {
+            // See if we are the first one to follow
+            if (!pending_finder->second.exists())
+              pending_finder->second = UserEvent::create_user_event();
+            wait_on = pending_finder->second;
+          }
+        }
+        if (!wait_on.exists())
+        {
+          // We have to make the instance view
+          result = manager->create_logical_top_view(this);
+          result->add_base_resource_ref(CONTEXT_REF);
+          UserEvent to_trigger;
+          {
+            AutoLock o_lock(op_lock);
+#ifdef DEBUG_HIGH_LEVEL
+            assert(instance_top_views.find(manager) == 
+                    instance_top_views.end());
+#endif
+            instance_top_views[manager] = result;
+            std::map<PhysicalManager*,UserEvent>::iterator pending_finder =
+              pending_top_views.find(manager);
+#ifdef DEBUG_HIGH_LEVEL
+            assert(pending_finder != pending_top_views.end());
+#endif
+            to_trigger = pending_finder->second;
+            pending_top_views.erase(pending_finder);
+          }
+          if (to_trigger.exists())
+            to_trigger.trigger();
+        }
+        else
+        {
+          wait_on.wait();
+          // Retake the lock and read out the result
+          AutoLock o_lock(op_lock, 1, false/*exclusive*/);
+          std::map<PhysicalManager*,InstanceView*>::const_iterator finder = 
+              instance_top_views.find(manager);
+#ifdef DEBUG_HIGH_LEVEL
+          assert(finder != instance_top_views.end());
+#endif
+          result = finder->second;
+        }
+      } while (false);
+      // We've got the result, see if this requirement was virtually mapped
+      if (has_virtual_instances() && is_virtual_mapped(index))
+      {
+        // This is where things get weird, this region was virtually mapped
+        // Now we have to clone the view information from our parent context
+        //
+      }
+      else if (is_created_region(index))
+      {
+        // If this is a created region, record that we made a new
+        // instance for this context so that it can flow back out
+        // later if it isn't deleted first
+      }
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    void SingleTask::notify_instance_deletion(PhysicalManager *deleted,
+                                              GenerationID old_gen)
+    //--------------------------------------------------------------------------
+    {
+      InstanceView *removed = NULL;
+      {
+        AutoLock o_lock(op_lock);
+        // If we are no longer the same generation, then we can ignore this
+        if (old_gen < gen)
+          return;
+        std::map<PhysicalManager*,InstanceView*>::iterator finder =  
+          instance_top_views.find(deleted);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(finder != instance_top_views.end());
+#endif
+        removed = finder->second;
+        instance_top_views.erase(finder);
+      }
+      if (removed->remove_base_resource_ref(CONTEXT_REF))
+        LogicalView::delete_logical_view(removed);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void SingleTask::handle_logical_top_view_request(
+                   Deserializer &derez, Runtime *runtime, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      UniqueID context_uid;
+      derez.deserialize(context_uid);
+      DistributedID manager_did;
+      derez.deserialize(manager_did);
+      unsigned index;
+      derez.deserialize(index);
+      InstanceView **target;
+      derez.deserialize(target);
+      UserEvent to_trigger;
+      derez.deserialize(to_trigger);
+      // Get the context first
+      SingleTask *context = runtime->find_context(context_uid);
+      // Find the manager too, we know we are local so it should already
+      // be registered in the set of distributed IDs
+      DistributedCollectable *dc = 
+        runtime->find_distributed_collectable(manager_did);
+#ifdef DEBUG_HIGH_LEVEL
+      PhysicalManager *manager = dynamic_cast<PhysicalManager*>(dc);
+      assert(manager != NULL);
+#else
+      PhysicalManager *manager = static_cast<PhysicalManager*>(dc);
+#endif
+      InstanceView *result = context->create_logical_top_view(manager, index);
+      // Send the result back to the source and follow it with our own message
+      DistributedID result_did = result->send_view_base(source);
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(result_did);
+        rez.serialize(target);
+        rez.serialize(to_trigger);
+      }
+      runtime->send_create_top_view_response(source, rez);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void SingleTask::handle_logical_top_view_response(
+                                          Deserializer &derez, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID result_did;
+      derez.deserialize(result_did);
+      InstanceView **target;
+      derez.deserialize(target);
+      UserEvent to_trigger;
+      derez.deserialize(to_trigger);
+      DistributedCollectable *dc = 
+        runtime->find_distributed_collectable(result_did);
+#ifdef DEBUG_HIGH_LEVEL
+      InstanceView *result = dynamic_cast<InstanceView*>(dc);
+      assert(result != NULL);
+#else
+      InstanceView *result = static_cast<InstanceView*>(dc);
+#endif
+      *target = result;
+      to_trigger.trigger();
     }
 
     //--------------------------------------------------------------------------
@@ -6719,10 +6969,7 @@ namespace Legion {
         for (std::map<AddressSpaceID,RemoteTask*>::const_iterator it = 
               remote_instances.begin(); it != remote_instances.end(); it++)
         {
-          if (it->first == runtime->address_space)
-            runtime->release_remote_context(local_uid);
-          else
-            runtime->send_free_remote_context(it->first, rez);
+          runtime->send_remote_context_free(it->first, rez);
         }
         remote_instances.clear();
       }
@@ -7331,6 +7578,7 @@ namespace Legion {
       assert(virtual_mapped[index]);
 #endif
       runtime->forest->physical_register_only(virtual_ctx, regions[index],
+                                              parent_req_indexes[index],
                                               version_infos[index], this,
                                               Event::NO_EVENT, refs
 #ifdef DEBUG_HIGH_LEVEL
@@ -7432,26 +7680,25 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndividualTask::record_remote_instance(AddressSpaceID remote_instance,
-                                                RemoteTask *remote_ctx)
+    void IndividualTask::send_remote_context(AddressSpaceID remote_instance,
+                                             RemoteTask *remote_ctx)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(remote_instance != runtime->address_space);
+#endif
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(remote_ctx);
+        pack_remote_context(rez, remote_instance);
+      }
+      runtime->send_remote_context_response(remote_instance, rez);
       AutoLock o_lock(op_lock);
 #ifdef DEBUG_HIGH_LEVEL
       assert(remote_instances.find(remote_instance) == remote_instances.end());
 #endif
       remote_instances[remote_instance] = remote_ctx;
-    }
-
-    //--------------------------------------------------------------------------
-    bool IndividualTask::has_remote_instance(AddressSpaceID remote_inst)
-    //--------------------------------------------------------------------------
-    {
-      if (is_remote())
-        return (remote_inst != runtime->find_address_space(orig_proc)); 
-      // Otherwise see if we already have a remote instance
-      AutoLock o_lock(op_lock,1,false/*exclusive*/);
-      return (remote_instances.find(remote_inst) != remote_instances.end());
     }
 
     //--------------------------------------------------------------------------
@@ -7618,7 +7865,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       runtime->forest->physical_traverse_path(ctx, privilege_paths[idx],
-                                              regions[idx], version_infos[idx],
+                                              regions[idx], 
+                                              parent_req_indexes[idx],
+                                              version_infos[idx],
                                               this, true/*find valid*/, valid
 #ifdef DEBUG_HIGH_LEVEL
                                               , idx, get_logging_name() 
@@ -7650,7 +7899,6 @@ namespace Legion {
       if (!is_locally_mapped())
         pack_version_infos(rez, version_infos);
       pack_restrict_infos(rez, restrict_infos);
-      parent_ctx->pack_parent_task(rez, addr_target);
       // Mark that we sent this task remotely
       sent_remotely = true;
       // If this task is remote, then deactivate it, otherwise
@@ -7691,16 +7939,8 @@ namespace Legion {
         deactivate();
         return false;
       }
-      RemoteTask *remote_ctx = 
-        runtime->find_or_init_remote_context(remote_owner_uid, orig_proc,
-                                             remote_parent_ctx);
-      remote_ctx->unpack_parent_task(derez);
-      // Add our enclosing parent regions to the list of 
-      // top regions maintained by the remote context
-      for (unsigned idx = 0; idx < regions.size(); idx++)
-        remote_ctx->add_top_region(regions[idx].parent);
-      // Now save the remote context as our parent context
-      parent_ctx = remote_ctx;
+      // Figure out what our parent context is
+      parent_ctx = runtime->find_context(remote_owner_uid);
       // Check to see if we had no virtual mappings and everything
       // was pre-mapped and we're remote then we can mark this
       // task as being mapped
@@ -7977,10 +8217,7 @@ namespace Legion {
         for (std::map<AddressSpaceID,RemoteTask*>::const_iterator it = 
               remote_instances.begin(); it != remote_instances.end(); it++)
         {
-          if (it->first == runtime->address_space)
-            runtime->release_remote_context(local_uid);
-          else
-            runtime->send_free_remote_context(it->first, rez);
+          runtime->send_remote_context_free(it->first, rez);
         }
         remote_instances.clear();
       }
@@ -8149,26 +8386,25 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PointTask::record_remote_instance(AddressSpaceID remote_instance,
-                                           RemoteTask *remote_ctx)
+    void PointTask::send_remote_context(AddressSpaceID remote_instance,
+                                        RemoteTask *remote_ctx)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(remote_instance != runtime->address_space);
+#endif
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(remote_ctx);
+        pack_remote_context(rez, remote_instance);
+      }
+      runtime->send_remote_context_response(remote_instance, rez);
       AutoLock o_lock(op_lock);
 #ifdef DEBUG_HIGH_LEVEL
       assert(remote_instances.find(remote_instance) == remote_instances.end());
 #endif
       remote_instances[remote_instance] = remote_ctx;
-    }
-
-    //--------------------------------------------------------------------------
-    bool PointTask::has_remote_instance(AddressSpaceID remote_inst)
-    //--------------------------------------------------------------------------
-    {
-      if (is_remote())
-        return (remote_inst != runtime->find_address_space(orig_proc)); 
-      // Otherwise see if we already have a remote instance
-      AutoLock o_lock(op_lock,1,false/*exclusive*/);
-      return (remote_instances.find(remote_inst) != remote_instances.end());
     }
 
     //--------------------------------------------------------------------------
@@ -8235,6 +8471,7 @@ namespace Legion {
         runtime->forest->initialize_path(regions[idx].region.get_index_space(),
             orig_req.region.get_index_space(), traversal_path);
       runtime->forest->physical_traverse_path(ctx, traversal_path, regions[idx],
+                                             parent_req_indexes[idx],
                                              slice_owner->get_version_info(idx),
                                              this, true/*find valid*/, valid
 #ifdef DEBUG_HIGH_LEVEL
@@ -8528,7 +8765,6 @@ namespace Legion {
       : WrapperTask(rt)
     //--------------------------------------------------------------------------
     {
-      // Make sure we can't go up above this task in the mapper interface
       parent_task = NULL;
     }
 
@@ -8570,7 +8806,7 @@ namespace Legion {
       activate_wrapper();
       context = RegionTreeContext();
       remote_owner_uid = 0;
-      remote_parent_ctx = NULL;
+      parent_task = NULL;
       depth = -1;
       is_top_level_context = false;
     }
@@ -8579,6 +8815,7 @@ namespace Legion {
     void RemoteTask::deactivate(void)
     //--------------------------------------------------------------------------
     {
+      deactivate_wrapper();
       // Before deactivating the context, clean it out
       if (!top_level_regions.empty())
       {
@@ -8603,44 +8840,31 @@ namespace Legion {
         for (std::map<AddressSpaceID,RemoteTask*>::const_iterator it = 
               remote_instances.begin(); it != remote_instances.end(); it++)
         {
-          if (it->first == runtime->address_space)
-            runtime->release_remote_context(local_uid);
-          else
-            runtime->send_free_remote_context(it->first, rez);
+          runtime->send_remote_context_free(it->first, rez);
         }
         remote_instances.clear();
       }
       top_level_regions.clear();
-      deactivate_wrapper();
       // Context is freed in deactivate single
       runtime->free_remote_task(this);
     }
-    
+
     //--------------------------------------------------------------------------
-    void RemoteTask::unpack_parent_task(Deserializer &derez)
+    void RemoteTask::initialize_remote(UniqueID context_uid, bool is_top_level)
     //--------------------------------------------------------------------------
     {
-      DerezCheck z(derez);
-      derez.deserialize(depth);
-      bool unpack_base;
-      derez.deserialize<bool>(unpack_base);
-      if (unpack_base)
-        unpack_base_task(derez);
-      size_t num_local;
-      derez.deserialize(num_local);
-      std::deque<LocalFieldInfo> temp_local(num_local);
-      for (unsigned idx = 0; idx < num_local; idx++)
+      remote_owner_uid = context_uid;
+      is_top_level_context = is_top_level;
+      if (is_top_level)
       {
-        derez.deserialize(temp_local[idx]);
-        allocate_local_field(temp_local[idx]);
+        runtime->allocate_local_context(this);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(context.exists());
+        runtime->forest->check_context_state(context);
+#endif
       }
-      // Now put them on the local fields list, hold the lock
-      // while modifying the data structure
-      AutoLock o_lock(op_lock);
-      for (unsigned idx = 0; idx < num_local; idx++)
-        local_fields.push_back(temp_local[idx]);
     }
-
+    
     //--------------------------------------------------------------------------
     RemoteTask* RemoteTask::find_outermost_context(void)
     //--------------------------------------------------------------------------
@@ -8673,32 +8897,29 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RemoteTask::record_remote_instance(AddressSpaceID remote_instance,
-                                            RemoteTask *remote_ctx)
+    void RemoteTask::send_remote_context(AddressSpaceID remote_instance,
+                                         RemoteTask *remote_ctx)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(remote_instance != runtime->address_space);
+#endif
       // should only see this call if it is the top-level context
 #ifdef DEBUG_HIGH_LEVEL
       assert(is_top_level_context);
 #endif
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(remote_ctx);
+        pack_remote_context(rez, remote_instance);
+      }
+      runtime->send_remote_context_response(remote_instance, rez);
       AutoLock o_lock(op_lock);
 #ifdef DEBUG_HIGH_LEVEL
       assert(remote_instances.find(remote_instance) == remote_instances.end());
 #endif
       remote_instances[remote_instance] = remote_ctx;
-    }
-
-    //--------------------------------------------------------------------------
-    bool RemoteTask::has_remote_instance(AddressSpaceID target)
-    //--------------------------------------------------------------------------
-    {
-      if (is_top_level_context)
-        return false;
-      if (target == runtime->find_address_space(orig_proc))
-        return true;
-      // To be precise we don't know, but that is enough to 
-      // need to send the data
-      return false;
     }
 
     //--------------------------------------------------------------------------
@@ -8733,11 +8954,32 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    void RemoteTask::pack_remote_ctx_info(Serializer &rez)
+    void RemoteTask::unpack_remote_context(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      rez.serialize(remote_owner_uid);
-      rez.serialize(remote_parent_ctx);
+      derez.deserialize(depth);
+      unpack_base_task(derez);
+      derez.deserialize(initial_region_count);
+      virtual_mapped.resize(initial_region_count, false);
+      size_t num_virtual;
+      derez.deserialize(num_virtual);
+      for (unsigned idx = 0; idx < num_virtual; idx++)
+      {
+        unsigned index;
+        derez.deserialize(index);
+        virtual_mapped[index] = true;
+      }
+      size_t num_local;
+      derez.deserialize(num_local);
+      local_fields.resize(num_local);
+      for (unsigned idx = 0; idx < num_local; idx++)
+      {
+        derez.deserialize(local_fields[idx]);
+        allocate_local_field(local_fields[idx]);
+      }
+      // Add our regions to the set of top-level regions
+      for (unsigned idx = 0; idx < regions.size(); idx++)
+        top_level_regions.insert(regions[idx].region);
     }
 
     //--------------------------------------------------------------------------
@@ -8863,21 +9105,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InlineTask::record_remote_instance(AddressSpaceID remote_inst,
-                                            RemoteTask *remote_ctx)
+    void InlineTask::send_remote_context(AddressSpaceID remote_inst,
+                                         RemoteTask *remote_ctx)
     //--------------------------------------------------------------------------
     {
       // should never be called
       assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    bool InlineTask::has_remote_instance(AddressSpaceID target)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return false;
     }
 
     //--------------------------------------------------------------------------
@@ -10619,6 +10852,7 @@ namespace Legion {
         InstanceSet empty_set;
         runtime->forest->physical_traverse_path(get_parent_context(idx),
                                         privilege_path, regions[idx],
+                                        parent_req_indexes[idx],
                                         version_infos[idx], this,
                                         false/*find valid*/, empty_set
 #ifdef DEBUG_HIGH_LEVEL
@@ -10854,8 +11088,6 @@ namespace Legion {
       {
         points[idx]->pack_task(rez, target);
       }
-      // Pack this last
-      parent_ctx->pack_parent_task(rez, addr_target);
       bool deactivate_now = true;
       if (!is_remote() && is_locally_mapped())
       {
@@ -10920,20 +11152,13 @@ namespace Legion {
       // Check to see if we ended up back on the original node
       if (is_remote())
       {
-        RemoteTask *remote_ctx = 
-          runtime->find_or_init_remote_context(remote_owner_uid, orig_proc,
-                                               remote_parent_ctx);
-        remote_ctx->unpack_parent_task(derez);
-        // Add our parent regions to the list of top regions
-        for (unsigned idx = 0; idx < regions.size(); idx++)
-          remote_ctx->add_top_region(regions[idx].parent);
-        parent_ctx = remote_ctx;
+        parent_ctx = runtime->find_context(remote_owner_uid);
       }
       else
       {
 #ifdef DEBUG_HIGH_LEVEL
         // Make the deserializer happy
-        derez.advance_point(derez.get_remaining_bytes());
+        derez.advance_pointer(derez.get_remaining_bytes());
 #endif
         parent_ctx = index_owner->parent_ctx;
       }
@@ -11123,6 +11348,7 @@ namespace Legion {
       // Hold a reference so it doesn't get deleted
       temporary_virtual_refs.push_back(refs[0]);
       runtime->forest->physical_register_only(virtual_ctx, regions[index],
+                                              parent_req_indexes[index],
                                               version_infos[index], this,
                                               Event::NO_EVENT, refs
 #ifdef DEBUG_HIGH_LEVEL

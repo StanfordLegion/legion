@@ -266,7 +266,7 @@ namespace Legion {
     public:
       void initialize_current_context(RegionTreeContext ctx,
                     const RegionRequirement &req, const InstanceSet &source,
-                    Event term_event, UniqueID context_uid,
+                    Event term_event, SingleTask *context, unsigned ctx_index,
                     std::map<PhysicalManager*,InstanceView*> &top_views);
       void initialize_current_context(RegionTreeContext ctx,
                                       const RegionRequirement &req,
@@ -283,6 +283,7 @@ namespace Legion {
       void physical_traverse_path(RegionTreeContext ctx,
                                   RegionTreePath &path,
                                   const RegionRequirement &req,
+                                  unsigned parent_req_index,
                                   VersionInfo &version_info,
                                   Operation *op, bool find_valid,
                                   InstanceSet &valid_insts
@@ -295,6 +296,7 @@ namespace Legion {
       void traverse_and_register(RegionTreeContext ctx,
                                  RegionTreePath &path,
                                  const RegionRequirement &req,
+                                 unsigned parent_req_index,
                                  VersionInfo &version_info,
                                  Operation *op, Event term_event, 
                                  InstanceSet &targets
@@ -317,6 +319,7 @@ namespace Legion {
                               );
       void physical_register_only(RegionTreeContext ctx,
                                   const RegionRequirement &req,
+                                  unsigned parent_req_index,
                                   VersionInfo &version_info,
                                   Operation *op, Event term_event,
                                   InstanceSet &targets
@@ -328,6 +331,7 @@ namespace Legion {
                                  );
       Event physical_perform_close(RegionTreeContext ctx,
                                    const RegionRequirement &req,
+                                   unsigned parent_req_index,
                                    VersionInfo &version_info,
                                    Operation *op, int composite_index,
                     const LegionMap<ColorPoint,FieldMask>::aligned &to_close,
@@ -341,6 +345,7 @@ namespace Legion {
                                   );
       Event physical_close_context(RegionTreeContext ctx,
                                    const RegionRequirement &req,
+                                   unsigned parent_req_index,
                                    VersionInfo &version_info,
                                    Operation *op,
                                    InstanceSet &targets
@@ -356,7 +361,8 @@ namespace Legion {
                         const RegionRequirement &dst_req,
                         const InstanceSet &src_targets, 
                         const InstanceSet &dst_targets,
-                        VersionInfo &src_version_info, int src_composite,
+                        VersionInfo &src_version_info, 
+                        int src_composite, unsigned src_parent_req_index,
                         Operation *op, Event precondition);
       Event reduce_across(RegionTreeContext src_ctx,
                           RegionTreeContext dst_ctx,
@@ -395,16 +401,18 @@ namespace Legion {
       // This takes ownership of the value buffer
       Event fill_fields(RegionTreeContext ctx, Operation *op,
                         const RegionRequirement &req,
+                        unsigned parent_req_index,
                         const void *value, size_t value_size,
                         VersionInfo &version_info,
                         RestrictInfo &restrict_info,
                         InstanceSet &instances, Event precondition);
       InstanceRef attach_file(RegionTreeContext ctx,
                               const RegionRequirement &req,
+                              unsigned parent_req_index,
                               AttachOp *attach_op,
                               VersionInfo &version_info);
-      Event detach_file(RegionTreeContext ctx, 
-                        const RegionRequirement &req, DetachOp *detach_op, 
+      Event detach_file(RegionTreeContext ctx, const RegionRequirement &req,
+                        unsigned parent_req_index, DetachOp *detach_op, 
                         VersionInfo &version_info, const InstanceRef &ref);
     public:
       void send_back_logical_state(RegionTreeContext local_context,
@@ -1534,20 +1542,23 @@ namespace Legion {
       void find_complete_fields(const FieldMask &scope_fields,
           const LegionMap<ColorPoint,FieldMask>::aligned &children,
           FieldMask &complete_fields);
-      InstanceView* convert_reference(const InstanceRef &ref, 
-                     UniqueID ctx_uid, VersionInfo &version_info) const;
+      InstanceView* convert_reference(const InstanceRef &ref, SingleTask *ctx,
+                                      unsigned context_index); 
       CompositeView* convert_reference(const InstanceRef &ref) const;
-      void convert_target_views(const InstanceSet &targets, UniqueID ctx_uid,
-                                std::vector<InstanceView*> &target_views,
-                                VersionInfo &version_info); 
+      void convert_target_views(const InstanceSet &targets, SingleTask *context, 
+                                unsigned context_index,
+                                std::vector<InstanceView*> &target_views);
       // I hate the container problem, same as previous except MaterializedView
-      void convert_target_views(const InstanceSet &targets, UniqueID ctx_uid,
-                                std::vector<MaterializedView*> &target_views,
-                                VersionInfo &version_info);
+      void convert_target_views(const InstanceSet &targets, SingleTask *context,
+                                unsigned context_index,
+                                std::vector<MaterializedView*> &target_views);
     public:
-      bool register_logical_view(LogicalView *view);
-      void unregister_logical_view(LogicalView *view);
-      LogicalView* find_view(DistributedID did);
+      bool register_instance_view(PhysicalManager *manager, 
+                                  SingleTask *context, InstanceView *view);
+      void unregister_instance_view(PhysicalManager *manager, 
+                                    SingleTask *context);
+      InstanceView* find_instance_view(PhysicalManager *manager,
+                                       SingleTask *context);
       VersionState* find_remote_version_state(ContextID ctx, VersionID vid,
                                   DistributedID did, AddressSpaceID owner);
     public:
@@ -1658,8 +1669,10 @@ namespace Legion {
       // While logical states and version managers have dense keys
       // within a node, distributed IDs don't so we use a map that
       // should rarely need to be accessed for tracking views
-      LegionMap<DistributedID,LogicalView*,
-                LOGICAL_VIEW_ALLOC>::tracked logical_views;
+      // The distributed IDs here correspond to the Instance Manager
+      // distributed ID.
+      LegionMap<std::pair<PhysicalManager*,SingleTask*>,InstanceView*,
+                LOGICAL_VIEW_ALLOC>::tracked instance_views;
       LegionMap<DistributedID,PhysicalManager*,
                 PHYSICAL_MANAGER_ALLOC>::tracked physical_managers;
     protected:
@@ -1820,20 +1833,23 @@ namespace Legion {
                               const FieldMask &fill_mask,
                               const void *value, size_t value_size,
                               VersionInfo &version_info, InstanceSet &instances,
-                              Event precondition);
+                              unsigned parent_req_index, Event precondition);
       InstanceRef attach_file(ContextID ctx, const FieldMask &attach_mask,
-                             const RegionRequirement &req, AttachOp *attach_op,
+                             const RegionRequirement &req, 
+                             unsigned parent_req_index, AttachOp *attach_op,
                              VersionInfo &version_info);
       Event detach_file(ContextID ctx, DetachOp *detach_op, 
+                        unsigned parent_req_index,
                         VersionInfo &version_info, const InstanceRef &ref);
+    public:
       InstanceView* convert_reference_region(PhysicalManager *manager, 
-                 UniqueID ctx_uid, VersionInfo *version_info) const;
-      CompositeView* convert_view_region(CompositeView *view) const;
+                           SingleTask *context, unsigned context_index);
+      CompositeView* convert_composite_view_region(CompositeView *view) const;
       void convert_references_region(
                               const std::vector<PhysicalManager*> &managers,
-                              std::vector<bool> &up_mask, UniqueID ctx_uid,
-                              std::vector<InstanceView*> &results,
-                              VersionInfo *version_info) const;
+                              std::vector<bool> &up_mask, SingleTask *context,
+                              unsigned context_index,
+                              std::vector<InstanceView*> &results);
     public:
       const LogicalRegion handle;
       PartitionNode *const parent;
@@ -1932,13 +1948,13 @@ namespace Legion {
       virtual void send_node(AddressSpaceID target);
     public:
       InstanceView* convert_reference_partition(PhysicalManager *manager,
-                          UniqueID ctx_uid, VersionInfo *version_info) const;
-      CompositeView* convert_view_partition(CompositeView *view) const;
+                           SingleTask *context, unsigned context_index);
+      CompositeView* convert_composite_view_partition(CompositeView *v) const;
       void convert_references_partition(
                                   const std::vector<PhysicalManager*> &managers,
-                                  std::vector<bool> &up_mask, UniqueID ctx_uid,
-                                  std::vector<InstanceView*> &results,
-                                  VersionInfo *version_info) const;
+                                  std::vector<bool> &up_mask, 
+                                  SingleTask *context, unsigned context_index,
+                                  std::vector<InstanceView*> &results);
     public:
       virtual void send_semantic_request(AddressSpaceID target, 
              SemanticTag tag, bool can_fail, bool wait_until, UserEvent ready);

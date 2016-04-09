@@ -41,11 +41,6 @@ namespace Legion {
     public:
       static void delete_logical_view(LogicalView *view);
     public:
-      virtual void send_remote_registration(void);
-      static void handle_view_remote_registration(RegionTreeForest *forest,
-                                                  Deserializer &derez,
-                                                  AddressSpaceID source);
-    public:
       virtual bool is_instance_view(void) const = 0;
       virtual bool is_deferred_view(void) const = 0;
 #ifdef DEBUG_HIGH_LEVEL
@@ -170,7 +165,7 @@ namespace Legion {
       inline InstanceView* get_instance_subview(const ColorPoint &c) 
         { return get_subview(c)->as_instance_view(); }
     public:
-      const SingleTask *owner_context;
+      SingleTask *const owner_context;
     };
 
     /**

@@ -43,8 +43,6 @@ namespace Legion {
         view_lock(Reservation::create_reservation()) 
     //--------------------------------------------------------------------------
     {
-      if (register_now)
-        logical_node->register_logical_view(this); 
     }
 
     //--------------------------------------------------------------------------
@@ -53,7 +51,6 @@ namespace Legion {
     {
       view_lock.destroy_reservation();
       view_lock = Reservation::NO_RESERVATION;
-      logical_node->unregister_logical_view(this);
     }
 
     //--------------------------------------------------------------------------
@@ -82,56 +79,6 @@ namespace Legion {
       }
       else
         assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void LogicalView::send_remote_registration(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(!is_owner());
-#endif
-      Serializer rez;
-      {
-        RezCheck z(rez);
-        rez.serialize(did);
-        rez.serialize(destruction_event);
-        const bool is_region = logical_node->is_region();
-        rez.serialize<bool>(is_region);
-        if (is_region)
-          rez.serialize(logical_node->as_region_node()->handle);
-        else
-          rez.serialize(logical_node->as_partition_node()->handle);
-      }
-      runtime->send_view_remote_registration(owner_space, rez);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void LogicalView::handle_view_remote_registration(
-           RegionTreeForest *forest, Deserializer &derez, AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      DistributedID did;
-      derez.deserialize(did);
-      Event destroy_event;
-      derez.deserialize(destroy_event);
-      bool is_region;
-      derez.deserialize<bool>(is_region);
-      if (is_region)
-      {
-        LogicalRegion handle;
-        derez.deserialize(handle);
-        forest->get_node(handle)->find_view(did)->register_remote_instance(
-                                                      source, destroy_event);
-      }
-      else
-      {
-        LogicalPartition handle;
-        derez.deserialize(handle);
-        forest->get_node(handle)->find_view(did)->register_remote_instance(
-                                                      source, destroy_event);
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -181,7 +128,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     InstanceView::~InstanceView(void)
     //--------------------------------------------------------------------------
-    {
+    { 
     }
 
     //--------------------------------------------------------------------------
@@ -240,12 +187,10 @@ namespace Legion {
       else 
       {
         manager->add_nested_resource_ref(did);
-        // Do remote registration for the top of each remote tree
+        // If we are the root and remote add a resource reference from
+        // the owner node
         if (!is_owner())
-        {
           add_base_resource_ref(REMOTE_DID_REF);
-          send_remote_registration();
-        }
       }
 #ifdef LEGION_GC
       log_garbage.info("GC Materialized View %ld %ld", did, manager->did); 
@@ -266,6 +211,8 @@ namespace Legion {
     MaterializedView::~MaterializedView(void)
     //--------------------------------------------------------------------------
     {
+      // Always unregister ourselves with the region tree node
+      logical_node->unregister_instance_view(manager, owner_context);
       // Remove our resource references on our children
       // Capture their recycle events in the process
       for (std::map<ColorPoint,MaterializedView*>::const_iterator it = 
@@ -277,7 +224,6 @@ namespace Legion {
       }
       if (parent == NULL)
       {
-        manager->unregister_logical_top_view(this);
         if (manager->remove_nested_resource_ref(did))
           delete manager;
         if (is_owner())
@@ -418,10 +364,7 @@ namespace Legion {
           result = finder->second;
         }
         else
-        {
           children[c] = child_view;
-          child_node->register_logical_view(child_view);
-        }
       }
       if (free_child_view)
         legion_delete(child_view);
@@ -687,7 +630,7 @@ namespace Legion {
             rez.serialize(manager_did);
             rez.serialize(logical_node->as_region_node()->handle);
             rez.serialize(owner_space);
-            rez.serialize<UniqueID>(context_owner->get_context_id());
+            rez.serialize<UniqueID>(owner_context->get_context_id());
           }
           runtime->send_materialized_view(target, rez);
         }
@@ -2371,6 +2314,7 @@ namespace Legion {
       }
     }
 
+#if 0
     //--------------------------------------------------------------------------
     /*static*/ void MaterializedView::handle_send_back_atomic(
                                                           RegionTreeForest *ctx,
@@ -2405,7 +2349,9 @@ namespace Legion {
 #endif
       inst_view->as_materialized_view()->process_atomic_reservations(derez);
     }
+#endif
 
+#if 0
     //--------------------------------------------------------------------------
     /*static*/ void MaterializedView::handle_send_materialized_view(
                   Runtime *runtime, Deserializer &derez, AddressSpaceID source)
@@ -2429,12 +2375,12 @@ namespace Legion {
       assert(!phy_man->is_reduction_manager());
 #endif
       InstanceManager *inst_manager = phy_man->as_instance_manager();
-      SingleTask *context_owner = runtime->find_context(context_uid);
+      SingleTask *owner_context = runtime->find_context(context_uid);
       MaterializedView *new_view = legion_new<MaterializedView>(runtime->forest,
                                       did, owner_space, runtime->address_space,
                                       target_node, inst_manager, 
                                       (MaterializedView*)NULL/*parent*/,
-                                      context_owner, false/*register*/);
+                                      owner_context, false/*register*/);
       if (!target_node->register_logical_view(new_view))
       {
         if (new_view->remove_base_resource_ref(REMOTE_DID_REF))
@@ -2444,7 +2390,6 @@ namespace Legion {
       {
         new_view->register_with_runtime();
         new_view->update_remote_instances(source);
-        inst_manager->register_logical_top_view(context_uid, new_view);
       }
     }
 
@@ -2480,6 +2425,7 @@ namespace Legion {
         view->as_instance_view()->as_materialized_view();
       mat_view->process_update(derez, source);
     }
+#endif
 
     /////////////////////////////////////////////////////////////
     // DeferredView 
@@ -2846,6 +2792,7 @@ namespace Legion {
       }
     } 
 
+#if 0
     //--------------------------------------------------------------------------
     /*static*/ void CompositeView::handle_send_composite_view(Runtime *runtime,
                                     Deserializer &derez, AddressSpaceID source)
@@ -2891,6 +2838,7 @@ namespace Legion {
         new_view->update_remote_instances(source);
       }
     }
+#endif
 
     /////////////////////////////////////////////////////////////
     // CompositeNode 
@@ -3641,6 +3589,7 @@ namespace Legion {
       }
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void CompositeNode::unpack_composite_tree(Deserializer &derez,
                                               AddressSpaceID source)
@@ -3686,6 +3635,7 @@ namespace Legion {
         child->unpack_composite_tree(derez, source);
       }
     }
+#endif
 
     //--------------------------------------------------------------------------
     void CompositeNode::make_local(std::set<Event> &preconditions,
@@ -3974,6 +3924,7 @@ namespace Legion {
       }
     }
 
+#if 0
     //--------------------------------------------------------------------------
     /*static*/ void FillView::handle_send_fill_view(Runtime *runtime,
                                      Deserializer &derez, AddressSpaceID source)
@@ -4009,6 +3960,7 @@ namespace Legion {
         new_view->update_remote_instances(source);
       }
     }
+#endif
 
     /////////////////////////////////////////////////////////////
     // ReductionView 
@@ -4018,8 +3970,8 @@ namespace Legion {
     ReductionView::ReductionView(RegionTreeForest *ctx, DistributedID did,
                                  AddressSpaceID own_sp, AddressSpaceID loc_sp,
                                  RegionTreeNode *node, ReductionManager *man,
-                                 UniqueID ctx_uid, bool register_now)
-      : InstanceView(ctx, did, own_sp, loc_sp, node, ctx_uid, register_now), 
+                                 SingleTask *own_ctx, bool register_now)
+      : InstanceView(ctx, did, own_sp, loc_sp, node, own_ctx, register_now), 
         manager(man)
     //--------------------------------------------------------------------------
     {
@@ -4039,7 +3991,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ReductionView::ReductionView(const ReductionView &rhs)
-      : InstanceView(NULL, 0, 0, 0, NULL, 0, false), manager(NULL)
+      : InstanceView(NULL, 0, 0, 0, NULL, NULL, false), manager(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -4050,13 +4002,14 @@ namespace Legion {
     ReductionView::~ReductionView(void)
     //--------------------------------------------------------------------------
     {
+      // Always unregister ourselves with the region tree node
+      logical_node->unregister_instance_view(manager, owner_context);
       if (is_owner())
       {
         // If we're the owner, remove our valid references on remote nodes
         UpdateReferenceFunctor<RESOURCE_REF_KIND,false/*add*/> functor(this);
         map_over_remote_instances(functor);
       }
-      manager->unregister_logical_top_view(this);
       if (manager->remove_nested_resource_ref(did))
       {
         if (manager->is_list_manager())
@@ -4739,7 +4692,7 @@ namespace Legion {
           rez.serialize(manager_did);
           rez.serialize(logical_node->as_region_node()->handle);
           rez.serialize(owner_space);
-          rez.serialize<UniqueID>(context_owner->get_context_id());
+          rez.serialize<UniqueID>(owner_context->get_context_id());
         }
         runtime->send_reduction_view(target, rez);
         update_remote_instances(target);
@@ -4938,6 +4891,7 @@ namespace Legion {
       return manager->redop;
     }
 
+#if 0
     //--------------------------------------------------------------------------
     /*static*/ void ReductionView::handle_send_reduction_view(Runtime *runtime,
                                      Deserializer &derez, AddressSpaceID source)
@@ -4961,11 +4915,11 @@ namespace Legion {
       assert(phy_man->is_reduction_manager());
 #endif
       ReductionManager *red_manager = phy_man->as_reduction_manager();
-      SingleTask *context_owner = runtime->find_context(context_uid);
+      SingleTask *owner_context = runtime->find_context(context_uid);
       ReductionView *new_view = legion_new<ReductionView>(runtime->forest,
                                    did, owner_space, runtime->address_space,
                                    target_node, red_manager,
-                                   context_owner, false/*register*/);
+                                   owner_context, false/*register*/);
       if (!target_node->register_logical_view(new_view))
       {
         if (new_view->remove_base_resource_ref(REMOTE_DID_REF))
@@ -4975,7 +4929,6 @@ namespace Legion {
       {
         new_view->register_with_runtime();
         new_view->update_remote_instances(source);
-        red_manager->register_logical_top_view(context_uid, new_view);
       }
     }
 
@@ -4998,6 +4951,7 @@ namespace Legion {
       ReductionView *red_view = view->as_instance_view()->as_reduction_view();
       red_view->process_update(derez, source);
     }
+#endif
 
   }; // namespace Internal 
 }; // namespace Legion

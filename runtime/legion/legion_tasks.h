@@ -355,6 +355,8 @@ namespace Legion {
       bool is_leaf(void) const;
       bool is_inner(void) const;
       bool has_virtual_instances(void) const;
+      bool is_virtual_mapped(unsigned index) const;
+      bool is_created_region(unsigned index) const;
     public:
       void assign_context(RegionTreeContext ctx);
       RegionTreeContext release_context(void);
@@ -504,12 +506,20 @@ namespace Legion {
           const std::vector<UserEvent> &unmap_events,
           std::set<Event> &preconditions);
       void invalidate_region_tree_contexts(void);
+    public:
+      InstanceView* create_logical_top_view(PhysicalManager *manager, 
+                                            unsigned index);
+      void notify_instance_deletion(PhysicalManager *deleted, 
+                                    GenerationID old_gen);
+      static void handle_logical_top_view_request(Deserializer &derez, 
+                            Runtime *runtime, AddressSpaceID source);
+      static void handle_logical_top_view_response(Deserializer &derez,
+                                                   Runtime *runtime);
     protected:
       void pack_single_task(Serializer &rez, AddressSpaceID target);
       void unpack_single_task(Deserializer &derez);
-    public:
-      void pack_parent_task(Serializer &rez, AddressSpace target);
-      virtual void pack_remote_ctx_info(Serializer &rez);
+      void pack_remote_context(Serializer &rez, AddressSpaceID target);
+      virtual void unpack_remote_context(Deserializer &derez);
     public:
       const std::vector<PhysicalRegion>& begin_task(void);
       void end_task(const void *res, size_t res_size, bool owned);
@@ -546,9 +556,8 @@ namespace Legion {
     public:
       virtual bool has_remote_state(void) const = 0;
       virtual void record_remote_state(void) = 0;
-      virtual void record_remote_instance(AddressSpaceID remote_inst,
-                                          RemoteTask *remote_ctx) = 0;
-      virtual bool has_remote_instance(AddressSpaceID remote_inst) = 0;
+      virtual void send_remote_context(AddressSpaceID target, 
+                                       RemoteTask *dst) = 0;
     public:
       RegionTreeContext find_enclosing_context(unsigned idx);
     public:
@@ -591,6 +600,9 @@ namespace Legion {
       // Context for this task
       RegionTreeContext context; 
       unsigned initial_region_count;
+    protected: // Instance top view data structures
+      std::map<PhysicalManager*,InstanceView*>  instance_top_views;
+      std::map<PhysicalManager*,UserEvent>      pending_top_views;
     protected: // Mapper choices 
       Mapper::ContextConfigOutput           context_configuration;
       VariantID                             selected_variant;
@@ -795,9 +807,8 @@ namespace Legion {
     public:
       virtual bool has_remote_state(void) const;
       virtual void record_remote_state(void);
-      virtual void record_remote_instance(AddressSpaceID remote_inst,
-                                          RemoteTask *remote_ctx);
-      virtual bool has_remote_instance(AddressSpaceID remote_inst);
+      virtual void send_remote_context(AddressSpaceID target, 
+                                       RemoteTask *dst);
     public:
       virtual void trigger_task_complete(void);
       virtual void trigger_task_commit(void);
@@ -904,9 +915,8 @@ namespace Legion {
     public:
       virtual bool has_remote_state(void) const;
       virtual void record_remote_state(void);
-      virtual void record_remote_instance(AddressSpaceID remote_inst,
-                                          RemoteTask *remote_ctx);
-      virtual bool has_remote_instance(AddressSpaceID remote_inst);
+      virtual void send_remote_context(AddressSpaceID target, 
+                                       RemoteTask *dst);
     public:
       virtual void trigger_task_complete(void);
       virtual void trigger_task_commit(void);
@@ -970,9 +980,8 @@ namespace Legion {
     public:
       virtual bool has_remote_state(void) const = 0;
       virtual void record_remote_state(void) = 0;
-      virtual void record_remote_instance(AddressSpaceID remote_inst,
-                                          RemoteTask *remote_ctx) = 0;
-      virtual bool has_remote_instance(AddressSpaceID remote_inst) = 0;
+      virtual void send_remote_context(AddressSpaceID target, 
+                                       RemoteTask *dst) = 0;
     public:
       virtual Event get_task_completion(void) const = 0;
       virtual TaskKind get_task_kind(void) const = 0;
@@ -1019,33 +1028,31 @@ namespace Legion {
     public:
       virtual int get_depth(void) const;
     public:
-      void unpack_parent_task(Deserializer &derez);
-    public:
       virtual void activate(void);
       virtual void deactivate(void);
+    public:
+      void initialize_remote(UniqueID context_uid, bool is_top_level);
     public:
       virtual RemoteTask* find_outermost_context(void);
       virtual UniqueID get_context_uid(void) const;
     public:
       virtual bool has_remote_state(void) const;
       virtual void record_remote_state(void);
-      virtual void record_remote_instance(AddressSpaceID remote_inst,
-                                          RemoteTask *remote_ctx);
-      virtual bool has_remote_instance(AddressSpaceID remote_inst);
+      virtual void send_remote_context(AddressSpaceID target, 
+                                       RemoteTask *dst);
     public:
       virtual Event get_task_completion(void) const;
       virtual TaskKind get_task_kind(void) const;
     public:
       virtual void find_enclosing_local_fields(
           LegionDeque<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::tracked &infos);
-      virtual void pack_remote_ctx_info(Serializer &rez);
+      virtual void unpack_remote_context(Deserializer &derez);
     public:
       void add_top_region(LogicalRegion handle);
     protected:
       std::set<LogicalRegion> top_level_regions;
     protected:
       UniqueID remote_owner_uid;
-      SingleTask *remote_parent_ctx; // Never a valid pointer
     protected:
       int depth;
       bool is_top_level_context;
@@ -1083,9 +1090,8 @@ namespace Legion {
     public:
       virtual bool has_remote_state(void) const;
       virtual void record_remote_state(void);
-      virtual void record_remote_instance(AddressSpaceID remote_inst,
-                                          RemoteTask *remote_ctx);
-      virtual bool has_remote_instance(AddressSpaceID remote_inst);
+      virtual void send_remote_context(AddressSpaceID target, 
+                                       RemoteTask *dst);
     public:
       virtual Event get_task_completion(void) const;
       virtual TaskKind get_task_kind(void) const;

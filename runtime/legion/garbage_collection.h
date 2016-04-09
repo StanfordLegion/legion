@@ -55,6 +55,7 @@ namespace Legion {
       APPLICATION_REF,
       MAPPING_ACQUIRE_REF,
       MAX_GC_REF,
+      CONTEXT_REF,
       LAST_SOURCE_REF,
     };
 
@@ -84,6 +85,7 @@ namespace Legion {
       "Application Reference",                      \
       "Mapping Acquire Reference",                  \
       "Maximum GC Priority Reference",              \
+      "Context Reference",                          \
     }
 
     extern LegionRuntime::Logger::Category log_garbage;

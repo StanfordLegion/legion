@@ -1845,7 +1845,6 @@ namespace Legion {
       void send_did_add_create_reference(AddressSpaceID target,Serializer &rez);
       void send_did_remove_create_reference(AddressSpaceID target,
                                             Serializer &rez, bool flush = true);
-      void send_view_remote_registration(AddressSpaceID target,Serializer &rez);
       void send_back_atomic(AddressSpaceID target, Serializer &rez);
       void send_materialized_view(AddressSpaceID target, Serializer &rez);
       void send_materialized_update(AddressSpaceID target, Serializer &rez);
@@ -1856,6 +1855,7 @@ namespace Legion {
       void send_instance_manager(AddressSpaceID target, Serializer &rez);
       void send_reduction_manager(AddressSpaceID target, Serializer &rez);
       void send_create_top_view_request(AddressSpaceID target, Serializer &rez);
+      void send_create_top_view_response(AddressSpaceID target,Serializer &rez);
       void send_future(AddressSpaceID target, Serializer &rez);
       void send_future_result(AddressSpaceID target, Serializer &rez);
       void send_future_subscription(AddressSpaceID target, Serializer &rez);
@@ -1887,8 +1887,9 @@ namespace Legion {
                                              Serializer &rez);
       void send_logical_partition_semantic_info(AddressSpaceID target,
                                                 Serializer &rez);
-      void send_subscribe_remote_context(AddressSpaceID target,Serializer &rez);
-      void send_free_remote_context(AddressSpaceID target, Serializer &rez);
+      void send_remote_context_request(AddressSpaceID target, Serializer &rez);
+      void send_remote_context_response(AddressSpaceID target, Serializer &rez);
+      void send_remote_context_free(AddressSpaceID target, Serializer &rez);
       void send_version_state_path_only(AddressSpaceID target, Serializer &rez);
       void send_version_state_initialization(AddressSpaceID target, 
                                              Serializer &rez);
@@ -1962,8 +1963,6 @@ namespace Legion {
       void handle_did_remote_resource_update(Deserializer &derez);
       void handle_did_create_add(Deserializer &derez);
       void handle_did_create_remove(Deserializer &derez);
-      void handle_view_remote_registration(Deserializer &derez, 
-                                           AddressSpaceID source);
       void handle_send_back_atomic(Deserializer &derez, AddressSpaceID source);
       void handle_send_materialized_view(Deserializer &derez, 
                                          AddressSpaceID source);
@@ -1982,6 +1981,7 @@ namespace Legion {
                                          AddressSpaceID source);
       void handle_create_top_view_request(Deserializer &derez,
                                           AddressSpaceID source);
+      void handle_create_top_view_response(Deserializer &derez);
       void handle_future_send(Deserializer &derez, AddressSpaceID source);
       void handle_future_result(Deserializer &derez);
       void handle_future_subscription(Deserializer &derez);
@@ -2015,9 +2015,10 @@ namespace Legion {
                                                AddressSpaceID source);
       void handle_logical_partition_semantic_info(Deserializer &derez,
                                                   AddressSpaceID source);
-      void handle_subscribe_remote_context(Deserializer &derez,
-                                           AddressSpaceID source);
-      void handle_free_remote_context(Deserializer &derez);
+      void handle_remote_context_request(Deserializer &derez,
+                                         AddressSpaceID source);
+      void handle_remote_context_response(Deserializer &derez);
+      void handle_remote_context_free(Deserializer &derez);
       void handle_version_state_path_only(Deserializer &derez,
                                           AddressSpaceID source);
       void handle_version_state_initialization(Deserializer &derez,
@@ -2243,12 +2244,12 @@ namespace Legion {
       void free_detach_op(DetachOp *op);
       void free_timing_op(TimingOp *op);
     public:
-      RemoteTask* find_or_init_remote_context(UniqueID uid, Processor orig,
-                                              SingleTask *remote_parent_ctx); 
-      void release_remote_context(UniqueID remote_owner_uid);
       void allocate_local_context(SingleTask *task);
       void free_local_context(SingleTask *task);
-      SingleTask* find_context(UniqueID context_uid);
+      void register_remote_context(UniqueID context_uid, RemoteTask *context);
+      void unregister_remote_context(UniqueID context_uid);
+      SingleTask* find_context(UniqueID context_uid, 
+                               bool return_null_if_not_found = false);
     public:
       bool is_local(Processor proc) const;
       void find_visible_memories(Processor proc, std::set<Memory> &visible);
@@ -2425,8 +2426,10 @@ namespace Legion {
       // The runtime keeps track of remote contexts so they
       // can be re-used by multiple tasks that get sent remotely
       Reservation context_lock;
-      LegionMap<UniqueID,std::pair<SingleTask*,bool/*remote*/>,
-                RUNTIME_REMOTE_ALLOC> current_contexts;
+      std::map<UniqueID,SingleTask*> local_contexts;
+      LegionMap<UniqueID,RemoteTask*,
+                RUNTIME_REMOTE_ALLOC>::tracked remote_contexts;
+      std::map<UniqueID,UserEvent> pending_remote_contexts;
       unsigned total_contexts;
       std::deque<RegionTreeContext> available_contexts;
     protected:

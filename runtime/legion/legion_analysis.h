@@ -154,8 +154,6 @@ namespace Legion {
       void clear(void);
       void recapture_state(void);
       void sanity_check(RegionTreeNode *node);
-      void record_top_view(InstanceView *view, bool created);
-      void release_top_views(void);
     public:
       PhysicalState* find_physical_state(RegionTreeNode *node, bool capture); 
       FieldVersions* get_versions(RegionTreeNode *node) const;
@@ -180,9 +178,6 @@ namespace Legion {
     protected:
       LegionMap<RegionTreeNode*,NodeInfo>::aligned node_infos;
       RegionTreeNode *upper_bound_node;
-      // Views which we hold resource references on during the 
-      // mapping process prevent them from being collected
-      std::set<InstanceView*> top_views;
     protected:
       bool packed;
       void *packed_buffer;
@@ -305,11 +300,13 @@ namespace Legion {
     struct TraversalInfo {
     public:
       TraversalInfo(ContextID ctx, Operation *op, const RegionRequirement &req,
-                    VersionInfo &version_info, const FieldMask &traversal_mask);
+                    unsigned parent_req_index, VersionInfo &version_info, 
+                    const FieldMask &traversal_mask);
     public:
       const ContextID ctx;
       Operation *const op;
       const RegionRequirement &req;
+      const unsigned parent_req_index;
       VersionInfo &version_info;
       const FieldMask traversal_mask;
       const UniqueID context_uid;

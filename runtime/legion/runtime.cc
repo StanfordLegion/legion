@@ -4766,12 +4766,6 @@ namespace Legion {
               runtime->handle_did_create_remove(derez);
               break;
             }
-          case VIEW_REMOTE_REGISTRATION:
-            {
-              runtime->handle_view_remote_registration(derez, 
-                                                       remote_address_space);
-              break;
-            }
           case SEND_BACK_ATOMIC:
             {
               runtime->handle_send_back_atomic(derez, remote_address_space);
@@ -4826,6 +4820,11 @@ namespace Legion {
             {
               runtime->handle_create_top_view_request(derez,
                                                       remote_address_space);
+              break;
+            }
+          case SEND_CREATE_TOP_VIEW_RESPONSE:
+            {
+              runtime->handle_create_top_view_response(derez);
               break;
             }
           case SEND_FUTURE:
@@ -4936,15 +4935,20 @@ namespace Legion {
                                                           remote_address_space);
               break;
             }
-          case SEND_SUBSCRIBE_REMOTE_CONTEXT:
+          case SEND_REMOTE_CONTEXT_REQUEST:
             {
-              runtime->handle_subscribe_remote_context(derez, 
-                                                       remote_address_space);
+              runtime->handle_remote_context_request(derez, 
+                                                     remote_address_space);
               break;
             }
-          case SEND_FREE_REMOTE_CONTEXT:
+          case SEND_REMOTE_CONTEXT_RESPONSE:
             {
-              runtime->handle_free_remote_context(derez);
+              runtime->handle_remote_context_response(derez);
+              break;
+            }
+          case SEND_REMOTE_CONTEXT_FREE:
+            {
+              runtime->handle_remote_context_free(derez);
               break;
             }
           case SEND_VERSION_STATE_PATH:
@@ -7614,7 +7618,7 @@ namespace Legion {
       IndividualTask *top_task = get_available_individual_task(false);
       // Get a remote task to serve as the top of the top-level task
       RemoteTask *top_context = get_available_remote_task(false);
-      top_context->initialize_remote(0, NULL, true/*top*/);
+      top_context->initialize_remote(0, true/*top*/);
       // Set the executing processor
       top_context->set_executing_processor(target);
       TaskLauncher launcher(Runtime::legion_main_id, TaskArgument());
@@ -7651,7 +7655,7 @@ namespace Legion {
       IndividualTask *mapper_task = get_available_individual_task(false);
       // Get a remote task to serve as the top of the top-level task
       RemoteTask *map_context = get_available_remote_task(false);
-      map_context->initialize_remote(0, NULL, true/*top*/);
+      map_context->initialize_remote(0, true/*top*/);
       map_context->set_executing_processor(proc);
       TaskLauncher launcher(tid, arg, Predicate::TRUE_PRED, map_id);
       Future f = mapper_task->initialize_task(map_context, launcher, 
@@ -14268,15 +14272,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_view_remote_registration(AddressSpaceID target, 
-                                                Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(rez, VIEW_REMOTE_REGISTRATION,
-                                    DISTRIBUTED_VIRTUAL_CHANNEL, true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::send_back_atomic(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -14355,7 +14350,16 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_CREATE_TOP_VIEW_REQUEST,
-                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+                                        VIEW_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_create_top_view_response(AddressSpaceID target,
+                                                Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_CREATE_TOP_VIEW_RESPONSE,
+                                        VIEW_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -14532,21 +14536,30 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_subscribe_remote_context(AddressSpaceID target,
-                                                Serializer &rez)
+    void Runtime::send_remote_context_request(AddressSpaceID target,
+                                              Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_message(rez, SEND_SUBSCRIBE_REMOTE_CONTEXT,
-                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+      find_messenger(target)->send_message(rez, SEND_REMOTE_CONTEXT_REQUEST, 
+                                        CONTEXT_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_free_remote_context(AddressSpaceID target, 
+    void Runtime::send_remote_context_response(AddressSpaceID target,
+                                               Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_REMOTE_CONTEXT_RESPONSE, 
+                                        CONTEXT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_remote_context_free(AddressSpaceID target, 
                                            Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_message(rez, SEND_FREE_REMOTE_CONTEXT,
-                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+      find_messenger(target)->send_message(rez, SEND_REMOTE_CONTEXT_FREE,
+                                        CONTEXT_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -15027,14 +15040,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_view_remote_registration(Deserializer &derez,
-                                                  AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      LogicalView::handle_view_remote_registration(forest, derez, source);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::handle_send_back_atomic(Deserializer &derez,
                                           AddressSpaceID source)
     //--------------------------------------------------------------------------
@@ -15111,7 +15116,14 @@ namespace Legion {
                                                  AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      PhysicalManager::handle_create_top_view_request(this, source, derez);
+      SingleTask::handle_logical_top_view_request(derez, this, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_create_top_view_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      SingleTask::handle_logical_top_view_response(derez, this);
     }
 
     //--------------------------------------------------------------------------
@@ -15287,26 +15299,41 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_subscribe_remote_context(Deserializer &derez,
-                                                  AddressSpaceID source)
+    void Runtime::handle_remote_context_request(Deserializer &derez,
+                                                AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
-      SingleTask *receiver;
-      derez.deserialize(receiver);
-      RemoteTask *remote_ctx;
-      derez.deserialize(remote_ctx);
-      receiver->record_remote_instance(source, remote_ctx);
+      UniqueID context_uid;
+      derez.deserialize(context_uid);
+      RemoteTask *target;
+      derez.deserialize(target);
+      SingleTask *context = find_context(context_uid);
+      context->send_remote_context(source, target);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_free_remote_context(Deserializer &derez)
+    void Runtime::handle_remote_context_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      RemoteTask *context;
+      derez.deserialize(context);
+      // Unpack the result
+      context->unpack_remote_context(derez);
+      // Then register it
+      UniqueID context_uid = context->get_context_id();
+      register_remote_context(context_uid, context);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_remote_context_free(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
       UniqueID remote_owner_uid;
       derez.deserialize(remote_owner_uid);
-      release_remote_context(remote_owner_uid);
+      unregister_remote_context(remote_owner_uid);
     }
 
     //--------------------------------------------------------------------------
@@ -17184,90 +17211,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RemoteTask* Runtime::find_or_init_remote_context(UniqueID uid,
-                                                     Processor orig_proc,
-                                                     SingleTask *remote_parent)
-    //--------------------------------------------------------------------------
-    {
-      {
-        AutoLock ctx_lock(context_lock,1,false/*exclusive*/);
-        std::map<UniqueID,std::pair<SingleTask*,bool> >::const_iterator 
-          finder = current_contexts.find(uid);
-        if (finder != current_contexts.end())
-        {
-#ifdef DEBUG_HIGH_LEVEL
-          assert(finder->second.second); // make sure it is remote
-#endif
-          return static_cast<RemoteTask*>(it->second.first);
-        }
-      }
-      // Otherwise we need to make one
-      RemoteTask *remote_ctx = get_available_remote_task(false);
-      RemoteTask *result = remote_ctx;
-      bool lost_race = false;
-      {
-        AutoLock ctx_lock(context_lock);
-        std::map<UniqueID,std::pair<SingleTask*,bool> >::const_iterator
-          finder = current_contexts.find(uid);
-        if (finder != current_contexts.end())
-        {
-          lost_race = true;
-          result = finder->second;
-        }
-        else // Put it in the map
-          current_contexts[uid] = std::pair<SingleTask*,bool>(remote_ctx, true);
-      }
-      if (lost_race)
-        free_remote_task(remote_ctx);
-      else
-      {
-        remote_ctx->initialize_remote(uid, remote_parent, false/*top*/);
-        AddressSpaceID target = find_address_space(orig_proc);
-        // In some cases we might be asked to temporarily make a
-        // remote task for a task that has been sent back to its
-        // owner node, in which case we don't have to send the
-        // subscription message.
-        if (target != address_space)
-        {
-          // Send back the subscription message
-          Serializer rez;
-          {
-            RezCheck z(rez);
-            rez.serialize(remote_parent);
-            rez.serialize(remote_ctx);
-          }
-          send_subscribe_remote_context(target, rez);
-        }
-        else // We're back to being local so we can just notify the parent
-          remote_parent->record_remote_instance(target, result);
-      }
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::release_remote_context(UniqueID remote_owner_uid)
-    //--------------------------------------------------------------------------
-    {
-      RemoteTask *remote_task;
-      {
-        AutoLock ctx_lock(context_lock);
-        std::map<UniqueID,RemoteTask*>::iterator finder = 
-          remote_contexts.find(remote_owner_uid);
-#ifdef DEBUG_HIGH_LEVEL
-        assert(finder != remote_contexts.end());
-#endif
-        remote_task = finder->second;
-        remote_contexts.erase(finder);
-      }
-      // Now we can deactivate it
-      remote_task->deactivate();
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::allocate_local_context(SingleTask *task)
     //--------------------------------------------------------------------------
     {
       UniqueID context_uid = task->get_unique_op_id();
+#ifdef DEBUG_HIGH_LEVEL
+      assert((context_uid % runtime_stride) == address_space); // sanity check
+#endif
       // Try getting something off the list of available contexts
       AutoLock ctx_lock(context_lock);
       if (!available_contexts.empty())
@@ -17299,9 +17249,9 @@ namespace Legion {
       }
       // Finally save us in the set of contexts
 #ifdef DEBUG_HIGH_LEVEL
-      assert(current_contexts.find(context_uid) == current_contexts.end());
+      assert(local_contexts.find(context_uid) == local_contexts.end());
 #endif
-      current_contexts[context_uid] = std::pair<SingleTask,bool>(task, false);
+      local_contexts[context_uid] = task;
     }
 
     //--------------------------------------------------------------------------
@@ -17317,25 +17267,129 @@ namespace Legion {
       AutoLock ctx_lock(context_lock);
       available_contexts.push_back(context);
       // Remove use from the set of contexts
-      std::map<UniqueID,std::pair<SingleTask,bool> >::iterator finder = 
-        current_contexts.find(task);
+      std::map<UniqueID,SingleTask*>::iterator finder = 
+        local_contexts.find(context_uid);
 #ifdef DEBUG_HIGH_LEVEL
-      assert(finder != current_contexts.end());
+      assert(finder != local_contexts.end());
 #endif
-      current_contexts.erase(finder);
+      local_contexts.erase(finder);
     }
 
     //--------------------------------------------------------------------------
-    SingleTask* Runtime::find_context(UniqueID context_uid)
+    void Runtime::register_remote_context(UniqueID context_uid, 
+                                          RemoteTask *context)
     //--------------------------------------------------------------------------
     {
-      AutoLock ctx_lock(context_lock,1,false/*exclusive*/);
-      std::map<UniqueID,std::pair<SingleTask*,bool> >::const_iterator
-        finder = current_contexts.find(context_uid);
+      UserEvent to_trigger = UserEvent::NO_USER_EVENT;
+      {
+        AutoLock ctx_lock(context_lock);
+        std::map<UniqueID,UserEvent>::iterator finder = 
+          pending_remote_contexts.find(context_uid);
 #ifdef DEBUG_HIGH_LEVEL
-      assert(finder != current_contexts.end());
+        assert(remote_contexts.find(context_uid) == remote_contexts.end());
+        assert(finder != pending_remote_contexts.end());
 #endif
-      return finder->second.first;
+        to_trigger = finder->second;
+        pending_remote_contexts.erase(finder);
+        remote_contexts[context_uid] = context; 
+      }
+#ifdef DEBUG_HIGH_LEVEL
+      assert(to_trigger.exists());
+#endif
+      to_trigger.trigger();
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::unregister_remote_context(UniqueID context_uid)
+    //--------------------------------------------------------------------------
+    {
+      RemoteTask *context = NULL;
+      {
+        AutoLock ctx_lock(context_lock);
+        std::map<UniqueID,RemoteTask*>::iterator finder = 
+          remote_contexts.find(context_uid);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(finder != remote_contexts.end());
+#endif
+        context = finder->second;
+        remote_contexts.erase(finder);
+      }
+      context->deactivate();
+    }
+
+    //--------------------------------------------------------------------------
+    SingleTask* Runtime::find_context(UniqueID context_uid,
+                                      bool return_null_if_not_found /*=false*/)
+    //--------------------------------------------------------------------------
+    {
+      Event wait_on = Event::NO_EVENT;
+      UserEvent ready_event = UserEvent::NO_USER_EVENT;
+      {
+        // Need exclusive permission since we might mutate stuff
+        AutoLock ctx_lock(context_lock);
+        // See if it is local first
+        std::map<UniqueID,SingleTask*>::const_iterator
+          local_finder = local_contexts.find(context_uid);
+        if (local_finder != local_contexts.end())
+          return local_finder->second;
+        // Now see if it is remote
+        std::map<UniqueID,RemoteTask*>::const_iterator
+          remote_finder = remote_contexts.find(context_uid);
+        if (remote_finder != remote_contexts.end())
+          return remote_finder->second;
+        // If we don't have it, see if we should send the response or not
+        std::map<UniqueID,UserEvent>::const_iterator pending_finder = 
+          pending_remote_contexts.find(context_uid);
+        if (pending_finder == pending_remote_contexts.end())
+        {
+          // If its not here and we are supposed to return null do that
+          if (return_null_if_not_found)
+            return NULL;
+          // Make an event to trigger for when we are done
+          ready_event = UserEvent::create_user_event();
+          pending_remote_contexts[context_uid] = ready_event; 
+        }
+        else // if we're going to have it we might as well wait
+          wait_on = pending_finder->second;
+      }
+      // If there is no wait event, we have to send the message
+      if (!wait_on.exists())
+      {
+#ifdef DEBUG_HIGH_LEVEL
+        assert(ready_event.exists());
+#endif
+        // We have to send the message
+        // Figure out the target
+        AddressSpaceID target = context_uid % runtime_stride;
+#ifdef DEBUG_HIGH_LEVEL
+        assert(target != address_space);
+#endif
+        // Make the result
+        RemoteTask *result = get_available_remote_task(false);
+        result->initialize_remote(context_uid, false/*top*/);
+        // Send the message
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(context_uid);
+          rez.serialize(result);
+        }
+        send_remote_context_request(target, rez);
+        // Wait for it to be ready
+        ready_event.wait();
+        // We already know the answer cause we sent the message
+        return result;
+      }
+      // We wait for the results to be ready
+      wait_on.wait();
+      // When we wake up the context should be here
+      AutoLock ctx_lock(context_lock,1,false/*exclusive*/);
+      std::map<UniqueID,RemoteTask*>::const_iterator finder = 
+        remote_contexts.find(context_uid);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(finder != remote_contexts.end());
+#endif
+      return finder->second;
     }
 
     //--------------------------------------------------------------------------
