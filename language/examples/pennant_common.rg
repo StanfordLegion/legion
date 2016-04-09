@@ -1302,7 +1302,6 @@ terra read_partitions(conf : config) : mesh_colorings
   return result
 end
 read_partitions:compile()
-read_partitions:printpretty()
 
 local terra get_zone_position(conf : config, pcx : int64, pcy : int64, z : int64)
   var first_zx, last_zx, stride_zx = block_zx(conf, pcx)
