@@ -991,7 +991,7 @@ end
 
 local terra all_ghost_p(conf : config)
   var num_ghost = get_num_ghost(conf)
-  var first_ghost = 0
+  var first_ghost : int64 = 0
   var last_ghost = num_ghost -- exclusive
   return first_ghost, last_ghost
 end
@@ -1274,7 +1274,7 @@ terra read_partitions(conf : config) : mesh_colorings
       c.legion_coloring_add_range(
         result.rp_all_shared_c, piece, ptr_t(bottom_right._0), ptr_t(bottom_right._1 - 1)) -- inclusive
 
-      var first_p, last_p = -1, -1
+      var first_p : int64, last_p : int64 = -1, -1
       if right._0 < right._1 then
         first_p = right._0
         last_p = right._1
@@ -1302,6 +1302,7 @@ terra read_partitions(conf : config) : mesh_colorings
   return result
 end
 read_partitions:compile()
+read_partitions:printpretty()
 
 local terra get_zone_position(conf : config, pcx : int64, pcy : int64, z : int64)
   var first_zx, last_zx, stride_zx = block_zx(conf, pcx)

@@ -1603,7 +1603,7 @@ namespace LegionRuntime {
        * count of contiguous points in 'act_count'.
        */
       inline ptr_t next_span(size_t& act_count, 
-                             size_t req_count = (size_t)-1);
+                             size_t req_count = (size_t)-1LL);
     public:
       IndexIterator& operator=(const IndexIterator &rhs);
     private:
