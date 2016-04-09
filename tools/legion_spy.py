@@ -3209,11 +3209,13 @@ class Task(object):
                 self.op.context.record_instance_use(inst, fid, req.parent)
                 # Clone the user list 
                 depth = self.get_depth()
-                assert depth > 0
-                parent_depth = depth - 1
-                inst.clone_users(field, parent_depth, depth) 
-                # Then add our own user at our parent's depth
-                inst.add_user(parent_depth, field, self.op, req) 
+                # If this is the top-level context we don't have
+                # anything to copy in
+                if depth > 0:
+                    parent_depth = depth - 1
+                    inst.clone_users(field, parent_depth, depth) 
+                    # Then add our own user at our parent's depth
+                    inst.add_user(parent_depth, field, self.op, req)
                 # We are done
                 break
         # Record that we handled this field for this instance

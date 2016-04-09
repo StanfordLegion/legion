@@ -3595,6 +3595,9 @@ namespace Legion {
       region_deleted.push_back(false);
       RemoteTask *outermost = find_outermost_context();
       outermost->add_top_region(handle);
+      // Log this requirement for legion spy if necessary
+      if (Runtime::legion_spy_enabled)
+        log_created_requirement(regions.size() - 1);
     }
 
     //--------------------------------------------------------------------------
@@ -3617,7 +3620,25 @@ namespace Legion {
         // Mark that the region was virtually mapped
         virtual_mapped.push_back(true);
         region_deleted.push_back(false);
+        if (Runtime::legion_spy_enabled)
+          log_created_requirement(regions.size() - 1);
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void SingleTask::log_created_requirement(unsigned index)
+    //--------------------------------------------------------------------------
+    {
+      log_requirement(unique_op_id, index, regions[index]);
+      std::vector<MappingInstance> instances(1, 
+          Mapping::PhysicalInstance::get_virtual_instance());
+      RegionTreeID bad_tree; std::vector<FieldID> missing_fields;
+      std::vector<PhysicalManager*> unacquired;
+      runtime->forest->physical_convert_mapping(regions[index], instances, 
+          physical_instances[index], bad_tree, missing_fields, 
+          NULL, unacquired, false/*do acquire_checks*/);
+      runtime->forest->log_mapping_decision(unique_op_id, index,
+                       regions[index], physical_instances[index]);
     }
 
     //--------------------------------------------------------------------------
@@ -5721,7 +5742,7 @@ namespace Legion {
       {
         // This is where things get weird, this region was virtually mapped
         // Now we have to clone the view information from our parent context
-        //
+        
       }
       else if (is_created_region(index))
       {

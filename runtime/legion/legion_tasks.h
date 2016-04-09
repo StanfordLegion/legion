@@ -421,6 +421,8 @@ namespace Legion {
       virtual void add_created_index(IndexSpace handle);
       virtual void add_created_region(LogicalRegion handle);
       virtual void add_created_field(FieldSpace handle, FieldID fid);
+      // for logging created region requirements
+      void log_created_requirement(unsigned index);
       virtual void remove_created_index(IndexSpace handle);
       virtual void remove_created_region(LogicalRegion handle);
       virtual void remove_created_field(FieldSpace handle, FieldID fid);
