@@ -847,9 +847,6 @@ namespace Realm {
       //LegionRuntime::LowLevel::start_dma_worker_threads(dma_worker_threads,
       //                                                  core_reservations);
 
-      LegionRuntime::LowLevel::start_dma_system(dma_worker_threads, 100
-                                                ,core_reservations);
-
 #ifdef EVENT_TRACING
       // Always initialize even if we won't dump to file, otherwise segfaults happen
       // when we try to save event info
@@ -943,6 +940,11 @@ namespace Realm {
 	  it != modules.end();
 	  it++)
 	(*it)->create_code_translators(this);
+      
+      // start dma system at the very ending of initialization
+      // since we need list of local gpus to create channels
+      LegionRuntime::LowLevel::start_dma_system(dma_worker_threads, 100
+                                                ,core_reservations);
 
       // now that we've created all the processors/etc., we can try to come up with core
       //  allocations that satisfy everybody's requirements - this will also start up any
