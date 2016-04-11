@@ -2794,8 +2794,8 @@ namespace LegionRuntime {
 	  int sstart = src_linearization->image((coord_t)rstart);
 	  int dstart = dst_linearization->image((coord_t)rstart);
 #ifdef DEBUG_LOW_LEVEL
-	  assert(src_linearization->image_is_dense(Rect<1>(rstart, rstart + rlen - 1)));
-	  assert(dst_linearization->image_is_dense(Rect<1>(rstart, rstart + rlen - 1)));
+	  assert(src_linearization->image_is_dense(Rect<1>((coord_t)rstart, (coord_t)(rstart + rlen - 1))));
+	  assert(dst_linearization->image_is_dense(Rect<1>((coord_t)rstart, (coord_t)(rstart + rlen - 1))));
 #endif
 	  //printf("X: %d+%d %d %d\n", rstart, rlen, sstart, dstart);
 
