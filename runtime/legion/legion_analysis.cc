@@ -3355,7 +3355,7 @@ namespace Legion {
       CompositeView *composite_view = legion_new<CompositeView>(node->context, 
                                    did, node->context->runtime->address_space,
                                    node, node->context->runtime->address_space, 
-                                   root, composite_info, true/*register now*/);
+                                   root, composite_info);
       // Now update the state of the node
       // Note that if we are permitted to leave the subregions
       // open then we don't make the view dirty
@@ -5217,8 +5217,7 @@ namespace Legion {
                 track_aligned::const_iterator it = valid_views.begin(); it !=
                 valid_views.end(); it++)
           {
-            DistributedID view_did = it->first->send_view(target, it->second);
-            rez.serialize(view_did);
+            rez.serialize(it->first->did);
             rez.serialize(it->second);
           }
           rez.serialize<size_t>(reduction_views.size());
@@ -5226,8 +5225,7 @@ namespace Legion {
                 track_aligned::const_iterator it = reduction_views.begin(); 
                 it != reduction_views.end(); it++)
           {
-            DistributedID reduc_did = it->first->send_view(target, it->second);
-            rez.serialize(reduc_did);
+            rez.serialize(it->first->did);
             rez.serialize(it->second);
           }
         }
@@ -5267,8 +5265,7 @@ namespace Legion {
               FieldMask overlap = it->second & request_mask;
               if (!overlap)
                 continue;
-              DistributedID view_did = it->first->send_view(target, overlap);
-              valid_rez.serialize(view_did);
+              valid_rez.serialize(it->first->did);
               valid_rez.serialize(overlap);
               count++;
             }
@@ -5288,8 +5285,7 @@ namespace Legion {
               FieldMask overlap = it->second & request_mask;
               if (!overlap)
                 continue;
-              DistributedID reduc_did = it->first->send_view(target, overlap);
-              reduc_rez.serialize(reduc_did);
+              reduc_rez.serialize(it->first->did);
               reduc_rez.serialize(overlap);
               count++;
             }
@@ -5585,13 +5581,11 @@ namespace Legion {
       }
     }
 
-#if 0
     //--------------------------------------------------------------------------
     void VersionState::handle_version_state_response(AddressSpaceID source,
      UserEvent to_trigger, VersionRequestKind request_kind, Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      RegionTreeNode *owner_node = manager->owner;
       // Special case for path only response
       if (request_kind == PATH_ONLY_VERSION_REQUEST)
       {
@@ -5623,9 +5617,11 @@ namespace Legion {
         to_trigger.trigger();
         return;
       }
+      std::set<Event> preconditions;
       // Keep track of any composite veiws we need to check 
       // for having recursive version states at here
       std::vector<CompositeView*> composite_views;
+      std::vector<LogicalView*> pending_views;
       {
         // Hold the lock when touching the data structures because we might
         // be getting multiple updates from different locations
@@ -5698,16 +5694,20 @@ namespace Legion {
           {
             DistributedID did;
             derez.deserialize(did);
-            LogicalView *view = owner_node->find_view(did);
-            // Check for composite view
-            if (view->is_deferred_view())
-            {
-              DeferredView *def_view = view->as_deferred_view();
-              if (def_view->is_composite_view())
-                composite_views.push_back(def_view->as_composite_view());
-            }
+            Event ready = Event::NO_EVENT;
+            LogicalView *view = 
+              runtime->find_or_request_logical_view(did, ready);
             FieldMask &mask = valid_views[view];
             derez.deserialize(mask);
+            if (ready.exists())
+            {
+              preconditions.insert(ready);
+              pending_views.push_back(view);
+              continue;
+            }
+            // Check for composite view
+            if (view->is_composite_view())
+              composite_views.push_back(view->as_composite_view());
             view->add_nested_gc_ref(did);
             view->add_nested_valid_ref(did);
           }
@@ -5717,15 +5717,22 @@ namespace Legion {
           {
             DistributedID did;
             derez.deserialize(did);
-            LogicalView *view = owner_node->find_view(did);
+            Event ready = Event::NO_EVENT;
+            LogicalView *view =
+              runtime->find_or_request_logical_view(did, ready);
+            ReductionView *red_view = static_cast<ReductionView*>(view); 
+            FieldMask &mask = reduction_views[red_view];
+            derez.deserialize(mask);
+            if (ready.exists())
+            {
+              preconditions.insert(ready);
+              pending_views.push_back(view);
+              continue;
+            }
 #ifdef DEBUG_HIGH_LEVEL
             assert(view->is_instance_view());
             assert(view->as_instance_view()->is_reduction_view());
 #endif
-            ReductionView *red_view = 
-              view->as_instance_view()->as_reduction_view();
-            FieldMask &mask = reduction_views[red_view];
-            derez.deserialize(mask);
             view->add_nested_gc_ref(did);
             view->add_nested_valid_ref(did);
           }
@@ -5738,14 +5745,9 @@ namespace Legion {
           {
             DistributedID did;
             derez.deserialize(did);
-            LogicalView *view = owner_node->find_view(did);
-            // Check for composite view
-            if (view->is_deferred_view())
-            {
-              DeferredView *def_view = view->as_deferred_view();
-              if (def_view->is_composite_view())
-                composite_views.push_back(def_view->as_composite_view());
-            }
+            Event ready = Event::NO_EVENT;
+            LogicalView *view =
+              runtime->find_or_request_logical_view(did, ready);
             LegionMap<LogicalView*,FieldMask>::aligned::iterator finder = 
               valid_views.find(view);
             if (finder != valid_views.end())
@@ -5753,14 +5755,28 @@ namespace Legion {
               FieldMask update_mask;
               derez.deserialize(update_mask);
               finder->second |= update_mask;
+              if (ready.exists())
+              {
+                preconditions.insert(ready);
+                continue;
+              }
             }
             else
             {
               FieldMask &mask = valid_views[view];
               derez.deserialize(mask);
+              if (ready.exists())
+              {
+                preconditions.insert(ready);
+                pending_views.push_back(view);
+                continue;
+              }
               view->add_nested_gc_ref(did);
               view->add_nested_valid_ref(did);
             }
+            // Check for composite view
+            if (view->as_composite_view())
+              composite_views.push_back(view->as_composite_view());
           }
           size_t num_reduction_views;
           derez.deserialize(num_reduction_views);
@@ -5768,13 +5784,10 @@ namespace Legion {
           {
             DistributedID did;
             derez.deserialize(did);
-            LogicalView *view = owner_node->find_view(did);
-#ifdef DEBUG_HIGH_LEVEL
-            assert(view->is_instance_view());
-            assert(view->as_instance_view()->is_reduction_view());
-#endif
-            ReductionView *red_view = 
-              view->as_instance_view()->as_reduction_view();
+            Event ready = Event::NO_EVENT;
+            LogicalView *view =
+              runtime->find_or_request_logical_view(did, ready);
+            ReductionView *red_view = static_cast<ReductionView*>(view);
             LegionMap<ReductionView*,FieldMask>::aligned::iterator finder = 
               reduction_views.find(red_view);
             if (finder != reduction_views.end())
@@ -5782,40 +5795,62 @@ namespace Legion {
               FieldMask update_mask;
               derez.deserialize(update_mask);
               finder->second |= update_mask;
+              if (ready.exists())
+              {
+                preconditions.insert(ready);
+                continue;
+              }
             }
             else
             {
               FieldMask &mask = reduction_views[red_view];
               derez.deserialize(mask);
+              if (ready.exists())
+              {
+                preconditions.insert(ready);
+                pending_views.push_back(view);
+                continue;
+              }
               view->add_nested_gc_ref(did);
               view->add_nested_valid_ref(did);
             }
           }
         }
       }
+      Event pending_ready = Event::NO_EVENT;
+      if (!preconditions.empty())
+      {
+        pending_ready = Runtime::merge_events<true>(preconditions);
+        preconditions.clear();
+      }
       // If we have composite views, then we need to make sure
       // that their version states are local as well
       if (!composite_views.empty())
       {
-        std::set<Event> preconditions;
         for (std::vector<CompositeView*>::const_iterator it = 
               composite_views.begin(); it != composite_views.end(); it++)
         {
           (*it)->make_local(preconditions); 
         }
-        if (!preconditions.empty())
-          Runtime::trigger_event<true>(to_trigger,
-              Runtime::merge_events<true>(preconditions));
-        else
-          to_trigger.trigger();
       }
-      else
+      if (pending_ready.exists())
       {
-        // Finally trigger the event saying we have the data
-        to_trigger.trigger();
+        pending_ready.wait();
+        for (std::vector<LogicalView*>::const_iterator it = 
+              pending_views.begin(); it != pending_views.end(); it++)
+        {
+          (*it)->add_nested_gc_ref(did);
+          (*it)->add_nested_valid_ref(did);
+          if ((*it)->is_composite_view())
+            (*it)->as_composite_view()->make_local(preconditions);
+        }
       }
+      if (!preconditions.empty())
+        Runtime::trigger_event<true>(to_trigger,
+            Runtime::merge_events<true>(preconditions));
+      else
+        to_trigger.trigger();
     }
-#endif
 
     //--------------------------------------------------------------------------
     /*static*/ void VersionState::process_version_state_path_only(
@@ -6332,27 +6367,22 @@ namespace Legion {
       if (composite)
       {
         if (ptr.view != NULL)
-        {
-          DistributedID did = ptr.view->send_view(target, valid_fields);
-          rez.serialize(did);
-        }
+          rez.serialize(ptr.view->did);
         else
           rez.serialize<DistributedID>(0);
       }
       else
       {
         if (ptr.manager != NULL)
-        {
-          DistributedID did = ptr.manager->send_manager(target);
-          rez.serialize(did);
-        }
+          rez.serialize(ptr.manager->did);
         else
           rez.serialize<DistributedID>(0);
       }
     }
 
     //--------------------------------------------------------------------------
-    void InstanceRef::unpack_reference(Runtime *runtime, Deserializer &derez)
+    void InstanceRef::unpack_reference(Runtime *runtime, 
+                                       Deserializer &derez, Event &ready)
     //--------------------------------------------------------------------------
     {
       derez.deserialize(valid_fields);
@@ -6362,26 +6392,14 @@ namespace Legion {
       derez.deserialize(did);
       if (did == 0)
         return;
-      DistributedCollectable *dc = runtime->find_distributed_collectable(did);
       if (composite)
       {
-#ifdef DEBUG_HIGH_LEVEL
-        ptr.view = dynamic_cast<CompositeView*>(dc);
-        assert(ptr.view != NULL);
-#else
-        ptr.view = static_cast<CompositeView*>(dc);
-#endif
+        ptr.view = 
+         runtime->find_or_request_logical_view(did, ready)->as_composite_view();
         ptr.view->add_base_valid_ref(COMPOSITE_HANDLE_REF);
       }
       else
-      {
-#ifdef DEBUG_HIGH_LEVEL
-        ptr.manager = dynamic_cast<PhysicalManager*>(dc);
-        assert(ptr.manager != NULL);
-#else
-        ptr.manager = static_cast<PhysicalManager*>(dc);
-#endif
-      }
+        ptr.manager = runtime->find_or_request_physical_manager(did, ready);
       local = false;
     } 
 
@@ -6835,7 +6853,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InstanceSet::unpack_references(Runtime *runtime, Deserializer &derez)
+    void InstanceSet::unpack_references(Runtime *runtime, Deserializer &derez,
+                                        std::set<Event> &ready_events)
     //--------------------------------------------------------------------------
     {
       size_t num_refs;
@@ -6872,7 +6891,10 @@ namespace Legion {
           refs.single = legion_new<CollectableRef>();
           refs.single->add_reference();
         }
-        refs.single->unpack_reference(runtime, derez);
+        Event ready = Event::NO_EVENT;
+        refs.single->unpack_reference(runtime, derez, ready);
+        if (ready.exists())
+          ready_events.insert(ready);
       }
       else
       {
@@ -6890,7 +6912,12 @@ namespace Legion {
           refs.multi->vector.resize(num_refs);
         // Now do the unpacking
         for (unsigned idx = 0; idx < num_refs; idx++)
-          refs.multi->vector[idx].unpack_reference(runtime, derez);
+        {
+          Event ready = Event::NO_EVENT;
+          refs.multi->vector[idx].unpack_reference(runtime, derez, ready);
+          if (ready.exists())
+            ready_events.insert(ready);
+        }
       }
       // We are always not shared when we are done
       shared = false;

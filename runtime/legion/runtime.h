@@ -1818,7 +1818,7 @@ namespace Legion {
       void send_field_space_top_alloc(AddressSpaceID target, Serializer &rez);
       void send_field_free(AddressSpaceID target, Serializer &rez);
       void send_top_level_region_request(AddressSpaceID target,Serializer &rez);
-      void send_top_level_region_return(AddressSpaceID target, Serializer &rez);
+      void send_top_level_region_return(AddressSpaceID target, Serializer &rez); 
       void send_logical_region_node(AddressSpaceID target, Serializer &rez);
       void send_index_space_destruction(IndexSpace handle, 
                                         AddressSpaceID target);
@@ -1846,6 +1846,10 @@ namespace Legion {
       void send_did_remove_create_reference(AddressSpaceID target,
                                             Serializer &rez, bool flush = true);
       void send_back_atomic(AddressSpaceID target, Serializer &rez);
+      void send_atomic_reservation_request(AddressSpaceID target, 
+                                           Serializer &rez);
+      void send_atomic_reservation_response(AddressSpaceID target, 
+                                            Serializer &rez);
       void send_materialized_view(AddressSpaceID target, Serializer &rez);
       void send_materialized_update(AddressSpaceID target, Serializer &rez);
       void send_composite_view(AddressSpaceID target, Serializer &rez);
@@ -1856,6 +1860,8 @@ namespace Legion {
       void send_reduction_manager(AddressSpaceID target, Serializer &rez);
       void send_create_top_view_request(AddressSpaceID target, Serializer &rez);
       void send_create_top_view_response(AddressSpaceID target,Serializer &rez);
+      void send_subview_did_request(AddressSpaceID target, Serializer &rez);
+      void send_subview_did_response(AddressSpaceID target, Serializer &rez);
       void send_future(AddressSpaceID target, Serializer &rez);
       void send_future_result(AddressSpaceID target, Serializer &rez);
       void send_future_subscription(AddressSpaceID target, Serializer &rez);
@@ -1963,7 +1969,9 @@ namespace Legion {
       void handle_did_remote_resource_update(Deserializer &derez);
       void handle_did_create_add(Deserializer &derez);
       void handle_did_create_remove(Deserializer &derez);
-      void handle_send_back_atomic(Deserializer &derez, AddressSpaceID source);
+      void handle_send_atomic_reservation_request(Deserializer &derez,
+                                                  AddressSpaceID source);
+      void handle_send_atomic_reservation_response(Deserializer &derez);
       void handle_send_materialized_view(Deserializer &derez, 
                                          AddressSpaceID source);
       void handle_send_materialized_update(Deserializer &derez,
@@ -1982,6 +1990,11 @@ namespace Legion {
       void handle_create_top_view_request(Deserializer &derez,
                                           AddressSpaceID source);
       void handle_create_top_view_response(Deserializer &derez);
+      void handle_subview_did_request(Deserializer &derez, 
+                                      AddressSpaceID source);
+      void handle_subview_did_response(Deserializer &derez);
+      void handle_view_request(Deserializer &derez, AddressSpaceID source);
+      void handle_manager_request(Deserializer &derez, AddressSpaceID source);
       void handle_future_send(Deserializer &derez, AddressSpaceID source);
       void handle_future_result(Deserializer &derez);
       void handle_future_subscription(Deserializer &derez);
@@ -2111,6 +2124,7 @@ namespace Legion {
                                                  bool has_lock = false);
       void free_distributed_id(DistributedID did);
       void recycle_distributed_id(DistributedID did, Event recycle_event);
+      AddressSpaceID determine_owner(DistributedID did) const;
     public:
       void register_distributed_collectable(DistributedID did,
                                             DistributedCollectable *dc,
@@ -2120,6 +2134,15 @@ namespace Legion {
       DistributedCollectable* find_distributed_collectable(DistributedID did);
       DistributedCollectable* weak_find_distributed_collectable(
                                                            DistributedID did);
+      bool find_pending_collectable_location(DistributedID did,void *&location);
+    public:
+      LogicalView* find_or_request_logical_view(DistributedID did,Event &ready);
+      PhysicalManager* find_or_request_physical_manager(DistributedID did, 
+                                                        Event &ready);
+    protected:
+      template<typename T, MessageKind MK, VirtualChannelKind VC>
+      DistributedCollectable* find_or_request_distributed_collectable(
+                                            DistributedID did, Event &ready);
     public:
       void register_future(DistributedID did, FutureImpl *impl);
       void unregister_future(DistributedID did);
@@ -2411,6 +2434,8 @@ namespace Legion {
       Reservation distributed_collectable_lock;
       LegionMap<DistributedID,DistributedCollectable*,
                 RUNTIME_DIST_COLLECT_ALLOC>::tracked dist_collectables;
+      std::map<DistributedID,
+        std::pair<DistributedCollectable*,UserEvent> > pending_collectables;
     protected:
       Reservation gc_epoch_lock;
       GarbageCollectionEpoch *current_gc_epoch;

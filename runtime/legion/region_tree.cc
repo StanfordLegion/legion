@@ -8869,6 +8869,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void FieldSpaceNode::get_field_set(const FieldMask &mask,
+                                       std::vector<FieldID> &to_set)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock n_lock(node_lock,1,false/*exclusive*/);
+      for (std::map<FieldID,FieldInfo>::const_iterator it = fields.begin();
+            it != fields.end(); it++)
+      {
+        if (it->second.destroyed)
+          continue;
+        if (mask.is_set(it->second.idx))
+          to_set.push_back(it->first);
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void FieldSpaceNode::get_field_set(const FieldMask &mask, 
                                        const std::set<FieldID> &basis,
                                        std::set<FieldID> &to_set)
@@ -9205,7 +9221,6 @@ namespace Legion {
                                          memory, inst, dom, false/*own*/,
                                          node, layout, pointer_constraint,
                                          Event::NO_EVENT,
-                                         true/*register now*/,
                                          InstanceManager::ATTACH_FILE_FLAG);
 #ifdef DEBUG_HIGH_LEVEL
       assert(result != NULL);
@@ -13211,8 +13226,6 @@ namespace Legion {
       else
         result = as_partition_node()->convert_reference_partition(manager, 
                                                     context, context_index); 
-      // Since this is a new view, save it in the region tree
-      register_instance_view(manager, context, result);
       return result;
     }
 
@@ -14910,8 +14923,7 @@ namespace Legion {
         new FillView::FillViewValue(value, value_size);
       FillView *fill_view = 
         legion_new<FillView>(context, did, context->runtime->address_space,
-                             context->runtime->address_space, this, 
-                             true/*register now*/, fill_value);
+                             context->runtime->address_space, this, fill_value);
       // Now update the physical state
       PhysicalState *state = get_physical_state(ctx, version_info);
       // Invalidate any open children and any reductions
@@ -15042,12 +15054,10 @@ namespace Legion {
 #ifdef DEBUG_HIGH_LEVEL
         assert(parent != NULL);
 #endif
-        InstanceView *parent_view = parent->convert_reference(manager, context, 
-                                                              context_index);
+        InstanceView *parent_view = parent->convert_reference_partition(
+                                              manager, context, context_index);
         result = parent_view->get_instance_subview(row_source->color);
       }
-      // Save the result
-      register_instance_view(manager, context, result);
       return result;
     }
 
@@ -15098,8 +15108,6 @@ namespace Legion {
         {
           results[idx] = 
             context->create_logical_top_view(manager, context_index);
-          // Save the result
-          register_instance_view(manager, context, results[idx]);
           // Mark that it is done
           up_mask[idx] = false;
         }
@@ -15119,7 +15127,6 @@ namespace Legion {
           unsigned index = up_indexes[idx];
           InstanceView *parent_view = results[index];
           results[index] = parent_view->get_instance_subview(row_source->color);
-          register_instance_view(managers[index], context, results[index]); 
         }
       }
     }
@@ -16237,8 +16244,6 @@ namespace Legion {
       InstanceView *parent_view = parent->convert_reference_region(manager,
                                                     context, context_index);
       result = parent_view->get_instance_subview(row_source->color);
-      // This is a new view so save the result
-      register_instance_view(manager, context, result);
       return result;
     }
 
@@ -16292,7 +16297,6 @@ namespace Legion {
           unsigned index = up_indexes[idx];
           InstanceView *parent_view = results[index];
           results[index] = parent_view->get_instance_subview(row_source->color);
-          register_instance_view(managers[index], context, results[idx]);
         }
       }
     }

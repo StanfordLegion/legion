@@ -36,20 +36,25 @@ namespace Legion {
     public:
       LogicalView(RegionTreeForest *ctx, DistributedID did,
                   AddressSpaceID owner_proc, AddressSpaceID local_space,
-                  RegionTreeNode *node, bool register_now);
+                  RegionTreeNode *node);
       virtual ~LogicalView(void);
     public:
       static void delete_logical_view(LogicalView *view);
     public:
-      virtual bool is_instance_view(void) const = 0;
-      virtual bool is_deferred_view(void) const = 0;
-#ifdef DEBUG_HIGH_LEVEL
-      virtual InstanceView* as_instance_view(void) const = 0;
-      virtual DeferredView* as_deferred_view(void) const = 0;
-#else
-      InstanceView* as_instance_view(void) const;
-      DeferredView* as_deferred_view(void) const;
-#endif
+      inline bool is_instance_view(void) const;
+      inline bool is_deferred_view(void) const;
+      inline bool is_materialized_view(void) const;
+      inline bool is_reduction_view(void) const;
+      inline bool is_composite_view(void) const;
+      inline bool is_fill_view(void) const;
+    public:
+      inline InstanceView* as_instance_view(void) const;
+      inline DeferredView* as_deferred_view(void) const;
+      inline MaterializedView* as_materialized_view(void) const;
+      inline ReductionView* as_reduction_view(void) const;
+      inline CompositeView* as_composite_view(void) const;
+      inline FillView* as_fill_view(void) const;
+    public:
       virtual bool has_manager(void) const = 0;
       virtual PhysicalManager* get_manager(void) const = 0;
       virtual bool has_parent(void) const = 0;
@@ -62,16 +67,27 @@ namespace Legion {
       virtual void notify_valid(void) = 0;
       virtual void notify_invalid(void) = 0;
     public:
-      DistributedID send_view(AddressSpaceID target, 
-                              const FieldMask &update_mask);
-      virtual DistributedID send_view_base(AddressSpaceID target) = 0;
+      virtual void send_view(AddressSpaceID target) = 0; 
       virtual void send_view_updates(AddressSpaceID target, 
                                      const FieldMask &update_mask) = 0;
+      static void handle_view_request(Deserializer &derez, Runtime *runtime,
+                                      AddressSpaceID source);
     public:
       void defer_collect_user(Event term_event);
       virtual void collect_users(const std::set<Event> &term_events) = 0;
       static void handle_deferred_collect(LogicalView *view,
                                           const std::set<Event> &term_events);
+    public:
+      static inline DistributedID encode_materialized_did(DistributedID did,
+                                                           bool top);
+      static inline DistributedID encode_reduction_did(DistributedID did);
+      static inline DistributedID encode_composite_did(DistributedID did);
+      static inline DistributedID encode_fill_did(DistributedID did);
+      static inline bool is_materialized_did(DistributedID did);
+      static inline bool is_reduction_did(DistributedID did);
+      static inline bool is_composite_did(DistributedID did);
+      static inline bool is_fill_did(DistributedID did);
+      static inline bool is_top_did(DistributedID did);
     public:
       RegionTreeForest *const context;
       RegionTreeNode *const logical_node;
@@ -92,25 +108,9 @@ namespace Legion {
     public:
       InstanceView(RegionTreeForest *ctx, DistributedID did,
                    AddressSpaceID owner_proc, AddressSpaceID local_space,
-                   RegionTreeNode *node, SingleTask *owner_context,
-                   bool register_now);
+                   RegionTreeNode *node, SingleTask *owner_context); 
       virtual ~InstanceView(void);
     public:
-      virtual bool is_instance_view(void) const;
-      virtual bool is_deferred_view(void) const;
-#ifdef DEBUG_HIGH_LEVEL
-      virtual InstanceView* as_instance_view(void) const;
-      virtual DeferredView* as_deferred_view(void) const;
-#endif
-      virtual bool is_materialized_view(void) const = 0;
-      virtual bool is_reduction_view(void) const = 0;
-#ifdef DEBUG_HIGH_LEVEL
-      virtual MaterializedView* as_materialized_view(void) const = 0;
-      virtual ReductionView* as_reduction_view(void) const = 0;
-#else
-      inline MaterializedView* as_materialized_view(void) const;
-      inline ReductionView* as_reduction_view(void) const;
-#endif
       virtual bool has_manager(void) const = 0;
       virtual PhysicalManager* get_manager(void) const = 0;
       virtual bool has_parent(void) const = 0;
@@ -140,7 +140,7 @@ namespace Legion {
       virtual void notify_valid(void) = 0;
       virtual void notify_invalid(void) = 0;
     public:
-      virtual DistributedID send_view_base(AddressSpaceID target) = 0;
+      virtual void send_view(AddressSpaceID target) = 0; 
       virtual void send_view_updates(AddressSpaceID target, 
                                      const FieldMask &update_mask) = 0;
     public:
@@ -193,8 +193,7 @@ namespace Legion {
       MaterializedView(RegionTreeForest *ctx, DistributedID did,
                        AddressSpaceID owner_proc, AddressSpaceID local_proc,
                        RegionTreeNode *node, InstanceManager *manager,
-                       MaterializedView *parent, SingleTask *owner_context,
-                       bool register_now); 
+                       MaterializedView *parent, SingleTask *owner_context);
       MaterializedView(const MaterializedView &rhs);
       virtual ~MaterializedView(void);
     public:
@@ -205,15 +204,12 @@ namespace Legion {
     public:
       const FieldMask& get_physical_mask(void) const;
     public:
-      virtual bool is_materialized_view(void) const;
-      virtual bool is_reduction_view(void) const;
-#ifdef DEBUG_HIGH_LEVEL
-      virtual MaterializedView* as_materialized_view(void) const;
-      virtual ReductionView* as_reduction_view(void) const;
-#endif
       virtual bool has_space(const FieldMask &space_mask) const;
     public:
       MaterializedView* get_materialized_subview(const ColorPoint &c);
+      static void handle_subview_did_request(Deserializer &derez,
+                             Runtime *runtime, AddressSpaceID source);
+      static void handle_subview_did_response(Deserializer &derez); 
       MaterializedView* get_materialized_parent_view(void) const;
     public:
       void copy_field(FieldID fid, std::vector<Domain::CopySrcDstField> &infos);
@@ -260,7 +256,7 @@ namespace Legion {
       virtual void notify_invalid(void);
       virtual void collect_users(const std::set<Event> &term_users);
     public:
-      virtual DistributedID send_view_base(AddressSpaceID target);
+      virtual void send_view(AddressSpaceID target); 
       virtual void send_view_updates(AddressSpaceID target, 
                                      const FieldMask &update_mask);
       void process_update(Deserializer &derez, AddressSpaceID source);
@@ -356,11 +352,15 @@ namespace Legion {
     public:
       void set_descriptor(FieldDataDescriptor &desc, FieldID field_id) const;
     public:
-      void send_back_atomic_reservations(
-          const std::vector<std::pair<FieldID,Reservation> > &send_back);
-      void process_atomic_reservations(Deserializer &derez);
-      static void handle_send_back_atomic(RegionTreeForest *ctx,
-                                          Deserializer &derez);
+      void find_field_reservations(const std::vector<FieldID> &needed_fields,
+                                   std::vector<Reservation> &results);
+      static void handle_send_atomic_reservation_request(Runtime *runtime,
+                                  Deserializer &derez, AddressSpaceID source);
+      void update_field_reservations(
+                            const std::vector<FieldID> &fields,
+                            const std::vector<Reservation> &reservations);
+      static void handle_send_atomic_reservation_response(Runtime *runtime,
+                                                          Deserializer &derez);
     public:
       static void handle_send_materialized_view(Runtime *runtime,
                               Deserializer &derez, AddressSpaceID source);
@@ -430,7 +430,7 @@ namespace Legion {
       ReductionView(RegionTreeForest *ctx, DistributedID did,
                     AddressSpaceID owner_proc, AddressSpaceID local_proc,
                     RegionTreeNode *node, ReductionManager *manager,
-                    SingleTask *owner_context, bool register_now);
+                    SingleTask *owner_context);
       ReductionView(const ReductionView &rhs);
       virtual ~ReductionView(void);
     public:
@@ -453,12 +453,6 @@ namespace Legion {
                                        const std::set<Event> &preconditions,
                                        Operation *op,RegionTreeNode *intersect);
     public:
-      virtual bool is_materialized_view(void) const;
-      virtual bool is_reduction_view(void) const;
-#ifdef DEBUG_HIGH_LEVEL
-      virtual MaterializedView* as_materialized_view(void) const;
-      virtual ReductionView* as_reduction_view(void) const;
-#endif
       virtual bool has_manager(void) const { return true; } 
       virtual PhysicalManager* get_manager(void) const;
       virtual bool has_parent(void) const { return false; }
@@ -503,7 +497,7 @@ namespace Legion {
       virtual void notify_invalid(void);
       virtual void collect_users(const std::set<Event> &term_events);
     public:
-      virtual DistributedID send_view_base(AddressSpaceID target);
+      virtual void send_view(AddressSpaceID target); 
       virtual void send_view_updates(AddressSpaceID target, 
                                      const FieldMask &update_mask);
       void process_update(Deserializer &derez, AddressSpaceID source);
@@ -543,7 +537,7 @@ namespace Legion {
     public:
       DeferredView(RegionTreeForest *ctx, DistributedID did,
                    AddressSpaceID owner_space, AddressSpaceID local_space,
-                   RegionTreeNode *node, bool register_now);
+                   RegionTreeNode *node);
       virtual ~DeferredView(void);
     public:
       // Deferred views never have managers
@@ -561,31 +555,13 @@ namespace Legion {
       virtual void notify_valid(void) = 0;
       virtual void notify_invalid(void) = 0;
     public:
-      virtual DistributedID send_view_base(AddressSpaceID target) = 0;
+      virtual void send_view(AddressSpaceID target) = 0; 
       virtual void send_view_updates(AddressSpaceID target, 
                                      const FieldMask &update_mask) = 0;
     public:
       // Should never be called
       virtual void collect_users(const std::set<Event> &term_events)
         { assert(false); }
-    public:
-      virtual bool is_instance_view(void) const { return false; }
-      virtual bool is_deferred_view(void) const { return true; }
-#ifdef DEBUG_HIGH_LEVEL
-      virtual InstanceView* as_instance_view(void) const { return NULL; }
-      virtual DeferredView* as_deferred_view(void) const
-        { return const_cast<DeferredView*>(this); }
-#endif
-    public:
-      virtual bool is_composite_view(void) const = 0;
-      virtual bool is_fill_view(void) const = 0;
-#ifdef DEBUG_HIGH_LEVEL
-      virtual FillView* as_fill_view(void) const = 0;
-      virtual CompositeView* as_composite_view(void) const = 0;
-#else
-      inline FillView* as_fill_view(void) const;
-      inline CompositeView* as_composite_view(void) const;
-#endif
     public:
       virtual DeferredView* simplify(CompositeCloser &closer, 
                                       const FieldMask &capture_mask) = 0;
@@ -648,7 +624,7 @@ namespace Legion {
       CompositeView(RegionTreeForest *ctx, DistributedID did,
                     AddressSpaceID owner_proc, RegionTreeNode *node, 
                     AddressSpaceID local_proc, CompositeNode *root,
-                    CompositeVersionInfo *version_info, bool register_now);
+                    CompositeVersionInfo *version_info);
       CompositeView(const CompositeView &rhs);
       virtual ~CompositeView(void);
     public:
@@ -666,19 +642,10 @@ namespace Legion {
       virtual void notify_valid(void);
       virtual void notify_invalid(void);
     public:
-      virtual DistributedID send_view_base(AddressSpaceID target);
+      virtual void send_view(AddressSpaceID target); 
       virtual void send_view_updates(AddressSpaceID target, 
                                      const FieldMask &update_mask);
       void make_local(std::set<Event> &preconditions);
-    public:
-      virtual bool is_composite_view(void) const { return true; }
-      virtual bool is_fill_view(void) const { return false; }
-#ifdef DEBUG_HIGH_LEVEL
-      virtual FillView* as_fill_view(void) const
-        { return NULL; }
-      virtual CompositeView* as_composite_view(void) const
-        { return const_cast<CompositeView*>(this); }
-#endif
     public:
       virtual DeferredView* simplify(CompositeCloser &closer, 
                                      const FieldMask &capture_mask);
@@ -759,7 +726,9 @@ namespace Legion {
                          CopyTracker *tracker, CopyAcrossHelper *helper) const;
     public:
       void pack_composite_tree(Serializer &rez, AddressSpaceID target);
-      void unpack_composite_tree(Deserializer &derez, AddressSpaceID source);
+      void unpack_composite_tree(Deserializer &derez, AddressSpaceID source,
+                                 Runtime *runtime,std::set<Event> &ready_events,
+                                 std::map<LogicalView*,unsigned> &pending_refs);
       void make_local(std::set<Event> &preconditions, 
                       std::set<DistributedID> &checked_views);
     public:
@@ -805,7 +774,7 @@ namespace Legion {
     public:
       FillView(RegionTreeForest *ctx, DistributedID did,
                AddressSpaceID owner_proc, AddressSpaceID local_proc,
-               RegionTreeNode *node, bool reg_now, FillViewValue *value);
+               RegionTreeNode *node, FillViewValue *value);
       FillView(const FillView &rhs);
       virtual ~FillView(void);
     public:
@@ -821,17 +790,9 @@ namespace Legion {
       virtual void notify_valid(void);
       virtual void notify_invalid(void);
     public:
-      virtual DistributedID send_view_base(AddressSpaceID target);
+      virtual void send_view(AddressSpaceID target); 
       virtual void send_view_updates(AddressSpaceID target, 
                                      const FieldMask &update_mask);
-    public:
-      virtual bool is_composite_view(void) const { return false; }
-      virtual bool is_fill_view(void) const { return true; }
-#ifdef DEBUG_HIGH_LEVEL
-      virtual FillView* as_fill_view(void) const
-        { return const_cast<FillView*>(this); }
-      virtual CompositeView* as_composite_view(void) const { return NULL; }
-#endif
     public:
       virtual DeferredView* simplify(CompositeCloser &closer, 
                                      const FieldMask &capture_mask);
@@ -850,12 +811,125 @@ namespace Legion {
       FillViewValue *const value;
     };
 
-    // Some inline definitions for non-debug mode
-#ifndef DEBUG_HIGH_LEVEL
+    //--------------------------------------------------------------------------
+    /*static*/ inline DistributedID LogicalView::encode_materialized_did(
+                                                    DistributedID did, bool top)
+    //--------------------------------------------------------------------------
+    {
+      if (top)
+        return LEGION_DISTRIBUTED_HELP_ENCODE(did, 0x0UL | (1UL << 2));
+      else
+        return LEGION_DISTRIBUTED_HELP_ENCODE(did, 0x0UL);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline DistributedID LogicalView::encode_reduction_did(
+                                                              DistributedID did)
+    //--------------------------------------------------------------------------
+    {
+      return LEGION_DISTRIBUTED_HELP_ENCODE(did, 0x1UL | (1UL << 2));
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline DistributedID LogicalView::encode_composite_did(
+                                                              DistributedID did)
+    //--------------------------------------------------------------------------
+    {
+      return LEGION_DISTRIBUTED_HELP_ENCODE(did, 0x2UL | (1UL << 2));
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline DistributedID LogicalView::encode_fill_did(
+                                                              DistributedID did)
+    //--------------------------------------------------------------------------
+    {
+      return LEGION_DISTRIBUTED_HELP_ENCODE(did, 0x3UL | (1UL << 2));
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline bool LogicalView::is_materialized_did(DistributedID did)
+    //--------------------------------------------------------------------------
+    {
+      return ((LEGION_DISTRIBUTED_HELP_DECODE(did) & 0x3UL) == 0x0UL);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline bool LogicalView::is_reduction_did(DistributedID did)
+    //--------------------------------------------------------------------------
+    {
+      return ((LEGION_DISTRIBUTED_HELP_DECODE(did) & 0x3UL) == 0x1UL);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline bool LogicalView::is_composite_did(DistributedID did)
+    //--------------------------------------------------------------------------
+    {
+      return ((LEGION_DISTRIBUTED_HELP_DECODE(did) & 0x3UL) == 0x2UL);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline bool LogicalView::is_fill_did(DistributedID did)
+    //--------------------------------------------------------------------------
+    {
+      return ((LEGION_DISTRIBUTED_HELP_DECODE(did) & 0x3UL) == 0x3UL);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline bool LogicalView::is_top_did(DistributedID did)
+    //--------------------------------------------------------------------------
+    {
+      return ((LEGION_DISTRIBUTED_HELP_DECODE(did) & 0x8UL) == 0x8UL);
+    }
+
+    //--------------------------------------------------------------------------
+    inline bool LogicalView::is_instance_view(void) const
+    //--------------------------------------------------------------------------
+    {
+      return (is_materialized_did(did) || is_reduction_did(did));
+    }
+
+    //--------------------------------------------------------------------------
+    inline bool LogicalView::is_deferred_view(void) const
+    //--------------------------------------------------------------------------
+    {
+      return (is_composite_did(did) || is_fill_did(did));
+    }
+
+    //--------------------------------------------------------------------------
+    inline bool LogicalView::is_materialized_view(void) const
+    //--------------------------------------------------------------------------
+    {
+      return is_materialized_did(did);
+    }
+
+    //--------------------------------------------------------------------------
+    inline bool LogicalView::is_reduction_view(void) const
+    //--------------------------------------------------------------------------
+    {
+      return is_reduction_did(did);
+    }
+
+    //--------------------------------------------------------------------------
+    inline bool LogicalView::is_composite_view(void) const
+    //--------------------------------------------------------------------------
+    {
+      return is_composite_did(did);
+    }
+
+    //--------------------------------------------------------------------------
+    inline bool LogicalView::is_fill_view(void) const
+    //--------------------------------------------------------------------------
+    {
+      return is_fill_did(did);
+    }
+
     //--------------------------------------------------------------------------
     inline InstanceView* LogicalView::as_instance_view(void) const
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(is_instance_view());
+#endif
       return static_cast<InstanceView*>(const_cast<LogicalView*>(this));
     }
 
@@ -863,37 +937,51 @@ namespace Legion {
     inline DeferredView* LogicalView::as_deferred_view(void) const
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(is_deferred_view());
+#endif
       return static_cast<DeferredView*>(const_cast<LogicalView*>(this));
     }
 
     //--------------------------------------------------------------------------
-    inline MaterializedView* InstanceView::as_materialized_view(void) const
+    inline MaterializedView* LogicalView::as_materialized_view(void) const
     //--------------------------------------------------------------------------
     {
-      return static_cast<MaterializedView*>(const_cast<InstanceView*>(this));
-    }
-
-    //--------------------------------------------------------------------------
-    inline ReductionView* InstanceView::as_reduction_view(void) const
-    //--------------------------------------------------------------------------
-    {
-      return static_cast<ReductionView*>(const_cast<InstanceView*>(this));
-    }
-
-    //--------------------------------------------------------------------------
-    inline FillView* DeferredView::as_fill_view(void) const
-    //--------------------------------------------------------------------------
-    {
-      return static_cast<FillView*>(const_cast<DeferredView*>(this));
-    }
-
-    //--------------------------------------------------------------------------
-    inline CompositeView* DeferredView::as_composite_view(void) const
-    //--------------------------------------------------------------------------
-    {
-      return static_cast<CompositeView*>(const_cast<DeferredView*>(this));
-    }
+#ifdef DEBUG_HIGH_LEVEL
+      assert(is_materialized_view());
 #endif
+      return static_cast<MaterializedView*>(const_cast<LogicalView*>(this));
+    }
+
+    //--------------------------------------------------------------------------
+    inline ReductionView* LogicalView::as_reduction_view(void) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(is_reduction_view());
+#endif
+      return static_cast<ReductionView*>(const_cast<LogicalView*>(this));
+    }
+
+    //--------------------------------------------------------------------------
+    inline FillView* LogicalView::as_fill_view(void) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(is_fill_view());
+#endif
+      return static_cast<FillView*>(const_cast<LogicalView*>(this));
+    }
+
+    //--------------------------------------------------------------------------
+    inline CompositeView* LogicalView::as_composite_view(void) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(is_composite_view());
+#endif
+      return static_cast<CompositeView*>(const_cast<LogicalView*>(this));
+    }
 
   }; // namespace Internal 
 }; // namespace Legion 

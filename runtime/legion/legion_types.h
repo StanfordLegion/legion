@@ -393,7 +393,8 @@ namespace Legion {
       DISTRIBUTED_RESOURCE_UPDATE,
       DISTRIBUTED_CREATE_ADD,
       DISTRIBUTED_CREATE_REMOVE,
-      SEND_BACK_ATOMIC,
+      SEND_ATOMIC_RESERVATION_REQUEST,
+      SEND_ATOMIC_RESERVATION_RESPONSE,
       SEND_MATERIALIZED_VIEW,
       SEND_MATERIALIZED_UPDATE,
       SEND_COMPOSITE_VIEW,
@@ -404,6 +405,10 @@ namespace Legion {
       SEND_REDUCTION_MANAGER,
       SEND_CREATE_TOP_VIEW_REQUEST,
       SEND_CREATE_TOP_VIEW_RESPONSE,
+      SEND_SUBVIEW_DID_REQUEST,
+      SEND_SUBVIEW_DID_RESPONSE,
+      SEND_VIEW_REQUEST,
+      SEND_MANAGER_REQUEST,
       SEND_FUTURE,
       SEND_FUTURE_RESULT,
       SEND_FUTURE_SUBSCRIPTION,
@@ -491,7 +496,8 @@ namespace Legion {
         "Distributed Resource Update",                                \
         "Distributed Create Add",                                     \
         "Distributed Create Remove",                                  \
-        "Send Back Atomic",                                           \
+        "Send Atomic Reservation Request",                            \
+        "Send Atomic Reservation Response",                           \
         "Send Materialized View",                                     \
         "Send Materialized Update",                                   \
         "Send Composite View",                                        \
@@ -502,6 +508,10 @@ namespace Legion {
         "Send Reduction Manager",                                     \
         "Send Create Top View Request",                               \
         "Send Create Top View Response",                              \
+        "Send Subview DID Request",                                   \
+        "Send Subview DID Response",                                  \
+        "Send View Request",                                          \
+        "Send Manager Request",                                       \
         "Send Future",                                                \
         "Send Future Result",                                         \
         "Send Future Subscription",                                   \

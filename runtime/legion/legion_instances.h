@@ -116,7 +116,7 @@ namespace Legion {
                       DistributedID did, AddressSpaceID owner_space, 
                       AddressSpaceID local_space, RegionNode *node,
                       PhysicalInstance inst, const Domain &intance_domain,
-                      bool own_domain, bool register_now);
+                      bool own_domain);
       virtual ~PhysicalManager(void);
     public:
       virtual LegionRuntime::Accessor::RegionAccessor<
@@ -125,24 +125,27 @@ namespace Legion {
       virtual LegionRuntime::Accessor::RegionAccessor<
         LegionRuntime::Accessor::AccessorType::Generic>
           get_field_accessor(FieldID fid) const = 0;
-      virtual bool is_reduction_manager(void) const = 0;
-      virtual bool is_instance_manager(void) const = 0;
-      virtual bool is_virtual_manager(void) const = 0;
-#ifdef DEBUG_HIGH_LEVEL
-      virtual InstanceManager* as_instance_manager(void) const = 0;
-      virtual ReductionManager* as_reduction_manager(void) const = 0;
-      virtual VirtualManager* as_virtual_manager(void) const = 0;
-#else
+    public:
+      inline bool is_reduction_manager(void) const;
+      inline bool is_instance_manager(void) const;
+      inline bool is_fold_manager(void) const;
+      inline bool is_list_manager(void) const;
+      inline bool is_virtual_manager(void) const;
       inline InstanceManager* as_instance_manager(void) const;
       inline ReductionManager* as_reduction_manager(void) const;
+      inline FoldReductionManager* as_fold_manager(void) const;
+      inline ListReductionManager* as_list_manager(void) const;
       inline VirtualManager* as_virtual_manager(void) const;
-#endif
+    public:
       virtual size_t get_instance_size(void) const = 0;
       virtual void notify_active(void);
       virtual void notify_inactive(void);
       virtual void notify_valid(void);
       virtual void notify_invalid(void);
-      virtual DistributedID send_manager(AddressSpaceID target) = 0; 
+    public:
+      virtual void send_manager(AddressSpaceID target) = 0; 
+      static void handle_manager_request(Deserializer &derez, 
+                          Runtime *runtime, AddressSpaceID source);
     public:
       // Support for mapper queries
       virtual bool has_field(FieldID fid) const = 0;
@@ -181,6 +184,13 @@ namespace Legion {
       void set_garbage_collection_priority(MapperID mapper_id, Processor p,
                                            GCPriority priority); 
       static void delete_physical_manager(PhysicalManager *manager);
+    public:
+      static inline DistributedID encode_instance_did(DistributedID did);
+      static inline DistributedID encode_reduction_fold_did(DistributedID did);
+      static inline DistributedID encode_reduction_list_did(DistributedID did);
+      static inline bool is_instance_did(DistributedID did);
+      static inline bool is_reduction_fold_did(DistributedID did);
+      static inline bool is_reduction_list_did(DistributedID did);
     public:
       RegionTreeForest *const context;
       MemoryManager *const memory_manager;
@@ -232,8 +242,7 @@ namespace Legion {
                       const Domain &instance_domain, bool own_domain,
                       RegionNode *node, LayoutDescription *desc, 
                       const PointerConstraint &constraint,
-                      Event use_event, bool register_now,
-                      InstanceFlag flag = NO_INSTANCE_FLAG);
+                      Event use_event, InstanceFlag flag = NO_INSTANCE_FLAG);
       InstanceManager(const InstanceManager &rhs);
       virtual ~InstanceManager(void);
     public:
@@ -245,14 +254,7 @@ namespace Legion {
       virtual LegionRuntime::Accessor::RegionAccessor<
         LegionRuntime::Accessor::AccessorType::Generic>
           get_field_accessor(FieldID fid) const;
-      virtual bool is_reduction_manager(void) const;
-      virtual bool is_instance_manager(void) const;
-      virtual bool is_virtual_manager(void) const;
-#ifdef DEBUG_HIGH_LEVEL
-      virtual InstanceManager* as_instance_manager(void) const;
-      virtual ReductionManager* as_reduction_manager(void) const;
-      virtual VirtualManager* as_virtual_manager(void) const;
-#endif
+    public:
       virtual size_t get_instance_size(void) const;
     public:
       inline Event get_use_event(void) const { return use_event; }
@@ -279,7 +281,7 @@ namespace Legion {
     public:
       void set_descriptor(FieldDataDescriptor &desc, unsigned fid_idx) const;
     public:
-      virtual DistributedID send_manager(AddressSpaceID target); 
+      virtual void send_manager(AddressSpaceID target);
       static void handle_send_manager(Runtime *runtime, 
                                       AddressSpaceID source,
                                       Deserializer &derez);
@@ -311,7 +313,7 @@ namespace Legion {
                        const PointerConstraint &constraint,
                        const Domain &inst_domain, bool own_domain,
                        RegionNode *region_node, ReductionOpID redop, 
-                       const ReductionOp *op, bool register_now);
+                       const ReductionOp *op);
       virtual ~ReductionManager(void);
     public:
       virtual LegionRuntime::Accessor::RegionAccessor<
@@ -320,14 +322,7 @@ namespace Legion {
       virtual LegionRuntime::Accessor::RegionAccessor<
         LegionRuntime::Accessor::AccessorType::Generic>
           get_field_accessor(FieldID fid) const = 0;
-      virtual bool is_reduction_manager(void) const;
-      virtual bool is_instance_manager(void) const;
-      virtual bool is_virtual_manager(void) const;
-#ifdef DEBUG_HIGH_LEVEL
-      virtual InstanceManager* as_instance_manager(void) const;
-      virtual ReductionManager* as_reduction_manager(void) const;
-      virtual VirtualManager* as_virtual_manager(void) const;
-#endif
+    public:
       virtual size_t get_instance_size(void) const = 0;
     public:
       virtual bool is_foldable(void) const = 0;
@@ -340,14 +335,6 @@ namespace Legion {
           bool precise_domain, RegionTreeNode *intersect) = 0;
       virtual Domain get_pointer_space(void) const = 0;
     public:
-      virtual bool is_list_manager(void) const = 0;
-#ifdef DEBUG_HIGH_LEVEL
-      virtual ListReductionManager* as_list_manager(void) const = 0;
-      virtual FoldReductionManager* as_fold_manager(void) const = 0;
-#else
-      inline ListReductionManager* as_list_manager(void) const;
-      inline FoldReductionManager* as_fold_manager(void) const;
-#endif
       virtual Event get_use_event(void) const = 0;
     public:
       // Support for mapper queries
@@ -355,7 +342,7 @@ namespace Legion {
       virtual void has_fields(std::map<FieldID,bool> &fields) const;
       virtual void remove_space_fields(std::set<FieldID> &fields) const;
     public:
-      virtual DistributedID send_manager(AddressSpaceID target); 
+      virtual void send_manager(AddressSpaceID target);
     public:
       static void handle_send_manager(Runtime *runtime,
                                       AddressSpaceID source,
@@ -384,7 +371,7 @@ namespace Legion {
                            const PointerConstraint &constraint,
                            const Domain &inst_domain, bool own_domain,
                            RegionNode *node, ReductionOpID redop, 
-                           const ReductionOp *op, Domain dom, bool reg_now);
+                           const ReductionOp *op, Domain dom);
       ListReductionManager(const ListReductionManager &rhs);
       virtual ~ListReductionManager(void);
     public:
@@ -408,11 +395,6 @@ namespace Legion {
           bool precise_domain, RegionTreeNode *intersect);
       virtual Domain get_pointer_space(void) const;
     public:
-      virtual bool is_list_manager(void) const;
-#ifdef DEBUG_HIGH_LEVEL
-      virtual ListReductionManager* as_list_manager(void) const;
-      virtual FoldReductionManager* as_fold_manager(void) const;
-#endif
       virtual Event get_use_event(void) const;
     protected:
       const Domain ptr_space;
@@ -434,8 +416,7 @@ namespace Legion {
                            const PointerConstraint &constraint,
                            const Domain &inst_dom, bool own_dom,
                            RegionNode *node, ReductionOpID redop, 
-                           const ReductionOp *op, Event use_event,
-                           bool register_now);
+                           const ReductionOp *op, Event use_event);
       FoldReductionManager(const FoldReductionManager &rhs);
       virtual ~FoldReductionManager(void);
     public:
@@ -459,11 +440,6 @@ namespace Legion {
           bool precise_domain, RegionTreeNode *intersect);
       virtual Domain get_pointer_space(void) const;
     public:
-      virtual bool is_list_manager(void) const;
-#ifdef DEBUG_HIGH_LEVEL
-      virtual ListReductionManager* as_list_manager(void) const;
-      virtual FoldReductionManager* as_fold_manager(void) const;
-#endif
       virtual Event get_use_event(void) const;
     public:
       const Event use_event;
@@ -491,16 +467,9 @@ namespace Legion {
       virtual LegionRuntime::Accessor::RegionAccessor<
         LegionRuntime::Accessor::AccessorType::Generic>
           get_field_accessor(FieldID fid) const;
-      virtual bool is_reduction_manager(void) const;
-      virtual bool is_instance_manager(void) const;
-      virtual bool is_virtual_manager(void) const;
-#ifdef DEBUG_HIGH_LEVEL
-      virtual InstanceManager* as_instance_manager(void) const;
-      virtual ReductionManager* as_reduction_manager(void) const;
-      virtual VirtualManager* as_virtual_manager(void) const;
-#endif
+    public: 
       virtual size_t get_instance_size(void) const;
-      virtual DistributedID send_manager(AddressSpaceID target);
+      virtual void send_manager(AddressSpaceID target);
       virtual bool has_field(FieldID fid) const;
       virtual void has_fields(std::map<FieldID,bool> &fields) const;
       virtual void remove_space_fields(std::set<FieldID> &fields) const;
@@ -563,12 +532,95 @@ namespace Legion {
       bool valid;
     };
 
-    // Some inline implementations for non-debug mode
-#ifndef DEBUG_HIGH_LEVEL
+    //--------------------------------------------------------------------------
+    /*static*/ inline DistributedID PhysicalManager::encode_instance_did(
+                                                              DistributedID did)
+    //--------------------------------------------------------------------------
+    {
+      return LEGION_DISTRIBUTED_HELP_ENCODE(did, 0x0UL);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline DistributedID PhysicalManager::encode_reduction_fold_did(
+                                                              DistributedID did)
+    //--------------------------------------------------------------------------
+    {
+      return LEGION_DISTRIBUTED_HELP_ENCODE(did, 0x1UL);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline DistributedID PhysicalManager::encode_reduction_list_did(
+                                                              DistributedID did)
+    //--------------------------------------------------------------------------
+    {
+      return LEGION_DISTRIBUTED_HELP_ENCODE(did, 0x2UL);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline bool PhysicalManager::is_instance_did(DistributedID did)
+    //--------------------------------------------------------------------------
+    {
+      return ((LEGION_DISTRIBUTED_HELP_DECODE(did) & 0x3) == 0x0);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline bool PhysicalManager::is_reduction_fold_did(
+                                                              DistributedID did)
+    //--------------------------------------------------------------------------
+    {
+      return ((LEGION_DISTRIBUTED_HELP_DECODE(did) & 0x3) == 0x1);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline bool PhysicalManager::is_reduction_list_did(
+                                                              DistributedID did)
+    //--------------------------------------------------------------------------
+    {
+      return ((LEGION_DISTRIBUTED_HELP_DECODE(did) & 0x3) == 0x2);
+    }
+
+    //--------------------------------------------------------------------------
+    inline bool PhysicalManager::is_reduction_manager(void) const
+    //--------------------------------------------------------------------------
+    {
+      return (is_reduction_fold_did(did) || is_reduction_list_did(did));
+    }
+
+    //--------------------------------------------------------------------------
+    inline bool PhysicalManager::is_instance_manager(void) const
+    //--------------------------------------------------------------------------
+    {
+      return is_instance_did(did);
+    }
+
+    //--------------------------------------------------------------------------
+    inline bool PhysicalManager::is_fold_manager(void) const
+    //--------------------------------------------------------------------------
+    {
+      return is_reduction_fold_did(did);
+    }
+
+    //--------------------------------------------------------------------------
+    inline bool PhysicalManager::is_list_manager(void) const
+    //--------------------------------------------------------------------------
+    {
+      return is_reduction_list_did(did);
+    }
+
+    //--------------------------------------------------------------------------
+    inline bool PhysicalManager::is_virtual_manager(void) const
+    //--------------------------------------------------------------------------
+    {
+      return (did == 0);
+    }
+
     //--------------------------------------------------------------------------
     inline InstanceManager* PhysicalManager::as_instance_manager(void) const
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(is_instance_manager());
+#endif
       return static_cast<InstanceManager*>(const_cast<PhysicalManager*>(this));
     }
 
@@ -576,6 +628,9 @@ namespace Legion {
     inline ReductionManager* PhysicalManager::as_reduction_manager(void) const
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(is_reduction_manager());
+#endif
       return static_cast<ReductionManager*>(const_cast<PhysicalManager*>(this));
     }
 
@@ -583,25 +638,33 @@ namespace Legion {
     inline VirtualManager* PhysicalManager::as_virtual_manager(void) const
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(is_virtual_manager());
+#endif
       return static_cast<VirtualManager*>(const_cast<PhysicalManager*>(this));
     }
 
     //--------------------------------------------------------------------------
-    inline ListReductionManager* ReductionManager::as_list_manager(void) const
+    inline ListReductionManager* PhysicalManager::as_list_manager(void) const
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(is_list_manager());
+#endif
       return static_cast<ListReductionManager*>(
-              const_cast<ReductionManager*>(this));
+              const_cast<PhysicalManager*>(this));
     }
 
     //--------------------------------------------------------------------------
-    inline FoldReductionManager* ReductionManager::as_fold_manager(void) const
+    inline FoldReductionManager* PhysicalManager::as_fold_manager(void) const
     //--------------------------------------------------------------------------
     {
-      return static_cast<FoldReductionManager*>(
-              const_cast<ReductionManager*>(this));
-    }
+#ifdef DEBUG_HIGH_LEVEL
+      assert(is_fold_manager());
 #endif
+      return static_cast<FoldReductionManager*>(
+              const_cast<PhysicalManager*>(this));
+    }
 
   }; // namespace Internal 
 }; // namespace Legion

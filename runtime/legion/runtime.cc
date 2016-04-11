@@ -3056,13 +3056,13 @@ namespace Legion {
             {
               // Send back the response starting with the instance
               PhysicalManager *manager = result.impl;
-              DistributedID did = manager->send_manager(source);
+              manager->send_manager(source);
               Serializer rez;
               {
                 RezCheck z(rez);
                 rez.serialize(memory);
                 rez.serialize(to_trigger);
-                rez.serialize(did);
+                rez.serialize(manager->did);
                 rez.serialize<bool>(acquire);
                 rez.serialize(remote_target);
                 rez.serialize(remote_success);
@@ -3099,13 +3099,13 @@ namespace Legion {
             if (success)
             {
               PhysicalManager *manager = result.impl;
-              DistributedID did = manager->send_manager(source);
+              manager->send_manager(source);
               Serializer rez;
               {
                 RezCheck z(rez);
                 rez.serialize(memory);
                 rez.serialize(to_trigger);
-                rez.serialize(did);
+                rez.serialize(manager->did);
                 rez.serialize<bool>(acquire);
                 rez.serialize(remote_target);
                 rez.serialize(remote_success);
@@ -3143,13 +3143,13 @@ namespace Legion {
             if (success)
             {
               PhysicalManager *manager = result.impl;
-              DistributedID did = manager->send_manager(source);
+              manager->send_manager(source);
               Serializer rez;
               {
                 RezCheck z(rez);
                 rez.serialize(memory);
                 rez.serialize(to_trigger);
-                rez.serialize(did);
+                rez.serialize(manager->did);
                 rez.serialize<bool>(acquire);
                 rez.serialize(remote_target);
                 rez.serialize(remote_success);
@@ -3191,13 +3191,13 @@ namespace Legion {
             if (success)
             {
               PhysicalManager *manager = result.impl;
-              DistributedID did = manager->send_manager(source);
+              manager->send_manager(source);
               Serializer rez;
               {
                 RezCheck z(rez);
                 rez.serialize(memory);
                 rez.serialize(to_trigger);
-                rez.serialize(did);
+                rez.serialize(manager->did);
                 rez.serialize<bool>(acquire);
                 rez.serialize(remote_target);
                 rez.serialize(remote_success);
@@ -3225,13 +3225,13 @@ namespace Legion {
             if (success)
             {
               PhysicalManager *manager = result.impl;
-              DistributedID did = manager->send_manager(source);
+              manager->send_manager(source);
               Serializer rez;
               {
                 RezCheck z(rez);
                 rez.serialize(memory);
                 rez.serialize(to_trigger);
-                rez.serialize(did);
+                rez.serialize(manager->did);
                 rez.serialize<bool>(acquire);
                 rez.serialize(remote_target);
                 rez.serialize(remote_success);
@@ -3259,13 +3259,13 @@ namespace Legion {
             if (success)
             {
               PhysicalManager *manager = result.impl;
-              DistributedID did = manager->send_manager(source);
+              manager->send_manager(source);
               Serializer rez;
               {
                 RezCheck z(rez);
                 rez.serialize(memory);
                 rez.serialize(to_trigger);
-                rez.serialize(did);
+                rez.serialize(manager->did);
                 rez.serialize<bool>(acquire);
                 rez.serialize(remote_target);
                 rez.serialize(remote_success);
@@ -4766,9 +4766,15 @@ namespace Legion {
               runtime->handle_did_create_remove(derez);
               break;
             }
-          case SEND_BACK_ATOMIC:
+          case SEND_ATOMIC_RESERVATION_REQUEST:
             {
-              runtime->handle_send_back_atomic(derez, remote_address_space);
+              runtime->handle_send_atomic_reservation_request(derez,
+                                                      remote_address_space);
+              break;
+            }
+          case SEND_ATOMIC_RESERVATION_RESPONSE:
+            {
+              runtime->handle_send_atomic_reservation_response(derez);
               break;
             }
           case SEND_MATERIALIZED_VIEW:
@@ -4825,6 +4831,26 @@ namespace Legion {
           case SEND_CREATE_TOP_VIEW_RESPONSE:
             {
               runtime->handle_create_top_view_response(derez);
+              break;
+            }
+          case SEND_SUBVIEW_DID_REQUEST:
+            {
+              runtime->handle_subview_did_request(derez, remote_address_space);
+              break;
+            }
+          case SEND_SUBVIEW_DID_RESPONSE:
+            {
+              runtime->handle_subview_did_response(derez);
+              break;
+            }
+          case SEND_VIEW_REQUEST:
+            {
+              runtime->handle_view_request(derez, remote_address_space);
+              break;
+            }
+          case SEND_MANAGER_REQUEST:
+            {
+              runtime->handle_manager_request(derez, remote_address_space);
               break;
             }
           case SEND_FUTURE:
@@ -14272,11 +14298,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_back_atomic(AddressSpaceID target, Serializer &rez)
+    void Runtime::send_atomic_reservation_request(AddressSpaceID target,
+                                                  Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_message(rez, SEND_BACK_ATOMIC,
-                                       DEFAULT_VIRTUAL_CHANNEL, false/*flush*/);
+      find_messenger(target)->send_message(rez, SEND_ATOMIC_RESERVATION_REQUEST,
+                                        VIEW_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_atomic_reservation_response(AddressSpaceID target,
+                                                   Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez,SEND_ATOMIC_RESERVATION_RESPONSE,
+                                        VIEW_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -14284,7 +14320,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_MATERIALIZED_VIEW,
-                                       DEFAULT_VIRTUAL_CHANNEL, false/*flush*/);
+                                        VIEW_VIRTUAL_CHANNEL, false/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -14293,7 +14329,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_MATERIALIZED_UPDATE,
-                                       DEFAULT_VIRTUAL_CHANNEL, false/*flush*/);
+                                       VIEW_VIRTUAL_CHANNEL, false/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -14301,7 +14337,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_COMPOSITE_VIEW,
-                                       DEFAULT_VIRTUAL_CHANNEL, false/*flush*/);
+                                       VIEW_VIRTUAL_CHANNEL, false/*flush*/);
     } 
 
     //--------------------------------------------------------------------------
@@ -14309,7 +14345,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_FILL_VIEW,
-                                       DEFAULT_VIRTUAL_CHANNEL, false/*flush*/);
+                                       VIEW_VIRTUAL_CHANNEL, false/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -14317,7 +14353,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_REDUCTION_VIEW,
-                                       DEFAULT_VIRTUAL_CHANNEL, false/*flush*/);
+                                       VIEW_VIRTUAL_CHANNEL, false/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -14325,7 +14361,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_REDUCTION_UPDATE,
-                                       DEFAULT_VIRTUAL_CHANNEL, false/*flush*/);
+                                       VIEW_VIRTUAL_CHANNEL, false/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -14333,7 +14369,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_INSTANCE_MANAGER,
-                                       DEFAULT_VIRTUAL_CHANNEL, false/*flush*/);
+                                       MANAGER_VIRTUAL_CHANNEL, false/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -14341,7 +14377,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_REDUCTION_MANAGER,
-                                       DEFAULT_VIRTUAL_CHANNEL, false/*flush*/);
+                                       MANAGER_VIRTUAL_CHANNEL, false/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -14359,6 +14395,24 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_CREATE_TOP_VIEW_RESPONSE,
+                                        VIEW_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_subview_did_request(AddressSpaceID target, 
+                                           Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_SUBVIEW_DID_REQUEST,
+                                        VIEW_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_subview_did_response(AddressSpaceID target,
+                                            Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_SUBVIEW_DID_RESPONSE,
                                         VIEW_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
@@ -14603,7 +14657,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_INSTANCE_REQUEST,
-                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+                                        MANAGER_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -14611,7 +14665,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_INSTANCE_RESPONSE,
-                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+                                        MANAGER_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -15040,11 +15094,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_send_back_atomic(Deserializer &derez,
-                                          AddressSpaceID source)
+    void Runtime::handle_send_atomic_reservation_request(Deserializer &derez,
+                                                         AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      MaterializedView::handle_send_back_atomic(forest, derez);
+      MaterializedView::handle_send_atomic_reservation_request(this, derez, 
+                                                               source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_send_atomic_reservation_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      MaterializedView::handle_send_atomic_reservation_response(this, derez);
     }
 
     //--------------------------------------------------------------------------
@@ -15124,6 +15186,37 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       SingleTask::handle_logical_top_view_response(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_subview_did_request(Deserializer &derez,
+                                             AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      MaterializedView::handle_subview_did_request(derez, this, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_subview_did_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      MaterializedView::handle_subview_did_response(derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_view_request(Deserializer &derez, 
+                                      AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      LogicalView::handle_view_request(derez, this, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_manager_request(Deserializer &derez, 
+                                         AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      PhysicalManager::handle_manager_request(derez, this, source);
     }
 
     //--------------------------------------------------------------------------
@@ -15913,6 +16006,9 @@ namespace Legion {
       }
       DistributedID result = unique_distributed_id;
       unique_distributed_id += runtime_stride;
+#ifdef DEBUG_HIGH_LEVEL
+      assert(result < LEGION_DISTRIBUTED_ID_MASK);
+#endif
       return result;
     }
 
@@ -15920,6 +16016,11 @@ namespace Legion {
     void Runtime::free_distributed_id(DistributedID did)
     //--------------------------------------------------------------------------
     {
+      did &= LEGION_DISTRIBUTED_ID_MASK;
+#ifdef DEBUG_HIGH_LEVEL
+      // Should only be getting back our own DIDs
+      assert(determine_owner(did) == address_space);
+#endif
       // Don't recycle distributed IDs if we're doing LegionSpy or LegionGC
 #ifndef LEGION_GC
 #ifndef LEGION_SPY
@@ -15952,11 +16053,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    AddressSpaceID Runtime::determine_owner(DistributedID did) const
+    //--------------------------------------------------------------------------
+    {
+      return ((did & LEGION_DISTRIBUTED_ID_MASK) % runtime_stride);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::register_distributed_collectable(DistributedID did,
                                                    DistributedCollectable *dc,
                                                    bool needs_lock)
     //--------------------------------------------------------------------------
     {
+      did &= LEGION_DISTRIBUTED_ID_MASK;
       if (needs_lock)
       {
         Event acquire_event = distributed_collectable_lock.acquire();
@@ -15968,18 +16077,33 @@ namespace Legion {
           return;
         }
       }
+      UserEvent to_trigger = UserEvent::NO_USER_EVENT;
       // If we make it here then we have the lock
 #ifdef DEBUG_HIGH_LEVEL
       assert(dist_collectables.find(did) == dist_collectables.end());
 #endif
       dist_collectables[did] = dc;
+      // See if this was a pending collectable
+      std::map<DistributedID,std::pair<DistributedCollectable*,UserEvent> >::
+        iterator finder = pending_collectables.find(did);
+      if (finder != pending_collectables.end())
+      {
+#ifdef DEBUG_HIGH_LEVEL
+        assert(finder->second.first == dc);
+#endif
+        to_trigger = finder->second.second;
+        pending_collectables.erase(finder);
+      }
       distributed_collectable_lock.release();
+      if (to_trigger.exists())
+        to_trigger.trigger();
     }
-    
+
     //--------------------------------------------------------------------------
     void Runtime::unregister_distributed_collectable(DistributedID did)
     //--------------------------------------------------------------------------
     {
+      did &= LEGION_DISTRIBUTED_ID_MASK;
       AutoLock d_lock(distributed_collectable_lock);
 #ifdef DEBUG_HIGH_LEVEL
       assert(dist_collectables.find(did) != dist_collectables.end());
@@ -15991,6 +16115,7 @@ namespace Legion {
     bool Runtime::has_distributed_collectable(DistributedID did)
     //--------------------------------------------------------------------------
     {
+      did &= LEGION_DISTRIBUTED_ID_MASK;
       AutoLock d_lock(distributed_collectable_lock,1,false/*exclusive*/);
       return (dist_collectables.find(did) != dist_collectables.end());
     }
@@ -16000,6 +16125,7 @@ namespace Legion {
                                                               DistributedID did)
     //--------------------------------------------------------------------------
     {
+      did &= LEGION_DISTRIBUTED_ID_MASK;
       AutoLock d_lock(distributed_collectable_lock,1,false/*exclusive*/);
       std::map<DistributedID,DistributedCollectable*>::const_iterator finder = 
         dist_collectables.find(did);
@@ -16014,12 +16140,128 @@ namespace Legion {
                                                               DistributedID did)
     //--------------------------------------------------------------------------
     {
+      did &= LEGION_DISTRIBUTED_ID_MASK;
       AutoLock d_lock(distributed_collectable_lock,1,false/*exclusive*/);
       std::map<DistributedID,DistributedCollectable*>::const_iterator finder = 
         dist_collectables.find(did);
       if (finder == dist_collectables.end())
         return NULL;
       return finder->second;
+    } 
+
+    //--------------------------------------------------------------------------
+    bool Runtime::find_pending_collectable_location(DistributedID did,
+                                                    void *&location)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock d_lock(distributed_collectable_lock,1,false/*exclusive*/);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(dist_collectables.find(did) == dist_collectables.end());
+#endif
+      std::map<DistributedID,std::pair<DistributedCollectable*,UserEvent> >::
+        const_iterator finder = pending_collectables.find(did);
+      if (finder != pending_collectables.end())
+      {
+        location = finder->second.first;
+        return true;
+      }
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalView* Runtime::find_or_request_logical_view(DistributedID did,
+                                                       Event &ready)
+    //--------------------------------------------------------------------------
+    {
+      DistributedCollectable *dc = NULL;
+      if (LogicalView::is_materialized_did(did))
+        dc = find_or_request_distributed_collectable<
+         MaterializedView, SEND_VIEW_REQUEST, VIEW_VIRTUAL_CHANNEL>(did, ready);
+      else if (LogicalView::is_reduction_did(did))
+        dc = find_or_request_distributed_collectable<
+          ReductionView, SEND_VIEW_REQUEST, VIEW_VIRTUAL_CHANNEL>(did, ready);
+      else if (LogicalView::is_composite_did(did))
+        dc = find_or_request_distributed_collectable<
+          CompositeView, SEND_VIEW_REQUEST, VIEW_VIRTUAL_CHANNEL>(did, ready);
+      else if (LogicalView::is_fill_did(did))
+        dc = find_or_request_distributed_collectable<
+          FillView, SEND_VIEW_REQUEST, VIEW_VIRTUAL_CHANNEL>(did, ready);
+      else
+        assert(false);
+      // Have to static cast since the memory might not have been initialized
+      return static_cast<LogicalView*>(dc);
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalManager* Runtime::find_or_request_physical_manager(
+                                                DistributedID did, Event &ready)
+    //--------------------------------------------------------------------------
+    {
+      DistributedCollectable *dc = NULL;
+      if (PhysicalManager::is_instance_did(did))
+        dc = find_or_request_distributed_collectable<
+          InstanceManager, SEND_MANAGER_REQUEST, MANAGER_VIRTUAL_CHANNEL>(did, 
+                                                                        ready);
+      else if (PhysicalManager::is_reduction_fold_did(did))
+        dc = find_or_request_distributed_collectable<
+          FoldReductionManager, SEND_MANAGER_REQUEST, MANAGER_VIRTUAL_CHANNEL>(
+                                                                    did, ready);
+      else if (PhysicalManager::is_reduction_list_did(did))
+        dc = find_or_request_distributed_collectable<
+          ListReductionManager, SEND_MANAGER_REQUEST, MANAGER_VIRTUAL_CHANNEL>(
+                                                                    did, ready);
+      else
+        assert(false);
+      // Have to static cast since the memory might not have been initialized
+      return static_cast<PhysicalManager*>(dc);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T, MessageKind MK, VirtualChannelKind VC>
+    DistributedCollectable* Runtime::find_or_request_distributed_collectable(
+                                                DistributedID did, Event &ready) 
+    //--------------------------------------------------------------------------
+    {
+      did &= LEGION_DISTRIBUTED_ID_MASK;
+      DistributedCollectable *result = NULL;
+      {
+        AutoLock d_lock(distributed_collectable_lock);
+        std::map<DistributedID,DistributedCollectable*>::const_iterator finder =
+          dist_collectables.find(did);
+        // If we've already got it, then we are done
+        if (finder != dist_collectables.end())
+        {
+          ready = Event::NO_EVENT;
+          return finder->second;
+        }
+        // If it is already pending, we can just return the ready event
+        std::map<DistributedID,std::pair<DistributedCollectable*,UserEvent> >::
+          const_iterator pending_finder = pending_collectables.find(did);
+        if (pending_finder != pending_collectables.end())
+        {
+          ready = pending_finder->second.second;
+          return pending_finder->second.first;
+        }
+        // This is the first request we've seen for this did, make it now
+        // Allocate space for the result and type case
+        result = (T*)legion_alloc_aligned<T,false/*bytes*/>(1/*count*/);  
+        UserEvent to_trigger = UserEvent::create_user_event();
+        pending_collectables[did] = 
+          std::pair<DistributedCollectable*,UserEvent>(result, to_trigger);
+        ready = to_trigger;
+      }
+      AddressSpaceID target = determine_owner(did);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(target != address_space); // shouldn't be sending to ourself
+#endif
+      // Now send the message
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(did);
+      }
+      find_messenger(target)->send_message(rez, MK, VC, true/*flush*/);
+      return result;
     }
     
     //--------------------------------------------------------------------------
@@ -17224,6 +17466,10 @@ namespace Legion {
       {
         task->assign_context(available_contexts.front());
         available_contexts.pop_front();
+#ifdef DEBUG_HIGH_LEVEL
+        assert(local_contexts.find(context_uid) == local_contexts.end());
+#endif
+        local_contexts[context_uid] = task;
         return;
       }
       // If we failed to get a context, double the number of total 

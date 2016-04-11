@@ -167,6 +167,10 @@
 #define LEGION_STRINGIFY(x) #x
 #define LEGION_MACRO_TO_STRING(x) LEGION_STRINGIFY(x)
 
+#define LEGION_DISTRIBUTED_ID_MASK    0x00FFFFFFFFFFFFFFFF
+#define LEGION_DISTRIBUTED_HELP_DECODE(x)   ((x) >> 56)
+#define LEGION_DISTRIBUTED_HELP_ENCODE(x,y) ((x) | ((y) << 56))
+
 // The following enums are all re-exported by
 // namespace Legion. These versions are here to facilitate the
 // C API. If you are writing C++ code, use the namespaced versions.

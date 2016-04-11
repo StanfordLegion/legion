@@ -65,7 +65,7 @@ namespace Legion {
                           bool do_registration);
     protected:
       void pack_base_task(Serializer &derez, AddressSpaceID target);
-      void unpack_base_task(Deserializer &derez);
+      void unpack_base_task(Deserializer &derez, std::set<Event> &ready_events);
     public:
       void mark_stolen(void);
       void initialize_base_task(SingleTask *ctx, bool track, 
@@ -110,7 +110,8 @@ namespace Legion {
     public:
       // Returns true if the task should be deactivated
       virtual bool pack_task(Serializer &rez, Processor target) = 0;
-      virtual bool unpack_task(Deserializer &derez, Processor current) = 0;
+      virtual bool unpack_task(Deserializer &derez, Processor current,
+                               std::set<Event> &ready_events) = 0;
       virtual void perform_inlining(SingleTask *ctx, VariantImpl *variant) = 0;
     public:
       virtual bool is_inline_task(void) const;
@@ -519,7 +520,8 @@ namespace Legion {
                                                    Runtime *runtime);
     protected:
       void pack_single_task(Serializer &rez, AddressSpaceID target);
-      void unpack_single_task(Deserializer &derez);
+      void unpack_single_task(Deserializer &derez, 
+                              std::set<Event> &ready_events);
       void pack_remote_context(Serializer &rez, AddressSpaceID target);
       virtual void unpack_remote_context(Deserializer &derez);
     public:
@@ -572,7 +574,8 @@ namespace Legion {
       virtual void perform_physical_traversal(unsigned idx,
                                 RegionTreeContext ctx, InstanceSet &valid) = 0;
       virtual bool pack_task(Serializer &rez, Processor target) = 0;
-      virtual bool unpack_task(Deserializer &derez, Processor current) = 0;
+      virtual bool unpack_task(Deserializer &derez, Processor current,
+                               std::set<Event> &ready_events) = 0;
       virtual void find_enclosing_local_fields(
       LegionDeque<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::tracked &infos) = 0;
       virtual void perform_inlining(SingleTask *ctx, VariantImpl *variant) = 0;
@@ -711,7 +714,8 @@ namespace Legion {
       virtual void trigger_task_commit(void) = 0;
     public:
       virtual bool pack_task(Serializer &rez, Processor target) = 0;
-      virtual bool unpack_task(Deserializer &derez, Processor current) = 0;
+      virtual bool unpack_task(Deserializer &derez, Processor current,
+                               std::set<Event> &ready_events) = 0;
       virtual void perform_inlining(SingleTask *ctx, VariantImpl *variant) = 0;
     public:
       virtual SliceTask* clone_as_slice_task(const Domain &d,
@@ -729,7 +733,8 @@ namespace Legion {
       virtual void remove_created_field(FieldSpace handle, FieldID fid);
     public:
       void pack_multi_task(Serializer &rez, AddressSpaceID target);
-      void unpack_multi_task(Deserializer &derez);
+      void unpack_multi_task(Deserializer &derez,
+                             std::set<Event> &ready_events);
     public:
       void initialize_reduction_state(void);
       void fold_reduction_future(const void *result, size_t result_size,
@@ -822,7 +827,8 @@ namespace Legion {
       virtual void perform_physical_traversal(unsigned idx,
                                 RegionTreeContext ctx, InstanceSet &valid);
       virtual bool pack_task(Serializer &rez, Processor target);
-      virtual bool unpack_task(Deserializer &derez, Processor current);
+      virtual bool unpack_task(Deserializer &derez, Processor current,
+                               std::set<Event> &ready_events);
       virtual void find_enclosing_local_fields(
           LegionDeque<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::tracked &infos);
       virtual void perform_inlining(SingleTask *ctx, VariantImpl *variant);
@@ -926,7 +932,8 @@ namespace Legion {
       virtual void perform_physical_traversal(unsigned idx,
                                 RegionTreeContext ctx, InstanceSet &valid);
       virtual bool pack_task(Serializer &rez, Processor target);
-      virtual bool unpack_task(Deserializer &derez, Processor current);
+      virtual bool unpack_task(Deserializer &derez, Processor current,
+                               std::set<Event> &ready_events);
       virtual void find_enclosing_local_fields(
           LegionDeque<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::tracked &infos);
       virtual void perform_inlining(SingleTask *ctx, VariantImpl *variant);
@@ -994,7 +1001,8 @@ namespace Legion {
       virtual void perform_physical_traversal(unsigned idx,
                                 RegionTreeContext ctx, InstanceSet &valid);
       virtual bool pack_task(Serializer &rez, Processor target);
-      virtual bool unpack_task(Deserializer &derez, Processor current);
+      virtual bool unpack_task(Deserializer &derez, Processor current,
+                               std::set<Event> &ready_events);
       virtual void find_enclosing_local_fields(
       LegionDeque<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::tracked &infos) = 0;
       virtual void perform_inlining(SingleTask *ctx, VariantImpl *variant);
@@ -1198,7 +1206,8 @@ namespace Legion {
       virtual void trigger_task_commit(void);
     public:
       virtual bool pack_task(Serializer &rez, Processor target);
-      virtual bool unpack_task(Deserializer &derez, Processor current);
+      virtual bool unpack_task(Deserializer &derez, Processor current,
+                               std::set<Event> &ready_events);
       virtual void perform_inlining(SingleTask *ctx, VariantImpl *variant);
       virtual bool is_inline_task(void) const;
       virtual const std::vector<PhysicalRegion>& begin_inline_task(void);
@@ -1296,7 +1305,8 @@ namespace Legion {
       virtual TaskKind get_task_kind(void) const;
     public:
       virtual bool pack_task(Serializer &rez, Processor target);
-      virtual bool unpack_task(Deserializer &derez, Processor current);
+      virtual bool unpack_task(Deserializer &derez, Processor current,
+                               std::set<Event> &ready_events);
       virtual void perform_inlining(SingleTask *ctx, VariantImpl *variant);
     public:
       virtual SliceTask* clone_as_slice_task(const Domain &d,

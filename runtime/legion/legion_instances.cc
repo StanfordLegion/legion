@@ -560,15 +560,14 @@ namespace Legion {
                                      AddressSpaceID local_space,
                                      RegionNode *node,
                                      PhysicalInstance inst, const Domain &d, 
-                                     bool own, bool register_now)
-      : DistributedCollectable(ctx->runtime, did, owner_space, 
-                               local_space, register_now), 
+                                     bool own)
+      : DistributedCollectable(ctx->runtime, did, owner_space, local_space), 
         context(ctx), memory_manager(memory), region_node(node), layout(desc),
         instance(inst), instance_domain(d), 
         own_domain(own), pointer_constraint(constraint)
     //--------------------------------------------------------------------------
     {
-      if (register_now)
+      if (region_node != NULL)
         region_node->register_physical_manager(this);
       // If we are not the owner, add a resource reference
       if (!is_owner())
@@ -584,8 +583,7 @@ namespace Legion {
     PhysicalManager::~PhysicalManager(void)
     //--------------------------------------------------------------------------
     {
-      // Only do the unregistration if we were successfully registered
-      if (registered_with_runtime)
+      if (region_node != NULL)
         region_node->unregister_physical_manager(this);
       // If we're the owner remove our resource references
       if (is_owner())
@@ -669,6 +667,24 @@ namespace Legion {
         memory_manager->invalidate_instance(this);
       if (!is_owner())
         send_remote_valid_update(owner_space, 1/*count*/, false/*add*/);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/void PhysicalManager::handle_manager_request(Deserializer &derez,
+                                        Runtime *runtime, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      DistributedCollectable *dc = runtime->find_distributed_collectable(did);
+#ifdef DEBUG_HIGH_LEVEL
+      PhysicalManager *manager = dynamic_cast<PhysicalManager*>(dc);
+      assert(manager != NULL);
+#else
+      PhysicalManager *manager = dynamic_cast<PhysicalManager*>(dc);
+#endif
+      manager->send_manager(source);
     }
 
     //--------------------------------------------------------------------------
@@ -904,10 +920,9 @@ namespace Legion {
                                      const Domain &instance_domain, bool own,
                                      RegionNode *node, LayoutDescription *desc, 
                                      const PointerConstraint &constraint,
-                                     Event u_event, bool reg_now, 
-                                     InstanceFlag flags)
+                                     Event u_event, InstanceFlag flags)
       : PhysicalManager(ctx, mem, desc, constraint, did, owner_space, 
-                        local_space, node, inst, instance_domain, own, reg_now),
+                        local_space, node, inst, instance_domain, own),
         use_event(u_event), instance_flags(flags)
     //--------------------------------------------------------------------------
     {
@@ -928,8 +943,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     InstanceManager::InstanceManager(const InstanceManager &rhs)
       : PhysicalManager(NULL, NULL, NULL, rhs.pointer_constraint, 0, 0, 0, NULL,
-                        PhysicalInstance::NO_INST, 
-                        Domain::NO_DOMAIN, false, false),
+                        PhysicalInstance::NO_INST, Domain::NO_DOMAIN, false),
         use_event(Event::NO_EVENT)
     //--------------------------------------------------------------------------
     {
@@ -984,50 +998,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool InstanceManager::is_reduction_manager(void) const
-    //--------------------------------------------------------------------------
-    {
-      return false;
-    }
-
-    //--------------------------------------------------------------------------
-    bool InstanceManager::is_instance_manager(void) const
-    //--------------------------------------------------------------------------
-    {
-      return true;
-    }
-
-    //--------------------------------------------------------------------------
-    bool InstanceManager::is_virtual_manager(void) const
-    //--------------------------------------------------------------------------
-    {
-      return false;
-    }
-
-#ifdef DEBUG_HIGH_LEVEL
-    //--------------------------------------------------------------------------
-    InstanceManager* InstanceManager::as_instance_manager(void) const
-    //--------------------------------------------------------------------------
-    {
-      return const_cast<InstanceManager*>(this);
-    }
-
-    //--------------------------------------------------------------------------
-    ReductionManager* InstanceManager::as_reduction_manager(void) const
-    //--------------------------------------------------------------------------
-    {
-      return NULL;
-    }
-
-    //--------------------------------------------------------------------------
-    VirtualManager* InstanceManager::as_virtual_manager(void) const
-    //--------------------------------------------------------------------------
-    {
-      return NULL;
-    }
-#endif
-
-    //--------------------------------------------------------------------------
     size_t InstanceManager::get_instance_size(void) const
     //--------------------------------------------------------------------------
     {
@@ -1053,7 +1023,7 @@ namespace Legion {
                                           owner_space, region_node,
                                           const_cast<InstanceManager*>(this),
                                           (MaterializedView*)NULL/*parent*/, 
-                                          own_ctx, true/*register now*/);
+                                          own_ctx);
     }
 
     //--------------------------------------------------------------------------
@@ -1147,34 +1117,32 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    DistributedID InstanceManager::send_manager(AddressSpaceID target)
+    void InstanceManager::send_manager(AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
-      if (!has_remote_instance(target))
+#ifdef DEBUG_HIGH_LEVEL
+      assert(is_owner());
+#endif
+      Serializer rez;
       {
-        // No need to take the lock, duplicate sends are alright
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(did);
-          rez.serialize(owner_space);
-          rez.serialize(memory_manager->memory);
-          rez.serialize(instance);
-          rez.serialize(instance_domain);
-          rez.serialize(region_node->handle);
-          rez.serialize(use_event);
-          rez.serialize(instance_flags);
-          layout->pack_layout_description(rez, target);
-          pointer_constraint.serialize(rez);
-        }
-        context->runtime->send_instance_manager(target, rez);
-        update_remote_instances(target);
-        // Finally we can update our known nodes
-        // It's only safe to do this after the message
-        // has been sent
-        layout->update_known_nodes(target);
+        RezCheck z(rez);
+        rez.serialize(did);
+        rez.serialize(owner_space);
+        rez.serialize(memory_manager->memory);
+        rez.serialize(instance);
+        rez.serialize(instance_domain);
+        rez.serialize(region_node->handle);
+        rez.serialize(use_event);
+        rez.serialize(instance_flags);
+        layout->pack_layout_description(rez, target);
+        pointer_constraint.serialize(rez);
       }
-      return did;
+      context->runtime->send_instance_manager(target, rez);
+      update_remote_instances(target);
+      // Finally we can update our known nodes
+      // It's only safe to do this after the message
+      // has been sent
+      layout->update_known_nodes(target);
     }
 
     //--------------------------------------------------------------------------
@@ -1206,23 +1174,20 @@ namespace Legion {
       PointerConstraint pointer_constraint;
       pointer_constraint.deserialize(derez);
       MemoryManager *memory = runtime->find_memory_manager(mem);
-      InstanceManager *inst_manager = legion_new<InstanceManager>(
-                                        runtime->forest, did, owner_space,
-                                        runtime->address_space, memory, inst,
-                                        inst_domain, false/*owns*/,
-                                        target_node, layout, 
-                                        pointer_constraint, use_event,
-                                        false/*reg now*/, flags);
-      if (!target_node->register_physical_manager(inst_manager))
-      {
-        if (inst_manager->remove_base_resource_ref(REMOTE_DID_REF))
-          legion_delete(inst_manager);
-      }
+      void *location;
+      if (runtime->find_pending_collectable_location(did, location))
+        legion_new_in_place<InstanceManager>(location, runtime->forest, did,
+                                             owner_space,runtime->address_space,
+                                             memory, inst, inst_domain, 
+                                             false/*owns*/, target_node, layout,
+                                             pointer_constraint, 
+                                             use_event, flags);
       else
-      {
-        inst_manager->register_with_runtime();
-        inst_manager->update_remote_instances(source);
-      }
+        legion_new<InstanceManager>(runtime->forest, did, owner_space,
+                                    runtime->address_space, memory, inst,
+                                    inst_domain, false/*owns*/,
+                                    target_node, layout, 
+                                    pointer_constraint, use_event, flags);
     }
 
     //--------------------------------------------------------------------------
@@ -1245,9 +1210,9 @@ namespace Legion {
                                        const PointerConstraint &constraint,
                                        const Domain &inst_domain, bool own_dom,
                                        RegionNode *node, ReductionOpID red, 
-                                       const ReductionOp *o, bool reg_now)
+                                       const ReductionOp *o)
       : PhysicalManager(ctx, mem, desc, constraint, did, owner_space, 
-                        local_space, node, inst, inst_domain, own_dom, reg_now),
+                        local_space, node, inst, inst_domain, own_dom),
         op(o), redop(red), logical_field(f)
     //--------------------------------------------------------------------------
     { 
@@ -1264,50 +1229,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
     }
-
-    //--------------------------------------------------------------------------
-    bool ReductionManager::is_reduction_manager(void) const
-    //--------------------------------------------------------------------------
-    {
-      return true;
-    }
-
-    //--------------------------------------------------------------------------
-    bool ReductionManager::is_instance_manager(void) const
-    //--------------------------------------------------------------------------
-    {
-      return false;
-    }
-
-    //--------------------------------------------------------------------------
-    bool ReductionManager::is_virtual_manager(void) const
-    //--------------------------------------------------------------------------
-    {
-      return false;
-    }
-
-#ifdef DEBUG_HIGH_LEVEL
-    //--------------------------------------------------------------------------
-    InstanceManager* ReductionManager::as_instance_manager(void) const
-    //--------------------------------------------------------------------------
-    {
-      return NULL;
-    }
-
-    //--------------------------------------------------------------------------
-    ReductionManager* ReductionManager::as_reduction_manager(void) const
-    //--------------------------------------------------------------------------
-    {
-      return const_cast<ReductionManager*>(this);
-    }
-
-    //--------------------------------------------------------------------------
-    VirtualManager* ReductionManager::as_virtual_manager(void) const
-    //--------------------------------------------------------------------------
-    {
-      return NULL;
-    }
-#endif
 
     //--------------------------------------------------------------------------
     bool ReductionManager::has_field(FieldID fid) const
@@ -1338,34 +1259,32 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    DistributedID ReductionManager::send_manager(AddressSpaceID target)
+    void ReductionManager::send_manager(AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
-      if (!has_remote_instance(target))
+#ifdef DEBUG_HIGH_LEVEL
+      assert(is_owner());
+#endif
+      Serializer rez;
       {
-        // NO need to take the lock, duplicate sends are alright
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(did);
-          rez.serialize(owner_space);
-          rez.serialize(memory_manager->memory);
-          rez.serialize(instance);
-          rez.serialize(instance_domain);
-          rez.serialize(redop);
-          rez.serialize(logical_field);
-          rez.serialize(region_node->handle);
-          rez.serialize<bool>(is_foldable());
-          rez.serialize(get_pointer_space());
-          rez.serialize(get_use_event());
-          layout->pack_layout_description(rez, target);
-          pointer_constraint.serialize(rez);
-        }
-        // Now send the message
-        context->runtime->send_reduction_manager(target, rez);
-        update_remote_instances(target);
+        RezCheck z(rez);
+        rez.serialize(did);
+        rez.serialize(owner_space);
+        rez.serialize(memory_manager->memory);
+        rez.serialize(instance);
+        rez.serialize(instance_domain);
+        rez.serialize(redop);
+        rez.serialize(logical_field);
+        rez.serialize(region_node->handle);
+        rez.serialize<bool>(is_foldable());
+        rez.serialize(get_pointer_space());
+        rez.serialize(get_use_event());
+        layout->pack_layout_description(rez, target);
+        pointer_constraint.serialize(rez);
       }
-      return did;
+      // Now send the message
+      context->runtime->send_reduction_manager(target, rez);
+      update_remote_instances(target);
     }
 
     //--------------------------------------------------------------------------
@@ -1406,39 +1325,45 @@ namespace Legion {
       const ReductionOp *op = Runtime::get_reduction_op(redop);
       if (foldable)
       {
-        FoldReductionManager *manager = 
-                        legion_new<FoldReductionManager>(
-                                            runtime->forest, did, logical_field,
-                                            owner_space, runtime->address_space,
-                                            memory, inst, layout,
-                                            pointer_constraint, inst_dom,
-                                            false/*own*/, target_node, redop,op,
-                                            use_event, false/*register now*/);
-        if (!target_node->register_physical_manager(manager))
-          legion_delete(manager);
+        void *location;
+        if (runtime->find_pending_collectable_location(did, location))
+          legion_new_in_place<FoldReductionManager>(location, runtime->forest,
+                                                    did, logical_field,
+                                                    owner_space,
+                                                    runtime->address_space,
+                                                    memory, inst, layout,
+                                                    pointer_constraint, 
+                                                    inst_dom, false/*owner*/,
+                                                    target_node, redop, op,
+                                                    use_event);
         else
-        {
-          manager->register_with_runtime();
-          manager->update_remote_instances(source);
-        }
+          legion_new<FoldReductionManager>(runtime->forest, did, logical_field,
+                                           owner_space, runtime->address_space,
+                                           memory, inst, layout,
+                                           pointer_constraint, inst_dom,
+                                           false/*own*/, target_node, redop, op,
+                                           use_event);
       }
       else
       {
-        ListReductionManager *manager = 
-                        legion_new<ListReductionManager>(
-                                            runtime->forest, did, logical_field,
-                                            owner_space, runtime->address_space,
-                                            memory, inst, layout, 
-                                            pointer_constraint, inst_dom, 
-                                            false/*own*/, target_node, redop,op,
-                                            ptr_space, false/*register now*/);
-        if (!target_node->register_physical_manager(manager))
-          legion_delete(manager);
+        void *location;
+        if (runtime->find_pending_collectable_location(did, location))
+          legion_new_in_place<ListReductionManager>(location, runtime->forest,
+                                                    did, logical_field,
+                                                    owner_space, 
+                                                    runtime->address_space,
+                                                    memory, inst, layout,
+                                                    pointer_constraint, 
+                                                    inst_dom, false/*owner*/,
+                                                    target_node, redop, op,
+                                                    ptr_space);
         else
-        {
-          manager->register_with_runtime();
-          manager->update_remote_instances(source);
-        }
+          legion_new<ListReductionManager>(runtime->forest, did, logical_field,
+                                           owner_space, runtime->address_space,
+                                           memory, inst, layout, 
+                                           pointer_constraint, inst_dom, 
+                                           false/*own*/, target_node, redop,op,
+                                           ptr_space);
       }
     }
 
@@ -1454,7 +1379,7 @@ namespace Legion {
       return legion_new<ReductionView>(context, view_did, owner_space,
                                        owner_space, region_node, 
                                        const_cast<ReductionManager*>(this),
-                                       own_ctx, true/*register now*/);
+                                       own_ctx);
     }
 
     /////////////////////////////////////////////////////////////
@@ -1475,9 +1400,9 @@ namespace Legion {
                                                RegionNode *node,
                                                ReductionOpID red,
                                                const ReductionOp *o, 
-                                               Domain dom, bool reg_now)
+                                               Domain dom)
       : ReductionManager(ctx, did, f, owner_space, local_space, mem, 
-                         inst, desc, cons, d, own_dom, node, red, o, reg_now),
+                         inst, desc, cons, d, own_dom, node, red, o),
         ptr_space(dom)
     //--------------------------------------------------------------------------
     {
@@ -1491,7 +1416,7 @@ namespace Legion {
     ListReductionManager::ListReductionManager(const ListReductionManager &rhs)
       : ReductionManager(NULL, 0, 0, 0, 0, NULL,
                          PhysicalInstance::NO_INST, NULL,rhs.pointer_constraint,
-                         Domain::NO_DOMAIN, false, NULL, 0, NULL, false),
+                         Domain::NO_DOMAIN, false, NULL, 0, NULL),
         ptr_space(Domain::NO_DOMAIN)
     //--------------------------------------------------------------------------
     {
@@ -1601,29 +1526,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool ListReductionManager::is_list_manager(void) const
-    //--------------------------------------------------------------------------
-    {
-      return true;
-    }
-
-#ifdef DEBUG_HIGH_LEVEL
-    //--------------------------------------------------------------------------
-    ListReductionManager* ListReductionManager::as_list_manager(void) const
-    //--------------------------------------------------------------------------
-    {
-      return const_cast<ListReductionManager*>(this);
-    }
-
-    //--------------------------------------------------------------------------
-    FoldReductionManager* ListReductionManager::as_fold_manager(void) const
-    //--------------------------------------------------------------------------
-    {
-      return NULL;
-    }
-#endif
-
-    //--------------------------------------------------------------------------
     Event ListReductionManager::get_use_event(void) const
     //--------------------------------------------------------------------------
     {
@@ -1648,10 +1550,9 @@ namespace Legion {
                                                RegionNode *node,
                                                ReductionOpID red,
                                                const ReductionOp *o,
-                                               Event u_event,
-                                               bool register_now)
+                                               Event u_event)
       : ReductionManager(ctx, did, f, owner_space, local_space, mem, inst, 
-                         desc, cons, d, own_dom, node, red, o,register_now),
+                         desc, cons, d, own_dom, node, red, o),
         use_event(u_event)
     //--------------------------------------------------------------------------
     {
@@ -1665,7 +1566,7 @@ namespace Legion {
     FoldReductionManager::FoldReductionManager(const FoldReductionManager &rhs)
       : ReductionManager(NULL, 0, 0, 0, 0, NULL,
                          PhysicalInstance::NO_INST, NULL,rhs.pointer_constraint,
-                         Domain::NO_DOMAIN, false, NULL, 0, NULL, false),
+                         Domain::NO_DOMAIN, false, NULL, 0, NULL),
         use_event(Event::NO_EVENT)
     //--------------------------------------------------------------------------
     {
@@ -1772,29 +1673,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool FoldReductionManager::is_list_manager(void) const
-    //--------------------------------------------------------------------------
-    {
-      return false;
-    }
-
-#ifdef DEBUG_HIGH_LEVEL
-    //--------------------------------------------------------------------------
-    ListReductionManager* FoldReductionManager::as_list_manager(void) const
-    //--------------------------------------------------------------------------
-    {
-      return NULL;
-    }
-
-    //--------------------------------------------------------------------------
-    FoldReductionManager* FoldReductionManager::as_fold_manager(void) const
-    //--------------------------------------------------------------------------
-    {
-      return const_cast<FoldReductionManager*>(this);
-    }
-#endif
-
-    //--------------------------------------------------------------------------
     Event FoldReductionManager::get_use_event(void) const
     //--------------------------------------------------------------------------
     {
@@ -1812,7 +1690,7 @@ namespace Legion {
                                    DistributedID did,AddressSpaceID local_space)
       : PhysicalManager(ctx, NULL/*memory*/, desc, constraint, did, local_space,
                         local_space, NULL/*region*/, PhysicalInstance::NO_INST,
-                        Domain::NO_DOMAIN, false/*own domain*/,false/*reg now*/)
+                        Domain::NO_DOMAIN, false/*own domain*/)
     //--------------------------------------------------------------------------
     {
     }
@@ -1820,8 +1698,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     VirtualManager::VirtualManager(const VirtualManager &rhs)
       : PhysicalManager(NULL, NULL, NULL, rhs.pointer_constraint, 0, 0, 0,
-                        NULL, PhysicalInstance::NO_INST, Domain::NO_DOMAIN,
-                        false, false)
+                      NULL, PhysicalInstance::NO_INST, Domain::NO_DOMAIN, false)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -1868,50 +1745,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool VirtualManager::is_reduction_manager(void) const
-    //--------------------------------------------------------------------------
-    {
-      return false;
-    }
-
-    //--------------------------------------------------------------------------
-    bool VirtualManager::is_instance_manager(void) const
-    //--------------------------------------------------------------------------
-    {
-      return false;
-    }
-
-    //--------------------------------------------------------------------------
-    bool VirtualManager::is_virtual_manager(void) const
-    //--------------------------------------------------------------------------
-    {
-      return true;
-    }
-
-#ifdef DEBUG_HIGH_LEVEL
-    //--------------------------------------------------------------------------
-    InstanceManager* VirtualManager::as_instance_manager(void) const
-    //--------------------------------------------------------------------------
-    {
-      return NULL;
-    }
-
-    //--------------------------------------------------------------------------
-    ReductionManager* VirtualManager::as_reduction_manager(void) const
-    //--------------------------------------------------------------------------
-    {
-      return NULL;
-    }
-
-    //--------------------------------------------------------------------------
-    VirtualManager* VirtualManager::as_virtual_manager(void) const
-    //--------------------------------------------------------------------------
-    {
-      return const_cast<VirtualManager*>(this);
-    }
-#endif
-
-    //--------------------------------------------------------------------------
     size_t VirtualManager::get_instance_size(void) const
     //--------------------------------------------------------------------------
     {
@@ -1921,11 +1754,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    DistributedID VirtualManager::send_manager(AddressSpaceID target)
+    void VirtualManager::send_manager(AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
-      // no need to do anything
-      return did;
+      // should never be called
+      assert(false);
     }
 
     //--------------------------------------------------------------------------
@@ -1981,8 +1814,6 @@ namespace Legion {
       PointerConstraint pointer_constraint(Memory::NO_MEMORY, 0);
       singleton = new VirtualManager(rt->forest, layout, pointer_constraint,
                                      did, rt->address_space);
-      // register this with the runtime
-      rt->register_distributed_collectable(did, singleton);
       // put a permenant resource reference on this so it is never deleted
       singleton->add_base_resource_ref(MAX_GC_REF);
     }
@@ -2065,8 +1896,7 @@ namespace Legion {
                                                  local_space, memory_manager,
                                                  instance, instance_domain, 
                                                  own_domain, ancestor, layout, 
-                                                 pointer_constraint,
-                                                 ready, true/*register now*/);
+                                                 pointer_constraint, ready);
             break;
           }
         case SpecializedConstraint::REDUCTION_FOLD_SPECIALIZE:
@@ -2105,8 +1935,7 @@ namespace Legion {
                                               pointer_constraint, 
                                               instance_domain, own_domain,
                                               ancestor, redop_id,
-                                              reduction_op, filled_and_ready, 
-                                              true/*register now*/);
+                                              reduction_op, filled_and_ready); 
             break;
           }
         case SpecializedConstraint::REDUCTION_LIST_SPECIALIZE:

@@ -1103,7 +1103,7 @@ namespace Legion {
           get_field_accessor(FieldID fid) const;
     public:
       void pack_reference(Serializer &rez, AddressSpaceID target);
-      void unpack_reference(Runtime *rt, Deserializer &derez);
+      void unpack_reference(Runtime *rt, Deserializer &derez, Event &ready);
     private:
       FieldMask valid_fields; 
       Event ready_event;
@@ -1165,7 +1165,8 @@ namespace Legion {
       const InstanceRef& get_composite_ref(void) const;
     public:
       void pack_references(Serializer &rez, AddressSpaceID target) const;
-      void unpack_references(Runtime *runtime, Deserializer &derez);
+      void unpack_references(Runtime *runtime, Deserializer &derez,
+                             std::set<Event> &ready_events);
     public:
       void add_valid_references(ReferenceSource source) const;
       void remove_valid_references(ReferenceSource source) const;

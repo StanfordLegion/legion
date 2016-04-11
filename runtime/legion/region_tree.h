@@ -1186,6 +1186,7 @@ namespace Legion {
       void get_all_fields(std::vector<FieldID> &to_set);
       void get_all_regions(std::set<LogicalRegion> &regions);
       void get_field_set(const FieldMask &mask, std::set<FieldID> &to_set);
+      void get_field_set(const FieldMask &mask, std::vector<FieldID> &to_set);
       void get_field_set(const FieldMask &mask, const std::set<FieldID> &basis,
                          std::set<FieldID> &to_set);
     public:

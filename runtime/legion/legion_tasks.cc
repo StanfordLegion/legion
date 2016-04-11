@@ -238,7 +238,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TaskOp::unpack_base_task(Deserializer &derez)
+    void TaskOp::unpack_base_task(Deserializer &derez,
+                                  std::set<Event> &ready_events)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
@@ -328,7 +329,8 @@ namespace Legion {
       {
         unsigned index;
         derez.deserialize(index);
-        early_mapped_regions[index].unpack_references(runtime, derez); 
+        early_mapped_regions[index].unpack_references(runtime, derez, 
+                                                      ready_events);
       }
       // Parent requirement indexes don't mean anything remotely
       parent_req_indexes.resize(regions.size(), 0);
@@ -358,17 +360,33 @@ namespace Legion {
         case INDIVIDUAL_TASK_KIND:
           {
             IndividualTask *task = rt->get_available_individual_task(false);
-            if (task->unpack_task(derez, current))
+            std::set<Event> ready_events;
+            if (task->unpack_task(derez, current, ready_events))
+            {
+              if (!ready_events.empty())
+              {
+                Event ready = Runtime::merge_events<true>(ready_events);
+                ready.wait();
+              }
               rt->add_to_ready_queue(current, task, 
                                      false/*prev fail*/);
+            }
             break;
           }
         case SLICE_TASK_KIND:
           {
             SliceTask *task = rt->get_available_slice_task(false);
-            if (task->unpack_task(derez, current))
+            std::set<Event> ready_events;
+            if (task->unpack_task(derez, current, ready_events))
+            {
+              if (!ready_events.empty())
+              {
+                Event ready = Runtime::merge_events<true>(ready_events);
+                ready.wait();
+              }
               rt->add_to_ready_queue(current, task,
                                      false/*prev fail*/);
+            }
             break;
           }
         case POINT_TASK_KIND:
@@ -2737,11 +2755,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SingleTask::unpack_single_task(Deserializer &derez)
+    void SingleTask::unpack_single_task(Deserializer &derez,
+                                        std::set<Event> &ready_events)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
-      unpack_base_task(derez);
+      unpack_base_task(derez, ready_events);
       if (map_locally)
       {
         derez.deserialize(selected_variant);
@@ -2755,7 +2774,7 @@ namespace Legion {
       derez.deserialize(num_phy);
       physical_instances.resize(num_phy);
       for (unsigned idx = 0; idx < num_phy; idx++)
-        physical_instances[idx].unpack_references(runtime, derez);
+        physical_instances[idx].unpack_references(runtime, derez, ready_events);
     }
 
     //--------------------------------------------------------------------------
@@ -3607,6 +3626,7 @@ namespace Legion {
       // Already hold the lock from the caller
       std::set<LogicalRegion> top_regions;
       runtime->forest->get_all_regions(handle, top_regions);
+      RemoteTask *outermost = find_outermost_context();
       for (std::set<LogicalRegion>::const_iterator it = top_regions.begin();
             it != top_regions.end(); it++)
       {
@@ -3620,6 +3640,7 @@ namespace Legion {
         // Mark that the region was virtually mapped
         virtual_mapped.push_back(true);
         region_deleted.push_back(false);
+        outermost->add_top_region(*it);
         if (Runtime::legion_spy_enabled)
           log_created_requirement(regions.size() - 1);
       }
@@ -5806,11 +5827,11 @@ namespace Legion {
 #endif
       InstanceView *result = context->create_logical_top_view(manager, index);
       // Send the result back to the source and follow it with our own message
-      DistributedID result_did = result->send_view_base(source);
+      result->send_view(source);
       Serializer rez;
       {
         RezCheck z(rez);
-        rez.serialize(result_did);
+        rez.serialize(result->did);
         rez.serialize(target);
         rez.serialize(to_trigger);
       }
@@ -6823,11 +6844,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MultiTask::unpack_multi_task(Deserializer &derez)
+    void MultiTask::unpack_multi_task(Deserializer &derez,
+                                      std::set<Event> &ready_events)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
-      unpack_base_task(derez); 
+      unpack_base_task(derez, ready_events); 
       derez.deserialize(sliced);
       derez.deserialize(redop);
       if (redop > 0)
@@ -7745,7 +7767,6 @@ namespace Legion {
           }
         }
 #endif
-
         // The future has already been set so just trigger it
         result.impl->complete_future();
       }
@@ -7929,11 +7950,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool IndividualTask::unpack_task(Deserializer &derez, Processor current)
+    bool IndividualTask::unpack_task(Deserializer &derez, Processor current,
+                                     std::set<Event> &ready_events)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
-      unpack_single_task(derez);
+      unpack_single_task(derez, ready_events);
       derez.deserialize(orig_task);
       derez.deserialize(remote_completion_event);
       derez.deserialize(remote_unique_id);
@@ -8515,11 +8537,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool PointTask::unpack_task(Deserializer &derez, Processor current)
+    bool PointTask::unpack_task(Deserializer &derez, Processor current,
+                                std::set<Event> &ready_events)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
-      unpack_single_task(derez);
+      unpack_single_task(derez, ready_events);
       derez.deserialize(point_termination);
       current_proc = current;
       // Check to see if we had no virtual mappings and everything
@@ -8731,7 +8754,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool WrapperTask::unpack_task(Deserializer &derez, Processor current)
+    bool WrapperTask::unpack_task(Deserializer &derez, Processor current,
+                                  std::set<Event> &ready_events)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -8836,7 +8860,6 @@ namespace Legion {
     void RemoteTask::deactivate(void)
     //--------------------------------------------------------------------------
     {
-      deactivate_wrapper();
       // Before deactivating the context, clean it out
       if (!top_level_regions.empty())
       {
@@ -8847,6 +8870,8 @@ namespace Legion {
                                                   false/*logical users only*/); 
         }
       }
+      top_level_regions.clear();
+      deactivate_wrapper();
       if (!remote_instances.empty())
       {
 #ifdef DEBUG_HIGH_LEVEL
@@ -8865,7 +8890,6 @@ namespace Legion {
         }
         remote_instances.clear();
       }
-      top_level_regions.clear();
       // Context is freed in deactivate single
       runtime->free_remote_task(this);
     }
@@ -8978,8 +9002,9 @@ namespace Legion {
     void RemoteTask::unpack_remote_context(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
+      std::set<Event> ready_events;
       derez.deserialize(depth);
-      unpack_base_task(derez);
+      unpack_base_task(derez, ready_events);
       derez.deserialize(initial_region_count);
       virtual_mapped.resize(initial_region_count, false);
       size_t num_virtual;
@@ -9001,6 +9026,11 @@ namespace Legion {
       // Add our regions to the set of top-level regions
       for (unsigned idx = 0; idx < regions.size(); idx++)
         top_level_regions.insert(regions[idx].region);
+      if (!ready_events.empty())
+      {
+        Event wait_on = Runtime::merge_events<true>(ready_events);
+        wait_on.wait();
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -10197,7 +10227,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool IndexTask::unpack_task(Deserializer &derez, Processor current)
+    bool IndexTask::unpack_task(Deserializer &derez, Processor current,
+                                std::set<Event> &ready_events)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -11131,13 +11162,14 @@ namespace Legion {
     }
     
     //--------------------------------------------------------------------------
-    bool SliceTask::unpack_task(Deserializer &derez, Processor current)
+    bool SliceTask::unpack_task(Deserializer &derez, Processor current,
+                                std::set<Event> &ready_events)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
       size_t num_points;
       derez.deserialize(num_points);
-      unpack_multi_task(derez);
+      unpack_multi_task(derez, ready_events);
       current_proc = current;
       derez.deserialize(denominator);
       derez.deserialize(index_owner);
@@ -11162,7 +11194,7 @@ namespace Legion {
       {
         PointTask *point = runtime->get_available_point_task(false); 
         point->slice_owner = this;
-        point->unpack_task(derez, current);
+        point->unpack_task(derez, current, ready_events);
         point->parent_ctx = parent_ctx;
         points.push_back(point);
         if (Runtime::legion_spy_enabled)
