@@ -525,8 +525,11 @@ namespace Realm {
 	setenv("PMI_GNI_COOKIE", new_pmi_gni_cookie, 1 /*overwrite*/);
       }
       // SJT: another GASNET workaround - if we don't have GASNET_IB_SPAWNER set, assume it was MPI
-      if(!getenv("GASNET_IB_SPAWNER"))
+      // (This is called GASNET_IB_SPAWNER for versions <= 1.24 and GASNET_SPAWNER for versions >= 1.26)
+      if(!getenv("GASNET_IB_SPAWNER") && !getenv("GASNET_SPAWNER")) {
 	setenv("GASNET_IB_SPAWNER", "mpi", 0 /*no overwrite*/);
+	setenv("GASNET_SPAWNER", "mpi", 0 /*no overwrite*/);
+      }
 
       // and one more... disable GASNet's probing of pinnable memory - it's
       //  painfully slow on most systems (the gemini conduit doesn't probe
