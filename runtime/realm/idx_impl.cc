@@ -410,7 +410,7 @@ namespace Realm {
 
 	//printf("CI: %zd %zd %zd\n", data->num_elmts, data->first_elmt, data->last_elmt);
 
-	Translation<1> inst_offset(-(off_t)(data->first_elmt));
+	Translation<1> inst_offset(-(coord_t)(data->first_elmt));
 	DomainLinearization dl = DomainLinearization::from_mapping<1>(Mapping<1,1>::new_dynamic_mapping(inst_offset));
 	dl.serialize(linearization_bits);
 #endif
@@ -628,7 +628,7 @@ namespace Realm {
 
 	//printf("CI: %zd %zd %zd\n", data->num_elmts, data->first_elmt, data->last_elmt);
 
-	Translation<1> inst_offset(-(off_t)(data->first_elmt));
+	Translation<1> inst_offset(-(coord_t)(data->first_elmt));
 	DomainLinearization dl = DomainLinearization::from_mapping<1>(Mapping<1,1>::new_dynamic_mapping(inst_offset));
 	dl.serialize(linearization_bits);
 #endif

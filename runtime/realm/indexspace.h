@@ -401,7 +401,7 @@ namespace Realm {
     protected:
     public:
       int dim;
-      off_t point_data[MAX_POINT_DIM];
+      coord_t point_data[MAX_POINT_DIM];
     };
 
     class DomainLinearization {
@@ -931,7 +931,7 @@ namespace Realm {
     public:
       IDType is_id;
       int dim;
-      off_t rect_data[2 * MAX_RECT_DIM];
+      coord_t rect_data[2 * MAX_RECT_DIM];
 
     public:
       // simple instance creation for the lazy

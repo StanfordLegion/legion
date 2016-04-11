@@ -2791,8 +2791,8 @@ namespace LegionRuntime {
 	    e->get_next(rstart2, rlen2);
 	  }
 
-	  int sstart = src_linearization->image(rstart);
-	  int dstart = dst_linearization->image(rstart);
+	  int sstart = src_linearization->image((coord_t)rstart);
+	  int dstart = dst_linearization->image((coord_t)rstart);
 #ifdef DEBUG_LOW_LEVEL
 	  assert(src_linearization->image_is_dense(Rect<1>(rstart, rstart + rlen - 1)));
 	  assert(dst_linearization->image_is_dense(Rect<1>(rstart, rstart + rlen - 1)));
@@ -3739,7 +3739,7 @@ namespace LegionRuntime {
 		}
 
 		// translate the index space point to the dst instance's linearization
-		int dstart = dst_linearization->image(rstart);
+		int dstart = dst_linearization->image((coord_t)rstart);
 
 		// now do an offset calculation for the destination
 		off_t dst_offset;
@@ -3795,7 +3795,7 @@ namespace LegionRuntime {
 	      off_t rstart; size_t rlen;
 	      while(e->get_next(rstart, rlen)) {
 		// translate the index space point to the dst instance's linearization
-		int dstart = dst_linearization->image(rstart);
+		int dstart = dst_linearization->image((coord_t)rstart);
 
 		// now do an offset calculation for the destination
 		off_t dst_offset;
@@ -4095,7 +4095,7 @@ namespace LegionRuntime {
               ElementMask::Enumerator *e = ispace->valid_mask->enumerate_enabled();
               off_t rstart; size_t elem_count;
               while(e->get_next(rstart, elem_count)) {
-                int dst_index = dst_linearization->image(rstart); 
+                int dst_index = dst_linearization->image((coord_t)rstart); 
                 size_t done = 0;
                 while (done < elem_count) {
                   int dst_in_this_block = inst_impl->metadata.block_size - 
