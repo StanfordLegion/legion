@@ -17575,7 +17575,7 @@ namespace LegionRuntime {
       if (!region->contains_ptr(ptr))
       {
         fprintf(stderr,"BOUNDS CHECK ERROR IN TASK %s: Accessing invalid "
-                       "pointer %d\n", region->get_task_name(), ptr.value);
+                       "pointer %lld\n", region->get_task_name(), ptr.value);
         assert(false);
       }
     }
@@ -17591,18 +17591,18 @@ namespace LegionRuntime {
         {
           case 1:
             fprintf(stderr,"BOUNDS CHECK ERROR IN TASK %s: Accessing invalid "
-                           "1D point (%d)\n", region->get_task_name(),
+                           "1D point (%lld)\n", region->get_task_name(),
                             dp.point_data[0]);
             break;
           case 2:
             fprintf(stderr,"BOUNDS CHECK ERROR IN TASK %s: Accessing invalid "
-                           "2D point (%d,%d)\n", region->get_task_name(),
+                           "2D point (%lld,%lld)\n", region->get_task_name(),
                             dp.point_data[0], dp.point_data[1]);
             break;
           case 3:
             fprintf(stderr,"BOUNDS CHECK ERROR IN TASK %s: Accessing invalid "
-                           "3D point (%d,%d,%d)\n", region->get_task_name(),
-                      dp.point_data[0], dp.point_data[1], dp.point_data[2]);
+                         "3D point (%lld,%lld,%lld)\n", region->get_task_name(),
+                          dp.point_data[0], dp.point_data[1], dp.point_data[2]);
             break;
           default:
             assert(false);
