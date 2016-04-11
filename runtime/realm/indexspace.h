@@ -1072,19 +1072,20 @@ namespace Realm {
       off_t pos;
       size_t len;
       while(enum1.get_next(pos, len)) {
+        off_t len_ = len;
 	if(pos < start) {
-	  len -= (start - pos);
+	  len_ -= (start - pos);
 	  pos = start;
 	}
 
-	if((count > 0) && ((pos + len) > (start + count))) {
-	  len = start + count - pos;
+	if((count > 0) && ((pos + len_) > (start + count))) {
+	  len_ = start + count - pos;
 	}
 
-	if(len > 0) {
+	if(len_ > 0) {
 	  //printf("S:%d(%d)\n", pos, len);
-	  executor.do_span(pos, len);
-	  total += len;
+	  executor.do_span(pos, len_);
+	  total += len_;
 	}
       }
 
@@ -1112,49 +1113,52 @@ namespace Realm {
 
       size_t total = 0;
 
+      off_t len1_ = len1, len2_ = len1;
       while(true) {
 	//printf("S:%d(%d) T:%d(%d)\n", pos1, len1, pos2, len2);
 
-	if(len1 <= 0) {
+	if(len1_ <= 0) {
 	  if(!enum1.get_next(pos1, len1)) break;
-	  if((count > 0) && ((pos1 + len1) > (start + count))) {
-	    len1 = (start + count) - pos1;
-	    if(len1 < 0) break;
+          len1_ = len1;
+	  if((count > 0) && ((pos1 + len1_) > (start + count))) {
+	    len1_ = (start + count) - pos1;
+	    if(len1_ < 0) break;
 	  }
 	  continue;
 	}
 
-	if(len2 <= 0) {
+	if(len2_ <= 0) {
 	  if(!enum2.get_next(pos2, len2)) break;
-	  if((count > 0) && ((pos2 + len2) > (start + count))) {
-	    len2 = (start + count) - pos2;
-	    if(len2 < 0) break;
+          len2_ = len2;
+	  if((count > 0) && ((pos2 + len2_) > (start + count))) {
+	    len2_ = (start + count) - pos2;
+	    if(len2_ < 0) break;
 	  }
 	  continue;
 	}
 
 	if(pos1 < pos2) {
-	  len1 -= (pos2 - pos1);
+	  len1_ -= (pos2 - pos1);
 	  pos1 = pos2;
 	  continue;
 	}
 
 	if(pos2 < pos1) {
-	  len2 -= (pos1 - pos2);
+	  len2_ -= (pos1 - pos2);
 	  pos2 = pos1;
 	  continue;
 	}
 
-	assert((pos1 == pos2) && (len1 > 0) && (len2 > 0));
+	assert((pos1 == pos2) && (len1_ > 0) && (len2_ > 0));
 
-	size_t span_len = (len1 < len2) ? len1 : len2;
+	size_t span_len = (len1_ < len2_) ? len1_ : len2_;
 
 	executor.do_span(pos1, span_len);
 
 	pos1 += span_len;
-	len1 -= span_len;
+	len1_ -= span_len;
 	pos2 += span_len;
-	len2 -= span_len;
+	len2_ -= span_len;
 
 	total += span_len;
       }

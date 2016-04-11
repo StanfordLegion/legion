@@ -1197,7 +1197,7 @@ namespace Realm {
 	// find last word that isn't 0 - no search if the first search failed
 	last_enabled_elmt = -1LL;
 	if(first_enabled_elmt >= 0)  {
-	  for(size_t i = count - 1; i >= 0; i--) {
+	  for(off_t i = (off_t)count - 1; i >= 0; i--) {
 	    uint64_t v = impl->bits[i];
 	    if(v != 0) {
 	      off_t ofs = __builtin_clzl(v);

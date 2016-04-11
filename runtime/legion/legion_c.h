@@ -85,7 +85,7 @@ extern "C" {
     long long int value;
   } legion_ptr_t;
 
-typedef ptrdiff_t coord_t;
+typedef long long int coord_t;
 
 #define NEW_POINT_TYPE(T, DIM) typedef struct T { coord_t x[DIM]; } T
   NEW_POINT_TYPE(legion_point_1d_t, 1);
