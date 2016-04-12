@@ -930,7 +930,7 @@ namespace Legion {
       layout->add_reference();
 #ifdef LEGION_GC
       log_garbage.info("GC Instance Manager %ld " IDFMT " " IDFMT " ",
-                        did, inst.id, mem.id);
+                    LEGION_DISTRIBUTED_ID_FILTER(did), inst.id, mem->memory.id);
 #endif
       if (is_owner() && Runtime::legion_spy_enabled)
       {
@@ -955,6 +955,9 @@ namespace Legion {
     InstanceManager::~InstanceManager(void)
     //--------------------------------------------------------------------------
     {
+#ifdef LEGION_GC
+      log_garbage.info("GC Deletion %ld", LEGION_DISTRIBUTED_ID_FILTER(did));
+#endif
       if (layout->remove_reference())
         delete layout;
     }
@@ -1408,7 +1411,7 @@ namespace Legion {
     {
 #ifdef LEGION_GC
       log_garbage.info("GC List Reduction Manager %ld " IDFMT " " IDFMT " ",
-                        did, inst.id, mem.id);
+                LEGION_DISTRIBUTED_ID_FILTER(did), inst.id, mem->memory.id);
 #endif
     }
 
@@ -1430,6 +1433,9 @@ namespace Legion {
     {
       // Free up our pointer space
       ptr_space.get_index_space().destroy();
+#ifdef LEGION_GC
+      log_garbage.info("GC Deletion %ld", LEGION_DISTRIBUTED_ID_FILTER(did));
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -1558,7 +1564,7 @@ namespace Legion {
     {
 #ifdef LEGION_GC
       log_garbage.info("GC Fold Reduction Manager %ld " IDFMT " " IDFMT " ",
-                        did, inst.id, mem.id);
+                  LEGION_DISTRIBUTED_ID_FILTER(did), inst.id, mem->memory.id);
 #endif
     }
 
@@ -1578,6 +1584,9 @@ namespace Legion {
     FoldReductionManager::~FoldReductionManager(void)
     //--------------------------------------------------------------------------
     {
+#ifdef LEGION_GC
+      log_garbage.info("GC Deletion %ld", LEGION_DISTRIBUTED_ID_FILTER(did));
+#endif
     }
 
     //--------------------------------------------------------------------------

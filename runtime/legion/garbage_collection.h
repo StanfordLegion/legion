@@ -36,33 +36,33 @@ namespace Legion {
   namespace Internal {
 
     enum ReferenceSource {
-      FUTURE_HANDLE_REF,
-      DEFERRED_TASK_REF,
-      CURRENT_STATE_REF,
-      VERSION_INFO_REF,
-      PHYSICAL_STATE_REF,
-      PHYSICAL_REGION_REF,
-      VERSION_MANAGER_REF,
-      PENDING_GC_REF,
-      REMOTE_DID_REF,
-      PENDING_COLLECTIVE_REF,
-      MEMORY_MANAGER_REF,
-      COMPOSITE_NODE_REF,
-      COMPOSITE_HANDLE_REF,
-      PERSISTENCE_REF,
-      REMOTE_CREATE_REF,
-      INSTANCE_MAPPER_REF,
-      APPLICATION_REF,
-      MAPPING_ACQUIRE_REF,
-      MAX_GC_REF,
-      CONTEXT_REF,
-      LAST_SOURCE_REF,
+      FUTURE_HANDLE_REF = 0,
+      DEFERRED_TASK_REF = 1,
+      CURRENT_STATE_REF = 2,
+      VERSION_INFO_REF = 3,
+      PHYSICAL_STATE_REF = 4,
+      PHYSICAL_REGION_REF = 5,
+      VERSION_MANAGER_REF = 6,
+      PENDING_GC_REF = 7,
+      REMOTE_DID_REF = 8,
+      PENDING_COLLECTIVE_REF = 9,
+      MEMORY_MANAGER_REF = 10,
+      COMPOSITE_NODE_REF = 11,
+      COMPOSITE_HANDLE_REF = 12,
+      PERSISTENCE_REF = 13,
+      REMOTE_CREATE_REF = 14,
+      INSTANCE_MAPPER_REF = 15,
+      APPLICATION_REF = 16,
+      MAPPING_ACQUIRE_REF = 17,
+      MAX_GC_REF = 18,
+      CONTEXT_REF = 19,
+      LAST_SOURCE_REF = 20,
     };
 
     enum ReferenceKind {
-      GC_REF_KIND,
-      VALID_REF_KIND,
-      RESOURCE_REF_KIND,
+      GC_REF_KIND = 0,
+      VALID_REF_KIND = 1,
+      RESOURCE_REF_KIND = 2,
     };
 
 #define REFERENCE_NAMES_ARRAY(names)                \
@@ -77,11 +77,12 @@ namespace Legion {
       "Pending GC Reference",                       \
       "Remote Distributed ID Reference",            \
       "Pending Collective Reference",               \
-      "Memory Manager Reference"                    \
+      "Memory Manager Reference",                   \
       "Composite Node Reference",                   \
       "Composite Handle Reference",                 \
       "Persistent Reference",                       \
       "Remote Creation Reference",                  \
+      "Instance Mapper Reference",                  \
       "Application Reference",                      \
       "Mapping Acquire Reference",                  \
       "Maximum GC Priority Reference",              \
@@ -306,6 +307,7 @@ namespace Legion {
                                     ReferenceSource src, unsigned cnt)
     //--------------------------------------------------------------------------
     {
+      did = LEGION_DISTRIBUTED_ID_FILTER(did);
       if (ADD)
         log_garbage.info("GC Add Base Ref %d %ld %d %d",
                           kind, did, src, cnt);
@@ -320,6 +322,8 @@ namespace Legion {
                                       DistributedID src, unsigned cnt)
     //--------------------------------------------------------------------------
     {
+      did = LEGION_DISTRIBUTED_ID_FILTER(did);
+      src = LEGION_DISTRIBUTED_ID_FILTER(src);
       if (ADD)
         log_garbage.info("GC Add Nested Ref %d %ld %ld %d",
                           kind, did, src, cnt);

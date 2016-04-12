@@ -159,7 +159,7 @@ namespace Legion {
       // If we are either not a parent or we are a remote parent add 
       // a resource reference to avoid being collected
       if (parent != NULL)
-        add_nested_resource_ref(did);
+        add_nested_resource_ref(parent->did);
       else 
       {
         manager->add_nested_resource_ref(did);
@@ -169,7 +169,8 @@ namespace Legion {
           add_base_resource_ref(REMOTE_DID_REF);
       }
 #ifdef LEGION_GC
-      log_garbage.info("GC Materialized View %ld %ld", did, manager->did); 
+      log_garbage.info("GC Materialized View %ld %ld", 
+          LEGION_DISTRIBUTED_ID_FILTER(did), manager->did); 
 #endif
     }
 
@@ -235,6 +236,9 @@ namespace Legion {
       assert(current_epoch_users.empty());
       assert(previous_epoch_users.empty());
       assert(outstanding_gc_events.empty());
+#endif
+#ifdef LEGION_GC
+      log_garbage.info("GC Deletion %ld", LEGION_DISTRIBUTED_ID_FILTER(did));
 #endif
     }
 
@@ -579,28 +583,19 @@ namespace Legion {
     void MaterializedView::notify_inactive(void)
     //--------------------------------------------------------------------------
     {
-      // No need to worry about handling the deletion case since
-      // we know we also hold a resource reference and therefore
-      // the manager won't be deleted until we are deleted at
-      // the earliest
-      if (parent == NULL)
+      if (parent == NULL) 
+        // we have a resource reference on the manager so no need to check
         manager->remove_nested_gc_ref(did);
       else if (parent->remove_nested_gc_ref(did))
-        delete parent;
+        legion_delete(parent);
     }
 
     //--------------------------------------------------------------------------
     void MaterializedView::notify_valid(void)
     //--------------------------------------------------------------------------
     {
-      // If we are at the top of the tree add a valid reference
-      // Otherwise add our valid reference on our parent
       if (parent == NULL)
-      {
-        if (!is_owner())
-          send_remote_valid_update(owner_space, 1/*count*/, true/*add*/);
         manager->add_nested_valid_ref(did);
-      }
       else
         parent->add_nested_valid_ref(did);
     }
@@ -609,15 +604,10 @@ namespace Legion {
     void MaterializedView::notify_invalid(void)
     //--------------------------------------------------------------------------
     {
-      // If we are at the top of the tree add a valid reference
-      // Otherwise add our valid reference on the parent
       if (parent == NULL)
-      {
-        if (!is_owner())
-          send_remote_valid_update(owner_space, 1/*count*/, false/*add*/);
+        // we have a resource reference on the manager so no need to check
         manager->remove_nested_valid_ref(did);
-      }
-      else if (parent->remove_nested_valid_ref(did))
+      else if(parent->remove_nested_valid_ref(did))
         legion_delete(parent);
     }
 
@@ -2671,7 +2661,8 @@ namespace Legion {
         send_remote_registration();
       }
 #ifdef LEGION_GC
-      log_garbage.info("GC Composite View %ld", did);
+      log_garbage.info("GC Composite View %ld", 
+          LEGION_DISTRIBUTED_ID_FILTER(did));
 #endif
     }
 
@@ -2698,6 +2689,9 @@ namespace Legion {
       // See if we can delete our version info
       if (version_info->remove_reference())
         delete version_info;
+#ifdef LEGION_GC
+      log_garbage.info("GC Deletion %ld", LEGION_DISTRIBUTED_ID_FILTER(did));
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -3804,7 +3798,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
-            valid_views.end(); it != valid_views.end(); it++)
+            valid_views.begin(); it != valid_views.end(); it++)
       {
         // Don't worry about deletion condition since we own resource refs
         it->first->remove_nested_gc_ref(owner_did);
@@ -3848,16 +3842,16 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
-            valid_views.end(); it != valid_views.end(); it++)
+            valid_views.begin(); it != valid_views.end(); it++)
       {
         // Don't worry about deletion condition since we own resource refs
-        it->first->add_nested_valid_ref(owner_did);
+        it->first->remove_nested_valid_ref(owner_did);
       }
       for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it =
             reduction_views.begin(); it != reduction_views.end(); it++)
       {
         // Don't worry about deletion condition since we own resource refs
-        it->first->add_nested_valid_ref(owner_did);
+        it->first->remove_nested_valid_ref(owner_did);
       }
       for (std::map<CompositeNode*,FieldMask>::const_iterator it = 
             children.begin(); it != children.end(); it++)
@@ -3888,7 +3882,7 @@ namespace Legion {
         send_remote_registration();
       }
 #ifdef LEGION_GC
-      log_garbage.info("GC Fill View %ld", did);
+      log_garbage.info("GC Fill View %ld", LEGION_DISTRIBUTED_ID_FILTER(did));
 #endif
     }
 
@@ -3912,6 +3906,9 @@ namespace Legion {
         UpdateReferenceFunctor<RESOURCE_REF_KIND,false/*add*/> functor(this);
         map_over_remote_instances(functor);
       }
+#ifdef LEGION_GC
+      log_garbage.info("GC Deletion %ld", LEGION_DISTRIBUTED_ID_FILTER(did));
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -4092,7 +4089,8 @@ namespace Legion {
         send_remote_registration();
       }
 #ifdef LEGION_GC
-      log_garbage.info("GC Reduction View %ld %ld", did, manager->did);
+      log_garbage.info("GC Reduction View %ld %ld", did, 
+          LEGION_DISTRIBUTED_ID_FILTER(manager->did));
 #endif
     }
 
@@ -4136,6 +4134,9 @@ namespace Legion {
       assert(reduction_users.empty());
       assert(reading_users.empty());
       assert(outstanding_gc_events.empty());
+#endif
+#ifdef LEGION_GC
+      log_garbage.info("GC Deletion %ld", LEGION_DISTRIBUTED_ID_FILTER(did));
 #endif
     }
 

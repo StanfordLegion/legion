@@ -418,7 +418,7 @@ namespace Legion {
       if (!is_owner())
         add_base_resource_ref(REMOTE_DID_REF);
 #ifdef LEGION_GC
-      log_garbage.info("GC Future %ld", did);
+      log_garbage.info("GC Future %ld", LEGION_DISTRIBUTED_ID_FILTER(did));
 #endif
     }
 
@@ -457,6 +457,9 @@ namespace Legion {
       }
       if (producer_op != NULL)
         producer_op->remove_mapping_reference(op_gen);
+#ifdef LEGION_GC
+      log_garbage.info("GC Deletion %ld", LEGION_DISTRIBUTED_ID_FILTER(did));
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -6464,6 +6467,9 @@ namespace Legion {
     {
       // This is always the remote creation so add a resource reference
       add_base_resource_ref(REMOTE_DID_REF);
+#ifdef LEGION_GC
+      log_garbage.info("GC Constraints %ld", LEGION_DISTRIBUTED_ID_FILTER(did));
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -6482,6 +6488,9 @@ namespace Legion {
       }
       else
         constraints_name = strdup(registrar.layout_name);
+#ifdef LEGION_GC
+      log_garbage.info("GC Constraints %ld", LEGION_DISTRIBUTED_ID_FILTER(did));
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -6496,6 +6505,9 @@ namespace Legion {
     {
       constraints_name = (char*)malloc(64*sizeof(char));
       snprintf(constraints_name,64,"layout constraints %ld", layout_id);
+#ifdef LEGION_GC
+      log_garbage.info("GC Constraints %ld", LEGION_DISTRIBUTED_ID_FILTER(did));
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -6535,6 +6547,9 @@ namespace Legion {
       // If we were registered with the runtime, unregister ourself
       if (registered_with_runtime)
         runtime->unregister_layout(layout_id);
+#ifdef LEGION_GC
+      log_garbage.info("GC Deletion %ld", LEGION_DISTRIBUTED_ID_FILTER(did));
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -7025,8 +7040,6 @@ namespace Legion {
       // Do some mixing
       for (int i = 0; i < 256; i++)
         nrand48(random_state);
-      // Initialize our one virtual manager
-      VirtualManager::initialize_virtual_instance(this, 0/*same across nodes*/);
 #ifdef DEBUG_HIGH_LEVEL
       if (logging_region_tree_state)
       {
@@ -7058,6 +7071,8 @@ namespace Legion {
 #ifdef DEBUG_SHUTDOWN_HANG
       outstanding_counts.resize(HLR_LAST_TASK_ID, 0);
 #endif
+      // Initialize our one virtual manager
+      VirtualManager::initialize_virtual_instance(this, 0/*same across nodes*/);
     }
 
     //--------------------------------------------------------------------------

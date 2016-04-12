@@ -4162,6 +4162,10 @@ namespace Legion {
         add_base_gc_ref(REMOTE_DID_REF);
         add_base_resource_ref(REMOTE_DID_REF);
       }
+#ifdef LEGION_GC
+      log_garbage.info("GC Version State %ld", 
+          LEGION_DISTRIBUTED_ID_FILTER(did));
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -4191,6 +4195,9 @@ namespace Legion {
         UpdateReferenceFunctor<RESOURCE_REF_KIND,false/*add*/> functor(this); 
         map_over_remote_instances(functor);
       }
+#ifdef LEGION_GC
+      log_garbage.info("GC Deletion %ld", LEGION_DISTRIBUTED_ID_FILTER(did));
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -4830,12 +4837,14 @@ namespace Legion {
       for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
             valid_views.begin(); it != valid_views.end(); it++)
       {
-        it->first->remove_nested_valid_ref(did);
+        if (it->first->remove_nested_valid_ref(did))
+          LogicalView::delete_logical_view(it->first);
       }
       for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it = 
             reduction_views.begin(); it != reduction_views.end(); it++)
       {
-        it->first->remove_nested_valid_ref(did);
+        if (it->first->remove_nested_valid_ref(did))
+          legion_delete(it->first);
       }
     }
 
