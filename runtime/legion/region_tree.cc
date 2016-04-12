@@ -2384,6 +2384,49 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void RegionTreeForest::convert_views_across_context(
+                                        const RegionRequirement &req,
+                                        VersionInfo &version_info,
+                                        unsigned src_index,
+                                        unsigned dst_index,
+                                        SingleTask *src_context,
+                                        SingleTask *dst_context
+                                        InstanceView *src_view,
+                                        InstanceView *dst_view,
+                                        Event src_completion_event)
+    //--------------------------------------------------------------------------
+    {
+      if (IS_NO_ACCESS(req))
+        return;
+      PhysicalManager *manager = src_view->get_manager();
+#ifdef DEBUG_HIGH_LEVEL
+      assert(req.handle_type == SINGULAR);
+      assert(dst_view->get_manager() == manager);
+      assert(dst_view->is_owner());
+      assert(src_view->is_owner());
+#endif
+      RegionUsage usage(req);
+      RegionNode *region_node = get_node(req.region);
+      FieldMask user_mask = 
+        region_node->column_source->get_field_mask(req.privilege_fields);
+      // We can filter the user mask based on the allocated fields
+      user_mask &= manager->layout->allocated_fields;
+      if (!user_mask)
+        return;
+      // Convert to the subviews, this is safe because we know the top-view
+      // exists so it will never recurse all the way back up to the contexts
+      InstanceView *src_subview = 
+        region_node->convert_reference_region(manager, src_context, src_index);
+      InstanceView *dst_subview = 
+        region_node->convert_reference_region(manager, dst_context, dst_index);
+      // Add the user to the source and get the event precondition
+      Event precondition = src_subview->add_user(usage, src_completion_event,
+                                         user_mask, src_context, version_info);
+      // Now record the event as an initial precondition on the dst view
+      dst_subview->add_initial_user(precondition, usage, user_mask);
+    }
+
+    //--------------------------------------------------------------------------
     int RegionTreeForest::physical_convert_mapping(const RegionRequirement &req,
                                   const std::vector<MappingInstance> &chosen,
                                   InstanceSet &result, RegionTreeID &bad_tree,

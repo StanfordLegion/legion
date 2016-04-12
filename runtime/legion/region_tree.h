@@ -372,6 +372,15 @@ namespace Legion {
                           const InstanceSet &dst_targets,
                           VersionInfo &src_version_info,
                           Operation *op, Event precondition);
+      void convert_views_across_context(const RegionRequirement &req,
+                                        VersionInfo &version_info,
+                                        unsigned src_index,
+                                        unsigned dst_index,
+                                        SingleTask *src_context,
+                                        SingleTask *dst_context,
+                                        InstanceView *src_view,
+                                        InstanceView *dst_view,
+                                        Event completion_event);
     public:
       int physical_convert_mapping(const RegionRequirement &req,
                                const std::vector<MappingInstance> &chosen,

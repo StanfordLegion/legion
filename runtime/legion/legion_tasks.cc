@@ -5763,7 +5763,26 @@ namespace Legion {
       {
         // This is where things get weird, this region was virtually mapped
         // Now we have to clone the view information from our parent context
-        
+        // First we need to get our parent context  
+        SingleTask *parent_context = find_enclosing_parent_context();
+        // Now recurse with our parents index 
+        // Note that this recursion ensures that we handle nested
+        // virtual mappings correctly
+#ifdef DEBUG_HIGH_LEVEL
+        assert(index < parent_req_indexes.size());
+#endif
+        InstanceView *parent_view = parent_context->create_instance_top_view(
+                                            manager, parent_req_indexes[index]);
+        VersionInfo &info = get_version_info(index);
+        // Now record ourselves as a user on the parent view and 
+        // make the event precondition a user on the child view
+        runtime->forest->convert_views_across_context(regions[index], info,
+            index, parent_req_indexes[index], this, parent_context,
+            parent_view, result, get_task_completion());
+        // Nasty corner case, see if there are any other region requirements
+        // which this instance can also be used for and are also virtual 
+        // mapped and therefore we need to do this analysis now before we
+        // release the instance as ready for the context
       }
       else if (is_created_region(index))
       {
