@@ -15,30 +15,41 @@
 # limitations under the License.
 #
 
-import sys, os, shutil
+import sys, os, shutil, gc
 import string, re
 from math import sqrt, log
 from getopt import getopt
 
 GC_REF_KIND = 0
 VALID_REF_KIND = 1
-REMOTE_REF_KIND = 2
-RESOURCE_REF_KIND = 3
+RESOURCE_REF_KIND = 2
+REMOTE_REF_KIND = 3
 
 prefix = r'\[(?P<node>[0-9]+) - (?P<thread>[0-9a-f]+)\] \{\w+\}\{legion_gc\}: '
+# References
 add_base_ref_pat = re.compile(prefix + r'GC Add Base Ref (?P<kind>[0-9]+) (?P<did>[0-9]+) (?P<src>[0-9]+) (?P<cnt>[0-9]+)')
 add_nested_ref_pat = re.compile(prefix + r'GC Add Nested Ref (?P<kind>[0-9]+) (?P<did>[0-9]+) (?P<src>[0-9]+) (?P<cnt>[0-9]+)')
 remove_base_ref_pat = re.compile(prefix + r'GC Remove Base Ref (?P<kind>[0-9]+) (?P<did>[0-9]+) (?P<src>[0-9]+) (?P<cnt>[0-9]+)')
 remove_nested_ref_pat = re.compile(prefix + r'GC Remove Nested Ref (?P<kind>[0-9]+) (?P<did>[0-9]+) (?P<src>[0-9]+) (?P<cnt>[0-9]+)')
+# Instances
 inst_manager_pat = re.compile(prefix + r'GC Instance Manager (?P<did>[0-9]+) (?P<iid>[a-f0-9]+) (?P<mem>[a-f0-9]+)')
 list_manager_pat = re.compile(prefix + r'GC List Reduction Manager (?P<did>[0-9]+) (?P<iid>[a-f0-9]+) (?P<mem>[a-f0-9]+)')
 fold_manager_pat = re.compile(prefix + r'GC Fold Reduction Manager (?P<did>[0-9]+) (?P<iid>[a-f0-9]+) (?P<mem>[a-f0-9]+)')
+# Views
 materialize_pat = re.compile(prefix + r'GC Materialized View (?P<did>[0-9]+) (?P<inst>[0-9]+)')
 composite_pat = re.compile(prefix + r'GC Composite View (?P<did>[0-9]+)')
 fill_pat = re.compile(prefix + r'GC Fill View (?P<did>[0-9]+)')
 reduction_pat = re.compile(prefix + r'GC Reduction View (?P<did>[0-9]+) (?P<inst>[0-9]+)')
+# Version State
+version_state_pat = re.compile(prefix + r'GC Version State (?P<did>[0-9]+)')
+# Future
 future_pat = re.compile(prefix + r'GC Future (?P<did>[0-9]+)')
+# Constraints
+constraints_pat = re.compile(prefix + r'GC Constraints (?P<did>[0-9]+)')
+# Source Kinds
 source_kind_pat = re.compile(prefix + r'GC Source Kind (?P<kind>[0-9]+) (?P<name>[0-9a-zA-Z_]+)')
+# Deletion Pattern
+deletion_pat = re.compile(prefix + r'GC Deletion (?P<did>[0-9]+)')
 
 class TracePrinter(object):
     def __init__(self):
@@ -63,61 +74,103 @@ class Base(object):
     def __init__(self, did):
         self.did = did
         self.base_gc_refs = {}
+        self.base_gc_adds = {}
+        self.base_gc_rems = {}
         self.base_valid_refs = {}
+        self.base_valid_adds = {}
+        self.base_valid_rems = {}
         self.base_remote_refs = {}
+        self.base_remote_adds = {}
+        self.base_remote_rems = {}
         self.base_resource_refs = {}
+        self.base_resource_adds = {}
+        self.base_resource_rems = {}
         self.nested_gc_refs = {}
+        self.nested_gc_adds = {}
+        self.nested_gc_rems = {}
         self.nested_valid_refs = {}
+        self.nested_valid_adds = {}
+        self.nested_valid_rems = {}
         self.nested_remote_refs = {}
+        self.nested_remote_adds = {}
+        self.nested_remote_rems = {}
         self.nested_resource_refs = {}
+        self.nested_resource_adds = {}
+        self.nested_resource_rems = {}
         self.on_stack = False
+        self.deleted = False
+        self.checked = False
 
     def add_base_ref(self, kind, src, cnt):
         if kind is GC_REF_KIND:
             if src in self.base_gc_refs:
                 self.base_gc_refs[src] += cnt
+                self.base_gc_adds[src] += cnt
             else:
                 self.base_gc_refs[src] = cnt
+                self.base_gc_adds[src] = cnt
+                self.base_gc_rems[src] = 0
         elif kind is VALID_REF_KIND:
             if src in self.base_valid_refs:
                 self.base_valid_refs[src] += cnt
+                self.base_valid_adds[src] += cnt
             else:
                 self.base_valid_refs[src] = cnt
+                self.base_valid_adds[src] = cnt
+                self.base_valid_rems[src] = 0
         elif kind is REMOTE_REF_KIND:
             if src in self.base_remote_refs:
                 self.base_remote_refs[src] += cnt
+                self.base_remote_adds[src] += cnt
             else:
                 self.base_remote_refs[src] = cnt
+                self.base_remote_adds[src] = cnt
+                self.base_remote_rems[src] = 0
         elif kind is RESOURCE_REF_KIND:
             if src in self.base_resource_refs:
                 self.base_resource_refs[src] += cnt
+                self.base_resource_adds[src] += cnt
             else:
                 self.base_resource_refs[src] = cnt
+                self.base_resource_adds[src] = cnt
+                self.base_resource_rems[src] = 0
         else:
             print 'BAD BASE REF '+str(kind)
             assert False
 
     def add_nested_ref(self, kind, src, cnt):
         if kind is GC_REF_KIND:
-            if src in self.base_gc_refs:
+            if src in self.nested_gc_refs:
                 self.nested_gc_refs[src] += cnt
+                self.nested_gc_adds[src] += cnt
             else:
                 self.nested_gc_refs[src] = cnt
+                self.nested_gc_adds[src] = cnt
+                self.nested_gc_rems[src] = 0
         elif kind is VALID_REF_KIND:
-            if src in self.base_valid_refs:
+            if src in self.nested_valid_refs:
                 self.nested_valid_refs[src] += cnt
+                self.nested_valid_adds[src] += cnt
             else:
                 self.nested_valid_refs[src] = cnt
+                self.nested_valid_adds[src] = cnt
+                self.nested_valid_rems[src] = 0
         elif kind is REMOTE_REF_KIND:
-            if src in self.base_remote_refs:
+            if src in self.nested_remote_refs:
                 self.nested_remote_refs[src] += cnt
+                self.nested_remote_adds[src] += cnt
             else:
                 self.nested_remote_refs[src] = cnt
+                self.nested_remote_adds[src] = cnt
+                self.nested_remote_rems[src] = 0
         elif kind is RESOURCE_REF_KIND:
-            if src in self.base_resource_refs:
+            if src in self.nested_resource_refs:
                 self.nested_resource_refs[src] += cnt
+                self.nested_resource_adds[src] += cnt
             else:
                 self.nested_resource_refs[src] = cnt
+                self.nested_resource_adds[src] = cnt
+                self.nested_resource_rems[src] = 0
         else:
             assert False
 
@@ -125,142 +178,359 @@ class Base(object):
         if kind is GC_REF_KIND:
             if src in self.base_gc_refs:
                 self.base_gc_refs[src] -= cnt
+                self.base_gc_rems[src] += cnt
             else:
                 self.base_gc_refs[src] = -cnt
+                self.base_gc_adds[src] = 0
+                self.base_gc_rems[src] = cnt
         elif kind is VALID_REF_KIND:
             if src in self.base_valid_refs:
-                self.base_valid_refs[src] -= -cnt
+                self.base_valid_refs[src] -= cnt
+                self.base_valid_rems[src] += cnt
             else:
                 self.base_valid_refs[src] = -cnt
+                self.base_valid_adds[src] = 0
+                self.base_valid_rems[src] = cnt
         elif kind is REMOTE_REF_KIND:
             if src in self.base_remote_refs:
                 self.base_remote_refs[src] -= cnt
+                self.base_remote_rems[src] += cnt
             else:
                 self.base_remote_refs[src] = -cnt
+                self.base_remote_adds[src] = 0
+                self.base_remote_rems[src] = cnt
         elif kind is RESOURCE_REF_KIND:
             if src in self.base_resource_refs:
                 self.base_resource_refs[src] -= cnt
+                self.base_resource_rems[src] += cnt
             else:
                 self.base_resource_refs[src] = -cnt
+                self.base_resource_adds[src] = 0
+                self.base_resource_rems[src] = cnt
         else:
             assert False
 
     def remove_nested_ref(self, kind, src, cnt):
         if kind is GC_REF_KIND:
-            if src in self.base_gc_refs:
+            if src in self.nested_gc_refs:
                 self.nested_gc_refs[src] -= cnt
+                self.nested_gc_rems[src] += cnt
             else:
                 self.nested_gc_refs[src] = -cnt
+                self.nested_gc_adds[src] = 0
+                self.nested_gc_rems[src] = cnt
         elif kind is VALID_REF_KIND:
-            if src in self.base_valid_refs:
+            if src in self.nested_valid_refs:
                 self.nested_valid_refs[src] -= cnt
+                self.nested_valid_rems[src] += cnt
             else:
                 self.nested_valid_refs[src] = -cnt
+                self.nested_valid_adds[src] = 0
+                self.nested_valid_rems[src] = cnt
         elif kind is REMOTE_REF_KIND:
-            if src in self.base_remote_refs:
+            if src in self.nested_remote_refs:
                 self.nested_remote_refs[src] -= cnt
+                self.nested_remote_rems[src] += cnt
             else:
                 self.nested_remote_refs[src] = -cnt
+                self.nested_remote_adds[src] = 0
+                self.nested_remote_rems[src] = cnt
         elif kind is RESOURCE_REF_KIND:
-            if src in self.base_resource_refs:
+            if src in self.nested_resource_refs:
                 self.nested_resource_refs[src] -= cnt
+                self.nested_resource_rems[src] += cnt
             else:
                 self.nested_resource_refs[src] = -cnt
+                self.nested_resource_adds[src] = 0
+                self.nested_resource_rems[src] = cnt
         else:
             assert False
 
     def clone(self, other):
+        assert self.did == other.did
         self.base_gc_refs = other.base_gc_refs
+        self.base_gc_adds = other.base_gc_adds
+        self.base_gc_rems = other.base_gc_rems
         self.base_valid_refs = other.base_valid_refs
+        self.base_valid_adds = other.base_valid_adds
+        self.base_valid_rems = other.base_valid_rems
         self.base_remote_refs = other.base_remote_refs
+        self.base_remote_adds = other.base_remote_adds
+        self.base_remote_rems = other.base_remote_rems
         self.base_resource_refs = other.base_resource_refs
+        self.base_resource_adds = other.base_resource_adds
+        self.base_resource_rems = other.base_resource_rems
         self.nested_gc_refs = other.nested_gc_refs
+        self.nested_gc_adds = other.nested_gc_adds
+        self.nested_gc_rems = other.nested_gc_rems
         self.nested_valid_refs = other.nested_valid_refs
+        self.nested_valid_adds = other.nested_valid_adds
+        self.nested_valid_rems = other.nested_valid_rems
         self.nested_remote_refs = other.nested_remote_refs
+        self.nested_remote_adds = other.nested_remote_adds
+        self.nested_remote_rems = other.nested_remote_rems
         self.nested_resource_refs = other.nested_resource_refs
+        self.nested_resource_adds = other.nested_resource_adds
+        self.nested_resource_rems = other.nested_resource_rems
+        self.deleted = other.deleted
 
-    def check_references(self):
-        has_references = False
-        if not has_references and len(self.base_gc_refs) > 0:
+    def update_nested_references(self, state):
+        if self.nested_gc_refs:
+            new_gc_refs = dict()
+            new_gc_adds = dict()
+            new_gc_rems = dict()
+            for did,refs in self.nested_gc_refs.iteritems():
+                src = state.get_obj(did)
+                new_gc_refs[src] = refs
+                new_gc_adds[src] = self.nested_gc_adds[did]
+                new_gc_rems[src] = self.nested_gc_rems[did]
+            self.nested_gc_refs = new_gc_refs
+            self.nested_gc_adds = new_gc_adds
+            self.nested_gc_rems = new_gc_rems
+        if self.nested_valid_refs:
+            new_valid_refs = dict()
+            new_valid_adds = dict()
+            new_valid_rems = dict()
+            for did,refs in self.nested_valid_refs.iteritems():
+                src = state.get_obj(did)
+                new_valid_refs[src] = refs
+                new_valid_adds[src] = self.nested_valid_adds[did]
+                new_valid_rems[src] = self.nested_valid_rems[did]
+            self.nested_valid_refs = new_valid_refs
+            self.nested_valid_adds = new_valid_adds
+            self.nested_valid_rems = new_valid_rems
+        if self.nested_remote_refs:
+            new_remote_refs = dict()
+            new_remote_adds = dict()
+            new_remote_rems = dict()
+            for did,refs in self.nested_remote_refs.iteritems():
+                src = state.get_obj(did)
+                new_remote_refs[src] = refs
+                new_remote_adds[src] = self.nested_remote_adds[did]
+                new_remote_rems[src] = self.nested_remote_rems[did]
+            self.nested_remote_refs = new_remote_refs
+            self.nested_remote_adds = new_remote_adds
+            self.nested_remote_rems = new_remote_rems
+        if self.nested_resource_refs:
+            new_resource_refs = dict()
+            new_resource_adds = dict()
+            new_resource_rems = dict()
+            for did,refs in self.nested_resource_refs.iteritems():
+                src = state.get_obj(did)
+                new_resource_refs[src] = refs
+                new_resource_adds[src] = self.nested_resource_adds[did]
+                new_resource_rems[src] = self.nested_resource_rems[did]
+            self.nested_resource_refs = new_resource_refs
+            self.nested_resource_adds = new_resource_adds
+            self.nested_resource_rems = new_resource_rems
+
+    def check_for_leaks(self, verbose):
+        if self.deleted:
+            if verbose:
+                print "----------------------------------------------------------------"
+                print str(self)+' was properly deleted'
+                printer = TracePrinter()
+                self.report_references(printer, GC_REF_KIND, verbose)
+                self.report_references(printer, VALID_REF_KIND, verbose)
+                self.report_references(printer, REMOTE_REF_KIND, verbose)
+                self.report_references(printer, RESOURCE_REF_KIND, verbose)
+                print "----------------------------------------------------------------"
+            else:
+                print str(self)+' was properly deleted'
+            return True
+        # Special case if this is an instance that the user pinned
+        # then we don't need to report this as an error
+        if isinstance(self,Manager):
+            is_pinned = True
             for kind,refs in self.base_gc_refs.iteritems():
-                if refs is not 0:
-                    has_references = True
+                if refs <> 0:
+                    is_pinned = False;
                     break
-        if not has_references and len(self.base_valid_refs) > 0:
-            for kind,refs in self.base_valid_refs.iteritems():
-                if refs is not 0:
-                    has_references = True
-                    break
-        if not has_references and len(self.base_remote_refs) > 0:
-            for kind,refs in self.base_remote_refs.iteritems():
-                if refs is not 0:
-                    has_references = True
-                    break
-        if not has_references and len(self.nested_gc_refs) > 0:
-            for kind,refs in self.nested_gc_refs.iteritems():
-                if refs is not 0:
-                    has_references = True
-                    break
-        if not has_references and len(self.nested_valid_refs) > 0:
-            for kind,refs in self.nested_valid_refs.iteritems():
-                if refs is not 0:
-                    has_references = True
-                    break
-        if not has_references and len(self.nested_remote_refs) > 0:
-            for kind,refs in self.nested_remote_refs.iteritems():
-                if refs is not 0:
-                    has_references = True
-                    break
-        if has_references:
-            printer = TracePrinter()
-            self.report_references(printer)
-        return has_references
+            if is_pinned:
+                for kind,refs in self.base_valid_refs.iteritems():
+                    if kind == 'Maximum':
+                        continue
+                    if refs <> 0:
+                        is_pinned = False
+                        break
+            if is_pinned:
+                for kind,refs in self.base_remote_refs.iteritems():
+                    if refs <> 0:
+                        is_pinned = False
+                        break
+            if is_pinned:
+                for kind,refs in self.base_resource_refs.iteritems():
+                    if kind == 'Memory':
+                        continue
+                    if refs <> 0:
+                        is_pinned = False
+                        break
+            if is_pinned:
+                for refs in self.nested_gc_refs.itervalues():
+                    if refs <> 0:
+                        is_pinned = False
+                        break
+            if is_pinned:
+                for refs in self.nested_valid_refs.itervalues():
+                    if refs <> 0:
+                        is_pinned = False
+                        break
+            if is_pinned:
+                for refs in self.nested_remote_refs.itervalues():
+                    if refs <> 0:
+                        is_pinned = False
+                        break
+            if is_pinned:
+                for refs in self.nested_resource_refs.itervalues():
+                    if refs <> 0:
+                        is_pinned = False
+                        break
+            if is_pinned:
+                if verbose:
+                    print "----------------------------------------------------------------"
+                    print "INFO: "+str(self)+' was not deleted because it was pinned by the user'
+                    printer = TracePrinter()
+                    self.report_references(printer, GC_REF_KIND, verbose)
+                    self.report_references(printer, VALID_REF_KIND, verbose)
+                    self.report_references(printer, REMOTE_REF_KIND, verbose)
+                    self.report_references(printer, RESOURCE_REF_KIND, verbose)
+                    print "----------------------------------------------------------------"
+                else:
+                    print "INFO: "+str(self)+' was not deleted because it was pinned by the user'
+                return True
+        print "----------------------------------------------------------------"
+        print "ERROR: "+str(self)+" was not properly deleted"
+        printer = TracePrinter()
+        self.report_references(printer, GC_REF_KIND, verbose)
+        self.report_references(printer, VALID_REF_KIND, verbose)
+        self.report_references(printer, REMOTE_REF_KIND, verbose)
+        self.report_references(printer, RESOURCE_REF_KIND, verbose)
+        print "----------------------------------------------------------------"
 
-    def report_references(self, printer):
-        printer.print_base(self)
+    def report_references(self, printer, kind, verbose):
         printer.down()
-        if len(self.base_gc_refs) > 0:
+        if kind == GC_REF_KIND and self.base_gc_refs:
             for kind,refs in self.base_gc_refs.iteritems():
-                if refs is 0:
-                    continue
-                printer.println('Base GC '+kind+' '+str(refs))
-        if len(self.base_valid_refs) > 0:
+                if refs == 0:
+                    if verbose:
+                        printer.println('Empty (Refs=0): Base GC '+kind+
+                            ' (Adds='+str(self.base_gc_adds[kind])+',Rems='+str(self.base_gc_rems[kind])+')')
+                else:
+                    if verbose:
+                        printer.println('NON-EMPTY (Refs='+str(refs)+'): Base GC '+kind+
+                            ' (Adds='+str(self.base_gc_adds[kind])+',Rems='+str(self.base_gc_rems[kind])+')')
+                    else:
+                        printer.println('Base GC '+kind+' (Refs='+str(refs)+')')
+        if kind == VALID_REF_KIND and self.base_valid_refs:
             for kind,refs in self.base_valid_refs.iteritems():
-                if refs is 0:
-                    continue
-                printer.println('Base Valid '+kind+' '+str(refs))
-        if len(self.base_remote_refs) > 0:
+                if refs == 0:
+                    if verbose:
+                        printer.println('Empty (Refs=0): Base Valid '+kind+
+                            ' (Adds='+str(self.base_valid_adds[kind])+',Rems='+str(self.base_valid_rems[kind])+')')
+                else:
+                    if verbose:
+                        printer.println('NON-EMPTY (Refs='+str(refs)+'): Base Valid '+kind+
+                            ' (Adds='+str(self.base_valid_adds[kind])+',Rems='+str(self.base_valid_rems[kind])+')')
+                    else:
+                        printer.println('Base Valid '+kind+' (Refs='+str(refs)+')')
+        if kind == REMOTE_REF_KIND and self.base_remote_refs:
             for kind,refs in self.base_remote_refs.iteritems():
-                if refs is 0:
-                    continue
-                printer.println('Base Remote '+kind+' '+str(refs))
-        if len(self.nested_gc_refs) > 0:
+                if refs == 0:
+                    if verbose:
+                        printer.println('Empty (Refs=0): Base Remote '+kind+
+                            ' (Adds='+str(self.base_remote_adds[kind])+',Rems='+str(self.base_remote_rems[kind])+')')
+                else:
+                    if verbose:
+                        printer.println('NON-EMPTY (Refs='+str(refs)+'): Base Remote '+kind+
+                            ' (Adds='+str(self.base_remote_adds[kind])+',Rems='+str(self.base_remote_rems[kind])+')')
+                    else:
+                        printer.println('Base Remote '+kind+' (Refs='+str(refs)+')')
+        if kind == RESOURCE_REF_KIND and self.base_resource_refs:
+            for kind,refs in self.base_resource_refs.iteritems():
+                if refs == 0:
+                    if verbose:
+                        printer.println('Empty (Refs=0): Base Resource '+kind+
+                            ' (Adds='+str(self.base_resource_adds[kind])+',Rems='+str(self.base_resource_rems[kind])+')')
+                else:
+                    if verbose:
+                        printer.println('NON-EMPTY (Refs='+str(refs)+'): Base Resource '+kind+
+                            ' (Adds='+str(self.base_resource_adds[kind])+',Rems='+str(self.base_resource_rems[kind])+')')
+                    else:
+                        printer.println('Base Resource '+kind+' (Refs='+str(refs)+')')
+        if kind == GC_REF_KIND and self.nested_gc_refs:
             for src,refs in self.nested_gc_refs.iteritems():
-                if refs is 0:
+                if refs == 0:
+                    if verbose:
+                        printer.println('Empty (Refs=0): Nested GC '+repr(src)+
+                            ' (Adds='+str(self.nested_gc_adds[src])+',Rems='+str(self.nested_gc_rems[src])+')')
                     continue
-                printer.println('Nested GC '+repr(src))
+                if verbose:
+                    printer.println('NON-EMPTY (Refs='+str(refs)+'): Nested GC '+repr(src)+
+                        ' (Adds='+str(self.nested_gc_adds[src])+',Rems='+str(self.nested_gc_rems[src])+')')    
+                else:
+                    printer.println('Nested GC '+repr(src)+' (Refs='+str(refs)+')')
                 printer.down()
-                src.report_references(printer)
+                src.report_references(printer, kind, verbose)
                 printer.up()
-        if len(self.nested_valid_refs) > 0:
+        if kind == VALID_REF_KIND and self.nested_valid_refs:
             for src,refs in self.nested_valid_refs.iteritems():
-                if refs is 0:
+                if refs == 0:
+                    if verbose:
+                        printer.println('Empty (Refs=0): Nested Valid '+repr(src)+
+                            ' (Adds='+str(self.nested_valid_adds[src])+',Rems='+str(self.nested_valid_rems[src])+')')
                     continue
-                printer.println('Nested Valid '+repr(src))
+                if verbose:
+                    printer.println('NON-EMPTY (Refs='+str(refs)+'): Nested Valid '+repr(src)+
+                        ' (Adds='+str(self.nested_valid_adds[src])+',Rems='+str(self.nested_valid_rems[src])+')')
+                else:
+                    printer.println('Nested Valid '+repr(src)+' (Refs='+str(refs)+')')
                 printer.down()
-                src.report_references(printer)
+                src.report_references(printer, kind, verbose)
                 printer.up()
-        if len(self.nested_remote_refs) > 0:
+        if kind == REMOTE_REF_KIND and self.nested_remote_refs:
             for src,refs in self.nested_remote_refs.iteritems():
-                if refs is 0:
+                if refs == 0:
+                    if verbose:
+                        printer.println('Empty (Refs=0): Nested Remote '+repr(src)+
+                            ' (Adds='+str(self.nested_remote_adds[src])+',Rems='+str(self.nested_remote_rems[src])+')')
                     continue
-                printer.println('Nested Remote '+repr(src))
+                if verbose:
+                    printer.println('NON-EMPTY (Refs='+str(refs)+'): Nested Remote '+repr(src)+
+                        ' (Adds='+str(self.nested_remote_adds[src])+',Rems='+str(self.nested_remote_rems[src])+')')
+                else:
+                    printer.println('Nested Remote '+repr(src)+' (Refs='+str(refs)+')')
                 printer.down()
-                src.report_references(printer)
+                src.report_references(printer, kind, verbose)
+                printer.up()
+        if kind == RESOURCE_REF_KIND and self.nested_resource_refs:
+            for src,refs in self.nested_resource_refs.iteritems():
+                if refs == 0:
+                    if verbose:
+                        printer.println('Empty (Refs=0): Nested Resource '+repr(src)+
+                            ' (Adds='+str(self.nested_resource_adds[src])+',Rems='+str(self.nested_resource_rems[src])+')')
+                    continue
+                if verbose:
+                    printer.println('NON-EMPTY (Refs='+str(refs)+'): Nested Resource '+repr(src)+
+                        ' (Adds='+str(self.nested_resource_adds[src])+',Rems='+str(self.nested_resource_rems[src])+')')
+                else:
+                    printer.println('Nested Resource '+repr(src)+' (Refs='+str(refs)+')')
+                printer.down()
+                src.report_references(printer, kind, verbose)
                 printer.up()
         printer.up()
+        return False
 
-    def check_for_cycles(self, stack):
+    def check_for_cycles(self):
+        stack = list()
+        self.check_for_cycles_by_kind(stack, GC_REF_KIND)
+        stack = list()
+        self.check_for_cycles_by_kind(stack, VALID_REF_KIND)
+        stack = list()
+        self.check_for_cycles_by_kind(stack, REMOTE_REF_KIND)
+        stack = list()
+        self.check_for_cycles_by_kind(stack, RESOURCE_REF_KIND)
+
+    def check_for_cycles_by_kind(self, stack, kind):
         if self.on_stack:
             print 'CYCLE DETECTED!'
             for obj in stack:
@@ -269,21 +539,26 @@ class Base(object):
             sys.exit(0)
         stack.append(self)
         self.on_stack = True
-        if len(self.nested_gc_refs) > 0:
+        if kind == GC_REF_KIND and self.nested_gc_refs:
             for src,refs in self.nested_gc_refs.iteritems():
                 if refs is 0:
                     continue
-                src.check_for_cycles(stack)
-        if len(self.nested_valid_refs) > 0:
+                src.check_for_cycles_by_kind(stack, kind)
+        if kind == VALID_REF_KIND and self.nested_valid_refs:
             for src,refs in self.nested_valid_refs.iteritems():
                 if refs is 0:
                     continue
-                src.check_for_cycles(stack)
-        if len(self.nested_remote_refs) > 0:
+                src.check_for_cycles_by_kind(stack, kind)
+        if kind == REMOTE_REF_KIND and self.nested_remote_refs:
             for src,refs in self.nested_remote_refs.iteritems():
                 if refs is 0:
                     continue
-                src.check_for_cycles(stack)
+                src.check_for_cycles_by_kind(stack, kind)
+        if kind == RESOURCE_REF_KIND and self.nested_resource_refs:
+            for src,refs in self.nested_resource_refs.iteritems():
+                if refs is 0:
+                    continue
+                src.check_for_cycles_by_kind(stack, kind)
         stack.pop()
         self.on_stack = False
 
@@ -312,8 +587,6 @@ class View(Base):
 
     def __repr__(self):
         result = self.kind +' View '+str(self.did)
-        if self.manager is not None:
-            result += ' of ' + repr(self.manager)
         return result
 
 class Future(Base):
@@ -323,6 +596,20 @@ class Future(Base):
     def __repr__(self):
         return 'Future '+str(self.did)
 
+class VersionState(Base):
+    def __init__(self, did):
+        super(VersionState,self).__init__(did)
+
+    def __repr__(self):
+        return 'Version State '+str(self.did)
+
+class Constraints(Base):
+    def __init__(self, did):
+        super(Constraints,self).__init__(did)
+
+    def __repr__(self):
+        return 'Layout Constraints '+str(self.did)
+
 class Instance(object):
     def __init__(self, iid, mem, kind):
         self.iid = iid
@@ -330,7 +617,7 @@ class Instance(object):
         self.kind = kind
 
     def __repr__(self):
-        return self.kind + ' Instance '+hex(self.iid)+' in Memory '+hex(self.mem)
+        return self.kind + ' Instance '+hex(self.iid)
 
 class State(object):
     def __init__(self):
@@ -340,6 +627,8 @@ class State(object):
         self.unknowns = {}
         self.instances = {}
         self.src_names = {}
+        self.constraints = {}
+        self.version_states = {}
 
     def parse_log_file(self, file_name):
         with open(file_name, 'rb') as log:
@@ -410,18 +699,52 @@ class State(object):
                     self.log_reduction_view(long(m.group('did')),
                                             long(m.group('inst')))
                     continue
+                m = version_state_pat.match(line)
+                if m is not None:
+                    self.log_version_state(long(m.group('did')))
+                    continue
                 m = future_pat.match(line)
                 if m is not None:
                     self.log_future(long(m.group('did')))
+                    continue
+                m = constraints_pat.match(line)
+                if m is not None:
+                    self.log_constraints(long(m.group('did')))
                     continue
                 m = source_kind_pat.match(line)
                 if m is not None:
                     self.log_source_kind(int(m.group('kind')),
                                          m.group('name'))
                     continue
+                m = deletion_pat.match(line)
+                if m is not None:
+                    self.log_deletion(long(m.group('did')))
+                    continue
                 matches -= 1
                 print 'Skipping unmatched line: '+line
         return matches
+
+    def post_parse(self):
+        # Delete the virtual instance it is special
+        assert 0 in self.unknowns
+        del self.unknowns[0]
+        if self.unknowns:
+            print "WARNING: Found %d unknown objects!" % len(self.unknowns)
+            for did in self.unknowns.iterkeys():
+                print '  Unknown DID '+str(hex(did))
+        # Now update all the pointers to references
+        for man in self.managers.itervalues():
+            man.update_nested_references(self)
+        for view in self.views.itervalues():
+            view.update_nested_references(self)
+        for future in self.futures.itervalues():
+            future.update_nested_references(self)
+        for constraint in self.constraints.itervalues():
+            constraint.update_nested_references(self)
+        for state in self.version_states.itervalues():
+            state.update_nested_references(self)
+        # Run the garbage collector
+        gc.collect()
 
     def log_add_base_ref(self, kind, did, src, cnt):
         obj = self.get_obj(did) 
@@ -430,8 +753,7 @@ class State(object):
 
     def log_add_nested_ref(self, kind, did, src, cnt):
         obj = self.get_obj(did)
-        src_obj = self.get_obj(src)
-        obj.add_nested_ref(kind, src_obj, cnt)
+        obj.add_nested_ref(kind, src, cnt)
 
     def log_remove_base_ref(self, kind, did, src, cnt):
         obj = self.get_obj(did)
@@ -440,21 +762,20 @@ class State(object):
 
     def log_remove_nested_ref(self, kind, did, src, cnt):
         obj = self.get_obj(did)
-        src_obj = self.get_obj(src)
-        obj.remove_nested_ref(kind, src_obj, cnt)
+        obj.remove_nested_ref(kind, src, cnt)
 
     def log_inst_manager(self, did, iid, mem):
-        inst = self.get_instance(iid, mem, 'Instance')
+        inst = self.get_instance(iid, mem, 'Physical')
         manager = self.get_manager(did)
         manager.add_inst(inst)
 
     def log_list_manager(self, did, iid, mem):
-        inst = self.get_instance(iid, mem, 'List')
+        inst = self.get_instance(iid, mem, 'List Reduction')
         manager = self.get_manager(did)
         manager.add_inst(inst)
 
     def log_fold_manager(self, did, iid, mem):
-        inst = self.get_instance(iid, mem, 'Fold')
+        inst = self.get_instance(iid, mem, 'Fold Reduction')
         manager = self.get_manager(did)
         manager.add_inst(inst)
 
@@ -474,12 +795,22 @@ class State(object):
         view = self.get_view(did, 'Reduction')
         view.add_manager(manager)
 
+    def log_version_state(self, did):
+        self.get_version_state(did);
+
     def log_future(self, did):
         self.get_future(did)
+
+    def log_constraints(self, did):
+        self.get_constraints(did)
 
     def log_source_kind(self, kind, name):
         if kind not in self.src_names:
             self.src_names[kind] = name
+
+    def log_deletion(self, did):
+        obj = self.get_obj(did)
+        obj.deleted = True
 
     def get_instance(self, iid, mem, kind):
         if iid not in self.instances:
@@ -502,6 +833,14 @@ class State(object):
                 del self.unknowns[did]
         return self.views[did]
 
+    def get_version_state(self, did):
+        if did not in self.version_states:
+            self.version_states[did] = VersionState(did)
+            if did in self.unknowns:
+                self.version_states[did].clone(self.unknowns[did])
+                del self.unknowns[did]
+        return self.version_states[did]
+
     def get_future(self, did):
         if did not in self.futures:
             self.futures[did] = Future(did)
@@ -510,6 +849,14 @@ class State(object):
                 del self.unknowns[did]
         return self.futures[did]
 
+    def get_constraints(self, did):
+        if did not in self.constraints:
+            self.constraints[did] = Constraints(did)
+            if did in self.unknowns:
+                self.constraints[did].clone(self.unknowns[did])
+                del self.unknowns[did]
+        return self.constraints[did]
+
     def get_obj(self, did):
         if did in self.views:
             return self.views[did]
@@ -517,61 +864,89 @@ class State(object):
             return self.managers[did]
         if did in self.futures:
             return self.futures[did]
+        if did in self.version_states:
+            return self.version_states[did]
+        if did in self.constraints:
+            return self.constraints[did]
         if did in self.unknowns:
             return self.unknowns[did]
         self.unknowns[did] = Base(did)
         return self.unknowns[did]
 
-    def find_cycles(self):
-        stack = list()
+    def check_for_cycles(self):
         for did,manager in self.managers.iteritems():
-            manager.check_for_cycles(stack)
+            manager.check_for_cycles()
         for did,view in self.views.iteritems():
-            view.check_for_cycles(stack)
+            view.check_for_cycles()
         for did,future in self.futures.iteritems():
-            future.check_for_cycles(stack)
+            future.check_for_cycles()
+        for did,version in self.version_states.iteritems():
+            version.check_for_cycles()
 
-    def check_futures(self):
-        for did,future in self.futures.iteritems():
-            if future.check_references():
-                break
-
-    def check_managers(self):
-        for did,manager in self.managers.iteritems():
-            if manager.check_references():
-                break
-
-    def check_views(self):
-        for did,views in self.views.iteritems():
-            if view.check_references():
-                break
+    def check_for_leaks(self, verbose): 
+        leaked_futures = 0
+        leaked_constraints = 0
+        leaked_managers = 0
+        leaked_views = 0
+        leaked_states = 0
+        for future in self.futures.itervalues():
+            if not future.check_for_leaks(verbose):
+                leaked_futures += 1
+        for constraint in self.constraints.itervalues():
+            if not constraint.check_for_leaks(verbose): 
+                leaked_constraints += 1
+        for manager in self.managers.itervalues():
+            if not manager.check_for_leaks(verbose):
+                leaked_managers += 1
+        for view in self.views.itervalues():
+            if not view.check_for_leaks(verbose):
+                leaked_views += 1
+        for state in self.version_states.itervalues():
+            if not state.check_for_leaks(verbose):
+                leaked_states += 1
+        print "LEAK SUMMARY"
+        if leaked_futures > 0:
+            print "  LEAKED_FUTURES: "+str(leaked_futures)
+        else:
+            print "  Leaked Futures: "+str(leaked_futures)
+        if leaked_constraints > 0:
+            print "  LEAKED CONSTRAINTS: "+str(leaked_constraints)
+        else:
+            print "  Leaked Constraints: "+str(leaked_constraints)
+        if leaked_managers > 0:
+            print "  LEAKED MANAGERS: "+str(leaked_managers)
+        else:
+            print "  Leaked Managers: "+str(leaked_managers)
+        if leaked_views > 0:
+            print "  LEAKED VIEWS: "+str(leaked_views)
+        else:
+            print "  Leaked Views: "+str(leaked_views)
+        if leaked_states > 0:
+            print "  LEAKED VERSION STATES: "+str(leaked_states)
+        else:
+            print "  Leaked Version States: "+str(leaked_states)
 
 def usage():
-    print 'Usage: '+sys.argv[0]+' <file_names>+'
+    print 'Usage: '+sys.argv[0]+' [-c -l -v] <file_names>+'
+    print '  -c : check for cycles'
+    print '  -l : check for leaks'
+    print '  -v : verbose'
     sys.exit(1)
 
 def main():
-    opts, args = getopt(sys.argv[1:],'fmv')
+    opts, args = getopt(sys.argv[1:],'clv')
     opts = dict(opts)
     if len(args) == 0:
         usage()
-    check_all = True
-    check_futures = False
-    check_managers = False
-    check_views = False
-    if '-f' in opts:
-        check_futures = True
-        check_all = False
-    if '-m' in opts:
-        check_managers = True
-        check_all = False
+    check_cycles = False
+    check_leaks = False
+    verbose = False
+    if '-c' in opts:
+        check_cycles = True
+    if '-l' in opts:
+        check_leaks = True
     if '-v' in opts:
-        check_managers = True
-        check_all = False
-    if check_all:
-        check_futures = True
-        check_managers = True
-        check_view = True
+        verbose = True
 
     file_names = args
     
@@ -587,16 +962,13 @@ def main():
         print 'No matches found! Exiting...'
         return
 
-    state.find_cycles()
+    state.post_parse()
+  
+    if check_cycles:
+        state.check_for_cycles()
+    if check_leaks:
+        state.check_for_leaks(verbose)
 
-    if check_futures:
-        state.check_futures()
-
-    if check_managers:
-        state.check_managers()
-
-    if check_views:
-        state.check_views()
 
 if __name__ == '__main__':
     main()
