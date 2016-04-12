@@ -875,13 +875,21 @@ class State(object):
 
     def check_for_cycles(self):
         for did,manager in self.managers.iteritems():
+            print "Checking for cycles in "+repr(manager)
             manager.check_for_cycles()
         for did,view in self.views.iteritems():
+            print "Checking for cycles in "+repr(view)
             view.check_for_cycles()
         for did,future in self.futures.iteritems():
+            print "Checking for cycles in "+repr(future)
             future.check_for_cycles()
         for did,version in self.version_states.iteritems():
+            print "Checking for cycles in "+repr(version)
             version.check_for_cycles()
+        for did,constraint in self.constraints.iteritems():
+            print "Checking for cycles in "+repr(constraint)
+            constraint.check_for_cycles()
+        print "NO CYCLES"
 
     def check_for_leaks(self, verbose): 
         leaked_futures = 0
