@@ -70,6 +70,7 @@ local language = {
     "atomic",
     "copy",
     "cross_product",
+    "cross_product_array",
     "disjoint",
     "dynamic_cast",
     "dynamic_collective",

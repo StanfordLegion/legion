@@ -249,6 +249,9 @@ local function get_num_accessed_fields(node)
   elseif node:is(ast.unspecialized.expr.CrossProduct) then
     return 1
 
+  elseif node:is(ast.unspecialized.expr.CrossProductArray) then
+    return 1
+
   elseif node:is(ast.unspecialized.expr.ListSlicePartition) then
     return 1
 
@@ -927,6 +930,16 @@ function specialize.expr_cross_product(cx, node)
   }
 end
 
+function specialize.expr_cross_product_array(cx, node)
+  return ast.specialized.expr.CrossProductArray {
+    lhs = specialize.expr(cx, node.lhs),
+    disjointness = specialize.disjointness_kind(cx, node.disjointness),
+    colorings = specialize.expr(cx, node.colorings),
+    options = node.options,
+    span = node.span,
+  }
+end
+
 function specialize.expr_list_slice_partition(cx, node)
   return ast.specialized.expr.ListSlicePartition {
     partition = specialize.expr(cx, node.partition),
@@ -1189,6 +1202,9 @@ function specialize.expr(cx, node)
 
   elseif node:is(ast.unspecialized.expr.CrossProduct) then
     return specialize.expr_cross_product(cx, node)
+
+  elseif node:is(ast.unspecialized.expr.CrossProductArray) then
+    return specialize.expr_cross_product_array(cx, node)
 
   elseif node:is(ast.unspecialized.expr.ListSlicePartition) then
     return specialize.expr_list_slice_partition(cx, node)
