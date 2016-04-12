@@ -510,13 +510,13 @@ namespace Legion {
           std::set<Event> &preconditions);
       void invalidate_region_tree_contexts(void);
     public:
-      InstanceView* create_logical_top_view(PhysicalManager *manager, 
-                                            unsigned index);
+      InstanceView* create_instance_top_view(PhysicalManager *manager, 
+                                             unsigned index);
       void notify_instance_deletion(PhysicalManager *deleted, 
                                     GenerationID old_gen);
-      static void handle_logical_top_view_request(Deserializer &derez, 
+      static void handle_create_top_view_request(Deserializer &derez, 
                             Runtime *runtime, AddressSpaceID source);
-      static void handle_logical_top_view_response(Deserializer &derez,
+      static void handle_create_top_view_response(Deserializer &derez,
                                                    Runtime *runtime);
     protected:
       void pack_single_task(Serializer &rez, AddressSpaceID target);

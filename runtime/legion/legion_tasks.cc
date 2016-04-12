@@ -5664,8 +5664,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    InstanceView* SingleTask::create_logical_top_view(PhysicalManager *manager,
-                                                      unsigned index)
+    InstanceView* SingleTask::create_instance_top_view(PhysicalManager *manager,
+                                                       unsigned index)
     //--------------------------------------------------------------------------
     {
       // First check to see if we are the owner node for this manager
@@ -5724,7 +5724,7 @@ namespace Legion {
         if (!wait_on.exists())
         {
           // We have to make the instance view
-          result = manager->create_logical_top_view(this);
+          result = manager->create_instance_top_view(this);
           result->add_base_resource_ref(CONTEXT_REF);
           UserEvent to_trigger;
           {
@@ -5798,7 +5798,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void SingleTask::handle_logical_top_view_request(
+    /*static*/ void SingleTask::handle_create_top_view_request(
                    Deserializer &derez, Runtime *runtime, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -5825,7 +5825,7 @@ namespace Legion {
 #else
       PhysicalManager *manager = static_cast<PhysicalManager*>(dc);
 #endif
-      InstanceView *result = context->create_logical_top_view(manager, index);
+      InstanceView *result = context->create_instance_top_view(manager, index);
       // Send the result back to the source and follow it with our own message
       result->send_view(source);
       Serializer rez;
@@ -5839,7 +5839,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void SingleTask::handle_logical_top_view_response(
+    /*static*/ void SingleTask::handle_create_top_view_response(
                                           Deserializer &derez, Runtime *runtime)
     //--------------------------------------------------------------------------
     {

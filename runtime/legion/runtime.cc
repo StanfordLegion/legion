@@ -15193,14 +15193,14 @@ namespace Legion {
                                                  AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      SingleTask::handle_logical_top_view_request(derez, this, source);
+      SingleTask::handle_create_top_view_request(derez, this, source);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::handle_create_top_view_response(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      SingleTask::handle_logical_top_view_response(derez, this);
+      SingleTask::handle_create_top_view_response(derez, this);
     }
 
     //--------------------------------------------------------------------------

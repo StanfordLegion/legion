@@ -688,7 +688,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    InstanceView* PhysicalManager::create_logical_top_view(SingleTask *context)
+    InstanceView* PhysicalManager::create_instance_top_view(SingleTask *context)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL

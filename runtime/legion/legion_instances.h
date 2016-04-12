@@ -159,7 +159,7 @@ namespace Legion {
         { return is_virtual_manager(); }
     public:
       // Methods for creating/finding/destroying logical top views
-      InstanceView* create_logical_top_view(SingleTask *context);
+      InstanceView* create_instance_top_view(SingleTask *context);
       void unregister_active_context(SingleTask *context);
     protected:
       virtual InstanceView* create_top_view(SingleTask *context) const = 0;

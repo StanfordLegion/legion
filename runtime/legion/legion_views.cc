@@ -769,12 +769,6 @@ namespace Legion {
       Serializer rez;
       {
         RezCheck z(rez);
-        bool is_region = logical_node->is_region();
-        rez.serialize(is_region);
-        if (is_region)
-          rez.serialize(logical_node->as_region_node()->handle);
-        else
-          rez.serialize(logical_node->as_partition_node()->handle);
         rez.serialize(did);
         // Pack the needed users first
         rez.serialize<size_t>(needed_users.size());
@@ -2475,21 +2469,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez); 
-      bool is_region;
-      derez.deserialize(is_region);
-      RegionTreeNode *target_node;
-      if (is_region)
-      {
-        LogicalRegion handle;
-        derez.deserialize(handle);
-        target_node = runtime->forest->get_node(handle);
-      }
-      else
-      {
-        LogicalPartition handle;
-        derez.deserialize(handle);
-        target_node = runtime->forest->get_node(handle);
-      }
       DistributedID did;
       derez.deserialize(did);
       DistributedCollectable *dc = runtime->find_distributed_collectable(did);
@@ -4846,10 +4825,6 @@ namespace Legion {
       Serializer rez;
       {
         RezCheck z(rez);
-#ifdef DEBUG_HIGH_LEVEL
-        assert(logical_node->is_region());
-#endif
-        rez.serialize(logical_node->as_region_node()->handle);
         rez.serialize(did);
         rez.serialize<size_t>(red_users.size());
         for (std::deque<PhysicalUser*>::const_iterator it = 
@@ -5011,8 +4986,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
-      LogicalRegion handle;
-      derez.deserialize(handle);
       DistributedID did;
       derez.deserialize(did);
       DistributedCollectable *dc = runtime->find_distributed_collectable(did);

@@ -1663,7 +1663,7 @@ namespace Legion {
             finder = top_views.find(manager);
           if (finder == top_views.end())
           {
-            ReductionView *new_view = context->create_logical_top_view(manager,
+            ReductionView *new_view = context->create_instance_top_view(manager,
                                                 ctx_index)->as_reduction_view();
             top_views[manager] = new_view;
             corresponding[idx] = new_view;
@@ -1686,8 +1686,8 @@ namespace Legion {
             finder = top_views.find(manager);
           if (finder == top_views.end())
           {
-            MaterializedView *new_view = context->create_logical_top_view(
-                              manager, ctx_index)->as_materialized_view();
+            MaterializedView *new_view = context->create_instance_top_view(
+                                manager, ctx_index)->as_materialized_view();
             top_views[manager] = new_view;
             // See if we need to get the appropriate subview
             if (top_node != manager->region_node)
@@ -13217,7 +13217,7 @@ namespace Legion {
       // We have to make it if it doesn't exist yet
       // If we're at the root, get the view we need for this context
       if (manager->region_node == this)
-        result = context->create_logical_top_view(manager, context_index);
+        result = context->create_instance_top_view(manager, context_index);
       // If we didn't find it immediately, switch over to the explicit
       // versions that don't have so many virtual function calls
       else if (is_region())
@@ -15005,8 +15005,8 @@ namespace Legion {
                                             attach_mask, this, attach_op);
       // Wrap it in a view
       MaterializedView *view = 
-        attach_op->get_parent()->create_logical_top_view(manager, 
-                                parent_req_index)->as_materialized_view();
+        attach_op->get_parent()->create_instance_top_view(manager, 
+                                  parent_req_index)->as_materialized_view();
 #ifdef DEBUG_HIGH_LEVEL
       assert(view != NULL);
 #endif
@@ -15048,7 +15048,7 @@ namespace Legion {
       if (result != NULL)
         return result;
       if (manager->region_node == this)
-        result = context->create_logical_top_view(manager, context_index);
+        result = context->create_instance_top_view(manager, context_index);
       else
       {
 #ifdef DEBUG_HIGH_LEVEL
@@ -15107,7 +15107,7 @@ namespace Legion {
         if (manager->region_node == this)
         {
           results[idx] = 
-            context->create_logical_top_view(manager, context_index);
+            context->create_instance_top_view(manager, context_index);
           // Mark that it is done
           up_mask[idx] = false;
         }
