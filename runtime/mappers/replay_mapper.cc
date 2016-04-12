@@ -149,6 +149,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ReplayMapper::report_profiling(const MapperContext       ctx,
+                                        const Task&               task,
+                                        const TaskProfilingInfo&  input)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
     void ReplayMapper::map_inline(const MapperContext        ctx,
                                   const InlineMapping&       inline_op,
                                   const MapInlineInput&      input,

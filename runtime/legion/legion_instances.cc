@@ -921,8 +921,8 @@ namespace Legion {
                                      RegionNode *node, LayoutDescription *desc, 
                                      const PointerConstraint &constraint,
                                      Event u_event, InstanceFlag flags)
-      : PhysicalManager(ctx, mem, desc, constraint, did, owner_space, 
-                        local_space, node, inst, instance_domain, own),
+      : PhysicalManager(ctx, mem, desc, constraint, encode_instance_did(did), 
+                 owner_space, local_space, node, inst, instance_domain, own),
         use_event(u_event), instance_flags(flags)
     //--------------------------------------------------------------------------
     {
@@ -1404,8 +1404,8 @@ namespace Legion {
                                                ReductionOpID red,
                                                const ReductionOp *o, 
                                                Domain dom)
-      : ReductionManager(ctx, did, f, owner_space, local_space, mem, 
-                         inst, desc, cons, d, own_dom, node, red, o),
+      : ReductionManager(ctx, encode_reduction_list_did(did), f, owner_space, 
+          local_space, mem, inst, desc, cons, d, own_dom, node, red, o),
         ptr_space(dom)
     //--------------------------------------------------------------------------
     {
@@ -1557,8 +1557,8 @@ namespace Legion {
                                                ReductionOpID red,
                                                const ReductionOp *o,
                                                Event u_event)
-      : ReductionManager(ctx, did, f, owner_space, local_space, mem, inst, 
-                         desc, cons, d, own_dom, node, red, o),
+      : ReductionManager(ctx, encode_reduction_fold_did(did), f, owner_space, 
+          local_space, mem, inst, desc, cons, d, own_dom, node, red, o),
         use_event(u_event)
     //--------------------------------------------------------------------------
     {
