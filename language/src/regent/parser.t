@@ -1046,22 +1046,32 @@ end
 
 function parser.fnargs(p)
   if p:nextif("(") then
-    local args
+    local args = terralib.newlist()
+    local conditions = terralib.newlist()
     if not p:matches(")") then
-      args = p:expr_list()
-    else
-      args = terralib.newlist()
+      repeat
+        if p:is_condition_kind() then
+          break
+        end
+        args:insert(p:expr())
+      until not p:nextif(",")
+
+      if not p:matches(")") then
+        repeat
+          conditions:insert(p:expr_condition())
+        until not p:nextif(",")
+      end
     end
     p:expect(")")
-    return args
+    return args, conditions
 
   elseif p:matches("{") then
     local arg = p:expr_ctor()
-    return terralib.newlist({arg})
+    return terralib.newlist({arg}), terralib.newlist()
 
   elseif p:matches(p.string) then
     local arg = p:expr_simple()
-    return terralib.newlist({arg})
+    return terralib.newlist({arg}), terralib.newlist()
 
   else
     p:error("unexpected token in fnargs expression")
@@ -1106,7 +1116,10 @@ function parser.expr_primary(p)
 
     elseif p:nextif(":") then
       local method_name = p:next(p.name).value
-      local args = p:fnargs()
+      local args, conditions = p:fnargs()
+      if #conditions > 0 then
+        p:error("method call cannot have conditions")
+      end
       expr = ast.unspecialized.expr.MethodCall {
         value = expr,
         method_name = method_name,
@@ -1116,10 +1129,11 @@ function parser.expr_primary(p)
       }
 
     elseif p:matches("(") or p:matches("{") or p:matches(p.string) then
-      local args = p:fnargs()
+      local args, conditions = p:fnargs()
       expr = ast.unspecialized.expr.Call {
         fn = expr,
         args = args,
+        conditions = conditions,
         options = ast.default_options(),
         span = ast.span(start, p),
       }

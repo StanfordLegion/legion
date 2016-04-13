@@ -657,10 +657,15 @@ function specialize.expr_call(cx, node)
     std.is_task(fn.value) or
     type(fn.value) == "function"
   then
+    if not std.is_task(fn.value) and #node.conditions > 0 then
+      log.error(node.conditions[1],
+        "terra function call cannot have conditions")
+    end
     return ast.specialized.expr.Call {
       fn = fn,
       args = node.args:map(
         function(arg) return specialize.expr(cx, arg) end),
+      conditions = specialize.expr_conditions(cx, node.conditions),
       options = node.options,
       span = node.span,
     }
