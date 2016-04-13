@@ -3817,15 +3817,7 @@ namespace Legion {
     {
       begin_dependence_analysis();
       // Register this fence with all previous users in the parent's context
-      RegionTreeContext ctx = parent_ctx->get_context();
-      for (unsigned idx = 0; idx < parent_ctx->regions.size(); idx++)
-      {
-#ifdef DEBUG_HIGH_LEVEL
-        assert(parent_ctx->regions[idx].handle_type == SINGULAR);
-#endif
-        runtime->forest->perform_fence_analysis(ctx, this, 
-                          parent_ctx->regions[idx].region, true/*dominate*/);
-      }
+      parent_ctx->perform_fence_analysis(this);
       // Now update the parent context with this fence
       // before we can complete the dependence analysis
       // and possibly be deactivated
@@ -4371,6 +4363,19 @@ namespace Legion {
       requirement = req;
       initialize_privilege_path(privilege_path, requirement);
     } 
+
+    //--------------------------------------------------------------------------
+    void CloseOp::initialize_close(SingleTask *ctx, unsigned idx, bool track)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(completion_event.exists());
+#endif
+      initialize_operation(ctx, track);
+      parent_task = ctx;
+      ctx->clone_requirement(idx, requirement);
+      initialize_privilege_path(privilege_path, requirement);
+    }
 
     //--------------------------------------------------------------------------
     void CloseOp::perform_logging(bool is_intermediate_close_op, bool read_only)
@@ -5030,7 +5035,7 @@ namespace Legion {
     void PostCloseOp::initialize(SingleTask *ctx, unsigned idx) 
     //--------------------------------------------------------------------------
     {
-      initialize_close(ctx, ctx->regions[idx], true/*track*/);
+      initialize_close(ctx, idx, true/*track*/);
       // If it was write-discard from the task's perspective, make it
       // read-write within the task's context
       if (requirement.privilege == WRITE_DISCARD)
@@ -5252,7 +5257,7 @@ namespace Legion {
     void VirtualCloseOp::initialize(SingleTask *ctx, unsigned index)
     //--------------------------------------------------------------------------
     {
-      initialize_close(ctx, ctx->regions[index], true/*track*/);
+      initialize_close(ctx, index, true/*track*/);
       // If it was write-discard from the task's perspective, make it
       // read-write within the task's context
       if (requirement.privilege == WRITE_DISCARD)

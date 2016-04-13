@@ -668,16 +668,12 @@ namespace Legion {
     RegionTreeContext TaskOp::get_parent_context(unsigned idx)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
-      AutoLock o_lock(op_lock,1,false/*exclusive*/);
-      assert(idx < regions.size());
-#endif
       if (!is_remote())
       {
-#ifdef DEBUG_HIGH_LEVEL
-        assert(idx < parent_req_indexes.size());
-#endif
-        return parent_ctx->find_enclosing_context(parent_req_indexes[idx]);
+        if (idx < parent_req_indexes.size())
+          return parent_ctx->find_enclosing_context(parent_req_indexes[idx]);
+        else
+          return parent_ctx->find_outermost_context()->get_context();
       }
       // This is remote, so just return the context of the remote parent
       return parent_ctx->get_context(); 
@@ -815,10 +811,7 @@ namespace Legion {
       if (finder == created_regions.end())
         deleted_regions.insert(handle);
       else
-      {
         created_regions.erase(finder);
-        remove_created_region(handle);
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -849,10 +842,7 @@ namespace Legion {
         if (finder == created_regions.end())
           deleted_regions.insert(*it);
         else
-        {
           created_regions.erase(finder);
-          remove_created_region(*it);
-        }
       }
     } 
 
@@ -901,10 +891,7 @@ namespace Legion {
         if (finder == created_fields.end())
           deleted_fields.insert(key);
         else
-        {
           created_fields.erase(finder);
-          remove_created_field(handle, *it);
-        }
       }
     }
 
@@ -939,10 +926,7 @@ namespace Legion {
         if (finder == created_fields.end())
           deleted_fields.insert(*it);
         else
-        {
           created_fields.erase(finder);
-          remove_created_field(it->first, it->second);
-        }
       }
     }
 
@@ -967,10 +951,7 @@ namespace Legion {
             created_fields.begin(); it != created_fields.end(); it++)
       {
         if (it->first == space)
-        {
           to_delete.push_back(it->second);
-          remove_created_field(space, it->second);
-        }
       }
       for (unsigned idx = 0; idx < to_delete.size(); idx++)
       {
@@ -1014,10 +995,7 @@ namespace Legion {
               created_fields.begin(); cit != created_fields.end(); cit++)
         {
           if (cit->first == *it)
-          {
             to_delete.push_back(cit->second);
-            remove_created_field(*it, cit->second);
-          }
         }
         for (unsigned idx = 0; idx < to_delete.size(); idx++)
         {
@@ -1049,7 +1027,6 @@ namespace Legion {
       assert(created_index_spaces.find(space) == created_index_spaces.end());
 #endif
       created_index_spaces.insert(space);
-      add_created_index(space);
     }
 
     //--------------------------------------------------------------------------
@@ -1061,10 +1038,7 @@ namespace Legion {
       if (finder == created_index_spaces.end())
         deleted_index_spaces.insert(space);
       else
-      {
         created_index_spaces.erase(finder);
-        remove_created_index(space);
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -1080,7 +1054,6 @@ namespace Legion {
         assert(created_index_spaces.find(*it) == created_index_spaces.end());
 #endif
         created_index_spaces.insert(*it);
-        add_created_index(*it);
       }
     }
 
@@ -1097,10 +1070,7 @@ namespace Legion {
         if (finder == created_index_spaces.end())
           deleted_index_spaces.insert(*it);
         else
-        {
           created_index_spaces.erase(finder);
-          remove_created_index(*it);
-        }
       }
     }
 
@@ -2328,7 +2298,6 @@ namespace Legion {
       current_fence = NULL;
       fence_gen = 0;
       context = RegionTreeContext();
-      initial_region_count = 0;
       valid_wait_event = false;
       deferred_map = Event::NO_EVENT;
       deferred_complete = Event::NO_EVENT; 
@@ -2369,10 +2338,9 @@ namespace Legion {
       target_processors.clear();
       physical_instances.clear();
       physical_regions.clear();
+      created_requirements.clear();
       inline_regions.clear();
       virtual_mapped.clear();
-      region_deleted.clear();
-      index_deleted.clear();
       executing_children.clear();
       executed_children.clear();
       complete_children.clear();
@@ -2459,9 +2427,7 @@ namespace Legion {
     {
       if (!has_virtual_instances_cached)
       {
-        // Hold the lock when testing this
-        AutoLock o_lock(op_lock, 1, false/*exclusive*/);
-        for (unsigned idx = 0; idx < initial_region_count; idx++)
+        for (unsigned idx = 0; idx < regions.size(); idx++)
         {
           if (virtual_mapped[idx])
           {
@@ -2478,9 +2444,8 @@ namespace Legion {
     bool SingleTask::is_virtual_mapped(unsigned index) const
     //--------------------------------------------------------------------------
     {
-      if (index >= initial_region_count)
+      if (index >= regions.size())
         return false; // new region, not actually virtually mapped
-      AutoLock o_lock(op_lock, 1, false/*exclusive*/);
 #ifdef DEBUG_HIGH_LEVEL
       assert(index < virtual_mapped.size());
 #endif
@@ -2491,7 +2456,7 @@ namespace Legion {
     bool SingleTask::is_created_region(unsigned index) const
     //--------------------------------------------------------------------------
     {
-      return (index >= initial_region_count);
+      return (index >= regions.size());
     }
 
     //--------------------------------------------------------------------------
@@ -2783,23 +2748,19 @@ namespace Legion {
     {
       int depth = get_depth();
       rez.serialize(depth);
-      // We have to hold the lock when packing some of these things
+      AutoLock o_lock(op_lock, 1, false/*exclusive*/);
+      // See if we need to pack up base task information
+      pack_base_task(rez, target);
+      // Pack up our virtual mapping information
+      std::vector<unsigned> virtual_indexes;
+      for (unsigned idx = 0; idx < regions.size(); idx++)
       {
-        AutoLock o_lock(op_lock, 1, false/*exclusive*/);
-        // See if we need to pack up base task information
-        pack_base_task(rez, target);
-        // Pack up our virtual mapping information
-        rez.serialize(initial_region_count);
-        std::vector<unsigned> virtual_indexes;
-        for (unsigned idx = 0; idx < initial_region_count; idx++)
-        {
-          if (virtual_mapped[idx])
-            virtual_indexes.push_back(idx);
-        }
-        rez.serialize<size_t>(virtual_indexes.size());
-        for (unsigned idx = 0; idx < virtual_indexes.size(); idx++)
-          rez.serialize(virtual_indexes[idx]);
+        if (virtual_mapped[idx])
+          virtual_indexes.push_back(idx);
       }
+      rez.serialize<size_t>(virtual_indexes.size());
+      for (unsigned idx = 0; idx < virtual_indexes.size(); idx++)
+        rez.serialize(virtual_indexes[idx]);
       // Now pack up any local fields 
       LegionDeque<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::tracked locals = 
                                                                   local_fields;
@@ -3120,6 +3081,28 @@ namespace Legion {
           current_fence = NULL;
 #endif
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void SingleTask::perform_fence_analysis(FenceOp *op)
+    //--------------------------------------------------------------------------
+    {
+      RegionTreeContext ctx = get_context();
+      // Do our internal regions first
+      for (unsigned idx = 0; idx < regions.size(); idx++)
+        runtime->forest->perform_fence_analysis(ctx, op, 
+                                        regions[idx].region, true/*dominate*/);
+      // Now see if we have any created regions
+      std::deque<RegionRequirement> created_clones;
+      {
+        AutoLock o_lock(op_lock,1,false/*exclusive*/);
+        if (created_requirements.empty())
+          return;
+        created_clones = created_requirements;
+      }
+      for (unsigned idx = 0; idx < created_clones.size(); idx++)
+        runtime->forest->perform_fence_analysis(ctx, op,
+                                created_clones[idx].region, true/*dominate*/);
     }
 
     //--------------------------------------------------------------------------
@@ -3583,15 +3566,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SingleTask::add_created_index(IndexSpace handle)
-    //--------------------------------------------------------------------------
-    {
-      // Already hold the lock from the caller
-      indexes.push_back(IndexSpaceRequirement(handle,ALL_MEMORY,handle));
-      index_deleted.push_back(false);
-    }
-
-    //--------------------------------------------------------------------------
     void SingleTask::add_created_region(LogicalRegion handle)
     //--------------------------------------------------------------------------
     {
@@ -3602,21 +3576,17 @@ namespace Legion {
       new_req.privilege_fields.insert(new_req.instance_fields.begin(),
                                       new_req.instance_fields.end());
       // Now make a new region requirement and physical region
-      regions.push_back(new_req);
+      created_requirements.push_back(new_req);
       // Make a new unmapped physical region
       physical_regions.push_back(PhysicalRegion(
-            legion_new<PhysicalRegionImpl>(regions.back(), Event::NO_EVENT,
-                 false/*mapped*/, this, map_id, tag, is_leaf(), runtime)));
-      physical_instances.push_back(InstanceSet());
-      // Mark that this region was virtually mapped so we don't
-      // try to close it when we are done executing.
-      virtual_mapped.push_back(true);
-      region_deleted.push_back(false);
+            legion_new<PhysicalRegionImpl>(created_requirements.back(), 
+              Event::NO_EVENT, false/*mapped*/, this, map_id, tag, 
+              is_leaf(), runtime)));
       RemoteTask *outermost = find_outermost_context();
       outermost->add_top_region(handle);
       // Log this requirement for legion spy if necessary
       if (Runtime::legion_spy_enabled)
-        log_created_requirement(regions.size() - 1);
+        log_created_requirement(created_requirements.size() - 1);
     }
 
     //--------------------------------------------------------------------------
@@ -3632,17 +3602,14 @@ namespace Legion {
       {
         RegionRequirement new_req(*it, READ_WRITE, EXCLUSIVE, *it);
         new_req.privilege_fields.insert(fid);
-        regions.push_back(new_req);
+        created_requirements.push_back(new_req);
         physical_regions.push_back(PhysicalRegion(
-              legion_new<PhysicalRegionImpl>(regions.back(), Event::NO_EVENT,
-                    false/*mapped*/, this, map_id, tag, is_leaf(), runtime)));
-        physical_instances.push_back(InstanceSet());
-        // Mark that the region was virtually mapped
-        virtual_mapped.push_back(true);
-        region_deleted.push_back(false);
+              legion_new<PhysicalRegionImpl>(created_requirements.back(), 
+                Event::NO_EVENT, false/*mapped*/, this, map_id, tag, 
+                is_leaf(), runtime)));
         outermost->add_top_region(*it);
         if (Runtime::legion_spy_enabled)
-          log_created_requirement(regions.size() - 1);
+          log_created_requirement(created_requirements.size() - 1);
       }
     }
 
@@ -3650,62 +3617,18 @@ namespace Legion {
     void SingleTask::log_created_requirement(unsigned index)
     //--------------------------------------------------------------------------
     {
-      log_requirement(unique_op_id, index, regions[index]);
+      log_requirement(unique_op_id, regions.size() + index, 
+                      created_requirements[index]);
       std::vector<MappingInstance> instances(1, 
           Mapping::PhysicalInstance::get_virtual_instance());
       RegionTreeID bad_tree; std::vector<FieldID> missing_fields;
       std::vector<PhysicalManager*> unacquired;
-      runtime->forest->physical_convert_mapping(regions[index], instances, 
-          physical_instances[index], bad_tree, missing_fields, 
+      InstanceSet instance_set;
+      runtime->forest->physical_convert_mapping(created_requirements[index], 
+          instances, instance_set, bad_tree, missing_fields, 
           NULL, unacquired, false/*do acquire_checks*/);
-      runtime->forest->log_mapping_decision(unique_op_id, index,
-                       regions[index], physical_instances[index]);
-    }
-
-    //--------------------------------------------------------------------------
-    void SingleTask::remove_created_index(IndexSpace handle)
-    //--------------------------------------------------------------------------
-    {
-      // Already hold the lock from the caller
-      for (unsigned idx = 0; idx < indexes.size(); idx++)
-      {
-        if (indexes[idx].handle == handle)
-        {
-          index_deleted[idx] = true;
-        }
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void SingleTask::remove_created_region(LogicalRegion handle)
-    //--------------------------------------------------------------------------
-    {
-      // Already hold the lock from the caller
-      for (unsigned idx = 0; idx < regions.size(); idx++)
-      {
-        if (regions[idx].region == handle)
-        {
-          region_deleted[idx] = true;
-        }
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void SingleTask::remove_created_field(FieldSpace handle, FieldID fid)
-    //--------------------------------------------------------------------------
-    {
-      // Already hold the lock from the caller
-      for (unsigned idx = 0; idx < regions.size(); idx++)
-      {
-        if (regions[idx].region.get_field_space() == handle)
-        {
-          regions[idx].privilege_fields.erase(fid);
-          if (regions[idx].privilege_fields.empty())
-          {
-            region_deleted[idx] = true;
-          }
-        }
-      }
+      runtime->forest->log_mapping_decision(unique_op_id,
+          regions.size() + index, created_requirements[index], instance_set);
     }
 
     //--------------------------------------------------------------------------
@@ -3714,23 +3637,31 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       RegionTreeContext outermost = find_outermost_context()->get_context();
+      for (std::vector<RegionRequirement>::const_iterator it = 
+            regions.begin(); it != regions.end(); it++)
+      {
+#ifdef DEBUG_HIGH_LEVEL
+        assert(it->handle_type == SINGULAR);
+#endif
+        if (top_regions.find(it->region) != top_regions.end())
+          continue;
+        top_regions[it->region] = context;
+      }
       // Need to hold the lock when getting the top regions because
       // the add_created_region method can be executing in parallel
       // and may result in the vector changing size
       AutoLock o_lock(op_lock,1,false/*exclusive*/);
-      for (unsigned idx = 0; idx < regions.size(); idx++)
+      for (std::deque<RegionRequirement>::const_iterator it = 
+           created_requirements.begin(); it != created_requirements.end(); it++)
       {
 #ifdef DEBUG_HIGH_LEVEL
-        assert(regions[idx].handle_type == SINGULAR);
+        assert(it->handle_type == SINGULAR);
 #endif
-        if (top_regions.find(regions[idx].region) != top_regions.end())
+        if (top_regions.find(it->region) != top_regions.end())
           continue;
         // If it is something that we made, then the context is
-        // the outermost context, otherwise it is our context
-        if (idx >= initial_region_count)
-          top_regions[regions[idx].region] = outermost;
-        else
-          top_regions[regions[idx].region] = context;
+        // the outermost context
+        top_regions[it->region] = outermost;
       }
     }
 
@@ -3870,17 +3801,15 @@ namespace Legion {
       parent_conflict = false;
       inline_conflict = false;
       // No need to hold our lock here because we are the only ones who
-      // could possibly be doing any mutating of the regions data structure
-      // but we are here so we aren't mutating
-#ifdef DEBUG_HIGH_LEVEL
-      assert(regions.size() == physical_regions.size());
-#endif
-      for (unsigned our_idx = 0; our_idx < regions.size(); our_idx++)
+      // could possibly be doing any mutating of the physical_regions data 
+      // structure but we are here so we aren't mutating
+      for (unsigned our_idx = 0; our_idx < physical_regions.size(); our_idx++)
       {
         // skip any regions which are not mapped
         if (!physical_regions[our_idx].impl->is_mapped())
           continue;
-        const RegionRequirement &our_req = regions[our_idx];
+        const RegionRequirement &our_req = 
+          physical_regions[our_idx].impl->get_requirement();
 #ifdef DEBUG_HIGH_LEVEL
         // This better be true for a single task
         assert(our_req.handle_type == SINGULAR);
@@ -3923,17 +3852,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // No need to hold our lock here because we are the only ones who
-      // could possibly be doing any mutating of the regions data structure
-      // but we are here so we aren't mutating
-#ifdef DEBUG_HIGH_LEVEL
-      assert(regions.size() == physical_regions.size());
-#endif
-      for (unsigned our_idx = 0; our_idx < regions.size(); our_idx++)
+      // could possibly be doing any mutating of the physical_regions data 
+      // structure but we are here so we aren't mutating
+      for (unsigned our_idx = 0; our_idx < physical_regions.size(); our_idx++)
       {
         // Skip any regions which are not mapped
         if (!physical_regions[our_idx].impl->is_mapped())
           continue;
-        const RegionRequirement &our_req = regions[our_idx];
+        const RegionRequirement &our_req = 
+          physical_regions[our_idx].impl->get_requirement();
 #ifdef DEBUG_HIGH_LEVEL
         // This better be true for a single task
         assert(our_req.handle_type == SINGULAR);
@@ -3990,17 +3917,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // No need to hold our lock here because we are the only ones who
-      // could possibly be doing any mutating of the regions data structure
-      // but we are here so we aren't mutating
-#ifdef DEBUG_HIGH_LEVEL
-      assert(regions.size() == physical_regions.size());
-#endif
-      for (unsigned our_idx = 0; our_idx < regions.size(); our_idx++)
+      // could possibly be doing any mutating of the physical_regions data 
+      // structure but we are here so we aren't mutating
+      for (unsigned our_idx = 0; our_idx < physical_regions.size(); our_idx++)
       {
         // skip any regions which are not mapped
         if (!physical_regions[our_idx].impl->is_mapped())
           continue;
-        const RegionRequirement &our_req = regions[our_idx];
+        const RegionRequirement &our_req = 
+          physical_regions[our_idx].impl->get_requirement();
 #ifdef DEBUG_HIGH_LEVEL
         // This better be true for a single task
         assert(our_req.handle_type == SINGULAR);
@@ -4092,17 +4017,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // No need to hold our lock here because we are the only ones who
-      // could possibly be doing any mutating of the regions data structure
-      // but we are here so we aren't mutating
-#ifdef DEBUG_HIGH_LEVEL
-      assert(regions.size() == physical_regions.size());
-#endif
-      for (unsigned our_idx = 0; our_idx < regions.size(); our_idx++)
+      // could possibly be doing any mutating of the physical_regions data 
+      // structure but we are here so we aren't mutating
+      for (unsigned our_idx = 0; our_idx < physical_regions.size(); our_idx++)
       {
         // skip any regions which are not mapped
         if (!physical_regions[our_idx].impl->is_mapped())
           continue;
-        const RegionRequirement &our_req = regions[our_idx];
+        const RegionRequirement &our_req = 
+          physical_regions[our_idx].impl->get_requirement();
 #ifdef DEBUG_HIGH_LEVEL
         // This better be true for a single task
         assert(our_req.handle_type == SINGULAR);
@@ -4239,10 +4162,26 @@ namespace Legion {
     {
       AutoLock o_lock(op_lock,1,false/*exclusive*/);
 #ifdef DEBUG_HIGH_LEVEL
-      assert(regions.size() == physical_regions.size());
       assert(idx < physical_regions.size());
 #endif
       return physical_regions[idx].impl->is_mapped();
+    }
+
+    //--------------------------------------------------------------------------
+    void SingleTask::clone_requirement(unsigned idx, RegionRequirement &target)
+    //--------------------------------------------------------------------------
+    {
+      if (idx >= regions.size())
+      {
+        idx -= regions.size();
+        AutoLock o_lock(op_lock,1,false/*exclusive*/);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(idx < created_requirements.size());
+#endif
+        target = created_requirements[idx];
+      }
+      else
+        target = regions[idx];
     }
 
     //--------------------------------------------------------------------------
@@ -4250,15 +4189,16 @@ namespace Legion {
                                            bool check_privilege /*= true*/)
     //--------------------------------------------------------------------------
     {
-      AutoLock o_lock(op_lock,1,false/*exclusive*/);
+      // We can check most of our region requirements without the lock
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
+        const RegionRequirement &our_req = regions[idx];
         // First check that the regions match
-        if ((regions[idx].region != req.parent) || region_deleted[idx])
+        if (our_req.region != req.parent)
           continue;
         // Next check the privileges
         if (check_privilege && 
-            ((req.privilege & regions[idx].privilege) != req.privilege))
+            ((req.privilege & our_req.privilege) != req.privilege))
           continue;
         // Finally check that all the fields are contained
         bool dominated = true;
@@ -4266,8 +4206,8 @@ namespace Legion {
               req.privilege_fields.begin(); it !=
               req.privilege_fields.end(); it++)
         {
-          if (regions[idx].privilege_fields.find(*it) ==
-              regions[idx].privilege_fields.end())
+          if (our_req.privilege_fields.find(*it) ==
+              our_req.privilege_fields.end())
           {
             dominated = false;
             break;
@@ -4277,6 +4217,37 @@ namespace Legion {
           continue;
         return int(idx);
       }
+      // The created region requirements have to be checked while holding
+      // the lock since they are subject to mutation by the application
+      AutoLock o_lock(op_lock,1,false/*exclusive*/);
+      for (unsigned idx = 0; idx < created_requirements.size(); idx++)
+      {
+        const RegionRequirement &our_req = created_requirements[idx];
+        // First check that the regions match
+        if (our_req.region != req.parent)
+          continue;
+        // Next check the privileges
+        if (check_privilege && 
+            ((req.privilege & our_req.privilege) != req.privilege))
+          continue;
+        // Finally check that all the fields are contained
+        bool dominated = true;
+        for (std::set<FieldID>::const_iterator it = 
+              req.privilege_fields.begin(); it !=
+              req.privilege_fields.end(); it++)
+        {
+          if (our_req.privilege_fields.find(*it) ==
+              our_req.privilege_fields.end())
+          {
+            dominated = false;
+            break;
+          }
+        }
+        if (!dominated)
+          continue;
+        // Include the offset by the number of base requirements
+        return int(regions.size() + idx);
+      }
       return -1;
     }
 
@@ -4284,15 +4255,17 @@ namespace Legion {
     unsigned SingleTask::find_parent_region(unsigned index, TaskOp *child)
     //--------------------------------------------------------------------------
     {
-      AutoLock o_lock(op_lock,1,false/*exclusive*/);
-#ifdef DEBUG_HIGH_LEVEL
-      assert(regions.size() == region_deleted.size());
-#endif
+      // We can check these without the lock
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
-        if ((regions[idx].region == child->regions[index].parent) &&
-            !region_deleted[idx])
+        if (regions[idx].region == child->regions[index].parent)
           return idx;
+      }
+      AutoLock o_lock(op_lock,1,false/*exclusive*/);
+      for (unsigned idx = 0; idx < created_requirements.size(); idx++)
+      {
+        if (created_requirements[idx].region == child->regions[index].parent)
+          return (regions.size() + idx);
       }
       log_region.error("Parent task %s (ID %lld) of inline task %s "
                         "(ID %lld) does not have a region "
@@ -4315,14 +4288,9 @@ namespace Legion {
     unsigned SingleTask::find_parent_index_region(unsigned index, TaskOp *child)
     //--------------------------------------------------------------------------
     {
-      AutoLock o_lock(op_lock,1,false/*exclusive*/);
-#ifdef DEBUG_HIGH_LEVEL
-      assert(indexes.size() == index_deleted.size());
-#endif
       for (unsigned idx = 0; idx < indexes.size(); idx++)
       {
-        if ((indexes[idx].handle == child->indexes[idx].parent) && 
-              !index_deleted[idx])
+        if ((indexes[idx].handle == child->indexes[idx].parent))
           return idx;
       }
       log_index.error("Parent task %s (ID %lld) of inline task %s "
@@ -4343,11 +4311,14 @@ namespace Legion {
     PrivilegeMode SingleTask::find_parent_privilege_mode(unsigned idx)
     //--------------------------------------------------------------------------
     {
+      if (idx < regions.size())
+        return regions[idx].privilege;
+      idx -= regions.size();
       AutoLock o_lock(op_lock,1,false/*exclusive*/);
 #ifdef DEBUG_HIGH_LEVEL
-      assert(idx < regions.size());
+      assert(idx < created_requirements.size());
 #endif
-      return regions[idx].privilege;
+      return created_requirements[idx].privilege;
     }
 
     //--------------------------------------------------------------------------
@@ -4409,17 +4380,9 @@ namespace Legion {
     {
       if (req.flags & VERIFIED_FLAG)
         return NO_ERROR;
-      std::vector<RegionRequirement> copy_regions;
-      {
-        // Make a copy of the regions so we don't have to
-        // hold the lock when doing this which could result
-        // in a double acquire of locks
-        AutoLock o_lock(op_lock,1,false/*exclusive*/);
-        copy_regions = regions;
-      }
       std::set<FieldID> checking_fields = req.privilege_fields;
       for (std::vector<RegionRequirement>::const_iterator it = 
-            copy_regions.begin(); it != copy_regions.end(); it++)
+            regions.begin(); it != regions.end(); it++)
       {
 #ifdef DEBUG_HIGH_LEVEL
         assert(it->handle_type == SINGULAR); // better be singular
@@ -4586,7 +4549,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // See if this is one of our original regions or if it is a new one
-      if (idx < initial_region_count)
+      if (idx < regions.size())
         return context;
       else
         return find_outermost_context()->get_context();
@@ -5646,20 +5609,16 @@ namespace Legion {
     void SingleTask::invalidate_region_tree_contexts(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(initial_region_count <= regions.size());
-#endif
-      for (unsigned idx = 0; idx < initial_region_count; idx++)
+      for (unsigned idx = 0; idx < regions.size(); idx++)
       {
         runtime->forest->invalidate_current_context(context,
                                                     regions[idx].region,
                                                     false/*logical only*/);
       }
-      for (unsigned idx = initial_region_count; idx < regions.size(); idx++)
+      for (unsigned idx = 0; idx < created_requirements.size(); idx++)
       {
         runtime->forest->invalidate_current_context(context,
-                                                    regions[idx].region,
-                                                    true/*logical only*/);
+                  created_requirements[idx].region, true/*logical only*/);
       }
     }
 
@@ -5761,6 +5720,7 @@ namespace Legion {
       // We've got the result, see if this requirement was virtually mapped
       if (has_virtual_instances() && is_virtual_mapped(index))
       {
+#if 0
         // This is where things get weird, this region was virtually mapped
         // Now we have to clone the view information from our parent context
         // First we need to get our parent context  
@@ -5783,6 +5743,7 @@ namespace Legion {
         // which this instance can also be used for and are also virtual 
         // mapped and therefore we need to do this analysis now before we
         // release the instance as ready for the context
+#endif
       }
       else if (is_created_region(index))
       {
@@ -5925,8 +5886,6 @@ namespace Legion {
       }
 
       // STEP 2: Set up the task's context
-      index_deleted.resize(indexes.size(),false);
-      region_deleted.resize(regions.size(),false);
       std::vector<UserEvent> unmap_events(regions.size());
       {
         std::vector<RegionRequirement> clone_requirements(regions.size());
@@ -6011,7 +5970,6 @@ namespace Legion {
         {
           // Request a context from the runtime
           runtime->allocate_local_context(this);
-          initial_region_count = regions.size();
           // Have the mapper configure the properties of the context
           context_configuration.max_window_size = 
             Runtime::initial_task_window_size;
@@ -6056,7 +6014,7 @@ namespace Legion {
                                           unmap_events, wait_on_events);
           if (!variant->is_inner())
           {
-            for (unsigned idx = 0; idx < regions.size(); idx++)
+            for (unsigned idx = 0; idx < physical_regions.size(); idx++)
             {
               if (!virtual_mapped[idx])
               {
@@ -6070,7 +6028,7 @@ namespace Legion {
         {
           // Leaf and all non-virtual mappings
           // Mark that all the local instances are empty
-          for (unsigned idx = 0; idx < regions.size(); idx++)
+          for (unsigned idx = 0; idx < physical_regions.size(); idx++)
           {
             if (!virtual_mapped[idx])
             {
@@ -6178,7 +6136,6 @@ namespace Legion {
       assert(regions.size() == physical_regions.size());
       assert(regions.size() == physical_instances.size());
       assert(regions.size() == virtual_mapped.size());
-      assert(regions.size() == region_deleted.size());
 #endif
       // Issue a utility task to decrement the number of outstanding
       // tasks now that this task has started running
@@ -6215,10 +6172,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
-      assert(regions.size() == physical_regions.size());
-      assert(regions.size() == physical_instances.size());
-      assert(regions.size() == virtual_mapped.size());
-      assert(regions.size() == region_deleted.size());
+      assert((regions.size() + 
+                created_requirements.size()) == physical_regions.size());
 #endif
       // Quick check to make sure the user didn't forget to end a trace
       if (current_trace != NULL)
@@ -6231,7 +6186,7 @@ namespace Legion {
         exit(ERROR_INCOMPLETE_TRACE);
       }
       // Unmap all of the physical regions which are still mapped
-      for (unsigned idx = 0; idx < regions.size(); idx++)
+      for (unsigned idx = 0; idx < physical_regions.size(); idx++)
       {
         if (physical_regions[idx].impl->is_mapped())
           physical_regions[idx].impl->unmap_region();
@@ -6245,15 +6200,13 @@ namespace Legion {
         if (it->impl->is_mapped())
           it->impl->unmap_region();
       }
-
       inline_regions.clear();
-
       if (!is_leaf() || has_virtual_instances())
       {
+        // Note that this loop doesn't handle create regions
         for (unsigned idx = 0; idx < physical_instances.size(); idx++)
         {
-          if (IS_READ_ONLY(regions[idx]) || IS_NO_ACCESS(regions[idx]) ||
-              region_deleted[idx])
+          if (IS_READ_ONLY(regions[idx]) || IS_NO_ACCESS(regions[idx]))
             continue;
           if (!virtual_mapped[idx])
           {
@@ -6268,8 +6221,11 @@ namespace Legion {
               runtime->add_to_dependence_queue(executing_processor, close_op);
             }
           }
-          else if (physical_instances[idx].has_composite_ref())
+          else
           {
+#ifdef DEBUG_HIGH_LEVEL
+            assert(physical_instances[idx].has_composite_ref());
+#endif
             // Make a virtual close op to close up the instance
             VirtualCloseOp *close_op = 
               runtime->get_available_virtual_close_op(true);
@@ -6804,13 +6760,6 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    void MultiTask::add_created_index(IndexSpace handle)
-    //--------------------------------------------------------------------------
-    {
-      // Do nothing
-    }
-
-    //--------------------------------------------------------------------------
     void MultiTask::add_created_region(LogicalRegion handle)
     //--------------------------------------------------------------------------
     {
@@ -6819,27 +6768,6 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void MultiTask::add_created_field(FieldSpace handle, FieldID fid)
-    //--------------------------------------------------------------------------
-    {
-      // Do nothing
-    }
-
-    //--------------------------------------------------------------------------
-    void MultiTask::remove_created_index(IndexSpace handle)
-    //--------------------------------------------------------------------------
-    {
-      // Do nothing
-    }
-
-    //--------------------------------------------------------------------------
-    void MultiTask::remove_created_region(LogicalRegion handle)
-    //--------------------------------------------------------------------------
-    {
-      // Do nothing
-    }
-
-    //--------------------------------------------------------------------------
-    void MultiTask::remove_created_field(FieldSpace handle, FieldID fid)
     //--------------------------------------------------------------------------
     {
       // Do nothing
@@ -7081,9 +7009,6 @@ namespace Legion {
       task_id = launcher.task_id;
       indexes = launcher.index_requirements;
       regions = launcher.region_requirements;
-      regions.resize(launcher.region_requirements.size());
-      for (unsigned idx = 0; idx < regions.size(); idx++)
-        regions[idx] = launcher.region_requirements[idx];
       futures = launcher.futures;
       grants = launcher.grants;
       update_grants(launcher.grants);
@@ -7203,9 +7128,6 @@ namespace Legion {
       task_id = tid;
       indexes = index_requirements;
       regions = region_requirements;
-      regions.resize(region_requirements.size());
-      for (unsigned idx = 0; idx < regions.size(); idx++)
-        regions[idx] = region_requirements[idx];
       arglen = arg.get_size();
       if (arglen > 0)
       {
@@ -8111,18 +8033,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AddressSpaceID target = runtime->find_address_space(orig_proc);
-      // First send back any created region tree state.  Note to do
-      // this we can start at the index of the version infos since we
-      // know that any additional region beyond this are ones for which
-      // we have created the privileges.
-      for (unsigned idx = version_infos.size(); idx < regions.size(); idx++)
+      for (unsigned idx = 0; idx < created_requirements.size(); idx++)
       {
-        if (!region_deleted[idx])
-        {
-          runtime->forest->send_back_logical_state(get_parent_context(idx),
-                                                   remote_outermost_context,
-                                                   regions[idx], target);
-        }
+        unsigned index = regions.size() + idx;
+        runtime->forest->send_back_logical_state(get_parent_context(index),
+            remote_outermost_context, created_requirements[idx], target);
       }
       // Send back the pointer to the task instance, then serialize
       // everything else that needs to be sent back
@@ -8632,14 +8547,11 @@ namespace Legion {
                                             RegionTreeContext remote_outermost)
     //--------------------------------------------------------------------------
     {
-      for (unsigned idx = start; idx < regions.size(); idx++)
+      for (unsigned idx = 0; idx < created_requirements.size(); idx++)
       {
-        if (!region_deleted[idx])
-        {
-          runtime->forest->send_back_logical_state(get_parent_context(idx),
-                                                   remote_outermost,
-                                                   regions[idx], target);
-        }
+        unsigned index = regions.size() + idx;
+        runtime->forest->send_back_logical_state(get_parent_context(index),
+            remote_outermost, created_requirements[idx], target);
       }
     }
 
@@ -9024,8 +8936,7 @@ namespace Legion {
       std::set<Event> ready_events;
       derez.deserialize(depth);
       unpack_base_task(derez, ready_events);
-      derez.deserialize(initial_region_count);
-      virtual_mapped.resize(initial_region_count, false);
+      virtual_mapped.resize(regions.size(), false);
       size_t num_virtual;
       derez.deserialize(num_virtual);
       for (unsigned idx = 0; idx < num_virtual; idx++)
@@ -9366,9 +9277,7 @@ namespace Legion {
       parent_ctx = ctx;
       task_id = launcher.task_id;
       indexes = launcher.index_requirements;
-      regions.resize(launcher.region_requirements.size());
-      for (unsigned idx = 0; idx < regions.size(); idx++)
-        regions[idx] = launcher.region_requirements[idx];
+      regions = launcher.region_requirements;
       futures = launcher.futures;
       update_grants(launcher.grants);
       wait_barriers = launcher.wait_barriers;
@@ -9426,9 +9335,7 @@ namespace Legion {
       parent_ctx = ctx;
       task_id = launcher.task_id;
       indexes = launcher.index_requirements;
-      regions.resize(launcher.region_requirements.size());
-      for (unsigned idx = 0; idx < regions.size(); idx++)
-        regions[idx] = launcher.region_requirements[idx];
+      regions = launcher.region_requirements;
       futures = launcher.futures;
       update_grants(launcher.grants);
       wait_barriers = launcher.wait_barriers;
@@ -9506,9 +9413,7 @@ namespace Legion {
       parent_ctx = ctx;
       task_id = tid;
       indexes = index_requirements;
-      regions.resize(region_requirements.size());
-      for (unsigned idx = 0; idx < regions.size(); idx++)
-        regions[idx] = region_requirements[idx];
+      regions = region_requirements;
       arglen = global_arg.get_size();
       if (arglen > 0)
       {
@@ -9567,9 +9472,7 @@ namespace Legion {
       parent_ctx = ctx;
       task_id = tid;
       indexes = index_requirements;
-      regions.resize(region_requirements.size());
-      for (unsigned idx = 0; idx < regions.size(); idx++)
-        regions[idx] = region_requirements[idx];
+      regions = region_requirements;
       arglen = global_arg.get_size();
       if (arglen > 0)
       {

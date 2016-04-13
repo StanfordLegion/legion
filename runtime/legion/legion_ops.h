@@ -869,6 +869,7 @@ namespace Legion {
       void deactivate_close(void);
       void initialize_close(SingleTask *ctx,
                             const RegionRequirement &req, bool track);
+      void initialize_close(SingleTask *ctx, unsigned idx, bool track);
       void perform_logging(bool is_intermediate_close_op, bool read_only);
     public:
       // For recording trace dependences

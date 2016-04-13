@@ -2383,6 +2383,7 @@ namespace Legion {
       return Runtime::merge_events<false>(result_events);
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void RegionTreeForest::convert_views_across_context(
                                         const RegionRequirement &req,
@@ -2425,6 +2426,7 @@ namespace Legion {
       // Now record the event as an initial precondition on the dst view
       dst_subview->add_initial_user(precondition, usage, user_mask);
     }
+#endif
 
     //--------------------------------------------------------------------------
     int RegionTreeForest::physical_convert_mapping(const RegionRequirement &req,

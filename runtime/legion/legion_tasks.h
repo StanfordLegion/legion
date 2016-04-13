@@ -161,12 +161,8 @@ namespace Legion {
       void register_index_space_creations(const std::set<IndexSpace> &spaces);
       void register_index_space_deletions(const std::set<IndexSpace> &spaces);
     public:
-      virtual void add_created_index(IndexSpace handle) = 0;
       virtual void add_created_region(LogicalRegion handle) = 0;
       virtual void add_created_field(FieldSpace handle, FieldID fid) = 0;
-      virtual void remove_created_index(IndexSpace handle) = 0;
-      virtual void remove_created_region(LogicalRegion handle) = 0;
-      virtual void remove_created_field(FieldSpace handle, FieldID fid) = 0;
     public:
       void return_privilege_state(TaskOp *target);
       void pack_privilege_state(Serializer &rez, AddressSpaceID target);
@@ -391,6 +387,7 @@ namespace Legion {
       void print_children(void);
       void perform_window_wait(void);
     public:
+      void perform_fence_analysis(FenceOp *op);
       virtual void update_current_fence(FenceOp *op);
     public:
       void begin_trace(TraceID tid);
@@ -419,14 +416,10 @@ namespace Legion {
       ptr_t perform_safe_cast(IndexSpace is, ptr_t pointer);
       DomainPoint perform_safe_cast(IndexSpace is, const DomainPoint &point);
     public:
-      virtual void add_created_index(IndexSpace handle);
       virtual void add_created_region(LogicalRegion handle);
       virtual void add_created_field(FieldSpace handle, FieldID fid);
       // for logging created region requirements
       void log_created_requirement(unsigned index);
-      virtual void remove_created_index(IndexSpace handle);
-      virtual void remove_created_region(LogicalRegion handle);
-      virtual void remove_created_field(FieldSpace handle, FieldID fid);
     public:
       void get_top_regions(std::map<LogicalRegion,
                                     RegionTreeContext> &top_regions);
@@ -469,6 +462,7 @@ namespace Legion {
       void unregister_inline_mapped_region(PhysicalRegion &region);
     public:
       bool is_region_mapped(unsigned idx);
+      void clone_requirement(unsigned idx, RegionRequirement &target);
       int find_parent_region_req(const RegionRequirement &req, 
                                  bool check_privilege = true);
       unsigned find_parent_region(unsigned idx, TaskOp *task);
@@ -586,25 +580,23 @@ namespace Legion {
     protected:
       // Boolean for each region saying if it is virtual mapped
       std::vector<bool> virtual_mapped;
-      // Boolean indicating if any regions have been deleted
-      std::vector<bool> region_deleted; 
-      // Boolean indicating if any index requirements have been deleted
-      std::vector<bool> index_deleted;
       Processor executing_processor;
     protected:
       std::vector<Processor> target_processors;
       // Hold the result of the mapping 
       LegionDeque<InstanceSet,TASK_INSTANCE_REGION_ALLOC>::tracked 
                                                              physical_instances;
-      // Hold the physical regions for the task's execution
-      std::vector<PhysicalRegion> physical_regions;
       // Keep track of inline mapping regions for this task
       // so we can see when there are conflicts
       LegionList<PhysicalRegion,TASK_INLINE_REGION_ALLOC>::tracked
                                                    inline_regions; 
       // Context for this task
       RegionTreeContext context; 
-      unsigned initial_region_count;
+      // Application tasks can manipulate these next two data
+      // structures by creating regions and fields, make sure you are
+      // holding the operation lock when you are accessing them
+      std::deque<RegionRequirement>             created_requirements;
+      std::vector<PhysicalRegion>               physical_regions;
     protected: // Instance top view data structures
       std::map<PhysicalManager*,InstanceView*>  instance_top_views;
       std::map<PhysicalManager*,UserEvent>      pending_top_views;
@@ -725,12 +717,8 @@ namespace Legion {
                                  size_t result_size, bool owner) = 0;
       virtual void register_must_epoch(void) = 0;
     public:
-      virtual void add_created_index(IndexSpace handle);
       virtual void add_created_region(LogicalRegion handle);
       virtual void add_created_field(FieldSpace handle, FieldID fid);
-      virtual void remove_created_index(IndexSpace handle);
-      virtual void remove_created_region(LogicalRegion handle);
-      virtual void remove_created_field(FieldSpace handle, FieldID fid);
     public:
       void pack_multi_task(Serializer &rez, AddressSpaceID target);
       void unpack_multi_task(Deserializer &derez,
