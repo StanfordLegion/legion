@@ -166,15 +166,17 @@ namespace Legion {
 
       // For capturing information about the shape of index spaces
       template<int DIM>
-      static inline void log_index_space_point(IDType handle, off_t *vals)
+      static inline void log_index_space_point(IDType handle, 
+                                               long long int *vals)
       {
-        log_spy.info("Index Space Point " IDFMT " %d %lld %lld %lld", handle, DIM,
-            vals[0], DIM < 2 ? 0 : vals[1], DIM < 3 ? 0 : vals[2]);
+        log_spy.info("Index Space Point " IDFMT " %d %lld %lld %lld", handle, 
+            DIM, vals[0], DIM < 2 ? 0 : vals[1], DIM < 3 ? 0 : vals[2]);
       }
 
       template<int DIM>
       static inline void log_index_space_rect(IDType handle, 
-                                              off_t *lower, off_t *higher)
+                                              long long int *lower, 
+                                              long long int *higher)
       {
         log_spy.info("Index Space Rect " IDFMT " %d "
             "%lld %lld %lld %lld %lld %lld",

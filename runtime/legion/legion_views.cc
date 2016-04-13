@@ -3529,36 +3529,19 @@ namespace Legion {
                                              src_preconditions);
           actual_copy_mask |= it->second;
         }
-        FieldMask diff_mask = copy_mask - actual_copy_mask;
-        if (!!diff_mask)
+        // Move in any preconditions that overlap with our set of fields
+        for (LegionMap<Event,FieldMask>::aligned::const_iterator it = 
+              preconditions.begin(); it != preconditions.end(); it++)
         {
-          // Move in any preconditions that overlap with our set of fields
-          for (LegionMap<Event,FieldMask>::aligned::const_iterator it = 
-                preconditions.begin(); it != preconditions.end(); it++)
-          {
-            FieldMask overlap = it->second & actual_copy_mask;
-            if (!overlap)
-              continue;
-            // If we ever hit this assertion we need to merge
+          FieldMask overlap = it->second & actual_copy_mask;
+          if (!overlap)
+            continue;
+          // If we ever hit this assertion we need to merge
 #ifdef DEBUG_HIGH_LEVEL
-            assert(src_preconditions.find(it->first) ==
-                   src_preconditions.end());
+          assert(src_preconditions.find(it->first) ==
+                 src_preconditions.end());
 #endif
-            src_preconditions[it->first] = overlap;
-          }
-        }
-        else // we can just add all the preconditions
-        {
-          for (LegionMap<Event,FieldMask>::aligned::const_iterator it = 
-                preconditions.begin(); it != preconditions.end(); it++)
-          {
-            // If we ever hit this assertion we need to merge
-#ifdef DEBUG_HIGH_LEVEL
-            assert(src_preconditions.find(it->first) ==
-                   src_preconditions.end());
-#endif
-            src_preconditions[it->first] = it->second;
-          }
+          src_preconditions[it->first] = overlap;
         }
         // issue the grouped copies and put the result in the postconditions
         // We are the intersect

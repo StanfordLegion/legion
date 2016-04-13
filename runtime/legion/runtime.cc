@@ -11899,7 +11899,7 @@ namespace Legion {
       }
       add_to_dependence_queue(ctx->get_executing_processor(), attach_op);
 #ifdef INORDER_EXECUTION
-      if (program_order_executiong)
+      if (program_order_execution)
         result.wait_until_valid();
 #endif
       return result;

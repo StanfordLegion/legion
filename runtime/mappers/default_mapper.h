@@ -330,8 +330,8 @@ namespace Legion {
                               std::vector<TaskSlice> &slices);
       template<int DIM>
       static LegionRuntime::Arrays::Point<DIM> default_select_blocking_factor(
-                              off_t factor, const LegionRuntime::Arrays::
-                              Rect<DIM> &rect_to_factor);
+                            long long int factor, const LegionRuntime::Arrays::
+                            Rect<DIM> &rect_to_factor);
       static unsigned long long compute_task_hash(const Task &task);
       static inline bool physical_sort_func(
                          const std::pair<PhysicalInstance,unsigned> &left,

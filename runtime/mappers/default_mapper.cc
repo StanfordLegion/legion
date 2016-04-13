@@ -961,19 +961,19 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM>
     /*static*/ Point<DIM> DefaultMapper::default_select_blocking_factor( 
-                                       off_t factor, const Rect<DIM> &to_factor)
+                               long long int factor, const Rect<DIM> &to_factor)
     //--------------------------------------------------------------------------
     {
       if (factor == 1)
       {
-        off_t result[DIM];
+        long long int result[DIM];
         for (int i = 0; i < DIM; i++)
           result[i] = 1;
         return Point<DIM>(result);
       }
       // Fundamental theorem of arithmetic time!
       const unsigned num_primes = 32;
-      const off_t primes[num_primes] = { 2, 3, 5, 7, 11, 13, 17, 19, 
+      const long long int primes[num_primes] = { 2, 3, 5, 7, 11, 13, 17, 19, 
                                         23, 29, 31, 37, 41, 43, 47, 53,
                                         59, 61, 67, 71, 73, 79, 83, 89,
                                         97, 101, 103, 107, 109, 113, 127, 131 };
@@ -983,7 +983,7 @@ namespace Legion {
       std::vector<int> prime_factors;
       for (unsigned idx = 0; idx < num_primes; idx++)
       {
-        const off_t prime = primes[idx];
+        const long long int prime = primes[idx];
         if ((prime * prime) > factor)
           break;
         while ((factor % prime) == 0)
@@ -1001,11 +1001,11 @@ namespace Legion {
       // largest primes down to the smallest to give ourselves as much 
       // flexibility as possible to get as fine a partitioning as possible
       // for maximum parallelism
-      off_t result[DIM];
+      long long int result[DIM];
       for (int i = 0; i < DIM; i++)
         result[i] = 1;
       int exhausted_dims = 0;
-      off_t dim_chunks[DIM];
+      long long int dim_chunks[DIM];
       for (int i = 0; i < DIM; i++)
       {
         dim_chunks[i] = to_factor.dim_size(i);
@@ -1016,7 +1016,7 @@ namespace Legion {
       {
         // Find the dimension with the biggest dim_chunk 
         int next_dim = -1;
-        off_t max_chunk = -1;
+        long long int max_chunk = -1;
         for (int i = 0; i < DIM; i++)
         {
           if (dim_chunks[i] > max_chunk)
@@ -1025,7 +1025,7 @@ namespace Legion {
             next_dim = i;
           }
         }
-        const off_t next_prime = prime_factors[idx];
+        const long long int next_prime = prime_factors[idx];
         // If this dimension still has chunks at least this big
         // then we can divide it by this factor
         if (max_chunk >= next_prime)

@@ -6431,14 +6431,15 @@ namespace Legion {
             bool empty = true;
             while (enumerator->get_next(next, length))
             {
+              long long int begin = next;
               if (length > 1)
               {
                 // inclusive so need -1
-                off_t end = next + length - 1;
-                LegionSpy::log_index_space_rect<1>(handle.id, &next, &end);
+                long long int end = next + length - 1;
+                LegionSpy::log_index_space_rect<1>(handle.id, &begin, &end);
               }
               else
-                LegionSpy::log_index_space_point<1>(handle.id, &next);
+                LegionSpy::log_index_space_point<1>(handle.id, &begin);
               empty = false;
             }
             delete enumerator;

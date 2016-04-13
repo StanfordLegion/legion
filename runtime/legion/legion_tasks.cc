@@ -5718,6 +5718,7 @@ namespace Legion {
       // to see if this instance can be used to satisfy a virtual mapping
       // We can also skip reduction views because we know they are not
       // permitted to cross context boundaries
+#if 0
       if (has_virtual_instances() && !result->is_reduction_view())
       {
         InstanceView *parent_context_view = NULL;
@@ -5770,6 +5771,7 @@ namespace Legion {
               this, parent_context_view, result, path, get_task_completion());
         }
       }
+#endif
       if (is_created_region(index))
       {
         // If this is a created region, record that we made a new
