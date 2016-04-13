@@ -41,7 +41,7 @@ task main()
   end
 
   var coloring = c.legion_domain_coloring_create()
-  var lo0 : int[1], hi0 : int[1], lo1 : int[1], hi1 : int[1]
+  var lo0 : int64[1], hi0 : int64[1], lo1 : int64[1], hi1 : int64[1]
   lo0[0], hi0[0], lo1[0], hi1[0] = 0, 5, 6, 10
   c.legion_domain_coloring_color_domain(
     coloring,

@@ -4336,9 +4336,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     VirtualChannel::VirtualChannel(VirtualChannelKind kind, 
-        AddressSpaceID local_address_space, size_t max_message_size)
+        AddressSpaceID local_address_space, 
+        size_t max_message_size, bool profile)
       : sending_buffer((char*)malloc(max_message_size)), 
-        sending_buffer_size(max_message_size), observed_recent(false)
+        sending_buffer_size(max_message_size), 
+        observed_recent(false), profile_messages(profile)
     //--------------------------------------------------------------------------
     {
       send_lock = Reservation::create_reservation();
@@ -4372,7 +4374,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     VirtualChannel::VirtualChannel(const VirtualChannel &rhs)
-      : sending_buffer(NULL), sending_buffer_size(0)
+      : sending_buffer(NULL), sending_buffer_size(0), profile_messages(false)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -4543,6 +4545,8 @@ namespace Legion {
                                          const char *args, size_t arglen)
     //--------------------------------------------------------------------------
     {
+      // For profiling if we are doing it
+      unsigned long long start = 0, stop = 0;
       for (unsigned idx = 0; idx < num_messages; idx++)
       {
         // Pull off the message kind and the size of the message
@@ -4563,10 +4567,8 @@ namespace Legion {
         if (idx == (num_messages-1))
           assert(message_size == arglen);
 #endif
-#ifdef LEGION_PROF_MESSAGES
-        unsigned long long start = 
-          Realm::Clock::current_time_in_microseconds();
-#endif
+        if (profile_messages)
+          start = Realm::Clock::current_time_in_microseconds();
         // Build the deserializer
         Deserializer derez(args,message_size);
         switch (kind)
@@ -5086,12 +5088,14 @@ namespace Legion {
           default:
             assert(false); // should never get here
         }
-#ifdef LEGION_PROF_MESSAGES
-        unsigned long long stop = 
-          Realm::Clock::current_time_in_microseconds();
-        if (runtime->profiler != NULL)
-          runtime->profiler->record_message(kind, start, stop);
+        if (profile_messages)
+        {
+          stop = Realm::Clock::current_time_in_microseconds();
+#ifdef DEBUG_HIGH_LEVEL
+          assert(runtime->profiler != NULL);
 #endif
+          runtime->profiler->record_message(kind, start, stop);
+        }
         // Update the args and arglen
         args += message_size;
         arglen -= message_size;
@@ -5192,7 +5196,7 @@ namespace Legion {
       for (unsigned idx = 0; idx < MAX_NUM_VIRTUAL_CHANNELS; idx++)
       {
         new (channels+idx) VirtualChannel((VirtualChannelKind)idx,
-                              rt->address_space, max_message_size);
+            rt->address_space, max_message_size, (runtime->profiler != NULL));
       }
     }
 
@@ -7529,10 +7533,8 @@ namespace Legion {
                                     hlr_task_descriptions, 
                                     Operation::LAST_OP_KIND, 
                                     Operation::op_names); 
-#ifdef LEGION_PROF_MESSAGES
       HLR_MESSAGE_DESCRIPTIONS(hlr_message_descriptions);
       profiler->record_message_kinds(hlr_message_descriptions, LAST_SEND_KIND);
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -8011,12 +8013,14 @@ namespace Legion {
         for (std::set<ptr_t>::const_iterator pit = pcoloring.points.begin();
               pit != pcoloring.points.end(); pit++)
         {
-          child_mask.enable(*pit,1);
+          child_mask.enable(pit->value,1);
         }
         for (std::set<std::pair<ptr_t,ptr_t> >::const_iterator pit = 
               pcoloring.ranges.begin(); pit != pcoloring.ranges.end(); pit++)
         {
-          child_mask.enable(pit->first.value, pit->second - pit->first + 1);
+          if (pit->second.value >= pit->first.value)
+            child_mask.enable(pit->first.value,
+                (size_t)(pit->second.value - pit->first.value) + 1);
         }
         Realm::IndexSpace child_space = 
           Realm::IndexSpace::create_index_space(
@@ -8104,12 +8108,14 @@ namespace Legion {
           for (std::set<ptr_t>::const_iterator it = pcoloring.points.begin();
                 it != pcoloring.points.end(); it++)
           {
-            child_mask.enable(*it,1);
+            child_mask.enable(it->value,1);
           }
           for (std::set<std::pair<ptr_t,ptr_t> >::const_iterator it = 
                 pcoloring.ranges.begin(); it != pcoloring.ranges.end(); it++)
           {
-            child_mask.enable(it->first.value, it->second-it->first+1);
+            if (it->second.value >= it->first.value)
+              child_mask.enable(it->first.value,
+                  (size_t)(it->second.value - it->first.value) + 1);
           }
         }
         else
@@ -8460,7 +8466,7 @@ namespace Legion {
 #ifdef DEBUG_HIGH_LEVEL
             assert(finder != child_masks.end());
 #endif
-            finder->second.enable(cur_ptr);
+            finder->second.enable(cur_ptr.value);
           }
         }
         // Now make the index spaces and their domains
@@ -19441,7 +19447,7 @@ namespace Legion {
       if (!region->contains_ptr(ptr))
       {
         fprintf(stderr,"BOUNDS CHECK ERROR IN TASK %s: Accessing invalid "
-                       "pointer %d\n", region->get_task_name(), ptr.value);
+                       "pointer %lld\n", region->get_task_name(), ptr.value);
         assert(false);
       }
     }
@@ -19457,18 +19463,18 @@ namespace Legion {
         {
           case 1:
             fprintf(stderr,"BOUNDS CHECK ERROR IN TASK %s: Accessing invalid "
-                           "1D point (%d)\n", region->get_task_name(),
+                           "1D point (%lld)\n", region->get_task_name(),
                             dp.point_data[0]);
             break;
           case 2:
             fprintf(stderr,"BOUNDS CHECK ERROR IN TASK %s: Accessing invalid "
-                           "2D point (%d,%d)\n", region->get_task_name(),
+                           "2D point (%lld,%lld)\n", region->get_task_name(),
                             dp.point_data[0], dp.point_data[1]);
             break;
           case 3:
             fprintf(stderr,"BOUNDS CHECK ERROR IN TASK %s: Accessing invalid "
-                           "3D point (%d,%d,%d)\n", region->get_task_name(),
-                      dp.point_data[0], dp.point_data[1], dp.point_data[2]);
+                         "3D point (%lld,%lld,%lld)\n", region->get_task_name(),
+                          dp.point_data[0], dp.point_data[1], dp.point_data[2]);
             break;
           default:
             assert(false);

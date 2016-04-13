@@ -14,13 +14,11 @@
 
 import "regent"
 
-local c = regentlib.c
-
 task main()
-  var r = region(ispace(ptr, 5), int)
-  var x = new(ptr(int, r))
-
-  var y = dynamic_cast(ptr(int, r), 0)
-  regentlib.assert(not isnull(y), "test failed")
+  var x = phase_barrier(2)
+  arrive(x)
+  arrive(x)
+  x = advance(x)
+  await(x)
 end
 regentlib.start(main)

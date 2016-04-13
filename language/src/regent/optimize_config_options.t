@@ -62,6 +62,7 @@ local function analyze_leaf_node(cx)
       node:is(ast.typed.expr.DynamicCollectiveGetResult) or
       node:is(ast.typed.expr.Advance) or
       node:is(ast.typed.expr.Arrive) or
+      node:is(ast.typed.expr.Await) or
       node:is(ast.typed.expr.Copy) or
       node:is(ast.typed.expr.Fill) or
       node:is(ast.typed.expr.AllocateScratchFields) or

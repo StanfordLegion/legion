@@ -712,6 +712,10 @@ function type_check.expr_call(cx, node)
     function(arg) return type_check.expr(cx, arg) end)
   local arg_types = args:map(
     function(arg) return std.check_read(cx, arg) end)
+  local conditions = terralib.newlist()
+  for _, condition in ipairs(node.conditions) do
+    conditions:insertall(type_check.expr_condition(cx, condition))
+  end
 
   -- Determine the type of the function being called.
   local fn_type
@@ -823,7 +827,7 @@ function type_check.expr_call(cx, node)
   local result = ast.typed.expr.Call {
     fn = fn,
     args = args,
-    conditions = terralib.newlist(),
+    conditions = conditions,
     expr_type = expr_type,
     options = node.options,
     span = node.span,
@@ -1115,7 +1119,7 @@ function type_check.expr_dynamic_cast(cx, node)
   if not std.is_bounded_type(node.expr_type) then
     log.error(node, "dynamic_cast requires ptr type as argument 1, got " .. tostring(node.expr_type))
   end
-  if not (std.is_index_type(value_type) or std.is_bounded_type(value_type)) then
+  if not std.validate_implicit_cast(value_type, node.expr_type.index_type) then
     log.error(node, "dynamic_cast requires ptr as argument 2, got " .. tostring(value_type))
   end
   if std.is_bounded_type(value_type) and not std.type_eq(node.expr_type.points_to_type, value_type.points_to_type) then
@@ -1163,6 +1167,32 @@ function type_check.expr_static_cast(cx, node)
   return ast.typed.expr.StaticCast {
     value = value,
     parent_region_map = parent_region_map,
+    expr_type = expr_type,
+    options = node.options,
+    span = node.span,
+  }
+end
+
+function type_check.expr_unsafe_cast(cx, node)
+  local value = type_check.expr(cx, node.value)
+  local value_type = std.check_read(cx, value)
+  local expr_type = node.expr_type
+
+  if not std.is_bounded_type(expr_type) then
+    log.error(node, "unsafe_cast requires ptr type as argument 1, got " .. tostring(expr_type))
+  end
+  if #expr_type:bounds() ~= 1 then
+    log.error(node, "unsafe_cast requires single ptr type as argument 1, got " .. tostring(expr_type))
+  end
+  if not std.validate_implicit_cast(value_type, node.expr_type.index_type) then
+    log.error(node, "unsafe_cast requires ptr as argument 2, got " .. tostring(value_type))
+  end
+  if std.is_bounded_type(value_type) and not std.type_eq(node.expr_type.points_to_type, value_type.points_to_type) then
+    log.error(node, "incompatible pointers for unsafe_cast: " .. tostring(expr_type) .. " and " .. tostring(value_type))
+  end
+
+  return ast.typed.expr.UnsafeCast {
+    value = value,
     expr_type = expr_type,
     options = node.options,
     span = node.span,
@@ -1626,6 +1656,26 @@ function type_check.expr_cross_product(cx, node)
   }
 end
 
+function type_check.expr_cross_product_array(cx, node)
+  local lhs = type_check.expr(cx, node.lhs)
+  local lhs_type = std.as_read(lhs.expr_type)
+  local lhs_symbol = terralib.newsymbol(lhs_type)
+  local disjointness = node.disjointness
+  local rhs_type = std.partition(disjointness, lhs_type.parent_region_symbol)
+  local rhs_symbol = terralib.newsymbol(rhs_type)
+  local expr_type = std.cross_product(lhs_symbol, rhs_symbol)
+  local colorings = type_check.expr(cx, node.colorings)
+
+  return ast.typed.expr.CrossProductArray {
+    lhs = lhs,
+    disjointness = disjointness,
+    colorings = colorings,
+    expr_type = expr_type,
+    options = node.options,
+    span = node.span,
+  }
+end
+
 function type_check.expr_list_slice_partition(cx, node)
   local partition = type_check.expr(cx, node.partition)
   local partition_type = std.check_read(cx, partition)
@@ -1906,12 +1956,15 @@ end
 function type_check.expr_arrive(cx, node)
   local barrier = type_check.expr(cx, node.barrier)
   local barrier_type = std.check_read(cx, barrier)
-  local value = type_check.expr(cx, node.value)
-  local value_type = std.check_read(cx, value)
-  if not std.is_dynamic_collective(barrier_type) then
-    log.error(node, "type mismatch in argument 1: expected a dynamic collective but got " .. tostring(value_type))
+  local value = node.value and type_check.expr(cx, node.value)
+  local value_type = node.value and std.check_read(cx, value)
+  if not (std.is_phase_barrier(barrier_type) or std.is_dynamic_collective(barrier_type)) then
+    log.error(node, "type mismatch in argument 1: expected a dynamic collective but got " .. tostring(barrier_type))
   end
-  if not std.validate_implicit_cast(value_type, barrier_type.result_type) then
+  if std.is_phase_barrier(barrier_type) and value_type then
+    log.error(node, "type mismatch in arrive: expected 1 argument but got 2")
+  end
+  if std.is_dynamic_collective(barrier_type) and not std.validate_implicit_cast(value_type, barrier_type.result_type) then
     log.error(node, "type mismatch in argument 2: expected " ..
                 tostring(barrier_type.result_type) .. " but got " ..
                 tostring(value_type))
@@ -1921,6 +1974,22 @@ function type_check.expr_arrive(cx, node)
   return ast.typed.expr.Arrive {
     barrier = barrier,
     value = value,
+    expr_type = expr_type,
+    options = node.options,
+    span = node.span,
+  }
+end
+
+function type_check.expr_await(cx, node)
+  local barrier = type_check.expr(cx, node.barrier)
+  local barrier_type = std.check_read(cx, barrier)
+  if not std.is_phase_barrier(barrier_type) then
+    log.error(node, "type mismatch in argument 1: expected a phase barrier but got " .. tostring(barrier_type))
+  end
+  local expr_type = terralib.types.unit
+
+  return ast.typed.expr.Await {
+    barrier = barrier,
     expr_type = expr_type,
     options = node.options,
     span = node.span,
@@ -2356,6 +2425,9 @@ function type_check.expr(cx, node)
   elseif node:is(ast.specialized.expr.StaticCast) then
     return type_check.expr_static_cast(cx, node)
 
+  elseif node:is(ast.specialized.expr.UnsafeCast) then
+    return type_check.expr_unsafe_cast(cx, node)
+
   elseif node:is(ast.specialized.expr.Ispace) then
     return type_check.expr_ispace(cx, node)
 
@@ -2379,6 +2451,9 @@ function type_check.expr(cx, node)
 
   elseif node:is(ast.specialized.expr.CrossProduct) then
     return type_check.expr_cross_product(cx, node)
+
+  elseif node:is(ast.specialized.expr.CrossProductArray) then
+    return type_check.expr_cross_product_array(cx, node)
 
   elseif node:is(ast.specialized.expr.ListSlicePartition) then
     return type_check.expr_list_slice_partition(cx, node)
@@ -2415,6 +2490,9 @@ function type_check.expr(cx, node)
 
   elseif node:is(ast.specialized.expr.Arrive) then
     return type_check.expr_arrive(cx, node)
+
+  elseif node:is(ast.specialized.expr.Await) then
+    return type_check.expr_await(cx, node)
 
   elseif node:is(ast.specialized.expr.Copy) then
     return type_check.expr_copy(cx, node)

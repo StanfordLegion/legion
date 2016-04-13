@@ -17,10 +17,11 @@ import "regent"
 local c = regentlib.c
 
 task main()
-  var r = region(ispace(ptr, 5), int)
-  var x = new(ptr(int, r))
+  var t = region(ispace(ptr, 5), int)
+  var x = new(ptr(int, t))
+  var y = unsafe_cast(ptr(int, t), 0)
 
-  var y = dynamic_cast(ptr(int, r), 0)
-  regentlib.assert(not isnull(y), "test failed")
+  @x = 123
+  regentlib.assert(@y == 123, "test failed")
 end
 regentlib.start(main)

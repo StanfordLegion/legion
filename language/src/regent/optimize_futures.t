@@ -146,6 +146,9 @@ function analyze_var_flow.expr(cx, node)
   elseif node:is(ast.typed.expr.StaticCast) then
     return nil
 
+  elseif node:is(ast.typed.expr.UnsafeCast) then
+    return nil
+
   elseif node:is(ast.typed.expr.Ispace) then
     return nil
 
@@ -168,6 +171,9 @@ function analyze_var_flow.expr(cx, node)
     return nil
 
   elseif node:is(ast.typed.expr.CrossProduct) then
+    return nil
+
+  elseif node:is(ast.typed.expr.CrossProductArray) then
     return nil
 
   elseif node:is(ast.typed.expr.ListSlicePartition) then
@@ -207,6 +213,9 @@ function analyze_var_flow.expr(cx, node)
     return nil
 
   elseif node:is(ast.typed.expr.Arrive) then
+    return nil
+
+  elseif node:is(ast.typed.expr.Await) then
     return nil
 
   elseif node:is(ast.typed.expr.Copy) then
@@ -598,6 +607,11 @@ function optimize_futures.expr_static_cast(cx, node)
   return node { value = value }
 end
 
+function optimize_futures.expr_unsafe_cast(cx, node)
+  local value = concretize(optimize_futures.expr(cx, node.value))
+  return node { value = value }
+end
+
 function optimize_futures.expr_ispace(cx, node)
   local extent = concretize(optimize_futures.expr(cx, node.extent))
   local start = node.start and
@@ -667,6 +681,14 @@ function optimize_futures.expr_cross_product(cx, node)
     function(arg) return concretize(optimize_futures.expr(cx, arg)) end)
   return node {
     args = args,
+  }
+end
+
+function optimize_futures.expr_cross_product_array(cx, node)
+  return node {
+    lhs = concretize(optimize_futures.expr(cx, node.lhs)),
+    disjointness = node.disjointness,
+    colorings = concretize(optimize_futures.expr(cx, node.colorings)),
   }
 end
 
@@ -774,10 +796,17 @@ end
 
 function optimize_futures.expr_arrive(cx, node)
   local barrier = concretize(optimize_futures.expr(cx, node.barrier))
-  local value = optimize_futures.expr(cx, node.value)
+  local value = node.value and optimize_futures.expr(cx, node.value)
   return node {
     barrier = barrier,
     value = value,
+  }
+end
+
+function optimize_futures.expr_await(cx, node)
+  local barrier = concretize(optimize_futures.expr(cx, node.barrier))
+  return node {
+    barrier = barrier,
   }
 end
 
@@ -921,6 +950,9 @@ function optimize_futures.expr(cx, node)
   elseif node:is(ast.typed.expr.StaticCast) then
     return optimize_futures.expr_static_cast(cx, node)
 
+  elseif node:is(ast.typed.expr.UnsafeCast) then
+    return optimize_futures.expr_unsafe_cast(cx, node)
+
   elseif node:is(ast.typed.expr.Ispace) then
     return optimize_futures.expr_ispace(cx, node)
 
@@ -944,6 +976,9 @@ function optimize_futures.expr(cx, node)
 
   elseif node:is(ast.typed.expr.CrossProduct) then
     return optimize_futures.expr_cross_product(cx, node)
+
+  elseif node:is(ast.typed.expr.CrossProductArray) then
+    return optimize_futures.expr_cross_product_array(cx, node)
 
   elseif node:is(ast.typed.expr.ListSlicePartition) then
     return optimize_futures.expr_list_slice_partition(cx, node)
@@ -983,6 +1018,9 @@ function optimize_futures.expr(cx, node)
 
   elseif node:is(ast.typed.expr.Arrive) then
     return optimize_futures.expr_arrive(cx, node)
+
+  elseif node:is(ast.typed.expr.Await) then
+    return optimize_futures.expr_await(cx, node)
 
   elseif node:is(ast.typed.expr.Copy) then
     return optimize_futures.expr_copy(cx, node)

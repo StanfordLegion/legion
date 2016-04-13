@@ -12,15 +12,16 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
+-- fails-with:
+-- type_mismatch_phase_barrier4.rg:26: terra function call cannot have conditions
+--  g(x, arrives(p))
+--             ^
+
 import "regent"
 
-local c = regentlib.c
+terra g(x : int) end
 
-task main()
-  var r = region(ispace(ptr, 5), int)
-  var x = new(ptr(int, r))
-
-  var y = dynamic_cast(ptr(int, r), 0)
-  regentlib.assert(not isnull(y), "test failed")
+task f(x : int)
+  var p = phase_barrier(1)
+  g(x, arrives(p))
 end
-regentlib.start(main)

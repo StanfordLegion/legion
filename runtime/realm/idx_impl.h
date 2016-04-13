@@ -29,7 +29,7 @@ namespace Realm {
 
     struct ElementMaskImpl {
       //int count, offset;
-      typedef unsigned long long uint64;
+      //typedef unsigned long long uint64;
       uint64_t bits[0];
 
       static size_t bytes_needed(off_t offset, off_t count)
@@ -97,11 +97,11 @@ namespace Realm {
 
       ~IndexSpaceAllocatorImpl(void);
 
-      unsigned alloc_elements(unsigned count = 1);
+      off_t alloc_elements(size_t count = 1);
 
-      void reserve_elements(unsigned ptr, unsigned count = 1);
+      void reserve_elements(off_t ptr, size_t count = 1);
 
-      void free_elements(unsigned ptr, unsigned count = 1);
+      void free_elements(off_t ptr, size_t count = 1);
 
       IndexSpaceImpl *is_impl;
     };
@@ -127,10 +127,10 @@ namespace Realm {
       struct RequestArgs : public BaseMedium {
 	IndexSpace is;
 	unsigned block_id;
-	int first_element;
-	int num_elements;
-	int first_enabled_elmt;
-	int last_enabled_elmt;
+	off_t first_element;
+	size_t num_elements;
+	off_t first_enabled_elmt;
+	off_t last_enabled_elmt;
       };
 
       static void handle_request(RequestArgs args, const void *data, size_t datalen);
@@ -140,8 +140,8 @@ namespace Realm {
 				         handle_request> Message;
       
       static void send_request(gasnet_node_t target, IndexSpace is, unsigned block_id,
-			       int first_element, int num_elements,
-			       int first_enabled_elmt, int last_enabled_elmt,
+			       off_t first_element, size_t num_elements,
+			       off_t first_enabled_elmt, off_t last_enabled_elmt,
 			       const void *data, size_t datalen, int payload_mode);
     };
 

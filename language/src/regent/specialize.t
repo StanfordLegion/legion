@@ -204,6 +204,11 @@ local function get_num_accessed_fields(node)
     if get_num_accessed_fields(node.value) > 1 then return false end
     return 1
 
+  elseif node:is(ast.unspecialized.expr.UnsafeCast) then
+    if get_num_accessed_fields(node.type_expr) > 1 then return false end
+    if get_num_accessed_fields(node.value) > 1 then return false end
+    return 1
+
   elseif node:is(ast.unspecialized.expr.Ispace) then
     if get_num_accessed_fields(node.fspace_type_expr) > 1 then return false end
     if get_num_accessed_fields(node.size) > 1 then return false end
@@ -244,6 +249,9 @@ local function get_num_accessed_fields(node)
   elseif node:is(ast.unspecialized.expr.CrossProduct) then
     return 1
 
+  elseif node:is(ast.unspecialized.expr.CrossProductArray) then
+    return 1
+
   elseif node:is(ast.unspecialized.expr.ListSlicePartition) then
     return 1
 
@@ -275,6 +283,9 @@ local function get_num_accessed_fields(node)
     return 1
 
   elseif node:is(ast.unspecialized.expr.Arrive) then
+    return 1
+
+  elseif node:is(ast.unspecialized.expr.Await) then
     return 1
 
   elseif node:is(ast.unspecialized.expr.DynamicCollectiveGetResult) then
@@ -646,10 +657,15 @@ function specialize.expr_call(cx, node)
     std.is_task(fn.value) or
     type(fn.value) == "function"
   then
+    if not std.is_task(fn.value) and #node.conditions > 0 then
+      log.error(node.conditions[1],
+        "terra function call cannot have conditions")
+    end
     return ast.specialized.expr.Call {
       fn = fn,
       args = node.args:map(
         function(arg) return specialize.expr(cx, arg) end),
+      conditions = specialize.expr_conditions(cx, node.conditions),
       options = node.options,
       span = node.span,
     }
@@ -829,6 +845,17 @@ function specialize.expr_static_cast(cx, node)
   }
 end
 
+function specialize.expr_unsafe_cast(cx, node)
+  local expr_type = node.type_expr(cx.env:env())
+  local value = specialize.expr(cx, node.value)
+  return ast.specialized.expr.UnsafeCast {
+    value = value,
+    expr_type = expr_type,
+    options = node.options,
+    span = node.span,
+  }
+end
+
 function specialize.expr_ispace(cx, node)
   local index_type = node.index_type_expr(cx.env:env())
   return ast.specialized.expr.Ispace {
@@ -903,6 +930,16 @@ function specialize.expr_cross_product(cx, node)
   return ast.specialized.expr.CrossProduct {
     args = node.args:map(
       function(arg) return specialize.expr(cx, arg) end),
+    options = node.options,
+    span = node.span,
+  }
+end
+
+function specialize.expr_cross_product_array(cx, node)
+  return ast.specialized.expr.CrossProductArray {
+    lhs = specialize.expr(cx, node.lhs),
+    disjointness = specialize.disjointness_kind(cx, node.disjointness),
+    colorings = specialize.expr(cx, node.colorings),
     options = node.options,
     span = node.span,
   }
@@ -1010,7 +1047,15 @@ end
 function specialize.expr_arrive(cx, node)
   return ast.specialized.expr.Arrive {
     barrier = specialize.expr(cx, node.barrier),
-    value = specialize.expr(cx, node.value),
+    value = node.value and specialize.expr(cx, node.value),
+    options = node.options,
+    span = node.span,
+  }
+end
+
+function specialize.expr_await(cx, node)
+  return ast.specialized.expr.Await {
+    barrier = specialize.expr(cx, node.barrier),
     options = node.options,
     span = node.span,
   }
@@ -1136,6 +1181,9 @@ function specialize.expr(cx, node)
   elseif node:is(ast.unspecialized.expr.StaticCast) then
     return specialize.expr_static_cast(cx, node)
 
+  elseif node:is(ast.unspecialized.expr.UnsafeCast) then
+    return specialize.expr_unsafe_cast(cx, node)
+
   elseif node:is(ast.unspecialized.expr.Ispace) then
     return specialize.expr_ispace(cx, node)
 
@@ -1159,6 +1207,9 @@ function specialize.expr(cx, node)
 
   elseif node:is(ast.unspecialized.expr.CrossProduct) then
     return specialize.expr_cross_product(cx, node)
+
+  elseif node:is(ast.unspecialized.expr.CrossProductArray) then
+    return specialize.expr_cross_product_array(cx, node)
 
   elseif node:is(ast.unspecialized.expr.ListSlicePartition) then
     return specialize.expr_list_slice_partition(cx, node)
@@ -1192,6 +1243,9 @@ function specialize.expr(cx, node)
 
   elseif node:is(ast.unspecialized.expr.Arrive) then
     return specialize.expr_arrive(cx, node)
+
+  elseif node:is(ast.unspecialized.expr.Await) then
+    return specialize.expr_await(cx, node)
 
   elseif node:is(ast.unspecialized.expr.DynamicCollectiveGetResult) then
     return specialize.expr_dynamic_collective_get_result(cx, node)

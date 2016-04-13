@@ -6426,14 +6426,15 @@ namespace Legion {
               dom.get_index_space().get_valid_mask();
             Realm::ElementMask::Enumerator *enumerator = 
               mask.enumerate_enabled();
-            int next, length;
+            off_t next;
+            size_t length;
             bool empty = true;
             while (enumerator->get_next(next, length))
             {
               if (length > 1)
               {
                 // inclusive so need -1
-                int end = next + length - 1;
+                off_t end = next + length - 1;
                 LegionSpy::log_index_space_rect<1>(handle.id, &next, &end);
               }
               else
@@ -14786,18 +14787,18 @@ namespace Legion {
 #endif
             closing_views[idx] = 
               new_views[idx]->as_instance_view()->as_materialized_view();
-            PhysicalCloser closer(info, handle);
-            FieldMask empty_complete_fields;
-            closer.initialize_targets(this, state, closing_views,
-                        info.traversal_mask, empty_complete_fields, targets);
-            // Mark the dirty mask with our bits since we're closing to it
-            closer.update_dirty_mask(info.traversal_mask);
-            std::set<ColorPoint> empty_next_children;
-            siphon_physical_children(closer, state, info.traversal_mask,
-                                     empty_next_children);
-            // This will put the instance in the set of valid views
-            closer.update_node_views(this, state);
           }
+          PhysicalCloser closer(info, handle);
+          FieldMask empty_complete_fields;
+          closer.initialize_targets(this, state, closing_views,
+                      info.traversal_mask, empty_complete_fields, targets);
+          // Mark the dirty mask with our bits since we're closing to it
+          closer.update_dirty_mask(info.traversal_mask);
+          std::set<ColorPoint> empty_next_children;
+          siphon_physical_children(closer, state, info.traversal_mask,
+                                   empty_next_children);
+          // This will put the instance in the set of valid views
+          closer.update_node_views(this, state);
           // flush any reductions that we need to do
           FieldMask reduction_overlap = info.traversal_mask &
                                         state->reduction_mask;

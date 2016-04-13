@@ -2544,7 +2544,7 @@ function codegen.expr_call(cx, node)
         c.legion_must_epoch_launcher_add_single_task(
           [cx.must_epoch],
           c.legion_domain_point_from_point_1d(
-            c.legion_point_1d_t { x = arrayof(int, [cx.must_epoch_point]) }),
+            c.legion_point_1d_t { x = arrayof(int64, [cx.must_epoch_point]) }),
           [launcher])
         [cx.must_epoch_point] = [cx.must_epoch_point] + 1
       end
@@ -2815,13 +2815,15 @@ end
 
 function codegen.expr_dynamic_cast(cx, node)
   local value = codegen.expr(cx, node.value):read(cx)
+  local value_type = std.as_read(node.value.expr_type)
   local expr_type = std.as_read(node.expr_type)
-
   local actions = quote
     [value.actions];
     [emit_debuginfo(node)]
   end
-  local input = `([value.value].__ptr)
+
+  local input = `([std.implicit_cast(value_type, expr_type.index_type, value.value)].__ptr)
+
   local result
   local regions = expr_type:bounds()
   if #regions == 1 then
@@ -2958,6 +2960,44 @@ function codegen.expr_static_cast(cx, node)
   end
 
   return values.value(expr.once_only(actions, result), expr_type)
+end
+
+function codegen.expr_unsafe_cast(cx, node)
+  local value = codegen.expr(cx, node.value):read(cx)
+  local value_type = std.as_read(node.value.expr_type)
+  local expr_type = std.as_read(node.expr_type)
+  local actions = quote
+    [value.actions];
+    [emit_debuginfo(node)]
+  end
+
+  local input = `([std.implicit_cast(value_type, expr_type.index_type, value.value)].__ptr)
+
+  local result = terralib.newsymbol(expr_type, "result")
+  if bounds_checks then
+    local regions = expr_type:bounds()
+    assert(#regions == 1)
+    local region = regions[1]
+    assert(cx:has_region(region))
+    local lr = `([cx:region(region).logical_region].impl)
+
+    local check = terralib.newsymbol(c.legion_ptr_t, "check")
+    actions = quote
+      [actions]
+      var [check] = c.legion_ptr_safe_cast([cx.runtime], [cx.context], [input], [lr])
+      if c.legion_ptr_is_null([check]) then
+        std.assert(false, ["pointer " .. tostring(expr_type) .. " is out-of-bounds"])
+      end
+      var [result] = [expr_type]({ __ptr = [check] })
+    end
+  else
+    actions = quote
+      [actions]
+      var [result] = [expr_type]({ __ptr = [input] })
+    end
+  end
+
+  return values.value(expr.just(actions, result), expr_type)
 end
 
 function codegen.expr_ispace(cx, node)
@@ -3289,9 +3329,9 @@ function codegen.expr_image(cx, node)
   local field_path
   if #fields_i ~= 1 then
     assert(#fields_i == 2)
-    -- Hack: This will fail if the index type ever becomes uint32.
+    -- Hack: This will fail if the index type ever becomes in64.
     local match = data.filter(
-      function(i) return std.type_eq(field_types[i], uint32) end,
+      function(i) return std.type_eq(field_types[i], int64) end,
       fields_i)
     assert(#match == 1)
     field_path = field_paths[match[1]]
@@ -3348,9 +3388,9 @@ function codegen.expr_preimage(cx, node)
   local field_path
   if #fields_i ~= 1 then
     assert(#fields_i == 2)
-    -- Hack: This will fail if the index type ever becomes uint32.
+    -- Hack: This will fail if the index type ever becomes int64.
     local match = data.filter(
-      function(i) return std.type_eq(field_types[i], uint32) end,
+      function(i) return std.type_eq(field_types[i], int64) end,
       fields_i)
     assert(#match == 1)
     field_path = field_paths[match[1]]
@@ -3409,6 +3449,74 @@ function codegen.expr_cross_product(cx, node)
     var ip = c.legion_terra_index_cross_product_get_partition([product])
     var [lp] = c.legion_logical_partition_create(
       [cx.runtime], [cx.context], lr.impl, ip)
+  end
+
+  return values.value(
+    expr.once_only(
+      actions,
+      `(expr_type {
+          impl = [lp],
+          product = [product],
+          colors = [colors],
+        })),
+    expr_type)
+end
+
+function codegen.expr_cross_product_array(cx, node)
+  local lhs = codegen.expr(cx, node.lhs):read(cx)
+  local colorings = codegen.expr(cx, node.colorings):read(cx)
+  local disjoint = node.disjointness == std.disjoint
+
+  local expr_type = std.as_read(node.expr_type)
+  local actions = quote
+    [lhs.actions];
+    [colorings.actions];
+    [emit_debuginfo(node)]
+  end
+
+  local lr = cx:region(expr_type:parent_region()).logical_region
+  local lp = terralib.newsymbol(c.legion_logical_partition_t, "lp")
+  local product = terralib.newsymbol(
+    c.legion_terra_index_cross_product_t, "cross_product")
+  local colors = terralib.newsymbol(c.legion_color_t[2], "colors")
+  actions = quote
+    var [colors]
+    var start : double = c.legion_get_current_time_in_micros()/double(1e6)
+    var color_domain =
+      c.legion_index_partition_get_color_space(
+        [cx.runtime], [cx.context], [lhs.value].impl.index_partition)
+    regentlib.assert(color_domain.dim == 1, "color domain should be 1D")
+    var start_color = color_domain.rect_data[0]
+    var end_color = color_domain.rect_data[1]
+    regentlib.assert(start_color >= 0 and end_color >= 0,
+      "colors should be non-negative")
+    var [lp] = [lhs.value].impl
+    var lhs_ip = [lp].index_partition
+    var [colors]
+    [colors][0] = c.legion_index_partition_get_color(
+      [cx.runtime], [cx.context], lhs_ip)
+    var other_color = -1
+
+    for color = start_color, end_color + 1 do
+      var lhs_subregion = c.legion_logical_partition_get_logical_subregion_by_color(
+        [cx.runtime], [cx.context], [lp], color)
+      var lhs_subspace = c.legion_index_partition_get_index_subspace(
+        [cx.runtime], [cx.context], lhs_ip, color)
+      var rhs_ip = c.legion_index_partition_create_coloring(
+        [cx.runtime], [cx.context], lhs_subspace, [colorings.value] [color],
+        [disjoint], other_color)
+      var rhs_lp = c.legion_logical_partition_create([cx.runtime], [cx.context],
+        lhs_subregion, rhs_ip)
+      other_color =
+        c.legion_index_partition_get_color([cx.runtime], [cx.context], rhs_ip)
+    end
+
+    [colors][1] = other_color
+    var [product]
+    [product].partition = lhs_ip
+    [product].other_color = other_color
+    var stop : double = c.legion_get_current_time_in_micros()/double(1e6)
+    c.printf("codegen: cross_product_array %e\n", stop - start)
   end
 
   return values.value(
@@ -4222,30 +4330,64 @@ end
 function codegen.expr_arrive(cx, node)
   local barrier_type = std.as_read(node.barrier.expr_type)
   local barrier = codegen.expr(cx, node.barrier):read(cx, barrier_type)
-  local value_type = std.as_read(node.value.expr_type)
-  local value = codegen.expr(cx, node.value):read(cx, value_type)
+  local value_type = node.value and std.as_read(node.value.expr_type)
+  local value = node.value and codegen.expr(cx, node.value):read(cx, value_type)
   local expr_type = std.as_read(node.expr_type)
   local actions = quote
     [barrier.actions];
-    [value.actions];
+    [value and value.actions];
     [emit_debuginfo(node)]
   end
 
-  if std.is_future(value_type) then
+  if std.is_phase_barrier(barrier_type) then
     actions = quote
       [actions]
-      c.legion_dynamic_collective_defer_arrival(
-        [cx.runtime], [cx.context], [barrier.value].impl,
-        [value.value].__result, 1)
+      c.legion_phase_barrier_arrive(
+        [cx.runtime], [cx.context], [barrier.value].impl, 1)
+    end
+  elseif std.is_dynamic_collective(barrier_type) then
+    if std.is_future(value_type) then
+      actions = quote
+        [actions]
+        c.legion_dynamic_collective_defer_arrival(
+          [cx.runtime], [cx.context], [barrier.value].impl,
+          [value.value].__result, 1)
+      end
+    else
+      actions = quote
+        [actions]
+        var buffer : value_type = [value.value]
+        c.legion_dynamic_collective_arrive(
+          [cx.runtime], [cx.context], [barrier.value].impl,
+          &buffer, [terralib.sizeof(value_type)], 1)
+      end
     end
   else
+    assert(false)
+  end
+
+  return values.value(
+    expr.just(actions, barrier.value),
+    expr_type)
+end
+
+function codegen.expr_await(cx, node)
+  local barrier_type = std.as_read(node.barrier.expr_type)
+  local barrier = codegen.expr(cx, node.barrier):read(cx, barrier_type)
+  local expr_type = std.as_read(node.expr_type)
+  local actions = quote
+    [barrier.actions];
+    [emit_debuginfo(node)]
+  end
+
+  if std.is_phase_barrier(barrier_type) then
     actions = quote
       [actions]
-      var buffer : value_type = [value.value]
-      c.legion_dynamic_collective_arrive(
-        [cx.runtime], [cx.context], [barrier.value].impl,
-        &buffer, [terralib.sizeof(value_type)], 1)
+      c.legion_phase_barrier_wait(
+        [cx.runtime], [cx.context], [barrier.value].impl)
     end
+  else
+    assert(false)
   end
 
   return values.value(
@@ -5153,6 +5295,9 @@ function codegen.expr(cx, node)
   elseif node:is(ast.typed.expr.StaticCast) then
     return codegen.expr_static_cast(cx, node)
 
+  elseif node:is(ast.typed.expr.UnsafeCast) then
+    return codegen.expr_unsafe_cast(cx, node)
+
   elseif node:is(ast.typed.expr.Ispace) then
     return codegen.expr_ispace(cx, node)
 
@@ -5176,6 +5321,9 @@ function codegen.expr(cx, node)
 
   elseif node:is(ast.typed.expr.CrossProduct) then
     return codegen.expr_cross_product(cx, node)
+
+  elseif node:is(ast.typed.expr.CrossProductArray) then
+    return codegen.expr_cross_product_array(cx, node)
 
   elseif node:is(ast.typed.expr.ListSlicePartition) then
     return codegen.expr_list_slice_partition(cx, node)
@@ -5215,6 +5363,9 @@ function codegen.expr(cx, node)
 
   elseif node:is(ast.typed.expr.Arrive) then
     return codegen.expr_arrive(cx, node)
+
+  elseif node:is(ast.typed.expr.Await) then
+    return codegen.expr_await(cx, node)
 
   elseif node:is(ast.typed.expr.Copy) then
     return codegen.expr_copy(cx, node)
@@ -5964,7 +6115,7 @@ function codegen.stat_index_launch(cx, node)
       c.legion_argument_map_set_point(
         [argument_map],
         c.legion_domain_point_from_point_1d(
-          c.legion_point_1d_t { x = arrayof(int32, [node.symbol]) }),
+          c.legion_point_1d_t { x = arrayof(int64, [node.symbol]) }),
         [task_args], true)
     end
     var g_args : c.legion_task_argument_t
@@ -5974,8 +6125,8 @@ function codegen.stat_index_launch(cx, node)
       [fn.value:gettaskid()],
       c.legion_domain_from_rect_1d(
         c.legion_rect_1d_t {
-          lo = c.legion_point_1d_t { x = arrayof(int32, [domain1]) },
-          hi = c.legion_point_1d_t { x = arrayof(int32, [domain2] - 1) },
+          lo = c.legion_point_1d_t { x = arrayof(int64, [domain1]) },
+          hi = c.legion_point_1d_t { x = arrayof(int64, [domain2] - 1) },
         }),
       g_args, [argument_map],
       c.legion_predicate_true(), false, 0, 0)

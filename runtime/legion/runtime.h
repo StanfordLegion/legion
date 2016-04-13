@@ -766,8 +766,8 @@ namespace Legion {
         FINAL_MESSAGE,
       };
     public:
-      VirtualChannel(VirtualChannelKind kind, 
-          AddressSpaceID local_address_space, size_t max_message_size);
+      VirtualChannel(VirtualChannelKind kind,AddressSpaceID local_address_space,
+                     size_t max_message_size, bool profile_messages);
       VirtualChannel(const VirtualChannel &rhs);
       ~VirtualChannel(void);
     public:
@@ -805,6 +805,8 @@ namespace Legion {
       size_t receiving_buffer_size;
       unsigned received_messages;
       bool observed_recent;
+    private:
+      const bool profile_messages;
     }; 
 
     /**

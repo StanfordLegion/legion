@@ -15,20 +15,20 @@
 -- runs-with:
 -- [
 --   ["pennant.tests/sedovsmall/sedovsmall.pnt",
---    "-npieces", "1", "-seq_init", "1", "-par_init", "1"],
+--    "-npieces", "1", "-seq_init", "1", "-par_init", "1", "-interior", "0"],
 --   ["pennant.tests/sedovsmall/sedovsmall.pnt",
---    "-npieces", "2", "-seq_init", "1", "-par_init", "1",
+--    "-npieces", "2", "-ll:cpu", "2", "-seq_init", "1", "-par_init", "1", "-interior", "0",
 --    "-absolute", "1e-6", "-relative", "1e-6", "-relative_absolute", "1e-9"],
 --   ["pennant.tests/sedov/sedov.pnt",
---    "-npieces", "1", "-seq_init", "1", "-par_init", "1",
+--    "-npieces", "1", "-seq_init", "1", "-par_init", "1", "-interior", "0",
 --    "-absolute", "2e-6", "-relative", "1e-8", "-relative_absolute", "1e-10"],
 --   ["pennant.tests/sedov/sedov.pnt",
---    "-npieces", "3", "-seq_init", "1", "-par_init", "1",
+--    "-npieces", "3", "-ll:cpu", "3", "-seq_init", "1", "-par_init", "1", "-interior", "0",
 --    "-absolute", "2e-6", "-relative", "1e-8", "-relative_absolute", "1e-10"],
 --   ["pennant.tests/leblanc/leblanc.pnt",
---    "-npieces", "1", "-seq_init", "1", "-par_init", "1"],
+--    "-npieces", "1", "-seq_init", "1", "-par_init", "1", "-interior", "0"],
 --   ["pennant.tests/leblanc/leblanc.pnt",
---    "-npieces", "2", "-seq_init", "1", "-par_init", "1"]
+--    "-npieces", "2", "-ll:cpu", "2", "-seq_init", "1", "-par_init", "1", "-interior", "0"]
 -- ]
 
 -- Inspired by https://github.com/losalamos/PENNANT
@@ -1069,6 +1069,7 @@ do
 
   var enable = conf.enable and not conf.warmup
   var warmup = conf.warmup and conf.enable
+  var print_ts = conf.print_ts
 
   var interval = 100
   var start_time = c.legion_get_current_time_in_micros()/1.e6
@@ -1102,13 +1103,15 @@ do
       last_time = current_time
     end
 
+    print_ts = conf.print_ts and cycle == 0
+
     __demand(__parallel)
     for i = 0, conf.npieces do
       adv_pos_half(rp_all_private_p[i],
                    rp_spans_private[i],
                    dt,
                    conf.nspans_points,
-                   enable, conf.print_ts)
+                   enable, print_ts)
     end
     __demand(__parallel)
     for i = 0, conf.npieces do
@@ -1116,7 +1119,7 @@ do
                    rp_spans_shared[i],
                    dt,
                    conf.nspans_points,
-                   enable, conf.print_ts)
+                   enable, print_ts)
     end
 
     __demand(__parallel)
@@ -1163,6 +1166,8 @@ do
                            enable)
     end
 
+    print_ts = conf.print_ts and cycle == cstop - 1
+
     dthydro = dtmax
     __demand(__parallel)
     for i = 0, conf.npieces do
@@ -1170,7 +1175,7 @@ do
                                  rz_spans[i],
                                  dt, dtmax, cfl, cflv,
                                  conf.nspans_zones,
-                                 enable, conf.print_ts)
+                                 enable, print_ts)
     end
 
     cycle += 1
@@ -1339,7 +1344,10 @@ task test()
   end
 
   if conf.par_init then
+    var colorings_ = read_partitions(conf)
     if conf.seq_init then
+      regentlib.assert(colorings.nspans_zones == colorings_.nspans_zones, "bad nspans zones")
+      regentlib.assert(colorings.nspans_points == colorings_.nspans_points, "bad nspans points")
       c.legion_coloring_destroy(colorings.rz_all_c)
       c.legion_coloring_destroy(colorings.rz_spans_c)
       c.legion_coloring_destroy(colorings.rp_all_c)
@@ -1350,7 +1358,7 @@ task test()
       c.legion_coloring_destroy(colorings.rs_all_c)
       c.legion_coloring_destroy(colorings.rs_spans_c)
     end
-    colorings = read_partitions(conf)
+    colorings = colorings_
   end
 
   conf.nspans_zones = colorings.nspans_zones

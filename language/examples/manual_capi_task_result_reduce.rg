@@ -62,11 +62,11 @@ local FID               = 2
 local REDID             = 3
 
 local Pt1dexplicit = macro(function(val)
-  return `Lg.legion_point_1d_t { x = array(val) }
+  return `Lg.legion_point_1d_t { x = array([int64](val)) }
 end) 
 local Pt1d = macro(function(val)
   return `Lg.legion_domain_point_from_point_1d(
-            Lg.legion_point_1d_t { x = array(val) })
+            Lg.legion_point_1d_t { x = array([int64](val)) })
 end)
 
 -- define the tasks

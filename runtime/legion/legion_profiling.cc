@@ -263,7 +263,6 @@ namespace Legion {
       info.destroy = timeline->delete_time;
     }
 
-#ifdef LEGION_PROF_MESSAGES
     //--------------------------------------------------------------------------
     void LegionProfInstance::record_message(Processor proc, MessageKind kind, 
                                             unsigned long long start,
@@ -276,6 +275,21 @@ namespace Legion {
       info.start = start;
       info.stop = stop;
       info.proc = proc;
+    }
+
+#ifdef LEGION_PROF_SELF_PROFILE
+    //--------------------------------------------------------------------------
+    void LegionProfInstance::record_proftask(Processor proc, UniqueID op_id,
+					     unsigned long long start,
+					     unsigned long long stop)
+    //--------------------------------------------------------------------------
+    {
+      prof_task_infos.push_back(ProfTaskInfo());
+      ProfTaskInfo &info = prof_task_infos.back();
+      info.proc = proc;
+      info.op_id = op_id;
+      info.start = start;
+      info.stop = stop;
     }
 #endif
 
@@ -361,12 +375,18 @@ namespace Legion {
                       it->op_id, it->inst.id, it->mem.id, it->total_bytes,
                       it->create, it->destroy);
       }
-#ifdef LEGION_PROF_MESSAGES
       for (std::deque<MessageInfo>::const_iterator it = message_infos.begin();
             it != message_infos.end(); it++)
       {
         log_prof.info("Prof Message Info %u " IDFMT " %llu %llu",
                       it->kind, it->proc.id, it->start, it->stop);
+      }
+#ifdef LEGION_PROF_SELF_PROFILE
+      for (std::deque<ProfTaskInfo>::const_iterator it = prof_task_infos.begin();
+            it != prof_task_infos.end(); it++)
+      {
+        log_prof.info("Prof ProfTask Info " IDFMT " %llu %llu %llu",
+                      it->proc.id, it->op_id, it->start, it->stop);
       }
 #endif
       task_kinds.clear();
@@ -377,9 +397,7 @@ namespace Legion {
       meta_infos.clear();
       copy_infos.clear();
       inst_infos.clear();
-#ifdef LEGION_PROF_MESSAGES
       message_infos.clear();
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -722,6 +740,9 @@ namespace Legion {
                                          size_t size)
     //--------------------------------------------------------------------------
     {
+#ifdef LEGION_PROF_SELF_PROFILE
+      long long t_start = Realm::Clock::current_time_in_nanoseconds();
+#endif
       size_t local_id = p.local_id(); 
 #ifdef DEBUG_HIGH_LEVEL
       assert(local_id < MAX_NUM_PROCS);
@@ -849,6 +870,10 @@ namespace Legion {
         default:
           assert(false);
       }
+#ifdef LEGION_PROF_SELF_PROFILE
+      long long t_stop = Realm::Clock::current_time_in_nanoseconds();
+      instances[local_id]->record_proftask(p, info->op_id, t_start, t_stop);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -862,7 +887,6 @@ namespace Legion {
       }
     }
 
-#ifdef LEGION_PROF_MESSAGES
     //--------------------------------------------------------------------------
     void LegionProfiler::record_message_kinds(const char *const *const
                                   message_names, unsigned int num_message_kinds)
@@ -889,7 +913,6 @@ namespace Legion {
         instances[local_id] = new LegionProfInstance(this);
       instances[local_id]->record_message(current, kind, start, stop);
     }
-#endif
 
   }; // namespace Internal
 }; // namespace Legion

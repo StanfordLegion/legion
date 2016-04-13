@@ -12,15 +12,20 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
+-- fails-with:
+-- type_mismatch_phase_barrier6.rg:31: method call cannot have conditions near 'end'
+
 import "regent"
 
-local c = regentlib.c
+struct st {
+  x : int;
+}
 
-task main()
-  var r = region(ispace(ptr, 5), int)
-  var x = new(ptr(int, r))
-
-  var y = dynamic_cast(ptr(int, r), 0)
-  regentlib.assert(not isnull(y), "test failed")
+terra st:g(y : int)
 end
-regentlib.start(main)
+
+task f(x : int)
+  var a = st { x = x }
+  var p = phase_barrier(1)
+  a:g(x, arrives(p))
+end

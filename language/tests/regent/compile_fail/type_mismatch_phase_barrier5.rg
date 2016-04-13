@@ -12,15 +12,15 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
+-- fails-with:
+-- type_mismatch_phase_barrier5.rg:25: type mismatch: expected phase_barrier but got int32
+--  g(x, arrives(x))
+--             ^
+
 import "regent"
 
-local c = regentlib.c
+task g(x : int) end
 
-task main()
-  var r = region(ispace(ptr, 5), int)
-  var x = new(ptr(int, r))
-
-  var y = dynamic_cast(ptr(int, r), 0)
-  regentlib.assert(not isnull(y), "test failed")
+task f(x : int)
+  g(x, arrives(x))
 end
-regentlib.start(main)

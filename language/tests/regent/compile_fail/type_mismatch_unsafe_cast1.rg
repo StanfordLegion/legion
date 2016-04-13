@@ -13,15 +13,14 @@
 -- limitations under the License.
 
 -- fails-with:
--- type_mismatch_dynamic_cast2.rg:25: dynamic_cast requires ptr as argument 2, got int32
---   var y = dynamic_cast(ptr(int, r), x)
---                      ^
+-- type_mismatch_unsafe_cast1.rg:24: unsafe_cast requires single ptr type as argument 1, got ptr(int32, $r, $s)
+-- var y = unsafe_cast(ptr(int, r, s), x)
+--                     ^
 
 import "regent"
 
-task f()
-  var r = region(ispace(ptr, 5), int)
+task f(r : region(int), s : region(int))
   var x = 5
-  var y = dynamic_cast(ptr(int, r), x)
+  var y = unsafe_cast(ptr(int, r, s), x)
 end
 f:compile()

@@ -18,7 +18,7 @@ local fcntl = terralib.includec("fcntl.h")
 local unistd = terralib.includec("unistd.h")
 
 -- this is an example of using Lua/Terra to implement a "templated" function
-function read_region_data(t)
+function read_region_data(src_t, dst_t)
   local specialized = terra(runtime : c.legion_runtime_t,
 			     ctx : c.legion_context_t,
 			     pr : c.legion_physical_region_t,
@@ -36,12 +36,15 @@ function read_region_data(t)
       var start : c.legion_ptr_t
       var count : uint64
       start = c.legion_index_iterator_next_span(itr, &count, -1)
-
-      var amt = unistd.pread(fd,
-			     [&t](c.legion_accessor_array_ref(fa, start)),
-			     sizeof(t) * count,
-			     offset + sizeof(t) * start.value)
-      regentlib.assert(amt == sizeof(t) * count, "short read!")
+      for idx = 0, count do
+        var pos : c.legion_ptr_t = c.legion_ptr_t { value = start.value + idx }
+        @[&dst_t](c.legion_accessor_array_ref(fa, pos)) = 0
+        var amt = unistd.pread(fd,
+          		     [&dst_t](c.legion_accessor_array_ref(fa, pos)),
+          		     sizeof(src_t),
+          		     offset + sizeof(src_t) * (start.value + idx))
+        regentlib.assert(amt == sizeof(src_t), "short read!")
+      end
     end
     unistd.close(fd)
   end
@@ -61,8 +64,8 @@ end
 
 helpers = { 
   read_region_data = read_region_data,
-  read_ptr_field = read_region_data(int),
-  read_float_field = read_region_data(float),
+  read_ptr_field = read_region_data(int, int64),
+  read_float_field = read_region_data(float, float),
 
   allocate_elements = allocate_elements,
 }

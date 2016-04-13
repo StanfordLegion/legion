@@ -961,29 +961,29 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM>
     /*static*/ Point<DIM> DefaultMapper::default_select_blocking_factor( 
-                                         int factor, const Rect<DIM> &to_factor)
+                                       off_t factor, const Rect<DIM> &to_factor)
     //--------------------------------------------------------------------------
     {
       if (factor == 1)
       {
-        int result[DIM];
+        off_t result[DIM];
         for (int i = 0; i < DIM; i++)
           result[i] = 1;
         return Point<DIM>(result);
       }
       // Fundamental theorem of arithmetic time!
       const unsigned num_primes = 32;
-      const int primes[num_primes] = { 2, 3, 5, 7, 11, 13, 17, 19, 
-                                       23, 29, 31, 37, 41, 43, 47, 53,
-                                       59, 61, 67, 71, 73, 79, 83, 89,
-                                       97, 101, 103, 107, 109, 113, 127, 131 };
+      const off_t primes[num_primes] = { 2, 3, 5, 7, 11, 13, 17, 19, 
+                                        23, 29, 31, 37, 41, 43, 47, 53,
+                                        59, 61, 67, 71, 73, 79, 83, 89,
+                                        97, 101, 103, 107, 109, 113, 127, 131 };
       // Increase the size of the prime number table if you ever hit this
       assert(factor <= (primes[num_primes-1] * primes[num_primes-1]));
       // Factor into primes
       std::vector<int> prime_factors;
       for (unsigned idx = 0; idx < num_primes; idx++)
       {
-        const int prime = primes[idx];
+        const off_t prime = primes[idx];
         if ((prime * prime) > factor)
           break;
         while ((factor % prime) == 0)
@@ -1001,11 +1001,11 @@ namespace Legion {
       // largest primes down to the smallest to give ourselves as much 
       // flexibility as possible to get as fine a partitioning as possible
       // for maximum parallelism
-      int result[DIM];
+      off_t result[DIM];
       for (int i = 0; i < DIM; i++)
         result[i] = 1;
       int exhausted_dims = 0;
-      int dim_chunks[DIM];
+      off_t dim_chunks[DIM];
       for (int i = 0; i < DIM; i++)
       {
         dim_chunks[i] = to_factor.dim_size(i);
@@ -1016,7 +1016,7 @@ namespace Legion {
       {
         // Find the dimension with the biggest dim_chunk 
         int next_dim = -1;
-        int max_chunk = -1;
+        off_t max_chunk = -1;
         for (int i = 0; i < DIM; i++)
         {
           if (dim_chunks[i] > max_chunk)
@@ -1025,7 +1025,7 @@ namespace Legion {
             next_dim = i;
           }
         }
-        const int next_prime = prime_factors[idx];
+        const off_t next_prime = prime_factors[idx];
         // If this dimension still has chunks at least this big
         // then we can divide it by this factor
         if (max_chunk >= next_prime)
@@ -1661,7 +1661,7 @@ namespace Legion {
       // TODO: deal with task layout constraints that require multiple
       // region requirements to be mapped to the same instance
       std::vector<LogicalRegion> target_regions(1, target_region);
-      if (force_new || (req.privilege == REDUCE)) {
+      if (force_new || (req.privilege == REDUCE)) { // && (kind != COPY_MAPPING))) {
         if (!mapper_rt_create_physical_instance(ctx, target_memory, constraints,
                                                 target_regions, result))
           return false;

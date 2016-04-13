@@ -2667,6 +2667,8 @@ class Operation(object):
         result = self.mappings[index]
         assert self.context is not None
         for fid,inst in result.iteritems():
+            if inst.is_virtual():
+                continue
             self.context.record_instance_use(inst, fid, parent_node) 
         return result
 
@@ -2786,7 +2788,7 @@ class Operation(object):
                     copy = self.find_generated_copy_across(src_field, dst_field,
                                           dst_req.logical_node, src_inst, dst_inst)
                     if copy is None:
-                        print "ERROR: Missing copy acros operation from field "+\
+                        print "ERROR: Missing copy across operation from field "+\
                               str(src_field)+" to field "+str(dst_field)+" between region "+\
                               "requirements "+str(src_index)+" and "+str(dst_index)+" of "+\
                               str(self)
@@ -3185,6 +3187,10 @@ class Task(object):
         return True
 
     def record_instance_use(self, inst, fid, node):
+        depth = self.get_depth()
+        # If this is the top-level context there is nothing to do
+        if depth == 0:
+            return
         assert self.used_instances is not None
         # If we've already handled it then we are done
         if (inst,fid) in self.used_instances:
@@ -3208,14 +3214,10 @@ class Task(object):
                 # First tell our parent that we are using the instance
                 self.op.context.record_instance_use(inst, fid, req.parent)
                 # Clone the user list 
-                depth = self.get_depth()
-                # If this is the top-level context we don't have
-                # anything to copy in
-                if depth > 0:
-                    parent_depth = depth - 1
-                    inst.clone_users(field, parent_depth, depth) 
-                    # Then add our own user at our parent's depth
-                    inst.add_user(parent_depth, field, self.op, req)
+                parent_depth = depth - 1
+                inst.clone_users(field, parent_depth, depth) 
+                # Then add our own user at our parent's depth
+                inst.add_user(parent_depth, field, self.op, req)
                 # We are done
                 break
         # Record that we handled this field for this instance
@@ -4342,11 +4344,18 @@ class RealmCopy(RealmBase):
                 dst_field = self.dst_fields[fidx]
                 src_inst = self.srcs[fidx]
                 dst_inst = self.dsts[fidx]
+                redop = self.redops[fidx]
                 line = []
                 if src_field == dst_field:
-                    line.append(str(src_field))
+                    if redop <> 0:
+                        line.append(str(src_field)+' Redop='+str(redop))
+                    else:
+                        line.append(str(src_field))
                 else:
-                    line.append(str(src_field)+':'+str(dst_field))
+                    if redop <> 0:
+                        line.append(str(src_field)+':'+str(dst_field)+' Redop='+str(redop))
+                    else:
+                        line.append(str(src_field)+':'+str(dst_field))
                 line.append(str(src_inst)+':'+str(dst_inst))
                 if first_field:
                     line.insert(0, {"label" : "Fields",
@@ -4355,7 +4364,7 @@ class RealmCopy(RealmBase):
                 lines.append(line)
         color = 'darkgoldenrod1'
         for redop in self.redops:
-            if redop is not 0:
+            if redop <> 0:
                 color = 'tomato'
                 break
         size = 14

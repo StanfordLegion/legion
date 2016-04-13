@@ -1269,6 +1269,6 @@ namespace Legion {
       }
     }
 
-  };
-};
+  }; // namespace Mapping
+}; // namespace Legion
 
