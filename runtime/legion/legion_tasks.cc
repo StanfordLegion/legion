@@ -1842,8 +1842,8 @@ namespace Legion {
           }
           if (!unacquired.empty())
           {
-            std::map<PhysicalManager*,unsigned> *acquired_instances =
-              get_acquired_instances_ref();
+            std::map<PhysicalManager*,std::pair<unsigned,bool> > 
+              *acquired_instances = get_acquired_instances_ref();
             for (std::vector<PhysicalManager*>::const_iterator uit = 
                   unacquired.begin(); uit != unacquired.end(); uit++)
             {
@@ -2736,9 +2736,14 @@ namespace Legion {
     {
       int depth = get_depth();
       rez.serialize(depth);
-      AutoLock o_lock(op_lock, 1, false/*exclusive*/);
       // See if we need to pack up base task information
       pack_base_task(rez, target);
+#ifdef DEBUG_HIGH_LEVEL
+      assert(parent_req_indexes.size() == regions.size());
+#endif
+      // Pack up our virtual req indexes
+      for (unsigned idx = 0; idx < parent_req_indexes.size(); idx++)
+        rez.serialize(parent_req_indexes[idx]);
       // Pack up our virtual mapping information
       std::vector<unsigned> virtual_indexes;
       for (unsigned idx = 0; idx < regions.size(); idx++)
@@ -4883,8 +4888,8 @@ namespace Legion {
         }
         if (!unacquired.empty())
         {
-          std::map<PhysicalManager*,unsigned> *acquired_instances =
-              get_acquired_instances_ref();
+          std::map<PhysicalManager*,std::pair<unsigned,bool> > 
+            *acquired_instances = get_acquired_instances_ref();
           for (std::vector<PhysicalManager*>::const_iterator it = 
                 unacquired.begin(); it != unacquired.end(); it++)
           {
@@ -5000,6 +5005,8 @@ namespace Legion {
           // managers are reduction instances
           if (IS_REDUCE(regions[idx]))
           {
+            std::map<PhysicalManager*,std::pair<unsigned,bool> > 
+              *acquired = get_acquired_instances_ref();
             for (unsigned idx2 = 0; idx2 < result.size(); idx2++)
             {
               if (!result[idx2].get_manager()->is_reduction_manager())
@@ -5011,6 +5018,26 @@ namespace Legion {
                               "reduction privileges.", "map_task", 
                               mapper->get_mapper_name(), idx,
                               get_task_name(), get_unique_id());
+#ifdef DEBUG_HIGH_LEVEL
+                assert(false);
+#endif
+                exit(ERROR_INVALID_MAPPER_OUTPUT);
+              }
+              std::map<PhysicalManager*,std::pair<unsigned,bool> >::
+                const_iterator finder = acquired->find(
+                    result[idx2].get_manager());
+#ifdef DEBUG_HIGH_LEVEL
+              assert(finder != acquired->end());
+#endif
+              if (!finder->second.second)
+              {
+                log_run.error("Invalid mapper output from invocation of '%s' "
+                              "on mapper %s. Mapper made an illegal decision "
+                              "to re-use a reduction instance for region "
+                              "requirement %d of task %s (ID %lld). Reduction "
+                              "instances are not currently permitted to be "
+                              "recycled.", "map_task",mapper->get_mapper_name(),
+                              idx, get_task_name(), get_unique_id());
 #ifdef DEBUG_HIGH_LEVEL
                 assert(false);
 #endif
@@ -5454,8 +5481,8 @@ namespace Legion {
         }
         if (!unacquired.empty())
         {
-          std::map<PhysicalManager*,unsigned> *acquired_instances =
-            get_acquired_instances_ref();
+          std::map<PhysicalManager*,std::pair<unsigned,bool> > 
+            *acquired_instances = get_acquired_instances_ref();
           for (std::vector<PhysicalManager*>::const_iterator uit = 
                 unacquired.begin(); uit != unacquired.end(); uit++)
           {
@@ -5689,7 +5716,9 @@ namespace Legion {
       result->add_base_resource_ref(CONTEXT_REF);
       // We've got the results, if we have any virtual mappings we have
       // to see if this instance can be used to satisfy a virtual mapping
-      if (has_virtual_instances())
+      // We can also skip reduction views because we know they are not
+      // permitted to cross context boundaries
+      if (has_virtual_instances() && !result->is_reduction_view())
       {
         InstanceView *parent_context_view = NULL;
         const LogicalRegion &handle = manager->region_node->handle;
@@ -7362,7 +7391,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    std::map<PhysicalManager*,unsigned>* 
+    std::map<PhysicalManager*,std::pair<unsigned,bool> >* 
                                 IndividualTask::get_acquired_instances_ref(void)
     //--------------------------------------------------------------------------
     {
@@ -8346,7 +8375,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    std::map<PhysicalManager*,unsigned>* 
+    std::map<PhysicalManager*,std::pair<unsigned,bool> >* 
                                      PointTask::get_acquired_instances_ref(void)
     //--------------------------------------------------------------------------
     {
@@ -8952,6 +8981,9 @@ namespace Legion {
       std::set<Event> ready_events;
       derez.deserialize(depth);
       unpack_base_task(derez, ready_events);
+      parent_req_indexes.resize(regions.size());
+      for (unsigned idx = 0; idx < parent_req_indexes.size(); idx++)
+        derez.deserialize(parent_req_indexes[idx]);
       virtual_mapped.resize(regions.size(), false);
       size_t num_virtual;
       derez.deserialize(num_virtual);
@@ -10272,7 +10304,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    std::map<PhysicalManager*,unsigned>* 
+    std::map<PhysicalManager*,std::pair<unsigned,bool> >* 
                                      IndexTask::get_acquired_instances_ref(void)
     //--------------------------------------------------------------------------
     {
@@ -10866,7 +10898,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    std::map<PhysicalManager*,unsigned>* 
+    std::map<PhysicalManager*,std::pair<unsigned,bool> >* 
                                      SliceTask::get_acquired_instances_ref(void)
     //--------------------------------------------------------------------------
     {

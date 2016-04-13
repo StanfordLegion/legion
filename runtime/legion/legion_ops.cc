@@ -238,13 +238,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void Operation::release_acquired_instances(
-                        std::map<PhysicalManager*,unsigned> &acquired_instances)
+       std::map<PhysicalManager*,std::pair<unsigned,bool> > &acquired_instances)
     //--------------------------------------------------------------------------
     {
-      for (std::map<PhysicalManager*,unsigned>::iterator it = 
+      for (std::map<PhysicalManager*,std::pair<unsigned,bool> >::iterator it = 
             acquired_instances.begin(); it != acquired_instances.end(); it++)
       {
-        if (it->first->remove_base_valid_ref(MAPPING_ACQUIRE_REF, it->second))
+        if (it->first->remove_base_valid_ref(MAPPING_ACQUIRE_REF, 
+                                             it->second.first))
           PhysicalManager::delete_physical_manager(it->first);
       }
       acquired_instances.clear();
@@ -399,7 +400,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    std::map<PhysicalManager*,unsigned>* 
+    std::map<PhysicalManager*,std::pair<unsigned,bool> >* 
                                      Operation::get_acquired_instances_ref(void)
     //--------------------------------------------------------------------------
     {
@@ -2023,7 +2024,8 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    std::map<PhysicalManager*,unsigned>* MapOp::get_acquired_instances_ref(void)
+    std::map<PhysicalManager*,std::pair<unsigned,bool> >* 
+                                         MapOp::get_acquired_instances_ref(void)
     //--------------------------------------------------------------------------
     {
       return &acquired_instances;
@@ -2405,6 +2407,27 @@ namespace Legion {
                           "requirement with reduction-only privileges for "
                           "inline mapping operation in task %s (ID %lld).",
                           mapper->get_mapper_name(),parent_ctx->get_task_name(),
+                          parent_ctx->get_unique_id());
+#ifdef DEBUG_HIGH_LEVEL
+            assert(false);
+#endif
+            exit(ERROR_INVALID_MAPPER_OUTPUT);
+          }
+          std::map<PhysicalManager*,std::pair<unsigned,bool> >::const_iterator 
+            finder = acquired_instances.find(
+                chosen_instances[idx].get_manager());
+#ifdef DEBUG_HIGH_LEVEL
+          assert(finder != acquired_instances.end());
+#endif
+          if (!finder->second.second)
+          {
+            log_run.error("Invalid mapper output from invocatino of "
+                          "'map_inline' on mapper %s. Mapper made an illegal "
+                          "decision to re-use a reduction instance for an "
+                          "inline mapping in task %s (ID %lld). Reduction "
+                          "instances are not currently permitted to be "
+                          "recycled.", mapper->get_mapper_name(),
+                          parent_ctx->get_task_name(), 
                           parent_ctx->get_unique_id());
 #ifdef DEBUG_HIGH_LEVEL
             assert(false);
@@ -3288,7 +3311,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    std::map<PhysicalManager*,unsigned>* 
+    std::map<PhysicalManager*,std::pair<unsigned,bool> >* 
                                         CopyOp::get_acquired_instances_ref(void)
     //--------------------------------------------------------------------------
     {
@@ -4761,7 +4784,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    std::map<PhysicalManager*,unsigned>* 
+    std::map<PhysicalManager*,std::pair<unsigned,bool> >* 
                                   InterCloseOp::get_acquired_instances_ref(void)
     //--------------------------------------------------------------------------
     {
@@ -5195,7 +5218,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    std::map<PhysicalManager*,unsigned>* 
+    std::map<PhysicalManager*,std::pair<unsigned,bool> >* 
                                    PostCloseOp::get_acquired_instances_ref(void)
     //--------------------------------------------------------------------------
     {
@@ -5736,7 +5759,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    std::map<PhysicalManager*,unsigned>* 
+    std::map<PhysicalManager*,std::pair<unsigned,bool> >* 
                                      AcquireOp::get_acquired_instances_ref(void)
     //--------------------------------------------------------------------------
     {
@@ -6317,7 +6340,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    std::map<PhysicalManager*,unsigned>* 
+    std::map<PhysicalManager*,std::pair<unsigned,bool> >* 
                                      ReleaseOp::get_acquired_instances_ref(void)
     //--------------------------------------------------------------------------
     {
@@ -7951,7 +7974,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    std::map<PhysicalManager*,unsigned>*
+    std::map<PhysicalManager*,std::pair<unsigned,bool> >*
                                    MustEpochOp::get_acquired_instances_ref(void)
     //--------------------------------------------------------------------------
     {

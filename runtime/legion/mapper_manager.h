@@ -114,7 +114,7 @@ namespace Legion {
       MappingCallKind                   kind;
       Operation*                        operation;
       std::map<PhysicalManager*,
-               unsigned/*count*/>*      acquired_instances;
+        std::pair<unsigned/*count*/,bool/*created*/> >* acquired_instances;
     };
 
     /**
@@ -383,7 +383,7 @@ namespace Legion {
                                     std::vector<MappingInstance> > &instances);
     public:
       void record_acquired_instance(MappingCallInfo *info, 
-                                    PhysicalManager *manager);
+                                    PhysicalManager *manager, bool created);
       void release_acquired_instance(MappingCallInfo *info,
                                      PhysicalManager *manager);
       void check_region_consistency(MappingCallInfo *info, const char *call,

@@ -368,8 +368,8 @@ namespace Legion {
           if (target.capacity() == 0)
             continue;
           if (default_make_instance(ctx, target, layout_constraints,
-                chosen_instances[output_idx], mapping_kind, true/*force new*/,
-                false/*meets*/, req.privilege == REDUCE, req))
+                chosen_instances[output_idx], mapping_kind, 
+                true/*force new*/, false/*meets*/, req))
           {
             made_instance = true;
             break;

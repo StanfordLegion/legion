@@ -2433,7 +2433,8 @@ namespace Legion {
                                   const std::vector<MappingInstance> &chosen,
                                   InstanceSet &result, RegionTreeID &bad_tree,
                                   std::vector<FieldID> &missing_fields,
-                                  std::map<PhysicalManager*,unsigned> *acquired,
+                                  std::map<PhysicalManager*,
+                                       std::pair<unsigned,bool> > *acquired,
                                   std::vector<PhysicalManager*> &unacquired,
                                   const bool do_acquire_checks)
     //--------------------------------------------------------------------------
@@ -2520,7 +2521,8 @@ namespace Legion {
                                      const RegionRequirement &req,
                                      const std::vector<MappingInstance> &chosen,
                                      InstanceSet &result,RegionTreeID &bad_tree,
-                                  std::map<PhysicalManager*,unsigned> *acquired,
+                                     std::map<PhysicalManager*,
+                                          std::pair<unsigned,bool> > *acquired,
                                      std::vector<PhysicalManager*> &unacquired,
                                      const bool do_acquire_checks)
     //--------------------------------------------------------------------------
@@ -2606,7 +2608,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionTreeForest::perform_missing_acquires(
-                                std::map<PhysicalManager*,unsigned> &acquired,
+                std::map<PhysicalManager*,std::pair<unsigned,bool> > &acquired,
                                 const std::vector<PhysicalManager*> &unacquired)
     //--------------------------------------------------------------------------
     {
@@ -2619,7 +2621,8 @@ namespace Legion {
         if ((*it)->try_add_base_valid_ref(MAPPING_ACQUIRE_REF,
                                             !(*it)->is_owner()))
         {
-          acquired.insert(std::pair<PhysicalManager*,unsigned>(*it,1));
+          acquired.insert(std::pair<PhysicalManager*,
+             std::pair<unsigned,bool> >(*it,std::pair<unsigned,bool>(1,false)));
           continue;
         }
         // If we failed on the ownr node, it will never work
@@ -2657,7 +2660,8 @@ namespace Legion {
           {
             if (req_it->second.results[idx])
             {
-              acquired.insert(std::pair<PhysicalManager*,unsigned>(*it,1));
+              acquired.insert(std::pair<PhysicalManager*,std::pair<unsigned,
+                  bool> >(*it,std::pair<unsigned,bool>(1,false)));
               // make the reference a local reference and 
               // remove our remote did reference
               (*it)->add_base_valid_ref(MAPPING_ACQUIRE_REF);

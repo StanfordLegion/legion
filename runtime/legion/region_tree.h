@@ -384,13 +384,15 @@ namespace Legion {
                                const std::vector<MappingInstance> &chosen,
                                InstanceSet &result, RegionTreeID &bad_tree,
                                std::vector<FieldID> &missing_fields,
-                               std::map<PhysicalManager*,unsigned> *acquired,
+                               std::map<PhysicalManager*,
+                                    std::pair<unsigned,bool> > *acquired,
                                std::vector<PhysicalManager*> &unacquired,
                                const bool do_acquire_checks);
       bool physical_convert_postmapping(const RegionRequirement &req,
                                const std::vector<MappingInstance> &chosen,
                                InstanceSet &result, RegionTreeID &bad_tree,
-                               std::map<PhysicalManager*,unsigned> *acquired,
+                               std::map<PhysicalManager*,
+                                    std::pair<unsigned,bool> > *acquired,
                                std::vector<PhysicalManager*> &unacquired,
                                const bool do_acquire_checks);
       void log_mapping_decision(UniqueID uid, unsigned index,
@@ -398,7 +400,7 @@ namespace Legion {
                                 const InstanceSet &targets);
     protected: // helper method for the above two methods
       void perform_missing_acquires(
-                               std::map<PhysicalManager*,unsigned> &acquired,
+                 std::map<PhysicalManager*,std::pair<unsigned,bool> > &acquired,
                                const std::vector<PhysicalManager*> &unacquired);
     public:
       bool are_colocated(const std::vector<InstanceSet*> &instances,

@@ -1447,7 +1447,7 @@ namespace Legion {
           // using these constraints
           if (!default_make_instance(ctx, target_memory, index_constraints,
                      instances.back(), TASK_MAPPING, force_new_instances, 
-                     false/*meets*/, false/*reduction*/, req))
+                     false/*meets*/, req))
             return false;
         }
         else if (mapper_rt_do_constraints_entail(ctx, 
@@ -1457,7 +1457,7 @@ namespace Legion {
           // so we can just use them directly
           if (!default_make_instance(ctx, target_memory, index_constraints,
                       instances.back(), TASK_MAPPING, force_new_instances, 
-                      true/*meets*/, false/*reduction*/, req))
+                      true/*meets*/, req))
             return false;
         }
         else
@@ -1472,7 +1472,7 @@ namespace Legion {
                 false/*contig*/, false/*inorder*/));
           if (!default_make_instance(ctx, target_memory, creation_constraints,
                          instances.back(), TASK_MAPPING, force_new_instances, 
-                         true/*meets*/, false/*reduction*/, req))
+                         true/*meets*/, req))
             return false;
         }
       }
@@ -1486,7 +1486,7 @@ namespace Legion {
           FieldConstraint(needed_fields, false/*contig*/, false/*inorder*/));
       if (!default_make_instance(ctx, target_memory, creation_constraints, 
                 instances.back(), TASK_MAPPING, force_new_instances, 
-                true/*meets*/,  false/*reduction*/, req))
+                true/*meets*/,  req))
         return false;
       return true;
     }
@@ -1651,13 +1651,13 @@ namespace Legion {
     bool DefaultMapper::default_make_instance(MapperContext ctx, 
         Memory target_memory, const LayoutConstraintSet &constraints,
         PhysicalInstance &result, MappingKind kind, bool force_new, bool meets, 
-        bool reduction, const RegionRequirement &req)
+        const RegionRequirement &req)
     //--------------------------------------------------------------------------
     {
       bool created = true;
       LogicalRegion target_region = 
         default_policy_select_instance_region(ctx, target_memory, req,
-                                    constraints, force_new, meets, reduction);
+                                              constraints, force_new, meets);
       // TODO: deal with task layout constraints that require multiple
       // region requirements to be mapped to the same instance
       std::vector<LogicalRegion> target_regions(1, target_region);
@@ -1673,7 +1673,7 @@ namespace Legion {
       if (created)
       {
         int priority = default_policy_select_garbage_collection_priority(ctx, 
-                         kind, target_memory, result, meets, reduction);
+                kind, target_memory, result, meets, (req.privilege == REDUCE));
         if (priority != 0)
           mapper_rt_set_garbage_collection_priority(ctx, result, priority);
       }
@@ -1686,13 +1686,13 @@ namespace Legion {
                                 const RegionRequirement &req,
                                 const LayoutConstraintSet &layout_constraints,
                                 bool force_new_instances, 
-                                bool meets_constraints, bool reduction)
+                                bool meets_constraints)
     //--------------------------------------------------------------------------
     {
       // If it is not something we are making a big region for just
       // return the region that is actually needed
       LogicalRegion result = req.region; 
-      if (!meets_constraints || reduction)
+      if (!meets_constraints || (req.privilege == REDUCE))
         return result;
       // Simple heuristic here, if we are on a single node, we go all the
       // way to the root since the first-level partition is likely just
@@ -1961,8 +1961,7 @@ namespace Legion {
       output.chosen_instances.resize(output.chosen_instances.size()+1);
       if (!default_make_instance(ctx, target_memory, creation_constraints,
             output.chosen_instances.back(), INLINE_MAPPING, 
-            force_new_instances, true/*meets*/, false/*reduction*/, 
-            inline_op.requirement))
+            force_new_instances, true/*meets*/, inline_op.requirement))
       {
         // If we failed to make it that is bad
         log_mapper.error("Default mapper failed allocation for region "
@@ -2091,8 +2090,7 @@ namespace Legion {
       instances.resize(instances.size() + 1);
       if (!default_make_instance(ctx, target_memory, 
             creation_constraints, instances.back(), 
-            COPY_MAPPING, force_new_instances, true/*meets*/, 
-            false/*reduction*/, req))
+            COPY_MAPPING, force_new_instances, true/*meets*/, req))
       {
         // If we failed to make it that is bad
         log_mapper.error("Default mapper failed allocation for "

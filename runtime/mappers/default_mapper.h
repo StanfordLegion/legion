@@ -270,7 +270,7 @@ namespace Legion {
                                     const RegionRequirement &req,
                                     const LayoutConstraintSet &constraints,
                                     bool force_new_instances, 
-                                    bool meets_constraints, bool reduction);
+                                    bool meets_constraints);
       virtual int default_policy_select_garbage_collection_priority(
                                     MapperContext ctx, 
                                     MappingKind kind, Memory memory, 
@@ -305,7 +305,7 @@ namespace Legion {
       bool default_make_instance(MapperContext ctx, Memory target_memory,
                               const LayoutConstraintSet &constraints, 
                               PhysicalInstance &result, MappingKind kind,
-                              bool force_new, bool meets, bool reduction,
+                              bool force_new, bool meets,
                               const RegionRequirement &req);
       void default_report_failed_instance_creation(const Task &task, 
                               unsigned index, Processor target_proc, 

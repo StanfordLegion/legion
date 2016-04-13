@@ -1428,7 +1428,7 @@ namespace Legion {
         constraints, regions, result, mapper_id, processor, acquire, priority,
         (ctx->operation == NULL) ? 0 : ctx->operation->get_unique_op_id());
       if (success && acquire)
-        record_acquired_instance(ctx, result.impl);
+        record_acquired_instance(ctx, result.impl, true/*created*/);
       resume_mapper_call(ctx);
       return success;
     }
@@ -1460,7 +1460,7 @@ namespace Legion {
                       regions, result, mapper_id, processor, acquire, priority,
              (ctx->operation == NULL) ? 0 : ctx->operation->get_unique_op_id());
       if (success && acquire)
-        record_acquired_instance(ctx, result.impl);
+        record_acquired_instance(ctx, result.impl, true/*created*/);
       resume_mapper_call(ctx);
       return success;
     }
@@ -1494,7 +1494,7 @@ namespace Legion {
                   acquire, priority, (ctx->operation == NULL) ? 0 : 
                                         ctx->operation->get_unique_op_id());
       if (success && acquire)
-        record_acquired_instance(ctx, result.impl);
+        record_acquired_instance(ctx, result.impl, created);
       resume_mapper_call(ctx);
       return success;
     }
@@ -1528,7 +1528,7 @@ namespace Legion {
                    acquire, priority, (ctx->operation == NULL) ? 0 : 
                                          ctx->operation->get_unique_op_id());
       if (success && acquire)
-        record_acquired_instance(ctx, result.impl);
+        record_acquired_instance(ctx, result.impl, created);
       resume_mapper_call(ctx);
       return success;
     }
@@ -1558,7 +1558,7 @@ namespace Legion {
       bool success = runtime->find_physical_instance(target_memory, constraints,
                                                      regions, result, acquire);
       if (success && acquire)
-        record_acquired_instance(ctx, result.impl);
+        record_acquired_instance(ctx, result.impl, false/*created*/);
       resume_mapper_call(ctx);
       return success;
     }
@@ -1588,7 +1588,7 @@ namespace Legion {
       bool success = runtime->find_physical_instance(target_memory, layout_id,
                                                      regions, result, acquire);
       if (success && acquire)
-        record_acquired_instance(ctx, result.impl);
+        record_acquired_instance(ctx, result.impl, false/*created*/);
       resume_mapper_call(ctx);
       return success;
     }
@@ -1630,7 +1630,7 @@ namespace Legion {
       if (manager->try_add_base_valid_ref(MAPPING_ACQUIRE_REF,
                                           !manager->is_owner()))
       {
-        record_acquired_instance(ctx, manager);
+        record_acquired_instance(ctx, manager, false/*created*/);
         resume_mapper_call(ctx);
         return true;
       }
@@ -1648,7 +1648,7 @@ namespace Legion {
         wait_on.wait(); // wait for the results to be ready
       bool success = results[0];
       if (success)
-        record_acquired_instance(ctx, manager);
+        record_acquired_instance(ctx, manager, false/*created*/);
       resume_mapper_call(ctx);
       return success;
     }
@@ -1726,7 +1726,7 @@ namespace Legion {
       bool remote_acquired = perform_remote_acquires(ctx, acquire_requests);
       if (!remote_acquired)
       {
-        std::map<PhysicalManager*,unsigned> &already_acquired = 
+        std::map<PhysicalManager*,std::pair<unsigned,bool> > &already_acquired = 
           *(ctx->acquired_instances);
         // Figure out which instances weren't deleted yet
         for (unsigned idx = 0; idx < instances.size(); idx++)
@@ -1816,7 +1816,7 @@ namespace Legion {
       bool remote_acquired = perform_remote_acquires(ctx, acquire_requests);
       if (!remote_acquired)
       {
-        std::map<PhysicalManager*,unsigned> &already_acquired = 
+        std::map<PhysicalManager*,std::pair<unsigned,bool> > &already_acquired =
           *(ctx->acquired_instances); 
         std::vector<unsigned> to_erase;
         for (std::vector<std::vector<MappingInstance> >::iterator it = 
@@ -1850,7 +1850,7 @@ namespace Legion {
                       std::vector<unsigned> *to_erase)
     //--------------------------------------------------------------------------
     {
-      std::map<PhysicalManager*,unsigned> &already_acquired = 
+      std::map<PhysicalManager*,std::pair<unsigned,bool> > &already_acquired = 
         *(info->acquired_instances);
       bool local_acquired = true;
       for (unsigned idx = 0; idx < instances.size(); idx++)
@@ -1867,7 +1867,7 @@ namespace Legion {
                                             !manager->is_owner()))
         {
           // We already know it wasn't there before
-          already_acquired[manager] = 1;
+          already_acquired[manager] = std::pair<unsigned,bool>(1, false);
           continue;
         }
         // if we failed on the owner node, it will never work
@@ -1917,7 +1917,7 @@ namespace Legion {
           if (req_it->second.results[idx])
           {
             // record that we acquired it
-            record_acquired_instance(info, *it); 
+            record_acquired_instance(info, *it, false/*created*/); 
             // make the reference a local reference and 
             // remove our remote did reference
             (*it)->add_base_valid_ref(MAPPING_ACQUIRE_REF);
@@ -1990,7 +1990,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void MapperManager::record_acquired_instance(MappingCallInfo *ctx,
-                                                 PhysicalManager *manager)
+                                         PhysicalManager *manager, bool created)
     //--------------------------------------------------------------------------
     {
       if (manager->is_virtual_manager())
@@ -1998,13 +1998,14 @@ namespace Legion {
 #ifdef DEBUG_HIGH_LEVEL
       assert(ctx->acquired_instances != NULL);
 #endif
-      std::map<PhysicalManager*,unsigned> &acquired =*(ctx->acquired_instances);
-      std::map<PhysicalManager*,unsigned>::iterator finder = 
+      std::map<PhysicalManager*,
+        std::pair<unsigned,bool> > &acquired =*(ctx->acquired_instances);
+      std::map<PhysicalManager*,std::pair<unsigned,bool> >::iterator finder = 
         acquired.find(manager); 
       if (finder == acquired.end())
-        acquired[manager] = 1; // first reference
+        acquired[manager] = std::pair<unsigned,bool>(1/*first ref*/, created);
       else
-        finder->second++;
+        finder->second.first++;
     }
 
     //--------------------------------------------------------------------------
@@ -2017,14 +2018,15 @@ namespace Legion {
 #ifdef DEBUG_HIGH_LEVEL
       assert(ctx->acquired_instances != NULL);
 #endif
-      std::map<PhysicalManager*,unsigned> &acquired =*(ctx->acquired_instances);
-      std::map<PhysicalManager*,unsigned>::iterator finder = 
+      std::map<PhysicalManager*,std::pair<unsigned,bool> > &acquired =
+        *(ctx->acquired_instances);
+      std::map<PhysicalManager*,std::pair<unsigned,bool> >::iterator finder = 
         acquired.find(manager);
       if (finder == acquired.end())
         return;
       // Release the refrences and then keep going, we know there is 
       // a resource reference so no need to check for deletion
-      manager->remove_base_valid_ref(MAPPING_ACQUIRE_REF, finder->second);
+      manager->remove_base_valid_ref(MAPPING_ACQUIRE_REF, finder->second.first);
       acquired.erase(finder);
     }
 
