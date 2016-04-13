@@ -712,6 +712,10 @@ function type_check.expr_call(cx, node)
     function(arg) return type_check.expr(cx, arg) end)
   local arg_types = args:map(
     function(arg) return std.check_read(cx, arg) end)
+  local conditions = terralib.newlist()
+  for _, condition in ipairs(node.conditions) do
+    conditions:insertall(type_check.expr_condition(cx, condition))
+  end
 
   -- Determine the type of the function being called.
   local fn_type
@@ -823,7 +827,7 @@ function type_check.expr_call(cx, node)
   local result = ast.typed.expr.Call {
     fn = fn,
     args = args,
-    conditions = terralib.newlist(),
+    conditions = conditions,
     expr_type = expr_type,
     options = node.options,
     span = node.span,
