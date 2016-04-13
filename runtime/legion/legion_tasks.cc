@@ -2441,18 +2441,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool SingleTask::is_virtual_mapped(unsigned index) const
-    //--------------------------------------------------------------------------
-    {
-      if (index >= regions.size())
-        return false; // new region, not actually virtually mapped
-#ifdef DEBUG_HIGH_LEVEL
-      assert(index < virtual_mapped.size());
-#endif
-      return virtual_mapped[index];
-    }
-
-    //--------------------------------------------------------------------------
     bool SingleTask::is_created_region(unsigned index) const
     //--------------------------------------------------------------------------
     {
@@ -4556,6 +4544,16 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
+    SingleTask* SingleTask::find_enclosing_context(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(parent_ctx != NULL);
+#endif
+      return parent_ctx;
+    }
+
+    //--------------------------------------------------------------------------
     bool SingleTask::trigger_execution(void)
     //--------------------------------------------------------------------------
     {
@@ -5650,107 +5648,125 @@ namespace Legion {
 #endif
         return result;
       }
-      // First we need to either find or make the instance view
-      InstanceView *result = NULL;
-      do
+      // Check to see if we already have the 
+      // instance, if we do, return it, otherwise make it and save it
+      Event wait_on = Event::NO_EVENT;
       {
-        // No virtual mappings, check to see if we already have the 
-        // instance, if we do, return it, otherwise make it and save it
-        Event wait_on = Event::NO_EVENT;
-        {
-          AutoLock o_lock(op_lock);
-          std::map<PhysicalManager*,InstanceView*>::const_iterator finder = 
-            instance_top_views.find(manager);
-          if (finder != instance_top_views.end())
-          {
-            result = finder->second;
-            break; // we've already go the view, jump to the end
-          }
-          // See if someone else is already making it
-          std::map<PhysicalManager*,UserEvent>::iterator pending_finder =
-            pending_top_views.find(manager);
-          if (pending_finder == pending_top_views.end())
-            // mark that we are making it
-            pending_top_views[manager] = UserEvent::NO_USER_EVENT;
-          else
-          {
-            // See if we are the first one to follow
-            if (!pending_finder->second.exists())
-              pending_finder->second = UserEvent::create_user_event();
-            wait_on = pending_finder->second;
-          }
-        }
-        if (!wait_on.exists())
-        {
-          // We have to make the instance view
-          result = manager->create_instance_top_view(this);
-          result->add_base_resource_ref(CONTEXT_REF);
-          UserEvent to_trigger;
-          {
-            AutoLock o_lock(op_lock);
-#ifdef DEBUG_HIGH_LEVEL
-            assert(instance_top_views.find(manager) == 
-                    instance_top_views.end());
-#endif
-            instance_top_views[manager] = result;
-            std::map<PhysicalManager*,UserEvent>::iterator pending_finder =
-              pending_top_views.find(manager);
-#ifdef DEBUG_HIGH_LEVEL
-            assert(pending_finder != pending_top_views.end());
-#endif
-            to_trigger = pending_finder->second;
-            pending_top_views.erase(pending_finder);
-          }
-          if (to_trigger.exists())
-            to_trigger.trigger();
-        }
+        AutoLock o_lock(op_lock);
+        std::map<PhysicalManager*,InstanceView*>::const_iterator finder = 
+          instance_top_views.find(manager);
+        if (finder != instance_top_views.end())
+          // We've already got the view, so we are done
+          return finder->second;
+        // See if someone else is already making it
+        std::map<PhysicalManager*,UserEvent>::iterator pending_finder =
+          pending_top_views.find(manager);
+        if (pending_finder == pending_top_views.end())
+          // mark that we are making it
+          pending_top_views[manager] = UserEvent::NO_USER_EVENT;
         else
         {
-          wait_on.wait();
-          // Retake the lock and read out the result
-          AutoLock o_lock(op_lock, 1, false/*exclusive*/);
-          std::map<PhysicalManager*,InstanceView*>::const_iterator finder = 
-              instance_top_views.find(manager);
-#ifdef DEBUG_HIGH_LEVEL
-          assert(finder != instance_top_views.end());
-#endif
-          result = finder->second;
+          // See if we are the first one to follow
+          if (!pending_finder->second.exists())
+            pending_finder->second = UserEvent::create_user_event();
+          wait_on = pending_finder->second;
         }
-      } while (false);
-      // We've got the result, see if this requirement was virtually mapped
-      if (has_virtual_instances() && is_virtual_mapped(index))
+      }
+      if (wait_on.exists())
       {
-#if 0
-        // This is where things get weird, this region was virtually mapped
-        // Now we have to clone the view information from our parent context
-        // First we need to get our parent context  
-        SingleTask *parent_context = find_enclosing_parent_context();
-        // Now recurse with our parents index 
-        // Note that this recursion ensures that we handle nested
-        // virtual mappings correctly
+        // Someone else is making it so we just have to wait for it
+        wait_on.wait();
+        // Retake the lock and read out the result
+        AutoLock o_lock(op_lock, 1, false/*exclusive*/);
+        std::map<PhysicalManager*,InstanceView*>::const_iterator finder = 
+            instance_top_views.find(manager);
 #ifdef DEBUG_HIGH_LEVEL
-        assert(index < parent_req_indexes.size());
+        assert(finder != instance_top_views.end());
 #endif
-        InstanceView *parent_view = parent_context->create_instance_top_view(
-                                            manager, parent_req_indexes[index]);
-        VersionInfo &info = get_version_info(index);
-        // Now record ourselves as a user on the parent view and 
-        // make the event precondition a user on the child view
-        runtime->forest->convert_views_across_context(regions[index], info,
-            index, parent_req_indexes[index], this, parent_context,
-            parent_view, result, get_task_completion());
+        return finder->second;
+      }
+      InstanceView *result = manager->create_instance_top_view(this);
+      result->add_base_resource_ref(CONTEXT_REF);
+      // We've got the results, if we have any virtual mappings we have
+      // to see if this instance can be used to satisfy a virtual mapping
+      if (has_virtual_instances())
+      {
+        InstanceView *parent_context_view = NULL;
+        const LogicalRegion &handle = manager->region_node->handle;
         // Nasty corner case, see if there are any other region requirements
         // which this instance can also be used for and are also virtual 
         // mapped and therefore we need to do this analysis now before we
         // release the instance as ready for the context
-#endif
+        for (unsigned idx = 0; idx < regions.size(); idx++)
+        {
+          // If it's not virtual mapped we can keep going
+          if (!virtual_mapped[idx])
+            continue;
+          // Different tree IDs then we can keep going
+          if (regions[idx].region.get_tree_id() != handle.get_tree_id())
+            continue;
+          // See if we have a path
+          std::vector<ColorPoint> path;
+          if (!runtime->forest->compute_index_path(handle.get_index_space(), 
+                                regions[idx].region.get_index_space(), path))
+            continue;
+          // See if we have any overlapping fields
+          bool has_overlapping_fields = false;
+          for (std::set<FieldID>::const_iterator it = 
+                regions[idx].privilege_fields.begin(); it !=
+                regions[idx].privilege_fields.end(); it++)
+          {
+            if (manager->layout->has_field(*it))
+            {
+              has_overlapping_fields = true;
+              break;
+            }
+          }
+          if (!has_overlapping_fields)
+            continue;
+          // We definitely need to do the analysis, since we are a
+          // sub-region and have overlapping fields, get the parent
+          // context view if we haven't done so already
+          if (parent_context_view == NULL)
+          {
+            // Note that this recursion ensures that we handle nested
+            // virtual mappings correctly
+            SingleTask *parent_context = find_enclosing_context();
+            parent_context_view = parent_context->create_instance_top_view(
+                                          manager, parent_req_indexes[idx]);
+          }
+          // Now we clone across for the given region requirement
+          VersionInfo &info = get_version_info(idx); 
+          runtime->forest->convert_views_across_context(regions[idx], info,
+              this, parent_context_view, result, path, get_task_completion());
+        }
       }
-      else if (is_created_region(index))
+      if (is_created_region(index))
       {
         // If this is a created region, record that we made a new
         // instance for this context so that it can flow back out
         // later if it isn't deleted first
       }
+      // Record the result and trigger any user event to signal that the
+      // view is ready
+      UserEvent to_trigger = UserEvent::NO_USER_EVENT;
+      {
+        AutoLock o_lock(op_lock);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(instance_top_views.find(manager) == 
+                instance_top_views.end());
+#endif
+        instance_top_views[manager] = result;
+        std::map<PhysicalManager*,UserEvent>::iterator pending_finder =
+          pending_top_views.find(manager);
+#ifdef DEBUG_HIGH_LEVEL
+        assert(pending_finder != pending_top_views.end());
+#endif
+        to_trigger = pending_finder->second;
+        pending_top_views.erase(pending_finder);
+      }
+      if (to_trigger.exists())
+        to_trigger.trigger();
       return result;
     }
 

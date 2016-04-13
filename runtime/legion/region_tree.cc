@@ -2383,17 +2383,14 @@ namespace Legion {
       return Runtime::merge_events<false>(result_events);
     }
 
-#if 0
     //--------------------------------------------------------------------------
     void RegionTreeForest::convert_views_across_context(
                                         const RegionRequirement &req,
                                         VersionInfo &version_info,
-                                        unsigned src_index,
-                                        unsigned dst_index,
                                         SingleTask *src_context,
-                                        SingleTask *dst_context
                                         InstanceView *src_view,
                                         InstanceView *dst_view,
+                                        const std::vector<ColorPoint> &path,
                                         Event src_completion_event)
     //--------------------------------------------------------------------------
     {
@@ -2414,19 +2411,22 @@ namespace Legion {
       user_mask &= manager->layout->allocated_fields;
       if (!user_mask)
         return;
-      // Convert to the subviews, this is safe because we know the top-view
-      // exists so it will never recurse all the way back up to the contexts
-      InstanceView *src_subview = 
-        region_node->convert_reference_region(manager, src_context, src_index);
-      InstanceView *dst_subview = 
-        region_node->convert_reference_region(manager, dst_context, dst_index);
-      // Add the user to the source and get the event precondition
-      Event precondition = src_subview->add_user(usage, src_completion_event,
-                                         user_mask, src_context, version_info);
-      // Now record the event as an initial precondition on the dst view
-      dst_subview->add_initial_user(precondition, usage, user_mask);
-    }
+      // Walk down the path for both views to get the proper subviews
+#ifdef DEBUG_HIGH_LEVEL
+      assert(!path.empty());
 #endif
+      // Skip the first entry as it is the color for the root node
+      for (int i = int(path.size())-2; i >= 0; i--)
+      {
+        src_view = src_view->get_instance_subview(path[i]);
+        dst_view = dst_view->get_instance_subview(path[i]);
+      }
+      // Add the user to the source and get the event precondition
+      Event precondition = src_view->add_user(usage, src_completion_event,
+                                     user_mask, src_context, version_info);
+      // Now record the event as an initial precondition on the dst view
+      dst_view->add_initial_user(precondition, usage, user_mask);
+    }
 
     //--------------------------------------------------------------------------
     int RegionTreeForest::physical_convert_mapping(const RegionRequirement &req,

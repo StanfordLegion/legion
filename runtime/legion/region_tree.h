@@ -374,12 +374,10 @@ namespace Legion {
                           Operation *op, Event precondition);
       void convert_views_across_context(const RegionRequirement &req,
                                         VersionInfo &version_info,
-                                        unsigned src_index,
-                                        unsigned dst_index,
                                         SingleTask *src_context,
-                                        SingleTask *dst_context,
                                         InstanceView *src_view,
                                         InstanceView *dst_view,
+                                        const std::vector<ColorPoint> &path,
                                         Event completion_event);
     public:
       int physical_convert_mapping(const RegionRequirement &req,

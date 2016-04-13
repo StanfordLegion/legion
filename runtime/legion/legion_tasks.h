@@ -352,7 +352,6 @@ namespace Legion {
       bool is_leaf(void) const;
       bool is_inner(void) const;
       bool has_virtual_instances(void) const;
-      bool is_virtual_mapped(unsigned index) const;
       bool is_created_region(unsigned index) const;
     public:
       void assign_context(RegionTreeContext ctx);
@@ -558,6 +557,7 @@ namespace Legion {
                                        RemoteTask *dst) = 0;
     public:
       RegionTreeContext find_enclosing_context(unsigned idx);
+      virtual SingleTask* find_enclosing_context(void);
     public:
       // Override these methods from operation class
       virtual bool trigger_execution(void); 
