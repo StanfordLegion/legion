@@ -1661,7 +1661,7 @@ namespace Legion {
       // TODO: deal with task layout constraints that require multiple
       // region requirements to be mapped to the same instance
       std::vector<LogicalRegion> target_regions(1, target_region);
-      if (force_new) {
+      if (force_new || (req.privilege == REDUCE)) {
         if (!mapper_rt_create_physical_instance(ctx, target_memory, constraints,
                                                 target_regions, result))
           return false;
