@@ -897,13 +897,22 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       Event continuation_precondition = Event::NO_EVENT;
-      MappingCallInfo *info = begin_mapper_call(HANDLE_MESSAGE_CALL,
-                            NULL, first_invocation, continuation_precondition);
-      if (info != NULL)
+      // Special case for handle message, always defer it if we are also
+      // the sender in order to avoid deadlocks
+      if (first_invocation && (message->sender == processor))
       {
-        mapper->handle_message(info, *message);
-        finish_mapper_call(info);
-        return;
+        continuation_precondition = mapper_lock.acquire(0, true/*exclusive*/);
+      }
+      else
+      {
+        MappingCallInfo *info = begin_mapper_call(HANDLE_MESSAGE_CALL,
+                          NULL, first_invocation, continuation_precondition);
+        if (info != NULL)
+        {
+          mapper->handle_message(info, *message);
+          finish_mapper_call(info);
+          return;
+        }
       }
 #ifdef DEBUG_HIGH_LEVEL
       assert(first_invocation);
