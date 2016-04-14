@@ -3534,7 +3534,8 @@ function codegen.expr_cross_product_array(cx, node)
           impl = [lp],
           product = [product],
           colors = [colors],
-        })),
+        }),
+      expr_type),
     expr_type)
 end
 

@@ -1670,10 +1670,10 @@ end
 function type_check.expr_cross_product_array(cx, node)
   local lhs = type_check.expr(cx, node.lhs)
   local lhs_type = std.as_read(lhs.expr_type)
-  local lhs_symbol = terralib.newsymbol(lhs_type)
+  local lhs_symbol = std.newsymbol(lhs_type)
   local disjointness = node.disjointness
   local rhs_type = std.partition(disjointness, lhs_type.parent_region_symbol)
-  local rhs_symbol = terralib.newsymbol(rhs_type)
+  local rhs_symbol = std.newsymbol(rhs_type)
   local expr_type = std.cross_product(lhs_symbol, rhs_symbol)
   local colorings = type_check.expr(cx, node.colorings)
 
