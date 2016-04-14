@@ -497,8 +497,8 @@ function task_initial_usage(cx, privileges)
   for _, privilege_list in ipairs(privileges) do
     for _, privilege in ipairs(privilege_list) do
       local region = privilege.region
-      assert(std.type_supports_privileges(region.type))
-      usage = usage_meet(usage, uses(cx, region.type, inline))
+      assert(std.type_supports_privileges(region:gettype()))
+      usage = usage_meet(usage, uses(cx, region:gettype(), inline))
     end
   end
   return usage

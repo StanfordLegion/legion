@@ -27,10 +27,10 @@ local default_options = {
   ["pretty"] = false,
   ["index-launches"] = true,
   ["futures"] = true,
-  ["inlines"] = true,
+  ["inlines"] = false, -- true,
   ["leaf"] = true,
   ["trace"] = true,
-  ["vectorize"] = true,
+  ["vectorize"] = false, -- true,
   ["task-inlines"] = true,
 }
 

@@ -80,6 +80,7 @@ function context:set_return_type(t)
 end
 
 function type_check.region_field(cx, node, region, prefix_path, value_type)
+  assert(std.is_symbol(region))
   local field_path = prefix_path .. data.newtuple(node.field_name)
   local field_type = std.get_field(value_type, node.field_name)
   if not field_type then
@@ -92,6 +93,7 @@ function type_check.region_field(cx, node, region, prefix_path, value_type)
 end
 
 function type_check.region_fields(cx, node, region, prefix_path, value_type)
+  assert(std.is_symbol(region))
   if not node then
     return terralib.newlist({prefix_path})
   end
@@ -105,7 +107,7 @@ end
 
 function type_check.region_bare(cx, node)
   local region = node.symbol
-  local region_type = region.type
+  local region_type = region:gettype()
   if not (std.type_supports_privileges(region_type)) then
     log.error(node, "type mismatch: expected a region but got " .. tostring(region_type))
   end
@@ -114,7 +116,7 @@ end
 
 function type_check.region_root(cx, node)
   local region = type_check.region_bare(cx, node)
-  local region_type = region.type
+  local region_type = region:gettype()
   local value_type = region_type:fspace()
   return {
     region = region,
@@ -129,11 +131,19 @@ function type_check.expr_region_root(cx, node)
   if not std.type_supports_privileges(region_type) then
     log.error(node, "type mismatch: expected a region but got " .. tostring(region_type))
   end
+
+  local region_symbol
+  if region:is(ast.typed.expr.ID) then
+    region_symbol = region.value
+  else
+    region_symbol = std.newsymbol(std.as_read(region.expr_type))
+  end
+
   local value_type = region_type:fspace()
   return ast.typed.expr.RegionRoot {
     region = region,
     fields = type_check.region_fields(
-      cx, node.fields, region, data.newtuple(), value_type),
+      cx, node.fields, region_symbol, data.newtuple(), value_type),
     expr_type = region_type,
     options = node.options,
     span = node.span,
@@ -147,7 +157,7 @@ end
 
 function type_check.condition_variable(cx, node)
   local symbol = node.symbol
-  local var_type = symbol.type
+  local var_type = symbol:gettype()
   while std.is_list(var_type) do
     var_type = var_type.element_type
   end
@@ -215,7 +225,7 @@ end
 
 local function check_coherence_conflict_field(node, region, field,
                                               coherence, other_field, result)
-  local region_type = region.type
+  local region_type = region:gettype()
   if field:starts_with(other_field) or other_field:starts_with(field) then
     local other_coherence = result[region_type][other_field]
     assert(other_coherence)
@@ -230,7 +240,7 @@ local function check_coherence_conflict_field(node, region, field,
 end
 
 local function check_coherence_conflict(node, region, field, coherence, result)
-  local region_type = region.type
+  local region_type = region:gettype()
   for _, other_field in result[region_type]:keys() do
     check_coherence_conflict_field(
       node, region, field, coherence, other_field, result)
@@ -244,7 +254,7 @@ function type_check.coherence(cx, node, result)
   for _, coherence in ipairs(coherence_modes) do
     for _, region_field in ipairs(region_fields) do
       local region = region_field.region
-      local region_type = region.type
+      local region_type = region:gettype()
       assert(std.type_supports_privileges(region_type))
 
       local fields = region_field.fields
@@ -283,7 +293,7 @@ function type_check.flag(cx, node, result)
   for _, flag in ipairs(flags) do
     for _, region_field in ipairs(region_fields) do
       local region = region_field.region
-      local region_type = region.type
+      local region_type = region:gettype()
       assert(std.type_supports_privileges(region_type))
 
       local fields = region_field.fields
@@ -417,9 +427,9 @@ function type_check.expr_constant(cx, node)
 end
 
 local untyped = std.untyped
-local untyped_fn = terralib.types.functype({}, terralib.types.unit, true)
+local untyped_fn = terralib.types.functype(terralib.newlist({untyped}), terralib.types.unit, true)
 local function cast_fn(to_type)
-  return terralib.types.functype({untyped}, to_type, false)
+  return terralib.types.functype(terralib.newlist({untyped}), to_type, false)
 end
 
 function type_check.expr_function(cx, node)
@@ -693,7 +703,7 @@ function type_check.expr_method_call(cx, node)
 
   if not valid then
     log.error(node, "invalid method call for " .. tostring(value_type) .. ":" ..
-                node.method_name .. "(" .. arg_types:mkstring(", ") .. ")")
+                node.method_name .. "(" .. data.newtuple(unpack(arg_types)):mkstring(", ") .. ")")
   end
 
   return ast.typed.expr.MethodCall {
@@ -717,8 +727,9 @@ function type_check.expr_call(cx, node)
   local fn_type
   if fn.expr_type == untyped then
     if terralib.isfunction(fn.value) or
-      terralib.isfunctiondefinition(fn.value) or
-      terralib.ismacro(fn.value)
+      terralib.isoverloadedfunction(fn.value) or
+      terralib.ismacro(fn.value) or
+      type(fn.value) == "cdata"
     then
       -- Ask the Terra compiler to determine which overloaded function
       -- to call (or for macros, determine the type of the resulting
@@ -740,7 +751,7 @@ function type_check.expr_call(cx, node)
         local fn_name = fn.value.name or tostring(fn.value)
         fn_name = string.gsub(fn_name, "^std[.]", "regentlib.")
         log.error(node, "no applicable overloaded function " .. tostring(fn_name) ..
-                  " for arguments " .. arg_types:mkstring(", "))
+                  " for arguments " .. data.newtuple(unpack(arg_types)):mkstring(", "))
       end
     elseif std.is_task(fn.value) then
       fn_type = fn.value:gettype()
@@ -769,7 +780,7 @@ function type_check.expr_call(cx, node)
     if arg:is(ast.typed.expr.ID) then
       arg_symbols:insert(arg.value)
     else
-      arg_symbols:insert(terralib.newsymbol(arg_type))
+      arg_symbols:insert(std.newsymbol(arg_type))
     end
   end
   local expr_type = std.validate_args(
@@ -795,11 +806,11 @@ function type_check.expr_call(cx, node)
         local privilege_type = privilege.privilege
         local region = privilege.region
         local field_path = privilege.field_path
-        assert(std.type_supports_privileges(region.type))
-        local arg_region = mapping[region.type]
-        if not std.check_privilege(cx, privilege_type, arg_region.type, field_path) then
+        assert(std.type_supports_privileges(region:gettype()))
+        local arg_region = mapping[region:gettype()]
+        if not std.check_privilege(cx, privilege_type, arg_region:gettype(), field_path) then
           for i, arg in ipairs(arg_symbols) do
-            if std.type_eq(arg.type, arg_region.type) then
+            if std.type_eq(arg:gettype(), arg_region:gettype()) then
               log.error(
                 node, "invalid privileges in argument " .. tostring(i) ..
                   ": " .. tostring(privilege_type) .. "(" ..
@@ -862,10 +873,10 @@ function type_check.expr_cast(cx, node)
     if arg:is(ast.typed.expr.Ctor) and arg.named then
       for _, field in ipairs(arg.fields) do
         if field.value:is(ast.typed.expr.ID) and
-          terralib.issymbol(field.value.value) and
-          terralib.types.istype(field.value.value.type)
+          std.is_symbol(field.value.value) and
+          field.value.value:hastype()
         then
-          from_symbols[field.value.value.type] = field.value.value
+          from_symbols[field.value.value:gettype()] = field.value.value
         end
       end
     end
@@ -1237,16 +1248,16 @@ function type_check.expr_region(cx, node)
   if ispace:is(ast.specialized.expr.ID) then
     ispace_symbol = ispace.value
   else
-    ispace_symbol = terralib.newsymbol()
+    ispace_symbol = std.newsymbol()
   end
   local region = std.region(ispace_symbol, node.fspace_type)
 
   -- Hack: Stuff the ispace type back into the ispace symbol so it is
   -- accessible to the region type.
-  if not ispace_symbol.type then
-    ispace_symbol.type = ispace_type
+  if not ispace_symbol:hastype() then
+    ispace_symbol:settype(ispace_type)
   end
-  assert(std.type_eq(ispace_symbol.type, ispace_type))
+  assert(std.type_eq(ispace_symbol:gettype(), ispace_type))
 
   std.add_privilege(cx, "reads", region, data.newtuple())
   std.add_privilege(cx, "writes", region, data.newtuple())
@@ -1310,10 +1321,10 @@ function type_check.expr_partition(cx, node)
 
   -- Hack: Stuff the region type back into the partition's region
   -- argument, if necessary.
-  if expr_type.parent_region_symbol.type == nil then
-    expr_type.parent_region_symbol.type = region_type
+  if not expr_type.parent_region_symbol:hastype() then
+    expr_type.parent_region_symbol:settype(region_type)
   end
-  assert(expr_type.parent_region_symbol.type == region_type)
+  assert(expr_type.parent_region_symbol:gettype() == region_type)
 
   return ast.typed.expr.Partition {
     disjointness = disjointness,
@@ -1355,10 +1366,10 @@ function type_check.expr_partition_equal(cx, node)
 
   -- Hack: Stuff the region type back into the partition's region
   -- argument, if necessary.
-  if expr_type.parent_region_symbol.type == nil then
-    expr_type.parent_region_symbol.type = region_type
+  if not expr_type.parent_region_symbol:hastype() then
+    expr_type.parent_region_symbol:settype(region_type)
   end
-  assert(expr_type.parent_region_symbol.type == region_type)
+  assert(expr_type.parent_region_symbol:gettype() == region_type)
 
   return ast.typed.expr.PartitionEqual {
     region = region,
@@ -1414,10 +1425,10 @@ function type_check.expr_partition_by_field(cx, node)
 
   -- Hack: Stuff the region type back into the partition's region
   -- argument, if necessary.
-  if expr_type.parent_region_symbol.type == nil then
-    expr_type.parent_region_symbol.type = region_type
+  if not expr_type.parent_region_symbol:hastype() then
+    expr_type.parent_region_symbol:settype(region_type)
   end
-  assert(expr_type.parent_region_symbol.type == region_type)
+  assert(expr_type.parent_region_symbol:gettype() == region_type)
 
   return ast.typed.expr.PartitionByField {
     region = region,
@@ -1480,10 +1491,10 @@ function type_check.expr_image(cx, node)
 
   -- Hack: Stuff the region type back into the partition's region
   -- argument, if necessary.
-  if expr_type.parent_region_symbol.type == nil then
-    expr_type.parent_region_symbol.type = parent_type
+  if not expr_type.parent_region_symbol:hastype() then
+    expr_type.parent_region_symbol:settype(parent_type)
   end
-  assert(expr_type.parent_region_symbol.type == parent_type)
+  assert(expr_type.parent_region_symbol:gettype() == parent_type)
 
   -- Check that partition's parent region is a subregion of region.
   do
@@ -1575,10 +1586,10 @@ function type_check.expr_preimage(cx, node)
 
   -- Hack: Stuff the region type back into the partition's region
   -- argument, if necessary.
-  if expr_type.parent_region_symbol.type == nil then
-    expr_type.parent_region_symbol.type = parent_type
+  if not expr_type.parent_region_symbol:hastype() then
+    expr_type.parent_region_symbol:settype(parent_type)
   end
-  assert(expr_type.parent_region_symbol.type == parent_type)
+  assert(expr_type.parent_region_symbol:gettype() == parent_type)
 
   -- Check that parent is a subregion of region.
   do
@@ -1697,7 +1708,7 @@ function type_check.expr_list_duplicate_partition(cx, node)
   end
   local expr_type = std.list(
     std.region(
-      terralib.newsymbol(std.ispace(partition_type:parent_region():ispace().index_type)),
+      std.newsymbol(std.ispace(partition_type:parent_region():ispace().index_type)),
       partition_type:parent_region():fspace()),
     partition_type)
 
@@ -2570,14 +2581,17 @@ function type_check.stat_for_num(cx, node)
 
   -- Enter scope for header.
   local cx = cx:new_local_scope()
-  local var_type = node.symbol.type or value_types[1]
+  local var_type = node.symbol:hastype() or value_types[1]
   if value_types[3] then
     var_type = binary_op_type("+")(cx, node, var_type, value_types[3])
   end
   if not var_type:isintegral() then
     log.error(node, "numeric for loop expected integral type, got " .. tostring(var_type))
   end
-  node.symbol.type = var_type
+  if not node.symbol:hastype() then
+    node.symbol:settype(var_type)
+  end
+  assert(node.symbol:gettype() == var_type)
   cx.type_env:insert(node, node.symbol, var_type)
 
   -- Enter scope for body.
@@ -2610,7 +2624,7 @@ function type_check.stat_for_list(cx, node)
   if value:is(ast.typed.expr.ID) then
     bound = value.value
   else
-    bound = terralib.newsymbol(value_type)
+    bound = std.newsymbol(value_type)
   end
 
   local expected_var_type
@@ -2626,7 +2640,7 @@ function type_check.stat_for_list(cx, node)
     assert(false)
   end
 
-  local var_type = node.symbol.type
+  local var_type = node.symbol:hastype()
   if not var_type then
     var_type = expected_var_type
   end
@@ -2638,7 +2652,7 @@ function type_check.stat_for_list(cx, node)
 
   -- Hack: Stuff the type back into the symbol so it's available
   -- to ptr types if necessary.
-  node.symbol.type = var_type
+  node.symbol:settype(var_type)
   cx.type_env:insert(node, node.symbol, var_type)
 
   -- Enter scope for body.
@@ -2698,7 +2712,7 @@ function type_check.stat_var(cx, node)
 
   local types = terralib.newlist()
   for i, symbol in ipairs(node.symbols) do
-    local var_type = symbol.type
+    local var_type = symbol:hastype()
 
     local value = values[i]
     local value_type = value_types[i]
@@ -2714,7 +2728,7 @@ function type_check.stat_var(cx, node)
 
       -- Hack: Stuff the type back into the symbol so it's available
       -- to ptr types if necessary.
-      symbol.type = var_type
+      symbol:settype(var_type)
     end
     cx.type_env:insert(node, symbol, std.rawref(&var_type))
     types:insert(var_type)
@@ -2763,13 +2777,16 @@ function type_check.stat_var_unpack(cx, node)
   for i, symbol in ipairs(node.symbols) do
     local field = node.fields[i]
     if mapping[field] then
-      field = mapping[field].displayname
+      field = mapping[field]:getname()
     end
     local field_type = index[field]
     if not field_type then
       log.error(node, "no field '" .. tostring(field) .. "' in type " .. tostring(value_type))
     end
-    symbol.type = field_type
+    if not symbol:hastype(field_type) then
+      symbol:settype(field_type)
+    end
+    assert(symbol:gettype() == field_type)
     cx.type_env:insert(node, symbol, std.rawref(&field_type))
     field_types:insert(field_type)
   end
@@ -2958,7 +2975,7 @@ function type_check.stat(cx, node)
 end
 
 function type_check.stat_task_param(cx, node)
-  local param_type = node.symbol.type
+  local param_type = node.symbol:gettype()
   cx.type_env:insert(node, node.symbol, std.rawref(&param_type))
 
   return ast.typed.stat.TaskParam {
@@ -2989,9 +3006,9 @@ function type_check.stat_task(cx, node)
       local privilege_type = privilege.privilege
       local region = privilege.region
       local field_path = privilege.field_path
-      assert(std.type_supports_privileges(region.type))
-      std.add_privilege(cx, privilege_type, region.type, field_path)
-      cx:intern_region(region.type)
+      assert(std.type_supports_privileges(region:gettype()))
+      std.add_privilege(cx, privilege_type, region:gettype(), field_path)
+      cx:intern_region(region:gettype())
     end
   end
   prototype:setprivileges(privileges)
@@ -3017,7 +3034,7 @@ function type_check.stat_task(cx, node)
   end
   task_type = terralib.types.functype(
     params:map(function(param) return param.param_type end), return_type, false)
-  prototype:settype(task_type)
+  prototype:settype(task_type, true)
 
   for _, fixup_node in ipairs(cx.fixup_nodes) do
     if fixup_node:is(ast.typed.expr.Call) then

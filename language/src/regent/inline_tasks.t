@@ -46,7 +46,7 @@ local global_env = context:new_global_scope({})
 local function expr_id(sym, node)
   return ast.typed.expr.ID {
     value = sym,
-    expr_type = std.rawref(&sym.type),
+    expr_type = std.rawref(&sym:gettype()),
     options = node.options,
     span = node.span,
   }
@@ -69,7 +69,7 @@ local function stat_var(lhs, rhs, node)
   local values = terralib.newlist()
 
   symbols:insert(lhs)
-  types:insert(lhs.type)
+  types:insert(lhs:gettype())
   if rhs then values:insert(rhs) end
   return ast.typed.stat.Var {
     symbols = symbols,
@@ -211,7 +211,7 @@ function inline_tasks.expr(cx, node)
     end
 
     local task = node.fn.value
-    local task_ast = task:getast()
+    local task_ast = task:hasast()
     if node.options.inline:is(ast.options.Demand) then
       check_valid_inline_task(task_ast)
     elseif not task_ast or
@@ -227,9 +227,9 @@ function inline_tasks.expr(cx, node)
       return new_node
     end)
     local params = task_ast.params:map(function(param) return param.symbol end)
-    local param_types = params:map(function(param) return param.type end)
+    local param_types = params:map(function(param) return param:gettype() end)
     local task_body = task_ast.body
-    local return_var = terralib.newsymbol(task_ast.return_type)
+    local return_var = std.newsymbol(task_ast.return_type)
     local return_var_expr = expr_id(return_var, node)
 
     stats:insert(stat_var(return_var, nil, node))
@@ -250,14 +250,14 @@ function inline_tasks.expr(cx, node)
             type_mapping[param] = get_root_subregion(arg)
           end
         else
-          local new_var = terralib.newsymbol(std.as_read(arg.expr_type))
+          local new_var = std.newsymbol(std.as_read(arg.expr_type))
           expr_mapping[param] = new_var
           new_local_params:insert(new_var)
-          new_local_param_types:insert(new_var.type)
+          new_local_param_types:insert(new_var:gettype())
           new_args:insert(arg)
           if std.is_region(param_type) then
             type_mapping[param] = new_var
-            type_mapping[param_type] = new_var.type
+            type_mapping[param_type] = new_var:gettype()
           end
         end
       end)

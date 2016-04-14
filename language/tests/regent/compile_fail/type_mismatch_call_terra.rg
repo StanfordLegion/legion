@@ -13,17 +13,17 @@
 -- limitations under the License.
 
 -- fails-with:
--- type_mismatch_call_terra.rg:30: no applicable overloaded function f for arguments int32, int32, int32
+-- type_mismatch_call_terra.rg:29: no applicable overloaded function f for arguments int32, int32, int32
 --   f(x, x, x)
 --   ^
 
 import "regent"
 
-terra f(x : int)
-end
-
-terra f(x : int, y : int)
-end
+local f = terralib.overloadedfunction(
+  "f", {
+    terra(x : int) end,
+    terra(x : int, y : int) end,
+  })
 
 task g()
   var x = 0

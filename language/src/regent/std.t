@@ -144,7 +144,7 @@ function std.add_constraints(cx, constraints)
   for _, constraint in ipairs(constraints) do
     local lhs, rhs, op = constraint.lhs, constraint.rhs, constraint.op
     local symmetric = op == "*"
-    std.add_constraint(cx, lhs.type, rhs.type, op, symmetric)
+    std.add_constraint(cx, lhs:gettype(), rhs:gettype(), op, symmetric)
   end
 end
 
@@ -258,8 +258,8 @@ function std.check_constraint(cx, constraint)
   local lhs = constraint.lhs
   if lhs == wild then
     return true
-  elseif terralib.issymbol(lhs) then
-    lhs = lhs.type
+  elseif std.is_symbol(lhs) then
+    lhs = lhs:gettype()
   end
   if std.is_cross_product(lhs) then lhs = lhs:partition() end
   assert(std.type_supports_constraints(lhs))
@@ -267,8 +267,8 @@ function std.check_constraint(cx, constraint)
   local rhs = constraint.rhs
   if rhs == wild then
     return true
-  elseif terralib.issymbol(rhs) then
-    rhs = rhs.type
+  elseif std.is_symbol(rhs) then
+    rhs = rhs:gettype()
   end
   if std.is_cross_product(rhs) then rhs = rhs:partition() end
   assert(std.type_supports_constraints(rhs))
@@ -355,9 +355,9 @@ local function find_field_privilege(privileges, coherence_modes, flags,
   local field_privilege = "none"
   for _, privilege_list in ipairs(privileges) do
     for _, privilege in ipairs(privilege_list) do
-      assert(terralib.issymbol(privilege.region))
+      assert(std.is_symbol(privilege.region))
       assert(data.is_tuple(privilege.field_path))
-      if region_type == privilege.region.type and
+      if region_type == privilege.region:gettype() and
         field_path:starts_with(privilege.field_path)
       then
         field_privilege = std.meet_privilege(field_privilege,
@@ -612,7 +612,7 @@ function std.is_fspace_instance(t)
   return terralib.types.istype(t) and rawget(t, "is_fspace_instance")
 end
 
-struct std.untyped {}
+std.untyped = terralib.types.newstruct("untyped")
 
 function std.type_sub(t, mapping)
   if mapping[t] then
@@ -653,11 +653,11 @@ function std.type_eq(a, b, mapping)
     return true
   elseif mapping[a] == b then
     return true
-  elseif terralib.issymbol(a) and terralib.issymbol(b) then
+  elseif std.is_symbol(a) and std.is_symbol(b) then
     if a == wild or b == wild then
       return true
     end
-    return std.type_eq(a.type, b.type, mapping)
+    return std.type_eq(a:gettype(), b:gettype(), mapping)
   elseif std.is_bounded_type(a) and std.is_bounded_type(b) then
     if not std.type_eq(a.points_to_type, b.points_to_type, mapping) then
       return false
@@ -735,9 +735,8 @@ function std.type_meet(a, b)
 end
 
 local function add_region_symbol(symbols, region)
-  assert(region.type)
-  if not symbols[region.type] then
-    symbols[region.type] = region
+  if not symbols[region:gettype()] then
+    symbols[region:gettype()] = region
   end
 end
 
@@ -776,12 +775,12 @@ function std.struct_entries_symbols(fs, symbols)
   for _, entry in ipairs(fs:getentries()) do
     local field_name = entry[1] or entry.field
     local field_type = entry[2] or entry.type
-    if terralib.issymbol(field_name) then
+    if terralib.islabel(field_name) then
       entries_symbols:insert(field_name)
     elseif symbols[field_type] then
       entries_symbols:insert(symbols[field_type])
     else
-      local new_symbol = terralib.newsymbol(field_type, field_name)
+      local new_symbol = std.newsymbol(field_type, field_name)
       entries_symbols:insert(new_symbol)
     end
   end
@@ -800,7 +799,7 @@ function std.fn_param_symbols(fn_type)
     if symbols[param] then
       param_symbols:insert(symbols[param])
     else
-      param_symbols:insert(terralib.newsymbol(param))
+      param_symbols:insert(std.newsymbol(param))
     end
   end
 
@@ -854,7 +853,7 @@ local function reconstruct_param_as_arg_type(param_type, mapping)
     local param_parent_region = param_type:parent_region()
     local param_parent_region_as_arg_type = mapping[param_parent_region]
     for k, v in pairs(mapping) do
-      if terralib.issymbol(v) and v.type == mapping[param_parent_region] then
+      if std.is_symbol(v) and v:gettype() == mapping[param_parent_region] then
         param_parent_region_as_arg_type = v
       end
     end
@@ -866,7 +865,7 @@ local function reconstruct_param_as_arg_type(param_type, mapping)
       function(param_partition)
         local param_partition_as_arg_type = mapping[param_partition]
         for k, v in pairs(mapping) do
-          if terralib.issymbol(v) and v.type == mapping[param_partition] then
+          if std.is_symbol(v) and v:gettype() == mapping[param_partition] then
             param_partition_as_arg_type = v
           end
         end
@@ -903,13 +902,14 @@ function std.validate_args(node, params, args, isvararg, return_type, mapping, s
 
   for i, param in ipairs(params) do
     local arg = args[i]
-    local param_type = param.type
-    local arg_type = arg.type
+    local param_type = param:gettype()
+    local arg_type = arg:gettype()
 
     -- Sanity check that we're not getting references here.
     assert(not (std.is_ref(arg_type) or std.is_rawref(arg_type)))
 
     if param_type == std.untyped or
+      arg_type == std.untyped or
       param_type == arg_type or
       mapping[param_type] == arg_type
     then
@@ -924,7 +924,7 @@ function std.validate_args(node, params, args, isvararg, return_type, mapping, s
       then
         local param_as_arg_type = mapping[param_type]
         for k, v in pairs(mapping) do
-          if terralib.issymbol(v) and v.type == mapping[param_type] then
+          if std.is_symbol(v) and v:gettype() == mapping[param_type] then
             param_as_arg_type = v
           end
         end
@@ -970,7 +970,7 @@ function std.validate_fields(fields, constraints, params, args)
   local new_fields = terralib.newlist()
   for _, old_field in ipairs(fields) do
     local old_symbol, old_type = old_field.field, old_field.type
-    local new_symbol = terralib.newsymbol(old_symbol.displayname)
+    local new_symbol = std.newsymbol(old_symbol:getname())
     local new_type
     if std.is_region(old_type) then
       mapping[old_symbol] = new_symbol
@@ -979,9 +979,9 @@ function std.validate_fields(fields, constraints, params, args)
     else
       new_type = std.type_sub(old_type, mapping)
     end
-    new_symbol.type = new_type
+    new_symbol:settype(new_type)
     new_fields:insert({
-        field = new_symbol.displayname,
+        field = new_symbol:getname(),
         type = new_type,
     })
   end
@@ -1058,7 +1058,7 @@ function std.unpack_fields(fs, symbols)
     if symbols and symbols[field_name] then
       new_symbol = symbols[field_name]
     else
-      new_symbol = terralib.newsymbol(old_symbol.displayname)
+      new_symbol = std.newsymbol(old_symbol:getname())
     end
     local new_type
     if std.is_region(old_type) then
@@ -1072,9 +1072,9 @@ function std.unpack_fields(fs, symbols)
         new_type = std.unpack_fields(new_type)
       end
     end
-    new_symbol.type = new_type
+    new_symbol:settype(new_type)
     new_fields:insert({
-        field = new_symbol.displayname,
+        field = new_symbol:getname(),
         type = new_type,
     })
   end
@@ -1426,6 +1426,89 @@ function std.type_size_bucket_type(value_type)
 end
 
 -- #####################################
+-- ## Symbols
+-- #################
+
+local symbol = {}
+function symbol:__index(field)
+  local value = symbol[field]
+  if value ~= nil then return value end
+  error("symbol has no field '" .. field .. "' (in lookup)", 2)
+end
+
+function symbol:__newindex(field, value)
+  error("symbol has no field '" .. field .. "' (in assignment)", 2)
+end
+
+do
+  local next_id = 1
+  function std.newsymbol(symbol_type, symbol_name)
+    -- Swap around the arguments to allow either one to be optional.
+    if type(symbol_type) == "string" then
+      symbol_type, symbol_name = nil, symbol_type
+    elseif terralib.types.istype(symbol_name) then
+      symbol_type, symbol_name = symbol_name, nil
+    end
+    assert(symbol_type == nil or terralib.types.istype(symbol_type))
+    assert(symbol_name == nil or type(symbol_name) == "string")
+
+    local id = next_id
+    next_id = next_id + 1
+    return setmetatable({
+      symbol_type = symbol_type or false,
+      symbol_name = symbol_name or false,
+      symbol_value = false,
+      symbol_id = id,
+    }, symbol)
+  end
+end
+
+function std.is_symbol(x)
+  return getmetatable(x) == symbol
+end
+
+function symbol:hasname()
+  return self.symbol_name or nil
+end
+
+function symbol:getname()
+  assert(self.symbol_name)
+  return self.symbol_name
+end
+
+function symbol:hastype()
+  return self.symbol_type
+end
+
+function symbol:gettype()
+  assert(self.symbol_type)
+  return self.symbol_type
+end
+
+function symbol:settype(type, force)
+  assert(terralib.types.istype(type))
+  assert(force or not self.symbol_type)
+  if self.symbol_type then assert(not self.symbol_value) end
+  self.symbol_type = type
+end
+
+function symbol:getsymbol()
+  assert(self.symbol_type)
+  if not self.symbol_value then
+    self.symbol_value = terralib.newsymbol(self.symbol_type, self.symbol_name)
+  end
+  return self.symbol_value
+end
+
+function symbol:__tostring()
+  if self:hasname() then
+    return "$" .. tostring(self:getname())
+  else
+    return "$" .. tostring(self.symbol_id)
+  end
+end
+
+-- #####################################
 -- ## Types
 -- #################
 
@@ -1440,7 +1523,7 @@ end
 -- The types of x and y are distinct objects, but are still type_eq.
 local bounded_type = terralib.memoize(function(index_type, ...)
   assert(std.is_index_type(index_type))
-  local bounds = terralib.newlist({...})
+  local bounds = data.newtuple(...)
   local points_to_type = false
   if #bounds > 0 then
     if terralib.types.istype(bounds[1]) then
@@ -1452,7 +1535,7 @@ local bounded_type = terralib.memoize(function(index_type, ...)
     error(tostring(index_type) .. " expected at least one ispace or region, got none")
   end
   for i, bound in ipairs(bounds) do
-    if not terralib.issymbol(bound) then
+    if not std.is_symbol(bound) then
       local offset = 0
       if points_to_type then
         offset = offset + 1
@@ -1494,11 +1577,11 @@ local bounded_type = terralib.memoize(function(index_type, ...)
   end
 
   function st:bounds()
-    local bounds = terralib.newlist()
+    local bounds = data.newtuple()
     local is_ispace = false
     local is_region = false
     for i, bound_symbol in ipairs(self.bounds_symbols) do
-      local bound = bound_symbol.type
+      local bound = bound_symbol:gettype()
       if terralib.types.istype(bound) then
         bound = std.as_read(bound)
       end
@@ -1550,8 +1633,10 @@ local bounded_type = terralib.memoize(function(index_type, ...)
     assert(false)
   end
 
+  -- Important: This has to downgrade the type, because arithmetic
+  -- isn't guarranteed to stay within bounds.
   terra st.metamethods.__add(a : st.index_type, b : st.index_type) : st.index_type
-    return st { __ptr = a.__ptr + b.__ptr }
+    return a + b
   end
 
   function st:force_cast(from, to, expr)
@@ -1565,23 +1650,23 @@ local bounded_type = terralib.memoize(function(index_type, ...)
   end
 
   if std.config["debug"] then
-    function st.metamethods.__typename(st)
-      local bounds = st.bounds_symbols
+    function st.metamethods:__typename()
+      local bounds = self.bounds_symbols
 
-      if st.points_to_type then
-        return tostring(st.index_type) .. "(" .. tostring(st.points_to_type) .. ", " .. tostring(bounds:mkstring(", ")) .. " : " .. tostring(st:bounds():mkstring(", ")) .. ")"
+      if self.points_to_type then
+        return tostring(self.index_type) .. "(" .. tostring(self.points_to_type) .. ", " .. tostring(bounds:mkstring(", ")) .. " : " .. tostring(self:bounds():mkstring(", ")) .. ")"
       else
-        return tostring(st.index_type) .. "(" .. tostring(bounds:mkstring(", ")) .. " : " .. tostring(st:bounds():mkstring(", ")) .. ")"
+        return tostring(self.index_type) .. "(" .. tostring(bounds:mkstring(", ")) .. " : " .. tostring(self:bounds():mkstring(", ")) .. ")"
       end
     end
   else
-    function st.metamethods.__typename(st)
-      local bounds = st.bounds_symbols
+    function st.metamethods:__typename()
+      local bounds = self.bounds_symbols
 
-      if st.points_to_type then
-        return tostring(st.index_type) .. "(" .. tostring(st.points_to_type) .. ", " .. tostring(bounds:mkstring(", ")) .. ")"
+      if self.points_to_type then
+        return tostring(self.index_type) .. "(" .. tostring(self.points_to_type) .. ", " .. tostring(bounds:mkstring(", ")) .. ")"
       else
-        return tostring(st.index_type) .. "(" .. tostring(bounds:mkstring(", ")) .. ")"
+        return tostring(self.index_type) .. "(" .. tostring(bounds:mkstring(", ")) .. ")"
       end
     end
   end
@@ -1620,11 +1705,14 @@ end
 -- expected type metatable so that the object is recongized as a type.
 
 local index_type = {}
-for k, v in pairs(getmetatable(int)) do
-  index_type[k] = v
+do
+  local st = terralib.types.newstruct()
+  for k, v in pairs(getmetatable(st)) do
+    index_type[k] = v
+  end
+  index_type.__call = bounded_type
+  index_type.__metatable = getmetatable(st)
 end
-index_type.__call = bounded_type
-index_type.__metatable = getmetatable(int)
 
 function std.index_type(base_type, displayname)
   local impl_type, dim, fields = validate_index_base_type(base_type)
@@ -1661,8 +1749,14 @@ function std.index_type(base_type, displayname)
     assert(false)
   end
 
-  terra st.metamethods.__add(a : st, b : st) : st
-    return st { __ptr = a.__ptr + b.__ptr }
+  if st:is_opaque() then
+    terra st.metamethods.__add(a : st, b : st) : st
+      return st { __ptr = c.legion_ptr_t { value = a.__ptr.value + b.__ptr.value } }
+    end
+  else
+    terra st.metamethods.__add(a : st, b : st) : st
+      return st { __ptr = a.__ptr + b.__ptr }
+    end
   end
 
   function st:zero()
@@ -1697,7 +1791,13 @@ function std.index_type(base_type, displayname)
 end
 
 local struct int2d { x : int, y : int }
+terra int2d.metamethods.__add(a : int2d, b : int2d) : int2d
+  return int2d { x = a.x + b.x, y = a.y + b.y }
+end
 local struct int3d { x : int, y : int, z : int }
+terra int3d.metamethods.__add(a : int3d, b : int3d) : int3d
+  return int3d { x = a.x + b.x, y = a.y + b.y, z = a.z + b.z }
+end
 std.ptr = std.index_type(opaque, "ptr")
 std.int1d = std.index_type(int, "int1d")
 std.int2d = std.index_type(int2d, "int2d")
@@ -1736,15 +1836,18 @@ local next_region_id = 1
 function std.region(ispace_symbol, fspace_type)
   if fspace_type == nil then
     fspace_type = ispace_symbol
-    ispace_symbol = terralib.newsymbol(std.ispace(std.ptr))
+    ispace_symbol = std.newsymbol(std.ispace(std.ptr))
   end
 
-  assert(terralib.issymbol(ispace_symbol),
-         "Region type requires ispace")
-  assert(terralib.types.istype(fspace_type),
-         "Region type requires fspace type")
-  assert(not std.is_list_of_regions(fspace_type),
-         "Region type requires fspace type to not be a list type")
+  if not std.is_symbol(ispace_symbol) then
+    error("region expected ispace as argument 1, got " .. tostring(ispace_symbol), 2)
+  end
+  if not terralib.types.istype(fspace_type) then
+    error("region expected fspace as argument 2, got " .. tostring(fspace_type), 2)
+  end
+  if std.is_list_of_regions(fspace_type) then
+    error("region expected fspace to not be a list, got " .. tostring(fspace_type), 2)
+  end
 
   local st = terralib.types.newstruct("region")
   st.entries = terralib.newlist({
@@ -1756,7 +1859,7 @@ function std.region(ispace_symbol, fspace_type)
   st.fspace_type = fspace_type
 
   function st:ispace()
-    local ispace = self.ispace_symbol.type
+    local ispace = self.ispace_symbol:gettype()
     assert(terralib.types.istype(ispace) and
              std.is_ispace(ispace),
            "Parition type requires ispace")
@@ -1808,7 +1911,7 @@ function std.region(ispace_symbol, fspace_type)
   return st
 end
 
-std.wild = terralib.newsymbol("wild")
+std.wild = std.newsymbol(std.untyped, "wild")
 
 std.disjoint = terralib.types.newstruct("disjoint")
 std.aliased = terralib.types.newstruct("aliased")
@@ -1816,10 +1919,10 @@ std.aliased = terralib.types.newstruct("aliased")
 function std.partition(disjointness, region)
   assert(disjointness == std.disjoint or disjointness == std.aliased,
          "Partition type requires disjointness to be one of disjoint or aliased")
-  assert(terralib.issymbol(region),
+  assert(std.is_symbol(region),
          "Partition type requires region to be a symbol")
-  if terralib.types.istype(region.type) then
-    assert(std.is_region(region.type),
+  if region:hastype() then
+    assert(terralib.types.istype(region:gettype()) and std.is_region(region:gettype()),
            "Parition type requires region")
   end
 
@@ -1842,7 +1945,7 @@ function std.partition(disjointness, region)
   end
 
   function st:parent_region()
-    local region = self.parent_region_symbol.type
+    local region = self.parent_region_symbol:gettype()
     assert(terralib.types.istype(region) and
              std.is_region(region),
            "Parition type requires region")
@@ -1858,7 +1961,7 @@ function std.partition(disjointness, region)
   end
 
   function st:subregion_constant(i)
-    assert(type(i) == "number" or terralib.issymbol(i))
+    assert(type(i) == "number" or std.is_symbol(i))
     if not self.subregions[i] then
       self.subregions[i] = self:subregion_dynamic()
     end
@@ -1868,7 +1971,7 @@ function std.partition(disjointness, region)
   function st:subregion_dynamic()
     local parent = self:parent_region()
     return std.region(
-      terralib.newsymbol(std.ispace(parent:ispace().index_type)),
+      std.newsymbol(std.ispace(parent:ispace().index_type)),
       parent.fspace_type)
   end
 
@@ -1900,10 +2003,10 @@ function std.cross_product(...)
   local partition_symbols = terralib.newlist({...})
   assert(#partition_symbols >= 2, "Cross product type requires at least 2 arguments")
   for i, partition_symbol in ipairs(partition_symbols) do
-    assert(terralib.issymbol(partition_symbol),
+    assert(std.is_symbol(partition_symbol),
            "Cross product type requires argument " .. tostring(i) .. " to be a symbol")
-    if terralib.types.istype(partition_symbol.type) then
-      assert(std.is_partition(partition_symbol.type),
+    if terralib.types.istype(partition_symbol:gettype()) then
+      assert(std.is_partition(partition_symbol:gettype()),
              "Cross prodcut type requires argument " .. tostring(i) .. " to be a partition")
     end
   end
@@ -1916,13 +2019,13 @@ function std.cross_product(...)
   })
 
   st.is_cross_product = true
-  st.partition_symbols = partition_symbols
+  st.partition_symbols = data.newtuple(unpack(partition_symbols))
   st.subpartitions = {}
 
   function st:partitions()
     return self.partition_symbols:map(
       function(partition_symbol)
-        local partition = partition_symbol.type
+        local partition = partition_symbol:gettype()
         assert(terralib.types.istype(partition) and
                  std.is_partition(partition),
                "Cross product type requires partition")
@@ -1972,10 +2075,10 @@ function std.cross_product(...)
   function st:subpartition_dynamic(region_type)
     region_type = region_type or self:subregion_dynamic()
     assert(std.is_region(region_type))
-    local region_symbol = terralib.newsymbol(region_type)
+    local region_symbol = std.newsymbol(region_type)
     local partition = std.partition(self:partition(2).disjointness, region_symbol)
     if #partition_symbols > 2 then
-      local partition_symbol = terralib.newsymbol(partition)
+      local partition_symbol = std.newsymbol(partition)
       local subpartition_symbols = terralib.newlist({partition_symbol})
       for i = 3, #partition_symbols do
         subpartition_symbols:insert(partition_symbols[i])
@@ -2004,7 +2107,7 @@ function std.cross_product(...)
 end
 
 std.vptr = terralib.memoize(function(width, points_to_type, ...)
-  local bounds = terralib.newlist({...})
+  local bounds = data.newtuple(...)
 
   local vec = vector(int64, width)
   local struct legion_vptr_t {
@@ -2272,9 +2375,9 @@ std.list = terralib.memoize(function(element_type, partition_type, privilege_dep
 
   function st:subregion_dynamic()
     assert(std.is_list_of_regions(self))
-    local ispace = terralib.newsymbol(
+    local ispace = std.newsymbol(
       std.ispace(self:ispace().index_type),
-      self:base_type().ispace_symbol.displayname)
+      self:base_type().ispace_symbol:hasname())
     return std.region(ispace, self:fspace())
   end
 
@@ -2417,7 +2520,7 @@ do
           mapping:insert({from_field_type, to_field_type, to_field_name})
         end
 
-        local v = terralib.newsymbol()
+        local v = terralib.newsymbol(from)
         local fields = mapping:map(
           function(field_mapping)
             local from_field_type, to_field_type, to_field_name = unpack(
@@ -2459,14 +2562,14 @@ function std.privilege(privilege, regions_fields)
   local privileges = terralib.newlist()
   for _, region_fields in ipairs(regions_fields) do
     local region, fields
-    if terralib.issymbol(region_fields) then
+    if std.is_symbol(region_fields) then
       region = region_fields
       fields = terralib.newlist({data.newtuple()})
     else
       region = region_fields.region
       fields = region_fields.fields
     end
-    assert(terralib.issymbol(region) and terralib.islist(fields))
+    assert(std.is_symbol(region) and terralib.islist(fields))
     for _, field in ipairs(fields) do
       privileges:insert(data.map_from_table {
         node_type = "privilege",
@@ -2518,81 +2621,124 @@ end
 -- #################
 
 local task = {}
-task.__index = task
+function task:__index(field)
+  local value = task[field]
+  if value ~= nil then return value end
+  error("task has no field '" .. field .. "' (in lookup)", 2)
+end
 
-function task:set_param_symbols(t)
-  assert(rawget(self, "param_symbols") == nil)
-  self.param_symbols = t
+function task:__newindex(field, value)
+  error("task has no field '" .. field .. "' (in assignment)", 2)
+end
+
+function task:set_param_symbols(symbols, force)
+  assert(force or not self.param_symbols)
+  self.param_symbols = symbols
 end
 
 function task:get_param_symbols()
-  assert(rawget(self, "param_symbols") ~= nil)
+  assert(self.param_symbols)
   return self.param_symbols
 end
 
 function task:set_params_struct(t)
-  assert(rawget(self, "params_struct") == nil)
+  assert(not self.params_struct)
   self.params_struct = t
 end
 
 function task:get_params_struct()
-  assert(rawget(self, "params_struct") ~= nil)
+  assert(self.params_struct)
   return self.params_struct
 end
 
 function task:set_params_map_type(t)
-  assert(rawget(self, "params_map_type") == nil)
+  assert(not self.params_map_type)
+  assert(t)
   self.params_map_type = t
 end
 
-function task:get_params_map_type()
-  assert(rawget(self, "params_map_type") ~= nil)
+function task:has_params_map_type()
   return self.params_map_type
 end
 
-function task:set_params_map(t)
-  assert(rawget(self, "params_map") == nil)
-  self.params_map = t
+function task:get_params_map_type()
+  assert(self.params_map_type)
+  return self.params_map_type
 end
 
-function task:get_params_map()
-  assert(rawget(self, "params_map") ~= nil)
-  return self.params_map
+function task:set_params_map_label(label)
+  assert(not self.params_map_label)
+  assert(label)
+  self.params_map_label = label
 end
 
-function task:set_field_id_params(t)
-  assert(rawget(self, "field_id_params") == nil)
-  self.field_id_params = t
+function task:has_params_map_label()
+  return self.params_map_label
 end
 
-function task:get_field_id_params()
-  assert(rawget(self, "field_id_params") ~= nil)
-  return self.field_id_params
+function task:get_params_map_label()
+  assert(self.params_map_label)
+  return self.params_map_label
 end
 
-function task:settype(t)
-  self.type = t
+function task:set_params_map_symbol(symbol)
+  assert(not self.params_map_symbol)
+  assert(symbol)
+  self.params_map_symbol = symbol
+end
+
+function task:has_params_map_symbol()
+  return self.params_map_symbol
+end
+
+function task:get_params_map_symbol()
+  assert(self.params_map_symbol)
+  return self.params_map_symbol
+end
+
+function task:set_field_id_param_labels(t)
+  assert(not self.field_id_param_labels)
+  self.field_id_param_labels = t
+end
+
+function task:get_field_id_param_labels()
+  assert(self.field_id_param_labels)
+  return self.field_id_param_labels
+end
+
+function task:set_field_id_param_symbols(t)
+  assert(not self.field_id_param_symbols)
+  self.field_id_param_symbols = t
+end
+
+function task:get_field_id_param_symbols()
+  assert(self.field_id_param_symbols)
+  return self.field_id_param_symbols
 end
 
 function task:setcuda(cuda)
   self.cuda = cuda
 end
 
+function task:getcuda()
+  return self.cuda
+end
+
 function task:setinline(inline)
   self.inline = inline
 end
 
-function task:setast(node)
-  self.ast = node
+function task:getinline()
+  return self.inline
 end
 
 local global_kernel_id = 1
 function task:addcudakernel(kernel)
-  if rawget(self, "cudakernels") == nil then
+  if not self.cudakernels then
     self.cudakernels = {}
   end
   local kernel_id = global_kernel_id
-  local kernel_name = self.name:mkstring("", "_", "") .. "_cuda" .. tostring(kernel_id)
+  local kernel_name = self.name:concat("_") .. "_cuda" .. tostring(kernel_id)
   self.cudakernels[kernel_id] = {
     name = kernel_name,
     kernel = kernel,
@@ -2601,88 +2747,99 @@ function task:addcudakernel(kernel)
   return kernel_id
 end
 
+function task:getcudakernels()
+  assert(self.cudakernels)
+  return self.cudakernels
+end
+
+function task:settype(type, force)
+  assert(force or not self.type)
+  self.type = type
+end
+
 function task:gettype()
-  assert(rawget(self, "type") ~= nil)
+  assert(self.type)
   return self.type
 end
 
 function task:setprivileges(t)
-  assert(rawget(self, "privileges") == nil)
+  assert(not self.privileges)
   self.privileges = t
 end
 
 function task:getprivileges()
-  assert(rawget(self, "privileges") ~= nil)
+  assert(self.privileges)
   return self.privileges
 end
 
 function task:set_coherence_modes(t)
-  assert(rawget(self, "coherence_modes") == nil)
+  assert(not self.coherence_modes)
   self.coherence_modes = t
 end
 
 function task:get_coherence_modes()
-  assert(rawget(self, "coherence_modes") ~= nil)
+  assert(self.coherence_modes)
   return self.coherence_modes
 end
 
 function task:set_flags(t)
-  assert(rawget(self, "flags") == nil)
+  assert(not self.flags)
   self.flags = t
 end
 
 function task:get_flags()
-  assert(rawget(self, "flags") ~= nil)
+  assert(self.flags)
   return self.flags
 end
 
-function task:set_conditions(t)
-  assert(rawget(self, "conditions") == nil and t)
-  self.conditions = t
+function task:set_conditions(conditions)
+  assert(not self.conditions)
+  assert(conditions)
+  self.conditions = conditions
 end
 
 function task:get_conditions()
-  assert(rawget(self, "conditions") ~= nil)
+  assert(self.conditions)
   return self.conditions
 end
 
 function task:set_param_constraints(t)
-  assert(rawget(self, "param_constraints") == nil)
+  assert(not self.param_constraints)
   self.param_constraints = t
 end
 
 function task:get_param_constraints()
-  assert(rawget(self, "param_constraints") ~= nil)
+  assert(self.param_constraints)
   return self.param_constraints
 end
 
 function task:set_constraints(t)
-  assert(rawget(self, "constraints") == nil)
+  assert(not self.constraints)
   self.constraints = t
 end
 
 function task:get_constraints()
-  assert(rawget(self, "constraints") ~= nil)
+  assert(self.constraints)
   return self.constraints
 end
 
 function task:set_region_universe(t)
-  assert(rawget(self, "region_universe") == nil)
+  assert(not self.region_universe)
   self.region_universe = t
 end
 
 function task:get_region_universe()
-  assert(rawget(self, "region_universe") ~= nil)
+  assert(self.region_universe)
   return self.region_universe
 end
 
 function task:set_config_options(t)
-  assert(rawget(self, "config_options") == nil)
+  assert(not self.config_options)
   self.config_options = t
 end
 
 function task:get_config_options()
-  assert(rawget(self, "config_options") ~= nil)
+  assert(self.config_options)
   return self.config_options
 end
 
@@ -2695,27 +2852,31 @@ function task:getname()
 end
 
 function task:getdefinition()
+  assert(self.definition)
   return self.definition
 end
 
-function task:getcuda()
-  return self.cuda
+function task:setdefinition(definition)
+  assert(not self.definition)
+  self.definition = definition
 end
 
-function task:getcudakernels()
-  return self.cudakernels
+function task:setast(ast)
+  assert(not self.ast)
+  self.ast = ast
 end
 
-function task:getinline()
-  return self.inline
+function task:hasast()
+  return self.ast
 end
 
 function task:getast()
+  assert(self.ast)
   return self.ast
 end
 
 function task:is_variant_task()
-  if rawget(self, "source_variant") then
+  if self.source_variant then
     return true
   else
     return false
@@ -2723,11 +2884,12 @@ function task:is_variant_task()
 end
 
 function task:set_source_variant(source_variant)
+  assert(not self.source_variant)
   self.source_variant = source_variant
 end
 
 function task:get_source_variant()
-  assert(rawget(self, "source_variant") ~= nil)
+  assert(self.source_variant)
   return self.source_variant
 end
 
@@ -2769,16 +2931,33 @@ do
   local next_task_id = 1
   function std.newtask(name)
     assert(data.is_tuple(name))
-    local terra proto
-    proto.name = name:mkstring(".")
     local task_id = next_task_id
     next_task_id = next_task_id + 1
     return setmetatable({
-      definition = proto,
-      taskid = terralib.constant(c.legion_task_id_t, task_id),
       name = name,
+      taskid = terralib.constant(c.legion_task_id_t, task_id),
+      ast = false,
+      definition = false,
       cuda = false,
       inline = false,
+      cudakernels = false,
+      param_symbols = false,
+      params_struct = false,
+      params_map_type = false,
+      params_map_label = false,
+      params_map_symbol = false,
+      field_id_param_labels = false,
+      field_id_param_symbols = false,
+      type = false,
+      privileges = false,
+      coherence_modes = false,
+      flags = false,
+      conditions = false,
+      param_constraints = false,
+      constraints = false,
+      region_universe = false,
+      config_options = false,
+      source_variant = false,
     }, task)
   end
 end
@@ -2797,11 +2976,11 @@ fspace.__index = fspace
 fspace.__call = terralib.memoize(function(fs, ...)
   -- Do NOT attempt to access fs.params or fs.fields; they are not ready yet.
 
-  local args = terralib.newlist({...})
+  local args = data.newtuple(...)
   -- Complain early if args are not symbols, but don't check types
   -- yet, since they may not be there at this point.
   for i, arg in ipairs(args) do
-    if not terralib.issymbol(arg) then
+    if not std.is_symbol(arg) then
       error("expected a symbol as argument " .. tostring(i) .. ", got " .. tostring(arg))
     end
   end
@@ -2842,7 +3021,7 @@ fspace.__call = terralib.memoize(function(fs, ...)
     assert(std.is_fspace_instance(from) and std.is_fspace_instance(to) and
              from.fspace == to.fspace)
 
-    local v = terralib.newsymbol()
+    local v = terralib.newsymbol((`expr):gettype())
     local fields = terralib.newlist()
     for i, to_field in ipairs(to:getentries()) do
       local from_field = from:getentries()[i]
@@ -3024,7 +3203,7 @@ function std.setup(main_task, extra_setup_thunk)
           inner = options.inner,
           idempotent = options.idempotent,
         },
-        [task:getname():mkstring(".")],
+        [task:getname():concat(".")],
         [task:getdefinition()])
       end
     end)
