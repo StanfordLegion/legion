@@ -197,11 +197,15 @@ def run_all_tests(thread_count, debug, verbose, quiet):
             if len(saved_temps) > 0:
                 all_saved_temps.append((test_name, filename, saved_temps))
             if outcome == PASS:
-                if (not quiet) or (output is not None):
+                if quiet:
+                    print('.', end='')
+                    sys.stdout.flush()
+                else:
                     print('[%sPASS%s] (%s) %s' % (green, clear, test_name, filename))
                 if output is not None: print(output)
                 test_counters[test_name].passed += 1
             elif outcome == FAIL:
+                if quiet: print()
                 print('[%sFAIL%s] (%s) %s' % (red, clear, test_name, filename))
                 if output is not None: print(output)
                 test_counters[test_name].failed += 1
