@@ -722,6 +722,10 @@ function type_check.expr_call(cx, node)
     function(arg) return type_check.expr(cx, arg) end)
   local arg_types = args:map(
     function(arg) return std.check_read(cx, arg) end)
+  local conditions = terralib.newlist()
+  for _, condition in ipairs(node.conditions) do
+    conditions:insertall(type_check.expr_condition(cx, condition))
+  end
 
   -- Determine the type of the function being called.
   local fn_type
@@ -834,7 +838,7 @@ function type_check.expr_call(cx, node)
   local result = ast.typed.expr.Call {
     fn = fn,
     args = args,
-    conditions = terralib.newlist(),
+    conditions = conditions,
     expr_type = expr_type,
     options = node.options,
     span = node.span,
@@ -1663,6 +1667,26 @@ function type_check.expr_cross_product(cx, node)
   }
 end
 
+function type_check.expr_cross_product_array(cx, node)
+  local lhs = type_check.expr(cx, node.lhs)
+  local lhs_type = std.as_read(lhs.expr_type)
+  local lhs_symbol = terralib.newsymbol(lhs_type)
+  local disjointness = node.disjointness
+  local rhs_type = std.partition(disjointness, lhs_type.parent_region_symbol)
+  local rhs_symbol = terralib.newsymbol(rhs_type)
+  local expr_type = std.cross_product(lhs_symbol, rhs_symbol)
+  local colorings = type_check.expr(cx, node.colorings)
+
+  return ast.typed.expr.CrossProductArray {
+    lhs = lhs,
+    disjointness = disjointness,
+    colorings = colorings,
+    expr_type = expr_type,
+    options = node.options,
+    span = node.span,
+  }
+end
+
 function type_check.expr_list_slice_partition(cx, node)
   local partition = type_check.expr(cx, node.partition)
   local partition_type = std.check_read(cx, partition)
@@ -2438,6 +2462,9 @@ function type_check.expr(cx, node)
 
   elseif node:is(ast.specialized.expr.CrossProduct) then
     return type_check.expr_cross_product(cx, node)
+
+  elseif node:is(ast.specialized.expr.CrossProductArray) then
+    return type_check.expr_cross_product_array(cx, node)
 
   elseif node:is(ast.specialized.expr.ListSlicePartition) then
     return type_check.expr_list_slice_partition(cx, node)

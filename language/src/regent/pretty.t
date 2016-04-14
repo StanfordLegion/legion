@@ -369,6 +369,15 @@ function pretty.expr_cross_product(cx, node)
       "cross_product(", commas({pretty.expr_list(cx, node.args)}), ")"})
 end
 
+function pretty.expr_cross_product_array(cx, node)
+  return join({
+      "cross_product_array(",
+      commas({pretty.expr(cx, node.lhs),
+              tostring(node.disjointness),
+              pretty.expr(cx, node.colorings)}),
+      ")"})
+end
+
 function pretty.expr_list_slice_partition(cx, node)
   return join({
       "list_slice_partition(",
@@ -608,6 +617,9 @@ function pretty.expr(cx, node)
 
   elseif node:is(ast.typed.expr.CrossProduct) then
     return pretty.expr_cross_product(cx, node)
+
+  elseif node:is(ast.typed.expr.CrossProductArray) then
+    return pretty.expr_cross_product_array(cx, node)
 
   elseif node:is(ast.typed.expr.ListSlicePartition) then
     return pretty.expr_list_slice_partition(cx, node)

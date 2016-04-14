@@ -173,6 +173,9 @@ function analyze_var_flow.expr(cx, node)
   elseif node:is(ast.typed.expr.CrossProduct) then
     return nil
 
+  elseif node:is(ast.typed.expr.CrossProductArray) then
+    return nil
+
   elseif node:is(ast.typed.expr.ListSlicePartition) then
     return nil
 
@@ -681,6 +684,14 @@ function optimize_futures.expr_cross_product(cx, node)
   }
 end
 
+function optimize_futures.expr_cross_product_array(cx, node)
+  return node {
+    lhs = concretize(optimize_futures.expr(cx, node.lhs)),
+    disjointness = node.disjointness,
+    colorings = concretize(optimize_futures.expr(cx, node.colorings)),
+  }
+end
+
 function optimize_futures.expr_list_slice_partition(cx, node)
   local partition = concretize(optimize_futures.expr(cx, node.partition))
   local indices = concretize(optimize_futures.expr(cx, node.indices))
@@ -965,6 +976,9 @@ function optimize_futures.expr(cx, node)
 
   elseif node:is(ast.typed.expr.CrossProduct) then
     return optimize_futures.expr_cross_product(cx, node)
+
+  elseif node:is(ast.typed.expr.CrossProductArray) then
+    return optimize_futures.expr_cross_product_array(cx, node)
 
   elseif node:is(ast.typed.expr.ListSlicePartition) then
     return optimize_futures.expr_list_slice_partition(cx, node)
