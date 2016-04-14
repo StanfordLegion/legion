@@ -1286,6 +1286,7 @@ class LogicalState(object):
         return True
 
     def perform_logical_fence(self, op, perform_checks):
+        return True
         if perform_checks:
             for prev_op,prev_req in self.current_epoch_users:
                 if prev_op not in op.logical_incoming:
@@ -2509,7 +2510,7 @@ class Operation(object):
         assert index in self.reqs
         req = self.reqs[index]
         if req.priv is NO_ACCESS:
-            return
+            return True
         # Compute the analysis path
         path = list()
         req.logical_node.compute_path(path, req.parent)
@@ -2538,10 +2539,12 @@ class Operation(object):
                         return False
         return True
 
-    def analyze_logical_fence(self):
-        for index,req in self.parent.op.reqs.iteritems():
+    def analyze_logical_fence(self, perform_checks):
+        for index,req in self.context.op.reqs.iteritems():
             for field in req.fields:
-                req.logical_node.perform_logical_fence(self, field, perform_checks)
+                if not req.logical_node.perform_logical_fence(self, field, perform_checks):
+                    return False
+        return True
 
     def perform_logical_analysis(self, perform_checks):
         if self.kind == DELETION_OP_KIND and not perform_checks:
@@ -2568,7 +2571,7 @@ class Operation(object):
             # either the begining or from the previous fence
             if self.kind == FENCE_OP_KIND:
                 # Record dependences on all the users in the region tree 
-                if not self.analyze_logical_fence():
+                if not self.analyze_logical_fence(perform_checks):
                     return False
                 # Finally record ourselves as the next fence
                 self.context.current_fence = self
@@ -2673,6 +2676,8 @@ class Operation(object):
         return result
 
     def analyze_physical_requirement(self, depth, index, req, perform_checks):
+        if req.is_no_access():
+            return True
         mappings = self.find_mapping(index, req.parent)
         for field in req.fields:
             # Find the instance that we chose to map this field to
