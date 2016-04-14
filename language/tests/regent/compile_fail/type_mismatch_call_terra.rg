@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 -- fails-with:
--- type_mismatch_call_terra.rg:29: no applicable overloaded function f for arguments int32, int32, int32
+-- type_mismatch_call_terra.rg:30: no applicable overloaded function f for arguments int32, int32, int32
 --   f(x, x, x)
 --   ^
 
