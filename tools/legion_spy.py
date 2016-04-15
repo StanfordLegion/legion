@@ -3098,10 +3098,9 @@ class Operation(object):
                 print "This is a runtime logging bug, please report it."
             assert field.fid in mappings
             inst = mappings[field.fid]
-            # If this is a virtual mapping then we can skip it
-            # This is only allowed if we are a post close op
-            if inst.is_virtual():
-                assert self.kind == POST_CLOSE_OP_KIND
+            # If this is a virtual mapping then we can skip it if we
+            # are a post close operation because this is the end of a context
+            if inst.is_virtual() and self.kind == POST_CLOSE_OP_KIND:
                 continue
             if not req.logical_node.perform_physical_close(depth, field, self,
                                                    req, inst, perform_checks):
