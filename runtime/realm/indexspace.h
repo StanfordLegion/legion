@@ -37,23 +37,23 @@ namespace Realm {
     class ElementMask {
     public:
       ElementMask(void);
-      explicit ElementMask(size_t num_elements, off_t first_element = 0);
-      explicit ElementMask(const ElementMask &copy_from, size_t num_elements, off_t first_element = -1LL);
+      explicit ElementMask(size_t num_elements, coord_t first_element = 0);
+      explicit ElementMask(const ElementMask &copy_from, size_t num_elements, coord_t first_element = -1LL);
       ElementMask(const ElementMask &copy_from, bool trim = false);
       ~ElementMask(void);
 
-      void init(off_t _first_element, size_t _num_elements, Memory _memory, off_t _offset);
+      void init(coord_t _first_element, size_t _num_elements, Memory _memory, coord_t _offset);
 
-      off_t get_first_element(void) const { return first_element; }
+      coord_t get_first_element(void) const { return first_element; }
       size_t get_num_elmts(void) const { return num_elements; }
 
-      void enable(off_t start, size_t count = 1);
-      void disable(off_t start, size_t count = 1);
+      void enable(coord_t start, size_t count = 1);
+      void disable(coord_t start, size_t count = 1);
 
-      off_t find_enabled(size_t count = 1, off_t start = 0) const;
-      off_t find_disabled(size_t count = 1, off_t start = 0) const;
+      coord_t find_enabled(size_t count = 1, coord_t start = 0) const;
+      coord_t find_disabled(size_t count = 1, coord_t start = 0) const;
 
-      bool is_set(off_t ptr) const;
+      bool is_set(coord_t ptr) const;
       size_t pop_count(bool enabled = true) const;
       bool operator!(void) const;
       bool operator==(const ElementMask &other) const;
@@ -67,34 +67,34 @@ namespace Realm {
       ElementMask& operator&=(const ElementMask &other);
       ElementMask& operator-=(const ElementMask &other);
 
-      off_t first_enabled(void) const { return first_enabled_elmt; }
-      off_t last_enabled(void) const { return last_enabled_elmt; }
+      coord_t first_enabled(void) const { return first_enabled_elmt; }
+      coord_t last_enabled(void) const { return last_enabled_elmt; }
 
       ElementMask& operator=(const ElementMask &rhs);
 
       enum OverlapResult { OVERLAP_NO, OVERLAP_MAYBE, OVERLAP_YES };
 
       OverlapResult overlaps_with(const ElementMask& other,
-				  off_t max_effort = -1LL) const;
+				  coord_t max_effort = -1LL) const;
 
       ElementMask intersect_with(const ElementMask &other);
 
       class Enumerator {
       public:
-	Enumerator(const ElementMask& _mask, off_t _start, int _polarity);
+	Enumerator(const ElementMask& _mask, coord_t _start, int _polarity);
 	~Enumerator(void);
 
-	bool get_next(off_t &position, size_t &length);
-	bool peek_next(off_t &position, size_t &length);
+	bool get_next(coord_t &position, size_t &length);
+	bool peek_next(coord_t &position, size_t &length);
 
       protected:
 	const ElementMask& mask;
-	off_t pos;
+	coord_t pos;
 	int polarity;
       };
 
-      Enumerator *enumerate_enabled(off_t start = 0) const;
-      Enumerator *enumerate_disabled(off_t start = 0) const;
+      Enumerator *enumerate_enabled(coord_t start = 0) const;
+      Enumerator *enumerate_disabled(coord_t start = 0) const;
 
       size_t raw_size(void) const;
       const void *get_raw(void) const;
@@ -104,14 +104,14 @@ namespace Realm {
       template <class T>
       static size_t forall_ranges(T &executor,
                                   const ElementMask &mask,
-			          off_t start = 0, off_t count = -1LL,
+			          coord_t start = 0, coord_t count = -1LL,
 			          bool do_enabled = true);
 
       template <class T>
       static size_t forall_ranges(T &executor,
                                   const ElementMask &mask1,
 			          const ElementMask &mask2,
-			          off_t start = 0, off_t count = -1LL,
+			          coord_t start = 0, coord_t count = -1LL,
 			          bool do_enabled1 = true,
 			          bool do_enabled2 = true);
 
@@ -119,12 +119,12 @@ namespace Realm {
       void recalc_first_last_enabled(void);
 
       friend class Enumerator;
-      off_t first_element;
+      coord_t first_element;
       size_t num_elements;
       Memory memory;
-      off_t offset;
+      coord_t offset;
       char *raw_data;
-      off_t first_enabled_elmt, last_enabled_elmt;
+      coord_t first_enabled_elmt, last_enabled_elmt;
     };
 
     class IndexSpaceAllocator;
@@ -151,7 +151,7 @@ namespace Realm {
 
       static IndexSpace expand_index_space(IndexSpace child,
 					   size_t num_elmts,
-					   off_t child_offset = 0);
+					   coord_t child_offset = 0);
 
       void destroy(Event wait_on = Event::NO_EVENT) const;
 
@@ -303,7 +303,7 @@ namespace Realm {
         for (int i = 0; i < MAX_POINT_DIM; i++)
           point_data[i] = 0;
       }
-      DomainPoint(off_t index) : dim(0)
+      DomainPoint(coord_t index) : dim(0)
       {
         point_data[0] = index;
         for (int i = 1; i < MAX_POINT_DIM; i++)
@@ -964,13 +964,13 @@ namespace Realm {
       public:
         CopySrcDstField(void) 
           : inst(RegionInstance::NO_INST), offset(0), size(0), serdez_id(0) { }
-        CopySrcDstField(RegionInstance i, off_t o, size_t s)
+        CopySrcDstField(RegionInstance i, coord_t o, size_t s)
           : inst(i), offset(o), size(s), serdez_id(0) { }
-        CopySrcDstField(RegionInstance i, off_t o, size_t s, CustomSerdezID sid)
+        CopySrcDstField(RegionInstance i, coord_t o, size_t s, CustomSerdezID sid)
           : inst(i), offset(o), size(s), serdez_id(sid) { }
       public:
 	RegionInstance inst;
-	off_t offset;
+	coord_t offset;
         size_t size;
 	CustomSerdezID serdez_id;
       };
@@ -1044,9 +1044,9 @@ namespace Realm {
       IndexSpaceAllocator(const IndexSpaceAllocator& to_copy)
 	: impl(to_copy.impl) {}
 
-      off_t alloc(size_t count = 1) const;
-      void reserve(off_t ptr, size_t count = 1) const;
-      void free(off_t ptr, size_t count = 1) const;
+      coord_t alloc(size_t count = 1) const;
+      void reserve(coord_t ptr, size_t count = 1) const;
+      void free(coord_t ptr, size_t count = 1) const;
 
       template <typename LIN>
       void reserve(const LIN& linearizer, LegionRuntime::Arrays::Point<LIN::IDIM> point) const;
@@ -1059,8 +1059,8 @@ namespace Realm {
     template <class T>
     /*static*/ size_t ElementMask::forall_ranges(T &executor,
                                                  const ElementMask &mask,
-					         off_t start /*= 0*/,
-					         off_t count /*= -1*/,
+					         coord_t start /*= 0*/,
+					         coord_t count /*= -1*/,
 					         bool do_enabled /*= true*/)
     {
       if(count == 0) return 0;
@@ -1069,10 +1069,10 @@ namespace Realm {
 
       size_t total = 0;
 
-      off_t pos;
+      coord_t pos;
       size_t len;
       while(enum1.get_next(pos, len)) {
-        off_t len_ = len;
+        coord_t len_ = len;
 	if(pos < start) {
 	  len_ -= (start - pos);
 	  pos = start;
@@ -1096,15 +1096,15 @@ namespace Realm {
     /*static*/ size_t ElementMask::forall_ranges(T &executor,
                                                  const ElementMask &mask1,
 					         const ElementMask &mask2,
-					         off_t start /*= 0*/,
-					         off_t count /*= -1*/,
+					         coord_t start /*= 0*/,
+					         coord_t count /*= -1*/,
 					         bool do_enabled1 /*= true*/,
 					         bool do_enabled2 /*= true*/)
     {
       ElementMask::Enumerator enum1(mask1, start, do_enabled1 ? 1 : 0);
       ElementMask::Enumerator enum2(mask2, start, do_enabled2 ? 1 : 0);
 
-      off_t pos1, pos2;
+      coord_t pos1, pos2;
       size_t len1, len2;
 
       if(!enum1.get_next(pos1, len1)) return 0;
@@ -1113,7 +1113,7 @@ namespace Realm {
 
       size_t total = 0;
 
-      off_t len1_ = len1, len2_ = len1;
+      coord_t len1_ = len1, len2_ = len1;
       while(true) {
 	//printf("S:%d(%d) T:%d(%d)\n", pos1, len1, pos2, len2);
 

@@ -2774,12 +2774,12 @@ namespace LegionRuntime {
 	}
 	
 	ElementMask::Enumerator *e = ispace->valid_mask->enumerate_enabled();
-	off_t rstart; size_t rlen;
+	coord_t rstart; size_t rlen;
 	while(e->get_next(rstart, rlen)) {
 	  // do we want to copy extra elements to fill in some holes?
 	  while(rlen < rlen_target) {
 	    // see where the next valid elements are
-	    off_t rstart2; size_t rlen2;
+	    coord_t rstart2; size_t rlen2;
 	    // if none, stop
 	    if(!e->peek_next(rstart2, rlen2)) break;
 	    // or if they don't even start until outside the window, stop
@@ -3289,7 +3289,7 @@ namespace LegionRuntime {
       deserializer >> requests;
       Realm::Operation::reconstruct_measurements();
 
-      log_dma.info("dma request %p deserialized - " IDFMT "[%zd]->" IDFMT "[%zd]:%zu (+%zu) %s %d (" IDFMT ") " IDFMT "/%d " IDFMT "/%d",
+      log_dma.info("dma request %p deserialized - " IDFMT "[%lld]->" IDFMT "[%lld]:%zu (+%zu) %s %d (" IDFMT ") " IDFMT "/%d " IDFMT "/%d",
 		   this,
 		   srcs[0].inst.id, srcs[0].offset,
 		   dst.inst.id, dst.offset, dst.size,
@@ -3320,7 +3320,7 @@ namespace LegionRuntime {
     {
       srcs.insert(srcs.end(), _srcs.begin(), _srcs.end());
 
-      log_dma.info("dma request %p created - " IDFMT "[%zd]->" IDFMT "[%zd]:%zu (+%zu) %s %d (" IDFMT ") " IDFMT "/%d " IDFMT "/%d",
+      log_dma.info("dma request %p created - " IDFMT "[%lld]->" IDFMT "[%lld]:%zu (+%zu) %s %d (" IDFMT ") " IDFMT "/%d " IDFMT "/%d",
 		   this,
 		   srcs[0].inst.id, srcs[0].offset,
 		   dst.inst.id, dst.offset, dst.size,
@@ -3676,7 +3676,7 @@ namespace LegionRuntime {
 
 	      // if source and dest are ok, we can just walk the index space's spans
 	      ElementMask::Enumerator *e = ispace->valid_mask->enumerate_enabled();
-	      off_t rstart; size_t rlen;
+	      coord_t rstart; size_t rlen;
 	      while(e->get_next(rstart, rlen)) {
 		if(red_fold)
 		  redop->fold_strided(((char *)dst_base) + (rstart * dst_stride),
@@ -3711,7 +3711,7 @@ namespace LegionRuntime {
 	      Arrays::Mapping<1, 1> *dst_linearization = dst_impl->metadata.linearization.get_mapping<1>();
 
 	      ElementMask::Enumerator *e = ispace->valid_mask->enumerate_enabled();
-	      off_t rstart; size_t rlen;
+	      coord_t rstart; size_t rlen;
 
 	      // get an RDMA sequence number so we can have the far side trigger the event once all reductions have been
 	      //  applied
@@ -3726,11 +3726,11 @@ namespace LegionRuntime {
 		// do we want to copy extra elements to fill in some holes?
 		while(rlen < rlen_target) {
 		  // see where the next valid elements are
-		  off_t rstart2; size_t rlen2;
+		  coord_t rstart2; size_t rlen2;
 		  // if none, stop
 		  if(!e->peek_next(rstart2, rlen2)) break;
 		  // or if they don't even start until outside the window, stop
-		  if(rstart2 > (rstart + (off_t)rlen_target)) break;
+		  if(rstart2 > (rstart + (coord_t)rlen_target)) break;
 		  // ok, include the next valid element(s) and any invalid ones in between
 		  //printf("bloating from %d to %d\n", rlen, rstart2 + rlen2 - rstart);
 		  rlen = rstart2 + rlen2 - rstart;
@@ -3792,7 +3792,7 @@ namespace LegionRuntime {
 
 	      // if source and dest are ok, we can just walk the index space's spans
 	      ElementMask::Enumerator *e = ispace->valid_mask->enumerate_enabled();
-	      off_t rstart; size_t rlen;
+	      coord_t rstart; size_t rlen;
 	      while(e->get_next(rstart, rlen)) {
 		// translate the index space point to the dst instance's linearization
 		int dstart = dst_linearization->image((coord_t)rstart);
@@ -3870,7 +3870,7 @@ namespace LegionRuntime {
 	delete mpc;
       }
 
-      log_dma.info("dma request %p finished - " IDFMT "[%zd]->" IDFMT "[%zd]:%zu (+%zu) %s %d (" IDFMT ") " IDFMT "/%d " IDFMT "/%d",
+      log_dma.info("dma request %p finished - " IDFMT "[%lld]->" IDFMT "[%lld]:%zu (+%zu) %s %d (" IDFMT ") " IDFMT "/%d " IDFMT "/%d",
 		   this,
 		   srcs[0].inst.id, srcs[0].offset,
 		   dst.inst.id, dst.offset, dst.size,
@@ -4093,7 +4093,7 @@ namespace LegionRuntime {
               Arrays::Mapping<1, 1> *dst_linearization = 
                 inst_impl->metadata.linearization.get_mapping<1>();
               ElementMask::Enumerator *e = ispace->valid_mask->enumerate_enabled();
-              off_t rstart; size_t elem_count;
+              coord_t rstart; size_t elem_count;
               while(e->get_next(rstart, elem_count)) {
                 int dst_index = dst_linearization->image((coord_t)rstart); 
                 size_t done = 0;
