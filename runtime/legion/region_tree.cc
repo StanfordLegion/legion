@@ -12133,9 +12133,9 @@ namespace Legion {
       FieldMask complete_below;
       siphon_physical_children(closer, state, closing_mask, complete_below);
       // We only need to capture locally if we have fields that are
-      // dirty or reduced which were not complete below
-      FieldMask capture_mask = (closing_mask & 
-                                  (state->dirty_mask | state->reduction_mask));
+      // dirty or reduced which were not complete below, we only get to 
+      // count dirty fields towards completeness.
+      FieldMask capture_mask = closing_mask & state->dirty_mask;
       // Record that we have complete data for any field that we will
       // capture or which we know is complete below
       complete_mask = capture_mask | complete_below;
