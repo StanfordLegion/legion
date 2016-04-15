@@ -1737,7 +1737,6 @@ namespace Legion {
         // Do the premapping
         runtime->forest->physical_traverse_path(req_ctx, privilege_path,
                                                 regions[*it],
-                                                parent_req_indexes[*it],
                                                 version_info, this, 
                                                 true/*find valid*/, valid
 #ifdef DEBUG_HIGH_LEVEL
@@ -1924,8 +1923,7 @@ namespace Legion {
         set_current_mapping_index(*it);
         // Passed all the error checking tests so register it
         runtime->forest->physical_register_only(req_ctx, 
-                              regions[*it], parent_req_indexes[*it],
-                              version_info, 
+                              regions[*it], version_info, 
                               this, completion_event, chosen_instances
 #ifdef DEBUG_HIGH_LEVEL
                               , *it, get_logging_name(), unique_op_id
@@ -2385,6 +2383,7 @@ namespace Legion {
           LogicalView::delete_logical_view(it->second);
       }
       instance_top_views.clear();
+      virtual_top_views.clear();
 #ifdef DEBUG_HIGH_LEVEL
       assert(pending_top_views.empty());
       assert(outstanding_subtasks == 0);
@@ -5367,8 +5366,7 @@ namespace Legion {
         set_current_mapping_index(idx);
         // apply the results of the mapping to the tree
         runtime->forest->physical_register_only(enclosing_contexts[idx],
-                                    regions[idx], parent_req_indexes[idx],
-                                    get_version_info(idx), 
+                                    regions[idx], get_version_info(idx), 
                                     this, local_termination_event, 
                                     physical_instances[idx]
 #ifdef DEBUG_HIGH_LEVEL
@@ -5403,9 +5401,8 @@ namespace Legion {
         RegionTreePath path;
         initialize_mapping_path(path, regions[idx], regions[idx].region);
         runtime->forest->physical_traverse_path(enclosing_contexts[idx],
-                              path, regions[idx], parent_req_indexes[idx],
-                              get_version_info(idx), this, true/*valid*/, 
-                              postmap_valid[idx]
+                              path, regions[idx], get_version_info(idx), 
+                              this, true/*valid*/, postmap_valid[idx]
 #ifdef DEBUG_HIGH_LEVEL
                               , idx, get_logging_name()
                               , unique_op_id
@@ -5547,8 +5544,7 @@ namespace Legion {
         // Register this with a no-event so that the instance can
         // be used as soon as it is valid from the copy to it
         runtime->forest->physical_register_only(enclosing_contexts[idx],
-                          regions[idx], parent_req_indexes[idx],
-                          get_version_info(idx), this, 
+                          regions[idx], get_version_info(idx), this, 
                           Event::NO_EVENT/*done immediately*/, result
 #ifdef DEBUG_HIGH_LEVEL
                           , idx, get_logging_name(), unique_op_id
@@ -5589,7 +5585,7 @@ namespace Legion {
         {
           runtime->forest->initialize_current_context(context,
               clone_requirements[idx], physical_instances[idx],
-              unmap_events[idx], this, idx, top_views);
+              unmap_events[idx], this, top_views);
 #ifdef DEBUG_HIGH_LEVEL
           assert(!physical_instances[idx].empty());
 #endif
@@ -5648,8 +5644,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    InstanceView* SingleTask::create_instance_top_view(PhysicalManager *manager,
-                                                       unsigned index)
+    InstanceView* SingleTask::create_instance_top_view(PhysicalManager *manager)
     //--------------------------------------------------------------------------
     {
       // First check to see if we are the owner node for this manager
@@ -5664,7 +5659,6 @@ namespace Legion {
           RezCheck z(rez);
           rez.serialize<UniqueID>(get_context_id());
           rez.serialize(manager->did);
-          rez.serialize(index);
           rez.serialize<InstanceView**>(const_cast<InstanceView**>(&result));
           rez.serialize(wait_on); 
         }
@@ -5714,11 +5708,11 @@ namespace Legion {
       }
       InstanceView *result = manager->create_instance_top_view(this);
       result->add_base_resource_ref(CONTEXT_REF);
+      std::vector<unsigned> virtual_indexes;
       // We've got the results, if we have any virtual mappings we have
       // to see if this instance can be used to satisfy a virtual mapping
       // We can also skip reduction views because we know they are not
       // permitted to cross context boundaries
-#if 0
       if (has_virtual_instances() && !result->is_reduction_view())
       {
         InstanceView *parent_context_view = NULL;
@@ -5762,21 +5756,17 @@ namespace Legion {
             // Note that this recursion ensures that we handle nested
             // virtual mappings correctly
             SingleTask *parent_context = find_enclosing_context();
-            parent_context_view = parent_context->create_instance_top_view(
-                                          manager, parent_req_indexes[idx]);
+            parent_context_view = 
+              parent_context->create_instance_top_view(manager);
           }
           // Now we clone across for the given region requirement
           VersionInfo &info = get_version_info(idx); 
-          runtime->forest->convert_views_across_context(regions[idx], info,
-              this, parent_context_view, result, path, get_task_completion());
+          runtime->forest->convert_views_into_context(regions[idx], info,
+                                        parent_context_view, result, path);
+          // Record that this was the index of a virtual region 
+          // requirement for this task
+          virtual_indexes.push_back(idx);
         }
-      }
-#endif
-      if (is_created_region(index))
-      {
-        // If this is a created region, record that we made a new
-        // instance for this context so that it can flow back out
-        // later if it isn't deleted first
       }
       // Record the result and trigger any user event to signal that the
       // view is ready
@@ -5795,6 +5785,9 @@ namespace Legion {
 #endif
         to_trigger = pending_finder->second;
         pending_top_views.erase(pending_finder);
+        // If we had any virtual indexes, record them
+        if (!virtual_indexes.empty())
+          virtual_top_views[manager] = virtual_indexes;
       }
       if (to_trigger.exists())
         to_trigger.trigger();
@@ -5825,6 +5818,113 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void SingleTask::convert_virtual_instance_top_views(
+                   const std::map<AddressSpaceID,RemoteTask*> &remote_instances,
+                                        std::set<Event> &map_applied_conditions)
+    //--------------------------------------------------------------------------
+    {
+      // If we have no virtual mapped regions and we have no created
+      // region requirements then we are done
+      if (!has_virtual_instances() && created_requirements.empty())
+        return;
+      // If we have any remote instances we need to send a message to them
+      // that they have to do this for themselves before we are mapped
+      if (!remote_instances.empty())
+      {
+
+      }
+      // Now do it for ourself, we have to make a copy because deletions
+      // can still come back while we are iterating over our instances
+      std::vector<PhysicalManager*> copy_top_views;
+      {
+        AutoLock o_lock(op_lock,1,false/*exclusive*/);
+        for (std::map<PhysicalManager*,InstanceView*>::const_iterator it = 
+              instance_top_views.begin(); it != instance_top_views.end(); it++)
+        {
+          // Try adding a valid reference to make sure it doesn't get
+          // collected while we are trying to do this, we're on the owner
+          // node so this doesn't need to be valid initially
+          if (it->first->try_add_base_valid_ref(CONTEXT_REF, false))
+            copy_top_views.push_back(it->first);
+          // If we couldn't add the valid ref that means this instance
+          // is definitely going to be collected
+        }
+      }
+      for (std::vector<PhysicalManager*>::const_iterator it = 
+            copy_top_views.begin(); it != copy_top_views.end(); it++)
+      {
+        InstanceView *parent_context_view = NULL;
+        const LogicalRegion &handle = (*it)->region_node->handle;
+        // See if we have any virtual indexes
+        std::map<PhysicalManager*,std::vector<unsigned> >::const_iterator
+          finder = virtual_top_views.find(*it);
+        if (finder != virtual_top_views.end())
+        {
+          for (unsigned idx = 0; idx < finder->second.size(); idx++)
+          {
+            unsigned index = finder->second[idx];
+            if (parent_context_view == NULL)
+            {
+              SingleTask *parent_context = find_enclosing_context();
+              parent_context_view = 
+                parent_context->create_instance_top_view(*it);
+            }
+            // Do the conversion back out
+            runtime->forest->convert_views_from_context(regions[index], this,
+                                                        get_version_info(index),
+                                                        parent_context_view,
+                                                        get_task_completion(),
+                                                        false/*initial user*/);
+          }
+        }
+        // If we had any created region requirements we also need to 
+        // see if we have any interfering users for those requirements too
+        if (!created_requirements.empty())
+        {
+          for (unsigned idx = 0; idx < created_requirements.size(); idx++)
+          {
+            if (created_requirements[idx].region.get_tree_id() != 
+                 handle.get_tree_id())
+              continue;
+            // We are guaranteed to have a path since we know a created
+            // requirement is always for the top of the region tree
+            // See if we have any overlapping fields
+            bool has_overlapping_fields = false;
+            for (std::set<FieldID>::const_iterator fit = 
+                  created_requirements[idx].privilege_fields.begin(); fit !=
+                  created_requirements[idx].privilege_fields.end(); fit++)
+            {
+              if ((*it)->layout->has_field(*fit))
+              {
+                has_overlapping_fields = true;
+                break;
+              }
+            }
+            if (!has_overlapping_fields)
+              continue;
+            if (parent_context_view == NULL)
+            {
+              SingleTask *parent_context = find_enclosing_context();
+              parent_context_view = 
+                parent_context->create_instance_top_view(*it);
+            }
+            // Do the conversion back out
+            VersionInfo dummy_info;
+            runtime->forest->convert_views_from_context(
+                                                      created_requirements[idx],
+                                                      this, dummy_info,
+                                                      parent_context_view,
+                                                      get_task_completion(),
+                                                      true/*initial user*/);
+          }
+        }
+        // Then we can remove our valid reference on the manager
+        if ((*it)->remove_base_valid_ref(CONTEXT_REF))
+          PhysicalManager::delete_physical_manager(*it); 
+      }
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ void SingleTask::handle_create_top_view_request(
                    Deserializer &derez, Runtime *runtime, AddressSpaceID source)
     //--------------------------------------------------------------------------
@@ -5834,8 +5934,6 @@ namespace Legion {
       derez.deserialize(context_uid);
       DistributedID manager_did;
       derez.deserialize(manager_did);
-      unsigned index;
-      derez.deserialize(index);
       InstanceView **target;
       derez.deserialize(target);
       UserEvent to_trigger;
@@ -5852,7 +5950,7 @@ namespace Legion {
 #else
       PhysicalManager *manager = static_cast<PhysicalManager*>(dc);
 #endif
-      InstanceView *result = context->create_instance_top_view(manager, index);
+      InstanceView *result = context->create_instance_top_view(manager);
       // Send the result back to the source and follow it with our own message
       result->send_view(source);
       Serializer rez;
@@ -7609,7 +7707,6 @@ namespace Legion {
       assert(virtual_mapped[index]);
 #endif
       runtime->forest->physical_register_only(virtual_ctx, regions[index],
-                                              parent_req_indexes[index],
                                               version_infos[index], this,
                                               Event::NO_EVENT, refs
 #ifdef DEBUG_HIGH_LEVEL
@@ -7865,6 +7962,12 @@ namespace Legion {
       {
         if (!acquired_instances.empty())
           release_acquired_instances(acquired_instances);
+        // Handle remaining state flowing back out for virtual mappings
+        // and newly created regions and fields, don't have to do this
+        // though if we are at the top of the task tree
+        if (!top_level_task)
+          convert_virtual_instance_top_views(remote_instances,
+                                             map_applied_conditions);
         if (!map_applied_conditions.empty())
         {
           map_applied_conditions.insert(mapped_precondition);
@@ -7896,7 +7999,6 @@ namespace Legion {
     {
       runtime->forest->physical_traverse_path(ctx, privilege_paths[idx],
                                               regions[idx], 
-                                              parent_req_indexes[idx],
                                               version_infos[idx],
                                               this, true/*find valid*/, valid
 #ifdef DEBUG_HIGH_LEVEL
@@ -8495,7 +8597,6 @@ namespace Legion {
         runtime->forest->initialize_path(regions[idx].region.get_index_space(),
             orig_req.region.get_index_space(), traversal_path);
       runtime->forest->physical_traverse_path(ctx, traversal_path, regions[idx],
-                                             parent_req_indexes[idx],
                                              slice_owner->get_version_info(idx),
                                              this, true/*find valid*/, valid
 #ifdef DEBUG_HIGH_LEVEL
@@ -8570,6 +8671,15 @@ namespace Legion {
                                          HLR_LATENCY_PRIORITY,
                                          this, mapped_precondition);
         return;
+      }
+      // Handle remaining state flowing back out for virtual mappings
+      // and newly created regions and fields
+      std::set<Event> preconditions;
+      convert_virtual_instance_top_views(remote_instances, preconditions);
+      if (!preconditions.empty())
+      {
+        Event ready = Runtime::merge_events<true>(preconditions);
+        ready.wait();
       }
       slice_owner->record_child_mapped();
       // Now we can complete this point task
@@ -10876,7 +10986,6 @@ namespace Legion {
         InstanceSet empty_set;
         runtime->forest->physical_traverse_path(get_parent_context(idx),
                                         privilege_path, regions[idx],
-                                        parent_req_indexes[idx],
                                         version_infos[idx], this,
                                         false/*find valid*/, empty_set
 #ifdef DEBUG_HIGH_LEVEL
@@ -11373,7 +11482,6 @@ namespace Legion {
       // Hold a reference so it doesn't get deleted
       temporary_virtual_refs.push_back(refs[0]);
       runtime->forest->physical_register_only(virtual_ctx, regions[index],
-                                              parent_req_indexes[index],
                                               version_infos[index], this,
                                               Event::NO_EVENT, refs
 #ifdef DEBUG_HIGH_LEVEL

@@ -300,13 +300,11 @@ namespace Legion {
     struct TraversalInfo {
     public:
       TraversalInfo(ContextID ctx, Operation *op, const RegionRequirement &req,
-                    unsigned parent_req_index, VersionInfo &version_info, 
-                    const FieldMask &traversal_mask);
+                    VersionInfo &version_info, const FieldMask &traversal_mask);
     public:
       const ContextID ctx;
       Operation *const op;
       const RegionRequirement &req;
-      const unsigned parent_req_index;
       VersionInfo &version_info;
       const FieldMask traversal_mask;
       const UniqueID context_uid;
@@ -1275,7 +1273,7 @@ namespace Legion {
      */
     class CompositeCloser {
     public:
-      CompositeCloser(ContextID ctx, VersionInfo &version_info);
+      CompositeCloser(ContextID ctx, VersionInfo &version_info, bool across);
       CompositeCloser(const CompositeCloser &rhs);
       ~CompositeCloser(void);
     public:
@@ -1285,8 +1283,7 @@ namespace Legion {
                                         bool root = false);
       CompositeView* create_valid_view(PhysicalState *state,
                                       CompositeNode *root,
-                                      const FieldMask &valid_mask,
-                                      bool register_view);
+                                      const FieldMask &valid_mask);
       void capture_physical_state(CompositeNode *target,
                                   RegionTreeNode *node,
                                   PhysicalState *state,
@@ -1299,6 +1296,7 @@ namespace Legion {
     public:
       const ContextID ctx;
       VersionInfo &version_info;
+      const bool across_contexts;
     public:
       std::map<RegionTreeNode*,CompositeNode*> constructed_nodes;
       LegionMap<RegionTreeNode*,FieldMask>::aligned capture_fields;

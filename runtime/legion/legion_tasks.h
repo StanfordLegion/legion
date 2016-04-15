@@ -503,10 +503,12 @@ namespace Legion {
           std::set<Event> &preconditions);
       void invalidate_region_tree_contexts(void);
     public:
-      InstanceView* create_instance_top_view(PhysicalManager *manager, 
-                                             unsigned index);
+      InstanceView* create_instance_top_view(PhysicalManager *manager); 
       void notify_instance_deletion(PhysicalManager *deleted, 
                                     GenerationID old_gen);
+      void convert_virtual_instance_top_views(
+          const std::map<AddressSpaceID,RemoteTask*> &remote_instances,
+                                      std::set<Event> &mapped_applied);
       static void handle_create_top_view_request(Deserializer &derez, 
                             Runtime *runtime, AddressSpaceID source);
       static void handle_create_top_view_response(Deserializer &derez,
@@ -600,6 +602,8 @@ namespace Legion {
     protected: // Instance top view data structures
       std::map<PhysicalManager*,InstanceView*>  instance_top_views;
       std::map<PhysicalManager*,UserEvent>      pending_top_views;
+      std::map<PhysicalManager*,
+               std::vector<unsigned> >          virtual_top_views;
     protected: // Mapper choices 
       Mapper::ContextConfigOutput           context_configuration;
       VariantID                             selected_variant;

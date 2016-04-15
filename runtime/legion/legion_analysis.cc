@@ -206,9 +206,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     TraversalInfo::TraversalInfo(ContextID c, Operation *o,
-                                 const RegionRequirement &r,unsigned parent_idx,
+                                 const RegionRequirement &r,
                                  VersionInfo &info, const FieldMask &k)
-      : ctx(c), op(o), req(r), parent_req_index(parent_idx), version_info(info),
+      : ctx(c), op(o), req(r), version_info(info),
         traversal_mask(k), context_uid(o->get_parent()->get_context_uid())
     //--------------------------------------------------------------------------
     {
@@ -3283,15 +3283,15 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    CompositeCloser::CompositeCloser(ContextID c, VersionInfo &info)
-      : ctx(c), version_info(info)
+    CompositeCloser::CompositeCloser(ContextID c, VersionInfo &info,bool across)
+      : ctx(c), version_info(info), across_contexts(across)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     CompositeCloser::CompositeCloser(const CompositeCloser &rhs)
-      : ctx(0), version_info(rhs.version_info)
+      : ctx(0), version_info(rhs.version_info), across_contexts(false)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -3340,8 +3340,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     CompositeView*CompositeCloser::create_valid_view(PhysicalState *state,
                                                     CompositeNode *root,
-                                                    const FieldMask &valid_mask,
-                                                    bool register_view)
+                                                    const FieldMask &valid_mask)
     //--------------------------------------------------------------------------
     {
       // Finalize the root before we use it
@@ -3355,7 +3354,7 @@ namespace Legion {
       CompositeView *composite_view = legion_new<CompositeView>(node->context, 
                                    did, node->context->runtime->address_space,
                                    node, node->context->runtime->address_space, 
-                                   root, composite_info);
+                                   root, composite_info, across_contexts);
       // Now update the state of the node
       // Note that if we are permitted to leave the subregions
       // open then we don't make the view dirty
