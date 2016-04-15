@@ -14544,8 +14544,6 @@ namespace Legion {
     {
       // Firgure out which, if any, of our fields are going to
       // be completely closed
-      FieldMask complete_fields;
-      find_complete_fields(closing_mask, target_children, complete_fields);
       PhysicalCloser closer(info, handle);
       PhysicalState *state = get_physical_state(info.ctx, version_info);
       // Iterate over all the targets and assign set the right views
@@ -14553,7 +14551,7 @@ namespace Legion {
       std::vector<MaterializedView*> target_views(targets.size());
       convert_target_views(targets, info.op->get_parent(), target_views);
       closer.initialize_targets(this, state, target_views,
-                                closing_mask, complete_fields, targets);
+                                closing_mask, targets);
       bool changed = false;
       for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it = 
             target_children.begin(); it != target_children.end(); it++)
@@ -14859,9 +14857,8 @@ namespace Legion {
               new_views[idx]->as_instance_view()->as_materialized_view();
           }
           PhysicalCloser closer(info, handle);
-          FieldMask empty_complete_fields;
           closer.initialize_targets(this, state, closing_views,
-                      info.traversal_mask, empty_complete_fields, targets);
+                                    info.traversal_mask, targets);
           // Mark the dirty mask with our bits since we're closing to it
           closer.update_dirty_mask(info.traversal_mask);
           std::set<ColorPoint> empty_next_children;
@@ -16176,7 +16173,6 @@ namespace Legion {
       if (!!leave_open_all && !targets.empty() && row_source->is_disjoint())
       {
         std::set<Event> closed_event_set;
-        FieldMask complete_fields;
         for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it = 
               target_children.begin(); it != target_children.end(); it++)
         {
@@ -16192,7 +16188,7 @@ namespace Legion {
           // Complete fields is empty because we don't know which
           // children we will be closing during the siphon call
           child_closer.initialize_targets(child_node, child_state, child_views,
-                                      leave_open_all, complete_fields, targets);
+                                          leave_open_all, targets);
           std::set<ColorPoint> empty_next_children;
           child_node->siphon_physical_children(child_closer,
                                                child_state, leave_open_all,
@@ -16207,9 +16203,8 @@ namespace Legion {
           // Closed up this whole partition for the remaining fields
           PhysicalCloser closer(info, parent->handle);
           PhysicalState *state = get_physical_state(info.ctx, version_info); 
-          find_complete_fields(unclosed, target_children, complete_fields);
           closer.initialize_targets(this, state, target_views,
-                                    unclosed, complete_fields, targets);
+                                    unclosed, targets);
           bool changed = false;
           for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it = 
                 target_children.begin(); it != target_children.end(); it++)
@@ -16249,11 +16244,9 @@ namespace Legion {
         // Otherwise we are trying to close up this whole partition
         // Close it up to our parent region
         PhysicalCloser closer(info, parent->handle);
-        FieldMask complete_fields;
-        find_complete_fields(closing_mask, target_children, complete_fields);
         PhysicalState *state = get_physical_state(info.ctx, version_info); 
         closer.initialize_targets(this, state, target_views,
-                                  closing_mask, complete_fields, targets);
+                                  closing_mask, targets);
         bool changed = false;
         for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it = 
               target_children.begin(); it != target_children.end(); it++)

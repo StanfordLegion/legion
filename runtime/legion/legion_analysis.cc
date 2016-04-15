@@ -3140,45 +3140,39 @@ namespace Legion {
                                   PhysicalState *state,
                                   const std::vector<MaterializedView*> &targets,
                                   const FieldMask &closing_mask,
-                                  const FieldMask &complete_mask,
                                   const InstanceSet &target_set)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
       assert(upper_targets.empty());
 #endif
-      // We only need to issue updates for the incomplete fields
-      FieldMask incomplete_mask = closing_mask - complete_mask;
-      if (!!incomplete_mask)
+      // Figure out which instances need updates before we can close to them
+      LegionMap<LogicalView*,FieldMask>::aligned valid_views;
+      origin->find_valid_instance_views(info.ctx, state, closing_mask,
+                                        closing_mask, info.version_info,
+                                        false/*needs space*/, valid_views);
+      // Now figure out which fields need updating for each instance
+      for (std::vector<MaterializedView*>::const_iterator it = 
+            targets.begin(); it != targets.end(); it++)
       {
-        // Figure out which instances need updates before we can close to them
-        LegionMap<LogicalView*,FieldMask>::aligned valid_views;
-        origin->find_valid_instance_views(info.ctx, state, incomplete_mask,
-                                          incomplete_mask, info.version_info,
-                                          false/*needs space*/, valid_views);
-        // Now figure out which fields need updating for each instance
-        for (std::vector<MaterializedView*>::const_iterator it = 
-              targets.begin(); it != targets.end(); it++)
+        // The set of fields we must update
+        FieldMask space_mask = (*it)->get_space_mask() & closing_mask;
+        // If we don't have any incomplete fields, keep going
+        if (!space_mask)
+          continue;
+        LegionMap<LogicalView*,FieldMask>::aligned::const_iterator finder = 
+          valid_views.find(*it);
+        if (finder != valid_views.end())
         {
-          // The set of fields we must update
-          FieldMask space_mask = (*it)->get_space_mask() & incomplete_mask;
-          // If we don't have any incomplete fields, keep going
-          if (!space_mask)
-            continue;
-          LegionMap<LogicalView*,FieldMask>::aligned::const_iterator finder = 
-            valid_views.find(*it);
-          if (finder != valid_views.end())
-          {
-            // We can skip fields for which we are already valid
-            FieldMask invalid_mask = space_mask - finder->second;
-            if (!!invalid_mask)
-              origin->issue_update_copies(info, *it, invalid_mask,
-                                          valid_views, this);
-          }
-          else // update all the incomplete fields we have
-            origin->issue_update_copies(info, *it, space_mask,
+          // We can skip fields for which we are already valid
+          FieldMask invalid_mask = space_mask - finder->second;
+          if (!!invalid_mask)
+            origin->issue_update_copies(info, *it, invalid_mask,
                                         valid_views, this);
         }
+        else // update all the incomplete fields we have
+          origin->issue_update_copies(info, *it, space_mask,
+                                      valid_views, this);
       }
       // Then we can record the targets
       upper_targets = targets;

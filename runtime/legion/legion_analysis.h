@@ -1234,7 +1234,6 @@ namespace Legion {
       void initialize_targets(RegionTreeNode *origin, PhysicalState *state, 
                               const std::vector<MaterializedView*> &targets,
                               const FieldMask &closing_mask,
-                              const FieldMask &complete_fields,
                               const InstanceSet &close_targets);
     public:
       void close_tree_node(RegionTreeNode *node, 
