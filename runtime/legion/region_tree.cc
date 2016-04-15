@@ -10851,7 +10851,7 @@ namespace LegionRuntime {
       }
       else
       {
-        const bool has_write = HAS_WRITE(user.usage);
+        const bool has_write = IS_WRITE(user.usage);
         // If we are writing in any way (including reduces), check to
         // see if we have already marked those fields dirty. If not,
         // advance the version numbers for those fields.
@@ -11178,7 +11178,7 @@ namespace LegionRuntime {
       }
       else
       {
-        const bool has_write = HAS_WRITE(user.usage);
+        const bool has_write = IS_WRITE(user.usage);
         // If we are writing in any way (including reduces), check to
         // see if we have already marked those fields dirty. If not,
         // advance the version numbers for those fields.
