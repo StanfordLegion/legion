@@ -3226,18 +3226,27 @@ namespace Legion {
       // for any field.
       LegionMap<Event,FieldMask>::aligned local_postconditions;
       // First see if we are at the root of the tree for this particular copy
+      bool traverse_children = true;
       if (check_root)
       {
-        // If we have reductions at this level we can no longer continue
-        // to play the dominance game because we know we will have to 
-        // initialize the data at this level
-        if (reduction_views.empty())
+        CompositeNode *child = find_next_root(dst->logical_node);
+        if (child != NULL)
         {
-          CompositeNode *child = find_next_root(dst->logical_node);
-          // This is the common case
-          if (child != NULL)
+          // If we have another child, we can continue the traversal
+          // If we have reductions here we need to do something special
+          if (!reduction_views.empty())
           {
-            // Continue traversing down the dominated path
+            // Have this path fall through to catch the reductions   
+            // but don't traverse the children since we're already doing it
+            child->issue_deferred_copies(info, dst, across_contexts,
+                                  copy_mask, src_version_info,
+                                  preconditions, local_postconditions, 
+                                  postreductions, tracker, across_helper,
+                                  true/*check root*/);
+            traverse_children = false;
+          }
+          else // This is the common case
+          {
             child->issue_deferred_copies(info, dst, across_contexts,
                                   copy_mask, src_version_info,
                                   preconditions, postconditions, postreductions,
@@ -3245,27 +3254,30 @@ namespace Legion {
             return;
           }
         }
-        // Otherwise we fall through and do the actual update copies
-        LegionMap<LogicalView*,FieldMask>::aligned all_valid_views;
-        // We have to pull down any valid views to make sure we are issuing
-        // copies to all the possibly overlapping locations
-        find_valid_views(copy_mask, all_valid_views);
-        if (!all_valid_views.empty())
+        else
         {
-          // If we have no children we can just put the results
-          // straight into the postcondition otherwise put it
-          // in our local postcondition
-          if (children.empty() && reduction_views.empty())
+          // Otherwise we fall through and do the actual update copies
+          LegionMap<LogicalView*,FieldMask>::aligned all_valid_views;
+          // We have to pull down any valid views to make sure we are issuing
+          // copies to all the possibly overlapping locations
+          find_valid_views(copy_mask, all_valid_views);
+          if (!all_valid_views.empty())
           {
-            issue_update_copies(info, dst, copy_mask, src_version_info,
-                        preconditions, postconditions, all_valid_views, 
-                        tracker, across_helper, across_contexts);
-            return;
+            // If we have no children we can just put the results
+            // straight into the postcondition otherwise put it
+            // in our local postcondition
+            if (children.empty() && reduction_views.empty())
+            {
+              issue_update_copies(info, dst, copy_mask, src_version_info,
+                          preconditions, postconditions, all_valid_views, 
+                          tracker, across_helper, across_contexts);
+              return;
+            }
+            else
+              issue_update_copies(info, dst, copy_mask, src_version_info,
+                    preconditions, local_postconditions, all_valid_views, 
+                    tracker, across_helper, across_contexts);
           }
-          else
-            issue_update_copies(info, dst, copy_mask, src_version_info,
-                  preconditions, local_postconditions, all_valid_views, 
-                  tracker, across_helper, across_contexts);
         }
       }
       else
@@ -3295,36 +3307,39 @@ namespace Legion {
       }
       LegionMap<Event,FieldMask>::aligned temp_preconditions;
       const LegionMap<Event,FieldMask>::aligned *local_preconditions = NULL;
-      // Defer initialization until we find the first interfering child
-      for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it =
-            children.begin(); it != children.end(); it++)
+      if (traverse_children)
       {
-        FieldMask overlap = it->second & copy_mask;
-        if (!overlap)
-          continue;
-        if (!it->first->logical_node->intersects_with(dst->logical_node))
-          continue;
-        if (local_preconditions == NULL)
+        // Defer initialization until we find the first interfering child
+        for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it =
+              children.begin(); it != children.end(); it++)
         {
-          // Do the initialization
-          // The preconditions going down are anything from above
-          // as well as anything that we generated
-          if (!local_postconditions.empty())
+          FieldMask overlap = it->second & copy_mask;
+          if (!overlap)
+            continue;
+          if (!it->first->logical_node->intersects_with(dst->logical_node))
+            continue;
+          if (local_preconditions == NULL)
           {
-            temp_preconditions = local_postconditions;
-            temp_preconditions.insert(preconditions.begin(),
-                                      preconditions.end());
-            local_preconditions = &temp_preconditions; 
+            // Do the initialization
+            // The preconditions going down are anything from above
+            // as well as anything that we generated
+            if (!local_postconditions.empty())
+            {
+              temp_preconditions = local_postconditions;
+              temp_preconditions.insert(preconditions.begin(),
+                                        preconditions.end());
+              local_preconditions = &temp_preconditions; 
+            }
+            else
+              local_preconditions = &preconditions;
           }
-          else
-            local_preconditions = &preconditions;
+          // Now traverse the child
+          it->first->issue_deferred_copies(info, dst, across_contexts,
+                            overlap, src_version_info,
+                            *local_preconditions, local_postconditions, 
+                            postreductions, tracker, across_helper, 
+                            false/*check root*/);
         }
-        // Now traverse the child
-        it->first->issue_deferred_copies(info, dst, across_contexts,
-                          overlap, src_version_info,
-                          *local_preconditions, local_postconditions, 
-                          postreductions, tracker, across_helper, 
-                          false/*check root*/);
       }
       // Handle any reductions we might have
       if (!reduction_views.empty())
