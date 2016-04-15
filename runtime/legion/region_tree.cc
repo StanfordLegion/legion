@@ -12140,7 +12140,7 @@ namespace Legion {
       // We always need to capture reductions for the fields we have
       FieldMask reduc_close = closing_mask & state->reduction_mask;
       // Quick out if there is nothing to capture
-      if (!!dirty_close && !!reduc_close)
+      if (!dirty_close && !reduc_close)
         return;
       // We only need to capture fields which are dirty and not already complete
       // but we must always capture any reduction fields that we have
@@ -12154,7 +12154,7 @@ namespace Legion {
                                         dirty_capture, reduc_close);
         }
       }
-      else if (!!dirty_close || !!reduc_close)
+      else
       {
         CompositeNode *node = closer.get_composite_node(this);
         closer.capture_physical_state(node, this, state, closing_mask,
