@@ -280,6 +280,8 @@ namespace Legion {
                                     const PhysicalInstance &target,
                                     const std::vector<PhysicalInstance> &source,
                                     std::deque<PhysicalInstance> &ranking);
+      virtual bool default_policy_select_close_virtual(const MapperContext,
+                                                       const Close &);
     protected: // help for generating random numbers
       long default_generate_random_integer(void) const;
       double default_generate_random_real(void) const;

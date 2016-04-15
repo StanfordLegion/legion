@@ -2157,13 +2157,56 @@ namespace Legion {
     {
       log_mapper.spew("Default map_close in %s", get_mapper_name());
       // Simple heuristic for closes, if we have an instance use it,
-      // otherwise just make a virtual instance
+      // otherwise make a (real or virtual) instance.
       output.chosen_instances = input.valid_instances;
       if (!output.chosen_instances.empty())
         mapper_rt_acquire_and_filter_instances(ctx, output.chosen_instances);
-      output.chosen_instances.push_back(
-                                PhysicalInstance::get_virtual_instance());
+
+      if (default_policy_select_close_virtual(ctx, close)) {
+        output.chosen_instances.push_back(
+                                          PhysicalInstance::get_virtual_instance());
+      } else {
+        // Make one big instance at the location where the parent task
+        // is running.
+        Memory target_memory =
+          default_policy_select_target_memory(ctx, close.parent_task->current_proc);
+        LayoutConstraintSet constraints;
+        default_policy_fill_constraints(ctx, constraints, target_memory,
+                                        close.requirement);
+
+        output.chosen_instances.resize(output.chosen_instances.size()+1);
+        if (!default_make_instance(ctx, target_memory, constraints,
+              output.chosen_instances.back(), CLOSE_MAPPING,
+              false/*force*/, true/*meets*/, close.requirement))
+        {
+          // If we failed to make it that is bad
+          log_mapper.error("Default mapper failed allocation for region "
+                           "requirement of close in task %s (UID %lld) "
+                           "in memory " IDFMT "for processor " IDFMT ". This "
+                           "means the working set of your application is too big "
+                           "for the allotted capacity of the given memory under "
+                           "the default mapper's mapping scheme. You have three "
+                           "choices: ask Realm to allocate more memory, write a "
+                           "custom mapper to better manage working sets, or find "
+                           "a bigger machine. Good luck!",
+                           close.parent_task->get_task_name(),
+                           close.parent_task->get_unique_id(),
+                           close.parent_task->current_proc.id,
+                           target_memory.id);
+          assert(false);
+        }
+      }
     }
+
+    //--------------------------------------------------------------------------
+    bool DefaultMapper::default_policy_select_close_virtual(
+                          const MapperContext ctx,
+                          const Close&        close)
+    //--------------------------------------------------------------------------
+    {
+      return true;
+    }
+
 
     //--------------------------------------------------------------------------
     void DefaultMapper::select_close_sources(const MapperContext        ctx,
