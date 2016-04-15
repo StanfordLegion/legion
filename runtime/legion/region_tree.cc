@@ -12113,52 +12113,65 @@ namespace Legion {
       // Capture down the tree first and then capture at our local node
       // if necessary
       siphon_physical_children(closer, state, closing_mask, complete_below);
-      // We are the top node, so we need to 
-      // capture any field that is not complete
-      FieldMask capture_mask = closing_mask - complete_below; 
-      if (!!capture_mask)
-        closer.capture_physical_state(root, this, state, capture_mask);    
+      // We are the top node, so we need to capture any field that is not 
+      // complete regardless of whether it is dirty or not
+      // as well as any reduction instances at this level
+      FieldMask capture_dirty = closing_mask - complete_below; 
+      FieldMask capture_reduc = closing_mask & state->reduction_mask;
+      if (!!capture_dirty || !!capture_reduc)
+        closer.capture_physical_state(root, this, state, closing_mask,
+                                      capture_dirty, capture_reduc);    
       return closer.create_valid_view(state, root, closing_mask);
     }
 
     //--------------------------------------------------------------------------
     void RegionTreeNode::close_physical_node(CompositeCloser &closer,
                                              const FieldMask &closing_mask,
-                                             FieldMask &complete_mask)
+                                             FieldMask &complete_below)
     //--------------------------------------------------------------------------
     {
       PhysicalState *state = get_physical_state(closer.ctx,closer.version_info);
       // Close down the tree and then determine if we have to capture locally 
       // We don't need to capture data for any fields that are complete below
-      FieldMask complete_below;
       siphon_physical_children(closer, state, closing_mask, complete_below);
-      // We only need to capture locally if we have fields that are
-      // dirty or reduced which were not complete below, we only get to 
-      // count dirty fields towards completeness.
-      FieldMask capture_mask = closing_mask & state->dirty_mask;
-      // Record that we have complete data for any field that we will
-      // capture or which we know is complete below
-      complete_mask = capture_mask | complete_below;
+      // We only need to capture instances for fields which are dirty and 
+      // not complete below
+      FieldMask dirty_close = closing_mask & state->dirty_mask;
+      // We always need to capture reductions for the fields we have
+      FieldMask reduc_close = closing_mask & state->reduction_mask;
+      // Quick out if there is nothing to capture
+      if (!!dirty_close && !!reduc_close)
+        return;
       // We only need to capture fields which are dirty and not already complete
-      if (!!complete_below)
-        capture_mask -= complete_below;
-      if (!!capture_mask)
+      // but we must always capture any reduction fields that we have
+      if (!!dirty_close && !!complete_below)
       {
-        CompositeNode *node = closer.get_composite_node(this); 
-        closer.capture_physical_state(node, this, state, capture_mask);
+        FieldMask dirty_capture = dirty_close - complete_below;
+        if (!!dirty_capture || !!reduc_close)
+        {
+          CompositeNode *node = closer.get_composite_node(this);
+          closer.capture_physical_state(node, this, state, closing_mask, 
+                                        dirty_capture, reduc_close);
+        }
       }
-      // Invalidate any state for which we were doing a capture
-      FieldMask clean_mask = closing_mask & state->dirty_mask;
-      if (!!clean_mask)
+      else if (!!dirty_close || !!reduc_close)
       {
-        invalidate_instance_views(state, clean_mask);
-        state->dirty_mask -= clean_mask;
+        CompositeNode *node = closer.get_composite_node(this);
+        closer.capture_physical_state(node, this, state, closing_mask,
+                                      dirty_close, reduc_close);
       }
-      FieldMask clean_reduc_mask = closing_mask & state->reduction_mask;
-      if (!!clean_reduc_mask)
+      // Invalidate any state for which we were doing a close
+      if (!!dirty_close)
       {
-        invalidate_reduction_views(state, clean_reduc_mask);
-        state->reduction_mask -= clean_reduc_mask;
+        invalidate_instance_views(state, dirty_close);
+        state->dirty_mask -= dirty_close;
+        // Update our complete mask with what we have captured
+        complete_below |= dirty_close;
+      }
+      if (!!reduc_close)
+      {
+        invalidate_reduction_views(state, reduc_close);
+        state->reduction_mask -= reduc_close;
       }
     }
 

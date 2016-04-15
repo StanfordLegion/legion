@@ -3367,13 +3367,17 @@ namespace Legion {
     void CompositeCloser::capture_physical_state(CompositeNode *target,
                                                  RegionTreeNode *node,
                                                  PhysicalState *state,
-                                                 const FieldMask &capture_mask)
+                                                 const FieldMask &close_mask,
+                                                 const FieldMask &dirty_mask,
+                                                 const FieldMask &reduc_mask)
     //--------------------------------------------------------------------------
     {
       // Do the capture and then update capture mask
-      target->capture_physical_state(*this, state, capture_mask);
+      target->capture_physical_state(*this, state, close_mask, 
+                                      dirty_mask, reduc_mask);
       // Record that we've captured the fields for this node
-      update_capture_mask(node, capture_mask);
+      // Important that we only do this after the capture
+      update_capture_mask(node, close_mask);
     }
 
     //--------------------------------------------------------------------------

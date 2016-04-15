@@ -1287,7 +1287,9 @@ namespace Legion {
       void capture_physical_state(CompositeNode *target,
                                   RegionTreeNode *node,
                                   PhysicalState *state,
-                                  const FieldMask &capture_mask);
+                                  const FieldMask &close_mask,
+                                  const FieldMask &dirty_mask,
+                                  const FieldMask &reduc_mask);
     public:
       void update_capture_mask(RegionTreeNode *node,
                                const FieldMask &capture_mask);
