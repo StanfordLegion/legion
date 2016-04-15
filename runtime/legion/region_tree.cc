@@ -12517,7 +12517,6 @@ namespace Legion {
             return;
         }
       }
-
       // To facilitate optimized copies in the low-level runtime, 
       // we gather all the information needed to issue gather copies 
       // from multiple instances into the data structures below, we then 

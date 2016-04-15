@@ -1325,10 +1325,7 @@ class LogicalState(object):
         return True
 
     def perform_logical_fence(self, op, perform_checks):
-        if perform_checks:
-            # TODO: Figure out how to turn this back on 
-            print "WARNING: Logical fence analysis is currently disabled"
-            return True
+        if perform_checks: 
             for prev_op,prev_req in self.current_epoch_users:
                 if prev_op not in op.logical_incoming:
                     print "ERROR: missing logical fence dependence between "+\
@@ -2670,6 +2667,10 @@ class Operation(object):
         return True
 
     def analyze_logical_fence(self, perform_checks):
+        if perform_checks:
+            # TODO: Figure out how to turn this back on 
+            print "WARNING: Logical fence analysis is currently disabled"
+            return True
         for index,req in self.context.op.reqs.iteritems():
             for field in req.fields:
                 if not req.logical_node.perform_logical_fence(self, field, perform_checks):
