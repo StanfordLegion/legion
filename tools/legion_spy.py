@@ -5981,7 +5981,11 @@ def main(temp_dir):
     if len(sys.argv) < 2:
         usage()
 
-    opts, args = getopt(sys.argv[1:],'lpcrmdeszkuva')
+    try:
+        opts, args = getopt(sys.argv[1:],'lpcrmdeszkuva')
+    except:
+        print "ERROR: Unknown command line flag"
+        usage()
     opts = dict(opts)
     if len(args) <> 1:
         usage()
