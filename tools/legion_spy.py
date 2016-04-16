@@ -19,7 +19,7 @@ import subprocess
 import sys, os, re, gc, shutil, copy
 import string
 import tempfile
-from getopt import getopt
+from getopt import getopt,GetoptError
 from array import *
 from collections import deque
 
@@ -5980,12 +5980,11 @@ def usage():
 def main(temp_dir):
     if len(sys.argv) < 2:
         usage()
-
     try:
         opts, args = getopt(sys.argv[1:],'lpcrmdeszkuva')
-    except:
-        print "ERROR: Unknown command line flag"
-        usage()
+    except GetoptError as err:
+        print "ERROR: "+str(err)
+        sys.exit(1)
     opts = dict(opts)
     if len(args) <> 1:
         usage()
