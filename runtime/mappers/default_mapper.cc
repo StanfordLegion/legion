@@ -1465,8 +1465,8 @@ namespace Legion {
           // These constraints don't do as much as we want but don't
           // conflict so make an instance with them and our constraints 
           LayoutConstraintSet creation_constraints = index_constraints;
-          default_policy_fill_constraints(ctx, creation_constraints, 
-                                          target_memory, req);
+          default_policy_select_constraints(ctx, creation_constraints, 
+                                            target_memory, req);
           creation_constraints.add_constraint(
               FieldConstraint(overlaping_fields,
                 false/*contig*/, false/*inorder*/));
@@ -1549,7 +1549,7 @@ namespace Legion {
         if (finder != reduction_constraint_cache.end())
           return finder->second;
         LayoutConstraintSet constraints;
-        default_policy_fill_constraints(ctx, constraints, target_memory, req);
+        default_policy_select_constraints(ctx, constraints, target_memory, req);
         LayoutConstraintID result = mapper_rt_register_layout(ctx, constraints);
         // Save the result
         reduction_constraint_cache[constraint_key] = result;
@@ -1599,7 +1599,7 @@ namespace Legion {
       }
       // Fill in the constraints 
       LayoutConstraintSet constraints;
-      default_policy_fill_constraints(ctx, constraints, target_memory, req);
+      default_policy_select_constraints(ctx, constraints, target_memory, req);
       // Do the registration
       LayoutConstraintID result = mapper_rt_register_layout(ctx, constraints);
       // Record our results, there is a benign race here as another mapper
@@ -1611,9 +1611,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DefaultMapper::default_policy_fill_constraints(MapperContext ctx,
-                   LayoutConstraintSet &constraints, Memory target_memory,
-                   const RegionRequirement &req)
+    void DefaultMapper::default_policy_select_constraints(MapperContext ctx,
+                     LayoutConstraintSet &constraints, Memory target_memory,
+                     const RegionRequirement &req)
     //--------------------------------------------------------------------------
     {
       // See if we are doing a reduction instance
@@ -2157,22 +2157,23 @@ namespace Legion {
     {
       log_mapper.spew("Default map_close in %s", get_mapper_name());
       // Simple heuristic for closes, if we have an instance use it,
-      // otherwise make a (real or virtual) instance.
+      // otherwise see if we should make a composite or a real instance.
       output.chosen_instances = input.valid_instances;
       if (!output.chosen_instances.empty())
         mapper_rt_acquire_and_filter_instances(ctx, output.chosen_instances);
 
       if (default_policy_select_close_virtual(ctx, close)) {
         output.chosen_instances.push_back(
-                                          PhysicalInstance::get_virtual_instance());
+                                  PhysicalInstance::get_virtual_instance());
       } else {
         // Make one big instance at the location where the parent task
         // is running.
         Memory target_memory =
-          default_policy_select_target_memory(ctx, close.parent_task->current_proc);
+          default_policy_select_target_memory(ctx, 
+                                              close.parent_task->current_proc);
         LayoutConstraintSet constraints;
-        default_policy_fill_constraints(ctx, constraints, target_memory,
-                                        close.requirement);
+        default_policy_select_constraints(ctx, constraints, target_memory,
+                                          close.requirement);
 
         output.chosen_instances.resize(output.chosen_instances.size()+1);
         if (!default_make_instance(ctx, target_memory, constraints,
@@ -2181,18 +2182,18 @@ namespace Legion {
         {
           // If we failed to make it that is bad
           log_mapper.error("Default mapper failed allocation for region "
-                           "requirement of close in task %s (UID %lld) "
-                           "in memory " IDFMT "for processor " IDFMT ". This "
-                           "means the working set of your application is too big "
-                           "for the allotted capacity of the given memory under "
-                           "the default mapper's mapping scheme. You have three "
-                           "choices: ask Realm to allocate more memory, write a "
-                           "custom mapper to better manage working sets, or find "
-                           "a bigger machine. Good luck!",
-                           close.parent_task->get_task_name(),
-                           close.parent_task->get_unique_id(),
-                           close.parent_task->current_proc.id,
-                           target_memory.id);
+                         "requirement of close in task %s (UID %lld) "
+                         "in memory " IDFMT "for processor " IDFMT ". This "
+                         "means the working set of your application is too big "
+                         "for the allotted capacity of the given memory under "
+                         "the default mapper's mapping scheme. You have three "
+                         "choices: ask Realm to allocate more memory, write a "
+                         "custom mapper to better manage working sets, or find "
+                         "a bigger machine. Good luck!",
+                         close.parent_task->get_task_name(),
+                         close.parent_task->get_unique_id(),
+                         close.parent_task->current_proc.id,
+                         target_memory.id);
           assert(false);
         }
       }
@@ -2206,7 +2207,6 @@ namespace Legion {
     {
       return true;
     }
-
 
     //--------------------------------------------------------------------------
     void DefaultMapper::select_close_sources(const MapperContext        ctx,

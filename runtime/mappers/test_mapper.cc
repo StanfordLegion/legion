@@ -422,7 +422,7 @@ namespace Legion {
             continue;
           // TODO: put in arbitrary constraints to mess with the DMA system
           LayoutConstraintSet constraints;
-          default_policy_fill_constraints(ctx, constraints, target, req);
+          default_policy_select_constraints(ctx, constraints, target, req);
           // Overwrite the field constraints 
           constraints.field_constraint = FieldConstraint(field, false);
           // Try to make the instance, we always make new instances to
