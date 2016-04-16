@@ -14883,7 +14883,7 @@ namespace Legion {
 #endif
           Event ready = 
             new_views[idx]->as_instance_view()->add_user(usage, term_event,
-                         ref.get_valid_fields(), info.op, info.version_info);       
+                         ref.get_valid_fields(), info.op, info.version_info);
           ref.set_ready_event(ready);
         }
       }

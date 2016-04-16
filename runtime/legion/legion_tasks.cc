@@ -7721,11 +7721,11 @@ namespace Legion {
       if (is_remote())
       {
         AddressSpaceID owner_space = runtime->find_address_space(orig_proc);
-        version_infos[index].apply_mapping(get_parent_context(index).get_id(),
+        version_infos[index].apply_mapping(virtual_ctx.get_id(),
                                     owner_space, temp_map_applied_conditions);
       }
       else
-        version_infos[index].apply_mapping(get_parent_context(index).get_id(),
+        version_infos[index].apply_mapping(virtual_ctx.get_id(),
                          runtime->address_space, temp_map_applied_conditions);
       if (!temp_map_applied_conditions.empty())
       {

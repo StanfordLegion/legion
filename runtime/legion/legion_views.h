@@ -692,8 +692,8 @@ namespace Legion {
       void capture_physical_state(CompositeCloser &closer, 
                                   PhysicalState *state, 
                                   const FieldMask &close_mask,
-                                  const FieldMask &dirty_mask,
-                                  const FieldMask &reduc_mask);
+                                  const FieldMask &capture_dirty,
+                                  const FieldMask &capture_reduc);
       bool capture_instances(CompositeCloser &closer, 
                              const FieldMask &capture_mask,
                      const LegionMap<LogicalView*,FieldMask>::aligned *views);

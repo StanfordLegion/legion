@@ -3033,8 +3033,8 @@ namespace Legion {
     void CompositeNode::capture_physical_state(CompositeCloser &closer,
                                                PhysicalState *state,
                                                const FieldMask &close_mask,
-                                               const FieldMask &dirty_mask,
-                                               const FieldMask &reduc_mask)
+                                               const FieldMask &capture_dirty,
+                                               const FieldMask &capture_reduc)
     //--------------------------------------------------------------------------
     {
       // Check to see if this is the root, if it is, we need to pull
@@ -3042,6 +3042,7 @@ namespace Legion {
       if (parent == NULL)
       {
         // Capture any dirty fields that we need here
+        dirty_mask = close_mask;
         if (!!dirty_mask)
         {
           LegionMap<LogicalView*,FieldMask>::aligned instances;
@@ -3056,23 +3057,31 @@ namespace Legion {
         // Tell the parent about our capture for all the fields
         // for which we are good regardless of what we capture
         parent->update_child(this, close_mask);
-        if (!state->valid_views.empty() && !!dirty_mask)
+        if (!state->valid_views.empty())
         {
-          // C++ sucks sometimes
-          LegionMap<LogicalView*,FieldMask>::aligned *valid_views = 
-            reinterpret_cast<LegionMap<LogicalView*,FieldMask>::aligned*>(
-                &(state->valid_views));
-          capture_instances(closer, dirty_mask, valid_views);
+          dirty_mask = state->dirty_mask & capture_dirty;
+          if (!!dirty_mask)
+          {
+            // C++ sucks sometimes
+            LegionMap<LogicalView*,FieldMask>::aligned *valid_views = 
+              reinterpret_cast<LegionMap<LogicalView*,FieldMask>::aligned*>(
+                  &(state->valid_views));
+            capture_instances(closer, dirty_mask, valid_views);
+          }
         }
       }
       // Always capture any reductions that we need
-      if (!state->reduction_views.empty() && !!reduc_mask)
+      if (!state->reduction_views.empty() && !!reduction_mask)
       {
-        // More C++ suckiness
-        LegionMap<ReductionView*,FieldMask>::aligned *reduction_views =
-          reinterpret_cast<LegionMap<ReductionView*,FieldMask>::aligned*>(
-              &(state->reduction_views));
-        capture_reductions(reduc_mask, reduction_views);
+        reduction_mask = state->reduction_mask & capture_reduc;
+        if (!!reduction_mask)
+        {
+          // More C++ suckiness
+          LegionMap<ReductionView*,FieldMask>::aligned *reduction_views =
+            reinterpret_cast<LegionMap<ReductionView*,FieldMask>::aligned*>(
+                &(state->reduction_views));
+          capture_reductions(reduction_mask, reduction_views);
+        }
       }
     }
 
