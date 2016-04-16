@@ -10704,11 +10704,9 @@ namespace LegionRuntime {
       }
       else // We're still not there, so keep going
       {
-        const bool has_write = IS_WRITE(user.usage); // write or reduce
-        // If we are writing in any way (including reduces), check to
-        // see if we have already marked those fields dirty. If not,
-        // advance the version numbers for those fields.
-        if (has_write)
+        // If we are writing check to see if we have already marked those 
+        // fields dirty. If not, advance the version numbers for those fields.
+        if (is_write)
         {
           FieldMask new_dirty_fields = user.field_mask - state.dirty_below;
           if (!!new_dirty_fields)
@@ -10851,14 +10849,13 @@ namespace LegionRuntime {
       }
       else
       {
-        const bool has_write = IS_WRITE(user.usage);
-        // If we are writing in any way (including reduces), check to
-        // see if we have already marked those fields dirty. If not,
+        // If we are writing check to see if we have already 
+        // marked those fields dirty. If not,
         // advance the version numbers for those fields.
 #ifdef DEBUG_HIGH_LEVEL
         assert(user.field_mask * state.dirty_below);
 #endif
-        if (has_write)
+        if (is_write)
         {
           state.dirty_below |= user.field_mask;
           state.advance_version_numbers(user.field_mask);
@@ -11051,11 +11048,9 @@ namespace LegionRuntime {
       }
       else
       {
-        const bool has_write = HAS_WRITE(user.usage);
-        // If we are writing in any way (including reduces), check to
-        // see if we have already marked those fields dirty. If not,
-        // advance the version numbers for those fields.
-        if (has_write)
+        // If we are writing check to see if we have already marked those 
+        // fields dirty. If not, advance the version numbers for those fields.
+        if (is_write)
         {
           FieldMask new_dirty_fields = user.field_mask - state.dirty_below;
           if (!!new_dirty_fields)
@@ -11178,14 +11173,12 @@ namespace LegionRuntime {
       }
       else
       {
-        const bool has_write = IS_WRITE(user.usage);
-        // If we are writing in any way (including reduces), check to
-        // see if we have already marked those fields dirty. If not,
-        // advance the version numbers for those fields.
+        // If we are writing check to see if we have already marked those 
+        // fields dirty. If not, advance the version numbers for those fields.
 #ifdef DEBUG_HIGH_LEVEL
         assert(user.field_mask * state.dirty_below);
 #endif
-        if (has_write)
+        if (is_write)
         {
           state.dirty_below |= user.field_mask;
           state.advance_version_numbers(user.field_mask);
