@@ -881,6 +881,9 @@ class LogicalRegion(object):
     def add_child(self, color, child):
         self.children[color] = child 
 
+    def has_all_children(self):
+        return len(self.children) == len(self.index_space.children)
+
     def __str__(self):
         if self.name is None:
             return "Region (%d,%d,%d)" % (self.index_space.uid,
@@ -1097,6 +1100,9 @@ class LogicalPartition(object):
 
     def add_child(self, color, child):
         self.children[color] = child
+
+    def has_all_children(self):
+        return len(self.children) == len(self.index_partition.children)
 
     def __str__(self):
         if self.name is None:
@@ -3183,32 +3189,34 @@ class Operation(object):
     def print_event_node(self, printer):
         self.print_base_node(printer, False)
 
-    def print_event_graph(self, printer, elevate, top):
+    def print_event_graph(self, printer, elevate, all_nodes, top):
         # Do any of our close operations too
         if self.inter_close_ops:
             for close in self.inter_close_ops:
-                close.print_event_graph(printer, elevate, False)
+                close.print_event_graph(printer, elevate, all_nodes, False)
         # Handle index space operations specially, everything
         # else is the same
         if self.kind is INDEX_TASK_KIND:
             assert self.points is not None
             for point in self.points.itervalues():
-                point.op.print_event_graph(printer, elevate, False)
+                point.op.print_event_graph(printer, elevate, all_nodes, False)
             return
         # If this is a single task, recurse and generate our subgraph first
         if self.kind is SINGLE_TASK_KIND:
             # Get our corresponding task
             task = self.state.get_task(self.uid)   
-            task.print_event_graph_context(printer, elevate, top)
+            task.print_event_graph_context(printer, elevate, all_nodes, top)
         # Look through all our generated realm operations and emit them
         if self.realm_copies:
             for copy in self.realm_copies:
                 if copy not in elevate:
-                    elevate[copy] = copy.get_event_context()
+                    #elevate[copy] = copy.get_event_context()
+                    elevate[copy] = copy.get_context()
         if self.realm_fills:
             for fill in self.realm_fills:
                 if fill not in elevate:
-                    elevate[fill] = fill.get_event_context()
+                    #elevate[fill] = fill.get_event_context()
+                    elevate[copy] = copy.get_context()
         if self.is_physical_operation():
             # Finally put ourselves in the set if we are a physical operation
             assert self.context is not None
@@ -3420,6 +3428,9 @@ class Task(object):
                             # a virtual instance to be made for a region requirement
                             # that only has reduction privileges
                             assert not req.is_reduce()
+                            # Make a virtual instance and then copy it over
+                            req.logical_node.perform_physical_close(depth-1, field,
+                                                          self.op, req, inst, False)
                             # We only need to save read-write privileges to be copied
                             # back out, read-only privileges means that the copies
                             # only flow in and not back out
@@ -3444,6 +3455,8 @@ class Task(object):
                 assert idx in self.op.reqs
                 req = self.op.reqs[idx]
                 for field in req.fields:
+                    req.logical_node.perform_physical_close(depth, field, self.op,
+                                             req, Instance(self.op.state, 0), False)
                     req.logical_node.copy_physical_state(depth, depth-1, field, True)
         self.virtual_indexes = None
         # Reset any physical user lists at our depth for instances we used
@@ -3514,7 +3527,7 @@ class Task(object):
         # We printed our dataflow graph
         return 1
 
-    def print_event_graph_context(self, printer, elevate, top):
+    def print_event_graph_context(self, printer, elevate, all_nodes, top):
         if not self.operations:
             return 
         if not top:
@@ -3531,16 +3544,15 @@ class Task(object):
             printer.println(self.op.node_name + ' [shape=point,style=invis];')
         # Generate the sub-graph
         for op in self.operations:
-            op.print_event_graph(printer, elevate, False)
+            op.print_event_graph(printer, elevate, all_nodes, False)
         # Find our local nodes
         local_nodes = list()
         for node,context in elevate.iteritems():
             if context is self:
                 local_nodes.append(node)
                 node.print_event_node(printer)
-        # Print the edges
-        for op in local_nodes:
-            op.print_incoming_event_edges(printer)
+                all_nodes.add(node)
+        # Hold off printing the edges until the very end
         # Remove our nodes from elevate
         for node in local_nodes:
             del elevate[node] 
@@ -3663,6 +3675,10 @@ class Instance(object):
             points = req.logical_node.get_shape().copy()
         for user in reversed(users[field]):
             if user.region.intersects(req.logical_node):
+                if precise:
+                    overlap = user.shape & points
+                    if overlap.empty():
+                        continue
                 dep = compute_dependence_type(user, req)
                 if dep == TRUE_DEPENDENCE or dep == ANTI_DEPENDENCE:
                     result.add(user.op)
@@ -3695,6 +3711,10 @@ class Instance(object):
                 points = region.get_shape() & intersect.get_shape()
         for user in reversed(users[field]):
             if user.region.intersects(region):
+                if precise:
+                    overlap = user.shape & points
+                    if overlap.empty():
+                        continue
                 dep = compute_dependence_type(user, inst)
                 if dep == TRUE_DEPENDENCE or dep == ANTI_DEPENDENCE:
                     result.add(user.op)
@@ -3841,14 +3861,9 @@ class CompositeNode(object):
             return True
         return False
 
-    def capture(self, state, is_root, already_captured):
-        # See if we can skip ourselves because we have a complete child
-        can_skip = False
-        for child in self.children:
-            if child.is_complete():
-                can_skip = True
-                break
-        if not can_skip:
+    def capture(self, state, is_root, already_captured, skip_instances):
+        inst_capture = False
+        if not skip_instances:
             # Capture any instances
             # If we are the root, get all the valid instances,
             # otherwise the local ones will suffice
@@ -3859,6 +3874,7 @@ class CompositeNode(object):
             else:
                 valid = state.valid_instances
             for inst in valid:
+                inst_capture = True
                 if inst.is_composite():
                     # For composite instances, we have make an inline composite instance
                     inline_composite = inst.create_inline_composite(already_captured)
@@ -3870,6 +3886,7 @@ class CompositeNode(object):
             self.owner.reductions.add(reduction)
         # Mark that we've been captured
         already_captured.add(self.node)
+        return inst_capture
 
     def capture_inline(self, target, already_captured):
         changed = False
@@ -3879,9 +3896,11 @@ class CompositeNode(object):
                 changed = True
         # Now see if we need to capture ourself
         if self.node not in already_captured:
-            copy = target.get_state(self.node)
+            copy = target.get_node(self.node)
             copy.dirty = self.dirty
             for inst in self.valid_instances:
+                if copy.valid_instances is None:
+                    copy.valid_instances = set()
                 if inst.is_composite():
                     inline_composite = inst.create_inline_composite(already_captured) 
                     copy.valid_instances.add(inline_composite)
@@ -3897,10 +3916,8 @@ class CompositeNode(object):
 
     def find_valid_instances(self, valid):
         # Go up the tree if necessary
-        if self.valid_instances is None:
-            self.valid_instances = set()
-            if not self.dirty and self.parent is not None:
-                self.parent.find_valid_instances(self.valid_instances)
+        if not self.dirty and self.parent is not None:
+            self.parent.find_valid_instances(valid)
         if self.valid_instances:
             for inst in self.valid_instances:
                 valid.add(inst)
@@ -3920,19 +3937,18 @@ class CompositeNode(object):
         # If we need check (e.g. haven't initialized data) or we are dirty
         # then we have to issue copies from this level
         if need_check or self.dirty:
-            # Issue copies from this node
-            # Pull valid instances if we haven't already done so
-            if self.valid_instances is None:
-                self.valid_instances = set()
-                if self.parent is not None:
-                    self.parent.find_valid_instances(self.valid_instances)
+            if need_check:
+                local_valid = set()
+                self.find_valid_instances(local_valid)
+            else:
+                local_valid = self.valid_instances 
             # Issue update copies from our valid instances if there are
             # valid instances and the destination is not already one of them
-            if self.valid_instances and dst not in self.valid_instances:
+            if local_valid and dst not in local_valid:
                 # Handle the virtual case
-                if len(self.valid_instances) == 1 and \
-                    next(iter(self.valid_instances)).is_virtual():
-                    virtual_inst = next(iter(self.valid_instances))
+                if len(local_valid) == 1 and \
+                    next(iter(local_valid)).is_virtual():
+                    virtual_inst = next(iter(local_valid))
                     if not virtual_inst.issue_copies_across(dst, dst_depth, dst_field, 
                               region, op, perform_checks, error_str, actually_across):
                         return False
@@ -3947,7 +3963,7 @@ class CompositeNode(object):
                         # Find the copy
                         if self.node is not region:
                             copy = op.find_generated_copy(self.owner.field, 
-                                                          region, dst, self.node)
+                                                          region, dst, 0, self.node)
                         else:
                             copy = op.find_generated_copy(self.owner.field,
                                                           region, dst)
@@ -3965,6 +3981,7 @@ class CompositeNode(object):
                                 if self.owner.state.assert_on_fail:
                                     assert False
                             return False
+                        src = copy.find_src_inst(self.owner.field)
                         if self.node is not region:
                             src_preconditions = src.find_copy_dependences(self.owner.depth,
                                 self.owner.field, region, True, 0, perform_checks, self.node)
@@ -3972,39 +3989,39 @@ class CompositeNode(object):
                             src_preconditions = src.find_copy_dependences(self.owner.depth,
                                 self.owner.field, region, True, 0, perform_checks)
                         if copy.reachable_cache is None:
-                            copy.reachable_cahe = set()
+                            copy.reachable_cache = set()
                             copy.get_physical_reachable(copy.reachable_cache, False)
                         bad = check_preconditions(src_preconditions, copy)
                         if bad is not None:
                             if actually_across:
-                                print "ERROR: Missing source precondition for "+\
-                                      "intersection copy across from composite instance "+\
-                                      "to update "+str(dst)+" for field "+str(dst_field)+\
-                                      " by "+error_str
+                                print "ERROR: Missing source precondition on "+\
+                                      str(bad)+" for "+str(copy)+" across from "+\
+                                      "composite instance to update "+str(dst)+\
+                                      " for field "+str(dst_field)+" by "+error_str
                                 if self.owner.state.assert_on_fail:
                                     assert False
                             else:
-                                print "ERROR: Missing source precondition for "+\
-                                      "intersection copy from composite instance "+\
-                                      "to update "+str(dst)+" for field "+str(dst_field)+\
-                                      " by "+error_str
+                                print "ERROR: Missing source precondition on "+\
+                                      str(bad)+" for "+str(copy)+" from composite "+\
+                                      "instance to update "+str(dst)+" for field "+\
+                                      str(dst_field)+" by "+error_str
                                 if self.owner.state.assert_on_fail:
                                     assert False
                             return False
                         bad = check_preconditions(dst_preconditions, copy)
                         if bad is not None:
                             if actually_across:
-                                print "ERROR: Missing destination precondition for "+\
-                                      "intersection copy across from composite instance "+\
-                                      "to update "+str(dst)+" for field "+str(dst_field)+\
-                                      " by "+error_str
+                                print "ERROR: Missing destination precondition on "+\
+                                      str(bad)+" for "+str(copy)+"  across from "+\
+                                      "composite instance to update "+str(dst)+\
+                                      " for field "+str(dst_field)+" by "+error_str
                                 if self.owner.state.assert_on_fail:
                                     assert False
                             else:
-                                print "ERROR: Missing destination precondition for "+\
-                                      "intersection copy from composite instance "+\
-                                      "to update "+str(dst)+" for field "+str(dst_field)+\
-                                      " by "+error_str
+                                print "ERROR: Missing destination precondition on "+\
+                                      str(bad)+" for "+str(copy)+" from composite "+\
+                                      "instance to update "+str(dst)+" for field "+\
+                                      str(dst_field)+" by "+error_str
                                 if self.owner.state.assert_on_fail:
                                     assert False
                             return False
@@ -4053,7 +4070,8 @@ class CompositeNode(object):
         return True
 
 class CompositeInstance(object):
-    __slots__ = ['state', 'root', 'depth', 'field', 'nodes', 'reductions']
+    __slots__ = ['state', 'root', 'depth', 'field', 'nodes', 
+                 'reductions', 'captured', 'complete']
     def __init__(self, state, root, depth, field):
         self.state = state
         self.root = root
@@ -4061,6 +4079,8 @@ class CompositeInstance(object):
         self.field = field
         self.nodes = dict()
         self.reductions = set()
+        self.complete = set() # complete nodes
+        self.captured = set()
 
     def __str__(self):
         print "Composite Instance of "+str(self.field)+" at "+str(self.root)
@@ -4079,10 +4099,31 @@ class CompositeInstance(object):
         return result
 
     def capture(self, state, already_captured):
-        # Do the capture if we are dirty or we are the root
-        if state.dirty or state.node is self.root:
+        # Do the capture if we are dirty or have reductions or we are the root
+        if state.dirty or state.redop <> 0 or state.node is self.root:
             new_state = self.get_node(state.node)
-            new_state.capture(state, state.node is self.root, already_captured)
+            # See if we can avoid capturing the instances
+            already_complete = False 
+            # If we are complete and we captured all our children
+            # then we can skip capturing instances here
+            if state.node.is_complete() and state.node.has_all_children():
+                already_complete = True
+                for child in state.node.children.itervalues():
+                    if not child in self.captured:
+                        already_complete = False
+                        break
+            # We can also skip if one of our children is complete
+            if not already_complete: 
+                for child in state.node.children.itervalues():
+                    if child in self.complete:
+                        already_complete = True
+                        break
+            inst_capture = new_state.capture(state, state.node is self.root, 
+                                             already_captured, already_complete)
+            if inst_capture or already_complete:
+                self.captured.add(state.node) 
+                if state.node.is_complete():
+                    self.complete.add(state.node)
 
     def create_inline_composite(self, already_captured):
         result = CompositeInstance(self.state, self.root, self.depth, self.field) 
@@ -4540,6 +4581,13 @@ class RealmCopy(RealmBase):
         self.srcs.append(src)
         self.dsts.append(dst)
         self.redops.append(redop)
+
+    def find_src_inst(self, src_field):
+        assert len(self.src_fields) == len(self.srcs)
+        for idx in range(len(self.src_fields)):
+            if src_field == self.src_fields[idx]:
+                return self.srcs[idx]
+        assert False
 
     def print_event_node(self, printer):
         if self.state.detailed_graphs:
@@ -5804,7 +5852,11 @@ class State(object):
         file_name = 'event_graph_'+str(op).replace(' ','_')+'_'+str(op.uid)
         printer = GraphPrinter(path, file_name)
         elevate = dict()
-        op.print_event_graph(printer, elevate, True) 
+        all_nodes = set()
+        op.print_event_graph(printer, elevate, all_nodes, True) 
+        # Now print the edges at the very end
+        for node in all_nodes:
+            node.print_incoming_event_edges(printer) 
         printer.print_pdf_after_close(False)
 
     def get_processor(self, proc_id):
