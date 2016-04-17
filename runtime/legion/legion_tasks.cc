@@ -20,6 +20,7 @@
 #include "legion_trace.h"
 #include "legion_profiling.h"
 #include "legion_instances.h"
+#include "legion_analysis.h"
 #include "legion_views.h"
 #include <algorithm>
 
@@ -2383,7 +2384,6 @@ namespace Legion {
           LogicalView::delete_logical_view(it->second);
       }
       instance_top_views.clear();
-      virtual_top_views.clear();
 #ifdef DEBUG_HIGH_LEVEL
       assert(pending_top_views.empty());
       assert(outstanding_subtasks == 0);
@@ -4918,6 +4918,7 @@ namespace Legion {
                           mapper->get_mapper_name(), idx, 
                           get_task_name(), get_unique_id());
         }
+        // See if they want a virtual mapping
         if (composite_idx >= 0)
         {
           // Everything better be all virtual or all real
@@ -5350,16 +5351,27 @@ namespace Legion {
           assert(physical_instances[idx][0].get_manager()->
                                       is_virtual_instance());
 #endif
+          // We choose different target contexts depending on whether
+          // we are locally mapping and are remote or not. If we're 
+          // locally mapping and being sent to a remote processor then
+          // we will use our parent context for now and translate later
+          // on our destination node. Otherwise we can just use ourself
+          SingleTask *target_ctx = this;
+          if (is_locally_mapped() && !runtime->is_local(target_proc))
+            target_ctx = parent_ctx;
           runtime->forest->map_virtual_region(enclosing_contexts[idx],
                                               regions[idx],
                                               physical_instances[idx][0],
                                               get_version_info(idx),
-                                              false/*needs fields*/
+                                              target_ctx, false/*needs fields*/
 #ifdef DEBUG_HIGH_LEVEL
                                               , idx, get_logging_name()
                                               , unique_op_id
 #endif
                                               );
+          // No need to register this instance in the context
+          // because it doesn't represent a change of state
+          continue;
         }
         // Set the current mapping index before doing anything
         // that sould result in a copy
@@ -5606,20 +5618,19 @@ namespace Legion {
           // First get any events necessary to make this view local
           if (!ref.is_local())
             composite_view->make_local(preconditions);
-          // There is something really scary here so pay attention!
-          // We're about to put a composite view from one context into
-          // a different context. This composite view has captured
-          // certain version numbers internally in its version info,
-          // or possibly nested version infos. In theory this could
-          // cause issues for the physical analysis since it sometimes
-          // uses version numbers to avoid catching dependences when 
-          // version numbers are the same. This would be really bad
-          // if we tried to do this with version numbers from different
-          // contexts. However, we know that it will never happen because
-          // the physical analysis only permits this optimization for
-          // WAR and WAW dependences, but composite instances are only
-          // ever being read from, so all the dependences it will catch
-          // are true dependences, therefore making it safe. :)
+          // If we locally mapped and are now remote, we need to translate
+          // this composite instance so that its views are specific to 
+          // our context
+          if (is_locally_mapped() && is_remote())
+          {
+            CompositeCloser closer(context.get_id(),get_version_info(idx),this);
+            DeferredView *translated_view = 
+              composite_view->simplify(closer, ref.get_valid_fields());
+#ifdef DEBUG_HIGH_LEVEL
+            assert(translated_view->is_composite_view());
+#endif
+            composite_view = translated_view->as_composite_view();
+          }
           runtime->forest->initialize_current_context(context,
               clone_requirements[idx], physical_instances[idx], composite_view);
         }
@@ -5708,7 +5719,6 @@ namespace Legion {
       }
       InstanceView *result = manager->create_instance_top_view(this);
       result->add_base_resource_ref(CONTEXT_REF);
-      std::vector<unsigned> virtual_indexes;
       // We've got the results, if we have any virtual mappings we have
       // to see if this instance can be used to satisfy a virtual mapping
       // We can also skip reduction views because we know they are not
@@ -5761,11 +5771,8 @@ namespace Legion {
           }
           // Now we clone across for the given region requirement
           VersionInfo &info = get_version_info(idx); 
-          runtime->forest->convert_views_into_context(regions[idx], info,
-                                        parent_context_view, result, path);
-          // Record that this was the index of a virtual region 
-          // requirement for this task
-          virtual_indexes.push_back(idx);
+          runtime->forest->convert_views_into_context(regions[idx], this, info,
+                      parent_context_view, result, get_task_completion(), path);
         }
       }
       // Record the result and trigger any user event to signal that the
@@ -5785,9 +5792,6 @@ namespace Legion {
 #endif
         to_trigger = pending_finder->second;
         pending_top_views.erase(pending_finder);
-        // If we had any virtual indexes, record them
-        if (!virtual_indexes.empty())
-          virtual_top_views[manager] = virtual_indexes;
       }
       if (to_trigger.exists())
         to_trigger.trigger();
@@ -5825,7 +5829,7 @@ namespace Legion {
     {
       // If we have no virtual mapped regions and we have no created
       // region requirements then we are done
-      if (!has_virtual_instances() && created_requirements.empty())
+      if (created_requirements.empty())
         return;
       // If we have any remote instances we need to send a message to them
       // that they have to do this for themselves before we are mapped
@@ -5855,30 +5859,8 @@ namespace Legion {
       {
         InstanceView *parent_context_view = NULL;
         const LogicalRegion &handle = (*it)->region_node->handle;
-        // See if we have any virtual indexes
-        std::map<PhysicalManager*,std::vector<unsigned> >::const_iterator
-          finder = virtual_top_views.find(*it);
-        if (finder != virtual_top_views.end())
-        {
-          for (unsigned idx = 0; idx < finder->second.size(); idx++)
-          {
-            unsigned index = finder->second[idx];
-            if (parent_context_view == NULL)
-            {
-              SingleTask *parent_context = find_enclosing_context();
-              parent_context_view = 
-                parent_context->create_instance_top_view(*it);
-            }
-            // Do the conversion back out
-            runtime->forest->convert_views_from_context(regions[index], this,
-                                                        get_version_info(index),
-                                                        parent_context_view,
-                                                        get_task_completion(),
-                                                        false/*initial user*/);
-          }
-        }
-        // If we had any created region requirements we also need to 
-        // see if we have any interfering users for those requirements too
+        // If we had any created region requirements we need to see 
+        // if we have any interfering users for those requirements
         if (!created_requirements.empty())
         {
           for (unsigned idx = 0; idx < created_requirements.size(); idx++)
@@ -11047,7 +11029,6 @@ namespace Legion {
         // not then do so now
         if (points.empty())
           enumerate_points();
-
         for (unsigned idx = 0; idx < points.size(); idx++)
         {
 #ifdef DEBUG_HIGH_LEVEL
@@ -11075,7 +11056,6 @@ namespace Legion {
 #ifdef DEBUG_HIGH_LEVEL
           assert(slice_success);
 #endif
-          
         }
         slices.clear();
         // If we succeeded in mapping all our remaining

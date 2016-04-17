@@ -1909,6 +1909,7 @@ namespace Legion {
                                               const RegionRequirement &req,
                                               InstanceRef &composite_ref,
                                               VersionInfo &version_info,
+                                              SingleTask *target_ctx,
                                               const bool needs_fields
 
 #ifdef DEBUG_HIGH_LEVEL
@@ -1930,14 +1931,14 @@ namespace Legion {
         FieldMask composite_mask = 
           child_node->column_source->get_field_mask(req.privilege_fields);
         CompositeView *view = child_node->map_virtual_region(ctx.get_id(),
-                                                  composite_mask, version_info);
+                                composite_mask, version_info, target_ctx);
         composite_ref.set_composite_view(view);
       }
       else
       {
         const FieldMask &composite_mask = composite_ref.get_valid_fields();
         CompositeView *view = child_node->map_virtual_region(ctx.get_id(), 
-                                                  composite_mask, version_info);
+                                 composite_mask, version_info, target_ctx);
         composite_ref.set_composite_view(view);
       }
     }
@@ -2035,7 +2036,7 @@ namespace Legion {
         // perform the composite close first
         close_node->create_composite_instance(info.ctx, to_close,
                                               next_children, comp_mask,
-                                              version_info, false/*across*/);
+                                              version_info, op->get_parent());
         // Now we can remove those fields from the closing mask
         closing_mask -= comp_mask;
       }
@@ -2375,9 +2376,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void RegionTreeForest::convert_views_into_context(
                                         const RegionRequirement &req,
+                                        SingleTask *context,
                                         VersionInfo &version_info,
                                         InstanceView *src_view,
                                         InstanceView *dst_view,
+                                        Event ready_event,
                                         const std::vector<ColorPoint> &path)
     //--------------------------------------------------------------------------
     {
@@ -2407,43 +2410,25 @@ namespace Legion {
         src_view = src_view->get_instance_subview(path[i]);
         dst_view = dst_view->get_instance_subview(path[i]);
       }
-      // This will look weird, but we actually pretent that the parent
-      // context is actually a copy and not a task. This is necessary 
-      // so that we can be precise about event preconditions on different
-      // fields which is necessary to avoid deadlock. It is also safe
-      // because coherence no longer matters since we know we virtually
-      // mapped this region requirement.
 #ifdef DEBUG_HIGH_LEVEL
       assert(!IS_REDUCE(req)); // no virtual mapped reductions
 #endif
-      LegionMap<Event,FieldMask>::aligned preconditions;
-      src_view->find_copy_preconditions(0/*redop*/, !IS_WRITE(req),
-                                        user_mask, version_info, preconditions);
-      // We've got the preconditions so sort them into field sets
-      LegionList<EventSet>::aligned precondition_sets;
-      RegionTreeNode::compute_event_sets(user_mask, preconditions, 
-                                         precondition_sets);
-      // Add the different precondition sets to the destination view
       RegionUsage usage(req);
+      // Add the different precondition sets to the destination view
       // Privileges should always be exclusive here
       usage.prop = EXCLUSIVE;
-      for (LegionList<EventSet>::aligned::iterator pit = 
-            precondition_sets.begin(); pit != precondition_sets.end(); pit++)
+      // Add the user to the source view and then record the resulting
+      // event as a the intial user for the destination view
+      Event init_event = src_view->add_user(usage, ready_event, user_mask,
+                                            context, version_info);
+      if (init_event.exists())
       {
-        EventSet &pre_set = *pit;
-        // Skip any fields with no preconditions
-        if (pre_set.preconditions.empty())
-          continue;
-        Event precondition = 
-          Runtime::merge_events<false>(pre_set.preconditions);
-        if (precondition.exists())
-          dst_view->add_initial_user(precondition, usage, pre_set.set_mask);
+        dst_view->add_initial_user(init_event, usage, user_mask);
+#ifdef LEGION_SPY
+        // We need to correlate the causality here for Legion Spy
+        LegionSpy::log_event_dependence(init_event, ready_event); 
+#endif
       }
-      // Note that you can't add the outgoing condition yet because the 
-      // some of the parent context's views may have been captured in 
-      // composite instances for the virtual mapping meaning that children
-      // might end up catching dependences on them incorrectly if we 
-      // try to add the user early.
     }
 
     //--------------------------------------------------------------------------
@@ -12101,11 +12086,11 @@ namespace Legion {
                         const LegionMap<ColorPoint,FieldMask>::aligned &targets,
                                       const std::set<ColorPoint> &next_children,
                                       const FieldMask &closing_mask,
-                                      VersionInfo &version_info, bool across)
+                              VersionInfo &version_info, SingleTask *target_ctx)
     //--------------------------------------------------------------------------
     {
       PhysicalState *state = get_physical_state(ctx_id, version_info);
-      CompositeCloser closer(ctx_id, version_info, across);
+      CompositeCloser closer(ctx_id, version_info, target_ctx);
       // Make the root node before traversing
       CompositeNode *root = closer.get_composite_node(this, true/*root*/);
       // Keep track of which fields are complete
@@ -12229,7 +12214,6 @@ namespace Legion {
         if (!it->second)
           to_delete.push_back(it->first);
       }
-      // Now see if we have any fields which we captured all fields
       if (local_complete && !!all_children &&
           (state->children.open_children.size() == get_num_children()))
         complete_mask |= all_children;
@@ -14701,7 +14685,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     CompositeView* RegionNode::map_virtual_region(ContextID ctx_id,
                                                  const FieldMask &virtual_mask,
-                                                 VersionInfo &version_info)
+                                                 VersionInfo &version_info,
+                                                 SingleTask *target_ctx)
     //--------------------------------------------------------------------------
     {
       PhysicalState *state = get_physical_state(ctx_id, version_info);
@@ -14720,9 +14705,8 @@ namespace Legion {
           targets[it->first] = FieldMask();
         }
       }
-      return create_composite_instance(ctx_id, targets, 
-                                       next, virtual_mask, version_info,
-                                       true/*across contexts*/);
+      return create_composite_instance(ctx_id, targets, next, virtual_mask, 
+                                       version_info, target_ctx);
     }
 
     //--------------------------------------------------------------------------
@@ -15147,6 +15131,14 @@ namespace Legion {
       PhysicalState *state = get_physical_state(ctx, version_info);
       filter_valid_views(state, detach_view);
       return Event::NO_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
+    InstanceView* RegionNode::find_context_view(PhysicalManager *manager,
+                                                SingleTask *context)
+    //--------------------------------------------------------------------------
+    {
+      return convert_reference_region(manager, context);
     }
 
     //--------------------------------------------------------------------------
@@ -16330,6 +16322,14 @@ namespace Legion {
       {
         context->runtime->send_logical_partition_destruction(handle, target);
       }
+    }
+
+    //--------------------------------------------------------------------------
+    InstanceView* PartitionNode::find_context_view(PhysicalManager *manager,
+                                                   SingleTask *context)
+    //--------------------------------------------------------------------------
+    {
+      return convert_reference_partition(manager, context);
     }
 
     //--------------------------------------------------------------------------

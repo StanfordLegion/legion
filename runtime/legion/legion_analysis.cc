@@ -3277,15 +3277,16 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    CompositeCloser::CompositeCloser(ContextID c, VersionInfo &info,bool across)
-      : ctx(c), version_info(info), across_contexts(across)
+    CompositeCloser::CompositeCloser(ContextID c, 
+                                     VersionInfo &info, SingleTask *target)
+      : ctx(c), version_info(info), target_ctx(target)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     CompositeCloser::CompositeCloser(const CompositeCloser &rhs)
-      : ctx(0), version_info(rhs.version_info), across_contexts(false)
+      : ctx(0), version_info(rhs.version_info), target_ctx(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -3348,7 +3349,7 @@ namespace Legion {
       CompositeView *composite_view = legion_new<CompositeView>(node->context, 
                                    did, node->context->runtime->address_space,
                                    node, node->context->runtime->address_space, 
-                                   root, composite_info, across_contexts);
+                                   root, composite_info);
       // Now update the state of the node
       // Note that if we are permitted to leave the subregions
       // open then we don't make the view dirty
@@ -3367,8 +3368,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Do the capture and then update capture mask
-      target->capture_physical_state(*this, state, close_mask, 
-                                      dirty_mask, reduc_mask);
+      target->capture_physical_state(*this, state,
+                                     close_mask, dirty_mask, reduc_mask);
       // Record that we've captured the fields for this node
       // Important that we only do this after the capture
       update_capture_mask(node, close_mask);

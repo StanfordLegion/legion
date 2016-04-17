@@ -3052,16 +3052,21 @@ namespace Legion {
           // If we have a compsite reference, we need to map it
           // as a virtual region
           if (src_composite >= 0)
+          {
             runtime->forest->map_virtual_region(src_contexts[idx],
                                                 src_requirements[idx],
                                                 src_targets[src_composite],
                                                 src_versions[idx],
+                                                parent_ctx,
                                                 false/*needs fields*/
 #ifdef DEBUG_HIGH_LEVEL
                                                 , idx, get_logging_name()
                                                 , unique_op_id
 #endif
                                                 );
+            // No need to do the registration here
+            continue;
+          }
           // Now do the registration
           set_mapping_state(idx, true/*src*/);
           runtime->forest->physical_register_only(src_contexts[idx],
@@ -5280,8 +5285,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       initialize_close(ctx, index, true/*track*/);
-      // If it was write-discard from the task's perspective, make it
-      // read-write within the task's context
+      // Make this read-write to pick up the earlier changes
       if (requirement.privilege == WRITE_DISCARD)
         requirement.privilege = READ_WRITE;
       parent_idx = index;
@@ -5354,8 +5358,11 @@ namespace Legion {
 #endif
       InstanceSet composite_refs(1);
       composite_refs[0] = InstanceRef(true/*composite*/);
+      // Always eagerly translate composite instances back out into
+      // the parent context
       runtime->forest->map_virtual_region(physical_ctx, requirement,
                                           composite_refs[0], version_info,
+                                          parent_ctx->get_parent(),
                                           true/*needs fields*/
 #ifdef DEBUG_HIGH_LEVEL
                                           , 0/*idx*/, get_logging_name()

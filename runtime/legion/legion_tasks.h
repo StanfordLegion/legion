@@ -602,8 +602,6 @@ namespace Legion {
     protected: // Instance top view data structures
       std::map<PhysicalManager*,InstanceView*>  instance_top_views;
       std::map<PhysicalManager*,UserEvent>      pending_top_views;
-      std::map<PhysicalManager*,
-               std::vector<unsigned> >          virtual_top_views;
     protected: // Mapper choices 
       Mapper::ContextConfigOutput           context_configuration;
       VariantID                             selected_variant;

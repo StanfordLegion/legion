@@ -2626,10 +2626,10 @@ namespace Legion {
     CompositeView::CompositeView(RegionTreeForest *ctx, DistributedID did,
                               AddressSpaceID owner_proc, RegionTreeNode *node,
                               AddressSpaceID local_proc, CompositeNode *r,
-                              CompositeVersionInfo *info, bool across)
+                              CompositeVersionInfo *info)
       : DeferredView(ctx, encode_composite_did(did), 
                      owner_proc, local_proc, node),
-        root(r), version_info(info) , across_contexts(across)
+        root(r), version_info(info)
     {
       version_info->add_reference();
       root->set_owner_did(did);
@@ -2647,8 +2647,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     CompositeView::CompositeView(const CompositeView &rhs)
-      : DeferredView(NULL, 0, 0, 0, NULL), root(NULL), 
-        version_info(NULL), across_contexts(false)
+      : DeferredView(NULL, 0, 0, 0, NULL), root(NULL), version_info(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -2741,7 +2740,6 @@ namespace Legion {
           rez.serialize(logical_node->as_region_node()->handle);
         else
           rez.serialize(logical_node->as_partition_node()->handle);
-        rez.serialize(across_contexts);
         VersionInfo &info = version_info->get_version_info();
         info.pack_version_info(rez, 0, 0);
         root->pack_composite_tree(rez, target);
@@ -2793,8 +2791,7 @@ namespace Legion {
         // Make a new composite view
         return legion_new<CompositeView>(context, new_did, 
             context->runtime->address_space, logical_node, 
-            context->runtime->address_space, new_root, 
-            version_info, closer.across_contexts || this->across_contexts);
+            context->runtime->address_space, new_root, version_info);
       }
       else // didn't change so we can delete the new root and return ourself
       {
@@ -2814,7 +2811,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       LegionMap<Event,FieldMask>::aligned postreductions;
-      root->issue_deferred_copies(info, dst, across_contexts, copy_mask, 
+      root->issue_deferred_copies(info, dst, copy_mask, 
                                   version_info->get_version_info(), 
                                   preconditions, postconditions, 
                                   postreductions, tracker, across_helper);
@@ -2874,8 +2871,6 @@ namespace Legion {
         derez.deserialize(handle);
         target_node = runtime->forest->get_node(handle);
       }
-      bool across;
-      derez.deserialize(across);
       CompositeVersionInfo *version_info = new CompositeVersionInfo();
       VersionInfo &info = version_info->get_version_info();
       info.unpack_version_info(derez);
@@ -2905,11 +2900,10 @@ namespace Legion {
         legion_new_in_place<CompositeView>(location, runtime->forest, did,
                                            owner, target_node, 
                                            runtime->address_space,
-                                           root, version_info, across);
+                                           root, version_info);
       else
         legion_new<CompositeView>(runtime->forest, did, owner, target_node, 
-                                  runtime->address_space, root, 
-                                  version_info, across);
+                                  runtime->address_space, root, version_info);
     }
 
     /////////////////////////////////////////////////////////////
@@ -3106,15 +3100,38 @@ namespace Legion {
         }
         else
         { 
-          LegionMap<LogicalView*,FieldMask>::aligned::iterator finder = 
-            valid_views.find(it->first);
-          if (finder == valid_views.end())
+          InstanceView *inst_view = it->first->as_instance_view();
+          // Check to see if it is the same context as our target context
+          if (inst_view->owner_context == closer.target_ctx)
           {
-            it->first->add_base_resource_ref(COMPOSITE_NODE_REF);
-            valid_views[it->first] = overlap;
+            // Same context so we can use the same view
+            LegionMap<LogicalView*,FieldMask>::aligned::iterator finder = 
+              valid_views.find(it->first);
+            if (finder == valid_views.end())
+            {
+              it->first->add_base_resource_ref(COMPOSITE_NODE_REF);
+              valid_views[it->first] = overlap;
+            }
+            else
+              finder->second |= overlap;
           }
           else
-            finder->second |= overlap;
+          {
+            // Different context, so we need the translated view
+            InstanceView *alt_view = logical_node->find_context_view(
+                inst_view->get_manager(), closer.target_ctx);
+            LegionMap<LogicalView*,FieldMask>::aligned::iterator finder = 
+              valid_views.find(alt_view);
+            if (finder == valid_views.end())
+            {
+              alt_view->add_base_resource_ref(COMPOSITE_NODE_REF);
+              valid_views[alt_view] = overlap;
+            }
+            else
+              finder->second |= overlap;
+            // This definitely changed
+            changed = true;
+          }
         }
       }
       if (!deferred_views.empty())
@@ -3162,6 +3179,8 @@ namespace Legion {
                       const LegionMap<ReductionView*,FieldMask>::aligned *views)
     //--------------------------------------------------------------------------
     {
+      // Don't need to translate reductions, 
+      // they are used once and not re-used
       for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it = 
             views->begin(); it != views->end(); it++)
       {
@@ -3220,7 +3239,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void CompositeNode::issue_deferred_copies(const TraversalInfo &info,
                                               MaterializedView *dst,
-                                              bool across_contexts,
                                               const FieldMask &copy_mask,
                                             const VersionInfo &src_version_info,
                       const LegionMap<Event,FieldMask>::aligned &preconditions,
@@ -3248,8 +3266,7 @@ namespace Legion {
           {
             // Have this path fall through to catch the reductions   
             // but don't traverse the children since we're already doing it
-            child->issue_deferred_copies(info, dst, across_contexts,
-                                  copy_mask, src_version_info,
+            child->issue_deferred_copies(info, dst, copy_mask, src_version_info,
                                   preconditions, local_postconditions, 
                                   postreductions, tracker, across_helper,
                                   true/*check root*/);
@@ -3257,8 +3274,7 @@ namespace Legion {
           }
           else // This is the common case
           {
-            child->issue_deferred_copies(info, dst, across_contexts,
-                                  copy_mask, src_version_info,
+            child->issue_deferred_copies(info, dst, copy_mask, src_version_info,
                                   preconditions, postconditions, postreductions,
                                   tracker, across_helper, true/*check root*/);
             return;
@@ -3280,13 +3296,13 @@ namespace Legion {
             {
               issue_update_copies(info, dst, copy_mask, src_version_info,
                           preconditions, postconditions, all_valid_views, 
-                          tracker, across_helper, across_contexts);
+                          tracker, across_helper);
               return;
             }
             else
               issue_update_copies(info, dst, copy_mask, src_version_info,
                     preconditions, local_postconditions, all_valid_views, 
-                    tracker, across_helper, across_contexts);
+                    tracker, across_helper);
           }
         }
       }
@@ -3305,13 +3321,13 @@ namespace Legion {
             {
               issue_update_copies(info, dst, update_mask, src_version_info,
                                 preconditions, postconditions, valid_views, 
-                                tracker, across_helper, across_contexts);
+                                tracker, across_helper);
               return;
             }
             else
               issue_update_copies(info, dst, update_mask, src_version_info,
                           preconditions, local_postconditions, valid_views, 
-                          tracker, across_helper, across_contexts);
+                          tracker, across_helper);
           }
         }
       }
@@ -3335,17 +3351,43 @@ namespace Legion {
             // as well as anything that we generated
             if (!local_postconditions.empty())
             {
+              // Move over the local postconditions and keep track of
+              // which fields we wrote to, then move over any preconditions
+              // for fields that we didn't write to
+              FieldMask written = copy_mask;
               temp_preconditions = local_postconditions;
-              temp_preconditions.insert(preconditions.begin(),
-                                        preconditions.end());
+              for (LegionMap<Event,FieldMask>::aligned::const_iterator it = 
+                    local_postconditions.begin(); it != 
+                    local_postconditions.end(); it++)
+              {
+                written -= it->second;
+                if (!written)
+                  break;
+              }
+              // If we had fields we didn't write to, then move over
+              // the necessary preconditions for those fields
+              if (!!written)
+              {
+                for (LegionMap<Event,FieldMask>::aligned::const_iterator it = 
+                      preconditions.begin(); it != preconditions.end(); it++)
+                {
+                  FieldMask overlap = written & it->second;
+                  if (!overlap)
+                    continue;
+#ifdef DEBUG_HIGH_LEVEL
+                  assert(temp_preconditions.find(it->first) == 
+                         temp_preconditions.end());
+#endif
+                  temp_preconditions[it->first] = overlap;
+                }
+              }
               local_preconditions = &temp_preconditions; 
             }
             else
               local_preconditions = &preconditions;
           }
           // Now traverse the child
-          it->first->issue_deferred_copies(info, dst, across_contexts,
-                            overlap, src_version_info,
+          it->first->issue_deferred_copies(info, dst, overlap, src_version_info,
                             *local_preconditions, local_postconditions, 
                             postreductions, tracker, across_helper, 
                             false/*check root*/);
@@ -3512,31 +3554,15 @@ namespace Legion {
                   const LegionMap<Event,FieldMask>::aligned &preconditions,
                         LegionMap<Event,FieldMask>::aligned &postconditions,
                   const LegionMap<LogicalView*,FieldMask>::aligned &views,
-                    CopyTracker *tracker, CopyAcrossHelper *across_helper,
-                    bool across_contexts) const
+                    CopyTracker *tracker, CopyAcrossHelper *across_helper) const
     //--------------------------------------------------------------------------
     {
       // This is similar to the version of this call in RegionTreeNode
       // but different in that it knows how to deal with intersections
-      // Do a quick check to see if we are done early
-      if (!across_contexts)
+      // See if the target manager is already valid at this level for any fields
       {
-        // If this composite view hasn't crossed a context boundary
-        // then we can look for the view directly
-        LegionMap<LogicalView*,FieldMask>::aligned::const_iterator finder = 
-          views.find(dst);
-        if (finder != views.end())
-        {
-          copy_mask -= finder->second;
-          if (!copy_mask)
-            return;
-        }
-      }
-      else
-      {
-        // Otherwise we need to iterate the views to see if they have
-        // the same manager because the views may be from different contexts
-        for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it =
+        PhysicalManager *dst_manager = dst->get_manager();
+        for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
               views.begin(); it != views.end(); it++)
         {
           if (it->first->is_deferred_view())
@@ -3544,14 +3570,11 @@ namespace Legion {
 #ifdef DEBUG_HIGH_LEVEL
           assert(it->first->is_materialized_view());
 #endif
-          MaterializedView *mat_view = it->first->as_materialized_view();
-          if (dst->manager == mat_view->manager)
+          if (it->first->as_materialized_view()->manager == dst_manager)
           {
             copy_mask -= it->second;
             if (!copy_mask)
               return;
-            // Once we've found the equivalent view then we are done
-            break;
           }
         }
       }
@@ -3582,12 +3605,12 @@ namespace Legion {
           FieldMask overlap = it->second & actual_copy_mask;
           if (!overlap)
             continue;
-          // If we ever hit this assertion we need to merge
-#ifdef DEBUG_HIGH_LEVEL
-          assert(src_preconditions.find(it->first) ==
-                 src_preconditions.end());
-#endif
-          src_preconditions[it->first] = overlap;
+          LegionMap<Event,FieldMask>::aligned::iterator finder = 
+            src_preconditions.find(it->first);
+          if (finder == src_preconditions.end())
+            src_preconditions[it->first] = overlap;
+          else
+            finder->second |= overlap;
         }
         // issue the grouped copies and put the result in the postconditions
         // We are the intersect

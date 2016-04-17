@@ -1272,7 +1272,8 @@ namespace Legion {
      */
     class CompositeCloser {
     public:
-      CompositeCloser(ContextID ctx, VersionInfo &version_info, bool across);
+      CompositeCloser(ContextID ctx, 
+                      VersionInfo &version_info, SingleTask *target_ctx);
       CompositeCloser(const CompositeCloser &rhs);
       ~CompositeCloser(void);
     public:
@@ -1297,7 +1298,7 @@ namespace Legion {
     public:
       const ContextID ctx;
       VersionInfo &version_info;
-      const bool across_contexts;
+      SingleTask *const target_ctx;
     public:
       std::map<RegionTreeNode*,CompositeNode*> constructed_nodes;
       LegionMap<RegionTreeNode*,FieldMask>::aligned capture_fields;

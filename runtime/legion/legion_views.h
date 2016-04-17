@@ -624,7 +624,7 @@ namespace Legion {
       CompositeView(RegionTreeForest *ctx, DistributedID did,
                     AddressSpaceID owner_proc, RegionTreeNode *node, 
                     AddressSpaceID local_proc, CompositeNode *root,
-                    CompositeVersionInfo *version_info, bool across);
+                    CompositeVersionInfo *version_info);
       CompositeView(const CompositeView &rhs);
       virtual ~CompositeView(void);
     public:
@@ -664,7 +664,6 @@ namespace Legion {
       // The root node for this composite view
       CompositeNode *const root;
       CompositeVersionInfo *const version_info;
-      const bool across_contexts;
     };
 
     /**
@@ -703,7 +702,7 @@ namespace Legion {
                     CompositeNode *new_parent);
     public:
       void issue_deferred_copies(const TraversalInfo &info, 
-                                 MaterializedView *dst, bool across_contexts,
+                                 MaterializedView *dst,
                                  const FieldMask &copy_mask,
                                  const VersionInfo &src_version_info,
               const LegionMap<Event,FieldMask>::aligned &preconditions,
@@ -719,8 +718,7 @@ namespace Legion {
                       const LegionMap<Event,FieldMask>::aligned &preconditions,
                             LegionMap<Event,FieldMask>::aligned &postconditions,
                       const LegionMap<LogicalView*,FieldMask>::aligned &views,
-                         CopyTracker *tracker, CopyAcrossHelper *helper,
-                         bool across_contexts) const; 
+                         CopyTracker *tracker, CopyAcrossHelper *helper) const;
       void issue_update_reductions(const TraversalInfo &info, 
                                    MaterializedView *dst, 
                                    const FieldMask &copy_mask,
