@@ -3,8 +3,8 @@
 
 #include "legion.h"
 #include "legion_mapping.h"
-#include "mapping_utilities.h"
-#include "runtime.h"
+
+
 
 #include <cstdlib>
 #include <cassert>
@@ -29,6 +29,9 @@ namespace Legion {
 			static std::map<Memory, int> mems_map;
 			static std::map<int, std::string> task_names_map;
 			static bool inputtaken;
+			static Processor ownerprocessor;
+			static int messagecount;
+			static MapperEvent mapevent;
 			WrapperMapper(Mapper* dmapper, Machine machine, Processor local);
 			~WrapperMapper(void);
 			void get_input();
@@ -170,6 +173,7 @@ public:
                                   const MapperMessage&          message);
        void handle_task_result(const MapperContext           ctx,
                                       const MapperTaskResult&       result);
+
     protected:
       const Processor       local_proc;
       const Processor::Kind local_kind;
@@ -192,6 +196,7 @@ public:
       // The maximum number of tasks scheduled per step
       unsigned max_schedule_count;
     };
+
 
   }; // namespace Mapping
 }; // namespace Legion

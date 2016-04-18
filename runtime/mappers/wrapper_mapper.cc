@@ -3,10 +3,7 @@
 #include <limits.h>
 #include <algorithm>
 
-#include "legion.h"
-#include "runtime.h"
 #include "wrapper_mapper.h"
-#include "legion_utilities.h"
 
 
 #define STATIC_MAX_PERMITTED_STEALS   4
@@ -31,7 +28,10 @@ namespace Legion {
 		std::map<Memory, int> WrapperMapper::mems_map;
 		std::map<int, std::string> WrapperMapper::task_names_map;
 		bool WrapperMapper::inputtaken=0;
-
+		Processor WrapperMapper::ownerprocessor;
+		int WrapperMapper::messagecount = 0;
+		MapperEvent WrapperMapper::mapevent;			
+		
 		WrapperMapper::WrapperMapper(Mapper* dmapper, Machine machine, Processor local):Mapper(), dmapper(dmapper), local_proc(local), local_kind(local.kind()), 
         node_id(local.address_space()), machine(machine),
         max_steals_per_theft(STATIC_MAX_PERMITTED_STEALS),
@@ -39,12 +39,12 @@ namespace Legion {
         breadth_first_traversal(STATIC_BREADTH_FIRST),
         stealing_enabled(STATIC_STEALING_ENABLED),
         max_schedule_count(STATIC_MAX_SCHEDULE_COUNT){
-			//mapper_name = dmapper->get_mapper_name();
 			machine.get_all_processors(WrapperMapper::all_procs);
 			machine.get_all_memories(WrapperMapper::all_mems);
 			if (!WrapperMapper::inputtaken){
 				WrapperMapper::get_input();
 				WrapperMapper::inputtaken=1;
+				WrapperMapper::ownerprocessor = local;
 			}
 
 //for(std::map<int, std::string>::const_iterator it = task_names_map.begin();
@@ -569,14 +569,32 @@ const char* WrapperMapper::get_mapper_name(void) const
       return SERIALIZED_REENTRANT_MAPPER_MODEL;
     }
 
+	struct select_task_options_message{
+	const Task& task;
+	Mapper::TaskOptions& output;
+	};
 void WrapperMapper::select_task_options(const MapperContext    ctx,
                                        const Task&            task,
                                              TaskOptions&     output){
+
+
+//if(WrapperMapper::ownerprocessor!=local_proc){
+//int message = ++WrapperMapper::messagecount;
+//void *mess_point;
+//mess_point=&message;
+//std::cout<<"Message sent \n";
+//WrapperMapper::mapevent = mapper_rt_create_mapper_event(ctx);
+//std::cout<<"Rajshah1"<<mapper_rt_has_mapper_event_triggered(ctx, WrapperMapper::mapevent)<<"\n";
+//WrapperMapper::mapper_rt_send_message(ctx,WrapperMapper::ownerprocessor, mess_point, sizeof(int));
+//std::cout<<"Rajshah2"<<mapper_rt_has_mapper_event_triggered(ctx, WrapperMapper::mapevent)<<"\n";
+//mapper_rt_wait_on_mapper_event(ctx, WrapperMapper::mapevent);
+//}
 			dmapper->select_task_options(ctx, task, output);
 std::map<std::string, int>::iterator itt = WrapperMapper::tasks_map.find(task.get_task_name());
 			std::map<int, int>::iterator itm = WrapperMapper::methods_map.find(1);
 			std::map<Processor, int>::iterator itp = WrapperMapper::procs_map.find(output.initial_proc);
 			if (((itt!=WrapperMapper::tasks_map.end()) && (itm!=WrapperMapper::methods_map.end())) || (itp!=WrapperMapper::procs_map.end())) {
+		if(WrapperMapper::ownerprocessor==local_proc){
 				std::cout<<"\n--------------TASK: "<<task.get_task_name()<<" FUNCTION: select_task_options--------------\n";
 				std::cout<<"\nThe selected task options for task "<<task.get_task_name()<<" are as follows:\n";
 				std::cout<<"initial processor="<<output.initial_proc.id<<"\ninline task="<<output.inline_task;
@@ -584,6 +602,16 @@ std::map<std::string, int>::iterator itt = WrapperMapper::tasks_map.find(task.ge
 				if (((itt!=tasks_map.end() && itt->second==0) && (itm!=methods_map.end() && itm->second==0))||(itp!=procs_map.end() && itp->second==0)) {
 					std::cout<<"To change the task options, type 'change' and to exit, type 'exit'\n";
 					WrapperMapper::get_select_task_options_input(task, output);
+				}
+				}
+			else{
+
+				select_task_options_message message ={task,output};
+				void *message_point = &message;
+				std::cout<<"Message sent \n";
+				WrapperMapper::mapevent = mapper_rt_create_mapper_event(ctx);
+				WrapperMapper::mapper_rt_send_message(ctx,WrapperMapper::ownerprocessor, message_point, sizeof(select_task_options_message));
+mapper_rt_wait_on_mapper_event(ctx, WrapperMapper::mapevent);
 				}
 			}
 }
@@ -798,7 +826,39 @@ void WrapperMapper::permit_steal_request(const MapperContext         ctx,
 
 void WrapperMapper::handle_message(const MapperContext           ctx,
                                   const MapperMessage&          message){
-			dmapper->handle_message(ctx, message);
+			if (local_proc==WrapperMapper::ownerprocessor){
+//std::cout<<"Owner mapper recieved a message"<<*(int*)message.message<<"\n";
+select_task_options_message *rec_message = (select_task_options_message*)message.message;
+std::cout<<"Owner mapper recieved a message"<<rec_message->task.get_task_name();
+int message1 = ++WrapperMapper::messagecount;
+void *mess_point;
+mess_point=&message1;
+std::string input;
+while(1){
+			getline(std::cin, input);
+			if (input.compare("go")==0) break;
+}
+std::cout<<"Message sent by owner\n";
+WrapperMapper::mapper_rt_send_message(ctx,message.sender, mess_point, sizeof(int));
+}
+else{
+std::cout<<"Rajshah3"<<mapper_rt_has_mapper_event_triggered(ctx, WrapperMapper::mapevent)<<"\n";
+mapper_rt_trigger_mapper_event(ctx, WrapperMapper::mapevent);
+std::cout<<"Rajshah4"<<mapper_rt_has_mapper_event_triggered(ctx, WrapperMapper::mapevent)<<"\n";
+std::cout<<"Message recieved by owner \n";}
+//std::string input;
+//std::cout<<"Rajshah3"<<mapper_rt_has_mapper_event_triggered(ctx, WrapperMapper::mapevent)<<"\n";
+//mapper_rt_trigger_mapper_event(ctx, WrapperMapper::mapevent);
+//std::cout<<"Rajshah4"<<mapper_rt_has_mapper_event_triggered(ctx, WrapperMapper::mapevent)<<"\n";
+//			while(1){
+//			getline(std::cin, input);
+//			if (input.compare("go")==0){
+//			mapper_rt_trigger_mapper_event(ctx, WrapperMapper::mapevent);
+//			break;
+//}
+//else std::cout<<"INvalid input\n";
+//}
+//			dmapper->handle_message(ctx, message);
 }
 void WrapperMapper::handle_task_result(const MapperContext           ctx,
                                       const MapperTaskResult&       result){

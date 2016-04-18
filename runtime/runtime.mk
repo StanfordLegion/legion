@@ -351,8 +351,9 @@ MAPPER_SRC	+= $(LG_RT_DIR)/mappers/default_mapper.cc \
 		   $(LG_RT_DIR)/mappers/shim_mapper.cc \
 		   $(LG_RT_DIR)/mappers/test_mapper.cc \
 		   $(LG_RT_DIR)/mappers/replay_mapper.cc \
-		   $(LG_RT_DIR)/mappers/debug_mapper.cc
-
+		   $(LG_RT_DIR)/mappers/debug_mapper.cc \
+		   $(LG_RT_DIR)/mappers/wrapper_mapper.cc
+		
 ifeq ($(strip $(ALT_MAPPERS)),1)
 MAPPER_SRC	+= $(LG_RT_DIR)/mappers/alt_mappers.cc
 endif
