@@ -177,6 +177,65 @@ namespace Legion {
     void TaskOp::pack_base_task(Serializer &rez, AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
+      // pack all the user facing data first
+      pack_base_external_task(rez, target); 
+      RezCheck z(rez);
+      rez.serialize(map_locally);
+      if (map_locally)
+      {
+        rez.serialize<size_t>(atomic_locks.size());
+        for (std::map<Reservation,bool>::const_iterator it = 
+              atomic_locks.begin(); it != atomic_locks.end(); it++)
+        {
+          rez.serialize(it->first);
+          rez.serialize(it->second);
+        }
+      }
+      rez.serialize(early_mapped_regions.size());
+      for (std::map<unsigned,InstanceSet>::iterator it = 
+            early_mapped_regions.begin(); it != 
+            early_mapped_regions.end(); it++)
+      {
+        rez.serialize(it->first);
+        it->second.pack_references(rez, target);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void TaskOp::unpack_base_task(Deserializer &derez,
+                                  std::set<Event> &ready_events)
+    //--------------------------------------------------------------------------
+    {
+      // unpack all the user facing data
+      unpack_base_external_task(derez, ready_events); 
+      DerezCheck z(derez);
+      derez.deserialize(map_locally);
+      if (map_locally)
+      {
+        size_t num_atomic;
+        derez.deserialize(num_atomic);
+        for (unsigned idx = 0; idx < num_atomic; idx++)
+        {
+          Reservation lock;
+          derez.deserialize(lock);
+          derez.deserialize(atomic_locks[lock]);
+        }
+      }
+      size_t num_early;
+      derez.deserialize(num_early);
+      for (unsigned idx = 0; idx < num_early; idx++)
+      {
+        unsigned index;
+        derez.deserialize(index);
+        early_mapped_regions[index].unpack_references(runtime, derez, 
+                                                      ready_events);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void TaskOp::pack_base_external_task(Serializer &rez, AddressSpaceID target)
+    //--------------------------------------------------------------------------
+    {
       RezCheck z(rez);
       rez.serialize(task_id);
       rez.serialize(indexes.size());
@@ -216,31 +275,11 @@ namespace Legion {
       rez.serialize(steal_count);
       // No need to pack remote, it will get set
       rez.serialize(speculated);
-      rez.serialize(map_locally);
-      if (map_locally)
-      {
-        rez.serialize<size_t>(atomic_locks.size());
-        for (std::map<Reservation,bool>::const_iterator it = 
-              atomic_locks.begin(); it != atomic_locks.end(); it++)
-        {
-          rez.serialize(it->first);
-          rez.serialize(it->second);
-        }
-      }
-      rez.serialize(early_mapped_regions.size());
-      for (std::map<unsigned,InstanceSet>::iterator it = 
-            early_mapped_regions.begin(); it != 
-            early_mapped_regions.end(); it++)
-      {
-        rez.serialize(it->first);
-        it->second.pack_references(rez, target);
-      }
-      rez.serialize<UniqueID>(parent_ctx->get_context_id()); 
     }
 
     //--------------------------------------------------------------------------
-    void TaskOp::unpack_base_task(Deserializer &derez,
-                                  std::set<Event> &ready_events)
+    void TaskOp::unpack_base_external_task(Deserializer &derez,
+                                           std::set<Event> &ready_events)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
@@ -312,37 +351,6 @@ namespace Legion {
       derez.deserialize(orig_proc);
       derez.deserialize(steal_count);
       derez.deserialize(speculated);
-      derez.deserialize(map_locally);
-      if (map_locally)
-      {
-        size_t num_atomic;
-        derez.deserialize(num_atomic);
-        for (unsigned idx = 0; idx < num_atomic; idx++)
-        {
-          Reservation lock;
-          derez.deserialize(lock);
-          derez.deserialize(atomic_locks[lock]);
-        }
-      }
-      size_t num_early;
-      derez.deserialize(num_early);
-      for (unsigned idx = 0; idx < num_early; idx++)
-      {
-        unsigned index;
-        derez.deserialize(index);
-        early_mapped_regions[index].unpack_references(runtime, derez, 
-                                                      ready_events);
-      }
-      // Parent requirement indexes don't mean anything remotely
-      parent_req_indexes.resize(regions.size(), 0);
-      // A little bit of magic here to see how far up the tree we will be
-      // able to go in the task tree for mappers. 
-      UniqueID parent_context_uid;
-      derez.deserialize(parent_context_uid);
-      // See if we have it, if not there is nothing we can do.
-      // DO NOT CHANGE THIS UNLESS YOU THINK REALLY HARD ABOUT VIRTUAL 
-      // CHANNELS AND HOW CONTEXT META-DATA IS MOVED!
-      parent_task = runtime->find_context(parent_context_uid, true);
     }
 
     //--------------------------------------------------------------------------
@@ -2736,7 +2744,7 @@ namespace Legion {
       int depth = get_depth();
       rez.serialize(depth);
       // See if we need to pack up base task information
-      pack_base_task(rez, target);
+      pack_base_external_task(rez, target);
 #ifdef DEBUG_HIGH_LEVEL
       assert(parent_req_indexes.size() == regions.size());
 #endif
@@ -2761,6 +2769,8 @@ namespace Legion {
       rez.serialize(num_local);
       for (unsigned idx = 0; idx < locals.size(); idx++)
         rez.serialize(locals[idx]);
+      rez.serialize(get_task_completion());
+      rez.serialize(parent_ctx->get_context_uid());
     }
 
     //--------------------------------------------------------------------------
@@ -4548,7 +4558,7 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    SingleTask* SingleTask::find_enclosing_context(void)
+    SingleTask* SingleTask::find_parent_context(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -5765,7 +5775,7 @@ namespace Legion {
           {
             // Note that this recursion ensures that we handle nested
             // virtual mappings correctly
-            SingleTask *parent_context = find_enclosing_context();
+            SingleTask *parent_context = find_parent_context();
             parent_context_view = 
               parent_context->create_instance_top_view(manager);
           }
@@ -5901,7 +5911,7 @@ namespace Legion {
               continue;
             if (parent_context_view == NULL)
             {
-              SingleTask *parent_context = find_enclosing_context();
+              SingleTask *parent_context = find_parent_context();
               parent_context_view = 
                 parent_context->create_instance_top_view(*it);
             }
@@ -8071,6 +8081,8 @@ namespace Legion {
       }
       // Figure out what our parent context is
       parent_ctx = runtime->find_context(remote_owner_uid);
+      // Set our parent task for the user
+      parent_task = parent_ctx;
       // Check to see if we had no virtual mappings and everything
       // was pre-mapped and we're remote then we can mark this
       // task as being mapped
@@ -8624,6 +8636,9 @@ namespace Legion {
       unpack_single_task(derez, ready_events);
       derez.deserialize(point_termination);
       current_proc = current;
+      // Get the context information from our slice owner
+      parent_ctx = slice_owner->get_parent();
+      parent_task = parent_ctx;
       // Check to see if we had no virtual mappings and everything
       // was pre-mapped and we're remote then we can mark this
       // task as being mapped
@@ -8895,7 +8910,6 @@ namespace Legion {
       : WrapperTask(rt)
     //--------------------------------------------------------------------------
     {
-      parent_task = NULL;
     }
 
     //--------------------------------------------------------------------------
@@ -8934,11 +8948,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       activate_wrapper();
+      parent_ctx = NULL;
+      parent_task = NULL;
       context = RegionTreeContext();
       remote_owner_uid = 0;
-      parent_task = NULL;
+      parent_context_uid = 0;
       depth = -1;
       is_top_level_context = false;
+      remote_completion_event = Event::NO_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -9053,16 +9070,27 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    SingleTask* RemoteTask::find_parent_context(void)
+    //--------------------------------------------------------------------------
+    {
+      // See if we already have it
+      if (parent_ctx != NULL)
+        return parent_ctx;
+#ifdef DEBUG_HIGH_LEVEL
+      assert(parent_context_uid != 0);
+#endif
+      // THIS IS ONLY SAFE BECAUSE THIS FUNCTION IS NEVER CALLED BY
+      // A MESSAGE IN THE CONTEXT_VIRTUAL_CHANNEL
+      parent_ctx = runtime->find_context(parent_context_uid);
+      parent_task = parent_ctx;
+      return parent_ctx;
+    }
+
+    //--------------------------------------------------------------------------
     Event RemoteTask::get_task_completion(void) const
     //--------------------------------------------------------------------------
     {
-#ifndef LEGION_SPY
-      // should never be called
-      assert(false);
-      return Event::NO_EVENT;
-#else
-      return remote_legion_spy_completion;
-#endif
+      return remote_completion_event;
     }
 
     //--------------------------------------------------------------------------
@@ -9089,7 +9117,7 @@ namespace Legion {
     {
       std::set<Event> ready_events;
       derez.deserialize(depth);
-      unpack_base_task(derez, ready_events);
+      unpack_base_external_task(derez, ready_events);
       parent_req_indexes.resize(regions.size());
       for (unsigned idx = 0; idx < parent_req_indexes.size(); idx++)
         derez.deserialize(parent_req_indexes[idx]);
@@ -9110,13 +9138,20 @@ namespace Legion {
         derez.deserialize(local_fields[idx]);
         allocate_local_field(local_fields[idx]);
       }
+      derez.deserialize(remote_completion_event);
+      derez.deserialize(parent_context_uid);
+      // See if we can find our parent task, if not don't worry about it
+      // DO NOT CHANGE THIS UNLESS YOU THINK REALLY HARD ABOUT VIRTUAL 
+      // CHANNELS AND HOW CONTEXT META-DATA IS MOVED!
+      parent_ctx = runtime->find_context(parent_context_uid, true/*can fail*/);
+      parent_task = parent_ctx;
       // Add our regions to the set of top-level regions
       for (unsigned idx = 0; idx < regions.size(); idx++)
         top_level_regions.insert(regions[idx].region);
       if (!ready_events.empty())
       {
-        Event wait_on = Runtime::merge_events<true>(ready_events);
-        wait_on.wait();
+        Event done = Runtime::merge_events<true/*meta*/>(ready_events);
+        done.wait();
       }
     }
 
@@ -11298,6 +11333,12 @@ namespace Legion {
       num_unmapped_points = num_points;
       num_uncomplete_points = num_points;
       num_uncommitted_points = num_points;
+      // Check to see if we ended up back on the original node
+      // We have to do this before unpacking the points
+      if (is_remote())
+        parent_ctx = runtime->find_context(remote_owner_uid);
+      else
+        parent_ctx = index_owner->parent_ctx;
       for (unsigned idx = 0; idx < num_points; idx++)
       {
         PointTask *point = runtime->get_available_point_task(false); 
@@ -11309,19 +11350,6 @@ namespace Legion {
           LegionSpy::log_slice_point(get_unique_id(), 
                                      point->get_unique_id(),
                                      point->index_point);
-      }
-      // Check to see if we ended up back on the original node
-      if (is_remote())
-      {
-        parent_ctx = runtime->find_context(remote_owner_uid);
-      }
-      else
-      {
-#ifdef DEBUG_HIGH_LEVEL
-        // Make the deserializer happy
-        derez.advance_pointer(derez.get_remaining_bytes());
-#endif
-        parent_ctx = index_owner->parent_ctx;
       }
       // Return true to add this to the ready queue
       return true;

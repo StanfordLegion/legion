@@ -64,8 +64,11 @@ namespace Legion {
       void set_must_epoch(MustEpochOp *epoch, unsigned index, 
                           bool do_registration);
     protected:
-      void pack_base_task(Serializer &derez, AddressSpaceID target);
+      void pack_base_task(Serializer &rez, AddressSpaceID target);
       void unpack_base_task(Deserializer &derez, std::set<Event> &ready_events);
+      void pack_base_external_task(Serializer &rez, AddressSpaceID target);
+      void unpack_base_external_task(Deserializer &derez, 
+                                     std::set<Event> &ready_events);
     public:
       void mark_stolen(void);
       void initialize_base_task(SingleTask *ctx, bool track, 
@@ -559,7 +562,8 @@ namespace Legion {
                                        RemoteTask *dst) = 0;
     public:
       RegionTreeContext find_enclosing_context(unsigned idx);
-      virtual SingleTask* find_enclosing_context(void);
+      // Override by RemoteTask
+      virtual SingleTask* find_parent_context(void);
     public:
       // Override these methods from operation class
       virtual bool trigger_execution(void); 
@@ -1041,6 +1045,7 @@ namespace Legion {
       virtual void record_remote_state(void);
       virtual void send_remote_context(AddressSpaceID target, 
                                        RemoteTask *dst);
+      virtual SingleTask* find_parent_context(void);
     public:
       virtual Event get_task_completion(void) const;
       virtual TaskKind get_task_kind(void) const;
@@ -1057,14 +1062,12 @@ namespace Legion {
       std::set<LogicalRegion> top_level_regions;
     protected:
       UniqueID remote_owner_uid;
+      UniqueID parent_context_uid;
     protected:
       int depth;
       bool is_top_level_context;
       std::map<AddressSpaceID,RemoteTask*> remote_instances;
-#ifdef LEGION_SPY
-    protected:
-      Event remote_legion_spy_completion;
-#endif
+      Event remote_completion_event;
     };
 
     /**
