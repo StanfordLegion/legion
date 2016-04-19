@@ -4898,6 +4898,7 @@ namespace LegionRuntime {
         execution_constraints.serialize(rez);
         layout_constraints.serialize(rez);
       }
+      runtime->send_variant_response(target, rez);
     }
 
     //--------------------------------------------------------------------------
