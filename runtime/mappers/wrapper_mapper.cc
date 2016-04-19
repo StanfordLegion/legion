@@ -577,18 +577,6 @@ void WrapperMapper::select_task_options(const MapperContext    ctx,
                                        const Task&            task,
                                              TaskOptions&     output){
 
-
-//if(WrapperMapper::ownerprocessor!=local_proc){
-//int message = ++WrapperMapper::messagecount;
-//void *mess_point;
-//mess_point=&message;
-//std::cout<<"Message sent \n";
-//WrapperMapper::mapevent = mapper_rt_create_mapper_event(ctx);
-//std::cout<<"Rajshah1"<<mapper_rt_has_mapper_event_triggered(ctx, WrapperMapper::mapevent)<<"\n";
-//WrapperMapper::mapper_rt_send_message(ctx,WrapperMapper::ownerprocessor, mess_point, sizeof(int));
-//std::cout<<"Rajshah2"<<mapper_rt_has_mapper_event_triggered(ctx, WrapperMapper::mapevent)<<"\n";
-//mapper_rt_wait_on_mapper_event(ctx, WrapperMapper::mapevent);
-//}
 			dmapper->select_task_options(ctx, task, output);
 std::map<std::string, int>::iterator itt = WrapperMapper::tasks_map.find(task.get_task_name());
 			std::map<int, int>::iterator itm = WrapperMapper::methods_map.find(1);
@@ -608,12 +596,10 @@ std::map<std::string, int>::iterator itt = WrapperMapper::tasks_map.find(task.ge
 
 				select_task_options_message message ={task,output};
 				void *message_point = &message;
-				//std::cout<<"Message sent \n";
 				WrapperMapper::mapevent = mapper_rt_create_mapper_event(ctx);
 				WrapperMapper::mapper_rt_send_message(ctx,WrapperMapper::ownerprocessor, message_point, sizeof(select_task_options_message));
 mapper_rt_wait_on_mapper_event(ctx, WrapperMapper::mapevent);
 				}
-			//std::cout<<"Test processor"<<output.initial_proc.id<<"\n";
 			}
 }
 
@@ -828,9 +814,7 @@ void WrapperMapper::permit_steal_request(const MapperContext         ctx,
 void WrapperMapper::handle_message(const MapperContext           ctx,
                                   const MapperMessage&          message){
 			if (local_proc==WrapperMapper::ownerprocessor){
-//std::cout<<"Owner mapper recieved a message"<<*(int*)message.message<<"\n";
 select_task_options_message *rec_message = (select_task_options_message*)message.message;
-//std::cout<<"Owner mapper recieved a message"<<rec_message->task.get_task_name();
 const Task& task = rec_message->task;
 TaskOptions& output = rec_message->output;
 
@@ -851,33 +835,10 @@ std::map<std::string, int>::iterator itt = WrapperMapper::tasks_map.find(task.ge
 int message1 = ++WrapperMapper::messagecount;
 void *mess_point;
 mess_point=&message1;
-//std::string input;
-//while(1){
-//			getline(std::cin, input);
-//			if (input.compare("go")==0) break;
-//}
-//std::cout<<"Message sent by owner\n";
 WrapperMapper::mapper_rt_send_message(ctx,message.sender, mess_point, sizeof(int));
 }
 else{
-//std::cout<<"Rajshah3"<<mapper_rt_has_mapper_event_triggered(ctx, WrapperMapper::mapevent)<<"\n";
-//std::cout<<"Message recieved by mapper \n";}
 mapper_rt_trigger_mapper_event(ctx, WrapperMapper::mapevent);
-//std::cout<<"Rajshah4"<<mapper_rt_has_mapper_event_triggered(ctx, WrapperMapper::mapevent)<<"\n";
-
-//std::string input;
-//std::cout<<"Rajshah3"<<mapper_rt_has_mapper_event_triggered(ctx, WrapperMapper::mapevent)<<"\n";
-//mapper_rt_trigger_mapper_event(ctx, WrapperMapper::mapevent);
-//std::cout<<"Rajshah4"<<mapper_rt_has_mapper_event_triggered(ctx, WrapperMapper::mapevent)<<"\n";
-//			while(1){
-//			getline(std::cin, input);
-//			if (input.compare("go")==0){
-//			mapper_rt_trigger_mapper_event(ctx, WrapperMapper::mapevent);
-//			break;
-//}
-//else std::cout<<"INvalid input\n";
-//}
-//			dmapper->handle_message(ctx, message);
 }
 }
 
