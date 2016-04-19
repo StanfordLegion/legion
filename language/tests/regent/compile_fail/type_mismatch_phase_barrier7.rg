@@ -12,24 +12,14 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
+-- fails-with:
+-- type_mismatch_phase_barrier7.rg:24: expected condition near 'x'
+
 import "regent"
 
-x = false
+task g(x : int) end
 
-function g(y)
-  regentlib.assert(y == 5, "test failed")
-  x = true
+task f(x : int)
+  var p = phase_barrier(1)
+  g(arrives(p), x)
 end
-local tg = terralib.cast({int} -> {}, g)
-
-task f(z : int)
-  tg(z)
-end
-
-task main()
-  f(5)
-end
-
-regentlib.assert(not x, "test failed")
-regentlib.start(main)
-regentlib.assert(x, "test failed")

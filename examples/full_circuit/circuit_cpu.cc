@@ -141,13 +141,13 @@ static inline float get_node_voltage(const RegionAccessor<AT,float> &priv,
   return 0.f;
 }
 
-template<typename AT>
+template<typename AT_VAL, typename AT_PTR>
 static inline __m128 get_vec_node_voltage(ptr_t current_wire,
-                                          const RegionAccessor<AT,float> &priv,
-                                          const RegionAccessor<AT,float> &shr,
-                                          const RegionAccessor<AT,float> &ghost,
-                                          const RegionAccessor<AT,ptr_t> &ptrs,
-                                          const RegionAccessor<AT,PointerLocation> &locs)
+                                          const RegionAccessor<AT_VAL,float> &priv,
+                                          const RegionAccessor<AT_VAL,float> &shr,
+                                          const RegionAccessor<AT_VAL,float> &ghost,
+                                          const RegionAccessor<AT_PTR,ptr_t> &ptrs,
+                                          const RegionAccessor<AT_VAL,PointerLocation> &locs)
 {
   float voltages[4];
   for (int i = 0; i < 4; i++)

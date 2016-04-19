@@ -578,7 +578,7 @@ namespace LegionRuntime {
 
     void DmaRequest::Waiter::print(std::ostream& os) const
     {
-      os << "dma request " << req << ": after " << req->get_finish_event();
+      os << "dma request " << (void *)req << ": after " << req->get_finish_event();
     }
 
     bool CopyRequest::check_readiness(bool just_check, DmaRequestQueue *rq)
@@ -2786,7 +2786,7 @@ namespace LegionRuntime {
 	//  it's ok to copy extra elements (to decrease sparsity) because they're unused in
 	//  the destination
 	assert(get_runtime()->get_instance_impl(dst_inst)->metadata.is_valid());
-	int rlen_target;
+	size_t rlen_target;
 	if(ispace->me == get_runtime()->get_instance_impl(dst_inst)->metadata.is) {
 	  rlen_target = 32768 / 4; // aim for ~32KB transfers at least
 	} else {
@@ -2794,16 +2794,16 @@ namespace LegionRuntime {
 	}
 	
 	ElementMask::Enumerator *e = ispace->valid_mask->enumerate_enabled();
-	int rstart, rlen;
+	coord_t rstart; size_t rlen;
 	while(e->get_next(rstart, rlen)) {
 	  // do we want to copy extra elements to fill in some holes?
 	  while(rlen < rlen_target) {
 	    // see where the next valid elements are
-	    int rstart2, rlen2;
+	    coord_t rstart2; size_t rlen2;
 	    // if none, stop
 	    if(!e->peek_next(rstart2, rlen2)) break;
 	    // or if they don't even start until outside the window, stop
-	    if(rstart2 > (rstart + rlen_target)) break;
+	    if(rstart2 > (rstart + (off_t)rlen_target)) break;
 	    // ok, include the next valid element(s) and any invalid ones in between
 	    //printf("bloating from %d to %d\n", rlen, rstart2 + rlen2 - rstart);
 	    rlen = rstart2 + rlen2 - rstart;
@@ -2811,11 +2811,11 @@ namespace LegionRuntime {
 	    e->get_next(rstart2, rlen2);
 	  }
 
-	  int sstart = src_linearization->image(rstart);
-	  int dstart = dst_linearization->image(rstart);
+	  int sstart = src_linearization->image((coord_t)rstart);
+	  int dstart = dst_linearization->image((coord_t)rstart);
 #ifdef DEBUG_LOW_LEVEL
-	  assert(src_linearization->image_is_dense(Rect<1>(rstart, rstart + rlen - 1)));
-	  assert(dst_linearization->image_is_dense(Rect<1>(rstart, rstart + rlen - 1)));
+	  assert(src_linearization->image_is_dense(Rect<1>((coord_t)rstart, (coord_t)(rstart + rlen - 1))));
+	  assert(dst_linearization->image_is_dense(Rect<1>((coord_t)rstart, (coord_t)(rstart + rlen - 1))));
 #endif
 	  //printf("X: %d+%d %d %d\n", rstart, rlen, sstart, dstart);
 
@@ -3994,7 +3994,7 @@ namespace LegionRuntime {
       deserializer >> requests;
       Realm::Operation::reconstruct_measurements();
 
-      log_dma.info("dma request %p deserialized - " IDFMT "[%d]->" IDFMT "[%d]:%d (+%zd) %s %d (" IDFMT ") " IDFMT "/%d " IDFMT "/%d",
+      log_dma.info("dma request %p deserialized - " IDFMT "[%lld]->" IDFMT "[%lld]:%zu (+%zu) %s %d (" IDFMT ") " IDFMT "/%d " IDFMT "/%d",
 		   this,
 		   srcs[0].inst.id, srcs[0].offset,
 		   dst.inst.id, dst.offset, dst.size,
@@ -4025,7 +4025,7 @@ namespace LegionRuntime {
     {
       srcs.insert(srcs.end(), _srcs.begin(), _srcs.end());
 
-      log_dma.info("dma request %p created - " IDFMT "[%d]->" IDFMT "[%d]:%d (+%zd) %s %d (" IDFMT ") " IDFMT "/%d " IDFMT "/%d",
+      log_dma.info("dma request %p created - " IDFMT "[%lld]->" IDFMT "[%lld]:%zu (+%zu) %s %d (" IDFMT ") " IDFMT "/%d " IDFMT "/%d",
 		   this,
 		   srcs[0].inst.id, srcs[0].offset,
 		   dst.inst.id, dst.offset, dst.size,
@@ -4386,7 +4386,7 @@ namespace LegionRuntime {
 
 	      // if source and dest are ok, we can just walk the index space's spans
 	      ElementMask::Enumerator *e = ispace->valid_mask->enumerate_enabled();
-	      int rstart, rlen;
+	      coord_t rstart; size_t rlen;
 	      while(e->get_next(rstart, rlen)) {
 		if(red_fold)
 		  redop->fold_strided(((char *)dst_base) + (rstart * dst_stride),
@@ -4421,7 +4421,7 @@ namespace LegionRuntime {
 	      Arrays::Mapping<1, 1> *dst_linearization = dst_impl->metadata.linearization.get_mapping<1>();
 
 	      ElementMask::Enumerator *e = ispace->valid_mask->enumerate_enabled();
-	      int rstart, rlen;
+	      coord_t rstart; size_t rlen;
 
 	      // get an RDMA sequence number so we can have the far side trigger the event once all reductions have been
 	      //  applied
@@ -4430,17 +4430,17 @@ namespace LegionRuntime {
 
 	      // for a reduction from a fold instance, it's always ok to copy unused elements, since they'll have an
 	      //  identity value stored for them
-	      int rlen_target = 32768 / dst_field_size;
+	      size_t rlen_target = 32768 / dst_field_size;
 
 	      while(e->get_next(rstart, rlen)) {
 		// do we want to copy extra elements to fill in some holes?
 		while(rlen < rlen_target) {
 		  // see where the next valid elements are
-		  int rstart2, rlen2;
+		  coord_t rstart2; size_t rlen2;
 		  // if none, stop
 		  if(!e->peek_next(rstart2, rlen2)) break;
 		  // or if they don't even start until outside the window, stop
-		  if(rstart2 > (rstart + rlen_target)) break;
+		  if(rstart2 > (rstart + (coord_t)rlen_target)) break;
 		  // ok, include the next valid element(s) and any invalid ones in between
 		  //printf("bloating from %d to %d\n", rlen, rstart2 + rlen2 - rstart);
 		  rlen = rstart2 + rlen2 - rstart;
@@ -4449,7 +4449,7 @@ namespace LegionRuntime {
 		}
 
 		// translate the index space point to the dst instance's linearization
-		int dstart = dst_linearization->image(rstart);
+		int dstart = dst_linearization->image((coord_t)rstart);
 
 		// now do an offset calculation for the destination
 		off_t dst_offset;
@@ -4502,10 +4502,10 @@ namespace LegionRuntime {
 
 	      // if source and dest are ok, we can just walk the index space's spans
 	      ElementMask::Enumerator *e = ispace->valid_mask->enumerate_enabled();
-	      int rstart, rlen;
+	      coord_t rstart; size_t rlen;
 	      while(e->get_next(rstart, rlen)) {
 		// translate the index space point to the dst instance's linearization
-		int dstart = dst_linearization->image(rstart);
+		int dstart = dst_linearization->image((coord_t)rstart);
 
 		// now do an offset calculation for the destination
 		off_t dst_offset;
@@ -4580,7 +4580,7 @@ namespace LegionRuntime {
 	delete mpc;
       }
 
-      log_dma.info("dma request %p finished - " IDFMT "[%d]->" IDFMT "[%d]:%d (+%zd) %s %d (" IDFMT ") " IDFMT "/%d " IDFMT "/%d",
+      log_dma.info("dma request %p finished - " IDFMT "[%lld]->" IDFMT "[%lld]:%zu (+%zu) %s %d (" IDFMT ") " IDFMT "/%d " IDFMT "/%d",
 		   this,
 		   srcs[0].inst.id, srcs[0].offset,
 		   dst.inst.id, dst.offset, dst.size,
@@ -4808,10 +4808,10 @@ namespace LegionRuntime {
               Arrays::Mapping<1, 1> *dst_linearization = 
                 inst_impl->metadata.linearization.get_mapping<1>();
               ElementMask::Enumerator *e = ispace->valid_mask->enumerate_enabled();
-              int rstart, elem_count;
+              coord_t rstart; size_t elem_count;
               while(e->get_next(rstart, elem_count)) {
-                int dst_index = dst_linearization->image(rstart); 
-                int done = 0;
+                int dst_index = dst_linearization->image((coord_t)rstart); 
+                size_t done = 0;
                 while (done < elem_count) {
                   int dst_in_this_block = inst_impl->metadata.block_size - 
                               ((dst_index + done) % inst_impl->metadata.block_size);

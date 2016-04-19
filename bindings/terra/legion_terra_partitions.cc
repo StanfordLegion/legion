@@ -438,9 +438,9 @@ struct BoundComp {
 
 struct Leaf;
 struct NonLeaf;
-#define NODE_SIZE 128
-#define NUM_LEAF_ENTRIES 14
-#define NUM_NONLEAF_ENTRIES 7
+#define NODE_SIZE 256
+#define NUM_LEAF_ENTRIES 15
+#define NUM_NONLEAF_ENTRIES 10
 
 struct Node {
   bool is_leaf() { return leaf; }
@@ -453,16 +453,16 @@ struct Node {
 struct Leaf {
   bool leaf;
   int num_children;
-  unsigned starts[NUM_LEAF_ENTRIES];
-  unsigned indices[NUM_LEAF_ENTRIES];
+  long long int starts[NUM_LEAF_ENTRIES];
+  long long int indices[NUM_LEAF_ENTRIES];
   Leaf* next;
 };
 
 struct NonLeaf {
   bool leaf;
   int num_children;
-  unsigned starts[NUM_NONLEAF_ENTRIES];
-  unsigned ends[NUM_NONLEAF_ENTRIES];
+  long long int starts[NUM_NONLEAF_ENTRIES];
+  long long int ends[NUM_NONLEAF_ENTRIES];
   Node* childs[NUM_NONLEAF_ENTRIES];
 };
 
@@ -551,7 +551,7 @@ void print_tree(Node* tree, unsigned level)
     for (unsigned idx = 0; idx < level; ++idx)
       printf("    ");
     for (int idx = 0; idx < leaf->num_children; ++idx)
-      printf("start: %d index: %d, ", leaf->starts[idx], leaf->indices[idx]);
+      printf("start: %lld index: %lld, ", leaf->starts[idx], leaf->indices[idx]);
     printf("\n");
   }
   else
@@ -560,7 +560,7 @@ void print_tree(Node* tree, unsigned level)
     for (int idx = 0; idx < nonleaf->num_children; ++idx)
     {
       for (unsigned j = 0; j < level; ++j) printf("    ");
-      printf("start: %d end: %d ptr: %p\n",
+      printf("start: %lld end: %lld ptr: %p\n",
           nonleaf->starts[idx], nonleaf->ends[idx], nonleaf->childs[idx]);
       print_tree(nonleaf->childs[idx], level + 1);
     }

@@ -82,14 +82,10 @@ extern "C" {
    * @see ptr_t
    */
   typedef struct legion_ptr_t {
-    unsigned value;
+    long long int value;
   } legion_ptr_t;
 
-#ifdef POINTS_ARE_64BIT
-typedef ptrdiff_t coord_t;
-#else
-typedef int coord_t;
-#endif
+typedef long long int coord_t;
 
 #define NEW_POINT_TYPE(T, DIM) typedef struct T { coord_t x[DIM]; } T
   NEW_POINT_TYPE(legion_point_1d_t, 1);
@@ -362,7 +358,7 @@ typedef int coord_t;
   legion_ptr_nil(void)
   {
     legion_ptr_t ptr;
-    ptr.value = (unsigned)-1;
+    ptr.value = -1LL;
     return ptr;
   }
 
@@ -372,7 +368,7 @@ typedef int coord_t;
   inline bool
   legion_ptr_is_null(legion_ptr_t ptr)
   {
-    return ptr.value == (unsigned)-1;
+    return ptr.value == -1LL;
   }
 
   /**
@@ -1518,7 +1514,7 @@ typedef int coord_t;
    */
   legion_ptr_t
   legion_index_allocator_alloc(legion_index_allocator_t allocator,
-                               unsigned num_elements /* = 1 */);
+                               size_t num_elements /* = 1 */);
 
   /**
    * @see LegionRuntime::HighLevel::IndexAllocator::free()
@@ -1526,7 +1522,7 @@ typedef int coord_t;
   void
   legion_index_allocator_free(legion_index_allocator_t allocator,
                               legion_ptr_t ptr,
-                              unsigned num_elements /* = 1 */);
+                              size_t num_elements /* = 1 */);
 
   /**
    * @return Caller takes ownership of return value.

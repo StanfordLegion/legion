@@ -94,13 +94,15 @@ terra vec2.metamethods.__sub(a : vec2, b : vec2) : vec2
   return vec2 { x = a.x - b.x, y = a.y - b.y }
 end
 
-terra vec2.metamethods.__mul(a : double, b : vec2) : vec2
-  return vec2 { x = a * b.x, y = a * b.y }
-end
-
-terra vec2.metamethods.__mul(a : vec2, b : double) : vec2
-  return vec2 { x = a.x * b, y = a.y * b }
-end
+vec2.metamethods.__mul = terralib.overloadedfunction(
+  "__mul", {
+    terra(a : double, b : vec2) : vec2
+      return vec2 { x = a * b.x, y = a * b.y }
+    end,
+    terra(a : vec2, b : double) : vec2
+      return vec2 { x = a.x * b, y = a.y * b }
+    end
+  })
 
 terra dot(a : vec2, b : vec2) : double
   return a.x*b.x + a.y*b.y
@@ -991,7 +993,7 @@ end
 
 local terra all_ghost_p(conf : config)
   var num_ghost = get_num_ghost(conf)
-  var first_ghost = 0
+  var first_ghost : int64 = 0
   var last_ghost = num_ghost -- exclusive
   return first_ghost, last_ghost
 end
@@ -1274,7 +1276,7 @@ terra read_partitions(conf : config) : mesh_colorings
       c.legion_coloring_add_range(
         result.rp_all_shared_c, piece, ptr_t(bottom_right._0), ptr_t(bottom_right._1 - 1)) -- inclusive
 
-      var first_p, last_p = -1, -1
+      var first_p : int64, last_p : int64 = -1, -1
       if right._0 < right._1 then
         first_p = right._0
         last_p = right._1

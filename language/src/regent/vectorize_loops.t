@@ -927,7 +927,7 @@ function vectorize_loops.stat_for_list(node)
   cx.demanded = node.options.vectorize:is(ast.options.Demand)
 
   local vectorizable = check_vectorizability.block(cx, node.block)
-  if vectorizable then
+  if vectorizable and not bounds_checks then
     return vectorize.stat_for_list(cx, node)
   else
     return node { block = node.block }
@@ -957,7 +957,7 @@ function vectorize_loops.stat(node)
     return vectorize_loops.stat_for_num(node)
 
   elseif node:is(ast.typed.stat.ForList) then
-    if std.is_bounded_type(node.symbol.type) and node.symbol.type.dim <= 1 then
+    if std.is_bounded_type(node.symbol:gettype()) and node.symbol:gettype().dim <= 1 then
       return vectorize_loops.stat_for_list(node)
     else
       return node { block = vectorize_loops.block(node.block) }
@@ -1031,11 +1031,7 @@ function vectorize_loops.stat_top(node)
 end
 
 function vectorize_loops.entry(node)
-  if bounds_checks then
-    return node
-  else
-    return vectorize_loops.stat_top(node)
-  end
+  return vectorize_loops.stat_top(node)
 end
 
 return vectorize_loops

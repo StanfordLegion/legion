@@ -51,6 +51,6 @@ task top() : int
 end
 
 task main()
-  assert(top() == 15)
+  regentlib.assert(top() == 15, "test failed")
 end
 regentlib.start(main)

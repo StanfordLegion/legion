@@ -932,7 +932,7 @@ PartitionByIntersectionShim::task(const Task *task,
     for (IndexIterator it(runtime, ctx, rhs); it.has_next();) {
       size_t count = 0;
       ptr_t start = it.next_span(count);
-      for (ptr_t p(start); p.value - start.value < count; p++) {
+      for (ptr_t p(start); p.value - start.value < (off_t)count; p++) {
         rhs_points.insert(p);
       }
     }
@@ -940,7 +940,7 @@ PartitionByIntersectionShim::task(const Task *task,
     for (IndexIterator it(runtime, ctx, lhs); it.has_next();) {
       size_t count = 0;
       ptr_t start = it.next_span(count);
-      for (ptr_t p(start); p.value - start.value < count; p++) {
+      for (ptr_t p(start); p.value - start.value < (off_t)count; p++) {
         if (rhs_points.count(p)) {
           coloring[c.p].points.insert(p);
         }
@@ -1066,7 +1066,7 @@ PartitionByDifferenceShim::task(const Task *task,
     for (IndexIterator it(runtime, ctx, rhs); it.has_next();) {
       size_t count = 0;
       ptr_t start = it.next_span(count);
-      for (ptr_t p(start); p.value - start.value < count; p++) {
+      for (ptr_t p(start); p.value - start.value < (off_t)count; p++) {
         rhs_points.insert(p);
       }
     }
@@ -1074,7 +1074,7 @@ PartitionByDifferenceShim::task(const Task *task,
     for (IndexIterator it(runtime, ctx, lhs); it.has_next();) {
       size_t count = 0;
       ptr_t start = it.next_span(count);
-      for (ptr_t p(start); p.value - start.value < count; p++) {
+      for (ptr_t p(start); p.value - start.value < (off_t)count; p++) {
         if (!rhs_points.count(p)) {
           coloring[c.p].points.insert(p);
         }
@@ -1202,7 +1202,7 @@ PartitionByFieldShim::task(const Task *task,
        it.has_next();) {
     size_t count = 0;
     ptr_t start = it.next_span(count);
-    for (ptr_t p(start); p.value - start.value < count; p++) {
+    for (ptr_t p(start); p.value - start.value < (off_t)count; p++) {
       Color c = accessor.read(p);
       coloring[DomainPoint::from_point<1>(Point<1>(c))].points.insert(p);
     }
@@ -1336,7 +1336,7 @@ PartitionByImageShim::task(const Task *task,
     for (IndexIterator it(runtime, ctx, r); it.has_next();) {
       size_t count = 0;
       ptr_t start = it.next_span(count);
-      for (ptr_t p(start); p.value - start.value < count; p++) {
+      for (ptr_t p(start); p.value - start.value < (off_t)count; p++) {
         coloring[upgrade_point(c.p)].points.insert(accessor.read(p));
       }
     }
@@ -1476,7 +1476,7 @@ PartitionByPreimageShim::task(const Task *task,
     for (IndexIterator it(runtime, ctx, target); it.has_next();) {
       size_t count = 0;
       ptr_t start = it.next_span(count);
-      for (ptr_t p(start); p.value - start.value < count; p++) {
+      for (ptr_t p(start); p.value - start.value < (off_t)count; p++) {
         points.insert(p);
       }
     }
@@ -1484,7 +1484,7 @@ PartitionByPreimageShim::task(const Task *task,
     for (IndexIterator it(runtime, ctx, args.handle); it.has_next();) {
       size_t count = 0;
       ptr_t start = it.next_span(count);
-      for (ptr_t p(start); p.value - start.value < count; p++) {
+      for (ptr_t p(start); p.value - start.value < (off_t)count; p++) {
         if (points.count(accessor.read(p))) {
           coloring[upgrade_point(c.p)].points.insert(p);
         }
@@ -2326,7 +2326,7 @@ legion_index_allocator_destroy(legion_index_allocator_t handle_)
 
 legion_ptr_t
 legion_index_allocator_alloc(legion_index_allocator_t allocator_,
-                             unsigned num_elements)
+                             size_t num_elements)
 {
   IndexAllocator allocator = CObjectWrapper::unwrap(allocator_);
   ptr_t ptr = allocator.alloc(num_elements);
@@ -2336,7 +2336,7 @@ legion_index_allocator_alloc(legion_index_allocator_t allocator_,
 void
 legion_index_allocator_free(legion_index_allocator_t allocator_,
                             legion_ptr_t ptr_,
-                            unsigned num_elements)
+                            size_t num_elements)
 {
   IndexAllocator allocator = CObjectWrapper::unwrap(allocator_);
   ptr_t ptr = CObjectWrapper::unwrap(ptr_);

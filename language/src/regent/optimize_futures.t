@@ -173,6 +173,9 @@ function analyze_var_flow.expr(cx, node)
   elseif node:is(ast.typed.expr.CrossProduct) then
     return nil
 
+  elseif node:is(ast.typed.expr.CrossProductArray) then
+    return nil
+
   elseif node:is(ast.typed.expr.ListSlicePartition) then
     return nil
 
@@ -681,6 +684,14 @@ function optimize_futures.expr_cross_product(cx, node)
   }
 end
 
+function optimize_futures.expr_cross_product_array(cx, node)
+  return node {
+    lhs = concretize(optimize_futures.expr(cx, node.lhs)),
+    disjointness = node.disjointness,
+    colorings = concretize(optimize_futures.expr(cx, node.colorings)),
+  }
+end
+
 function optimize_futures.expr_list_slice_partition(cx, node)
   local partition = concretize(optimize_futures.expr(cx, node.partition))
   local indices = concretize(optimize_futures.expr(cx, node.indices))
@@ -966,6 +977,9 @@ function optimize_futures.expr(cx, node)
   elseif node:is(ast.typed.expr.CrossProduct) then
     return optimize_futures.expr_cross_product(cx, node)
 
+  elseif node:is(ast.typed.expr.CrossProductArray) then
+    return optimize_futures.expr_cross_product_array(cx, node)
+
   elseif node:is(ast.typed.expr.ListSlicePartition) then
     return optimize_futures.expr_list_slice_partition(cx, node)
 
@@ -1141,7 +1155,7 @@ function optimize_futures.stat_var(cx, node)
       types:insert(std.future(value_type))
 
       -- FIXME: Would be better to generate fresh symbols.
-      symbol.type = std.future(value_type)
+      symbol:settype(std.future(value_type), true)
     else
       types:insert(value_type)
     end
@@ -1287,15 +1301,18 @@ end
 
 function optimize_futures.stat_task_param(cx, param)
   if cx:is_future(param.symbol) then
-    local new_symbol = terralib.newsymbol(param.param_type, param.symbol.displayname .. "_tmp")
+    local param_type = param.param_type
+    local future_type = std.future(param_type)
+
+    local new_symbol = std.newsymbol(param_type, param.symbol:getname() .. "_tmp")
     local new_param = param { symbol = new_symbol }
     local new_var = ast.typed.stat.Var {
       symbols = terralib.newlist({param.symbol}),
-      types = terralib.newlist({std.future(param.param_type)}),
+      types = terralib.newlist({future_type}),
       values = terralib.newlist({
           promote(ast.typed.expr.ID {
             value = new_symbol,
-            expr_type = std.rawref(&param.param_type),
+            expr_type = std.rawref(&param_type),
             options = param.options,
             span = param.span,
           }),
@@ -1303,6 +1320,9 @@ function optimize_futures.stat_task_param(cx, param)
       options = param.options,
       span = param.span,
     }
+
+    -- FIXME: Would be better to generate fresh symbols.
+    param.symbol:settype(future_type, true)
 
     return new_param, new_var
   else
@@ -1326,6 +1346,9 @@ function optimize_futures.stat_task(cx, node)
   analyze_var_flow.block(cx, node.body)
   compute_var_futures(cx, node.params)
   local params, actions = optimize_futures.stat_task_params(cx, node)
+  node.prototype:set_param_symbols(
+    params:map(function(param) return param.symbol end),
+    true)
   local body = optimize_futures.block(cx, node.body)
 
   if #actions > 0 then

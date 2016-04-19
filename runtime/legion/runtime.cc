@@ -4312,8 +4312,8 @@ namespace LegionRuntime {
         rez.serialize(task_id);
         rez.serialize(variant_id);
         rez.serialize(wait_on);
-        runtime->send_variant_request(owner_space, rez);
       }
+      runtime->send_variant_request(owner_space, rez);
       // Wait for the results
       wait_on.wait();
       // Now we can re-take the lock and find our variant
@@ -4856,7 +4856,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void VariantImpl::send_variant_response(AddressSpaceID target, Event done)
+    void VariantImpl::send_variant_response(AddressSpaceID target, UserEvent done)
     //--------------------------------------------------------------------------
     {
       if (!global)
@@ -4875,6 +4875,7 @@ namespace LegionRuntime {
         RezCheck z(rez);
         rez.serialize(owner->task_id);
         rez.serialize(vid);
+        rez.serialize(done);
         rez.serialize(has_return_value);
         // pack the code descriptors 
         Realm::Serialization::ByteCountSerializer counter;
@@ -4898,6 +4899,7 @@ namespace LegionRuntime {
         execution_constraints.serialize(rez);
         layout_constraints.serialize(rez);
       }
+      runtime->send_variant_response(target, rez);
     }
 
     //--------------------------------------------------------------------------
@@ -4919,15 +4921,26 @@ namespace LegionRuntime {
       TaskVariantRegistrar registrar(task_id);
       VariantID variant_id;
       derez.deserialize(variant_id);
+      UserEvent done;
+      derez.deserialize(done);
       bool has_return;
       derez.deserialize(has_return);
       size_t impl_size;
       derez.deserialize(impl_size);
-      Realm::Serialization::FixedBufferDeserializer
-        deserializer(derez.get_current_pointer(), impl_size);
-      derez.advance_pointer(impl_size);
       CodeDescriptor *realm_desc = new CodeDescriptor();
-      realm_desc->deserialize(deserializer);
+      {
+        // Realm's serializers assume properly aligned buffers, so
+        // malloc a temporary buffer here and copy the data to ensure
+        // alignment.
+        void *impl_buffer = malloc(impl_size);
+        assert(impl_buffer);
+        memcpy(impl_buffer, derez.get_current_pointer(), impl_size);
+        derez.advance_pointer(impl_size);
+        Realm::Serialization::FixedBufferDeserializer
+          deserializer(impl_buffer, impl_size);
+        assert(realm_desc->deserialize(deserializer));
+        free(impl_buffer);
+      }
       size_t user_data_size;
       derez.deserialize(user_data_size);
       const void *user_data = derez.get_current_pointer();
@@ -4945,6 +4958,7 @@ namespace LegionRuntime {
       // Ask the runtime to perform the registration 
       runtime->register_variant(registrar, user_data, user_data_size,
                     realm_desc, has_return, variant_id, false/*check task*/);
+      done.trigger();
     }
 
     /////////////////////////////////////////////////////////////
@@ -6194,12 +6208,14 @@ namespace LegionRuntime {
         for (std::set<ptr_t>::const_iterator pit = pcoloring.points.begin();
               pit != pcoloring.points.end(); pit++)
         {
-          child_mask.enable(*pit,1);
+          child_mask.enable(pit->value,1);
         }
         for (std::set<std::pair<ptr_t,ptr_t> >::const_iterator pit = 
               pcoloring.ranges.begin(); pit != pcoloring.ranges.end(); pit++)
         {
-          child_mask.enable(pit->first.value, pit->second - pit->first + 1);
+          if (pit->second.value >= pit->first.value)
+            child_mask.enable(pit->first.value,
+                (size_t)(pit->second.value - pit->first.value) + 1);
         }
         Realm::IndexSpace child_space = 
           Realm::IndexSpace::create_index_space(
@@ -6287,12 +6303,14 @@ namespace LegionRuntime {
           for (std::set<ptr_t>::const_iterator it = pcoloring.points.begin();
                 it != pcoloring.points.end(); it++)
           {
-            child_mask.enable(*it,1);
+            child_mask.enable(it->value,1);
           }
           for (std::set<std::pair<ptr_t,ptr_t> >::const_iterator it = 
                 pcoloring.ranges.begin(); it != pcoloring.ranges.end(); it++)
           {
-            child_mask.enable(it->first.value, it->second-it->first+1);
+            if (it->second.value >= it->first.value)
+              child_mask.enable(it->first.value,
+                  (size_t)(it->second.value - it->first.value) + 1);
           }
         }
         else
@@ -6641,7 +6659,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
             assert(finder != child_masks.end());
 #endif
-            finder->second.enable(cur_ptr);
+            finder->second.enable(cur_ptr.value);
           }
         }
         // Now make the index spaces and their domains
@@ -13009,7 +13027,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_VARIANT_REQUEST,
-                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+                                        VARIANT_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13017,7 +13035,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_VARIANT_RESPONSE,
-                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+                                        VARIANT_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -17571,7 +17589,7 @@ namespace LegionRuntime {
       if (!region->contains_ptr(ptr))
       {
         fprintf(stderr,"BOUNDS CHECK ERROR IN TASK %s: Accessing invalid "
-                       "pointer %d\n", region->get_task_name(), ptr.value);
+                       "pointer %lld\n", region->get_task_name(), ptr.value);
         assert(false);
       }
     }
@@ -17587,18 +17605,18 @@ namespace LegionRuntime {
         {
           case 1:
             fprintf(stderr,"BOUNDS CHECK ERROR IN TASK %s: Accessing invalid "
-                           "1D point (%d)\n", region->get_task_name(),
+                           "1D point (%lld)\n", region->get_task_name(),
                             dp.point_data[0]);
             break;
           case 2:
             fprintf(stderr,"BOUNDS CHECK ERROR IN TASK %s: Accessing invalid "
-                           "2D point (%d,%d)\n", region->get_task_name(),
+                           "2D point (%lld,%lld)\n", region->get_task_name(),
                             dp.point_data[0], dp.point_data[1]);
             break;
           case 3:
             fprintf(stderr,"BOUNDS CHECK ERROR IN TASK %s: Accessing invalid "
-                           "3D point (%d,%d,%d)\n", region->get_task_name(),
-                      dp.point_data[0], dp.point_data[1], dp.point_data[2]);
+                         "3D point (%lld,%lld,%lld)\n", region->get_task_name(),
+                          dp.point_data[0], dp.point_data[1], dp.point_data[2]);
             break;
           default:
             assert(false);
