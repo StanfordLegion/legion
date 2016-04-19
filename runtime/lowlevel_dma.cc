@@ -563,7 +563,7 @@ namespace LegionRuntime {
 
     void DmaRequest::Waiter::print(std::ostream& os) const
     {
-      os << "dma request " << req << ": after " << req->get_finish_event();
+      os << "dma request " << (void *)req << ": after " << req->get_finish_event();
     }
 
     bool CopyRequest::check_readiness(bool just_check, DmaRequestQueue *rq)
