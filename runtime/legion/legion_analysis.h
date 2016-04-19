@@ -102,26 +102,27 @@ namespace LegionRuntime {
       public:
         // Don't forget to update clone_from methods
         // when changing these bit values
-        static const unsigned BASE_FIELDS_MASK = 0x7;
-        inline void set_path_only(void) { bit_mask |= 1; }
-        inline void set_needs_final(void) { bit_mask |= 2; }
-        inline void set_close_top(void) { bit_mask |= 4; }
-        inline void set_needs_capture(void) { bit_mask |= 8; }
+        static const unsigned BASE_FIELDS_MASK = 0x3F;
+        inline void set_path_only(void) { bit_mask |= 0x1; }
+        inline void set_needs_final(void) { bit_mask |= 0x2; }
+        inline void set_close_top(void) { bit_mask |= 0x4; }
+        inline void set_close_node(void) { bit_mask |= 0x8; }
+        inline void set_leave_open(void) { bit_mask |= 0x10; }
+        inline void set_split_node(void) { bit_mask |= 0x20; }
+        inline void set_needs_capture(void) { bit_mask |= 0x40; }
         inline void unset_needs_capture(void)
-        { if (needs_capture()) bit_mask -= 8; }
+        { if (needs_capture()) bit_mask &= BASE_FIELDS_MASK; }
       public:
-        inline bool path_only(void) const { return (1 & bit_mask); }
-        inline bool needs_final(void) const { return (2 & bit_mask); }
-        inline bool close_top(void) const { return (4 & bit_mask); }
-        inline bool needs_capture(void) const { return (8 & bit_mask); }
+        inline bool path_only(void) const { return (0x1 & bit_mask); }
+        inline bool needs_final(void) const { return (0x2 & bit_mask); }
+        inline bool close_top(void) const { return (0x4 & bit_mask); }
+        inline bool close_node(void) const { return (0x8 & bit_mask); }
+        inline bool leave_open(void) const { return (0x10 & bit_mask); }
+        inline bool split_node(void) const { return (0x20 & bit_mask); }
+        inline bool needs_capture(void) const { return (0x40 & bit_mask); }
       public:
         PhysicalState *physical_state;
         FieldVersions *field_versions;
-        // For nodes in close operations that are not the top node
-        // this mask doubles as the set of fields which need to be 
-        // applied because the close is leave open. Unfortunately
-        // we can't put this in a union to make this more clear
-        // because C unions are dumb.
         FieldMask        advance_mask;
       public:
         unsigned bit_mask;
@@ -411,7 +412,9 @@ namespace LegionRuntime {
                                   bool capture_previous, bool path_only,
                                   bool need_final, bool close_top, 
                                   bool report_unversioned,
-                                  bool capture_leave_open = false);
+                                  bool close_node = false,
+                                  bool capture_leave_open = false,
+                                  bool split_node = false);
       void advance_version_numbers(const FieldMask &mask);
     public:
       VersionState* create_new_version_state(VersionID vid); 
@@ -527,6 +530,8 @@ namespace LegionRuntime {
       LogicalCloser& operator=(const LogicalCloser &rhs);
     public:
       inline bool has_closed_fields(void) const { return !!closed_mask; }
+      inline const FieldMask& get_closed_fields(void) const 
+        { return closed_mask; }
       void record_closed_child(const ColorPoint &child, const FieldMask &mask,
                                bool leave_open, bool read_only_close);
       void record_partial_fields(const FieldMask &skipped_fields);
@@ -723,13 +728,14 @@ namespace LegionRuntime {
     public:
       void add_version_state(VersionState *state, const FieldMask &mask);
       void add_advance_state(VersionState *state, const FieldMask &mask);
-      void capture_state(bool path_only, bool close_top);
+      void capture_state(bool path_only, bool split_node);
       void apply_path_only_state(const FieldMask &advance_mask,
             AddressSpaceID target, std::set<Event> &applied_conditions) const;
       void apply_state(const FieldMask &advance_mask, 
             AddressSpaceID target, std::set<Event> &applied_conditions);
-      void filter_and_apply(bool top, AddressSpaceID target,
-            const LegionMap<ColorPoint,FieldMask>::aligned &closed_children,
+      void filter_and_apply(const FieldMask &advance_mask,AddressSpaceID target,
+            bool filter_masks, bool filter_views, bool filter_children,
+            const LegionMap<ColorPoint,FieldMask>::aligned *closed_children,
                             std::set<Event> &applied_conditions);
       void release_created_instances(void);
       void reset(void);
@@ -821,14 +827,16 @@ namespace LegionRuntime {
       void initialize(LogicalView *view, Event term_event,
                       const RegionUsage &usage,
                       const FieldMask &user_mask);
-      void update_close_top_state(PhysicalState *state,
-                                  const FieldMask &update_mask) const;
-      void update_open_children_state(PhysicalState *state,
+    public: // methods for retrieving state information
+      void update_split_previous_state(PhysicalState *state,
+                                       const FieldMask &update_mask) const;
+      void update_split_advance_state(PhysicalState *state,
                                       const FieldMask &update_mask) const;
       void update_path_only_state(PhysicalState *state,
                                   const FieldMask &update_mask) const;
       void update_physical_state(PhysicalState *state, 
                                  const FieldMask &update_mask) const; 
+    public: // methods for applying state information
       void merge_path_only_state(const PhysicalState *state,
                                  const FieldMask &merge_mask,
                                  AddressSpaceID target,
@@ -839,9 +847,10 @@ namespace LegionRuntime {
                                 std::set<Event> &applied_conditions,
                                 bool need_lock = true);
       void filter_and_merge_physical_state(const PhysicalState *state,
-                                const FieldMask &merge_mask, bool top,
-                                AddressSpaceID target,
-            const LegionMap<ColorPoint,FieldMask>::aligned &closed_children,
+                                const FieldMask &merge_mask,
+                                AddressSpaceID target, bool filter_masks,
+                                bool filter_views, bool filter_children,
+            const LegionMap<ColorPoint,FieldMask>::aligned *closed_children,
                                 std::set<Event> &applied_conditions);
     public:
       virtual void notify_active(void);

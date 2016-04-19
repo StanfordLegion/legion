@@ -10610,28 +10610,9 @@ namespace LegionRuntime {
                           open_below, arrived/*validates*/ && !projecting);
         }
       }
-      const bool is_write = IS_WRITE(user.usage); // only writes
       if (arrived)
       { 
-        // If we dominated and this is our final destination then we 
-        // can filter the operations since we actually do dominate them
-        if (!!dominator_mask)
-        {
-          // Dominator mask is not empty
-          // Mask off all the dominated fields from the previous set
-          // of epoch users and remove any previous epoch users
-          // that were totally dominated
-          filter_prev_epoch_users(state, dominator_mask); 
-          // Mask off all dominated fields from current epoch users and move
-          // them to prev epoch users.  If all fields masked off, then remove
-          // them from the list of current epoch users.
-          filter_curr_epoch_users(state, dominator_mask);
-          // We only advance version numbers for fields which are being
-          // written and dominated the previous epoch because multiple 
-          // writes for atomic and simultaneous go in the same generation.
-          if (is_write)
-            state.advance_version_numbers(dominator_mask);
-        }
+        const bool is_write = IS_WRITE(user.usage); // only writes
         // Now that we've arrived, check to see if we are a projection 
         // region requirement or a normal region requirement. If we are normal
         // then we can do the regular analysis, otherwise, we have to traverse
@@ -10648,6 +10629,35 @@ namespace LegionRuntime {
         }
         else
         {
+          // If we dominated and this is our final destination then we 
+          // can filter the operations since we actually do dominate them
+          if (!!dominator_mask)
+          {
+            // Dominator mask is not empty
+            // Mask off all the dominated fields from the previous set
+            // of epoch users and remove any previous epoch users
+            // that were totally dominated
+            filter_prev_epoch_users(state, dominator_mask); 
+            // Mask off all dominated fields from current epoch users and move
+            // them to prev epoch users.  If all fields masked off, then remove
+            // them from the list of current epoch users.
+            filter_curr_epoch_users(state, dominator_mask);
+            // We only advance version numbers for fields which are being
+            // written and dominated the previous epoch because multiple 
+            // writes for atomic and simultaneous go in the same generation.
+            if (is_write)
+            {
+              // Only advance fields that are not already dirty below
+              if (!!state.dirty_below)
+              {
+                FieldMask split_mask = dominator_mask - state.dirty_below;
+                if (!!split_mask)
+                  state.advance_version_numbers(split_mask);
+              }
+              else
+                state.advance_version_numbers(dominator_mask);
+            }
+          }
           // Easy case, we are there 
           // If we have arrived and we are doing read-write access, then we
           // need to capture any versions in sub-trees for which we will 
@@ -10658,24 +10668,42 @@ namespace LegionRuntime {
             // There's no point in siphoning, we know we need to close
             // everything up that interferes with this task
             close_logical_subtree(closer, user.field_mask);
-            // We've registered dependences on any users in the sub-tree
-            // and we definitely interfered with them all so all we need
-            // to do now is capture the version information.
-            closer.merge_version_info(version_info, user.field_mask);
+            if (closer.has_closed_fields())
+            {
+              const FieldMask &closed_fields = closer.get_closed_fields();
+              closer.record_top_version_numbers(this, state);
+              // We've registered dependences on any users in the sub-tree
+              // and we definitely interfered with them all so all we need
+              // to do now is capture the version information.
+              closer.merge_version_info(version_info, closed_fields);
+              FieldMask non_closed = user.field_mask - closed_fields;
+              if (!!non_closed)
+                state.record_version_numbers(non_closed, user, version_info,
+                                    true/*previous*/, false/*path only*/,
+                                    true/*final*/, false/*close top*/,
+                                    report_uninitialized);
+            }
+            else
+              state.record_version_numbers(user.field_mask, user, version_info,
+                                    true/*previous*/, false/*path only*/,
+                                    true/*final*/, false/*close top*/,
+                                    report_uninitialized);
           }
-          // We also need to record the needed version numbers for this node
-          // Note that we do this after the version numbers have been updated
-          // so that we get the version numbers that we are contributing to
-          // as part of the execution for this operation. If we are writing
-          // in any way, then record the previous version number
-          // If this is a projection requirement, we also need to record any
-          // version numbers from farther down in the tree as well. 
-          // Do this before the version numbers can be updated.
-          state.record_version_numbers(user.field_mask, user, version_info,
-                                 is_write, false/*path only*/,
-                                 is_write, false/*close top*/, 
-                                 report_uninitialized);
-          
+          else
+          {
+            // We also need to record the needed version numbers for this node
+            // Note that we do this after the version numbers have been updated
+            // so that we get the version numbers that we are contributing to
+            // as part of the execution for this operation. If we are writing
+            // in any way, then record the previous version number
+            // If this is a projection requirement, we also need to record any
+            // version numbers from farther down in the tree as well. 
+            // Do this before the version numbers can be updated.
+            state.record_version_numbers(user.field_mask, user, version_info,
+                                   false/*previous*/, false/*path only*/,
+                                   false/*final*/, false/*close top*/, 
+                                   report_uninitialized);
+          }
           // If this is a reduction, record that we have an outstanding 
           // reduction at this node in the region tree
           if (user.usage.redop > 0)
@@ -10706,7 +10734,7 @@ namespace LegionRuntime {
       {
         // If we are writing check to see if we have already marked those 
         // fields dirty. If not, advance the version numbers for those fields.
-        if (is_write)
+        if (HAS_WRITE(user.usage))
         {
           FieldMask new_dirty_fields = user.field_mask - state.dirty_below;
           if (!!new_dirty_fields)
@@ -10799,9 +10827,9 @@ namespace LegionRuntime {
       sanity_check_logical_state(state);
 #endif
       const unsigned depth = get_depth(); 
-      const bool is_write = IS_WRITE(user.usage);
       if (!path.has_child(depth))
       {
+        const bool is_write = IS_WRITE(user.usage);
         // If this is a write, then update our version numbers
         if (is_write)
           state.advance_version_numbers(user.field_mask);
@@ -10855,7 +10883,7 @@ namespace LegionRuntime {
 #ifdef DEBUG_HIGH_LEVEL
         assert(user.field_mask * state.dirty_below);
 #endif
-        if (is_write)
+        if (HAS_WRITE(user.usage))
         {
           state.dirty_below |= user.field_mask;
           state.advance_version_numbers(user.field_mask);
@@ -11002,16 +11030,26 @@ namespace LegionRuntime {
         // them from the list of current epoch users.
         filter_curr_epoch_users(state, dominator_mask);
       }
-      const bool is_write = IS_WRITE(user.usage);
       if (arrived)
       {
+        const bool is_write = IS_WRITE(user.usage);
         // If we dominated and this is our final destination then we 
         // can filter the operations since we actually do dominate them
         // We only advance version numbers for fields which are being
         // written and dominated the previous epoch because multiple 
         // writes for atomic and simultaneous go in the same generation.
         if (!!dominator_mask && is_write)
+        {
+          // Only advance fields that are not already dirty below
+          if (!!state.dirty_below)
+          {
+            FieldMask split_mask = dominator_mask - state.dirty_below;
+            if (!!split_mask)
+              state.advance_version_numbers(split_mask);
+          }
+          else
             state.advance_version_numbers(dominator_mask);
+        }
         // If we have arrived and we are doing read-write access, then we
         // need to capture any versions in sub-trees for which we will 
         // be issuing a close when we actually map.
@@ -11021,16 +11059,35 @@ namespace LegionRuntime {
           // There's no point in siphoning, we know we need to close
           // everything up that interferes with this task
           close_logical_subtree(closer, user.field_mask);
-          // We've registered dependences on any users in the sub-tree
-          // and we definitely interfered with them all so all we need
-          // to do now is capture the version information.
-          closer.merge_version_info(version_info, user.field_mask);
+          if (closer.has_closed_fields())
+          {
+            const FieldMask &closed_fields = closer.get_closed_fields();
+            closer.record_top_version_numbers(this, state);
+            // We've registered dependences on any users in the sub-tree
+            // and we definitely interfered with them all so all we need
+            // to do now is capture the version information.
+            closer.merge_version_info(version_info, closed_fields);
+            FieldMask non_closed = user.field_mask - closed_fields;
+            if (!!non_closed)
+              state.record_version_numbers(non_closed, user, version_info,
+                                  true/*previous*/, false/*path only*/,
+                                  true/*final*/, false/*close top*/,
+                                  report_uninitialized);
+          }
+          else
+            state.record_version_numbers(user.field_mask, user, version_info,
+                                  true/*previous*/, false/*path only*/,
+                                  true/*final*/, false/*close top*/,
+                                  report_uninitialized);
         }
-        // No need to register ourselves as a user 
-        state.record_version_numbers(user.field_mask, user, version_info,
-                               is_write, false/*path only*/, 
-                               is_write, false/*close top*/, 
-                               report_uninitialized);
+        else
+        {
+          // No need to register ourselves as a user 
+          state.record_version_numbers(user.field_mask, user, version_info,
+                                 false/*previous*/, false/*path only*/, 
+                                 false/*final*/, false/*close top*/, 
+                                 report_uninitialized);
+        }
         // If this is a reduction, record that we have an outstanding 
         // reduction at this node in the region tree
         if (user.usage.redop > 0)
@@ -11050,7 +11107,7 @@ namespace LegionRuntime {
       {
         // If we are writing check to see if we have already marked those 
         // fields dirty. If not, advance the version numbers for those fields.
-        if (is_write)
+        if (HAS_WRITE(user.usage))
         {
           FieldMask new_dirty_fields = user.field_mask - state.dirty_below;
           if (!!new_dirty_fields)
@@ -11268,7 +11325,7 @@ namespace LegionRuntime {
                                  false/*upgrade*/, false/*leave open*/,
                                  false/*read only close*/,
                                  //(it->open_state == OPEN_READ_ONLY),
-                                 false/*record close operations*/,
+                                 true/*record close operations*/,
                                  false/*record closed fields*/,
                                  dummy_states, already_open);
         // Remove the state if it is now empty
