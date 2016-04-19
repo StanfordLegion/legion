@@ -218,7 +218,8 @@ namespace LegionRuntime {
       DISTRIBUTED_VIRTUAL_CHANNEL = 3,
       MAPPER_VIRTUAL_CHANNEL = 4,
       SEMANTIC_INFO_VIRTUAL_CHANNEL = 5,
-      MAX_NUM_VIRTUAL_CHANNELS = 6, // this one must be last
+      VARIANT_VIRTUAL_CHANNEL = 6,
+      MAX_NUM_VIRTUAL_CHANNELS = 7, // this one must be last
     };
 
     enum MessageKind {

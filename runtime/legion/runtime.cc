@@ -13014,7 +13014,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_VARIANT_REQUEST,
-                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+                                        VARIANT_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13022,7 +13022,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_VARIANT_RESPONSE,
-                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+                                        VARIANT_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
