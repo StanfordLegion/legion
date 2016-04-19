@@ -1015,7 +1015,7 @@ namespace LegionRuntime {
     public:
       Processor::Kind get_processor_kind(bool warn) const;
     public:
-      void send_variant_response(AddressSpaceID source, Event done_event);
+      void send_variant_response(AddressSpaceID source, UserEvent done_event);
     public:
       static AddressSpaceID get_owner_space(VariantID vid, Internal *runtime);
       static void handle_variant_response(Internal *runtime, 

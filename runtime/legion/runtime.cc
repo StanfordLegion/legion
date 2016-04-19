@@ -4856,7 +4856,7 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    void VariantImpl::send_variant_response(AddressSpaceID target, Event done)
+    void VariantImpl::send_variant_response(AddressSpaceID target, UserEvent done)
     //--------------------------------------------------------------------------
     {
       if (!global)
@@ -4875,6 +4875,7 @@ namespace LegionRuntime {
         RezCheck z(rez);
         rez.serialize(owner->task_id);
         rez.serialize(vid);
+        rez.serialize(done);
         rez.serialize(has_return_value);
         // pack the code descriptors 
         Realm::Serialization::ByteCountSerializer counter;
@@ -4920,6 +4921,8 @@ namespace LegionRuntime {
       TaskVariantRegistrar registrar(task_id);
       VariantID variant_id;
       derez.deserialize(variant_id);
+      UserEvent done;
+      derez.deserialize(done);
       bool has_return;
       derez.deserialize(has_return);
       size_t impl_size;
@@ -4955,6 +4958,7 @@ namespace LegionRuntime {
       // Ask the runtime to perform the registration 
       runtime->register_variant(registrar, user_data, user_data_size,
                     realm_desc, has_return, variant_id, false/*check task*/);
+      done.trigger();
     }
 
     /////////////////////////////////////////////////////////////
