@@ -608,11 +608,12 @@ std::map<std::string, int>::iterator itt = WrapperMapper::tasks_map.find(task.ge
 
 				select_task_options_message message ={task,output};
 				void *message_point = &message;
-				std::cout<<"Message sent \n";
+				//std::cout<<"Message sent \n";
 				WrapperMapper::mapevent = mapper_rt_create_mapper_event(ctx);
 				WrapperMapper::mapper_rt_send_message(ctx,WrapperMapper::ownerprocessor, message_point, sizeof(select_task_options_message));
 mapper_rt_wait_on_mapper_event(ctx, WrapperMapper::mapevent);
 				}
+			std::cout<<"Test processor"<<output.initial_proc.id<<"\n";
 			}
 }
 
@@ -829,23 +830,41 @@ void WrapperMapper::handle_message(const MapperContext           ctx,
 			if (local_proc==WrapperMapper::ownerprocessor){
 //std::cout<<"Owner mapper recieved a message"<<*(int*)message.message<<"\n";
 select_task_options_message *rec_message = (select_task_options_message*)message.message;
-std::cout<<"Owner mapper recieved a message"<<rec_message->task.get_task_name();
+//std::cout<<"Owner mapper recieved a message"<<rec_message->task.get_task_name();
+const Task& task = rec_message->task;
+TaskOptions& output = rec_message->output;
+
+std::map<std::string, int>::iterator itt = WrapperMapper::tasks_map.find(task.get_task_name());
+			std::map<int, int>::iterator itm = WrapperMapper::methods_map.find(1);
+			std::map<Processor, int>::iterator itp = WrapperMapper::procs_map.find(output.initial_proc);
+			if (((itt!=WrapperMapper::tasks_map.end()) && (itm!=WrapperMapper::methods_map.end())) || (itp!=WrapperMapper::procs_map.end())) {
+				std::cout<<"\n--------------TASK: "<<task.get_task_name()<<" FUNCTION: select_task_options--------------\n";
+				std::cout<<"\nThe selected task options for task "<<task.get_task_name()<<" are as follows:\n";
+				std::cout<<"initial processor="<<output.initial_proc.id<<"\ninline task="<<output.inline_task;
+				std::cout<<"\nspawn task="<<output.stealable<<"\nmap locally="<<output.map_locally<<"\n\n";
+				if (((itt!=tasks_map.end() && itt->second==0) && (itm!=methods_map.end() && itm->second==0))||(itp!=procs_map.end() && itp->second==0)) {
+					std::cout<<"To change the task options, type 'change' and to exit, type 'exit'\n";
+					WrapperMapper::get_select_task_options_input(task, output);
+				}
+			}
+
 int message1 = ++WrapperMapper::messagecount;
 void *mess_point;
 mess_point=&message1;
-std::string input;
-while(1){
-			getline(std::cin, input);
-			if (input.compare("go")==0) break;
-}
-std::cout<<"Message sent by owner\n";
+//std::string input;
+//while(1){
+//			getline(std::cin, input);
+//			if (input.compare("go")==0) break;
+//}
+//std::cout<<"Message sent by owner\n";
 WrapperMapper::mapper_rt_send_message(ctx,message.sender, mess_point, sizeof(int));
 }
 else{
-std::cout<<"Rajshah3"<<mapper_rt_has_mapper_event_triggered(ctx, WrapperMapper::mapevent)<<"\n";
+//std::cout<<"Rajshah3"<<mapper_rt_has_mapper_event_triggered(ctx, WrapperMapper::mapevent)<<"\n";
+std::cout<<"Message recieved by mapper \n";}
 mapper_rt_trigger_mapper_event(ctx, WrapperMapper::mapevent);
-std::cout<<"Rajshah4"<<mapper_rt_has_mapper_event_triggered(ctx, WrapperMapper::mapevent)<<"\n";
-std::cout<<"Message recieved by owner \n";}
+//std::cout<<"Rajshah4"<<mapper_rt_has_mapper_event_triggered(ctx, WrapperMapper::mapevent)<<"\n";
+
 //std::string input;
 //std::cout<<"Rajshah3"<<mapper_rt_has_mapper_event_triggered(ctx, WrapperMapper::mapevent)<<"\n";
 //mapper_rt_trigger_mapper_event(ctx, WrapperMapper::mapevent);
