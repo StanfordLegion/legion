@@ -1050,6 +1050,9 @@ namespace Legion {
       virtual void unpack_remote_context(Deserializer &derez);
     public:
       void add_top_region(LogicalRegion handle);
+    public:
+      void convert_virtual_instances(Deserializer &derez);
+      static void handle_convert_virtual_instances(Deserializer &derez);
     protected:
       std::set<LogicalRegion> top_level_regions;
     protected:

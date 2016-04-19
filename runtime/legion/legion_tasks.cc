@@ -5835,7 +5835,22 @@ namespace Legion {
       // that they have to do this for themselves before we are mapped
       if (!remote_instances.empty())
       {
-
+        for (std::map<AddressSpaceID,RemoteTask*>::const_iterator it = 
+              remote_instances.begin(); it != remote_instances.end(); it++)
+        {
+          UserEvent remote_done = UserEvent::create_user_event();
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(it->second);
+            rez.serialize<size_t>(created_requirements.size());
+            for (unsigned idx = 0; idx < created_requirements.size(); idx++)
+              rez.serialize(created_requirements[idx]);
+            rez.serialize(remote_done); 
+          }
+          runtime->send_remote_convert_virtual_instances(it->first, rez);
+          map_applied_conditions.insert(remote_done);
+        }
       }
       // Now do it for ourself, we have to make a copy because deletions
       // can still come back while we are iterating over our instances
@@ -9111,6 +9126,38 @@ namespace Legion {
     {
       AutoLock o_lock(op_lock);
       top_level_regions.insert(handle);
+    }
+    
+    //--------------------------------------------------------------------------
+    void RemoteTask::convert_virtual_instances(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      size_t num_created;
+      derez.deserialize(num_created);
+      created_requirements.resize(num_created);
+      for (unsigned idx = 0; idx < num_created; idx++)
+        derez.deserialize(created_requirements[idx]);
+      UserEvent to_trigger;
+      derez.deserialize(to_trigger);
+      std::set<Event> applied_conditions;
+      std::map<AddressSpaceID,RemoteTask*> empty_remote;
+      convert_virtual_instance_top_views(empty_remote, applied_conditions);
+      if (!applied_conditions.empty())
+        Runtime::trigger_event<true/*meta*/>(to_trigger,
+            Runtime::merge_events<true/*meta*/>(applied_conditions));
+      else
+        Runtime::trigger_event<true/*meta*/>(to_trigger);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void RemoteTask::handle_convert_virtual_instances(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      RemoteTask *local_context;
+      derez.deserialize(local_context);
+      local_context->convert_virtual_instances(derez);
     }
 
     /////////////////////////////////////////////////////////////

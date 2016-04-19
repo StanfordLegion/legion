@@ -431,6 +431,7 @@ namespace Legion {
       SEND_REMOTE_CONTEXT_REQUEST,
       SEND_REMOTE_CONTEXT_RESPONSE,
       SEND_REMOTE_CONTEXT_FREE,
+      SEND_REMOTE_CONVERT_VIRTUAL,
       SEND_VERSION_STATE_PATH,
       SEND_VERSION_STATE_INIT,
       SEND_VERSION_STATE_REQUEST,
@@ -534,6 +535,7 @@ namespace Legion {
         "Send Remote Context Request",                                \
         "Send Remote Context Response",                               \
         "Send Remote Context Free",                                   \
+        "Send Remote Convert Virtual Instances",                      \
         "Send Version State Path",                                    \
         "Send Version State Init",                                    \
         "Send Version State Request",                                 \
