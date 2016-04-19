@@ -3261,9 +3261,10 @@ class Operation(object):
                             ' [style=solid,color=black,penwidth=2];')
 
 class Task(object):
-    __slots__ = ['op', 'point', 'operations', 'depth', 
+    __slots__ = ['state', 'op', 'point', 'operations', 'depth', 
                  'current_fence', 'used_instances', 'virtual_indexes']
     def __init__(self, state, op):
+        self.state = state
         self.op = op
         self.op.task = self
         self.point = Point(0) 
@@ -3835,7 +3836,7 @@ class FillInstance(object):
                         assert False
                 return False
         else:
-            fill = state.create_fill(op)
+            fill = self.state.create_fill(op)
             fill.add_field(dst_field.fid, dst)    
             for pre in preconditions:
                 pre.physical_outgoing.add(fill)
