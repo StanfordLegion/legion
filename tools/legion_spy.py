@@ -1064,7 +1064,7 @@ class LogicalRegion(object):
         if len(self.children) < len(self.index_space.children):
             for color,child in self.index_space.children.iteritems():
                 if color not in self.children:
-                    state.get_partition(child.uid, self.field_space.uid, self.tree_id)
+                    self.state.get_partition(child.uid, self.field_space.uid, self.tree_id)
         # print links to children
         for child in self.children.itervalues():
             if not simplify_graph or child.has_named_children:
