@@ -613,7 +613,7 @@ std::map<std::string, int>::iterator itt = WrapperMapper::tasks_map.find(task.ge
 				WrapperMapper::mapper_rt_send_message(ctx,WrapperMapper::ownerprocessor, message_point, sizeof(select_task_options_message));
 mapper_rt_wait_on_mapper_event(ctx, WrapperMapper::mapevent);
 				}
-			std::cout<<"Test processor"<<output.initial_proc.id<<"\n";
+			//std::cout<<"Test processor"<<output.initial_proc.id<<"\n";
 			}
 }
 
@@ -861,7 +861,7 @@ WrapperMapper::mapper_rt_send_message(ctx,message.sender, mess_point, sizeof(int
 }
 else{
 //std::cout<<"Rajshah3"<<mapper_rt_has_mapper_event_triggered(ctx, WrapperMapper::mapevent)<<"\n";
-std::cout<<"Message recieved by mapper \n";}
+//std::cout<<"Message recieved by mapper \n";}
 mapper_rt_trigger_mapper_event(ctx, WrapperMapper::mapevent);
 //std::cout<<"Rajshah4"<<mapper_rt_has_mapper_event_triggered(ctx, WrapperMapper::mapevent)<<"\n";
 
@@ -879,6 +879,8 @@ mapper_rt_trigger_mapper_event(ctx, WrapperMapper::mapevent);
 //}
 //			dmapper->handle_message(ctx, message);
 }
+}
+
 void WrapperMapper::handle_task_result(const MapperContext           ctx,
                                       const MapperTaskResult&       result){
 			dmapper->handle_task_result(ctx, result);
