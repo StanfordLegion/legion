@@ -4312,8 +4312,8 @@ namespace LegionRuntime {
         rez.serialize(task_id);
         rez.serialize(variant_id);
         rez.serialize(wait_on);
-        runtime->send_variant_request(owner_space, rez);
       }
+      runtime->send_variant_request(owner_space, rez);
       // Wait for the results
       wait_on.wait();
       // Now we can re-take the lock and find our variant
@@ -4898,6 +4898,7 @@ namespace LegionRuntime {
         execution_constraints.serialize(rez);
         layout_constraints.serialize(rez);
       }
+      runtime->send_variant_response(target, rez);
     }
 
     //--------------------------------------------------------------------------
@@ -4923,11 +4924,20 @@ namespace LegionRuntime {
       derez.deserialize(has_return);
       size_t impl_size;
       derez.deserialize(impl_size);
-      Realm::Serialization::FixedBufferDeserializer
-        deserializer(derez.get_current_pointer(), impl_size);
-      derez.advance_pointer(impl_size);
       CodeDescriptor *realm_desc = new CodeDescriptor();
-      realm_desc->deserialize(deserializer);
+      {
+        // Realm's serializers assume properly aligned buffers, so
+        // malloc a temporary buffer here and copy the data to ensure
+        // alignment.
+        void *impl_buffer = malloc(impl_size);
+        assert(impl_buffer);
+        memcpy(impl_buffer, derez.get_current_pointer(), impl_size);
+        derez.advance_pointer(impl_size);
+        Realm::Serialization::FixedBufferDeserializer
+          deserializer(impl_buffer, impl_size);
+        assert(realm_desc->deserialize(deserializer));
+        free(impl_buffer);
+      }
       size_t user_data_size;
       derez.deserialize(user_data_size);
       const void *user_data = derez.get_current_pointer();
@@ -13013,7 +13023,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_VARIANT_REQUEST,
-                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+                                        VARIANT_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13021,7 +13031,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_VARIANT_RESPONSE,
-                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+                                        VARIANT_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
