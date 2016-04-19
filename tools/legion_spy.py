@@ -5712,6 +5712,12 @@ class State(object):
 
     def simplify_physical_graph(self):
         print "Simplifying event graph..."
+        # Check for cycles first, if there are any, then we disable
+        # the transitive reduction and print a warning
+        if self.perform_cycle_checks(print_result=False):
+            print "WARNING: CYCLE DETECTED IN PHYSICAL EVENT GRAPH!!!"
+            print "WARNING: DISABLING TRANSITIVE REDUCTION!!!"
+            return
         def traverse_node(node, traverser):
             if node not in traverser.order:
                 traverser.order.append(node)
@@ -5796,17 +5802,19 @@ class State(object):
 
             # Run race detection
 
-    def perform_cycle_checks(self):
+    def perform_cycle_checks(self, print_result=True):
         for op in self.ops.itervalues(): 
             if op.perform_cycle_check():
-                return
+                return True
         for copy in self.copies.itervalues():
             if copy.perform_cycle_check():
-                return
+                return True
         for fill in self.fills.itervalues():
             if fill.perform_cycle_check():
-                return
-        print "No cycles detected"
+                return True
+        if print_result:
+            print "No cycles detected"
+        return False
 
     def make_region_tree_graphs(self, path, simplify_graphs):
         index_space_printer = GraphPrinter(path, 'index_space_graph', 'TB')
