@@ -4312,8 +4312,8 @@ namespace LegionRuntime {
         rez.serialize(task_id);
         rez.serialize(variant_id);
         rez.serialize(wait_on);
-        runtime->send_variant_request(owner_space, rez);
       }
+      runtime->send_variant_request(owner_space, rez);
       // Wait for the results
       wait_on.wait();
       // Now we can re-take the lock and find our variant
