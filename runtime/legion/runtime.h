@@ -2670,9 +2670,7 @@ namespace Legion {
       static bool verify_disjointness;
       static bool bit_mask_logging;
 #endif
-#ifdef INORDER_EXECUTION
       static bool program_order_execution;
-#endif
 #ifdef DEBUG_PERF
     public:
       static unsigned long long perf_trace_tolerance;

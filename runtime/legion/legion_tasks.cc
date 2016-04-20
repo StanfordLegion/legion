@@ -3172,28 +3172,14 @@ namespace Legion {
         // Already fixed, dump a complete trace op into the stream
         TraceCompleteOp *complete_op = runtime->get_available_trace_op(true);
         complete_op->initialize_complete(this);
-#ifdef INORDER_EXECUTION
-        Event term_event = complete_op->get_completion_event();
-#endif
         runtime->add_to_dependence_queue(get_executing_processor(),complete_op);
-#ifdef INORDER_EXECUTION
-        if (Runtime::program_order_execution && !term_event.has_triggered())
-          term_event.wait();
-#endif
       }
       else
       {
         // Not fixed yet, dump a capture trace op into the stream
         TraceCaptureOp *capture_op = runtime->get_available_capture_op(true); 
         capture_op->initialize_capture(this);
-#ifdef INORDER_EXECUTION
-        Event term_event = capture_op->get_completion_event();
-#endif
         runtime->add_to_dependence_queue(get_executing_processor(), capture_op);
-#ifdef INORDER_EXECUTION
-        if (Runtime::program_order_execution && !term_event.has_triggered())
-          term_event.wait();
-#endif
         // Mark that the current trace is now fixed
         current_trace->fix_trace();
       }
