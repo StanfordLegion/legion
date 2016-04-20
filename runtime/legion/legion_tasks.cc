@@ -1750,9 +1750,9 @@ namespace LegionRuntime {
               regions[idx].premapped = runtime->forest->premap_physical_region(
                                        req_ctx, privilege_path, regions[idx], 
                                        version_info, this, parent_ctx,
-                                       parent_ctx->get_executing_processor()
+                                       parent_ctx->get_executing_processor(),idx
 #ifdef DEBUG_HIGH_LEVEL
-                                       , idx, get_logging_name(), unique_op_id
+                                       , get_logging_name(), unique_op_id
 #endif
                                        );
 #ifdef DEBUG_HIGH_LEVEL
@@ -4760,7 +4760,7 @@ namespace LegionRuntime {
         {
           local_instances[idx] = 
             runtime->forest->initialize_current_context(context,
-                clone_requirements[idx], get_unique_op_id(),
+                clone_requirements[idx], get_unique_op_id(), idx,
                 physical_instances[idx].get_manager(),
                 unmap_events[idx], depth+1, top_views);
 #ifdef DEBUG_HIGH_LEVEL
@@ -4801,7 +4801,7 @@ namespace LegionRuntime {
             // ever being read from, so all the dependences it will catch
             // are true dependences, therefore making it safe. :)
             runtime->forest->initialize_current_context(context,
-                clone_requirements[idx], get_unique_op_id(), composite_view);
+              clone_requirements[idx], get_unique_op_id(), idx, composite_view);
           }
         }
       }
@@ -6622,9 +6622,10 @@ namespace LegionRuntime {
                                          get_parent_context(idx),
                                          privilege_paths[idx], regions[idx], 
                                          version_infos[idx], this, parent_ctx,
-                                         parent_ctx->get_executing_processor()
+                                         parent_ctx->get_executing_processor(),
+                                         idx
 #ifdef DEBUG_HIGH_LEVEL
-                                         , idx, get_logging_name(), unique_op_id
+                                         , get_logging_name(), unique_op_id
 #endif
                                          );
 #ifdef DEBUG_HIGH_LEVEL
@@ -7537,9 +7538,9 @@ namespace LegionRuntime {
                                      get_parent_context(idx),
                                      mapping_path, regions[idx], 
                                      version_info, this, parent_ctx,
-                                     parent_ctx->get_executing_processor()
+                                     parent_ctx->get_executing_processor(), idx
 #ifdef DEBUG_HIGH_LEVEL
-                                     , idx, get_logging_name(), unique_op_id
+                                     , get_logging_name(), unique_op_id
 #endif
                                      );
 #ifdef DEBUG_HIGH_LEVEL
@@ -10147,9 +10148,10 @@ namespace LegionRuntime {
                                        get_parent_context(idx),
                                        privilege_path, regions[idx], 
                                        version_infos[idx], this, parent_ctx,
-                                       parent_ctx->get_executing_processor()
+                                       parent_ctx->get_executing_processor(), 
+                                       idx
 #ifdef DEBUG_HIGH_LEVEL
-                                       , idx, get_logging_name(), unique_op_id
+                                       , get_logging_name(), unique_op_id
 #endif
                                        );
 #ifdef DEBUG_HIGH_LEVEL

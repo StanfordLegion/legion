@@ -63,8 +63,8 @@ namespace LegionRuntime {
     
     //--------------------------------------------------------------------------
     PhysicalUser::PhysicalUser(const RegionUsage &u, const ColorPoint &c,
-                               UniqueID id)
-      : usage(u), child(c), op_id(id)
+                               UniqueID id, unsigned idx, bool cp)
+      : usage(u), child(c), op_id(id), index(idx), copy(cp)
     //--------------------------------------------------------------------------
     {
     }
@@ -101,6 +101,8 @@ namespace LegionRuntime {
       rez.serialize(usage.prop);
       rez.serialize(usage.redop);
       rez.serialize(op_id);
+      rez.serialize(index);
+      rez.serialize(copy);
     }
 
     //--------------------------------------------------------------------------
@@ -116,6 +118,8 @@ namespace LegionRuntime {
       derez.deserialize(result->usage.prop);
       derez.deserialize(result->usage.redop);
       derez.deserialize(result->op_id);
+      derez.deserialize(result->index);
+      derez.deserialize(result->copy);
 #ifdef DEBUG_HIGH_LEVEL
       assert(result != NULL);
 #endif
@@ -126,9 +130,9 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     MappableInfo::MappableInfo(ContextID c, Operation *o, Processor p,
-                               RegionRequirement &r, VersionInfo &info,
-                               const FieldMask &k)
-      : ctx(c), op(o), local_proc(p), req(r), 
+                               RegionRequirement &r, unsigned idx,
+                               VersionInfo &info, const FieldMask &k)
+      : ctx(c), op(o), local_proc(p), req(r), index(idx),
         version_info(info), traversal_mask(k)
     //--------------------------------------------------------------------------
     {
@@ -1461,9 +1465,9 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     ReductionCloser::ReductionCloser(ContextID c, ReductionView *t,
                                      const FieldMask &m, VersionInfo &info, 
-                                     Processor local, Operation *o)
+                                     Processor local, Operation *o, unsigned i)
       : ctx(c), target(t), close_mask(m), version_info(info), 
-        local_proc(local), op(o)
+        local_proc(local), op(o), index(i)
     //--------------------------------------------------------------------------
     {
     }
@@ -1471,7 +1475,8 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     ReductionCloser::ReductionCloser(const ReductionCloser &rhs)
       : ctx(0), target(NULL), close_mask(FieldMask()), 
-        version_info(rhs.version_info), local_proc(Processor::NO_PROC), op(NULL)
+        version_info(rhs.version_info), 
+        local_proc(Processor::NO_PROC), op(NULL), index(0)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -1517,7 +1522,7 @@ namespace LegionRuntime {
       }
       if (!valid_reductions.empty())
         node->issue_update_reductions(target, close_mask, version_info,
-                                      local_proc, valid_reductions, op);
+                                      local_proc, valid_reductions, op, index);
     }
 
     /////////////////////////////////////////////////////////////
@@ -2332,7 +2337,8 @@ namespace LegionRuntime {
     void CurrentState::initialize_state(LogicalView *view, Event term_event,
                                         const RegionUsage &usage,
                                         const FieldMask &user_mask,
-                                        const UniqueID init_op_id)
+                                        const UniqueID init_op_id,
+                                        const unsigned init_index)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -2345,7 +2351,8 @@ namespace LegionRuntime {
       {
         VersionState *init_state = create_new_version_state(init_version);
         init_state->add_base_valid_ref(VERSION_MANAGER_REF);
-        init_state->initialize(view, term_event, usage, user_mask, init_op_id);
+        init_state->initialize(view, term_event, usage, user_mask, 
+                               init_op_id, init_index);
         current_version_infos[init_version].valid_fields = user_mask;
         current_version_infos[init_version].states[init_state] = user_mask;
       }
@@ -2362,7 +2369,8 @@ namespace LegionRuntime {
 #endif
         LegionMap<VersionState*,FieldMask>::aligned::iterator it = 
           finder->second.states.begin();
-        it->first->initialize(view, term_event, usage, user_mask, init_op_id);
+        it->first->initialize(view, term_event, usage, user_mask, 
+                              init_op_id, init_index);
         it->second |= user_mask;
       }
 #ifdef DEBUG_HIGH_LEVEL
@@ -4774,7 +4782,8 @@ namespace LegionRuntime {
     void VersionState::initialize(LogicalView *new_view, Event term_event,
                                   const RegionUsage &usage,
                                   const FieldMask &user_mask,
-                                  const UniqueID init_op_id)
+                                  const UniqueID init_op_id,
+                                  const unsigned init_index)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -4795,7 +4804,8 @@ namespace LegionRuntime {
           else
             finder->second |= user_mask;
           reduction_mask |= user_mask;
-          inst_view->add_initial_user(term_event, usage, user_mask, init_op_id);
+          inst_view->add_initial_user(term_event, usage, user_mask, 
+                                      init_op_id, init_index);
         }
         else
         {
@@ -4807,7 +4817,8 @@ namespace LegionRuntime {
             finder->second |= user_mask;
           if (HAS_WRITE(usage))
             dirty_mask |= user_mask;
-          inst_view->add_initial_user(term_event, usage, user_mask, init_op_id);
+          inst_view->add_initial_user(term_event, usage, user_mask, 
+                                      init_op_id, init_index);
         }
       }
       else

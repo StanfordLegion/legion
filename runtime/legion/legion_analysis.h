@@ -275,8 +275,8 @@ namespace LegionRuntime {
       static const AllocationType alloc_type = PHYSICAL_USER_ALLOC;
     public:
       PhysicalUser(void);
-      PhysicalUser(const RegionUsage &u, 
-                   const ColorPoint &child, UniqueID op_id);
+      PhysicalUser(const RegionUsage &u, const ColorPoint &child, 
+                   UniqueID op_id, unsigned index, bool copy);
       PhysicalUser(const PhysicalUser &rhs);
       ~PhysicalUser(void);
     public:
@@ -291,6 +291,8 @@ namespace LegionRuntime {
       RegionUsage usage;
       ColorPoint child;
       UniqueID op_id;
+      short index; // region requirement index
+      bool copy; // is this a copy user
     }; 
 
     /**
@@ -300,13 +302,14 @@ namespace LegionRuntime {
     public:
       MappableInfo(ContextID ctx, Operation *op,
                    Processor local_proc, RegionRequirement &req,
-                   VersionInfo &version_info,
+                   unsigned index, VersionInfo &version_info,
                    const FieldMask &traversal_mask);
     public:
       const ContextID ctx;
       Operation *const op;
       const Processor local_proc;
       RegionRequirement &req;
+      const unsigned index;
       VersionInfo &version_info;
       const FieldMask traversal_mask;
     };
@@ -404,7 +407,8 @@ namespace LegionRuntime {
       void initialize_state(LogicalView *view, Event term_event,
                             const RegionUsage &usage,
                             const FieldMask &user_mask,
-                            const UniqueID init_op_id);
+                            const UniqueID init_op_id,
+                            const unsigned init_index);
       void record_version_numbers(const FieldMask &mask,
                                   const LogicalUser &user,
                                   VersionInfo &version_info,
@@ -826,7 +830,8 @@ namespace LegionRuntime {
       void initialize(LogicalView *view, Event term_event,
                       const RegionUsage &usage,
                       const FieldMask &user_mask,
-                      const UniqueID init_op_id);
+                      const UniqueID init_op_id,
+                      const unsigned init_index);
     public: // methods for retrieving state information
       void update_split_previous_state(PhysicalState *state,
                                        const FieldMask &update_mask) const;
@@ -1148,7 +1153,8 @@ namespace LegionRuntime {
       ReductionCloser(ContextID ctx, ReductionView *target,
                       const FieldMask &reduc_mask, 
                       VersionInfo &version_info,
-                      Processor local_proc, Operation *op);
+                      Processor local_proc, Operation *op,
+                      unsigned index);
       ReductionCloser(const ReductionCloser &rhs);
       ~ReductionCloser(void);
     public:
@@ -1161,6 +1167,7 @@ namespace LegionRuntime {
       VersionInfo &version_info;
       const Processor local_proc;
       Operation *const op;
+      const unsigned index;
     protected:
       std::set<ReductionView*> issued_reductions;
     };
