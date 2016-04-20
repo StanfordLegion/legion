@@ -3686,12 +3686,7 @@ class Instance(object):
             return result
         if precise:
             points = req.logical_node.get_shape().copy()
-        logical_op = op.get_logical_op()
         for user in reversed(users[field]):
-            # If they are from the same operation, then we don't
-            # need to record any dependences
-            if logical_op is user.logical_op:
-                continue
             if user.region.intersects(req.logical_node):
                 # If we have intersections we can also check those
                 # for overlap, if any of them prove to be independent
@@ -3732,6 +3727,7 @@ class Instance(object):
         for user in reversed(users[field]):
             # Check to see if they come from the same operation
             # if they do, then we don't need a dependence
+            # Note that we only do this for copy operations
             if logical_op is user.logical_op:
                 continue
             if user.region.intersects(region):
