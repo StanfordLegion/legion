@@ -2463,8 +2463,8 @@ namespace Legion {
 #ifdef DEBUG_HIGH_LEVEL
         bool valid =
 #endif
-          compute_index_path(root->handle.get_index_space(),
-                             region_node->handle.get_index_space(), path);
+          compute_index_path(region_node->handle.get_index_space(), 
+                             root->handle.get_index_space(), path);
 #ifdef DEBUG_HIGH_LEVEL
         assert(valid);
 #endif
