@@ -291,7 +291,7 @@ namespace LegionRuntime {
       RegionUsage usage;
       ColorPoint child;
       UniqueID op_id;
-      short index; // region requirement index
+      unsigned index; // region requirement index
       bool copy; // is this a copy user
     }; 
 
