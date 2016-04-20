@@ -274,15 +274,13 @@ namespace LegionRuntime {
     public:
       static const AllocationType alloc_type = PHYSICAL_USER_ALLOC;
     public:
-      PhysicalUser(const RegionUsage &u, const ColorPoint &child,
-                   FieldVersions *versions = NULL);
+      PhysicalUser(void);
+      PhysicalUser(const RegionUsage &u, 
+                   const ColorPoint &child, UniqueID op_id);
       PhysicalUser(const PhysicalUser &rhs);
       ~PhysicalUser(void);
     public:
       PhysicalUser& operator=(const PhysicalUser &rhs);
-    public:
-      bool same_versions(const FieldMask &test_mask, 
-                         const FieldVersions *other) const;
     public:
       void pack_user(Serializer &rez);
       static PhysicalUser* unpack_user(Deserializer &derez, 
@@ -292,7 +290,7 @@ namespace LegionRuntime {
     public:
       RegionUsage usage;
       ColorPoint child;
-      FieldVersions *const versions;
+      UniqueID op_id;
     }; 
 
     /**
@@ -405,7 +403,8 @@ namespace LegionRuntime {
     public:
       void initialize_state(LogicalView *view, Event term_event,
                             const RegionUsage &usage,
-                            const FieldMask &user_mask);
+                            const FieldMask &user_mask,
+                            const UniqueID init_op_id);
       void record_version_numbers(const FieldMask &mask,
                                   const LogicalUser &user,
                                   VersionInfo &version_info,
@@ -826,7 +825,8 @@ namespace LegionRuntime {
     public:
       void initialize(LogicalView *view, Event term_event,
                       const RegionUsage &usage,
-                      const FieldMask &user_mask);
+                      const FieldMask &user_mask,
+                      const UniqueID init_op_id);
     public: // methods for retrieving state information
       void update_split_previous_state(PhysicalState *state,
                                        const FieldMask &update_mask) const;

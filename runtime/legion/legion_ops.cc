@@ -8215,7 +8215,7 @@ namespace LegionRuntime {
           {
             ready_event = 
               runtime->forest->create_partition_by_field(physical_ctx,
-                                                         local_proc,
+                                                         local_proc, this,
                                                          requirement,
                                                          partition_handle,
                                                          color_space,
@@ -8227,7 +8227,7 @@ namespace LegionRuntime {
           {
             ready_event = 
               runtime->forest->create_partition_by_image(physical_ctx,
-                                                         local_proc,
+                                                         local_proc, this,
                                                          requirement,
                                                          partition_handle,
                                                          color_space,
@@ -8239,7 +8239,7 @@ namespace LegionRuntime {
           {
             ready_event = 
               runtime->forest->create_partition_by_preimage(physical_ctx,
-                                                            local_proc,
+                                                            local_proc, this,
                                                             requirement,
                                                             projection,
                                                             partition_handle,

@@ -577,7 +577,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     Event RegionTreeForest::create_partition_by_field(RegionTreeContext ctx,
-                                                  Processor proc,
+                                                  Processor proc, Operation *op,
                                                   const RegionRequirement &req,
                                                   IndexPartition pending,
                                                   const Domain &color_space,
@@ -604,8 +604,9 @@ namespace LegionRuntime {
         user_mask.set_bit(fid_idx);
         RegionUsage usage(req);
         top_node->find_field_descriptors(ctx.get_id(), term_event, usage,
-                                       user_mask, fid_idx, proc,
-                                       field_data, preconditions, version_info);
+                                       user_mask, op->get_unique_op_id(),
+                                       fid_idx, proc, field_data, 
+                                       preconditions, version_info);
       }
       // Enumerate the color space so we can get back a different index
       // for each color in the color space
@@ -633,7 +634,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     Event RegionTreeForest::create_partition_by_image(RegionTreeContext ctx,
-                                                  Processor proc,
+                                                  Processor proc, Operation *op,
                                                   const RegionRequirement &req,
                                                   IndexPartition pending,
                                                   const Domain &color_space,
@@ -669,8 +670,9 @@ namespace LegionRuntime {
         // Get the field data on this child node
         RegionUsage usage(req);
         child_node->find_field_descriptors(ctx.get_id(), term_event, usage,
-                                            user_mask, fid_idx, proc,
-                                       field_data, preconditions, version_info);
+                                           user_mask, op->get_unique_op_id(),
+                                           fid_idx, proc, field_data, 
+                                           preconditions, version_info);
         Event child_pre;
         const Domain &child_dom = 
                         child_node->row_source->get_domain(child_pre);
@@ -700,7 +702,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     Event RegionTreeForest::create_partition_by_preimage(RegionTreeContext ctx,
-                                                  Processor proc,
+                                                  Processor proc, Operation *op,
                                                   const RegionRequirement &req,
                                                   IndexPartition projection,
                                                   IndexPartition pending,
@@ -729,8 +731,9 @@ namespace LegionRuntime {
         user_mask.set_bit(fid_idx);
         RegionUsage usage(req);
         top_node->find_field_descriptors(ctx.get_id(), term_event, usage,
-                                         user_mask, fid_idx, proc,
-                                       field_data, preconditions, version_info);
+                                         user_mask, op->get_unique_op_id(),
+                                         fid_idx, proc, field_data,
+                                         preconditions, version_info);
       }
       // Get all the index spaces from the color space in the projection
       std::map<Realm::IndexSpace,Realm::IndexSpace> subspaces;
@@ -2014,6 +2017,7 @@ namespace LegionRuntime {
     InstanceRef RegionTreeForest::initialize_current_context(
                                                 RegionTreeContext ctx,
                                                 const RegionRequirement &req,
+                                                const UniqueID init_op_id,
                                                 PhysicalManager *manager,
                                                 Event term_event,
                                                 unsigned depth,
@@ -2091,13 +2095,14 @@ namespace LegionRuntime {
       // that overlap with each other.
       // Now seed the top node
       top_node->seed_state(ctx.get_id(), term_event, usage,
-                           user_mask, new_view);
+                           user_mask, init_op_id, new_view);
       return InstanceRef(Event::NO_EVENT, new_view);
     }
 
     //--------------------------------------------------------------------------
     void RegionTreeForest::initialize_current_context(RegionTreeContext ctx,
                                                   const RegionRequirement &req,
+                                                  const UniqueID init_op_id,
                                                   CompositeView *composite_view)
     //--------------------------------------------------------------------------
     {
@@ -2109,7 +2114,7 @@ namespace LegionRuntime {
       FieldMask user_mask = 
         top_node->column_source->get_field_mask(req.privilege_fields);
       top_node->seed_state(ctx.get_id(), Event::NO_EVENT, usage,
-                           user_mask, composite_view);
+                           user_mask, init_op_id, composite_view);
     }
     
     //--------------------------------------------------------------------------
@@ -2293,6 +2298,7 @@ namespace LegionRuntime {
                                           src_preconditions[it->first];
         it->first->find_copy_preconditions(0/*redop*/, true/*reading*/,
                                            it->second, src_version_info,
+                                           op->get_unique_op_id(),
                                            preconditions);
       }
       for (unsigned idx = 0; idx < src_req.instance_fields.size(); idx++)
@@ -2359,6 +2365,7 @@ namespace LegionRuntime {
             FieldMask local_src; local_src.set_bit(src_index);
             sit->first->add_copy_user(0/*redop*/, copy_post,
                                       src_version_info,
+                                      op->get_unique_op_id(),
                                       local_src, true/*reading*/);
             // No need to register a user for the destination because
             // we've already mapped it.
@@ -13569,12 +13576,14 @@ namespace LegionRuntime {
 #endif
           it->first->find_copy_preconditions(0/*redop*/, true/*reading*/,
                                              it->second, info.version_info,
+                                             info.op->get_unique_op_id(),
                                              preconditions);
           update_mask |= it->second;
         }
         // Now do the destination
         dst->find_copy_preconditions(0/*redop*/, false/*reading*/,
                                      update_mask, info.version_info,
+                                     info.op->get_unique_op_id(),
                                      preconditions);
 
         LegionMap<Event,FieldMask>::aligned postconditions;
@@ -13602,6 +13611,7 @@ namespace LegionRuntime {
               postconditions.begin(); it != postconditions.end(); it++)
         {
           dst->add_copy_user(0/*redop*/, it->first, info.version_info, 
+                             info.op->get_unique_op_id(),
                              it->second, false/*reading*/);
         }
       }
@@ -13911,6 +13921,7 @@ namespace LegionRuntime {
                 it = update_views.begin(); it != update_views.end(); it++)
           {
             it->first->add_copy_user(0/*redop*/, copy_post, src_version_info,
+                                     info.op->get_unique_op_id(),
                                      it->second, true/*reading*/);
           }
           postconditions[copy_post] = pre_set.set_mask;
@@ -15759,8 +15770,8 @@ namespace LegionRuntime {
                              false/*dirty*/, new_view);
         }
         // Now add ourselves as a user of this region
-        return new_view->add_user(usage, term_event,
-                                  user_mask, info.version_info);
+        return new_view->add_user(usage, term_event, user_mask, 
+                          info.version_info, info.op->get_unique_op_id());
       }
       else
       {
@@ -15776,8 +15787,8 @@ namespace LegionRuntime {
         // it was performed as part of the premapping operation
         update_reduction_views(state, user_mask, new_view);
         // Now we can add ourselves as a user of this region
-        return new_view->add_user(usage, term_event,
-                                  user_mask, info.version_info);
+        return new_view->add_user(usage, term_event, user_mask, 
+                          info.version_info, info.op->get_unique_op_id());
       }
     }
 
@@ -15794,11 +15805,12 @@ namespace LegionRuntime {
     void RegionNode::seed_state(ContextID ctx, Event term_event,
                                 const RegionUsage &usage,
                                 const FieldMask &user_mask,
+                                const UniqueID init_op_id,
                                 LogicalView *new_view)
     //--------------------------------------------------------------------------
     {
       get_current_state(ctx).initialize_state(new_view, term_event, 
-                                              usage, user_mask);
+                                              usage, user_mask, init_op_id);
     } 
 
     //--------------------------------------------------------------------------
@@ -15826,7 +15838,7 @@ namespace LegionRuntime {
         // up dependences on all the reductions applied ot this instance
         usage.privilege = READ_ONLY;
         InstanceRef result = target_view->add_user(usage, term_event,
-                                                  user_mask, info.version_info);
+                    user_mask, info.version_info, info.op->get_unique_op_id());
 #ifdef DEBUG_HIGH_LEVEL
         assert(result.has_ref());
 #endif
@@ -15859,6 +15871,7 @@ namespace LegionRuntime {
     void RegionNode::find_field_descriptors(ContextID ctx, Event term_event,
                                             const RegionUsage &usage,
                                             const FieldMask &user_mask,
+                                            const UniqueID reading_op_id,
                                             unsigned fid_idx, Processor proc,
                                   std::vector<FieldDataDescriptor> &field_data,
                                             std::set<Event> &preconditions,
@@ -15892,7 +15905,7 @@ namespace LegionRuntime {
             view->set_descriptor(field_data.back(), fid_idx);
             // Register ourselves as user of this instance
             InstanceRef ref = view->add_user(usage, term_event,
-                                             user_mask, version_info);  
+                                 user_mask, version_info, reading_op_id);  
             Event ready_event = ref.get_ready_event();
             if (ready_event.exists())
               preconditions.insert(ready_event);
@@ -15918,8 +15931,8 @@ namespace LegionRuntime {
         // instance or apply it to all the existing physical instances
         if (!deferred_view->is_composite_view())
           assert(false); // TODO: implement this
-        deferred_view->find_field_descriptors(term_event, usage, 
-                                              user_mask, fid_idx, proc, 
+        deferred_view->find_field_descriptors(term_event, usage, user_mask, 
+                                              reading_op_id, fid_idx, proc, 
                                               field_data, preconditions);
       }
     }
@@ -15959,8 +15972,8 @@ namespace LegionRuntime {
       // Effectively a fill is a special kind of copy so we can analyze
       // it the same way to figure out how to issue the fill
       LegionMap<Event,FieldMask>::aligned preconditions;
-      target->find_copy_preconditions(0/*redop*/, false/*reading*/,
-                                      fill_mask, version_info, preconditions);
+      target->find_copy_preconditions(0/*redop*/, false/*reading*/, fill_mask, 
+                          version_info, op->get_unique_op_id(), preconditions);
       // Get the domains we need for this copy 
       std::set<Domain> fill_domains;
       Event dom_pre = Event::NO_EVENT;
@@ -15995,7 +16008,7 @@ namespace LegionRuntime {
       }
       // Add user to make record when everyone is done writing
       target->add_copy_user(0/*redop*/, op->get_completion_event(),
-                            version_info, fill_mask, false/*reading*/);
+          version_info, op->get_unique_op_id(), fill_mask, false/*reading*/);
       // Finally do the update to the physical state like a normal fill
       PhysicalState *state = get_physical_state(ctx, version_info);
       // Invalidate any open children and any reductions

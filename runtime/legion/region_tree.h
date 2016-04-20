@@ -127,6 +127,7 @@ namespace LegionRuntime {
                                            Event domain_ready);
       Event create_partition_by_field(RegionTreeContext ctx,
                                       Processor local_proc,
+                                      Operation *op,
                                       const RegionRequirement &req,
                                       IndexPartition pending,
                                       const Domain &color_space,
@@ -134,6 +135,7 @@ namespace LegionRuntime {
                                       VersionInfo &version_info);
       Event create_partition_by_image(RegionTreeContext ctx,
                                       Processor local_proc,
+                                      Operation *op,
                                       const RegionRequirement &req,
                                       IndexPartition pending,
                                       const Domain &color_space,
@@ -141,6 +143,7 @@ namespace LegionRuntime {
                                       VersionInfo &version_info);
       Event create_partition_by_preimage(RegionTreeContext ctx,
                                       Processor local_proc,
+                                      Operation *op,
                                       const RegionRequirement &req,
                                       IndexPartition projection,
                                       IndexPartition pending,
@@ -264,11 +267,12 @@ namespace LegionRuntime {
                             const std::set<FieldID> &fields);
     public:
       InstanceRef initialize_current_context(RegionTreeContext ctx,
-                    const RegionRequirement &req, PhysicalManager *manager,
-                    Event term_event, unsigned depth,
+                    const RegionRequirement &req, const UniqueID init_op_id,
+                    PhysicalManager *manager, Event term_event, unsigned depth,
                     std::map<PhysicalManager*,InstanceView*> &top_views);
       void initialize_current_context(RegionTreeContext ctx,
                                       const RegionRequirement &req,
+                                      const UniqueID init_op_id,
                                       CompositeView *composite_view);
       void invalidate_current_context(RegionTreeContext ctx,
                                       LogicalRegion handle,
@@ -1927,6 +1931,7 @@ namespace LegionRuntime {
       void seed_state(ContextID ctx, Event term_event,
                              const RegionUsage &usage,
                              const FieldMask &user_mask,
+                             const UniqueID init_op_id,
                              LogicalView *new_view);
       Event close_state(const MappableInfo &info, Event term_event,
                         RegionUsage &usage, const FieldMask &user_mask,
@@ -1934,6 +1939,7 @@ namespace LegionRuntime {
       void find_field_descriptors(ContextID ctx, Event term_event,
                                   const RegionUsage &usage,
                                   const FieldMask &user_mask,
+                                  const UniqueID reading_op_id,
                                   unsigned fid_idx, Processor proc, 
                                   std::vector<FieldDataDescriptor> &field_data,
                                   std::set<Event> &preconditions,

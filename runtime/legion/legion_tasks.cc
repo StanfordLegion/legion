@@ -4760,7 +4760,7 @@ namespace LegionRuntime {
         {
           local_instances[idx] = 
             runtime->forest->initialize_current_context(context,
-                clone_requirements[idx], 
+                clone_requirements[idx], get_unique_op_id(),
                 physical_instances[idx].get_manager(),
                 unmap_events[idx], depth+1, top_views);
 #ifdef DEBUG_HIGH_LEVEL
@@ -4801,7 +4801,7 @@ namespace LegionRuntime {
             // ever being read from, so all the dependences it will catch
             // are true dependences, therefore making it safe. :)
             runtime->forest->initialize_current_context(context,
-                clone_requirements[idx], composite_view);
+                clone_requirements[idx], get_unique_op_id(), composite_view);
           }
         }
       }
