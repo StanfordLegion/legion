@@ -314,7 +314,6 @@ namespace LegionRuntime {
                                       const RegionUsage &next_user,
                                       const FieldMask &next_mask,
                                       const ColorPoint &child_color,
-                                      const UniqueID op_id,
                                       std::set<Event> &preconditions,
                                       FieldMask &observed,
                                       FieldMask &non_dominated);
@@ -324,7 +323,6 @@ namespace LegionRuntime {
                                        const RegionUsage &next_user,
                                        const FieldMask &next_mask,
                                        const ColorPoint &child_color,
-                                       const UniqueID op_id,
                                        std::set<Event> &preconditions);
     protected: 
       void find_copy_preconditions_above(ReductionOpID redop, bool reading,

@@ -1336,7 +1336,7 @@ namespace LegionRuntime {
             find_current_preconditions(cit->first, 
                                        event_users.users.single_user,
                                        event_users.user_mask,
-                                       usage, user_mask, child_color, op_id,
+                                       usage, user_mask, child_color,
                                        preconditions, observed, non_dominated);
           }
           else
@@ -1354,7 +1354,7 @@ namespace LegionRuntime {
                 if (find_current_preconditions(cit->first,
                                                it->first, it->second,
                                                usage, user_mask, child_color,
-                                               op_id, preconditions, 
+                                               preconditions, 
                                                observed, non_dominated))
                   break;
               }
@@ -1406,7 +1406,7 @@ namespace LegionRuntime {
                                         event_users.users.single_user,
                                         event_users.user_mask,
                                         usage, non_dominated,
-                                        child_color, op_id, preconditions);
+                                        child_color, preconditions);
           }
           else
           {
@@ -1420,8 +1420,7 @@ namespace LegionRuntime {
                 if (find_previous_preconditions(pit->first,
                                                 it->first, it->second,
                                                 usage, non_dominated, 
-                                                child_color, op_id, 
-                                                preconditions))
+                                                child_color, preconditions))
                   break;
               }
             }
@@ -1470,7 +1469,6 @@ namespace LegionRuntime {
                                                  const RegionUsage &next_user,
                                                  const FieldMask &next_mask,
                                                  const ColorPoint &child_color,
-                                                 const UniqueID op_id,
                                                  std::set<Event> &preconditions,
                                                  FieldMask &observed,
                                                  FieldMask &non_dominated)
@@ -1481,12 +1479,6 @@ namespace LegionRuntime {
         return false;
       else
         observed |= overlap;
-      // Same operation so no dependence
-      if (op_id == prev_user->op_id)
-      {
-        non_dominated |= overlap;
-        return false;
-      }
       if (child_color.is_valid())
       {
         // Same child, already done the analysis
@@ -1537,13 +1529,9 @@ namespace LegionRuntime {
                                                  const RegionUsage &next_user,
                                                  const FieldMask &next_mask,
                                                  const ColorPoint &child_color,
-                                                 const UniqueID op_id,
                                                  std::set<Event> &preconditions)
     //--------------------------------------------------------------------------
     {
-      // Same operatino so no dependence
-      if (op_id == prev_user->op_id)
-        return false;
       if (child_color.is_valid())
       {
         // Same child: did analysis below
@@ -1803,6 +1791,7 @@ namespace LegionRuntime {
       else
         observed |= overlap;
       // Same operation so no dependence
+      // Note that this only applies to copies and not users
       if (creator_op_id == user->op_id)
       {
         non_dominated |= overlap;
@@ -1857,6 +1846,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     { 
       // Same operation so no dependence
+      // Note that this only applies to copies and not users
       if (creator_op_id == user->op_id)
         return;
       if (child_color.is_valid())
