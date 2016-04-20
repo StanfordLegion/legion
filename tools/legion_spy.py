@@ -606,7 +606,7 @@ class IndexSpace(object):
         intersection = self.get_shape() & other.get_shape()
         if intersection.empty():
             self.intersections[other] = None
-            return intersection 
+            return None
         self.intersections[other] = intersection
         return intersection
 
@@ -737,7 +737,7 @@ class IndexPartition(object):
         intersection = self.get_shape() & other.get_shape()
         if intersection.empty():
             self.intersections[other] = None
-            return intersection 
+            return None 
         self.intersections[other] = intersection
         return intersection
         
@@ -1014,16 +1014,16 @@ class LogicalRegion(object):
         return physical_state.perform_physical_close(op, req, inst,
                                                      perform_checks)
 
-    def close_physical_tree(self, depth, field, target, op, perform_checks):
+    def close_physical_tree(self, depth, field, target, op, req, perform_checks):
         for child in self.children.itervalues():
             if not child.perform_close_physical_tree(depth, field, target, 
-                                                     op, perform_checks):
+                                                     op, req, perform_checks):
                 return False
         return True
 
-    def perform_close_physical_tree(self, depth, field, target, op, perform_checks):
+    def perform_close_physical_tree(self, depth, field, target, op, req, perform_checks):
         physical_state = self.get_physical_state(depth, field)
-        return physical_state.close_physical_tree(target, op, perform_checks)
+        return physical_state.close_physical_tree(target, op, req, perform_checks)
 
     def mark_named_children(self):
         if self.name is not None:
@@ -1215,16 +1215,16 @@ class LogicalPartition(object):
         return physical_state.perform_physical_close(op, req, inst,
                                                      perform_checks)
 
-    def close_physical_tree(self, depth, field, target, op, perform_checks):
+    def close_physical_tree(self, depth, field, target, op, req, perform_checks):
         for child in self.children.itervalues():
             if not child.perform_close_physical_tree(depth, field, target, 
-                                                     op, perform_checks):
+                                                     op, req, perform_checks):
                 return False
         return True
 
-    def perform_close_physical_tree(self, depth, field, target, op, perform_checks):
+    def perform_close_physical_tree(self, depth, field, target, op, req, perform_checks):
         physical_state = self.get_physical_state(depth, field)
-        return physical_state.close_physical_tree(target, op, perform_checks)
+        return physical_state.close_physical_tree(target, op, req, perform_checks)
 
     def mark_named_children(self):
         if self.name is not None:
@@ -1784,7 +1784,7 @@ class PhysicalState(object):
             assert not self.reduction_instances
             # If we are write only, we just need to close up any open children
             if not self.node.close_physical_tree(self.depth, self.field, 
-                                                 None, op, perform_checks):
+                                                 None, op, req, perform_checks):
                 return False
             # Clear out all previous valid instances make this the only one
             self.valid_instances = set()
@@ -1799,14 +1799,14 @@ class PhysicalState(object):
             if inst not in valid:
                 error_str = "region requirement "+str(req.index)+" of "+str(op)
                 # Not valid yet, we need to issue copies to make ourselves valid
-                if not self.issue_update_copies(inst, valid, op, 
+                if not self.issue_update_copies(inst, valid, op, req.index, 
                                                 perform_checks, error_str):
                     return False
             # If we are writing, close up any open children
             if req.is_write():
                 # Close up the tree to our instance
                 if not self.node.close_physical_tree(self.depth, self.field, 
-                                                     inst, op, perform_checks):
+                                                     inst, op, req, perform_checks):
                     return False
                 # We are now the only valid copy
                 self.valid_instances = set()
@@ -1816,8 +1816,8 @@ class PhysicalState(object):
                 self.valid_instances.add(inst)
         if register:
             # Find our preconditions for using this instance
-            preconditions = inst.find_use_dependences(self.depth, self.field, 
-                                                      op, req, perform_checks)
+            preconditions = inst.find_use_dependences(depth=self.depth, field=self.field, 
+                                                  op=op, req=req, precise=perform_checks)
             if perform_checks:
                 bad = check_preconditions(preconditions, op)
                 if bad is not None:
@@ -1832,14 +1832,14 @@ class PhysicalState(object):
                     op.physical_incoming.add(other)
                     other.physical_outgoing.add(op)
             # Record ourselves as a users for this instance
-            inst.add_user(self.depth, self.field, op, req)
+            inst.add_user(depth=self.depth, field=self.field, op=op, req=req)
         return True
 
     def perform_fill_analysis(self, op, req, perform_checks):
         assert req.logical_node is self.node
         # Clean out our state and all our child states
         if not self.node.close_physical_tree(self.depth, self.field, 
-                                             None, op, perform_checks):
+                                             None, op, req, perform_checks):
             return False
         # Mark that we are dirty since we are writing
         self.dirty = True  
@@ -1857,12 +1857,12 @@ class PhysicalState(object):
             # invalidate all the stuff in the sub tree, no need to 
             # invalidate anything at this node
             return self.node.close_physical_tree(self.depth, self.field,
-                                                 None, op, perform_checks)
+                                                 None, op, req, perform_checks)
         elif inst.is_virtual():
             target = CompositeInstance(op.state, self.node, self.depth, self.field)
             # Capture down the tree first
             if not self.node.close_physical_tree(self.depth, self.field,
-                                                 target, op, perform_checks):
+                                                 target, op, req, perform_checks):
                 return False
             # Now capture locally
             already_captured = set()
@@ -1874,18 +1874,18 @@ class PhysicalState(object):
                 if inst not in self.valid_instances:
                     error_str = "region requirement "+str(req.index)+" of "+str(op)
                     if not self.issue_update_copies(inst, self.valid_instances, op,
-                                                    perform_checks, error_str):
+                                              req.index, perform_checks, error_str):
                         return False
             # close sub-tree
             if not self.node.close_physical_tree(self.depth, self.field,
-                                                 inst, op, perform_checks):
+                                                 inst, op, req, perform_checks):
                 return False
             # Finally flush any outstanding reductions
             if self.reduction_instances:
                 assert self.redop <> 0
                 error_str = "region requirement "+str(req.index)+" of "+str(op)
                 if not self.issue_update_reductions(inst, self.reduction_instances, 
-                                                    op, perform_checks, error_str):
+                                          op, req.index, perform_checks, error_str):
                     return False
             target = inst
         self.dirty = True
@@ -1895,15 +1895,15 @@ class PhysicalState(object):
         self.valid_instances.add(target)
         return True
 
-    def close_physical_tree(self, target, op, perform_checks):
+    def close_physical_tree(self, target, op, req, perform_checks):
         # Issue any updates from our instances
         if target is not None and not target.is_virtual() and self.dirty:
             if not self.issue_update_copies(target, self.valid_instances, 
-                                            op, perform_checks, str(op)):
+                                            op, req.index, perform_checks, str(op)):
                 return False
         # Continue down the tree 
         if not self.node.close_physical_tree(self.depth, self.field, 
-                                             target, op, perform_checks):
+                                             target, op, req, perform_checks):
             return False
         # If the target is a composite instance do the capture
         # otherwise flush any reductions
@@ -1914,7 +1914,7 @@ class PhysicalState(object):
             elif self.redop <> 0:
                 assert self.reduction_instances
                 if not self.issue_update_reductions(target, self.reduction_instances,
-                                                    op, perform_checks):
+                                                    op, req.index, perform_checks):
                     return False
         # Now we can reset everything since we are closed
         self.dirty = False
@@ -1936,7 +1936,7 @@ class PhysicalState(object):
             result.add(inst)
         return result
 
-    def issue_update_copies(self, dst, valid, op, perform_checks, error_str):
+    def issue_update_copies(self, dst, valid, op, index, perform_checks, error_str):
         # There better be a destination
         assert dst
         # Easy out if there are no valid instances
@@ -1947,11 +1947,12 @@ class PhysicalState(object):
         if len(valid) == 1 and next(iter(valid)).is_virtual():
             virtual_inst = next(iter(valid))
             return virtual_inst.issue_update_copies(dst, self.depth, self.node, op, 
-                                                    perform_checks, error_str)
+                                                    index, perform_checks, error_str)
         # Find the destination preconditions since we will
         # need to know them no matter what
-        dst_preconditions = dst.find_copy_dependences(self.depth, self.field, 
-                                        op, self.node, False, 0, perform_checks)
+        dst_preconditions = dst.find_copy_dependences(depth=self.depth, 
+            field=self.field, op=op, index=index, region=self.node, 
+            reading=False, redop=0, precise=perform_checks)
         if perform_checks:
             # Find the copy that was generated by this operation
             copy = op.find_generated_copy(self.field, dst.region, dst, 0, self.node)
@@ -1973,8 +1974,9 @@ class PhysicalState(object):
                     assert False
                 return False
             # Now check for event preconditions 
-            src_preconditions = src.find_copy_dependences(self.depth, self.field, 
-                                          op, self.node, True, 0, perform_checks)
+            src_preconditions = src.find_copy_dependences(depth=self.depth, 
+                field=self.field, op=op, index=index, region=self.node, 
+                reading=True, redop=0, precise=perform_checks)
             # Have to fill in the reachable cache
             if copy.reachable_cache is None:
                 copy.reachable_cache = set()
@@ -1999,8 +2001,9 @@ class PhysicalState(object):
             if len(valid) > 1:
                 print "INFO: Multiple valid instances to choose from... picking one" 
             src = next(iter(valid)) 
-            src_preconditions = src.find_copy_dependences(self.depth, self.field, 
-                                          op, self.node, True, 0, perform_checks)
+            src_preconditions = src.find_copy_dependences(depth=self.depth, 
+                field=self.field, op=op, index=index, region=self.node, 
+                reading=True, redop=0, precise=perform_checks)
             # Make a realm copy from the source to the dst for this field
             copy = dst.state.create_copy(op)
             copy.add_field(self.field.fid, src, self.field.fid, dst, 0) 
@@ -2013,11 +2016,14 @@ class PhysicalState(object):
                 dst_op.physical_outgoing.add(copy)
                 copy.physical_incoming.add(dst_op)
         # Record the copy user
-        src.add_copy_user(self.depth, self.field, self.node, copy, True, 0)
-        dst.add_copy_user(self.depth, self.field, self.node, copy, False, 0)
+        src.add_copy_user(depth=self.depth, field=self.field, region=self.node, 
+                          op=copy, index=index, reading=True, redop=0)
+        dst.add_copy_user(depth=self.depth, field=self.field, region=self.node, 
+                          op=copy, index=index, reading=False, redop=0)
         return True
 
-    def issue_update_reductions(self, dst, reductions, op, perform_checks, error_str):
+    def issue_update_reductions(self, dst, reductions, op, index, 
+                                perform_checks, error_str):
         # There better be a destination 
         assert dst 
         if perform_checks:
@@ -2036,8 +2042,9 @@ class PhysicalState(object):
                 assert reduction.redops[reduc_index] == src.redop
                 src = reduction.srcs[reduc_index]
                 # Now check for event preconditions
-                src_preconditions = src.find_copy_dependences(self.depth, self.field, 
-                                                        op, self.node, True, 0, True) 
+                src_preconditions = src.find_copy_dependences(depth=self.depth, 
+                    field=self.field, op=op, index=index, region=self.node, 
+                    reading=True, redop=0, precise=True) 
                 # Fill in the reachable cache if necessary
                 if reduction.reachable_cache is None:
                     reduction.reachable_cache = set()
@@ -2049,8 +2056,9 @@ class PhysicalState(object):
                     if self.node.state.assert_on_fail:
                         assert False
                     return False
-                dst_preconditions = dst.find_copy_dependences(self.depth, self.field, 
-                                               op, self.node, False, src.redop, True)
+                dst_preconditions = dst.find_copy_dependences(depth=self.depth, 
+                    field=self.field, op=op, index=index, region=self.node, 
+                    reading=False, redop=src.redop, precise=True)
                 bad = check_preconditions(dst_preconditions, reduction)
                 if bad is not None:
                     print "ERROR: Missing destination copy precondition for reduction "+\
@@ -2059,10 +2067,10 @@ class PhysicalState(object):
                         assert False
                     return False
                 # Register the users
-                src.add_copy_user(self.depth, self.field, self.node, 
-                                  reduction, True, 0) # just reading
-                dst.add_copy_user(self.depth, self.field, self.node, 
-                                  reduction, False, src.redop)
+                src.add_copy_user(depth=self.depth, field=self.field, region=self.node, 
+                                  op=reduction, index=index, reading=True, redop=0)
+                dst.add_copy_user(depth=self.depth, field=self.field, region=self.node, 
+                                  op=reduction, index=index, reading=False, redop=src.redop)
         else:
             # flush all the reductions to the destination 
             for src in reductions:
@@ -2071,21 +2079,23 @@ class PhysicalState(object):
                 reduction = self.node.state.create_copy(op)
                 reduction.set_region(self.node)
                 reduction.add_field(self.field.fid, src, self.field.fid, dst, src.redop) 
-                src_preconditions = src.find_copy_dependences(self.depth, self.field, 
-                                                        op, self.node, True, 0, False)
+                src_preconditions = src.find_copy_dependences(depth=self.depth, 
+                    field=self.field, op=op, index=index, region=self.node, 
+                    reading=True, redop=0, precise=False)
                 for src_op in src_preconditions:
                     src_op.physical_outgoing.add(reduction)
                     reduction.add_physical_incoming(src_op)
-                dst_preconditions = dst.find_copy_dependences(self.depth, self.field, 
-                                              op, self.node, False, src.redop, False)
+                dst_preconditions = dst.find_copy_dependences(depth=self.depth, 
+                    field=self.field, op=op, index=index, region=self.node, 
+                    reading=False, redop=src.redop, precise=False)
                 for dst_op in dst_preconditions:
                     dst_op.physical_outgoing.add(reduction)
                     reduction.physical_incoming.add(dst_op)
                 # Record the copy user
-                src.add_copy_user(self.depth, self.field, self.node, 
-                                  reduction, True, 0) # Just reading
-                dst.add_copy_user(self.depth, self.field, self.node, 
-                                  reduction, False, src.redop)
+                src.add_copy_user(depth=self.depth, field=self.field, region=self.node, 
+                                  op=reduction, index=index, reading=True, redop=0)
+                dst.add_copy_user(depth=self.depth, field=self.field, region=self.node, 
+                                  op=reduction, index=index, reading=False, redop=src.redop)
         return True
 
 class Requirement(object):
@@ -2882,10 +2892,10 @@ class Operation(object):
                 return False
             else:
                 # Normal reduction, find the source and destination dependences
-                src_preconditions = src_inst.find_use_dependences(depth, src_field, self, 
-                                                                  src_req, perform_checks)
-                dst_preconditions = dst_inst.find_use_dependences(depth, dst_field, self,
-                                                                  dst_req, perform_checks)
+                src_preconditions = src_inst.find_use_dependences(depth=depth, 
+                    field=src_field, op=self, req=src_req, precise=perform_checks)
+                dst_preconditions = dst_inst.find_use_dependences(depth=depth, 
+                    field=dst_field, op=self, req=dst_req, precise=perform_checks)
                 if perform_checks:
                     reduction = self.find_generated_copy_across(src_field, dst_field,
                                   dst_req.logical_node, src_inst, dst_inst, dst_req.redop)
@@ -2932,10 +2942,14 @@ class Operation(object):
                         dst.physical_outgoing.add(reduction)
                         reduction.physical_incoming.add(dst)
                 # Record the copy users
-                src_inst.add_copy_user(depth, src_field, src_req.logical_node, 
-                                       reduction, True, 0)
-                dst_inst.add_copy_user(depth, dst_field, dst_req.logical_node, 
-                                       reduction, False, dst_req.redop)
+                src_inst.add_copy_user(depth=depth, field=src_field, 
+                                       region=src_req.logical_node, 
+                                       op=reduction, index=src_index, 
+                                       reading=True, redop=0)
+                dst_inst.add_copy_user(depth=depth, field=dst_field, 
+                                       region=dst_req.logical_node, 
+                                       op=reduction, index=dst_index, 
+                                       reading=False, redop=dst_req.redop)
             # Done with the analysis, swith the privilege back
             dst_req.priv = REDUCE
         else:
@@ -2948,10 +2962,10 @@ class Operation(object):
                               dst_region.logical_node, self, perform_checks, error_str)
             else:
                 # Normal copy
-                src_preconditions = src_inst.find_use_dependences(depth, src_field, self, 
-                                                                  src_req, perform_checks)
-                dst_preconditions = dst_inst.find_use_dependences(depth, dst_field, self,
-                                                                  dst_req, perform_checks)
+                src_preconditions = src_inst.find_use_dependences(depth=depth, 
+                    field=src_field, op=self, req=src_req, precise=perform_checks)
+                dst_preconditions = dst_inst.find_use_dependences(depth=depth, 
+                    field=dst_field, op=self, req=dst_req, precise=perform_checks)
                 if perform_checks:
                     copy = self.find_generated_copy_across(src_field, dst_field,
                                           dst_req.logical_node, src_inst, dst_inst)
@@ -2995,10 +3009,14 @@ class Operation(object):
                         dst.physical_outgoing.add(copy)
                         copy.physical_incoming.add(dst)
                 # Record the copy users
-                src_inst.add_copy_user(depth, src_field, src_req.logical_node, 
-                                       copy, True, 0)
-                dst_inst.add_copy_user(depth, dst_field, dst_req.logical_node, 
-                                       copy, False, 0)
+                src_inst.add_copy_user(depth=depth, field=src_field, 
+                                       region=src_req.logical_node, 
+                                       op=copy, index=src_index, 
+                                       reading=True, redop=0)
+                dst_inst.add_copy_user(depth=depth, field=dst_field, 
+                                       region=dst_req.logical_node, 
+                                       op=copy, index=dst_index, 
+                                       reading=False, redop=0)
         return True
 
     def analyze_fill_requirement(self, depth, index, req, perform_checks):
@@ -3403,7 +3421,7 @@ class Task(object):
                 parent_depth = depth - 1
                 inst.clone_users(field, parent_depth, depth) 
                 # Then add our own user at our parent's depth
-                inst.add_user(parent_depth, field, self.op, req)
+                inst.add_user(depth=parent_depth, field=field, op=self.op, req=req)
                 # We are done
                 break
         # Record that we handled this field for this instance
@@ -3565,12 +3583,14 @@ class Task(object):
             printer.end_this_cluster()
 
 class InstanceUser(object):
-    __slots__ = ['op', 'logical_op', 'region', 'priv', 'coher', 
+    __slots__ = ['op', 'index', 'logical_op', 'region', 'priv', 'coher', 
                  'redop', 'shape', 'intersect']
-    def __init__(self, op, region, priv, coher, redop, shape=None, intersect=None):
+    def __init__(self, op, index, region, priv, coher, redop, 
+                 shape=None, intersect=None):
         assert isinstance(region, LogicalRegion)
         # The operation that generated this user
         self.op = op
+        self.index = index
         # The application level operation that generated this user
         if op is not None:
             self.logical_op = op.get_logical_op()
@@ -3583,6 +3603,10 @@ class InstanceUser(object):
         self.redop = redop
         self.shape = shape
         self.intersect = intersect
+
+    def is_realm_op(self):
+        assert self.op is not None
+        return self.op.is_realm_operation()
 
     def is_no_access(self):
         return self.priv == NO_ACCESS
@@ -3686,7 +3710,14 @@ class Instance(object):
             return result
         if precise:
             points = req.logical_node.get_shape().copy()
+        logical_op = op.get_logical_op()
         for user in reversed(users[field]):
+            # If this is another user generated by the same operation
+            # but from a different region requirement then we can 
+            # skip the dependence because we'll catch it implicitly
+            # as part of the dependences through other region requirements
+            if logical_op is user.logical_op and req.index <> user.index:
+                continue
             if user.region.intersects(req.logical_node):
                 # If we have intersections we can also check those
                 # for overlap, if any of them prove to be independent
@@ -3704,7 +3735,7 @@ class Instance(object):
                             break
         return result
 
-    def find_copy_dependences(self, depth, field, op, region, reading, 
+    def find_copy_dependences(self, depth, field, op, index, region, reading, 
                               redop, precise, intersect=None):
         assert not self.is_virtual()
         users = self.get_users(depth)
@@ -3713,11 +3744,11 @@ class Instance(object):
             return result
         if reading:
             assert redop == 0
-            inst = InstanceUser(None, region, READ_ONLY, EXCLUSIVE, 0)
+            inst = InstanceUser(None, index, region, READ_ONLY, EXCLUSIVE, 0)
         elif redop <> 0:
-            inst = InstanceUser(None, region, REDUCE, EXCLUSIVE, redop)
+            inst = InstanceUser(None, index, region, REDUCE, EXCLUSIVE, redop)
         else:
-            inst = InstanceUser(None, region, READ_WRITE, EXCLUSIVE, 0)
+            inst = InstanceUser(None, index, region, READ_WRITE, EXCLUSIVE, 0)
         if precise:
             if intersect is None:
                 points = region.get_shape().copy()
@@ -3725,11 +3756,13 @@ class Instance(object):
                 points = region.get_shape() & intersect.get_shape()
         logical_op = op.get_logical_op()
         for user in reversed(users[field]):
-            # Check to see if they come from the same operation
-            # if they do, then we don't need a dependence
-            # Note that we only do this for copy operations
-            if logical_op is user.logical_op:
-                continue
+            # If this user was generated by the same operation check to 
+            # see if is another user or a copy operation, users from a
+            # different region requirement can be skipped, otherwise
+            # we can avoid WAR and WAW dependences, but not true RAW dependences
+            if logical_op is user.logical_op and index <> user.index:
+                if not user.is_realm_op() or not reading or user.is_read_only():
+                    continue
             if user.region.intersects(region):
                 # If we have intersections we can also check those
                 # for overlap, if any of them prove to be independent
@@ -3761,14 +3794,17 @@ class Instance(object):
 
     def add_user(self, depth, field, op, req):
         assert not self.is_virtual()
+        assert not op.is_realm_operation()
         users = self.get_users(depth)
         if field not in users:
             users[field] = list()
-        users[field].append(InstanceUser(op, req.logical_node, 
+        users[field].append(InstanceUser(op, req.index, req.logical_node, 
                 req.priv, req.coher, req.redop, req.logical_node.get_shape()))
 
-    def add_copy_user(self, depth, field, region, op, reading, redop, intersect=None):
+    def add_copy_user(self, depth, field, region, op, index, 
+                      reading, redop, intersect=None):
         assert not self.is_virtual()
+        assert op.is_realm_operation()
         users = self.get_users(depth)
         if field not in users:
             users[field] = list()
@@ -3778,13 +3814,13 @@ class Instance(object):
             shape = region.get_shape() & intersect.get_shape()
         if reading:
             assert redop == 0
-            users[field].append(InstanceUser(op, region,
+            users[field].append(InstanceUser(op, index, region,
                                  READ_ONLY, EXCLUSIVE, 0, shape, intersect))
         elif redop <> 0:
-            users[field].append(InstanceUser(op, region,
+            users[field].append(InstanceUser(op, index, region,
                                  REDUCE, EXCLUSIVE, redop, shape, intersect))
         else:
-            users[field].append(InstanceUser(op, region,
+            users[field].append(InstanceUser(op, index, region,
                                  READ_WRITE, EXCLUSIVE, 0, shape, intersect))
 
 class FillInstance(object):
@@ -3809,7 +3845,7 @@ class FillInstance(object):
     def add_user(self, depth, field, op, req):
         assert False
 
-    def add_copy_user(self, depth, field, op, reading, redop):
+    def add_copy_user(self, depth, field, op, index, reading, redop, intersect=None):
         assert False
 
     def is_virtual(self):
@@ -3818,20 +3854,23 @@ class FillInstance(object):
     def is_composite(self):
         return False
 
-    def issue_update_copies(self, dst, dst_depth, region, op, perform_checks, error_str):
+    def issue_update_copies(self, dst, dst_depth, region, 
+                            op, index, perform_checks, error_str):
         # This is just a special case of issue copies across 
-        return self.issue_copies_across(dst, dst_depth, self.field, region, op, 
+        return self.issue_copies_across(dst, dst_depth, self.field, region, op, index,
                                         perform_checks, error_str, False)
 
-    def issue_copies_across(self, dst, dst_depth, dst_field, region, op, 
+    def issue_copies_across(self, dst, dst_depth, dst_field, region, op, index, 
                             perform_checks, error_str, actually_across=True):
         # Find the destination preconditions
         if self.region is not region:
-            preconditions = dst.find_copy_dependences(dst_depth, dst_field, op, region, 
-                                              False, 0, perform_checks, self.region)
+            preconditions = dst.find_copy_dependences(depth=dst_depth, 
+                field=dst_field, op=op, region=region, reading=False, 
+                redop=0, precise=perform_checks, intersect=self.region)
         else:
-            preconditions = dst.find_copy_dependences(dst_depth, dst_field, op, region, 
-                                              False, 0, perform_checks)
+            preconditions = dst.find_copy_dependences(depth=dst_depth, 
+                field=dst_field, op=op, region=region, reading=False, 
+                redop=0, precise=perform_checks)
         if perform_checks:
             if self.region is not region:
                 fill = op.find_generated_fill(dst_field, region, dst, self.region)
@@ -3873,7 +3912,8 @@ class FillInstance(object):
             for pre in preconditions:
                 pre.physical_outgoing.add(fill)
                 fill.physical_incoming.add(pre)
-        dst.add_copy_user(dst_depth, dst_field, False, 0)
+        dst.add_copy_user(depth=dst_depth, field=dst_field, region=region,
+                          op=fill, index=index, reading=False, redop=0)
         return True
 
 class CompositeNode(object):
@@ -3955,8 +3995,8 @@ class CompositeNode(object):
             for inst in self.valid_instances:
                 valid.add(inst)
 
-    def issue_update_copies(self, dst, dst_depth, dst_field, region, op, perform_checks, 
-                            error_str, actually_across, need_check = True):
+    def issue_update_copies(self, dst, dst_depth, dst_field, region, op, index, 
+                            perform_checks, error_str, actually_across, need_check = True):
         if need_check:
             # Figure out how many children dominate the target region
             # Keep going down if we there is exaclty one
@@ -3965,8 +4005,8 @@ class CompositeNode(object):
                 if child.node.dominates(region):
                     dominating_children.append(child)
             if len(dominating_children) == 1:
-                return dominating_children[0].issue_update_copies(dst, dst_depth, 
-                    dst_field, region, op, perform_checks, error_str, actually_across)
+                return dominating_children[0].issue_update_copies(dst, dst_depth, dst_field,
+                          region, op, index, perform_checks, error_str, actually_across)
         # If we need check (e.g. haven't initialized data) or we are dirty
         # then we have to issue copies from this level
         if need_check or self.dirty:
@@ -3987,11 +4027,14 @@ class CompositeNode(object):
                         return False
                 else:
                     if self.node is not region:
-                        dst_preconditions = dst.find_copy_dependences(dst_depth, 
-                            dst_field, op, region, False, 0, perform_checks, self.node)
+                        dst_preconditions = dst.find_copy_dependences(depth=dst_depth, 
+                            field=dst_field, op=op, index=index, region=region, 
+                            reading=False, redop=0, precise=perform_checks, 
+                            intersect=self.node)
                     else:
-                        dst_preconditions = dst.find_copy_dependences(dst_depth,
-                            dst_field, op, region, False, 0, perform_checks)
+                        dst_preconditions = dst.find_copy_dependences(depth=dst_depth,
+                            field=dst_field, op=op, index=index, region=region, 
+                            reading=False, redop=0, precise=perform_checks)
                     if perform_checks:
                         # Find the copy
                         if self.node is not region:
@@ -4016,13 +4059,15 @@ class CompositeNode(object):
                             return False
                         src = copy.find_src_inst(self.owner.field)
                         if self.node is not region:
-                            src_preconditions = src.find_copy_dependences(self.owner.depth,
-                                            self.owner.field, op, region, True, 0, 
-                                            perform_checks, self.node)
+                            src_preconditions = src.find_copy_dependences(
+                                depth=self.owner.depth, field=self.owner.field, 
+                                op=op, index=index, region=region, reading=True, 
+                                redop=0, precise=perform_checks, intersect=self.node)
                         else:
-                            src_preconditions = src.find_copy_dependences(self.owner.depth,
-                                            self.owner.field, op, region, True, 0, 
-                                            perform_checks)
+                            src_preconditions = src.find_copy_dependences(
+                                depth=self.owner.depth, field=self.owner.field, 
+                                op=op, index=index, region=region, reading=True, 
+                                redop=0, precise=perform_checks)
                         if copy.reachable_cache is None:
                             copy.reachable_cache = set()
                             copy.get_physical_reachable(copy.reachable_cache, False)
@@ -4067,13 +4112,15 @@ class CompositeNode(object):
                                   "composite instance... picking one"
                         src = next(iter(valid))
                         if self.node is not region:
-                            src_preconditions = src.find_copy_dependences(self.owner.depth,
-                                                  self.owner.field, op, region, True, 0, 
-                                                  perform_checks, self.node)
+                            src_preconditions = src.find_copy_dependences(
+                                depth=self.owner.depth, field=self.owner.field, 
+                                op=op, index=index, region=region, reading=True, 
+                                redop=0, precise=perform_checks, intersect=self.node)
                         else:
-                            src_preconditions = src.find_copy_dependences(self.owner.depth,
-                                                  self.owner.field, op, region, True, 0, 
-                                                  perform_checks)
+                            src_preconditions = src.find_copy_dependences(
+                                depth=self.owner.depth, field=self.owner.field, 
+                                op=op, index=index, region=region, reading=True, 
+                                redop=0, precise=perform_checks)
                         # Make a realm copy from the source to the destination
                         copy = self.owner.state.create_copy(op)
                         copy.set_region(region)
@@ -4088,21 +4135,25 @@ class CompositeNode(object):
                             copy.physical_incoming.add(dst_op)
                     # Record the copy user
                     if self.node is not region:
-                        src.add_copy_user(self.owner.depth, self.owner.field, region, 
-                                          copy, True, 0, self.node)
-                        dst.add_copy_user(dst_depth, dst_field, region, 
-                                          copy, False, 0, self.node)
+                        src.add_copy_user(depth=self.owner.depth, field=self.owner.field, 
+                                          region=region, op=copy, index=index, 
+                                          reading=True, redop=0, intersect=self.node)
+                        dst.add_copy_user(depth=dst_depth, field=dst_field, 
+                                          region=region, op=copy, index=index, 
+                                          reading=False, redop=0, intersect=self.node)
                     else:
-                        src.add_copy_user(self.owner.depth, self.owner.field, region, 
-                                          copy, True, 0)
-                        dst.add_copy_user(dst_depth, dst_field, region, copy, False, 0)
+                        src.add_copy_user(depth=self.owner.depth, field=self.owner.field, 
+                                          region=region, op=copy, index=index, 
+                                          reading=True, redop=0)
+                        dst.add_copy_user(depth=dst_depth, field=dst_field, region=region, 
+                                          op=copy, index=index, reading=False, redop=0)
         # Now we can recurse down the tree from this point, no need for the check
         for child in self.children:
             # Check for intersection before going down
             if not region.intersects(child.node):
                 continue
             if not child.issue_update_copies(dst, dst_depth, dst_field, region, op, 
-                                perform_checks, error_str, actually_across, False):
+                          index, perform_checks, error_str, actually_across, False):
                 return False
         return True
 
@@ -4182,7 +4233,7 @@ class CompositeInstance(object):
     def add_user(self, depth, field, op, req):
         assert False
 
-    def add_copy_user(self, depth, field, op, reading, redop):
+    def add_copy_user(self, depth, field, op, index, reading, redop, intersect=None):
         assert False
 
     def is_virtual(self):
@@ -4191,17 +4242,18 @@ class CompositeInstance(object):
     def is_composite(self):
         return True
 
-    def issue_update_copies(self, dst, dst_depth, region, op, perform_checks, error_str):
+    def issue_update_copies(self, dst, dst_depth, region, 
+                            op, index, perform_checks, error_str):
         # This is actually just a special case of issuing copies across 
-        return self.issue_copies_across(dst, dst_depth, self.field, region, op, 
+        return self.issue_copies_across(dst, dst_depth, self.field, region, op, index, 
                                         perform_checks, error_str, False)
 
-    def issue_copies_across(self, dst, dst_depth, dst_field, region, op, 
+    def issue_copies_across(self, dst, dst_depth, dst_field, region, op, index, 
                             perform_checks, error_str, actually_across=True):
         # First issue copies from anything in our tree
         assert self.root in self.nodes
         if not self.nodes[self.root].issue_update_copies(dst, dst_depth, dst_field, 
-                            region, op, perform_checks, error_str, actually_across):
+                      region, op, index, perform_checks, error_str, actually_across):
             return False
         # If we have any reductions issue those now
         if self.reductions:
@@ -4234,11 +4286,14 @@ class CompositeInstance(object):
                             return False
                         if reduction_inst.region is not region:
                             src_preconditions = reduction_inst.find_copy_dependences(
-                                self.depth, self.field, op, region, True, 0, 
-                                perform_checks, reduction_inst.region)
+                                depth=self.depth, field=self.field, op=op, 
+                                region=region, reading=True, redop=0, 
+                                precise=perform_checks, intersect=reduction_inst.region)
                         else:
                             src_preconditions = reduction_inst.find_copy_dependences(
-                                self.depth, self.field, op, region, True, 0, perform_checks)
+                                depth=self.depth, field=self.field, op=op, 
+                                region=region, reading=True, redop=0, 
+                                precise=perform_checks)
                         if reduction.reachable_cache is None:
                             reduction.reachable_cache = set()
                             reduction.get_physical_reachable(
@@ -4259,13 +4314,15 @@ class CompositeInstance(object):
                                     assert False
                             return False
                         if reduction_inst.region is not region:
-                            dst_preconditions = dst.find_copy_dependences(dst_depth, 
-                                dst_field, op, region, False, reduction_inst.redop,
-                                perform_checks, reduction_inst.region)
+                            dst_preconditions = dst.find_copy_dependences(
+                                depth=dst_depth, field=dst_field, op=op, 
+                                region=region, reading=False, redop=reduction_inst.redop,
+                                precise=perform_checks, intersect=reduction_inst.region)
                         else:
-                            dst_preconditions = dst.find_copy_dependences(dst_depth,
-                                dst_field, op, region, False, reduction_inst.redop, 
-                                perform_checks)
+                            dst_preconditions = dst.find_copy_dependences(
+                                depth=dst_depth, field=dst_field, op=op, 
+                                region=region, reading=False, redop=reduction_inst.redop, 
+                                precise=perform_checks)
                         bad = check_preconditions(dst_preconditions, reduction)
                         if bad is not None:
                             if actually_across:
@@ -4282,15 +4339,19 @@ class CompositeInstance(object):
                                     assert False
                             return False
                         if reduction_inst.region is not region:
-                            reduction_inst.add_copy_user(self.depth, self.field, region, 
-                                reduction, True, 0, reduction_inst.region)
-                            dst.add_copy_user(dst_depth, dst_field, region, reduction, False, 
-                                            reduction_inst.redop, reduction_inst.region)
+                            reduction_inst.add_copy_user(depth=self.depth, field=self.field,
+                                region=region, op=reduction, index=index, reading=True, 
+                                redop=0, intersect=reduction_inst.region)
+                            dst.add_copy_user(depth=dst_depth, field=dst_field, 
+                                region=region, op=reduction, index=index, reading=False, 
+                                redop=reduction_inst.redop, intersect=reduction_inst.region)
                         else:
-                            reduction_isnt.add_copy_user(self.depth, self.field, region, 
-                                reduction, True, 0)
-                            dst.add_copy_user(dst_depth, dst_field, region, reduction, False,
-                                              reduction_inst.redop)
+                            reduction_isnt.add_copy_user(depth=self.depth, field=self.field,
+                                region=region, op=reduction, index=index, 
+                                reading=True, redop=0)
+                            dst.add_copy_user(depth=dst_depth, field=dst_field, 
+                                region=region, op=reduction, index=index, 
+                                reading=False, intersect=reduction_inst.redop)
             else:
                 for reduction_inst in self.reductions:
                     assert reduction_inst.redop <> 0
@@ -4303,18 +4364,22 @@ class CompositeInstance(object):
                         if reduction_inst.region is not region:
                             reduction.set_intersection(reduction_inst.region)
                             src_preconditions = reduction_inst.find_copy_dependences(
-                                self.depth, self.field, op, region, True, 0,
-                                perform_checks, reduction_inst.region)
-                            dst_preconditions = dst.find_copy_dependences(dst_depth,
-                                dst_field, region, False, reduction_inst.redop,
-                                perform_checks, reduction_inst.region)
+                                depth=self.depth, field=self.field, op=op, 
+                                region=region, reading=True, redop=0,
+                                precise=perform_checks, intersect=reduction_inst.region)
+                            dst_preconditions = dst.find_copy_dependences(
+                                depth=dst_depth, field=dst_field, op=op,
+                                region=region, reading=False, redop=reduction_inst.redop,
+                                precise=perform_checks, intersect=reduction_inst.region)
                         else:
                             src_preconditions = reduction_inst.find_copy_dependences(
-                                self.depth, self.field, op, region, True, 0, 
-                                perform_checks)
-                            dst_preconditions = dst.find_copy_dependences(dst_depth,
-                                dst_field, op, region, False, reduction_inst.redop, 
-                                perform_checks)
+                                depth=self.depth, field=self.field, op=op, 
+                                region=region, reading=True, redop=0, 
+                                precise=perform_checks)
+                            dst_preconditions = dst.find_copy_dependences(
+                                depth=dst_depth, field=dst_field, op=op, 
+                                region=region, reading=False, redop=reduction_inst.redop, 
+                                precise=perform_checks)
                         for src_op in src_preconditions:
                             src_op.physical_outgoing.add(reduction)
                             reduction.physical_incoming.add(src_op)
@@ -4322,15 +4387,20 @@ class CompositeInstance(object):
                             dst_op.physical_outgoing.add(reduction)
                             reduction.physical_incoming.add(dst_op)
                         if reduction_inst.region is not region:
-                            reduction_inst.add_copy_user(self.depth, self.field, 
-                                region, reduction, True, 0, reduction_inst.region)
-                            dst.add_copy_user(dst_depth, dst_field, region, reduction, 
-                                False, reduction_inst.redop, reduction_inst.region)
+                            reduction_inst.add_copy_user(depth=self.depth, field=self.field, 
+                                region=region, op=reduction, index=index, 
+                                reading=True, redop=0, intersect=reduction_inst.region)
+                            dst.add_copy_user(depth=dst_depth, field=dst_field, 
+                                region=region, op=reduction, index=index, 
+                                reading=False, redop=reduction_inst.redop, 
+                                intersect=reduction_inst.region)
                         else:
-                            reduction_inst.add_copy_user(self.depth, self.field, 
-                                region, reduction, True, 0)
-                            dst.add_copy_user(dst_depth, dst_field, region, 
-                                reduction, False, reduction_inst.redop)
+                            reduction_inst.add_copy_user(depth=self.depth, field=self.field, 
+                                region=region, op=reduction, index=index, 
+                                reading=True, redop=0)
+                            dst.add_copy_user(depth=dst_depth, field=dst_field, 
+                                region=region, op=reduction, index=index, 
+                                reading=False, redop=reduction_inst.redop)
         return True
 
 class EventHandle(object):
