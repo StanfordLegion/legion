@@ -1005,6 +1005,12 @@ class LogicalRegion(object):
                                                         perform_checks, register)
 
     # Should only be called on regions and not on partitions
+    def perform_physical_registration(self, depth, field, op, req, inst, perform_checks):
+        physical_state = self.get_physical_state(depth, field)
+        return physical_state.perform_physical_registration(op, req, inst,
+                                                            perform_checks)
+
+    # Should only be called on regions and not on partitions
     def perform_fill_analysis(self, depth, field, op, req, perform_checks):
         physical_state = self.get_physical_state(depth, field)
         return physical_state.perform_fill_analysis(op, req, perform_checks)
@@ -1814,25 +1820,30 @@ class PhysicalState(object):
                 self.dirty = True
             else:
                 self.valid_instances.add(inst)
-        if register:
-            # Find our preconditions for using this instance
-            preconditions = inst.find_use_dependences(depth=self.depth, field=self.field, 
-                                                  op=op, req=req, precise=perform_checks)
-            if perform_checks:
-                bad = check_preconditions(preconditions, op)
-                if bad is not None:
-                    print "ERROR: Missing use precondition for field "+str(self.field)+\
-                          " of region requirement "+str(req.index)+" of "+str(op)+\
-                          " (UID "+str(op.uid)+") on previous "+str(bad)
-                    if self.node.state.assert_on_fail:
-                        assert False
-                    return False
-            else:
-                for other in preconditions:
-                    op.physical_incoming.add(other)
-                    other.physical_outgoing.add(op)
-            # Record ourselves as a users for this instance
-            inst.add_user(depth=self.depth, field=self.field, op=op, req=req)
+        if register and not self.perform_physical_registration(op, req, inst, 
+                                                               perform_checks):
+            return False
+        return True
+
+    def perform_physical_registration(self, op, req, inst, perform_checks):
+        # Find our preconditions for using this instance
+        preconditions = inst.find_use_dependences(depth=self.depth, field=self.field, 
+                                              op=op, req=req, precise=perform_checks)
+        if perform_checks:
+            bad = check_preconditions(preconditions, op)
+            if bad is not None:
+                print "ERROR: Missing use precondition for field "+str(self.field)+\
+                      " of region requirement "+str(req.index)+" of "+str(op)+\
+                      " (UID "+str(op.uid)+") on previous "+str(bad)
+                if self.node.state.assert_on_fail:
+                    assert False
+                return False
+        else:
+            for other in preconditions:
+                op.physical_incoming.add(other)
+                other.physical_outgoing.add(op)
+        # Record ourselves as a users for this instance
+        inst.add_user(depth=self.depth, field=self.field, op=op, req=req)
         return True
 
     def perform_fill_analysis(self, op, req, perform_checks):
@@ -2851,8 +2862,25 @@ class Operation(object):
                 # In the case of virtual mappings we don't have to
                 # do any analysis here since we're just passing in the state
                 continue
+            # Don't register if we are a task
             if not req.logical_node.perform_physical_analysis(depth, field, self, 
-                                                      req, inst, perform_checks):
+                        req, inst, perform_checks, self.kind <> SINGLE_TASK_KIND):
+                return False
+        return True
+
+    def perform_physical_registration(self, depth, index, req, perform_checks):
+        assert self.kind == SINGLE_TASK_KIND
+        if req.is_no_access():
+            return True
+        mappings = self.find_mapping(index, req.parent)
+        for field in req.fields:
+            assert field.fid in mappings
+            inst = mappings[field.fid]
+            # skip any virtual mappings
+            if inst.is_virtual():
+                continue
+            if not req.perform_physical_registration(depth, field, self,
+                                                     req, inst, perform_checks):
                 return False
         return True
 
@@ -3089,8 +3117,15 @@ class Operation(object):
                 if not self.analyze_physical_requirement(depth, index, req, 
                                                          perform_checks):
                     return False
-            # If we are a task we need to go down the task tree
             if self.kind == SINGLE_TASK_KIND:
+                # We now need to do the registration for our region
+                # requirements since we didn't do it as part of the 
+                # normal physical analysis
+                for index,req in self.reqs.iteritems():
+                    if not self.perform_physical_registration(depth, index, req, 
+                                                              perform_checks):
+                        return False
+                # If we are not a leaf task, go down the task tree
                 if self.task is not None:
                     if not self.task.perform_task_physical_analysis(perform_checks):
                         return False
