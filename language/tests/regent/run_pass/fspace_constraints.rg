@@ -29,4 +29,10 @@ end
 task f(rtop : region(tree(rtop)), t : ptr(tree(rtop), rtop))
 where reads(rtop) do
 end
-f:compile()
+
+task main()
+  var r = region(ispace(ptr, 4), tree(r))
+  var x = new(ptr(tree(r), r))
+  f(r, x)
+end
+regentlib.start(main)

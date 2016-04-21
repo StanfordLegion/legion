@@ -154,11 +154,11 @@ tests = [
      (os.path.join('tests', 'regent', 'compile_fail'),
       os.path.join('tests', 'bishop', 'compile_fail'),
      )),
-    ('pretty', (test_run_pass, (['-fpretty', '1'], {})),
+    ('pretty', (test_run_pass, (['-fpretty', '1', '-fvectorize', '0'], {})),
      (os.path.join('tests', 'regent', 'run_pass'),
       os.path.join('examples'),
      )),
-    ('run_pass', (test_run_pass, ([], {'REALM_BACKTRACE': '1'})),
+    ('run_pass', (test_run_pass, (['-fvectorize', '0'], {'REALM_BACKTRACE': '1'})),
      (os.path.join('tests', 'regent', 'run_pass'),
       #os.path.join('tests', 'bishop', 'run_pass'),
       os.path.join('examples'),
@@ -197,11 +197,15 @@ def run_all_tests(thread_count, debug, verbose, quiet):
             if len(saved_temps) > 0:
                 all_saved_temps.append((test_name, filename, saved_temps))
             if outcome == PASS:
-                if (not quiet) or (output is not None):
+                if quiet:
+                    print('.', end='')
+                    sys.stdout.flush()
+                else:
                     print('[%sPASS%s] (%s) %s' % (green, clear, test_name, filename))
                 if output is not None: print(output)
                 test_counters[test_name].passed += 1
             elif outcome == FAIL:
+                if quiet: print()
                 print('[%sFAIL%s] (%s) %s' % (red, clear, test_name, filename))
                 if output is not None: print(output)
                 test_counters[test_name].failed += 1

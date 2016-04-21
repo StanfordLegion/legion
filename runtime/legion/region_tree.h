@@ -126,21 +126,21 @@ namespace Legion {
                                            Event handle_ready,
                                            Event domain_ready);
       Event create_partition_by_field(RegionTreeContext ctx,
-                                      Operation *op,
+                                      Operation *op, unsigned index,
                                       const RegionRequirement &req,
                                       IndexPartition pending,
                                       const Domain &color_space,
                                       Event term_event,
                                       VersionInfo &version_info);
       Event create_partition_by_image(RegionTreeContext ctx,
-                                      Operation *op,
+                                      Operation *op, unsigned index,
                                       const RegionRequirement &req,
                                       IndexPartition pending,
                                       const Domain &color_space,
                                       Event term_event,
                                       VersionInfo &version_info);
       Event create_partition_by_preimage(RegionTreeContext ctx,
-                                      Operation *op,
+                                      Operation *op, unsigned index,
                                       const RegionRequirement &req,
                                       IndexPartition projection,
                                       IndexPartition pending,
@@ -266,11 +266,12 @@ namespace Legion {
     public:
       void initialize_current_context(RegionTreeContext ctx,
                     const RegionRequirement &req, const InstanceSet &source,
-                    Event term_event, SingleTask *context,
+                    Event term_event, SingleTask *context, unsigned index,
                     std::map<PhysicalManager*,InstanceView*> &top_views);
       void initialize_current_context(RegionTreeContext ctx,
                                       const RegionRequirement &req,
                                       const InstanceSet &sources,
+                                      SingleTask *context, unsigned index,
                                       CompositeView *composite_view);
       void invalidate_current_context(RegionTreeContext ctx,
                                       LogicalRegion handle,
@@ -284,10 +285,10 @@ namespace Legion {
                                   RegionTreePath &path,
                                   const RegionRequirement &req,
                                   VersionInfo &version_info,
-                                  Operation *op, bool find_valid,
+                                  Operation *op, unsigned index,
+                                  bool find_valid,
                                   InstanceSet &valid_insts
 #ifdef DEBUG_HIGH_LEVEL
-                                  , unsigned index
                                   , const char *log_name
                                   , UniqueID uid
 #endif
@@ -296,10 +297,10 @@ namespace Legion {
                                  RegionTreePath &path,
                                  const RegionRequirement &req,
                                  VersionInfo &version_info,
-                                 Operation *op, Event term_event, 
+                                 Operation *op, unsigned index,
+                                 Event term_event, 
                                  InstanceSet &targets
 #ifdef DEBUG_HIGH_LEVEL
-                                 , unsigned index
                                  , const char *log_name
                                  , UniqueID uid
 #endif
@@ -319,10 +320,10 @@ namespace Legion {
       void physical_register_only(RegionTreeContext ctx,
                                   const RegionRequirement &req,
                                   VersionInfo &version_info,
-                                  Operation *op, Event term_event,
+                                  Operation *op, unsigned index,
+                                  Event term_event,
                                   InstanceSet &targets
 #ifdef DEBUG_HIGH_LEVEL
-                                 , unsigned index
                                  , const char *log_name
                                  , UniqueID uid
 #endif
@@ -330,12 +331,12 @@ namespace Legion {
       Event physical_perform_close(RegionTreeContext ctx,
                                    const RegionRequirement &req,
                                    VersionInfo &version_info,
-                                   Operation *op, int composite_index,
+                                   Operation *op, unsigned index,
+                                   int composite_index,
                     const LegionMap<ColorPoint,FieldMask>::aligned &to_close,
                     const std::set<ColorPoint> &next_children,
                     const InstanceSet &targets
 #ifdef DEBUG_HIGH_LEVEL
-                                  , unsigned index
                                   , const char *log_name
                                   , UniqueID uid
 #endif
@@ -343,10 +344,9 @@ namespace Legion {
       Event physical_close_context(RegionTreeContext ctx,
                                    const RegionRequirement &req,
                                    VersionInfo &version_info,
-                                   Operation *op,
+                                   Operation *op, unsigned index,
                                    InstanceSet &targets
 #ifdef DEBUG_HIGH_LEVEL
-                                   , unsigned index
                                    , const char *log_name
                                    , UniqueID uid
 #endif
@@ -358,8 +358,8 @@ namespace Legion {
                         const InstanceSet &src_targets, 
                         const InstanceSet &dst_targets,
                         VersionInfo &src_version_info, 
-                        int src_composite,
-                        Operation *op, Event precondition);
+                        int src_composite, Operation *op, 
+                        unsigned index, Event precondition);
       Event reduce_across(RegionTreeContext src_ctx,
                           RegionTreeContext dst_ctx,
                           const RegionRequirement &src_req,
@@ -370,6 +370,7 @@ namespace Legion {
                           Operation *op, Event precondition);
       void convert_views_into_context(const RegionRequirement &req,
                                       SingleTask *context,
+                                      unsigned index,
                                       VersionInfo &version_info,
                                       InstanceView *src_view,
                                       InstanceView *dst_view,
@@ -377,6 +378,7 @@ namespace Legion {
                                       const std::vector<ColorPoint> &path);
       void convert_views_from_context(const RegionRequirement &req,
                                       SingleTask *context,
+                                      unsigned index,
                                       VersionInfo &version_info,
                                       InstanceView *dst_view,
                                       Event ready_event,
@@ -412,6 +414,7 @@ namespace Legion {
       // This takes ownership of the value buffer
       Event fill_fields(RegionTreeContext ctx, Operation *op,
                         const RegionRequirement &req,
+                        const unsigned index,
                         const void *value, size_t value_size,
                         VersionInfo &version_info,
                         RestrictInfo &restrict_info,
@@ -1521,7 +1524,7 @@ namespace Legion {
                                    const FieldMask &update_mask,
                                    const VersionInfo &version_info,
           const LegionMap<ReductionView*,FieldMask>::aligned &valid_reductions,
-                                   Operation *op,
+                                   Operation *op, unsigned index,
                                    CopyTracker *tracker = NULL);
       void invalidate_instance_views(PhysicalState *state,
                                      const FieldMask &invalid_mask); 
@@ -1826,13 +1829,14 @@ namespace Legion {
                              const RegionUsage &usage,
                              const FieldMask &user_mask,
                              const InstanceSet &targets,
+                             UniqueID init_op_id, unsigned init_index,
                              const std::vector<LogicalView*> &corresponding);
       void close_state(const TraversalInfo &info,
                        RegionUsage &usage, InstanceSet &targets);
       void find_field_descriptors(ContextID ctx, Event term_event,
                                   const RegionUsage &usage,
                                   const FieldMask &user_mask,
-                                  FieldID fid, Operation *op, 
+                                  FieldID fid, Operation *op, unsigned index,
                                   std::vector<FieldDataDescriptor> &field_data,
                                   std::set<Event> &preconditions,
                                   VersionInfo &version_info);
@@ -1840,6 +1844,7 @@ namespace Legion {
                        const void *value, size_t value_size, 
                        VersionInfo &version_info);
       Event eager_fill_fields(ContextID ctx, Operation *op,
+                              const unsigned index,
                               const FieldMask &fill_mask,
                               const void *value, size_t value_size,
                               VersionInfo &version_info, InstanceSet &instances,

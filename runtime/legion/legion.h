@@ -1578,7 +1578,7 @@ namespace Legion {
     private:
       Enumerator *enumerator;
       bool finished;
-      off_t current_pointer;
+      coord_t current_pointer;
       size_t remaining_elmts;
     };
 

@@ -49,7 +49,6 @@ where reads(r1), writes(r1) do
     h2(p1_disjoint[i])
   end
 end
-with_partitions:printpretty()
 
 task main()
   var n = 1

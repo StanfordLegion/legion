@@ -1746,10 +1746,10 @@ namespace Legion {
         // Do the premapping
         runtime->forest->physical_traverse_path(req_ctx, privilege_path,
                                                 regions[*it],
-                                                version_info, this, 
+                                                version_info, this, *it, 
                                                 true/*find valid*/, valid
 #ifdef DEBUG_HIGH_LEVEL
-                                                , *it, get_logging_name()
+                                                , get_logging_name()
                                                 , unique_op_id
 #endif
                                                 );
@@ -1932,10 +1932,10 @@ namespace Legion {
         set_current_mapping_index(*it);
         // Passed all the error checking tests so register it
         runtime->forest->physical_register_only(req_ctx, 
-                              regions[*it], version_info, 
-                              this, completion_event, chosen_instances
+                              regions[*it], version_info, this, *it,
+                              completion_event, chosen_instances
 #ifdef DEBUG_HIGH_LEVEL
-                              , *it, get_logging_name(), unique_op_id
+                              , get_logging_name(), unique_op_id
 #endif
                               );
         // Now apply our mapping
@@ -5375,10 +5375,10 @@ namespace Legion {
         // apply the results of the mapping to the tree
         runtime->forest->physical_register_only(enclosing_contexts[idx],
                                     regions[idx], get_version_info(idx), 
-                                    this, local_termination_event, 
+                                    this, idx, local_termination_event, 
                                     physical_instances[idx]
 #ifdef DEBUG_HIGH_LEVEL
-                                    , idx, get_logging_name()
+                                    , get_logging_name()
                                     , unique_op_id
 #endif
                                     );
@@ -5410,9 +5410,9 @@ namespace Legion {
         initialize_mapping_path(path, regions[idx], regions[idx].region);
         runtime->forest->physical_traverse_path(enclosing_contexts[idx],
                               path, regions[idx], get_version_info(idx), 
-                              this, true/*valid*/, postmap_valid[idx]
+                              this, idx, true/*valid*/, postmap_valid[idx]
 #ifdef DEBUG_HIGH_LEVEL
-                              , idx, get_logging_name()
+                              , get_logging_name()
                               , unique_op_id
 #endif
                               );
@@ -5552,10 +5552,10 @@ namespace Legion {
         // Register this with a no-event so that the instance can
         // be used as soon as it is valid from the copy to it
         runtime->forest->physical_register_only(enclosing_contexts[idx],
-                          regions[idx], get_version_info(idx), this, 
+                          regions[idx], get_version_info(idx), this, idx,
                           Event::NO_EVENT/*done immediately*/, result
 #ifdef DEBUG_HIGH_LEVEL
-                          , idx, get_logging_name(), unique_op_id
+                          , get_logging_name(), unique_op_id
 #endif
                           );
       }
@@ -5593,7 +5593,7 @@ namespace Legion {
         {
           runtime->forest->initialize_current_context(context,
               clone_requirements[idx], physical_instances[idx],
-              unmap_events[idx], this, top_views);
+              unmap_events[idx], this, idx, top_views);
 #ifdef DEBUG_HIGH_LEVEL
           assert(!physical_instances[idx].empty());
 #endif
@@ -5628,7 +5628,8 @@ namespace Legion {
             composite_view = translated_view->as_composite_view();
           }
           runtime->forest->initialize_current_context(context,
-              clone_requirements[idx], physical_instances[idx], composite_view);
+              clone_requirements[idx], physical_instances[idx], 
+              this, idx, composite_view);
         }
       }
     }
@@ -5767,8 +5768,8 @@ namespace Legion {
           }
           // Now we clone across for the given region requirement
           VersionInfo &info = get_version_info(idx); 
-          runtime->forest->convert_views_into_context(regions[idx], this, info,
-                      parent_context_view, result, get_task_completion(), path);
+          runtime->forest->convert_views_into_context(regions[idx], this, idx,
+              info, parent_context_view, result, get_task_completion(), path);
         }
       }
       // Record the result and trigger any user event to signal that the
@@ -5905,7 +5906,8 @@ namespace Legion {
             VersionInfo dummy_info;
             runtime->forest->convert_views_from_context(
                                                       created_requirements[idx],
-                                                      this, dummy_info,
+                                                      this, regions.size()+idx,
+                                                      dummy_info,
                                                       parent_context_view,
                                                       get_task_completion(),
                                                       true/*initial user*/);
@@ -7701,9 +7703,9 @@ namespace Legion {
 #endif
       runtime->forest->physical_register_only(virtual_ctx, regions[index],
                                               version_infos[index], this,
-                                              Event::NO_EVENT, refs
+                                              index, Event::NO_EVENT, refs
 #ifdef DEBUG_HIGH_LEVEL
-                                              , index, get_logging_name()
+                                              , get_logging_name()
                                               , unique_op_id
 #endif
                                               );
@@ -7992,10 +7994,10 @@ namespace Legion {
     {
       runtime->forest->physical_traverse_path(ctx, privilege_paths[idx],
                                               regions[idx], 
-                                              version_infos[idx],
-                                              this, true/*find valid*/, valid
+                                              version_infos[idx], this, idx, 
+                                              true/*find valid*/, valid
 #ifdef DEBUG_HIGH_LEVEL
-                                              , idx, get_logging_name() 
+                                              , get_logging_name() 
                                               , get_unique_id()
 #endif
                                               );
@@ -8593,9 +8595,9 @@ namespace Legion {
             orig_req.region.get_index_space(), traversal_path);
       runtime->forest->physical_traverse_path(ctx, traversal_path, regions[idx],
                                              slice_owner->get_version_info(idx),
-                                             this, true/*find valid*/, valid
+                                             this, idx, true/*find valid*/,valid
 #ifdef DEBUG_HIGH_LEVEL
-                                             , idx, get_logging_name()
+                                             , get_logging_name()
                                              , get_unique_id()
 #endif
                                              );
@@ -11036,10 +11038,10 @@ namespace Legion {
         InstanceSet empty_set;
         runtime->forest->physical_traverse_path(get_parent_context(idx),
                                         privilege_path, regions[idx],
-                                        version_infos[idx], this,
+                                        version_infos[idx], this, idx,
                                         false/*find valid*/, empty_set
 #ifdef DEBUG_HIGH_LEVEL
-                                        , idx, get_logging_name(), unique_op_id
+                                        , get_logging_name(), unique_op_id
 #endif
                                         );
       }
@@ -11524,9 +11526,9 @@ namespace Legion {
       temporary_virtual_refs.push_back(refs[0]);
       runtime->forest->physical_register_only(virtual_ctx, regions[index],
                                               version_infos[index], this,
-                                              Event::NO_EVENT, refs
+                                              index, Event::NO_EVENT, refs
 #ifdef DEBUG_HIGH_LEVEL
-                                              , index, get_logging_name()
+                                              , get_logging_name()
                                               , unique_op_id
 #endif
                                               );

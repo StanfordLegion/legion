@@ -14,22 +14,13 @@
 
 import "regent"
 
-x = false
-
-function g(y)
-  regentlib.assert(y == 5, "test failed")
-  x = true
-end
-local tg = terralib.cast({int} -> {}, g)
-
-task f(z : int)
-  tg(z)
-end
-
 task main()
-  f(5)
+  var is = ispace(int2d, { x = 1, y = 3 })
+  var t = int2d { x = 10, y = 20 }
+  for i in is do
+    t += i + { x = 100, y = 200 }
+  end
+  regentlib.assert(t.x == 310, "test failed")
+  regentlib.assert(t.y == 623, "test failed")
 end
-
-regentlib.assert(not x, "test failed")
 regentlib.start(main)
-regentlib.assert(x, "test failed")

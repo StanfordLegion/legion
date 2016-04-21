@@ -14,22 +14,19 @@
 
 import "regent"
 
-x = false
-
-function g(y)
-  regentlib.assert(y == 5, "test failed")
-  x = true
+local struct i2 { x : int, y : int }
+terra i2.metamethods.__add(a : i2, b : i2) : i2
+  return i2 { x = a.x + b.x, y = a.y + b.y }
 end
-local tg = terralib.cast({int} -> {}, g)
-
-task f(z : int)
-  tg(z)
-end
+local i2d = index_type(i2, "i2d")
 
 task main()
-  f(5)
+  var is = ispace(i2d, { x = 1, y = 3 })
+  var t = i2d { x = 10, y = 20 }
+  for i in is do
+    t += i + { x = 100, y = 200 }
+  end
+  regentlib.assert(t.x == 310, "test failed")
+  regentlib.assert(t.y == 623, "test failed")
 end
-
-regentlib.assert(not x, "test failed")
 regentlib.start(main)
-regentlib.assert(x, "test failed")

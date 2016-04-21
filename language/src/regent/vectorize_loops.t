@@ -957,7 +957,7 @@ function vectorize_loops.stat(node)
     return vectorize_loops.stat_for_num(node)
 
   elseif node:is(ast.typed.stat.ForList) then
-    if std.is_bounded_type(node.symbol.type) and node.symbol.type.dim <= 1 then
+    if std.is_bounded_type(node.symbol:gettype()) and node.symbol:gettype().dim <= 1 then
       return vectorize_loops.stat_for_list(node)
     else
       return node { block = vectorize_loops.block(node.block) }
