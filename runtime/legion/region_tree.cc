@@ -6482,7 +6482,7 @@ namespace Legion {
               dom.get_index_space().get_valid_mask();
             Realm::ElementMask::Enumerator *enumerator = 
               mask.enumerate_enabled();
-            off_t next;
+            coord_t next;
             size_t length;
             bool empty = true;
             while (enumerator->get_next(next, length))
@@ -6491,7 +6491,7 @@ namespace Legion {
               if (length > 1)
               {
                 // inclusive so need -1
-                long long int end = next + length - 1;
+                coord_t end = next + length - 1;
                 LegionSpy::log_index_space_rect<1>(handle.id, &begin, &end);
               }
               else
