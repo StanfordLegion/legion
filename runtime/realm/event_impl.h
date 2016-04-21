@@ -52,6 +52,7 @@ namespace Realm {
       virtual ~EventWaiter(void) {}
       virtual bool event_triggered(Event e, bool poisoned) = 0;
       virtual void print(std::ostream& os) const = 0;
+      virtual Event get_finish_event(void) const = 0;
     };
 
     // parent class of GenEventImpl and BarrierImpl
@@ -68,6 +69,8 @@ namespace Realm {
       virtual bool add_waiter(Event::gen_t needed_gen, EventWaiter *waiter/*, bool pre_subscribed = false*/) = 0;
 
       static bool add_waiter(Event needed, EventWaiter *waiter);
+
+      static bool detect_event_chain(Event search_from, Event target, int max_depth, bool print_chain);
     };
 
     class GenEventImpl : public EventImpl {
