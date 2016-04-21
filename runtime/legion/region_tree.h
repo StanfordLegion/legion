@@ -299,6 +299,7 @@ namespace Legion {
                                  VersionInfo &version_info,
                                  Operation *op, unsigned index,
                                  Event term_event, 
+                                 bool defer_add_users,
                                  InstanceSet &targets
 #ifdef DEBUG_HIGH_LEVEL
                                  , const char *log_name
@@ -322,12 +323,18 @@ namespace Legion {
                                   VersionInfo &version_info,
                                   Operation *op, unsigned index,
                                   Event term_event,
+                                  bool defer_add_users,
                                   InstanceSet &targets
 #ifdef DEBUG_HIGH_LEVEL
                                  , const char *log_name
                                  , UniqueID uid
 #endif
                                  );
+      // For when we deferred registration of users
+      void physical_record_users(const RegionRequirement &req,
+                                 VersionInfo &version_info,
+                                 Operation *op, unsigned index,
+                                 Event term_event, InstanceSet &targets);
       Event physical_perform_close(RegionTreeContext ctx,
                                    const RegionRequirement &req,
                                    VersionInfo &version_info,
@@ -1821,7 +1828,8 @@ namespace Legion {
                                        VersionInfo &version_info,
                                        SingleTask *target_ctx);
       void register_region(const TraversalInfo &info, Event term_event,
-                           const RegionUsage &usage, InstanceSet &targets);
+                           const RegionUsage &usage, bool defer_add_users,
+                           InstanceSet &targets);
       void register_virtual(ContextID ctx, const InstanceRef &ref,
                             VersionInfo &version_info,
                             const FieldMask &composite_mask);

@@ -276,7 +276,7 @@ namespace Legion {
     public:
       PhysicalUser(void);
       PhysicalUser(const RegionUsage &u, const ColorPoint &child, 
-                   UniqueID op_id, unsigned index, bool copy);
+                   UniqueID op_id, unsigned index);
       PhysicalUser(const PhysicalUser &rhs);
       ~PhysicalUser(void);
     public:
@@ -292,7 +292,6 @@ namespace Legion {
       ColorPoint child;
       UniqueID op_id;
       unsigned index; // region requirement index
-      bool copy; // is this a copy user
     }; 
 
     /**

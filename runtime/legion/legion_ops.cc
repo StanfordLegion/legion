@@ -1840,6 +1840,7 @@ namespace Legion {
                                                requirement, version_info, 
                                                this, 0/*idx*/, 
                                                termination_event, 
+                                               false/*defer add users*/,
                                                mapped_instances
 #ifdef DEBUG_HIGH_LEVEL
                                                , get_logging_name()
@@ -1855,6 +1856,7 @@ namespace Legion {
                                                requirement, version_info,
                                                this, 0/*idx*/, 
                                                termination_event,
+                                               false/*defer add users*/,
                                                mapped_instances
 #ifdef DEBUG_HIGH_LEVEL
                                                , get_logging_name()
@@ -1883,6 +1885,7 @@ namespace Legion {
         runtime->forest->physical_register_only(physical_ctx, requirement,
                                                 version_info, this, 0/*idx*/,
                                                 termination_event, 
+                                                false/*defer add users*/,
                                                 mapped_instances
 #ifdef DEBUG_HIGH_LEVEL
                                                 , get_logging_name()
@@ -3075,6 +3078,7 @@ namespace Legion {
                                                   src_requirements[idx],
                                                   src_versions[idx],
                                                   this, idx, local_completion,
+                                                  false/*defer add users*/,
                                                   src_targets
 #ifdef DEBUG_HIGH_LEVEL
                                                   , get_logging_name()
@@ -3092,7 +3096,9 @@ namespace Legion {
                                                  src_privilege_paths[idx],
                                                  src_requirements[idx],
                                                  src_versions[idx], this, idx,
-                                                 local_completion, src_targets
+                                                 local_completion, 
+                                                 false/*defer add users*/,
+                                                 src_targets
 #ifdef DEBUG_HIGH_LEVEL
                                                  , get_logging_name()
                                                  , unique_op_id
@@ -3121,6 +3127,7 @@ namespace Legion {
                                                   dst_requirements[idx],
                                                   dst_versions[idx],
                                                   this, idx, local_completion,
+                                                  false/*defer add users*/,
                                                   dst_targets
 #ifdef DEBUG_HIGH_LEVEL
                                                   , get_logging_name()
@@ -3138,7 +3145,9 @@ namespace Legion {
                                                  dst_privilege_paths[idx],
                                                  dst_requirements[idx],
                                                  dst_versions[idx], this, idx,
-                                                 local_completion, dst_targets
+                                                 local_completion, 
+                                                 false/*defer add users*/, 
+                                                 dst_targets
 #ifdef DEBUG_HIGH_LEVEL
                                                  , get_logging_name()
                                                  , unique_op_id
@@ -5687,6 +5696,7 @@ namespace Legion {
       runtime->forest->traverse_and_register(physical_ctx, privilege_path,
                                              requirement, version_info, 
                                              this, 0/*idx*/, completion_event, 
+                                             false/*defer add users*/,
                                              mapped_instances
 #ifdef DEBUG_HIGH_LEVEL
                                              , get_logging_name()
@@ -6251,6 +6261,7 @@ namespace Legion {
       runtime->forest->traverse_and_register(physical_ctx, privilege_path,
                                              requirement, version_info, 
                                              this, 0/*idx*/, completion_event, 
+                                             false/*defer add users*/,
                                              mapped_instances
 #ifdef DEBUG_HIGH_LEVEL
                                              , get_logging_name()
@@ -9560,6 +9571,7 @@ namespace Legion {
                                                  requirement, version_info, 
                                                  this, 0/*idx*/, 
                                                  Event::NO_EVENT,
+                                                 false/*defer add users*/,
                                                  mapped_instances
 #ifdef DEBUG_HIGH_LEVEL
                                                  , get_logging_name()
@@ -9647,7 +9659,9 @@ namespace Legion {
         runtime->forest->traverse_and_register(physical_ctx, privilege_path,
                                                requirement, version_info, 
                                                this, 0/*idx*/, 
-                                               Event::NO_EVENT, mapped_instances
+                                               Event::NO_EVENT, 
+                                               false/*defer add users*/,
+                                               mapped_instances
 #ifdef DEBUG_HIGH_LEVEL
                                                , get_logging_name()
                                                , unique_op_id

@@ -63,8 +63,8 @@ namespace Legion {
     
     //--------------------------------------------------------------------------
     PhysicalUser::PhysicalUser(const RegionUsage &u, const ColorPoint &c,
-                               UniqueID id, unsigned idx, bool cp)
-      : usage(u), child(c), op_id(id), index(idx), copy(cp)
+                               UniqueID id, unsigned idx)
+      : usage(u), child(c), op_id(id), index(idx)
     //--------------------------------------------------------------------------
     {
     }
@@ -102,7 +102,6 @@ namespace Legion {
       rez.serialize(usage.redop);
       rez.serialize(op_id);
       rez.serialize(index);
-      rez.serialize(copy);
     }
 
     //--------------------------------------------------------------------------
@@ -119,7 +118,6 @@ namespace Legion {
       derez.deserialize(result->usage.redop);
       derez.deserialize(result->op_id);
       derez.deserialize(result->index);
-      derez.deserialize(result->copy);
 #ifdef DEBUG_HIGH_LEVEL
       assert(result != NULL);
 #endif

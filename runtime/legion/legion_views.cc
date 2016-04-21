@@ -567,7 +567,7 @@ namespace Legion {
     {
       // No need to take the lock since we are just initializing
       PhysicalUser *user = legion_new<PhysicalUser>(usage, ColorPoint(), 
-                                                   op_id, index, false/*copy*/);
+                                                    op_id, index);
       user->add_reference();
       add_current_user(user, term_event, user_mask);
       initial_user_events.insert(term_event);
@@ -999,7 +999,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       PhysicalUser *user = legion_new<PhysicalUser>(usage, child_color, 
-                                          creator_op_id, index, true/*copy*/);
+                                                    creator_op_id, index);
       user->add_reference();
       bool issue_collect = false;
       {
@@ -1155,8 +1155,7 @@ namespace Legion {
       PhysicalUser *new_user = NULL;
       if (term_event.exists())
       {
-        new_user = legion_new<PhysicalUser>(usage, child_color, 
-                                            op_id, index, false/*copy*/);
+        new_user = legion_new<PhysicalUser>(usage, child_color, op_id, index);
         new_user->add_reference();
       }
       // No matter what, we retake the lock in exclusive mode so we
@@ -1543,7 +1542,7 @@ namespace Legion {
         // We can ignore WAR and WAW dependences because we have
         // non-interfering region requirements, but we must get 
         // true dependences (RAW) correct
-        if (!user->copy || !reading || IS_READ_ONLY(user->usage))
+        if (!reading || IS_READ_ONLY(user->usage))
         {
           non_dominated |= overlap;
           return;
@@ -1610,7 +1609,7 @@ namespace Legion {
         // We can ignore WAR and WAW dependences because we have
         // non-interfering region requirements, but we must get 
         // true dependences (RAW) correct
-        if (!user->copy || !reading || IS_READ_ONLY(user->usage))
+        if (!reading || IS_READ_ONLY(user->usage))
           return;
         // If we fall through it is because we are reading
         // the result of another copy we generated that is writing
@@ -4499,13 +4498,13 @@ namespace Legion {
         {
           RegionUsage usage(READ_ONLY, EXCLUSIVE, 0);
           user = legion_new<PhysicalUser>(usage, ColorPoint(), 
-                                          creator_op_id, index, true/*copy*/);
+                                          creator_op_id, index);
         }
         else
         {
           RegionUsage usage(REDUCE, EXCLUSIVE, redop);
           user = legion_new<PhysicalUser>(usage, ColorPoint(), 
-                                          creator_op_id, index, true/*copy*/);
+                                          creator_op_id, index);
         }
         AutoLock v_lock(view_lock);
         add_physical_user(user, reading, copy_term, mask);
@@ -4545,7 +4544,7 @@ namespace Legion {
       bool issue_collect = false;
       UniqueID op_id = op->get_unique_op_id();
       PhysicalUser *new_user = legion_new<PhysicalUser>(usage, ColorPoint(), 
-                                                  op_id, index, false/*copy*/);
+                                                        op_id, index);
       {
         AutoLock v_lock(view_lock);
         if (!reading)
@@ -4735,7 +4734,7 @@ namespace Legion {
       // We don't use field versions for doing interference tests on
       // reductions so there is no need to record it
       PhysicalUser *user = legion_new<PhysicalUser>(usage, ColorPoint(), 
-                                                   op_id, index, false/*copy*/);
+                                                    op_id, index);
       add_physical_user(user, IS_READ_ONLY(usage), term_event, user_mask);
       initial_user_events.insert(term_event);
       // Don't need to actual launch a collection task, destructor

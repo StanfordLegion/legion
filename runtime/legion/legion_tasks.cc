@@ -1933,7 +1933,8 @@ namespace Legion {
         // Passed all the error checking tests so register it
         runtime->forest->physical_register_only(req_ctx, 
                               regions[*it], version_info, this, *it,
-                              completion_event, chosen_instances
+                              completion_event, (regions.size() > 1), 
+                              chosen_instances
 #ifdef DEBUG_HIGH_LEVEL
                               , get_logging_name(), unique_op_id
 #endif
@@ -5376,12 +5377,28 @@ namespace Legion {
         runtime->forest->physical_register_only(enclosing_contexts[idx],
                                     regions[idx], get_version_info(idx), 
                                     this, idx, local_termination_event, 
+                                    (regions.size() > 1)/*defer add users*/,
                                     physical_instances[idx]
 #ifdef DEBUG_HIGH_LEVEL
                                     , get_logging_name()
                                     , unique_op_id
 #endif
                                     );
+      }
+      // If we had more than one region requirement when now have to
+      // record our users because we skipped that during traversal
+      if (regions.size() > 1)
+      {
+        for (unsigned idx = 0; idx < regions.size(); idx++)
+        {
+          if (virtual_mapped[idx])
+            continue;
+          runtime->forest->physical_record_users(regions[idx],
+                                                 get_version_info(idx),
+                                                 this, idx, 
+                                                 local_termination_event,
+                                                 physical_instances[idx]);
+        }
       }
       if (perform_postmap)
         perform_post_mapping();
@@ -5553,7 +5570,8 @@ namespace Legion {
         // be used as soon as it is valid from the copy to it
         runtime->forest->physical_register_only(enclosing_contexts[idx],
                           regions[idx], get_version_info(idx), this, idx,
-                          Event::NO_EVENT/*done immediately*/, result
+                          Event::NO_EVENT/*done immediately*/, 
+                          true/*defer add users*/, result
 #ifdef DEBUG_HIGH_LEVEL
                           , get_logging_name(), unique_op_id
 #endif
@@ -7703,7 +7721,8 @@ namespace Legion {
 #endif
       runtime->forest->physical_register_only(virtual_ctx, regions[index],
                                               version_infos[index], this,
-                                              index, Event::NO_EVENT, refs
+                                              index, Event::NO_EVENT, 
+                                              false/*defer add users*/, refs
 #ifdef DEBUG_HIGH_LEVEL
                                               , get_logging_name()
                                               , unique_op_id
@@ -11526,7 +11545,8 @@ namespace Legion {
       temporary_virtual_refs.push_back(refs[0]);
       runtime->forest->physical_register_only(virtual_ctx, regions[index],
                                               version_infos[index], this,
-                                              index, Event::NO_EVENT, refs
+                                              index, Event::NO_EVENT, 
+                                              false/*defer add users*/, refs
 #ifdef DEBUG_HIGH_LEVEL
                                               , get_logging_name()
                                               , unique_op_id

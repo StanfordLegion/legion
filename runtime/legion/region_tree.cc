@@ -1882,6 +1882,7 @@ namespace Legion {
                                                  VersionInfo &version_info,
                                                  Operation *op, unsigned index,
                                                  Event term_event,
+                                                 bool defer_add_users,
                                                  InstanceSet &targets
 #ifdef DEBUG_HIGH_LEVEL
                                                  , const char *log_name
@@ -1900,7 +1901,7 @@ namespace Legion {
                              );
       // Now we can do the registration
       physical_register_only(ctx, req, version_info, op, index, 
-                             term_event, targets
+                             term_event, defer_add_users, targets
 #ifdef DEBUG_HIGH_LEVEL
                              , log_name, uid
 #endif
@@ -1951,6 +1952,7 @@ namespace Legion {
                                                   VersionInfo &version_info,
                                                   Operation *op, unsigned index,
                                                   Event term_event,
+                                                  bool defer_add_users,
                                                   InstanceSet &targets
 #ifdef DEBUG_HIGH_LEVEL
                                                   , const char *log_name
@@ -1987,7 +1989,8 @@ namespace Legion {
                                      version_info, user_mask);
       }
       else // this is the normal path
-        child_node->register_region(info, term_event, usage, targets); 
+        child_node->register_region(info, term_event, usage, 
+                                    defer_add_users, targets);
 #ifdef DEBUG_HIGH_LEVEL 
       TreeStateLogger::capture_state(runtime, &req, index, log_name, uid,
                                      child_node, ctx.get_id(), 
@@ -1995,6 +1998,36 @@ namespace Legion {
                                      false/*closing*/, false/*logical*/,
                    FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES), user_mask);
 #endif
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeForest::physical_record_users(const RegionRequirement &req,
+                                                 VersionInfo &version_info,
+                                                 Operation *op, unsigned index,
+                                                 Event term_event,
+                                                 InstanceSet &targets)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(req.handle_type == SINGULAR);
+      assert(!targets.empty());
+#endif
+      RegionNode *region_node = get_node(req.region);
+      // Convert to the proper instance views
+      std::vector<InstanceView*> views(targets.size());
+      region_node->convert_target_views(targets, op->get_parent(), views);
+      RegionUsage usage(req);
+      for (unsigned idx = 0; idx < targets.size(); idx++)
+      {
+        InstanceRef &ref = targets[idx];
+#ifdef DEBUG_HIGH_LEVEL
+        assert(!ref.is_composite_ref());
+#endif
+        Event ready = 
+          views[idx]->add_user(usage, term_event, ref.get_valid_fields(),
+                               op, index, version_info);
+        ref.set_ready_event(ready);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -14772,7 +14805,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void RegionNode::register_region(const TraversalInfo &info,
                                      Event term_event, const RegionUsage &usage,
-                                     InstanceSet &targets)
+                                     bool defer_add_users, InstanceSet &targets)
     //--------------------------------------------------------------------------
     {
       PhysicalState *state = get_physical_state(info.ctx, info.version_info);
@@ -14794,6 +14827,9 @@ namespace Legion {
             view->as_instance_view()->as_reduction_view();
           const FieldMask &user_mask = ref.get_valid_fields(); 
           update_reduction_views(state, user_mask, new_view);
+          // Skip adding the user if requested
+          if (defer_add_users)
+            continue;
           Event ready = new_view->add_user(usage, term_event, user_mask, 
                                  info.op, info.index, info.version_info);
           ref.set_ready_event(ready);
@@ -14918,17 +14954,20 @@ namespace Legion {
         }
         // Finally we have to update our instance references
         // to get the ready events
-        for (unsigned idx = 0; idx < targets.size(); idx++)
+        if (!defer_add_users)
         {
-          InstanceRef &ref = targets[idx];
+          for (unsigned idx = 0; idx < targets.size(); idx++)
+          {
+            InstanceRef &ref = targets[idx];
 #ifdef DEBUG_HIGH_LEVEL
-          assert(!ref.is_composite_ref());
-          assert(new_views[idx]->is_instance_view());
+            assert(!ref.is_composite_ref());
+            assert(new_views[idx]->is_instance_view());
 #endif
-          Event ready = 
-            new_views[idx]->as_instance_view()->add_user(usage, term_event,
-             ref.get_valid_fields(), info.op, info.index, info.version_info);
-          ref.set_ready_event(ready);
+            Event ready = 
+              new_views[idx]->as_instance_view()->add_user(usage, term_event,
+               ref.get_valid_fields(), info.op, info.index, info.version_info);
+            ref.set_ready_event(ready);
+          }
         }
       }
     }
@@ -15000,7 +15039,8 @@ namespace Legion {
         // our region because any actualy close operations that would
         // need to be done would have been issued as part of the 
         // logical analysis or will be done as part of the registration.
-        register_region(info, Event::NO_EVENT, usage, targets);
+        register_region(info, Event::NO_EVENT, usage, 
+                        false/*defer add users*/, targets);
       }
     }
 
