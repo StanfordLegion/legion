@@ -54,6 +54,11 @@ namespace Realm {
         os << "deferred instance destruction";
       }
 
+      virtual Event get_finish_event(void) const
+      {
+	return Event::NO_EVENT;
+      }
+
     protected:
       RegionInstanceImpl *impl;
     };

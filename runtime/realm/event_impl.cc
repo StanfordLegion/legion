@@ -45,6 +45,8 @@ namespace Realm {
 
     virtual void print(std::ostream& os) const;
 
+    virtual Event get_finish_event(void) const;
+
   protected:
     Event after_event;
   };
@@ -71,6 +73,11 @@ namespace Realm {
   void DeferredEventTrigger::print(std::ostream& os) const
   {
     os << "deferred trigger: after=" << after_event;
+  }
+
+  Event DeferredEventTrigger::get_finish_event(void) const
+  {
+    return after_event;
   }
 
 
@@ -148,6 +155,7 @@ namespace Realm {
       virtual ~Callback(void);
       virtual bool event_triggered(Event e, bool poisoned);
       virtual void print(std::ostream& os) const;
+      virtual Event get_finish_event(void) const;
       virtual void operator()(bool poisoned) = 0;
 
     protected:
@@ -194,6 +202,11 @@ namespace Realm {
   {
     os << "EventTriggeredCondition (thread unknown)";
   }  
+
+  Event EventTriggeredCondition::Callback::get_finish_event(void) const
+  {
+    return Event::NO_EVENT;  // ideally would be the finish event of the task being suspended
+  }
 
   void Event::wait(void) const
   {
@@ -306,6 +319,12 @@ namespace Realm {
     return u;
   }
 
+  namespace Config {
+    // if non-zero, eagerly checks deferred user event triggers for loops up to the
+    //  specified limit
+    int event_loop_detection_limit = 0;
+  };
+
   void UserEvent::trigger(Event wait_on) const
   {
     DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
@@ -321,6 +340,15 @@ namespace Realm {
     if(!wait_on.has_triggered()) {
       // deferred trigger
       log_event.info() << "deferring user event trigger: event=" << *this << " wait_on=" << wait_on;
+      if(Config::event_loop_detection_limit > 0) {
+	// before we add the deferred trigger as a waiter, see if this is causing a cycle in the event graph
+	if(EventImpl::detect_event_chain(*this, wait_on, 
+					 Config::event_loop_detection_limit,
+					 true /*print chain*/)) {
+	  log_event.fatal() << "deferred trigger creates event loop!  event=" << *this << " wait_on=" << wait_on;
+	  assert(0);
+	}
+      }
       EventImpl::add_waiter(wait_on, new DeferredEventTrigger(*this));
       return;
     }
@@ -451,6 +479,123 @@ namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
   //
+  // class EventImpl
+  //
+
+  /*static*/ bool EventImpl::detect_event_chain(Event search_from, Event target,
+						int max_depth, bool print_chain)
+  {
+    std::vector<Event> events;
+    std::vector<EventWaiter *> waiters;
+    std::set<Event> events_seen;
+    std::vector<EventWaiter *> todo;
+
+    events.reserve(max_depth + 1);
+    waiters.reserve(max_depth + 1);
+
+    events.push_back(search_from);
+    waiters.push_back(0);
+
+    Event e = search_from;
+    while(true) {
+      std::vector<EventWaiter *> waiters_copy;
+
+      switch(ID(e).type()) {
+      case ID::ID_EVENT:
+	{
+	  GenEventImpl *impl = get_runtime()->get_genevent_impl(e);
+
+	  {
+	    AutoHSLLock al(impl->mutex);
+	    if(impl->generation >= e.gen) {
+	      // already triggered!?
+	      assert(0);
+	    } else if((impl->generation + 1) == e.gen) {
+	      // current generation
+	      waiters_copy.assign(impl->current_local_waiters.begin(),
+				  impl->current_local_waiters.end());
+	    } else {
+	      std::map<Event::gen_t, std::vector<EventWaiter *> >::const_iterator it = impl->future_local_waiters.find(e.gen);
+	      if(it != impl->future_local_waiters.end())
+		waiters_copy.assign(it->second.begin(), it->second.end());
+	    }
+	  }
+	  break;
+	}
+
+      case ID::ID_BARRIER:
+	{
+	  assert(0);
+	  break;
+	}
+
+      default:
+	assert(0);
+      }
+
+      // record all of these event waiters as seen before traversing, so that we find the
+      //  shortest possible path
+      int count = 0;
+      for(std::vector<EventWaiter *>::const_iterator it = waiters_copy.begin();
+	  it != waiters_copy.end();
+	  it++) {
+	Event e2 = (*it)->get_finish_event();
+	if(!e2.exists()) continue;
+	if(e2 == target) {
+	  if(print_chain) {
+	    LoggerMessage msg(log_event.error());
+	    if(msg.is_active()) {
+	      msg << "event chain found!";
+	      events.push_back(e2);
+	      waiters.push_back(*it);
+	      for(size_t i = 0; i < events.size(); i++) {
+		msg << "\n  " << events[i];
+		if(waiters[i]) {
+		  msg << ": ";
+		  waiters[i]->print(msg.get_stream());
+		}
+	      }
+	    }
+	  }
+	  return true;
+	}
+	// don't search past the requested maximum depth
+	if(events.size() > (size_t)max_depth)
+	  continue;
+	bool inserted = events_seen.insert(e2).second;
+	if(inserted) {
+	  if(count++ == 0)
+	    todo.push_back(0); // marker so we know when to "pop" the stack
+	  todo.push_back(*it);
+	}
+      }
+
+      if(count == 0) {
+	events.pop_back();
+	waiters.pop_back();
+      }
+
+      // get next waiter
+      EventWaiter *w = 0;
+      while(!todo.empty()) {
+	w = todo.back();
+	todo.pop_back();
+	if(w) break;
+	assert(!events.empty());
+	events.pop_back();
+	waiters.pop_back();
+      }
+      if(!w) break;
+      e = w->get_finish_event();
+      events.push_back(e);
+      waiters.push_back(w);
+    }
+    return false;
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
   // class GenEventImpl
   //
 
@@ -556,6 +701,11 @@ namespace Realm {
       virtual void print(std::ostream& os) const
       {
 	os << "event merger: " << finish_event << " left=" << count_needed;
+      }
+
+      virtual Event get_finish_event(void) const
+      {
+	return finish_event;
       }
 
     protected:
@@ -1222,6 +1372,11 @@ namespace Realm {
 	os << "external waiter";
       }
 
+      virtual Event get_finish_event(void) const
+      {
+	return Event::NO_EVENT;
+      }
+
     public:
       GASNetCondVar &cv;
       bool poisoned;
@@ -1580,6 +1735,11 @@ static void *bytedup(const void *data, size_t datalen)
       {
 	os << "deferred arrival: barrier=" << barrier << " (" << barrier.timestamp << ")"
 	   << ", delta=" << delta << " datalen=" << datalen;
+      }
+
+      virtual Event get_finish_event(void) const
+      {
+	return barrier;
       }
 
     protected:

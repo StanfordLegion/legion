@@ -291,6 +291,11 @@ namespace Realm {
     os << "operation table cleaner (table=" << table << ")";
   }
 
+  Event OperationTable::TableCleaner::get_finish_event(void) const
+  {
+    return Event::NO_EVENT;
+  }
+
 
   ////////////////////////////////////////////////////////////////////////
   //
