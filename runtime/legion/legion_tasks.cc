@@ -693,18 +693,15 @@ namespace Legion {
                                     std::vector<VersionInfo> &infos)
     //--------------------------------------------------------------------------
     {
-      if (!is_locally_mapped())
-      {
-        RezCheck z(rez);
-        AddressSpaceID local_space = runtime->address_space;
+      RezCheck z(rez);
+      AddressSpaceID local_space = runtime->address_space;
 #ifdef DEBUG_HIGH_LEVEL
-        assert(infos.size() == regions.size());
+      assert(infos.size() == regions.size());
 #endif
-        for (unsigned idx = 0; idx < infos.size(); idx++)
-        {
-          infos[idx].pack_version_info(rez, local_space, 
-                                       get_parent_context(idx).get_id()); 
-        }
+      for (unsigned idx = 0; idx < infos.size(); idx++)
+      {
+        infos[idx].pack_version_info(rez, local_space, 
+                                     get_parent_context(idx).get_id()); 
       }
     }
 
@@ -713,14 +710,11 @@ namespace Legion {
                                       std::vector<VersionInfo> &infos)
     //--------------------------------------------------------------------------
     {
-      if (!is_locally_mapped())
+      DerezCheck z(derez);
+      infos.resize(regions.size());
+      for (unsigned idx = 0; idx < infos.size(); idx++)
       {
-        DerezCheck z(derez);
-        infos.resize(regions.size());
-        for (unsigned idx = 0; idx < infos.size(); idx++)
-        {
-          infos[idx].unpack_version_info(derez);
-        }
+        infos[idx].unpack_version_info(derez);
       }
     }
 
@@ -2746,12 +2740,14 @@ namespace Legion {
       rez.serialize(depth);
       // See if we need to pack up base task information
       pack_base_external_task(rez, target);
-#ifdef DEBUG_HIGH_LEVEL
-      assert(parent_req_indexes.size() == regions.size());
-#endif
-      // Pack up our virtual req indexes
-      for (unsigned idx = 0; idx < parent_req_indexes.size(); idx++)
-        rez.serialize(parent_req_indexes[idx]);
+      // Pack up the version information
+      AddressSpaceID local_space = runtime->address_space;
+      for (unsigned idx = 0; idx < regions.size(); idx++)
+      {
+        VersionInfo &info = get_version_info(idx);
+        info.pack_version_info(rez, local_space, 
+                               get_parent_context(idx).get_id());
+      }
       // Pack up our virtual mapping information
       std::vector<unsigned> virtual_indexes;
       for (unsigned idx = 0; idx < regions.size(); idx++)
@@ -8999,6 +8995,7 @@ namespace Legion {
         }
         remote_instances.clear();
       }
+      version_infos.clear();
       // Context is freed in deactivate single
       runtime->free_remote_task(this);
     }
@@ -9031,6 +9028,16 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return remote_owner_uid;
+    }
+
+    //--------------------------------------------------------------------------
+    VersionInfo& RemoteTask::get_version_info(unsigned idx)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(idx < version_infos.size());
+#endif
+      return version_infos[idx];
     }
 
     //--------------------------------------------------------------------------
@@ -9125,9 +9132,9 @@ namespace Legion {
       std::set<Event> ready_events;
       derez.deserialize(depth);
       unpack_base_external_task(derez, ready_events);
-      parent_req_indexes.resize(regions.size());
-      for (unsigned idx = 0; idx < parent_req_indexes.size(); idx++)
-        derez.deserialize(parent_req_indexes[idx]);
+      version_infos.resize(regions.size());
+      for (unsigned idx = 0; idx < regions.size(); idx++)
+        version_infos[idx].unpack_version_info(derez);
       virtual_mapped.resize(regions.size(), false);
       size_t num_virtual;
       derez.deserialize(num_virtual);

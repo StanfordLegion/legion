@@ -1040,6 +1040,7 @@ namespace Legion {
     public:
       virtual RemoteTask* find_outermost_context(void);
       virtual UniqueID get_context_uid(void) const;
+      virtual VersionInfo& get_version_info(unsigned idx);
     public:
       virtual bool has_remote_state(void) const;
       virtual void record_remote_state(void);
@@ -1068,6 +1069,7 @@ namespace Legion {
       bool is_top_level_context;
       std::map<AddressSpaceID,RemoteTask*> remote_instances;
       Event remote_completion_event;
+      std::vector<VersionInfo> version_infos;
     };
 
     /**
