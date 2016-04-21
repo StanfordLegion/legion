@@ -12,6 +12,11 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
+-- fails-with:
+-- specialize_lua_function.rg:30: unable to specialize lua function (use terralib.cast to explicitly cast it to a terra function type)
+--   g(z)
+--   ^
+
 import "regent"
 
 x = false
@@ -20,10 +25,9 @@ function g(y)
   regentlib.assert(y == 5, "test failed")
   x = true
 end
-local tg = terralib.cast({int} -> {}, g)
 
 task f(z : int)
-  tg(z)
+  g(z)
 end
 
 task main()

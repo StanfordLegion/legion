@@ -38,8 +38,8 @@ terra sub_task(task : c.legion_task_t,
                 arglen, num_regions)
 
   if arglen ~= terralib.sizeof(c.legion_ptr_t) or num_regions ~= 1 then
-    c.printf("abort")
-    assert(false)
+    c.printf("abort\n")
+    c.abort()
   end
 
   var p1 = @[&c.legion_ptr_t](c.legion_task_get_args(task))

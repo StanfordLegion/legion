@@ -5799,8 +5799,8 @@ namespace Legion {
         rez.serialize(variant_id);
         rez.serialize(wait_on);
         rez.serialize(can_fail);
-        runtime->send_variant_request(owner_space, rez);
       }
+      runtime->send_variant_request(owner_space, rez);
       // Wait for the results
       wait_on.wait();
       // Now we can re-take the lock and find our variant
@@ -6370,7 +6370,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void VariantImpl::send_variant_response(AddressSpaceID target, Event done)
+    void VariantImpl::send_variant_response(AddressSpaceID target, UserEvent done)
     //--------------------------------------------------------------------------
     {
       if (!global)
@@ -6389,6 +6389,7 @@ namespace Legion {
         RezCheck z(rez);
         rez.serialize(owner->task_id);
         rez.serialize(vid);
+        rez.serialize(done);
         rez.serialize(has_return_value);
         // pack the code descriptors 
         Realm::Serialization::ByteCountSerializer counter;
@@ -6412,6 +6413,7 @@ namespace Legion {
         execution_constraints.serialize(rez);
         layout_constraints.serialize(rez);
       }
+      runtime->send_variant_response(target, rez);
     }
 
     //--------------------------------------------------------------------------
@@ -6433,15 +6435,26 @@ namespace Legion {
       TaskVariantRegistrar registrar(task_id);
       VariantID variant_id;
       derez.deserialize(variant_id);
+      UserEvent done;
+      derez.deserialize(done);
       bool has_return;
       derez.deserialize(has_return);
       size_t impl_size;
       derez.deserialize(impl_size);
-      Realm::Serialization::FixedBufferDeserializer
-        deserializer(derez.get_current_pointer(), impl_size);
-      derez.advance_pointer(impl_size);
       CodeDescriptor *realm_desc = new CodeDescriptor();
-      realm_desc->deserialize(deserializer);
+      {
+        // Realm's serializers assume properly aligned buffers, so
+        // malloc a temporary buffer here and copy the data to ensure
+        // alignment.
+        void *impl_buffer = malloc(impl_size);
+        assert(impl_buffer);
+        memcpy(impl_buffer, derez.get_current_pointer(), impl_size);
+        derez.advance_pointer(impl_size);
+        Realm::Serialization::FixedBufferDeserializer
+          deserializer(impl_buffer, impl_size);
+        assert(realm_desc->deserialize(deserializer));
+        free(impl_buffer);
+      }
       size_t user_data_size;
       derez.deserialize(user_data_size);
       const void *user_data = derez.get_current_pointer();
@@ -6459,6 +6472,7 @@ namespace Legion {
       // Ask the runtime to perform the registration 
       runtime->register_variant(registrar, user_data, user_data_size,
                     realm_desc, has_return, variant_id, false/*check task*/);
+      done.trigger();
     }
 
     /////////////////////////////////////////////////////////////
@@ -14413,7 +14427,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_VARIANT_REQUEST,
-                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+                                        VARIANT_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -14421,7 +14435,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_VARIANT_RESPONSE,
-                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+                                        VARIANT_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------

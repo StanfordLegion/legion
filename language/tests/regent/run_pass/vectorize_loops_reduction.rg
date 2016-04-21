@@ -46,5 +46,4 @@ task main()
   regentlib.assert(x2.a == 10020, "test failed")
   regentlib.assert(x3.a == 10030, "test failed")
 end
-main:printpretty()
 regentlib.start(main)
