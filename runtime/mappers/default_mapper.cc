@@ -1627,9 +1627,8 @@ namespace Legion {
       else
       {
         // Normal instance creation
-        FieldSpace handle = req.region.get_field_space();
-        std::vector<FieldID> all_fields;
-        mapper_rt_get_field_space_fields(ctx, handle, all_fields);
+        std::vector<FieldID> fields;
+        default_policy_select_constraint_fields(ctx, req, fields);
         std::vector<DimensionKind> dimension_ordering(4);
         dimension_ordering[0] = DIM_X;
         dimension_ordering[1] = DIM_Y;
@@ -1640,12 +1639,24 @@ namespace Legion {
         // maximum re-use by any tasks which use subsets of the fields
         constraints.add_constraint(SpecializedConstraint())
           .add_constraint(MemoryConstraint(target_memory.kind()))
-          .add_constraint(FieldConstraint(all_fields, false/*contiguous*/,
+          .add_constraint(FieldConstraint(fields, false/*contiguous*/,
                                           false/*inorder*/))
           .add_constraint(OrderingConstraint(dimension_ordering, 
                                              false/*contigous*/));
       }
     }
+
+    //--------------------------------------------------------------------------
+    void DefaultMapper::default_policy_select_constraint_fields(
+                                    MapperContext ctx,
+                                    const RegionRequirement &req,
+                                    std::vector<FieldID> &fields)
+    //--------------------------------------------------------------------------
+    {
+      FieldSpace handle = req.region.get_field_space();
+      mapper_rt_get_field_space_fields(ctx, handle, fields);
+    }
+
 
     //--------------------------------------------------------------------------
     bool DefaultMapper::default_make_instance(MapperContext ctx, 
