@@ -265,6 +265,10 @@ namespace Legion {
                                     LayoutConstraintSet &constraints,
                                     Memory target_memory,
                                     const RegionRequirement &req);
+      virtual void default_policy_select_constraint_fields(
+                                    MapperContext ctx,
+                                    const RegionRequirement &req,
+                                    std::vector<FieldID> &fields);
       virtual LogicalRegion default_policy_select_instance_region(
                                     MapperContext ctx, Memory target_memory,
                                     const RegionRequirement &req,
