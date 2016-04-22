@@ -469,6 +469,8 @@ namespace Legion {
       local_task.map_locally = output.map_locally;
       local_task.spawn_task = output.stealable;
       local_task.profile_task = false;
+      // Save the current context before doing any old calls
+      current_ctx = ctx;
       // Invoke the old mapper call
       this->select_task_options(&local_task);
       // Copy the results back
