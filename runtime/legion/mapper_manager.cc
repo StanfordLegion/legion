@@ -2747,7 +2747,7 @@ namespace Legion {
         log_run.error("ERROR: Invalid mapper context passed to mapper_rt "
                       "call by mapper %s. Mapper contexts are only valid "
                       "for the mapper call to which they are passed. They "
-                      "cannot be stored in beyond the lifetime of the "
+                      "cannot be stored beyond the lifetime of the "
                       "mapper call.", mapper->get_mapper_name());
 #ifdef DEBUG_HIGH_LEVEL
         assert(false);

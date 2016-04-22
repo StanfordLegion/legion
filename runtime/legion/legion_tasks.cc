@@ -631,6 +631,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    const std::vector<VersionInfo>* TaskOp::get_version_infos(void)
+    //--------------------------------------------------------------------------
+    {
+      // This should never be called
+      assert(false);
+      return NULL;
+    }
+
+    //--------------------------------------------------------------------------
     RegionTreePath& TaskOp::get_privilege_path(unsigned idx)
     //--------------------------------------------------------------------------
     {
@@ -5385,16 +5394,11 @@ namespace Legion {
       // record our users because we skipped that during traversal
       if (regions.size() > 1)
       {
-        for (unsigned idx = 0; idx < regions.size(); idx++)
-        {
-          if (virtual_mapped[idx])
-            continue;
-          runtime->forest->physical_record_users(regions[idx],
-                                                 get_version_info(idx),
-                                                 this, idx, 
-                                                 local_termination_event,
-                                                 physical_instances[idx]);
-        }
+        // C++ type system suckiness
+        std::deque<InstanceSet> &phy_inst_ref = 
+          *(reinterpret_cast<std::deque<InstanceSet>*>(&physical_instances));
+        runtime->forest->physical_register_users(this, local_termination_event,
+            regions, virtual_mapped, *get_version_infos(), phy_inst_ref);
       }
       if (perform_postmap)
         perform_post_mapping();
@@ -7030,6 +7034,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    const std::vector<VersionInfo>* MultiTask::get_version_infos(void)
+    //--------------------------------------------------------------------------
+    {
+      return &version_infos;
+    }
+
+    //--------------------------------------------------------------------------
     void MultiTask::recapture_version_info(unsigned idx)
     //--------------------------------------------------------------------------
     {
@@ -7756,6 +7767,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    const std::vector<VersionInfo>* IndividualTask::get_version_infos(void)
+    //--------------------------------------------------------------------------
+    {
+      return &version_infos;
+    }
+
+    //--------------------------------------------------------------------------
     RegionTreePath& IndividualTask::get_privilege_path(unsigned idx)
     //--------------------------------------------------------------------------
     {
@@ -8454,6 +8472,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    const std::vector<VersionInfo>* PointTask::get_version_infos(void)
+    //--------------------------------------------------------------------------
+    {
+      return slice_owner->get_version_infos();
+    }
+
+    //--------------------------------------------------------------------------
     void PointTask::recapture_version_info(unsigned idx)
     //--------------------------------------------------------------------------
     {
@@ -9038,6 +9063,13 @@ namespace Legion {
       assert(idx < version_infos.size());
 #endif
       return version_infos[idx];
+    }
+
+    //--------------------------------------------------------------------------
+    const std::vector<VersionInfo>* RemoteTask::get_version_infos(void)
+    //--------------------------------------------------------------------------
+    {
+      return &version_infos;
     }
 
     //--------------------------------------------------------------------------

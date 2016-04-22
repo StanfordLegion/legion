@@ -331,10 +331,11 @@ namespace Legion {
 #endif
                                  );
       // For when we deferred registration of users
-      void physical_record_users(const RegionRequirement &req,
-                                 VersionInfo &version_info,
-                                 Operation *op, unsigned index,
-                                 Event term_event, InstanceSet &targets);
+      void physical_register_users(Operation *op, Event term_event,
+                   const std::vector<RegionRequirement> &regions,
+                   const std::vector<bool> &to_skip,
+                   const std::vector<VersionInfo> &version_infos,
+                   std::deque<InstanceSet> &targets);
       Event physical_perform_close(RegionTreeContext ctx,
                                    const RegionRequirement &req,
                                    VersionInfo &version_info,

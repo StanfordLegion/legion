@@ -523,10 +523,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Event MaterializedView::add_user(const RegionUsage &usage, Event term_event,
-                                     const FieldMask &user_mask, 
-                                     Operation *op, const unsigned index,
-                                     const VersionInfo &version_info)
+    Event MaterializedView::find_user_precondition(
+                          const RegionUsage &usage, Event term_event,
+                          const FieldMask &user_mask, Operation *op,
+                          const unsigned index, const VersionInfo &version_info)
     //--------------------------------------------------------------------------
     {
       std::set<Event> wait_on_events;
@@ -534,14 +534,71 @@ namespace Legion {
       if (start_use_event.exists())
         wait_on_events.insert(start_use_event);
       UniqueID op_id = op->get_unique_op_id();
+      // Find our local preconditions
+      find_local_user_preconditions(usage, term_event, ColorPoint(), op_id, 
+                                    index, user_mask, wait_on_events);
+      // Go up the tree if we have to
       if ((parent != NULL) && !version_info.is_upper_bound_node(logical_node))
       {
         const ColorPoint &local_color = logical_node->get_color();
-        parent->add_user_above(usage, term_event, local_color,
+        parent->find_user_preconditions_above(usage, term_event, local_color, 
+                        version_info, op_id, index, user_mask, wait_on_events);
+      }
+      return Runtime::merge_events<false/*meta*/>(wait_on_events); 
+    }
+
+    //--------------------------------------------------------------------------
+    void MaterializedView::add_user(const RegionUsage &usage, Event term_event,
+                                    const FieldMask &user_mask, Operation *op,
+                                    const unsigned index,
+                                    const VersionInfo &version_info)
+    //--------------------------------------------------------------------------
+    {
+      UniqueID op_id = op->get_unique_op_id();
+      // Go up the tree if necessary 
+      if ((parent != NULL) && !version_info.is_upper_bound_node(logical_node))
+      {
+        const ColorPoint &local_color = logical_node->get_color();
+        parent->add_user_above(usage, term_event, local_color, version_info, 
+                               op_id, index, user_mask);
+      }
+      // Add our local user
+      const bool issue_collect = add_local_user(usage, term_event, 
+                                    ColorPoint(), op_id, index, user_mask);
+      // Launch the garbage collection task, if it doesn't exist
+      // then the user wasn't registered anyway, see add_local_user
+      if (issue_collect)
+        defer_collect_user(term_event);
+      if (IS_ATOMIC(usage))
+        find_atomic_reservations(user_mask, op, IS_WRITE(usage));
+    }
+
+    //--------------------------------------------------------------------------
+    Event MaterializedView::add_user_fused(const RegionUsage &usage, 
+                                           Event term_event,
+                                           const FieldMask &user_mask, 
+                                           Operation *op, const unsigned index,
+                                           const VersionInfo &version_info)
+    //--------------------------------------------------------------------------
+    {
+      std::set<Event> wait_on_events;
+      Event start_use_event = manager->get_use_event();
+      if (start_use_event.exists())
+        wait_on_events.insert(start_use_event);
+      UniqueID op_id = op->get_unique_op_id();
+      // Find our local preconditions
+      find_local_user_preconditions(usage, term_event, ColorPoint(), op_id, 
+                                    index, user_mask, wait_on_events);
+      // Go up the tree if necessary
+      if ((parent != NULL) && !version_info.is_upper_bound_node(logical_node))
+      {
+        const ColorPoint &local_color = logical_node->get_color();
+        parent->add_user_above_fused(usage, term_event, local_color,
                        version_info, op_id, index, user_mask, wait_on_events);
       }
-      const bool issue_collect = add_local_user(usage, term_event, true/*base*/,
-          ColorPoint(), version_info, op_id, index, user_mask, wait_on_events);
+      // Add our local user
+      const bool issue_collect = add_local_user(usage, term_event, 
+                                    ColorPoint(), op_id, index, user_mask);
       // Launch the garbage collection task, if it doesn't exist
       // then the user wasn't registered anyway, see add_local_user
       if (issue_collect)
@@ -947,24 +1004,72 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MaterializedView::add_user_above(const RegionUsage &usage, 
+    void MaterializedView::find_user_preconditions_above(
+                                                const RegionUsage &usage,
+                                                Event term_event,
+                                                const ColorPoint &child_color,
+                                                const VersionInfo &version_info,
+                                                const UniqueID op_id,
+                                                const unsigned index,
+                                                const FieldMask &user_mask,
+                                                std::set<Event> &preconditions)
+    //--------------------------------------------------------------------------
+    {
+      // Do the precondition analysis on the way up
+      find_local_user_preconditions(usage, term_event, child_color, op_id, 
+                                    index, user_mask, preconditions);
+      // Go up the tree if we have to
+      if ((parent != NULL) && !version_info.is_upper_bound_node(logical_node))
+      {
+        const ColorPoint &local_color = logical_node->get_color();
+        parent->find_user_preconditions_above(usage, term_event, local_color, 
+                        version_info, op_id, index, user_mask, preconditions);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void MaterializedView::add_user_above(const RegionUsage &usage,
                                           Event term_event,
                                           const ColorPoint &child_color,
                                           const VersionInfo &version_info,
                                           const UniqueID op_id,
                                           const unsigned index,
-                                          const FieldMask &user_mask,
-                                          std::set<Event> &preconditions)
+                                          const FieldMask &user_mask)
     //--------------------------------------------------------------------------
     {
+      // Go up the tree if we have to
       if ((parent != NULL) && !version_info.is_upper_bound_node(logical_node))
       {
         const ColorPoint &local_color = logical_node->get_color();
-        parent->add_user_above(usage, term_event, local_color,
+        parent->add_user_above(usage, term_event, local_color, version_info,
+                               op_id, index, user_mask);
+      }
+      add_local_user(usage, term_event, child_color, op_id, index, user_mask);
+    }
+
+    //--------------------------------------------------------------------------
+    void MaterializedView::add_user_above_fused(const RegionUsage &usage, 
+                                                Event term_event,
+                                                const ColorPoint &child_color,
+                                                const VersionInfo &version_info,
+                                                const UniqueID op_id,
+                                                const unsigned index,
+                                                const FieldMask &user_mask,
+                                                std::set<Event> &preconditions)
+    //--------------------------------------------------------------------------
+    {
+      // Do the precondition analysis on the way up
+      find_local_user_preconditions(usage, term_event, child_color, op_id, 
+                                    index, user_mask, preconditions);
+      // Go up the tree if we have to
+      if ((parent != NULL) && !version_info.is_upper_bound_node(logical_node))
+      {
+        const ColorPoint &local_color = logical_node->get_color();
+        parent->add_user_above_fused(usage, term_event, local_color,
                        version_info, op_id, index, user_mask, preconditions);
       }
-      add_local_user(usage, term_event, false/*base*/, child_color,
-                     version_info, op_id, index, user_mask, preconditions);
+      // Add the user on the way back down
+      add_local_user(usage, term_event, child_color, op_id, index, user_mask);
       // No need to launch a collect user task, the child takes care of that
     }
 
@@ -1015,152 +1120,141 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool MaterializedView::add_local_user(const RegionUsage &usage,
-                                          Event term_event, bool base_user,
-                                          const ColorPoint &child_color,
-                                          const VersionInfo &version_info,
-                                          const UniqueID op_id,
-                                          const unsigned index,
-                                          const FieldMask &user_mask,
-                                          std::set<Event> &preconditions)
+    void MaterializedView::find_local_user_preconditions(
+                                                const RegionUsage &usage,
+                                                Event term_event,
+                                                const ColorPoint &child_color,
+                                                const UniqueID op_id,
+                                                const unsigned index,
+                                                const FieldMask &user_mask,
+                                                std::set<Event> &preconditions)
     //--------------------------------------------------------------------------
     {
       std::set<Event> dead_events;
       LegionMap<Event,FieldMask>::aligned filter_previous;
-      FieldMask dominated;
-      // Hold the lock in read-only mode when doing this part of the analysis
-      {
-        AutoLock v_lock(view_lock,1,false/*exclusive*/);
-        FieldMask observed, non_dominated;
-        for (LegionMap<Event,EventUsers>::aligned::const_iterator cit = 
-              current_epoch_users.begin(); cit != 
-              current_epoch_users.end(); cit++)
-        {
-#if !defined(LEGION_SPY) && !defined(EVENT_GRAPH_TRACE)
-          // We're about to do a bunch of expensive tests, 
-          // so first do something cheap to see if we can 
-          // skip all the tests.
-          if (cit->first.has_triggered())
-          {
-            dead_events.insert(cit->first);
-            continue;
-          }
-#endif
-          // No need to check for dependences on ourselves
-          if (cit->first == term_event)
-            continue;
-          // If we arleady recorded a dependence, then we are done
-          if (preconditions.find(cit->first) != preconditions.end())
-            continue;
-          const EventUsers &event_users = cit->second;
-          if (event_users.single)
-          {
-            find_current_preconditions(cit->first, 
-                                       event_users.users.single_user,
-                                       event_users.user_mask,
-                                       usage, user_mask, child_color,
-                                       op_id, index,
-                                       preconditions, observed, non_dominated);
-          }
-          else
-          {
-            // Otherwise do a quick test for non-interference on the
-            // summary mask and iterate the users if needed
-            if (!(user_mask * event_users.user_mask))
-            {
-              for (LegionMap<PhysicalUser*,FieldMask>::aligned::const_iterator 
-                    it = event_users.users.multi_users->begin(); it !=
-                    event_users.users.multi_users->end(); it++)
-              {
-                // Unlike with the copy analysis, once we record a dependence
-                // on an event, we are done, so we can keep going
-                if (find_current_preconditions(cit->first,
-                                               it->first, it->second,
-                                               usage, user_mask, child_color,
-                                               op_id, index, preconditions, 
-                                               observed, non_dominated))
-                  break;
-              }
-            }
-          }
-        }
-        // See if we have any fields for which we need to do an analysis
-        // on the previous fields
-        // It's only safe to dominate fields that we observed
-        dominated = (observed & (user_mask - non_dominated));
-        // Update the non-dominated mask with what we
-        // we're actually not-dominated by
-        non_dominated = user_mask - dominated;
-        const bool skip_analysis = !non_dominated;
-        for (LegionMap<Event,EventUsers>::aligned::const_iterator pit = 
-              previous_epoch_users.begin(); pit != 
-              previous_epoch_users.end(); pit++)
-        {
-#if !defined(LEGION_SPY) && !defined(EVENT_GRAPH_TRACE)
-          // We're about to do a bunch of expensive tests, 
-          // so first do something cheap to see if we can 
-          // skip all the tests.
-          if (pit->first.has_triggered())
-          {
-            dead_events.insert(pit->first);
-            continue;
-          }
-#endif
-          // No need to check for dependences on ourselves
-          if (pit->first == term_event)
-            continue;
-          // If we arleady recorded a dependence, then we are done
-          if (preconditions.find(pit->first) != preconditions.end())
-            continue;
-          const EventUsers &event_users = pit->second;
-          if (!!dominated)
-          {
-            FieldMask dom_overlap = event_users.user_mask & dominated;
-            if (!!dom_overlap)
-              filter_previous[pit->first] = dom_overlap;
-          }
-          // If we don't have any non-dominated fields we can skip the
-          // rest of the analysis because we dominated everything
-          if (skip_analysis)
-            continue;
-          if (event_users.single)
-          {
-            find_previous_preconditions(pit->first,
-                                        event_users.users.single_user,
-                                        event_users.user_mask,
-                                        usage, non_dominated,
-                                        child_color, op_id, 
-                                        index, preconditions);
-          }
-          else
-          {
-            if (!(non_dominated * event_users.user_mask))
-            {
-              for (LegionMap<PhysicalUser*,FieldMask>::aligned::const_iterator 
-                    it = event_users.users.multi_users->begin(); it !=
-                    event_users.users.multi_users->end(); it++)
-              {
-                // Once we find a dependence we are can skip the rest
-                if (find_previous_preconditions(pit->first,
-                                                it->first, it->second,
-                                                usage, non_dominated, 
-                                                child_color, op_id,
-                                                index, preconditions))
-                  break;
-              }
-            }
-          }
-        }
-      }
-      PhysicalUser *new_user = NULL;
-      if (term_event.exists())
-      {
-        new_user = legion_new<PhysicalUser>(usage, child_color, op_id, index);
-        new_user->add_reference();
-      }
-      // No matter what, we retake the lock in exclusive mode so we
-      // can handle any clean-up and add our user
+      // Hold the lock in exclusive mode since we might mutate things
       AutoLock v_lock(view_lock);
+      FieldMask observed, non_dominated;
+      for (LegionMap<Event,EventUsers>::aligned::const_iterator cit = 
+            current_epoch_users.begin(); cit != 
+            current_epoch_users.end(); cit++)
+      {
+#if !defined(LEGION_SPY) && !defined(EVENT_GRAPH_TRACE)
+        // We're about to do a bunch of expensive tests, 
+        // so first do something cheap to see if we can 
+        // skip all the tests.
+        if (cit->first.has_triggered())
+        {
+          dead_events.insert(cit->first);
+          continue;
+        }
+#endif
+        // No need to check for dependences on ourself
+        if (cit->first == term_event)
+          continue;
+        // If we arleady recorded a dependence, then we are done
+        if (preconditions.find(cit->first) != preconditions.end())
+          continue;
+        const EventUsers &event_users = cit->second;
+        if (event_users.single)
+        {
+          find_current_preconditions(cit->first, 
+                                     event_users.users.single_user,
+                                     event_users.user_mask,
+                                     usage, user_mask, child_color,
+                                     op_id, index,
+                                     preconditions, observed, non_dominated);
+        }
+        else
+        {
+          // Otherwise do a quick test for non-interference on the
+          // summary mask and iterate the users if needed
+          if (!(user_mask * event_users.user_mask))
+          {
+            for (LegionMap<PhysicalUser*,FieldMask>::aligned::const_iterator 
+                  it = event_users.users.multi_users->begin(); it !=
+                  event_users.users.multi_users->end(); it++)
+            {
+              // Unlike with the copy analysis, once we record a dependence
+              // on an event, we are done, so we can keep going
+              if (find_current_preconditions(cit->first,
+                                             it->first, it->second,
+                                             usage, user_mask, child_color,
+                                             op_id, index, preconditions, 
+                                             observed, non_dominated))
+                break;
+            }
+          }
+        }
+      }
+      // See if we have any fields for which we need to do an analysis
+      // on the previous fields
+      // It's only safe to dominate fields that we observed
+      FieldMask dominated = (observed & (user_mask - non_dominated));
+      // Update the non-dominated mask with what we
+      // we're actually not-dominated by
+      non_dominated = user_mask - dominated;
+      const bool skip_analysis = !non_dominated;
+      for (LegionMap<Event,EventUsers>::aligned::const_iterator pit = 
+            previous_epoch_users.begin(); pit != 
+            previous_epoch_users.end(); pit++)
+      {
+#if !defined(LEGION_SPY) && !defined(EVENT_GRAPH_TRACE)
+        // We're about to do a bunch of expensive tests, 
+        // so first do something cheap to see if we can 
+        // skip all the tests.
+        if (pit->first.has_triggered())
+        {
+          dead_events.insert(pit->first);
+          continue;
+        }
+#endif
+        // No need to check for dependences on ourself
+        if (pit->first == term_event)
+          continue;
+        // If we arleady recorded a dependence, then we are done
+        if (preconditions.find(pit->first) != preconditions.end())
+          continue;
+        const EventUsers &event_users = pit->second;
+        if (!!dominated)
+        {
+          FieldMask dom_overlap = event_users.user_mask & dominated;
+          if (!!dom_overlap)
+            filter_previous[pit->first] = dom_overlap;
+        }
+        // If we don't have any non-dominated fields we can skip the
+        // rest of the analysis because we dominated everything
+        if (skip_analysis)
+          continue;
+        if (event_users.single)
+        {
+          find_previous_preconditions(pit->first,
+                                      event_users.users.single_user,
+                                      event_users.user_mask,
+                                      usage, non_dominated,
+                                      child_color, op_id, 
+                                      index, preconditions);
+        }
+        else
+        {
+          if (!(non_dominated * event_users.user_mask))
+          {
+            for (LegionMap<PhysicalUser*,FieldMask>::aligned::const_iterator 
+                  it = event_users.users.multi_users->begin(); it !=
+                  event_users.users.multi_users->end(); it++)
+            {
+              // Once we find a dependence we are can skip the rest
+              if (find_previous_preconditions(pit->first,
+                                              it->first, it->second,
+                                              usage, non_dominated, 
+                                              child_color, op_id,
+                                              index, preconditions))
+                break;
+            }
+          }
+        }
+      }
+      // Do any filtering that is necessary
       if (!dead_events.empty())
       {
         for (std::set<Event>::const_iterator it = dead_events.begin();
@@ -1173,16 +1267,32 @@ namespace Legion {
         filter_previous_users(filter_previous);
       if (!!dominated)
         filter_current_users(dominated);
+    }
+
+    //--------------------------------------------------------------------------
+    bool MaterializedView::add_local_user(const RegionUsage &usage,
+                                          Event term_event,
+                                          const ColorPoint &child_color,
+                                          const UniqueID op_id,
+                                          const unsigned index,
+                                          const FieldMask &user_mask)
+    //--------------------------------------------------------------------------
+    {
+      if (!term_event.exists())
+        return false;
+      PhysicalUser *new_user = 
+        new_user = legion_new<PhysicalUser>(usage, child_color, op_id, index);
+      new_user->add_reference();
+      // No matter what, we retake the lock in exclusive mode so we
+      // can handle any clean-up and add our user
+      AutoLock v_lock(view_lock);
       // Finally add our user and return if we need to issue a GC meta-task
-      if (term_event.exists())
+      add_current_user(new_user, term_event, user_mask);
+      if (outstanding_gc_events.find(term_event) == 
+          outstanding_gc_events.end())
       {
-        add_current_user(new_user, term_event, user_mask);
-        if (outstanding_gc_events.find(term_event) == 
-            outstanding_gc_events.end())
-        {
-          outstanding_gc_events.insert(term_event);
-          return base_user;
-        }
+        outstanding_gc_events.insert(term_event);
+        return !child_color.is_valid();
       }
       return false;
     }
@@ -4522,10 +4632,77 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Event ReductionView::add_user(const RegionUsage &usage, Event term_event,
-                                  const FieldMask &user_mask, 
-                                  Operation *op, const unsigned index,
-                                  const VersionInfo &version_info)
+    Event ReductionView::find_user_precondition(const RegionUsage &usage,
+                                                Event term_event,
+                                                const FieldMask &user_mask,
+                                                Operation *op, 
+                                                const unsigned index,
+                                                const VersionInfo &version_info)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      if (IS_REDUCE(usage))
+        assert(usage.redop == manager->redop);
+      else
+        assert(IS_READ_ONLY(usage));
+#endif
+      const bool reading = IS_READ_ONLY(usage);
+      std::set<Event> wait_on;
+      Event use_event = manager->get_use_event();
+      if (use_event.exists())
+        wait_on.insert(use_event);
+      {
+        AutoLock v_lock(view_lock,1,false/*exclusive*/);
+        if (!reading)
+          find_reducing_preconditions(user_mask, term_event, wait_on);
+        else
+          find_reading_preconditions(user_mask, term_event, wait_on);
+      }
+      return Runtime::merge_events<false/*meta*/>(wait_on);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReductionView::add_user(const RegionUsage &usage, Event term_event,
+                                 const FieldMask &user_mask, Operation *op,
+                                 const unsigned index,
+                                 const VersionInfo &version_info)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      if (IS_REDUCE(usage))
+        assert(usage.redop == manager->redop);
+      else
+        assert(IS_READ_ONLY(usage));
+#endif
+      if (!term_event.exists())
+        return;
+      const bool reading = IS_READ_ONLY(usage);
+      UniqueID op_id = op->get_unique_op_id();
+      PhysicalUser *new_user = legion_new<PhysicalUser>(usage, ColorPoint(), 
+                                                        op_id, index);
+      bool issue_collect = false;
+      {
+        AutoLock v_lock(view_lock);
+        add_physical_user(new_user, reading, term_event, user_mask);
+        // Only need to do this if we actually have a term event
+        if (outstanding_gc_events.find(term_event) == 
+            outstanding_gc_events.end())
+        {
+          outstanding_gc_events.insert(term_event);
+          issue_collect = true;
+        }
+      }
+      // Launch the garbage collection task if we need to
+      if (issue_collect)
+        defer_collect_user(term_event);
+    }
+
+    //--------------------------------------------------------------------------
+    Event ReductionView::add_user_fused(const RegionUsage &usage, 
+                                        Event term_event,
+                                        const FieldMask &user_mask, 
+                                        Operation *op, const unsigned index,
+                                        const VersionInfo &version_info)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -4547,79 +4724,20 @@ namespace Legion {
                                                         op_id, index);
       {
         AutoLock v_lock(view_lock);
-        if (!reading)
-        {
-          // Reducing
-          for (LegionMap<Event,EventUsers>::aligned::const_iterator rit = 
-                reading_users.begin(); rit != reading_users.end(); rit++)
-          {
-            const EventUsers &event_users = rit->second;
-            if (event_users.single)
-            {
-              FieldMask overlap = user_mask & event_users.user_mask;
-              if (!overlap)
-                continue;
-              wait_on.insert(rit->first);
-            }
-            else
-            {
-              if (!(user_mask * event_users.user_mask))
-              {
-                for (LegionMap<PhysicalUser*,FieldMask>::aligned::const_iterator
-                      it = event_users.users.multi_users->begin(); it !=
-                      event_users.users.multi_users->end(); it++)
-                {
-                  FieldMask overlap = user_mask & it->second;
-                  if (!overlap)
-                    continue;
-                  // Once we have one event precondition we are done
-                  wait_on.insert(rit->first);
-                  break;
-                }
-              }
-            }
-          }
-          add_physical_user(new_user, false/*reading*/, term_event, user_mask);
-        }
+        if (!reading) // Reducing
+          find_reducing_preconditions(user_mask, term_event, wait_on);
         else // We're reading so wait on any reducers
-        {
-          for (LegionMap<Event,EventUsers>::aligned::const_iterator rit = 
-                reduction_users.begin(); rit != reduction_users.end(); rit++)
-          {
-            const EventUsers &event_users = rit->second;
-            if (event_users.single)
-            {
-              FieldMask overlap = user_mask & event_users.user_mask;
-              if (!overlap)
-                continue;
-              wait_on.insert(rit->first);
-            }
-            else
-            {
-              if (!(user_mask * event_users.user_mask))
-              {
-                for (LegionMap<PhysicalUser*,FieldMask>::aligned::const_iterator 
-                      it = event_users.users.multi_users->begin(); it !=
-                      event_users.users.multi_users->end(); it++)
-                {
-                  FieldMask overlap = user_mask & it->second;
-                  if (!overlap)
-                    continue;
-                  // Once we have one event precondition we are done
-                  wait_on.insert(rit->first);
-                  break;
-                }
-              }
-            }
-          }
-          add_physical_user(new_user, true/*reading*/, term_event, user_mask);
-        }
+          find_reading_preconditions(user_mask, term_event, wait_on);  
         // Only need to do this if we actually have a term event
-        if (outstanding_gc_events.find(term_event) ==
-            outstanding_gc_events.end())
+        if (term_event.exists())
         {
-          outstanding_gc_events.insert(term_event);
-          issue_collect = true;
+          add_physical_user(new_user, reading, term_event, user_mask);
+          if (outstanding_gc_events.find(term_event) ==
+              outstanding_gc_events.end())
+          {
+            outstanding_gc_events.insert(term_event);
+            issue_collect = true;
+          }
         }
       }
       // Launch the garbage collection task if we need to
@@ -4627,6 +4745,86 @@ namespace Legion {
         defer_collect_user(term_event);
       // Return our result
       return Runtime::merge_events<false>(wait_on);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReductionView::find_reducing_preconditions(const FieldMask &user_mask,
+                                                    Event term_event,
+                                                    std::set<Event> &wait_on)
+    //--------------------------------------------------------------------------
+    {
+      // lock must be held by caller
+      for (LegionMap<Event,EventUsers>::aligned::const_iterator rit = 
+            reading_users.begin(); rit != reading_users.end(); rit++)
+      {
+        if (rit->first == term_event)
+          continue;
+        const EventUsers &event_users = rit->second;
+        if (event_users.single)
+        {
+          FieldMask overlap = user_mask & event_users.user_mask;
+          if (!overlap)
+            continue;
+          wait_on.insert(rit->first);
+        }
+        else
+        {
+          if (!(user_mask * event_users.user_mask))
+          {
+            for (LegionMap<PhysicalUser*,FieldMask>::aligned::const_iterator
+                  it = event_users.users.multi_users->begin(); it !=
+                  event_users.users.multi_users->end(); it++)
+            {
+              FieldMask overlap = user_mask & it->second;
+              if (!overlap)
+                continue;
+              // Once we have one event precondition we are done
+              wait_on.insert(rit->first);
+              break;
+            }
+          }
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ReductionView::find_reading_preconditions(const FieldMask &user_mask,
+                                                   Event term_event,
+                                                   std::set<Event> &wait_on)
+    //--------------------------------------------------------------------------
+    {
+      // lock must be held by caller
+      for (LegionMap<Event,EventUsers>::aligned::const_iterator rit = 
+            reduction_users.begin(); rit != reduction_users.end(); rit++)
+      {
+        if (rit->first == term_event)
+          continue;
+        const EventUsers &event_users = rit->second;
+        if (event_users.single)
+        {
+          FieldMask overlap = user_mask & event_users.user_mask;
+          if (!overlap)
+            continue;
+          wait_on.insert(rit->first);
+        }
+        else
+        {
+          if (!(user_mask * event_users.user_mask))
+          {
+            for (LegionMap<PhysicalUser*,FieldMask>::aligned::const_iterator 
+                  it = event_users.users.multi_users->begin(); it !=
+                  event_users.users.multi_users->end(); it++)
+            {
+              FieldMask overlap = user_mask & it->second;
+              if (!overlap)
+                continue;
+              // Once we have one event precondition we are done
+              wait_on.insert(rit->first);
+              break;
+            }
+          }
+        }
+      }
     }
 
     //--------------------------------------------------------------------------

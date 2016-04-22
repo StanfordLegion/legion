@@ -131,10 +131,20 @@ namespace Legion {
                                  const UniqueID creator_op_id,
                                  const unsigned index,
                                  const FieldMask &mask, bool reading) = 0;
-      virtual Event add_user(const RegionUsage &user, Event term_event,
-                             const FieldMask &user_mask, 
-                             Operation *op, const unsigned index,
-                             const VersionInfo &version_info) = 0;
+      virtual Event find_user_precondition(const RegionUsage &user,
+                                           Event term_event,
+                                           const FieldMask &user_mask,
+                                           Operation *op, const unsigned index,
+                                           const VersionInfo &version_info) = 0;
+      virtual void add_user(const RegionUsage &user, Event term_event,
+                            const FieldMask &user_mask, Operation *op,
+                            const unsigned index,
+                            const VersionInfo &version_info) = 0;
+      // This is a fused version of the above two methods
+      virtual Event add_user_fused(const RegionUsage &user, Event term_event,
+                                   const FieldMask &user_mask, 
+                                   Operation *op, const unsigned index,
+                                   const VersionInfo &version_info) = 0;
       virtual void add_initial_user(Event term_event,
                                     const RegionUsage &usage,
                                     const FieldMask &user_mask,
@@ -254,10 +264,20 @@ namespace Legion {
                                  const UniqueID creator_op_id,
                                  const unsigned index,
                                  const FieldMask &mask, bool reading);
-      virtual Event add_user(const RegionUsage &user, Event term_event,
-                             const FieldMask &user_mask, 
-                             Operation *op, const unsigned index,
-                             const VersionInfo &version_info);
+      virtual Event find_user_precondition(const RegionUsage &user,
+                                           Event term_event,
+                                           const FieldMask &user_mask,
+                                           Operation *op, const unsigned index,
+                                           const VersionInfo &version_info);
+      virtual void add_user(const RegionUsage &user, Event term_event,
+                            const FieldMask &user_mask, Operation *op,
+                            const unsigned index,
+                            const VersionInfo &version_info);
+      // This is a fused version of the above two methods
+      virtual Event add_user_fused(const RegionUsage &user, Event term_event,
+                                   const FieldMask &user_mask, 
+                                   Operation *op, const unsigned index,
+                                   const VersionInfo &version_info);
       virtual void add_initial_user(Event term_event,
                                     const RegionUsage &usage,
                                     const FieldMask &user_mask,
@@ -276,21 +296,38 @@ namespace Legion {
       void process_update(Deserializer &derez, AddressSpaceID source);
       void update_gc_events(const std::deque<Event> &gc_events);
     protected:
+      
+      void find_local_user_preconditions(const RegionUsage &usage,
+                                         Event term_event,
+                                         const ColorPoint &child_color,
+                                         const UniqueID op_id,
+                                         const unsigned index,
+                                         const FieldMask &user_mask,
+                                         std::set<Event> &preconditions);
+      bool add_local_user(const RegionUsage &usage, Event term_event,
+                          const ColorPoint &child_color, 
+                          const UniqueID op_id, const unsigned index,
+                          const FieldMask &user_mask);
+      void find_user_preconditions_above(const RegionUsage &usage,
+                                         Event term_event,
+                                         const ColorPoint &child_color,
+                                         const VersionInfo &version_info,
+                                         const UniqueID op_id,
+                                         const unsigned index,
+                                         const FieldMask &user_mask,
+                                         std::set<Event> &preconditions);
       void add_user_above(const RegionUsage &usage, Event term_event,
-                          const ColorPoint &child_color,
+                          const ColorPoint &child_color, 
                           const VersionInfo &version_info,
-                          const UniqueID op_id,
-                          const unsigned index,
-                          const FieldMask &user_mask,
-                          std::set<Event> &preconditions);
-      bool add_local_user(const RegionUsage &usage, 
-                          Event term_event, bool base_user,
-                          const ColorPoint &child_color,
-                          const VersionInfo &version_info,
-                          const UniqueID op_id,
-                          const unsigned index,
-                          const FieldMask &user_mask,
-                          std::set<Event> &preconditions);
+                          const UniqueID op_id, const unsigned index,
+                          const FieldMask &user_mask);
+      void add_user_above_fused(const RegionUsage &usage, Event term_event,
+                                const ColorPoint &child_color,
+                                const VersionInfo &version_info,
+                                const UniqueID op_id,
+                                const unsigned index,
+                                const FieldMask &user_mask,
+                                std::set<Event> &preconditions);
     protected:
       void add_copy_user_above(const RegionUsage &usage, Event copy_term,
                                const ColorPoint &child_color,
@@ -507,15 +544,32 @@ namespace Legion {
                                  const UniqueID creator_op_id,
                                  const unsigned index,
                                  const FieldMask &mask, bool reading);
-      virtual Event add_user(const RegionUsage &user, Event term_event,
-                             const FieldMask &user_mask, 
-                             Operation *op, const unsigned index,
-                             const VersionInfo &version_info);
+      virtual Event find_user_precondition(const RegionUsage &user,
+                                           Event term_event,
+                                           const FieldMask &user_mask,
+                                           Operation *op, const unsigned index,
+                                           const VersionInfo &version_info);
+      virtual void add_user(const RegionUsage &user, Event term_event,
+                            const FieldMask &user_mask, Operation *op,
+                            const unsigned index,
+                            const VersionInfo &version_info);
+      // This is a fused version of the above two methods
+      virtual Event add_user_fused(const RegionUsage &user, Event term_event,
+                                   const FieldMask &user_mask, 
+                                   Operation *op, const unsigned index,
+                                   const VersionInfo &version_info);
       virtual void add_initial_user(Event term_event,
                                     const RegionUsage &usage,
                                     const FieldMask &user_mask,
                                     const UniqueID op_id,
                                     const unsigned index);
+    protected:
+      void find_reducing_preconditions(const FieldMask &user_mask,
+                                       Event term_event,
+                                       std::set<Event> &wait_on);
+      void find_reading_preconditions(const FieldMask &user_mask,
+                                      Event term_event,
+                                      std::set<Event> &wait_on);
     public:
       virtual bool reduce_to(ReductionOpID redop, const FieldMask &copy_mask,
                      std::vector<Domain::CopySrcDstField> &dst_fields,

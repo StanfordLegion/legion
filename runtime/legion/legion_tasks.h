@@ -98,6 +98,7 @@ namespace Legion {
       virtual void update_atomic_locks(Reservation lock, bool exclusive);
       virtual unsigned find_parent_index(unsigned idx);
       virtual VersionInfo& get_version_info(unsigned idx);
+      virtual const std::vector<VersionInfo>* get_version_infos(void);
       virtual RegionTreePath& get_privilege_path(unsigned idx);
       virtual void recapture_version_info(unsigned idx);
     public:
@@ -701,6 +702,7 @@ namespace Legion {
       virtual bool has_restrictions(unsigned idx, LogicalRegion handle) = 0;
       virtual bool map_and_launch(void) = 0;
       virtual VersionInfo& get_version_info(unsigned idx);
+      virtual const std::vector<VersionInfo>* get_version_infos(void);
       virtual void recapture_version_info(unsigned idx);
     public:
       virtual Event get_task_completion(void) const = 0;
@@ -799,6 +801,7 @@ namespace Legion {
       virtual bool can_early_complete(UserEvent &chain_event);
       virtual void return_virtual_instance(unsigned index, InstanceSet &refs);
       virtual VersionInfo& get_version_info(unsigned idx);
+      virtual const std::vector<VersionInfo>* get_version_infos(void);
       virtual RegionTreePath& get_privilege_path(unsigned idx);
       virtual void recapture_version_info(unsigned idx);
     public:
@@ -909,6 +912,7 @@ namespace Legion {
       virtual bool can_early_complete(UserEvent &chain_event);
       virtual void return_virtual_instance(unsigned index, InstanceSet &refs);
       virtual VersionInfo& get_version_info(unsigned idx);
+      virtual const std::vector<VersionInfo>* get_version_infos(void);
       virtual void recapture_version_info(unsigned idx);
       virtual bool is_inline_task(void) const;
     public:
@@ -1041,6 +1045,7 @@ namespace Legion {
       virtual RemoteTask* find_outermost_context(void);
       virtual UniqueID get_context_uid(void) const;
       virtual VersionInfo& get_version_info(unsigned idx);
+      virtual const std::vector<VersionInfo>* get_version_infos(void);
     public:
       virtual bool has_remote_state(void) const;
       virtual void record_remote_state(void);

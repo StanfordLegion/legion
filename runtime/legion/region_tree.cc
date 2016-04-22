@@ -2001,32 +2001,62 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeForest::physical_record_users(const RegionRequirement &req,
-                                                 VersionInfo &version_info,
-                                                 Operation *op, unsigned index,
-                                                 Event term_event,
-                                                 InstanceSet &targets)
+    void RegionTreeForest::physical_register_users(
+                                  Operation *op, Event term_event,
+                                  const std::vector<RegionRequirement> &regions,
+                                  const std::vector<bool> &to_skip,
+                                  const std::vector<VersionInfo> &version_infos,
+                                  std::deque<InstanceSet> &target_sets)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
-      assert(req.handle_type == SINGULAR);
-      assert(!targets.empty());
+      assert(regions.size() == to_skip.size());
+      assert(regions.size() == version_infos.size());
+      assert(regions.size() == target_sets.size());
 #endif
-      RegionNode *region_node = get_node(req.region);
-      // Convert to the proper instance views
-      std::vector<InstanceView*> views(targets.size());
-      region_node->convert_target_views(targets, op->get_parent(), views);
-      RegionUsage usage(req);
-      for (unsigned idx = 0; idx < targets.size(); idx++)
+      std::vector<std::vector<InstanceView*> > views(regions.size());
+      // Do the precondition pass
+      SingleTask *ctx = op->get_parent();
+      for (unsigned idx1 = 0; idx1 < regions.size(); idx1++)
       {
-        InstanceRef &ref = targets[idx];
+        if (to_skip[idx1])
+          continue;
+        const RegionRequirement &req = regions[idx1];
+        const VersionInfo &info = version_infos[idx1];
+        InstanceSet &targets = target_sets[idx1];
 #ifdef DEBUG_HIGH_LEVEL
-        assert(!ref.is_composite_ref());
+        assert(req.handle_type == SINGULAR);
+        assert(!targets.empty());
 #endif
-        Event ready = 
-          views[idx]->add_user(usage, term_event, ref.get_valid_fields(),
-                               op, index, version_info);
-        ref.set_ready_event(ready);
+        RegionNode *region_node = get_node(req.region);
+        std::vector<InstanceView*> &target_views = views[idx1];
+        target_views.resize(targets.size());
+        region_node->convert_target_views(targets, ctx, target_views);
+        RegionUsage usage(req);
+        for (unsigned idx2 = 0; idx2 < targets.size(); idx2++)
+        {
+          InstanceRef &ref = targets[idx2];
+#ifdef DEBUG_HIGH_LEVEL
+          assert(!ref.is_composite_ref());
+#endif
+          Event ready = target_views[idx2]->find_user_precondition(usage, 
+              term_event, ref.get_valid_fields(), op, idx1, info);
+          ref.set_ready_event(ready);
+        }
+      }
+      // Then do the registration pass
+      for (unsigned idx1 = 0; idx1 < regions.size(); idx1++)
+      {
+        if (to_skip[idx1])
+          continue;
+        const RegionRequirement &req = regions[idx1];
+        const VersionInfo &info = version_infos[idx1];
+        InstanceSet &targets = target_sets[idx1];
+        std::vector<InstanceView*> &target_views = views[idx1];
+        RegionUsage usage(req);
+        for (unsigned idx2 = 0; idx2 < targets.size(); idx2++)
+          target_views[idx2]->add_user(usage, term_event, 
+              targets[idx2].get_valid_fields(), op, idx1, info);
       }
     }
 
@@ -2454,8 +2484,8 @@ namespace Legion {
       usage.prop = EXCLUSIVE;
       // Add the user to the source view and then record the resulting
       // event as a the intial user for the destination view
-      Event init_event = src_view->add_user(usage, ready_event, user_mask,
-                                            context, index, version_info);
+      Event init_event = src_view->add_user_fused(usage, ready_event, user_mask,
+                                                  context, index, version_info);
       if (init_event.exists())
       {
         dst_view->add_initial_user(init_event, usage, user_mask,
@@ -2515,8 +2545,8 @@ namespace Legion {
         dst_view->add_initial_user(ready_event, usage, user_mask,
                                    context->get_unique_op_id(), index);
       else
-        dst_view->add_user(usage, ready_event, user_mask, 
-                           context, index, version_info);
+        dst_view->add_user_fused(usage, ready_event, user_mask, 
+                                 context, index, version_info);
     }
 
     //--------------------------------------------------------------------------
@@ -14812,6 +14842,9 @@ namespace Legion {
       if (IS_REDUCE(info.req))
       {
         // Reduction only case
+        std::vector<ReductionView*> new_views;
+        if (!defer_add_users && (targets.size() > 1))
+          new_views.resize(targets.size());
         for (unsigned idx = 0; idx < targets.size(); idx++)
         {
           InstanceRef &ref = targets[idx];
@@ -14828,11 +14861,33 @@ namespace Legion {
           const FieldMask &user_mask = ref.get_valid_fields(); 
           update_reduction_views(state, user_mask, new_view);
           // Skip adding the user if requested
-          if (defer_add_users)
+          if (defer_add_users || (targets.size() > 1))
             continue;
-          Event ready = new_view->add_user(usage, term_event, user_mask, 
-                                 info.op, info.index, info.version_info);
-          ref.set_ready_event(ready);
+          if (targets.size() > 1)
+          {
+            // Only find the preconditions now 
+            Event ready = new_view->find_user_precondition(usage, term_event,
+                user_mask, info.op, info.index, info.version_info);
+            ref.set_ready_event(ready);
+            new_views[idx] = new_view;
+          }
+          else
+          {
+            // Do the fused find preconditions and add user
+            Event ready = new_view->add_user_fused(usage, term_event, user_mask,
+                                        info.op, info.index, info.version_info);
+            ref.set_ready_event(ready);
+          }
+        }
+        if (!defer_add_users && (targets.size() > 1))
+        {
+          // Second pass of the two pass approach, add our users
+          for (unsigned idx = 0; idx < targets.size(); idx++)
+          {
+            InstanceRef &ref = targets[idx]; 
+            new_views[idx]->add_user(usage, term_event, 
+                ref.get_valid_fields(), info.op, info.index, info.version_info);
+          }
         }
       }
       else
@@ -14956,17 +15011,43 @@ namespace Legion {
         // to get the ready events
         if (!defer_add_users)
         {
-          for (unsigned idx = 0; idx < targets.size(); idx++)
+          // If there is exactly one instance, then we can do
+          // the fused analysis and register user, otherwise we
+          // have to make two passes in order to avoid event cycles 
+          if (targets.size() == 1)
           {
-            InstanceRef &ref = targets[idx];
+            InstanceRef &ref = targets[0];
 #ifdef DEBUG_HIGH_LEVEL
             assert(!ref.is_composite_ref());
-            assert(new_views[idx]->is_instance_view());
+            assert(new_views[0]->is_instance_view());
 #endif
-            Event ready = 
-              new_views[idx]->as_instance_view()->add_user(usage, term_event,
-               ref.get_valid_fields(), info.op, info.index, info.version_info);
+            Event ready = new_views[0]->as_instance_view()->add_user_fused(
+                usage, term_event, ref.get_valid_fields(), info.op, info.index,
+                info.version_info);
             ref.set_ready_event(ready);
+          }
+          else
+          {
+            // Two pass approach to avoid event cycles 
+            for (unsigned idx = 0; idx < targets.size(); idx++)
+            {
+              InstanceRef &ref = targets[idx];
+#ifdef DEBUG_HIGH_LEVEL
+              assert(!ref.is_composite_ref());
+              assert(new_views[idx]->is_instance_view());
+#endif
+              Event ready = 
+                new_views[idx]->as_instance_view()->find_user_precondition(
+                    usage, term_event, ref.get_valid_fields(), info.op, 
+                    info.index, info.version_info);
+              ref.set_ready_event(ready);
+            }
+            for (unsigned idx = 0; idx < targets.size(); idx++)
+            {
+              InstanceRef &ref = targets[idx];
+              new_views[idx]->as_instance_view()->add_user(usage, term_event,
+                ref.get_valid_fields(), info.op, info.index, info.version_info);
+            }
           }
         }
       }
@@ -15028,7 +15109,7 @@ namespace Legion {
           closer.issue_close_reductions(this, state);
           siphon_physical_children(closer, state);
           
-          Event ready = target_view->add_user(usage, Event::NO_EVENT,
+          Event ready = target_view->add_user_fused(usage, Event::NO_EVENT,
                     user_mask, info.op, info.index, info.version_info);
           ref.set_ready_event(ready);
         }
@@ -15081,8 +15162,8 @@ namespace Legion {
             field_data.push_back(FieldDataDescriptor());
             view->set_descriptor(field_data.back(), field_id);
             // Register ourselves as user of this instance
-            Event ready_event = view->add_user(usage, term_event, user_mask,
-                                               op, index, version_info);
+            Event ready_event = view->add_user_fused(usage, term_event, 
+                                    user_mask, op, index, version_info);
             if (ready_event.exists())
               preconditions.insert(ready_event);
             // We found an actual instance so we are done
