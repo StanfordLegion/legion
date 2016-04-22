@@ -9033,7 +9033,6 @@ namespace Legion {
     {
       remote_owner_uid = context_uid;
       is_top_level_context = is_top_level;
-      if (is_top_level)
       {
         runtime->allocate_local_context(this);
 #ifdef DEBUG_HIGH_LEVEL
