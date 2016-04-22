@@ -14453,7 +14453,7 @@ namespace Legion {
       // This is pushing constraints so it is alright to keep on
       // the default virtual channel
       find_messenger(target)->send_message(rez, SEND_CONSTRAINTS,
-                                       DEFAULT_VIRTUAL_CHANNEL, false/*flush*/);
+                                       MANAGER_VIRTUAL_CHANNEL, false/*flush*/);
     }
 
     //--------------------------------------------------------------------------
