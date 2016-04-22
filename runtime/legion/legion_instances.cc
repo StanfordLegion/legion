@@ -517,8 +517,6 @@ namespace Legion {
 #endif
       FieldMask mask;
       derez.deserialize(mask);
-      size_t blocking_factor;
-      derez.deserialize(blocking_factor);
       if (has_local)
       {
         // If we have a local layout, then we should be able to find it
