@@ -165,6 +165,7 @@ namespace Legion {
       assert(!local_cpus.empty()); // better have some cpus
       // check to make sure we complete sets of ios, cpus, and gpus
       for (unsigned idx = 0; idx < remote_cpus.size(); idx++) {
+	if (idx == node_id) continue;  // ignore our own node
         if (!remote_cpus[idx].exists()) { 
           log_mapper.error("Default mapper error: no CPUs detected on "
                            "node %d! There must be CPUs on all nodes "
@@ -175,6 +176,7 @@ namespace Legion {
       total_nodes = remote_cpus.size() + 1;
       if (!local_gpus.empty()) {
         for (unsigned idx = 0; idx < remote_gpus.size(); idx++) {
+	  if (idx == node_id) continue;  // ignore our own node
           if (!remote_gpus[idx].exists())
           {
             log_mapper.error("Default mapper has GPUs on node %d, but "
@@ -187,6 +189,7 @@ namespace Legion {
       }
       if (!local_ios.empty()) {
         for (unsigned idx = 0; idx < remote_ios.size(); idx++) {
+	  if (idx == node_id) continue;  // ignore our own node
           if (!remote_ios[idx].exists()) {
             log_mapper.error("Default mapper has I/O procs on node %d, but "
                              "could not detect I/O procs on node %d. The "

@@ -122,6 +122,8 @@ namespace Realm {
 
     bool is_active(void) const;
 
+    std::ostream& get_stream(void);
+
   protected:
     Logger *logger;
     bool active;

@@ -1583,7 +1583,7 @@ namespace Realm {
 	  args.sequence_id = sequence_id;
 
 	  int count = 1;
-	  while(datalen > max_xfer_size) {
+	  while(lines > max_lines_per_xfer) {
 	    RemoteWriteMessage::Message::request(ID(mem).node(), args,
 						 pos, datalen,
 						 stride, max_lines_per_xfer,

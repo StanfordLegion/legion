@@ -56,6 +56,11 @@ namespace Realm {
 	os << "deferred lock: lock=" << lock << " after=" << after_lock;
       }
 
+      virtual Event get_finish_event(void) const
+      {
+	return Event::NO_EVENT;
+      }
+
     protected:
       Reservation lock;
       unsigned mode;
@@ -93,6 +98,11 @@ namespace Realm {
 	os << "deferred unlock: lock=" << lock;
       }
 
+      virtual Event get_finish_event(void) const
+      {
+	return Event::NO_EVENT; // WRONG!  Should be ALL the waiting events
+      }
+
     protected:
       Reservation lock;
     };
@@ -125,6 +135,11 @@ namespace Realm {
       virtual void print(std::ostream& os) const
       {
 	os << "deferred lock destruction: lock=" << lock;
+      }
+
+      virtual Event get_finish_event(void) const
+      {
+	return Event::NO_EVENT;
       }
 
     protected:

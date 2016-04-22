@@ -566,6 +566,11 @@ namespace LegionRuntime {
       os << "dma request " << (void *)req << ": after " << req->get_finish_event();
     }
 
+    Event DmaRequest::Waiter::get_finish_event(void) const
+    {
+      return req->get_finish_event();
+    }
+
     bool CopyRequest::check_readiness(bool just_check, DmaRequestQueue *rq)
     {
       if(state == STATE_INIT)
