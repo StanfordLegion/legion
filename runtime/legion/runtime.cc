@@ -15136,7 +15136,7 @@ namespace Legion {
       // Unpack the result
       context->unpack_remote_context(derez);
       // Then register it
-      UniqueID context_uid = context->get_context_id();
+      UniqueID context_uid = context->get_context_uid();
       register_remote_context(context_uid, context);
     }
 
