@@ -440,7 +440,7 @@ namespace Legion {
       SEND_INSTANCE_REQUEST,
       SEND_INSTANCE_RESPONSE,
       SEND_GC_PRIORITY_UPDATE,
-      SEND_MAX_GC_RESPONSE,
+      SEND_NEVER_GC_RESPONSE,
       SEND_ACQUIRE_REQUEST,
       SEND_ACQUIRE_RESPONSE,
       SEND_BACK_LOGICAL_STATE,
@@ -544,7 +544,7 @@ namespace Legion {
         "Send Instance Request",                                      \
         "Send Instance Response",                                     \
         "Send GC Priority Update",                                    \
-        "Send Max GC Response",                                       \
+        "Send Never GC Response",                                     \
         "Send Acquire Request",                                       \
         "Send Acquire Response",                                      \
         "Send Back Logical State",                                    \

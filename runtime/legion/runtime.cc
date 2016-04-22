@@ -2830,14 +2830,14 @@ namespace Legion {
                                 Processor processor, GCPriority priority)
     //--------------------------------------------------------------------------
     {
-      bool remove_max_reference = false;
+      bool remove_min_reference = false;
       if (!is_owner)
       {
-        UserEvent max_gc_wait = UserEvent::NO_USER_EVENT;
-        bool remove_max_gc_ref = false;
+        UserEvent never_gc_wait = UserEvent::NO_USER_EVENT;
+        bool remove_never_gc_ref = false;
         std::pair<MapperID,Processor> key(mapper_id,processor);
         // Check to see if this is or is going to be a max priority instance
-        if (priority == MAX_GC_REF)
+        if (priority == NEVER_GC_REF)
         {
           // See if we need a handback
           AutoLock m_lock(manager_lock,1,false);
@@ -2846,10 +2846,10 @@ namespace Legion {
           if (finder != current_instances.end())
           {
             // If priority is already max priority, then we are done
-            if (finder->second.max_priority == priority)
+            if (finder->second.min_priority == priority)
               return;
             // Make an event for a callback
-            max_gc_wait = UserEvent::create_user_event();
+            never_gc_wait = UserEvent::create_user_event();
           }
         }
         else
@@ -2859,21 +2859,21 @@ namespace Legion {
             current_instances.find(manager);
           if (finder != current_instances.end())
           {
-            if (finder->second.max_priority == MAX_GC_REF)
+            if (finder->second.min_priority == NEVER_GC_REF)
             {
               finder->second.mapper_priorities.erase(key);
               if (finder->second.mapper_priorities.empty())
               {
-                finder->second.max_priority = 0;
-                remove_max_gc_ref = true;
+                finder->second.min_priority = 0;
+                remove_never_gc_ref = true;
               }
             }
           }
         }
         // Won't delete the whole manager because we still hold
         // a resource reference
-        if (remove_max_gc_ref)
-          manager->remove_base_valid_ref(MAX_GC_REF);
+        if (remove_never_gc_ref)
+          manager->remove_base_valid_ref(NEVER_GC_REF);
         // We are not the owner so send a message to the owner
         // to update the priority, no need to send the manager
         // since we know we are sending to the owner node
@@ -2886,32 +2886,32 @@ namespace Legion {
           rez.serialize(mapper_id);
           rez.serialize(processor);
           rez.serialize(priority);
-          rez.serialize(max_gc_wait);
-          if (max_gc_wait.exists())
+          rez.serialize(never_gc_wait);
+          if (never_gc_wait.exists())
             rez.serialize(&success);
         }
         runtime->send_gc_priority_update(owner_space, rez);
         // In most cases, we will fire and forget, the one exception
         // is if we are waiting for a confirmation of setting max priority
-        if (max_gc_wait.exists())
+        if (never_gc_wait.exists())
         {
-          max_gc_wait.wait();
+          never_gc_wait.wait();
           bool remove_duplicate = false;
           if (success)
           {
             // Add our local reference
-            manager->add_base_valid_ref(MAX_GC_REF);
+            manager->add_base_valid_ref(NEVER_GC_REF);
             manager->send_remote_valid_update(owner_space, 1, false/*add*/);
             // Then record it
             AutoLock m_lock(manager_lock);
             InstanceInfo &info = current_instances[manager];
-            if (info.max_priority == MAX_GC_PRIORITY)
+            if (info.min_priority == GC_NEVER_PRIORITY)
               remove_duplicate = true; // lost the race
             else
-              info.max_priority = MAX_GC_PRIORITY;
-            info.mapper_priorities[key] = MAX_GC_PRIORITY;
+              info.min_priority = GC_NEVER_PRIORITY;
+            info.mapper_priorities[key] = GC_NEVER_PRIORITY;
           }
-          if (remove_duplicate && manager->remove_base_valid_ref(MAX_GC_REF))
+          if (remove_duplicate && manager->remove_base_valid_ref(NEVER_GC_REF))
             PhysicalManager::delete_physical_manager(manager);
         }
       }
@@ -2919,8 +2919,8 @@ namespace Legion {
       {
         // If this a max priority, try adding the reference beforehand, if
         // it fails then we know the instance is already deleted so whatever
-        if ((priority == MAX_GC_PRIORITY) &&
-            !manager->try_add_base_valid_ref(MAX_GC_REF, true/*must be valid*/))
+        if ((priority == GC_NEVER_PRIORITY) &&
+            !manager->try_add_base_valid_ref(NEVER_GC_REF, true/*must be valid*/))
           return;
         // Do the update locally 
         AutoLock m_lock(manager_lock);
@@ -2931,11 +2931,11 @@ namespace Legion {
           std::map<std::pair<MapperID,Processor>,GCPriority> 
             &mapper_priorities = finder->second.mapper_priorities;
           std::pair<MapperID,Processor> key(mapper_id,processor);
-          // If the new priority is MAX_GC and we were already at MAX_GC
+          // If the new priority is NEVER_GC and we were already at NEVER_GC
           // then we need to remove the redundant reference when we are done
-          if ((priority == MAX_GC_PRIORITY) && 
-              (finder->second.max_priority == MAX_GC_PRIORITY))
-            remove_max_reference = true;
+          if ((priority == GC_NEVER_PRIORITY) && 
+              (finder->second.min_priority == GC_NEVER_PRIORITY))
+            remove_min_reference = true;
           // See if we can find the current priority  
           std::map<std::pair<MapperID,Processor>,GCPriority>::iterator 
             priority_finder = mapper_priorities.find(key);
@@ -2944,32 +2944,39 @@ namespace Legion {
             // See if it changed
             if (priority_finder->second != priority)
             {
-              // Update the max if necessary
-              if (priority > finder->second.max_priority)
+              // Update the min if necessary
+              if (priority < finder->second.min_priority)
               {
-                // It increased
-                finder->second.max_priority = priority;
+                // It decreased 
+                finder->second.min_priority = priority;
               }
-              // It might go down if this was (one of) the max priority
-              else if ((priority < finder->second.max_priority) &&
-                       (finder->second.max_priority == priority_finder->second))
+              // It might go up if this was (one of) the min priorities
+              else if ((priority > finder->second.min_priority) &&
+                       (finder->second.min_priority == priority_finder->second))
               {
-                // This was (one of) the max priorities, but it 
-                // is about to go down so compute the new max
-                GCPriority new_max = priority;
+                // This was (one of) the min priorities, but it 
+                // is about to go up so compute the new min
+                GCPriority new_min = priority;
                 for (std::map<std::pair<MapperID,Processor>,GCPriority>::
                       const_iterator it = mapper_priorities.begin(); it != 
                       mapper_priorities.end(); it++)
                 {
                   if (it->first == key)
                     continue;
-                  if (it->second > new_max)
-                    new_max = it->second;
+                  // If we find another one with the same as the current 
+                  // min then we know we are just going to stay the same
+                  if (it->second == finder->second.min_priority)
+                  {
+                    new_min = it->second;
+                    break;
+                  }
+                  if (it->second < new_min)
+                    new_min = it->second;
                 }
-                if ((finder->second.max_priority == MAX_GC_PRIORITY) &&
-                    (new_max < MAX_GC_PRIORITY))
-                  remove_max_reference = true;
-                finder->second.max_priority = new_max;
+                if ((finder->second.min_priority == GC_NEVER_PRIORITY) &&
+                    (new_min > GC_NEVER_PRIORITY))
+                  remove_min_reference = true;
+                finder->second.min_priority = new_min;
               }
               // Finally update the priority
               priority_finder->second = priority;
@@ -2978,12 +2985,12 @@ namespace Legion {
           else // previous priority was zero, see if we need to update it
           {
             mapper_priorities[key] = priority;
-            if (priority > finder->second.max_priority)
-              finder->second.max_priority = priority;
+            if (priority < finder->second.min_priority)
+              finder->second.min_priority = priority;
           }
         }
       }
-      if (remove_max_reference && manager->remove_base_valid_ref(MAX_GC_REF))
+      if (remove_min_reference && manager->remove_base_valid_ref(NEVER_GC_REF))
         PhysicalManager::delete_physical_manager(manager);
     }
 
@@ -3329,9 +3336,9 @@ namespace Legion {
         *created_ptr = created;
         if (created)
         {
-          bool max_priority;
-          derez.deserialize(max_priority);
-          if (max_priority)
+          bool min_priority;
+          derez.deserialize(min_priority);
+          if (min_priority)
           {
             MapperID mapper_id;
             derez.deserialize(mapper_id);
@@ -3340,18 +3347,19 @@ namespace Legion {
             // Record the instance as a max priority instance
             bool remove_duplicate = false;
             // No need to be safe here, we have a valid reference
-            manager->add_base_valid_ref(MAX_GC_REF);
+            manager->add_base_valid_ref(NEVER_GC_REF);
             {
               std::pair<MapperID,Processor> key(mapper_id,processor);
               AutoLock m_lock(manager_lock);
               InstanceInfo &info = current_instances[manager];
-              if (info.max_priority == MAX_GC_REF)
+              if (info.min_priority == NEVER_GC_REF)
                 remove_duplicate = true;
               else
-                info.max_priority = MAX_GC_REF;
-              info.mapper_priorities[key] = MAX_GC_REF;
+                info.min_priority = NEVER_GC_REF;
+              info.mapper_priorities[key] = NEVER_GC_REF;
             }
-            if (remove_duplicate && manager->remove_base_valid_ref(MAX_GC_REF))
+            if (remove_duplicate && 
+                manager->remove_base_valid_ref(NEVER_GC_REF))
               PhysicalManager::delete_physical_manager(manager);
           }
         }
@@ -3359,9 +3367,9 @@ namespace Legion {
       else if ((kind == CREATE_INSTANCE_CONSTRAINTS) ||
                (kind == CREATE_INSTANCE_LAYOUT))
       {
-        bool max_priority;
-        derez.deserialize(max_priority);
-        if (max_priority)
+        bool min_priority;
+        derez.deserialize(min_priority);
+        if (min_priority)
         {
           MapperID mapper_id;
           derez.deserialize(mapper_id);
@@ -3369,18 +3377,18 @@ namespace Legion {
           derez.deserialize(processor);
           bool remove_duplicate = false;
           // No need to be safe here, we have a valid reference
-          manager->add_base_valid_ref(MAX_GC_REF);
+          manager->add_base_valid_ref(NEVER_GC_REF);
           {
             std::pair<MapperID,Processor> key(mapper_id,processor);
             AutoLock m_lock(manager_lock);
             InstanceInfo &info = current_instances[manager];
-            if (info.max_priority == MAX_GC_REF)
+            if (info.min_priority == NEVER_GC_REF)
               remove_duplicate = true;
             else
-              info.max_priority = MAX_GC_REF;
-            info.mapper_priorities[key] = MAX_GC_REF;
+              info.min_priority = NEVER_GC_REF;
+            info.mapper_priorities[key] = NEVER_GC_REF;
           }
-          if (remove_duplicate && manager->remove_base_valid_ref(MAX_GC_REF))
+          if (remove_duplicate && manager->remove_base_valid_ref(NEVER_GC_REF))
             PhysicalManager::delete_physical_manager(manager);
         }
       }
@@ -3401,8 +3409,8 @@ namespace Legion {
       derez.deserialize(processor);
       GCPriority priority;
       derez.deserialize(priority);
-      UserEvent max_gc_event;
-      derez.deserialize(max_gc_event);
+      UserEvent never_gc_event;
+      derez.deserialize(never_gc_event);
       // Hold our lock to make sure our allocation doesn't change
       // when getting the reference
       PhysicalManager *manager = NULL;
@@ -3423,7 +3431,7 @@ namespace Legion {
       // If the instance was already collected, there is nothing to do
       if (manager == NULL)
       {
-        if (max_gc_event.exists())
+        if (never_gc_event.exists())
         {
           bool *success;
           derez.deserialize(success);
@@ -3433,14 +3441,14 @@ namespace Legion {
             RezCheck z(rez);
             rez.serialize(memory);
             rez.serialize(success);
-            rez.serialize(max_gc_event);
+            rez.serialize(never_gc_event);
           }
-          runtime->send_max_gc_response(source, rez);
+          runtime->send_never_gc_response(source, rez);
         }
         return;
       }
       set_garbage_collection_priority(manager, mapper_id, processor, priority);
-      if (max_gc_event.exists())
+      if (never_gc_event.exists())
       {
         bool *success;
         derez.deserialize(success);
@@ -3454,12 +3462,12 @@ namespace Legion {
             RezCheck z(rez);
             rez.serialize(memory);
             rez.serialize(success);
-            rez.serialize(max_gc_event);
+            rez.serialize(never_gc_event);
           }
-          runtime->send_max_gc_response(source, rez);
+          runtime->send_never_gc_response(source, rez);
         }
         else
-          max_gc_event.trigger();
+          never_gc_event.trigger();
       }
       // Remote our reference
       if (manager->remove_base_resource_ref(MEMORY_MANAGER_REF))
@@ -3467,7 +3475,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MemoryManager::process_max_gc_response(Deserializer &derez)
+    void MemoryManager::process_never_gc_response(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       bool *success;
@@ -3943,10 +3951,10 @@ namespace Legion {
           continue;
         if (it->second.instance_size >= needed_size)
           larger_instances.insert(CollectableInfo<false>(it->first,
-                it->second.instance_size, it->second.max_priority));
+                it->second.instance_size, it->second.min_priority));
         else
           smaller_instances.insert(CollectableInfo<true>(it->first,
-                it->second.instance_size, it->second.max_priority));
+                it->second.instance_size, it->second.min_priority));
       }
     }
 
@@ -4035,7 +4043,7 @@ namespace Legion {
       // First do the insertion
       // If we're going to add a valid reference, mark this valid early
       // to avoid races with deletions
-      bool early_valid = acquire || (priority == MAX_GC_PRIORITY);
+      bool early_valid = acquire || (priority == GC_NEVER_PRIORITY);
       size_t instance_size = manager->get_instance_size();
       // Since we're going to put this in the table add a reference
       manager->add_base_resource_ref(MEMORY_MANAGER_REF);
@@ -4064,7 +4072,7 @@ namespace Legion {
         InstanceInfo &info = current_instances[manager];
         if (early_valid)
           info.current_state = VALID_STATE;
-        info.max_priority = priority;
+        info.min_priority = priority;
         info.instance_size = instance_size;
         info.mapper_priorities[
           std::pair<MapperID,Processor>(mapper_id,proc)] = priority;
@@ -4097,7 +4105,7 @@ namespace Legion {
             if (finder != current_instances.end())
             {
               finder->second.current_state = COLLECTABLE_STATE;
-              finder->second.max_priority = 0;
+              finder->second.min_priority = 0;
               finder->second.mapper_priorities[
                 std::pair<MapperID,Processor>(mapper_id,proc)] = 0;
             }
@@ -4115,8 +4123,8 @@ namespace Legion {
         else
           manager->add_base_valid_ref(MAPPING_ACQUIRE_REF);
       }
-      if (priority == MAX_GC_REF)
-        manager->add_base_valid_ref(MAX_GC_REF);
+      if (priority == NEVER_GC_REF)
+        manager->add_base_valid_ref(NEVER_GC_REF);
       return manager;
     }
 
@@ -4135,7 +4143,7 @@ namespace Legion {
       // First do the insertion
       // If we're going to add a valid reference, mark this valid early
       // to avoid races with deletions
-      bool early_valid = acquire || (priority == MAX_GC_PRIORITY);
+      bool early_valid = acquire || (priority == GC_NEVER_PRIORITY);
       size_t instance_size = manager->get_instance_size();
       // Since we're going to put this in the table add a reference
       manager->add_base_resource_ref(MEMORY_MANAGER_REF);
@@ -4164,7 +4172,7 @@ namespace Legion {
         InstanceInfo &info = current_instances[manager];
         if (early_valid)
           info.current_state = VALID_STATE;
-        info.max_priority = priority;
+        info.min_priority = priority;
         info.instance_size = instance_size;
         info.mapper_priorities[
           std::pair<MapperID,Processor>(mapper_id,proc)] = priority;
@@ -4197,7 +4205,7 @@ namespace Legion {
             if (finder != current_instances.end())
             {
               finder->second.current_state = COLLECTABLE_STATE;
-              finder->second.max_priority = 0;
+              finder->second.min_priority = 0;
               finder->second.mapper_priorities[
                 std::pair<MapperID,Processor>(mapper_id,proc)] = 0;
             }
@@ -4215,8 +4223,8 @@ namespace Legion {
         else
           manager->add_base_valid_ref(MAPPING_ACQUIRE_REF);
       }
-      if (priority == MAX_GC_REF)
-        manager->add_base_valid_ref(MAX_GC_REF);
+      if (priority == NEVER_GC_REF)
+        manager->add_base_valid_ref(NEVER_GC_REF);
       return manager;
     }
 
@@ -4232,7 +4240,7 @@ namespace Legion {
       // First do the insertion
       // If we're going to add a valid reference, mark this valid early
       // to avoid races with deletions
-      bool early_valid = acquire || (priority == MAX_GC_PRIORITY);
+      bool early_valid = acquire || (priority == GC_NEVER_PRIORITY);
       size_t instance_size = manager->get_instance_size();
       // Since we're going to put this in the table add a reference
       manager->add_base_resource_ref(MEMORY_MANAGER_REF);
@@ -4244,7 +4252,7 @@ namespace Legion {
         InstanceInfo &info = current_instances[manager];
         if (early_valid)
           info.current_state = VALID_STATE;
-        info.max_priority = priority;
+        info.min_priority = priority;
         info.instance_size = instance_size;
         info.mapper_priorities[
           std::pair<MapperID,Processor>(mapper_id,p)] = priority;
@@ -4257,8 +4265,8 @@ namespace Legion {
         else
           manager->add_base_valid_ref(MAPPING_ACQUIRE_REF);
       }
-      if (priority == MAX_GC_REF)
-        manager->add_base_valid_ref(MAX_GC_REF);
+      if (priority == NEVER_GC_REF)
+        manager->add_base_valid_ref(NEVER_GC_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -5025,9 +5033,9 @@ namespace Legion {
               runtime->handle_gc_priority_update(derez, remote_address_space);
               break;
             }
-          case SEND_MAX_GC_RESPONSE:
+          case SEND_NEVER_GC_RESPONSE:
             {
-              runtime->handle_max_gc_response(derez);
+              runtime->handle_never_gc_response(derez);
               break;
             }
           case SEND_ACQUIRE_REQUEST:
@@ -14390,10 +14398,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_max_gc_response(AddressSpaceID target, Serializer &rez)
+    void Runtime::send_never_gc_response(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_message(rez, SEND_MAX_GC_RESPONSE,
+      find_messenger(target)->send_message(rez, SEND_NEVER_GC_RESPONSE,
                                         DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
@@ -15217,14 +15225,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_max_gc_response(Deserializer &derez)
+    void Runtime::handle_never_gc_response(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
       Memory target_memory;
       derez.deserialize(target_memory);
       MemoryManager *manager = find_memory_manager(target_memory);
-      manager->process_max_gc_response(derez);
+      manager->process_never_gc_response(derez);
     }
 
     //--------------------------------------------------------------------------

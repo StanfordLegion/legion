@@ -584,12 +584,12 @@ namespace Legion {
         InstanceInfo(void)
           : current_state(COLLECTABLE_STATE), 
             deferred_collect(UserEvent::NO_USER_EVENT),
-            instance_size(0), max_priority(0) { }
+            instance_size(0), min_priority(0) { }
       public:
         InstanceState current_state;
         UserEvent deferred_collect;
         size_t instance_size;
-        GCPriority max_priority;
+        GCPriority min_priority;
         std::map<std::pair<MapperID,Processor>,GCPriority> mapper_priorities;
       };
       template<bool SMALLER>
@@ -665,7 +665,7 @@ namespace Legion {
       void process_instance_request(Deserializer &derez, AddressSpaceID source);
       void process_instance_response(Deserializer &derez,AddressSpaceID source);
       void process_gc_priority_update(Deserializer &derez, AddressSpaceID src);
-      void process_max_gc_response(Deserializer &derez);
+      void process_never_gc_response(Deserializer &derez);
       void process_acquire_request(Deserializer &derez, AddressSpaceID source);
       void process_acquire_response(Deserializer &derez);
     protected:
@@ -1908,7 +1908,7 @@ namespace Legion {
       void send_instance_request(AddressSpaceID target, Serializer &rez);
       void send_instance_response(AddressSpaceID target, Serializer &rez);
       void send_gc_priority_update(AddressSpaceID target, Serializer &rez);
-      void send_max_gc_response(AddressSpaceID target, Serializer &rez);
+      void send_never_gc_response(AddressSpaceID target, Serializer &rez);
       void send_acquire_request(AddressSpaceID target, Serializer &rez);
       void send_acquire_response(AddressSpaceID target, Serializer &rez);
       void send_back_logical_state(AddressSpaceID target, Serializer &rez);
@@ -2047,7 +2047,7 @@ namespace Legion {
       void handle_instance_request(Deserializer &derez, AddressSpaceID source);
       void handle_instance_response(Deserializer &derez,AddressSpaceID source);
       void handle_gc_priority_update(Deserializer &derez,AddressSpaceID source);
-      void handle_max_gc_response(Deserializer &derez);
+      void handle_never_gc_response(Deserializer &derez);
       void handle_acquire_request(Deserializer &derez, AddressSpaceID source);
       void handle_acquire_response(Deserializer &derez);
       void handle_logical_state_return(Deserializer &derez,

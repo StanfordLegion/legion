@@ -1824,7 +1824,7 @@ namespace Legion {
       singleton = new VirtualManager(rt->forest, layout, pointer_constraint,
                                      did, rt->address_space);
       // put a permenant resource reference on this so it is never deleted
-      singleton->add_base_resource_ref(MAX_GC_REF);
+      singleton->add_base_resource_ref(NEVER_GC_REF);
     }
 
     /////////////////////////////////////////////////////////////

@@ -1281,7 +1281,7 @@ namespace Legion {
       if (!term_event.exists())
         return false;
       PhysicalUser *new_user = 
-        new_user = legion_new<PhysicalUser>(usage, child_color, op_id, index);
+        legion_new<PhysicalUser>(usage, child_color, op_id, index);
       new_user->add_reference();
       // No matter what, we retake the lock in exclusive mode so we
       // can handle any clean-up and add our user

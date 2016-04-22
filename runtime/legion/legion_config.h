@@ -38,8 +38,9 @@
 //==========================================================================
 
 #define AUTO_GENERATE_ID   UINT_MAX
-#define MIN_GC_PRIORITY    INT_MIN
-#define MAX_GC_PRIORITY    INT_MAX
+#define GC_MIN_PRIORITY    INT_MIN
+#define GC_MAX_PRIORITY    INT_MAX
+#define GC_NEVER_PRIORITY  INT_MIN
 
 #ifndef MAX_RETURN_SIZE
 #define MAX_RETURN_SIZE    2048 // maximum return type size in bytes

@@ -1171,7 +1171,7 @@ namespace Legion {
       std::set<FieldID> fields = req.privilege_fields;
       GCPriority gc_priority = 0;
       if (req.make_persistent)
-        gc_priority = MAX_GC_PRIORITY; 
+        gc_priority = GC_NEVER_PRIORITY; 
       if (!req.additional_fields.empty())
         fields.insert(req.additional_fields.begin(),
                       req.additional_fields.end());
