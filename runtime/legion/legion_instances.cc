@@ -572,7 +572,8 @@ namespace Legion {
       {
         // Register it with the memory manager, the memory manager
         // on the owner node will handle this
-        memory_manager->register_remote_instance(this);
+	// have to do register_remote_instance in the subclass constructors...
+        //memory_manager->register_remote_instance(this);
         add_base_resource_ref(REMOTE_DID_REF);
       }
     }
@@ -934,6 +935,12 @@ namespace Legion {
         use_event(u_event), instance_flags(flags)
     //--------------------------------------------------------------------------
     {
+      if (!is_owner())
+      {
+        // Register it with the memory manager, the memory manager
+        // on the owner node will handle this
+        memory_manager->register_remote_instance(this);
+      }
       // Add a reference to the layout
       layout->add_reference();
 #ifdef LEGION_GC
@@ -1227,6 +1234,12 @@ namespace Legion {
         op(o), redop(red), logical_field(f)
     //--------------------------------------------------------------------------
     { 
+      if (!is_owner())
+      {
+        // Register it with the memory manager, the memory manager
+        // on the owner node will handle this
+        memory_manager->register_remote_instance(this);
+      }
       if (is_owner() && Runtime::legion_spy_enabled)
       {
         LegionSpy::log_physical_instance(inst.id, mem->memory.id, redop);
