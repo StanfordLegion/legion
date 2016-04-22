@@ -1569,8 +1569,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       specialized_constraint.deserialize(derez);
+      field_constraint.deserialize(derez);
       memory_constraint.deserialize(derez);
       pointer_constraint.deserialize(derez);
+      ordering_constraint.deserialize(derez);
 #define UNPACK_CONSTRAINTS(Type, constraints)                       \
       {                                                             \
         size_t constraint_size;                                     \
