@@ -370,7 +370,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ShimMapper::ShimMapper(Machine m, Runtime *rt, 
                            Processor local, const char *name/*=NULL*/)
-      : DefaultMapper(m, local, name),
+      : DefaultMapper(m, local,(name == NULL) ? create_shim_name(local) : name),
         local_kind(local.kind()), machine(m), runtime(rt),
         max_steals_per_theft(STATIC_MAX_PERMITTED_STEALS),
         max_steal_count(STATIC_MAX_STEAL_COUNT),
@@ -443,6 +443,17 @@ namespace Legion {
       // should never be called
       assert(false);
       return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ const char* ShimMapper::create_shim_name(Processor p)
+    //--------------------------------------------------------------------------
+    {
+      const size_t buffer_size = 64;
+      char *result = (char*)malloc(buffer_size*sizeof(char));
+      snprintf(result, buffer_size-1,
+                "Shim Mapper on Processor " IDFMT "", p.id);
+      return result;
     }
 
     //--------------------------------------------------------------------------
