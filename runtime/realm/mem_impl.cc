@@ -38,7 +38,9 @@ namespace Realm {
 
     AddressSpace Memory::address_space(void) const
     {
-      return ID(id).node();
+      // limitations in the current newmap implementation require that all memories
+      //  be managed by the HLR instance on the first node
+      return 0; //ID(id).node();
     }
 
     ID::IDType Memory::local_id(void) const
