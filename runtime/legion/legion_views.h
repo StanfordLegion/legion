@@ -296,7 +296,6 @@ namespace Legion {
       void process_update(Deserializer &derez, AddressSpaceID source);
       void update_gc_events(const std::deque<Event> &gc_events);
     protected:
-      
       void find_local_user_preconditions(const RegionUsage &usage,
                                          Event term_event,
                                          const ColorPoint &child_color,
