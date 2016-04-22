@@ -746,6 +746,16 @@ namespace Legion {
         if (tree_id != it->get_tree_id())
           return false;
         RegionNode *handle_node = context->get_node(*it);
+        // For now this instance must be a sub-region of the 
+        // ancestor logical region.
+        if (handle_node != region_node)
+        {
+          RegionNode *up_node = handle_node;
+          while ((up_node != region_node) && (up_node->parent != NULL))
+            up_node = up_node->parent->parent;
+          if (up_node != region_node)
+            return false;
+        }
         // Now check to see if our instance domain dominates the region
         IndexSpaceNode *index_node = handle_node->row_source; 
         std::vector<Domain> to_check;
