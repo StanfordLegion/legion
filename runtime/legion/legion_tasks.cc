@@ -378,10 +378,10 @@ namespace Legion {
               if (!ready_events.empty())
               {
                 Event ready = Runtime::merge_events<true>(ready_events);
-                ready.wait();
+                rt->add_to_ready_queue(current, task, false/*prev fail*/,ready);
               }
-              rt->add_to_ready_queue(current, task, 
-                                     false/*prev fail*/);
+              else
+                rt->add_to_ready_queue(current, task, false/*prev fail*/);
             }
             break;
           }
@@ -394,10 +394,10 @@ namespace Legion {
               if (!ready_events.empty())
               {
                 Event ready = Runtime::merge_events<true>(ready_events);
-                ready.wait();
+                rt->add_to_ready_queue(current, task, false/*prev fail*/,ready);
               }
-              rt->add_to_ready_queue(current, task,
-                                     false/*prev fail*/);
+              else
+                rt->add_to_ready_queue(current, task, false/*prev fail*/);
             }
             break;
           }

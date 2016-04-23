@@ -36,7 +36,7 @@ namespace Legion {
     public:
       LogicalView(RegionTreeForest *ctx, DistributedID did,
                   AddressSpaceID owner_proc, AddressSpaceID local_space,
-                  RegionTreeNode *node);
+                  RegionTreeNode *node, bool register_now);
       virtual ~LogicalView(void);
     public:
       static void delete_logical_view(LogicalView *view);
@@ -108,7 +108,8 @@ namespace Legion {
     public:
       InstanceView(RegionTreeForest *ctx, DistributedID did,
                    AddressSpaceID owner_proc, AddressSpaceID local_space,
-                   RegionTreeNode *node, SingleTask *owner_context); 
+                   RegionTreeNode *node, SingleTask *owner_context,
+                   bool register_now); 
       virtual ~InstanceView(void);
     public:
       virtual bool has_manager(void) const = 0;
@@ -210,7 +211,8 @@ namespace Legion {
       MaterializedView(RegionTreeForest *ctx, DistributedID did,
                        AddressSpaceID owner_proc, AddressSpaceID local_proc,
                        RegionTreeNode *node, InstanceManager *manager,
-                       MaterializedView *parent, SingleTask *owner_context);
+                       MaterializedView *parent, SingleTask *owner_context,
+                       bool register_now);
       MaterializedView(const MaterializedView &rhs);
       virtual ~MaterializedView(void);
     public:
@@ -499,7 +501,7 @@ namespace Legion {
       ReductionView(RegionTreeForest *ctx, DistributedID did,
                     AddressSpaceID owner_proc, AddressSpaceID local_proc,
                     RegionTreeNode *node, ReductionManager *manager,
-                    SingleTask *owner_context);
+                    SingleTask *owner_context, bool register_now);
       ReductionView(const ReductionView &rhs);
       virtual ~ReductionView(void);
     public:
@@ -632,7 +634,7 @@ namespace Legion {
     public:
       DeferredView(RegionTreeForest *ctx, DistributedID did,
                    AddressSpaceID owner_space, AddressSpaceID local_space,
-                   RegionTreeNode *node);
+                   RegionTreeNode *node, bool register_now);
       virtual ~DeferredView(void);
     public:
       // Deferred views never have managers
@@ -720,7 +722,7 @@ namespace Legion {
       CompositeView(RegionTreeForest *ctx, DistributedID did,
                     AddressSpaceID owner_proc, RegionTreeNode *node, 
                     AddressSpaceID local_proc, CompositeNode *root,
-                    CompositeVersionInfo *version_info);
+                    CompositeVersionInfo *version_info, bool register_now);
       CompositeView(const CompositeView &rhs);
       virtual ~CompositeView(void);
     public:
@@ -872,7 +874,8 @@ namespace Legion {
     public:
       FillView(RegionTreeForest *ctx, DistributedID did,
                AddressSpaceID owner_proc, AddressSpaceID local_proc,
-               RegionTreeNode *node, FillViewValue *value);
+               RegionTreeNode *node, FillViewValue *value,
+               bool register_now);
       FillView(const FillView &rhs);
       virtual ~FillView(void);
     public:

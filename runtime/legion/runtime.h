@@ -1237,6 +1237,12 @@ namespace Legion {
         Domain domain;
         TaskOp *task_op;
       };
+      struct DeferredEnqueueArgs {
+        HLRTaskID hlr_id;
+        ProcessorManager *manager;
+        TaskOp *task;
+        bool prev_fail;
+      };
       struct MPIRankArgs {
         HLRTaskID hlr_id;
         int mpi_rank;
@@ -2114,7 +2120,8 @@ namespace Legion {
     public:
       void execute_task_launch(Context ctx, TaskOp *task_op);
       void add_to_dependence_queue(Processor p, Operation *op);
-      void add_to_ready_queue(Processor p, TaskOp *task_op, bool prev_fail);
+      void add_to_ready_queue(Processor p, TaskOp *task_op, 
+                              bool prev_fail, Event wait_on = Event::NO_EVENT);
       void add_to_local_queue(Processor p, Operation *op, bool prev_fail);
     public:
       inline Processor find_utility_group(void) { return utility_group; }

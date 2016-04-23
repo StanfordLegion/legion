@@ -15667,15 +15667,26 @@ namespace Legion {
     }
     
     //--------------------------------------------------------------------------
-    void Runtime::add_to_ready_queue(Processor p, 
-                                           TaskOp *op, bool prev_fail)
+    void Runtime::add_to_ready_queue(Processor p, TaskOp *op, 
+                                     bool prev_fail, Event wait_on)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
       assert(p.kind() != Processor::UTIL_PROC);
       assert(proc_managers.find(p) != proc_managers.end());
 #endif
-      proc_managers[p]->add_to_ready_queue(op, prev_fail);
+      if (wait_on.exists())
+      {
+        DeferredEnqueueArgs args;
+        args.hlr_id = HLR_DEFERRED_ENQUEUE_TASK_ID;
+        args.manager = proc_managers[p];
+        args.task = op;
+        args.prev_fail = prev_fail;
+        issue_runtime_meta_task(&args, sizeof(args), 
+            HLR_DEFERRED_ENQUEUE_TASK_ID, HLR_LATENCY_PRIORITY, op, wait_on);
+      }
+      else
+        proc_managers[p]->add_to_ready_queue(op, prev_fail);
     }
 
     //--------------------------------------------------------------------------
@@ -20022,6 +20033,14 @@ namespace Legion {
             // Remove the reference that we added
             if (tunable_args->result->remove_base_gc_ref(FUTURE_HANDLE_REF))
               legion_delete(tunable_args->result);
+            break;
+          }
+        case HLR_DEFERRED_ENQUEUE_TASK_ID:
+          {
+            const DeferredEnqueueArgs *enqueue_args = 
+              (const DeferredEnqueueArgs*)args;
+            enqueue_args->manager->add_to_ready_queue(enqueue_args->task,
+                                                      enqueue_args->prev_fail);
             break;
           }
         case HLR_SHUTDOWN_ATTEMPT_TASK_ID:
