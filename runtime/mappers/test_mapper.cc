@@ -122,7 +122,8 @@ namespace Legion {
         output.initial_proc = select_random_processor(kind);
         output.inline_task = false;
         output.stealable = true;
-        output.map_locally = ((generate_random_integer() % 2) == 0);
+        output.map_locally = true;
+        //output.map_locally = ((generate_random_integer() % 2) == 0);
       }
     }
 
