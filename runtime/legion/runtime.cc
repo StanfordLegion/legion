@@ -2541,7 +2541,6 @@ namespace Legion {
       if (!is_owner)
       {
         // Not the owner, send a meessage to the owner to request the creation
-        constraints->send_constraints(owner_space);
         Serializer rez;
         UserEvent ready_event = UserEvent::create_user_event();
         {
@@ -2678,7 +2677,6 @@ namespace Legion {
                                       acquire, remote);
         if (success)
           return true;
-        constraints->send_constraints(owner_space);
         // Not the owner, send a message to the owner to request creation
         Serializer rez;
         UserEvent ready_event = UserEvent::create_user_event();
@@ -2795,7 +2793,6 @@ namespace Legion {
                                       acquire, remote);
         if (success)
           return true;
-        constraints->send_constraints(owner_space);
         Serializer rez;
         UserEvent ready_event = UserEvent::create_user_event();
         {
@@ -5099,11 +5096,6 @@ namespace Legion {
               runtime->handle_variant_response(derez);
               break;
             }
-          case SEND_CONSTRAINTS:
-            {
-              runtime->handle_constraint_send(derez, remote_address_space);
-              break;
-            }
           case SEND_CONSTRAINT_REQUEST:
             {
               runtime->handle_constraint_request(derez, remote_address_space);
@@ -6535,27 +6527,23 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     LayoutConstraints::LayoutConstraints(LayoutConstraintID lay_id,FieldSpace h,
-                                         DistributedID did, Runtime *rt,
-                                     AddressSpaceID owner, AddressSpaceID local)
-      : LayoutConstraintSet(), 
-        DistributedCollectable(rt, did, owner, local, false/*register*/), 
-        layout_id(lay_id), handle(h), constraints_name(NULL) 
+                                         Runtime *rt, AddressSpaceID owner, 
+                                         AddressSpaceID local)
+      : LayoutConstraintSet(), Collectable(), layout_id(lay_id), handle(h), 
+        owner_space(owner), local_space(local), runtime(rt), 
+        constraints_name(NULL) 
     //--------------------------------------------------------------------------
     {
-      // This is always the remote creation so add a resource reference
-      add_base_resource_ref(REMOTE_DID_REF);
-#ifdef LEGION_GC
-      log_garbage.info("GC Constraints %ld", LEGION_DISTRIBUTED_ID_FILTER(did));
-#endif
+      layout_lock = Reservation::create_reservation();
     }
 
     //--------------------------------------------------------------------------
-    LayoutConstraints::LayoutConstraints(LayoutConstraintID lay_id,
-                                         DistributedID did, Runtime *rt,
+    LayoutConstraints::LayoutConstraints(LayoutConstraintID lay_id, Runtime *rt,
                                      const LayoutConstraintRegistrar &registrar)
-      : LayoutConstraintSet(registrar.layout_constraints), 
-        DistributedCollectable(rt, did, runtime->address_space,
-            runtime->address_space), layout_id(lay_id), handle(registrar.handle)
+      : LayoutConstraintSet(registrar.layout_constraints), Collectable(),
+        layout_id(lay_id), handle(registrar.handle), 
+        owner_space(rt->address_space), local_space(rt->address_space),
+        runtime(rt)
     //--------------------------------------------------------------------------
     {
       if (registrar.layout_name == NULL)
@@ -6565,32 +6553,27 @@ namespace Legion {
       }
       else
         constraints_name = strdup(registrar.layout_name);
-#ifdef LEGION_GC
-      log_garbage.info("GC Constraints %ld", LEGION_DISTRIBUTED_ID_FILTER(did));
-#endif
+      layout_lock = Reservation::create_reservation();
     }
 
     //--------------------------------------------------------------------------
-    LayoutConstraints::LayoutConstraints(LayoutConstraintID lay_id,
-                                         DistributedID did, Runtime *rt,
+    LayoutConstraints::LayoutConstraints(LayoutConstraintID lay_id, Runtime *rt,
                                          const LayoutConstraintSet &cons,
                                          FieldSpace h)
-      : LayoutConstraintSet(cons), DistributedCollectable(rt, did,
-          rt->address_space, rt->address_space, true/*register*/),
-        layout_id(lay_id), handle(h)
+      : LayoutConstraintSet(cons), Collectable(), layout_id(lay_id), handle(h),
+        owner_space(rt->address_space), local_space(rt->address_space), 
+        runtime(rt)
     //--------------------------------------------------------------------------
     {
       constraints_name = (char*)malloc(64*sizeof(char));
       snprintf(constraints_name,64,"layout constraints %ld", layout_id);
-#ifdef LEGION_GC
-      log_garbage.info("GC Constraints %ld", LEGION_DISTRIBUTED_ID_FILTER(did));
-#endif
+      layout_lock = Reservation::create_reservation();
     }
 
     //--------------------------------------------------------------------------
     LayoutConstraints::LayoutConstraints(const LayoutConstraints &rhs)
-      : LayoutConstraintSet(rhs), DistributedCollectable(rhs),
-        layout_id(rhs.layout_id), handle(rhs.handle)
+      : LayoutConstraintSet(rhs), Collectable(), layout_id(rhs.layout_id), 
+        handle(rhs.handle), owner_space(0), local_space(0), runtime(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -6610,23 +6593,8 @@ namespace Legion {
     {
       if (constraints_name != NULL)
         free(constraints_name);
-      // If we are the owner, we can now remove our remote copies
-      if (is_owner())
-      {
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(layout_id);
-        }
-        RemoveFunctor functor(rez, runtime);
-        remote_instances.map(functor);
-      }
-      // If we were registered with the runtime, unregister ourself
-      if (registered_with_runtime)
-        runtime->unregister_layout(layout_id);
-#ifdef LEGION_GC
-      log_garbage.info("GC Deletion %ld", LEGION_DISTRIBUTED_ID_FILTER(did));
-#endif
+      layout_lock.destroy_reservation();
+      layout_lock = Reservation::NO_RESERVATION;
     }
 
     //--------------------------------------------------------------------------
@@ -6639,77 +6607,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LayoutConstraints::notify_active(void)
-    //--------------------------------------------------------------------------
-    {
-      // If we are not the owner, send a gc reference back to the owner
-      if (!is_owner())
-        send_remote_gc_update(owner_space, 1/*count*/, true/*add*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void LayoutConstraints::notify_valid(void)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void LayoutConstraints::notify_invalid(void)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void LayoutConstraints::notify_inactive(void)
-    //--------------------------------------------------------------------------
-    {
-      // If we are not the owner, remove our gc reference
-      if (!is_owner())
-        send_remote_gc_update(owner_space, 1/*count*/, false/*add*/);
-    }
-
-    //--------------------------------------------------------------------------
-    DistributedID LayoutConstraints::send_constraints(AddressSpaceID target)
-    //--------------------------------------------------------------------------
-    {
-      if (!has_remote_instance(target))
-      {
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(did);
-          rez.serialize(layout_id);
-          rez.serialize(handle);
-          size_t name_len = strlen(constraints_name)+1;
-          rez.serialize(name_len);
-          rez.serialize(constraints_name, name_len);
-          // pack the constraints
-          serialize(rez);
-        }
-        runtime->send_constraints(target, rez);
-        update_remote_instances(target);
-      }
-      return did;
-    }
-
-    //--------------------------------------------------------------------------
     void LayoutConstraints::send_constraint_response(AddressSpaceID target,
                                                      UserEvent done_event)
     //--------------------------------------------------------------------------
     {
-      // Hold our lock when updating our se of remote instances
-      {
-        AutoLock gc(gc_lock);
-        remote_instances.add(target);
-      }
       Serializer rez;
       {
         RezCheck z(rez);
-        rez.serialize(did);
         rez.serialize(layout_id);
         rez.serialize(handle);
         size_t name_len = strlen(constraints_name)+1;
@@ -6721,7 +6625,9 @@ namespace Legion {
         rez.serialize(done_event);
       }
       runtime->send_constraint_response(target, rez);
-      update_remote_instances(target);
+      // Hold our lock when updating our se of remote instances
+      AutoLock lay_lock(layout_lock);
+      remote_instances.add(target);
     }
 
     //--------------------------------------------------------------------------
@@ -6740,12 +6646,28 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void LayoutConstraints::release_remote_instances(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      assert(is_owner());
+#endif
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(layout_id);
+      }
+      RemoveFunctor functor(rez, runtime);
+      remote_instances.map(functor);
+    }
+
+    //--------------------------------------------------------------------------
     bool LayoutConstraints::entails(LayoutConstraints *constraints)
     //--------------------------------------------------------------------------
     {
       // Check to see if the result is in the cache
       {
-        AutoLock gc(gc_lock,1,false/*exclusive*/);
+        AutoLock lay(layout_lock,1,false/*exclusive*/);
         std::map<LayoutConstraintID,bool>::const_iterator finder = 
           entailment_cache.find(constraints->layout_id);
         if (finder != entailment_cache.end())
@@ -6754,7 +6676,7 @@ namespace Legion {
       // Didn't find it, so do the test for real
       bool result = entails(*constraints);
       // Save the result in the cache
-      AutoLock gc(gc_lock);
+      AutoLock lay(layout_lock);
       entailment_cache[constraints->layout_id] = result;
       return result;
     }
@@ -6772,7 +6694,7 @@ namespace Legion {
     {
       // Check to see if the result is in the cache
       {
-        AutoLock gc(gc_lock,1,false/*exclusive*/);
+        AutoLock lay(layout_lock,1,false/*exclusive*/);
         std::map<LayoutConstraintID,bool>::const_iterator finder = 
           conflict_cache.find(constraints->layout_id);
         if (finder != conflict_cache.end())
@@ -6781,7 +6703,7 @@ namespace Legion {
       // Didn't find it, so do the test for real
       bool result = conflicts(*constraints);
       // Save the result in the cache
-      AutoLock gc(gc_lock);
+      AutoLock lay(layout_lock);
       conflict_cache[constraints->layout_id] = result;
       return result;
     }
@@ -6800,7 +6722,7 @@ namespace Legion {
     {
       // See if we have it in the cache
       {
-        AutoLock gc(gc_lock,1,false/*exclusive*/);
+        AutoLock lay(layout_lock,1,false/*exclusive*/);
         std::map<LayoutConstraintID,bool>::const_iterator finder = 
           no_pointer_entailment_cache.find(constraints->layout_id);
         if (finder != no_pointer_entailment_cache.end())
@@ -6809,7 +6731,7 @@ namespace Legion {
       // Didn't find it so do the test for real
       bool result = entails_without_pointer(*constraints);
       // Save the result in the cache
-      AutoLock gc(gc_lock);
+      AutoLock lay(layout_lock);
       no_pointer_entailment_cache[constraints->layout_id] = result;
       return result;
     }
@@ -6904,30 +6826,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void LayoutConstraints::process_send(Runtime *runtime,
-                                     Deserializer &derez, AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      DistributedID did;
-      derez.deserialize(did);
-      LayoutConstraintID lay_id;
-      derez.deserialize(lay_id);
-      FieldSpace handle;
-      derez.deserialize(handle);
-      // Make it an unpack it, then try to register it 
-      LayoutConstraints *new_constraints = 
-        legion_new<LayoutConstraints>(lay_id, handle, did, runtime,
-                                      source, runtime->address_space);
-      new_constraints->update_constraints(derez);
-      // Try to register this, if it has already been registered we are done
-      if (!runtime->register_layout(new_constraints, true/*need lock*/))
-        legion_delete(new_constraints);
-      else
-        new_constraints->register_with_runtime();
-    }
-
-    //--------------------------------------------------------------------------
     /*static*/ void LayoutConstraints::process_request(Runtime *runtime,
                                      Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
@@ -6953,21 +6851,17 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
-      DistributedID did;
-      derez.deserialize(did);
       LayoutConstraintID lay_id;
       derez.deserialize(lay_id);
       FieldSpace handle;
       derez.deserialize(handle);
       // Make it an unpack it, then try to register it 
       LayoutConstraints *new_constraints = 
-        legion_new<LayoutConstraints>(lay_id, handle, did, runtime,
+        legion_new<LayoutConstraints>(lay_id, handle, runtime,
                                       source, runtime->address_space);
       new_constraints->update_constraints(derez);
       if (!runtime->register_layout(new_constraints, true/*need lock*/))
         legion_delete(new_constraints);
-      else
-        new_constraints->register_with_runtime();
       // Now try to register this with the runtime
       // Trigger our done event and then return it
       UserEvent done_event;
@@ -7500,7 +7394,8 @@ namespace Legion {
             layout_constraints_table.begin();
           LayoutConstraints *next = next_it->second;
           layout_constraints_table.erase(next_it);
-          legion_delete(next);
+          if (next->remove_reference())
+            legion_delete(next);
         }
       }
       layout_constraints_lock.destroy_reservation();
@@ -14500,14 +14395,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_constraints(AddressSpaceID target, Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(rez, SEND_CONSTRAINTS,
-                             LAYOUT_CONSTRAINT_VIRTUAL_CHANNEL, true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::send_constraint_request(AddressSpaceID target, 
                                            Serializer &rez)
     //--------------------------------------------------------------------------
@@ -15333,14 +15220,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_constraint_send(Deserializer &derez, 
-                                         AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      LayoutConstraints::process_send(this, derez, source);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::handle_constraint_request(Deserializer &derez,
                                              AddressSpaceID source)
     //--------------------------------------------------------------------------
@@ -15377,9 +15256,7 @@ namespace Legion {
       Deserializer z(derez);
       LayoutConstraintID layout_id;
       derez.deserialize(layout_id);
-      LayoutConstraints *constraints = find_layout_constraints(layout_id);
-      if (constraints->remove_base_resource_ref(REMOTE_DID_REF))
-        legion_delete(constraints);
+      unregister_layout(layout_id);
     }
 
     //--------------------------------------------------------------------------
@@ -18179,11 +18056,7 @@ namespace Legion {
         layout_id = get_unique_constraint_id();
       // Now make our entry and then return the result
       LayoutConstraints *constraints = 
-        legion_new<LayoutConstraints>(layout_id, 
-            get_available_distributed_id(true), this, registrar);
-      // Add a base application valid reference so this doesn't get 
-      // collected until the application is actually done with it
-      constraints->add_base_gc_ref(APPLICATION_REF);
+        legion_new<LayoutConstraints>(layout_id, this, registrar);
       Event precondition = layout_constraints_lock.acquire(0,true/*exclusive*/);
       if (precondition.has_triggered())
       {
@@ -18203,8 +18076,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       LayoutConstraints *constraints = legion_new<LayoutConstraints>(
-          get_unique_constraint_id(), get_available_distributed_id(false),
-          this, cons, handle);
+          get_unique_constraint_id(), this, cons, handle);
       register_layout(constraints, true/*needs lock*/);
       return constraints;
     }
@@ -18214,6 +18086,7 @@ namespace Legion {
                                   bool needs_lock)
     //--------------------------------------------------------------------------
     {
+      new_constraints->add_reference();
       if (needs_lock)
       {
         AutoLock l_lock(layout_constraints_lock);
@@ -18243,9 +18116,8 @@ namespace Legion {
       // Check to see if this is the owner
       if (constraints->is_owner())
       {
-        // If we deleted this, then we are done
-        if (constraints->remove_base_gc_ref(APPLICATION_REF))
-          legion_delete(constraints);
+        // Send the remove message to all the remove nodes
+        constraints->release_remote_instances();
       }
       else
       {
@@ -18257,14 +18129,26 @@ namespace Legion {
         }
         send_constraint_release(constraints->owner_space, rez);
       }
+      unregister_layout(layout_id);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::unregister_layout(LayoutConstraintID layout_id)
     //--------------------------------------------------------------------------
     {
-      AutoLock l_lock(layout_constraints_lock);
-      layout_constraints_table.erase(layout_id);
+      LayoutConstraints *constraints = NULL;
+      {
+        AutoLock l_lock(layout_constraints_lock);
+        std::map<LayoutConstraintID,LayoutConstraints*>::iterator finder = 
+          layout_constraints_table.find(layout_id);
+        if (finder != layout_constraints_table.end())
+        {
+          constraints = finder->second;
+          layout_constraints_table.erase(finder);
+        }
+      }
+      if ((constraints != NULL) && constraints->remove_reference())
+        legion_delete(constraints);
     }
 
     //--------------------------------------------------------------------------

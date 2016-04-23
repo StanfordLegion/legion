@@ -1140,7 +1140,7 @@ namespace Legion {
      * variout places so we make it a distributed collectable
      */
     class LayoutConstraints : 
-      public LayoutConstraintSet, public DistributedCollectable {
+      public LayoutConstraintSet, public Collectable {
     public:
       static const AllocationType alloc_type = LAYOUT_CONSTRAINTS_ALLOC; 
     protected:
@@ -1156,12 +1156,11 @@ namespace Legion {
       };
     public:
       LayoutConstraints(LayoutConstraintID layout_id, FieldSpace handle, 
-                        DistributedID did, Runtime *runtime, 
+                        Runtime *runtime, 
                         AddressSpace owner_space, AddressSpaceID local_space);
-      LayoutConstraints(LayoutConstraintID layout_id, 
-                        DistributedID did, Runtime *runtime, 
+      LayoutConstraints(LayoutConstraintID layout_id, Runtime *runtime, 
                         const LayoutConstraintRegistrar &registrar);
-      LayoutConstraints(LayoutConstraintID layout_id, DistributedID did,
+      LayoutConstraints(LayoutConstraintID layout_id,
                         Runtime *runtime, const LayoutConstraintSet &cons,
                         FieldSpace handle);
       LayoutConstraints(const LayoutConstraints &rhs);
@@ -1169,17 +1168,13 @@ namespace Legion {
     public:
       LayoutConstraints& operator=(const LayoutConstraints &rhs);
     public:
-      virtual void notify_active(void);
-      virtual void notify_valid(void);
-      virtual void notify_invalid(void);
-      virtual void notify_inactive(void);
-    public:
       inline FieldSpace get_field_space(void) const { return handle; }
       inline const char* get_name(void) const { return constraints_name; }
+      inline bool is_owner(void) const { return (owner_space == local_space); }
     public:
-      DistributedID send_constraints(AddressSpaceID source);
       void send_constraint_response(AddressSpaceID source,UserEvent done_event);
       void update_constraints(Deserializer &derez);
+      void release_remote_instances(void);
     public:
       bool entails(LayoutConstraints *other_constraints);
       bool entails(const LayoutConstraintSet &other) const;
@@ -1191,8 +1186,6 @@ namespace Legion {
       static AddressSpaceID get_owner_space(LayoutConstraintID layout_id,
                                             Runtime *runtime);
     public:
-      static void process_send(Runtime *runtime, Deserializer &derez,
-                               AddressSpaceID source);
       static void process_request(Runtime *runtime, Deserializer &derez,
                                   AddressSpaceID source);
       static LayoutConstraintID process_response(Runtime *runtime, 
@@ -1200,12 +1193,18 @@ namespace Legion {
     public:
       const LayoutConstraintID layout_id;
       const FieldSpace handle;
+      const AddressSpace owner_space;
+      const AddressSpace local_space;
+      Runtime *const runtime;
     protected:
       char *constraints_name;
+      Reservation layout_lock;
     protected:
       std::map<LayoutConstraintID,bool> conflict_cache;
       std::map<LayoutConstraintID,bool> entailment_cache;
       std::map<LayoutConstraintID,bool> no_pointer_entailment_cache;
+    protected:
+      NodeSet remote_instances;
     };
 
     /**
@@ -1920,7 +1919,6 @@ namespace Legion {
       void send_back_logical_state(AddressSpaceID target, Serializer &rez);
       void send_variant_request(AddressSpaceID target, Serializer &rez);
       void send_variant_response(AddressSpaceID target, Serializer &rez);
-      void send_constraints(AddressSpaceID target, Serializer &rez);
       void send_constraint_request(AddressSpaceID target, Serializer &rez);
       void send_constraint_response(AddressSpaceID target, Serializer &rez);
       void send_constraint_release(AddressSpaceID target, Serializer &rez);
@@ -2060,7 +2058,6 @@ namespace Legion {
                                        AddressSpaceID source);
       void handle_variant_request(Deserializer &derez, AddressSpaceID source);
       void handle_variant_response(Deserializer &derez);
-      void handle_constraint_send(Deserializer &derez, AddressSpaceID source);
       void handle_constraint_request(Deserializer &derez,AddressSpaceID source);
       void handle_constraint_response(Deserializer &derez,AddressSpaceID src);
       void handle_constraint_release(Deserializer &derez);

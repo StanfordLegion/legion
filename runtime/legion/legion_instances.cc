@@ -111,6 +111,7 @@ namespace Legion {
       : allocated_fields(mask), constraints(con), owner(own) 
     //--------------------------------------------------------------------------
     {
+      constraints->add_reference();
       layout_lock = Reservation::create_reservation();
       field_infos.resize(field_sizes.size());
       // Switch data structures from layout by field order to order
@@ -163,6 +164,8 @@ namespace Legion {
       comp_cache.clear();
       layout_lock.destroy_reservation();
       layout_lock = Reservation::NO_RESERVATION;
+      if (constraints->remove_reference())
+        legion_delete(constraints);
     }
 
     //--------------------------------------------------------------------------
