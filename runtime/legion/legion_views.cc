@@ -698,7 +698,6 @@ namespace Legion {
     {
 #ifdef DEBUG_HIGH_LEVEL
       assert(is_owner());
-      assert(logical_node->is_region());
 #endif
       Serializer rez;
       {
@@ -709,9 +708,18 @@ namespace Legion {
           rez.serialize<DistributedID>(0);
         else
           rez.serialize<DistributedID>(parent->did);
-        rez.serialize(logical_node->as_region_node()->handle);
+        if (logical_node->is_region())
+        {
+          rez.serialize<bool>(true);
+          rez.serialize(logical_node->as_region_node()->handle);
+        }
+        else
+        {
+          rez.serialize<bool>(false);
+          rez.serialize(logical_node->as_partition_node()->handle);
+        }
         rez.serialize(owner_space);
-        rez.serialize<UniqueID>(owner_context->get_context_id());
+        rez.serialize<UniqueID>(owner_context->get_context_uid());
       }
       runtime->send_materialized_view(target, rez);
       update_remote_instances(target); 
@@ -1118,6 +1126,29 @@ namespace Legion {
       if (issue_collect)
         defer_collect_user(copy_term);
     }
+
+#if 0
+    //--------------------------------------------------------------------------
+    void MaterializedView::update_versions(const VersionInfo &version_info,
+                                           const FieldMask &user_mask)
+    //--------------------------------------------------------------------------
+    {
+      FieldVersions *versions = version_info.get_versions(logical_node); 
+#ifdef DEBUG_HIGH_LEVEL
+      assert(versions != NULL);
+#endif
+      const LegionMap<VersionID,FieldMask>::aligned &field_versions = 
+        versions->get_field_versions();
+      // Take the lock in exclusive mode and update the versions
+      // Any version numbers that we advance are ones that we can filter
+      AutoLock v_lock(view_lock);  
+      for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
+            field_versions.begin(); it != field_versions.end(); it++)
+      {
+        FieldMask 
+      }
+    }
+#endif
 
     //--------------------------------------------------------------------------
     void MaterializedView::find_local_user_preconditions(
@@ -2581,14 +2612,25 @@ namespace Legion {
       derez.deserialize(manager_did);
       DistributedID parent_did;
       derez.deserialize(parent_did);
-      LogicalRegion handle;
-      derez.deserialize(handle);
+      bool is_region;
+      derez.deserialize(is_region);
+      RegionTreeNode *target_node;
+      if (is_region)
+      {
+        LogicalRegion handle;
+        derez.deserialize(handle);
+        target_node = runtime->forest->get_node(handle);
+      }
+      else
+      {
+        LogicalPartition handle;
+        derez.deserialize(handle);
+        target_node = runtime->forest->get_node(handle);
+      }
       AddressSpaceID owner_space;
       derez.deserialize(owner_space);
       UniqueID context_uid;
       derez.deserialize(context_uid);
-
-      RegionNode *target_node = runtime->forest->get_node(handle); 
       Event man_ready = Event::NO_EVENT;
       PhysicalManager *phy_man = 
         runtime->find_or_request_physical_manager(manager_did, man_ready);
@@ -2926,8 +2968,9 @@ namespace Legion {
     void CompositeView::make_local(std::set<Event> &preconditions)
     //--------------------------------------------------------------------------
     {
-      VersionInfo &info = version_info->get_version_info();
-      info.make_local(preconditions, context, 0/*dummy ctx*/);
+      // TODO: update this
+      //VersionInfo &info = version_info->get_version_info();
+      //info.make_local(preconditions, context, 0/*dummy ctx*/);
       std::set<DistributedID> checked_views;
       root->make_local(preconditions, checked_views);
     }
@@ -5061,7 +5104,7 @@ namespace Legion {
         rez.serialize(manager->did);
         rez.serialize(logical_node->as_region_node()->handle);
         rez.serialize(owner_space);
-        rez.serialize<UniqueID>(owner_context->get_context_id());
+        rez.serialize<UniqueID>(owner_context->get_context_uid());
       }
       runtime->send_reduction_view(target, rez);
       update_remote_instances(target);

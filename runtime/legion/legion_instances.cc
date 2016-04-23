@@ -458,30 +458,8 @@ namespace Legion {
         rez.serialize<bool>(true);
       else
         rez.serialize<bool>(false);
-      // If it is already on the remote node, then we only
-      // need to the necessary information to identify it
-      DistributedID constraint_did = constraints->send_constraints(target);
-      rez.serialize(constraint_did);
+      rez.serialize(constraints->layout_id);
       rez.serialize(allocated_fields);
-    }
-
-    //--------------------------------------------------------------------------
-    void LayoutDescription::unpack_layout_description(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      size_t num_fields;
-      derez.deserialize(num_fields);
-      for (unsigned idx = 0; idx < num_fields; idx++)
-      {
-        FieldID fid;
-        derez.deserialize(fid);
-        unsigned index = owner->get_field_index(fid);
-        field_indexes[index] = fid;
-        Domain::CopySrcDstField &info = field_infos[fid];
-        derez.deserialize(info.offset);
-        derez.deserialize(info.size);
-        derez.deserialize(info.serdez_id);
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -504,17 +482,10 @@ namespace Legion {
       derez.deserialize(has_local);
       FieldSpaceNode *field_space_node = region_node->column_source;
       LayoutDescription *result = NULL;
-      DistributedID constraint_did;
-      derez.deserialize(constraint_did);
-#ifdef DEBUG_HIGH_LEVEL
-      LayoutConstraints *constraints = dynamic_cast<LayoutConstraints*>(
-        region_node->context->runtime->find_distributed_collectable(
-                                                            constraint_did));
-#else
-      LayoutConstraints *constraints = static_cast<LayoutConstraints*>(
-        region_node->context->runtime->find_distributed_collectable(
-                                                            constraint_did));
-#endif
+      LayoutConstraintID layout_id;
+      derez.deserialize(layout_id);
+      LayoutConstraints *constraints = 
+        region_node->context->runtime->find_layout_constraints(layout_id);
       FieldMask mask;
       derez.deserialize(mask);
       if (has_local)
@@ -569,13 +540,7 @@ namespace Legion {
         region_node->register_physical_manager(this);
       // If we are not the owner, add a resource reference
       if (!is_owner())
-      {
-        // Register it with the memory manager, the memory manager
-        // on the owner node will handle this
-	// have to do register_remote_instance in the subclass constructors...
-        //memory_manager->register_remote_instance(this);
         add_base_resource_ref(REMOTE_DID_REF);
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -1233,13 +1198,7 @@ namespace Legion {
                         local_space, node, inst, inst_domain, own_dom),
         op(o), redop(red), logical_field(f)
     //--------------------------------------------------------------------------
-    { 
-      if (!is_owner())
-      {
-        // Register it with the memory manager, the memory manager
-        // on the owner node will handle this
-        memory_manager->register_remote_instance(this);
-      }
+    {  
       if (is_owner() && Runtime::legion_spy_enabled)
       {
         LegionSpy::log_physical_instance(inst.id, mem->memory.id, redop);
@@ -1430,6 +1389,12 @@ namespace Legion {
         ptr_space(dom)
     //--------------------------------------------------------------------------
     {
+      if (!is_owner())
+      {
+        // Register it with the memory manager, the memory manager
+        // on the owner node will handle this
+        memory_manager->register_remote_instance(this);
+      }
 #ifdef LEGION_GC
       log_garbage.info("GC List Reduction Manager %ld " IDFMT " " IDFMT " ",
                 LEGION_DISTRIBUTED_ID_FILTER(did), inst.id, mem->memory.id);
@@ -1583,6 +1548,12 @@ namespace Legion {
         use_event(u_event)
     //--------------------------------------------------------------------------
     {
+      if (!is_owner())
+      {
+        // Register it with the memory manager, the memory manager
+        // on the owner node will handle this
+        memory_manager->register_remote_instance(this);
+      }
 #ifdef LEGION_GC
       log_garbage.info("GC Fold Reduction Manager %ld " IDFMT " " IDFMT " ",
                   LEGION_DISTRIBUTED_ID_FILTER(did), inst.id, mem->memory.id);

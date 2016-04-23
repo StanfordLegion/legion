@@ -5815,7 +5815,7 @@ namespace Legion {
               view->add_nested_valid_ref(did);
             }
             // Check for composite view
-            if (view->as_composite_view())
+            if (view->is_composite_view())
               composite_views.push_back(view->as_composite_view());
           }
           size_t num_reduction_views;

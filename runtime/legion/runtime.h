@@ -2168,10 +2168,15 @@ namespace Legion {
       void finalize_runtime_shutdown(void);
     public:
       bool has_outstanding_tasks(void);
+#ifdef DEBUG_HIGH_LEVEL
+      void increment_total_outstanding_tasks(void);
+      void decrement_total_outstanding_tasks(void);
+#else
       inline void increment_total_outstanding_tasks(void)
         { __sync_fetch_and_add(&total_outstanding_tasks,1); }
       inline void decrement_total_outstanding_tasks(void)
         { __sync_fetch_and_sub(&total_outstanding_tasks,1); }
+#endif
     public:
       template<typename T>
       inline T* get_available(Reservation reservation,
@@ -2354,6 +2359,9 @@ namespace Legion {
       Processor utility_group;
       const bool has_explicit_utility_procs;
     protected:
+#ifdef DEBUG_HIGH_LEVEL
+      Reservation outstanding_task_lock;
+#endif
       unsigned total_outstanding_tasks;
       unsigned outstanding_top_level_tasks;
       ShutdownManager *shutdown_manager;

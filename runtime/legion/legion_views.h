@@ -296,6 +296,8 @@ namespace Legion {
       void process_update(Deserializer &derez, AddressSpaceID source);
       void update_gc_events(const std::deque<Event> &gc_events);
     protected:
+      //void update_versions(const VersionInfo &version_info,
+      //                     const FieldMask &user_mask);
       void find_local_user_preconditions(const RegionUsage &usage,
                                          Event term_event,
                                          const ColorPoint &child_color,
@@ -461,7 +463,7 @@ namespace Legion {
       // an event might be filtered out for some fields, so we can't rely
       // on it to detect when we have outstanding gc meta-tasks
       std::set<Event> outstanding_gc_events;
-      // TODO: Keep track of the current version numbers for each field
+      // Keep track of the current version numbers for each field
       // This will allow us to detect when physical instances are no
       // longer valid from a particular view when doing rollbacks for
       // resilience or mis-speculation.

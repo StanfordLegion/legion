@@ -3077,6 +3077,13 @@ namespace Legion {
                 rez.serialize(remote_target);
                 rez.serialize(remote_success);
                 rez.serialize(kind);
+                bool min_priority = (priority == NEVER_GC_REF);
+                rez.serialize<bool>(min_priority);
+                if (min_priority)
+                {
+                  rez.serialize(mapper_id);
+                  rez.serialize(processor);
+                }
               }
               runtime->send_instance_response(source, rez);
             }
@@ -3120,6 +3127,13 @@ namespace Legion {
                 rez.serialize(remote_target);
                 rez.serialize(remote_success);
                 rez.serialize(kind);
+                bool min_priority = (priority == NEVER_GC_REF);
+                rez.serialize<bool>(min_priority);
+                if (min_priority)
+                {
+                  rez.serialize(mapper_id);
+                  rez.serialize(processor);
+                }
               }
               runtime->send_instance_response(source, rez);
             }
@@ -3166,6 +3180,16 @@ namespace Legion {
                 rez.serialize(kind);
                 rez.serialize(remote_created);
                 rez.serialize<bool>(created);
+                if (created)
+                {
+                  bool min_priority = (priority == NEVER_GC_REF);
+                  rez.serialize<bool>(min_priority);
+                  if (min_priority)
+                  {
+                    rez.serialize(mapper_id);
+                    rez.serialize(processor);
+                  }
+                }
               }
               runtime->send_instance_response(source, rez);
             }
@@ -3214,6 +3238,16 @@ namespace Legion {
                 rez.serialize(kind);
                 rez.serialize(remote_created);
                 rez.serialize<bool>(created);
+                if (created)
+                {
+                  bool min_priority = (priority == NEVER_GC_REF);
+                  rez.serialize<bool>(min_priority);
+                  if (min_priority)
+                  {
+                    rez.serialize(mapper_id);
+                    rez.serialize(processor);
+                  }
+                }
               }
               runtime->send_instance_response(source, rez);
             }
@@ -3309,8 +3343,10 @@ namespace Legion {
       derez.deserialize(success);
       RequestKind kind;
       derez.deserialize(kind);
-      // Find the manager
 #ifdef DEBUG_HIGH_LEVEL
+      assert((CREATE_INSTANCE_CONSTRAINTS <= kind) &&
+             (kind <= FIND_ONLY_LAYOUT));
+      // Find the manager
       PhysicalManager *manager = dynamic_cast<PhysicalManager*>(
                             runtime->find_distributed_collectable(did));
 #else
@@ -5086,6 +5122,16 @@ namespace Legion {
           case SEND_CONSTRAINT_REMOVAL:
             {
               runtime->handle_constraint_removal(derez);
+              break;
+            }
+          case SEND_TOP_LEVEL_TASK_REQUEST:
+            {
+              runtime->handle_top_level_task_request(derez);
+              break;
+            }
+          case SEND_TOP_LEVEL_TASK_COMPLETE:
+            {
+              runtime->handle_top_level_task_complete(derez);
               break;
             }
           case SEND_SHUTDOWN_NOTIFICATION:
@@ -6944,6 +6990,9 @@ namespace Legion {
         runtime_stride(address_spaces.size()), profiler(NULL),
         forest(new RegionTreeForest(this)), 
         has_explicit_utility_procs(!local_utilities.empty()), 
+#ifdef DEBUG_HIGH_LEVEL
+        outstanding_task_lock(Reservation::create_reservation()),
+#endif
         total_outstanding_tasks(0), outstanding_top_level_tasks(0), 
         shutdown_manager(NULL),
         shutdown_lock(Reservation::create_reservation()),
@@ -7478,6 +7527,8 @@ namespace Legion {
       shutdown_lock = Reservation::NO_RESERVATION;
 
 #ifdef DEBUG_HIGH_LEVEL
+      outstanding_task_lock.destroy_reservation();
+      outstanding_task_lock = Reservation::NO_RESERVATION;
       if (logging_region_tree_state)
 	delete tree_state_logger;
 #endif
@@ -7688,7 +7739,8 @@ namespace Legion {
       IndividualTask *top_task = get_available_individual_task(false);
       // Get a remote task to serve as the top of the top-level task
       RemoteTask *top_context = get_available_remote_task(false);
-      top_context->initialize_remote(0, true/*top*/);
+      top_context->initialize_remote(
+          top_context->get_unique_op_id(), true/*top*/);
       // Set the executing processor
       top_context->set_executing_processor(target);
       TaskLauncher launcher(Runtime::legion_main_id, TaskArgument());
@@ -7725,7 +7777,8 @@ namespace Legion {
       IndividualTask *mapper_task = get_available_individual_task(false);
       // Get a remote task to serve as the top of the top-level task
       RemoteTask *map_context = get_available_remote_task(false);
-      map_context->initialize_remote(0, true/*top*/);
+      map_context->initialize_remote(
+          map_context->get_unique_op_id(), true/*top*/);
       map_context->set_executing_processor(proc);
       TaskLauncher launcher(tid, arg, Predicate::TRUE_PRED, map_id);
       Future f = mapper_task->initialize_task(map_context, launcher, 
@@ -14031,7 +14084,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_MATERIALIZED_VIEW,
-                                        VIEW_VIRTUAL_CHANNEL, false/*flush*/);
+                                        VIEW_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -14040,7 +14093,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_MATERIALIZED_UPDATE,
-                                       VIEW_VIRTUAL_CHANNEL, false/*flush*/);
+                                       VIEW_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -14048,7 +14101,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_COMPOSITE_VIEW,
-                                       VIEW_VIRTUAL_CHANNEL, false/*flush*/);
+                                       VIEW_VIRTUAL_CHANNEL, true/*flush*/);
     } 
 
     //--------------------------------------------------------------------------
@@ -14056,7 +14109,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_FILL_VIEW,
-                                       VIEW_VIRTUAL_CHANNEL, false/*flush*/);
+                                       VIEW_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -14064,7 +14117,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_REDUCTION_VIEW,
-                                       VIEW_VIRTUAL_CHANNEL, false/*flush*/);
+                                       VIEW_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -14072,7 +14125,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_REDUCTION_UPDATE,
-                                       VIEW_VIRTUAL_CHANNEL, false/*flush*/);
+                                       VIEW_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -14088,7 +14141,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_REDUCTION_MANAGER,
-                                       MANAGER_VIRTUAL_CHANNEL, false/*flush*/);
+                                       MANAGER_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -14450,10 +14503,8 @@ namespace Legion {
     void Runtime::send_constraints(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      // This is pushing constraints so it is alright to keep on
-      // the default virtual channel
       find_messenger(target)->send_message(rez, SEND_CONSTRAINTS,
-                                       MANAGER_VIRTUAL_CHANNEL, false/*flush*/);
+                             LAYOUT_CONSTRAINT_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -15889,6 +15940,7 @@ namespace Legion {
                                                     void *&location)
     //--------------------------------------------------------------------------
     {
+      did &= LEGION_DISTRIBUTED_ID_MASK;
       AutoLock d_lock(distributed_collectable_lock,1,false/*exclusive*/);
 #ifdef DEBUG_HIGH_LEVEL
       assert(dist_collectables.find(did) == dist_collectables.end());
@@ -16292,8 +16344,32 @@ namespace Legion {
     bool Runtime::has_outstanding_tasks(void)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_HIGH_LEVEL
+      AutoLock out_lock(outstanding_task_lock);
+      return (total_outstanding_tasks > 0);
+#else
       return (__sync_fetch_and_add(&total_outstanding_tasks,0) != 0);
+#endif
     }
+
+#ifdef DEBUG_HIGH_LEVEL
+    //--------------------------------------------------------------------------
+    void Runtime::increment_total_outstanding_tasks(void)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock out_lock(outstanding_task_lock); 
+      total_outstanding_tasks++;
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::decrement_total_outstanding_tasks(void)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock out_lock(outstanding_task_lock);
+      assert(total_outstanding_tasks > 0);
+      total_outstanding_tasks--;
+    }
+#endif
 
     //--------------------------------------------------------------------------
     IndividualTask* Runtime::get_available_individual_task(bool need_cont,
@@ -17857,8 +17933,6 @@ namespace Legion {
           return "Task Barriers";
         case TASK_LOCAL_FIELD_ALLOC:
           return "Task Local Fields";
-        case TASK_INLINE_ALLOC:
-          return "Task Inline Tasks";
         case SEMANTIC_INFO_ALLOC:
           return "Semantic Information";
         case DIRECTORY_ALLOC:
@@ -19979,7 +20053,7 @@ namespace Legion {
         default:
           assert(false); // should never get here
       }
-      if (tid < HLR_SHUTDOWN_ATTEMPT_TASK_ID)
+      if (tid < HLR_MESSAGE_ID)
         Runtime::get_runtime(p)->decrement_total_outstanding_tasks();
 #ifdef DEBUG_SHUTDOWN_HANG
       Runtime *runtime = Runtime::get_runtime(p);
