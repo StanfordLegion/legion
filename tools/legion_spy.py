@@ -2879,8 +2879,8 @@ class Operation(object):
             # skip any virtual mappings
             if inst.is_virtual():
                 continue
-            if not req.perform_physical_registration(depth, field, self,
-                                                     req, inst, perform_checks):
+            if not req.logical_node.perform_physical_registration(depth, field, self,
+                                                          req, inst, perform_checks):
                 return False
         return True
 
@@ -5062,7 +5062,7 @@ class GraphPrinter(object):
                 region_name = str(req.logical_node)
                 line = [str(i), region_name, req.get_privilege_and_coherence()]
                 lines.append(line)
-                if detailed and mappings is not None and i in mappings:
+                if detailed:
                     first_field = True
                     for f in req.fields:
                         line = []
@@ -5070,7 +5070,10 @@ class GraphPrinter(object):
                             line.append({"label" : "Fields", "rowspan" : len(req.fields)})
                             first_field = False
                         line.append(str(f))
-                        line.append(str(mappings[i][f.fid]))
+                        if mappings is not None and i in mappings:
+                            line.append(str(mappings[i][f.fid]))
+                        else:
+                            line.append('(Many instances)')
                         lines.append(line)
         return '<table border="0" cellborder="1" cellpadding="3" cellspacing="0" bgcolor="%s">' % color + \
               "".join([self.wrap_with_trtd(line) for line in lines]) + '</table>'
