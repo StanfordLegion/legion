@@ -7457,6 +7457,8 @@ namespace Legion {
                                     Operation::op_names); 
       HLR_MESSAGE_DESCRIPTIONS(hlr_message_descriptions);
       profiler->record_message_kinds(hlr_message_descriptions, LAST_SEND_KIND);
+      MAPPER_CALL_NAMES(hlr_mapper_calls);
+      profiler->record_mapper_call_kinds(hlr_mapper_calls, LAST_MAPPER_CALL);
     }
 
     //--------------------------------------------------------------------------

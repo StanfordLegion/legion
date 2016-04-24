@@ -118,6 +118,13 @@ namespace Legion {
         unsigned long long start, stop;
         Processor proc;
       };
+      struct MapperCallInfo {
+      public:
+        MappingCallKind kind;
+        UniqueID op_id;
+        unsigned long long start, stop;
+        Processor proc;
+      };
 #ifdef LEGION_PROF_SELF_PROFILE
       struct ProfTaskInfo {
       public:
@@ -162,6 +169,9 @@ namespace Legion {
       void record_message(Processor proc, MessageKind kind, 
                           unsigned long long start,
                           unsigned long long stop);
+      void record_mapper_call(Processor proc, MappingCallKind kind, 
+                          UniqueID uid, unsigned long long start,
+                          unsigned long long stop);
 #ifdef LEGION_PROF_SELF_PROFILE
     public:
       void record_proftask(Processor p, UniqueID op_id,
@@ -185,6 +195,7 @@ namespace Legion {
       std::deque<InstInfo> inst_infos;
     private:
       std::deque<MessageInfo> message_infos;
+      std::deque<MapperCallInfo> mapper_call_infos;
 #ifdef LEGION_PROF_SELF_PROFILE
     private:
       std::deque<ProfTaskInfo> prof_task_infos;
@@ -266,6 +277,11 @@ namespace Legion {
                                 unsigned int num_message_kinds);
       void record_message(MessageKind kind, unsigned long long start,
                           unsigned long long stop);
+    public:
+      void record_mapper_call_kinds(const char *const *const mapper_call_names,
+                                    unsigned int num_mapper_call_kinds);
+      void record_mapper_call(MappingCallKind kind, UniqueID uid,
+                            unsigned long long start, unsigned long long stop);
     public:
       const Processor target_proc;
       inline bool has_outstanding_requests(void)

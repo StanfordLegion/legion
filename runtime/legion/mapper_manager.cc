@@ -34,7 +34,7 @@ namespace Legion {
                                      Operation *op /*= NULL*/)
       : manager(man), resume(UserEvent::NO_USER_EVENT), 
         kind(k), operation(op), acquired_instances((op == NULL) ? NULL :
-             operation->get_acquired_instances_ref())
+             operation->get_acquired_instances_ref()), start_time(0)
     //--------------------------------------------------------------------------
     {
     }
@@ -2559,9 +2559,14 @@ namespace Legion {
         result->operation = op;
         if (op != NULL)
           result->acquired_instances = op->get_acquired_instances_ref();
+        if (runtime->profiler != NULL)
+          result->start_time = Realm::Clock::current_time_in_microseconds();
         return result;
       }
-      return new MappingCallInfo(this, kind, op);
+      MappingCallInfo *result = new MappingCallInfo(this, kind, op);
+      if (runtime->profiler != NULL)
+        result->start_time = Realm::Clock::current_time_in_microseconds();
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -2572,10 +2577,20 @@ namespace Legion {
       {
         AutoLock m_lock(mapper_lock);
         free_call_info(info, false/*need lock*/);
+        return;
+      }
+      if (runtime->profiler != NULL)
+      {
+        unsigned long long stop_time = 
+          Realm::Clock::current_time_in_microseconds();
+        runtime->profiler->record_mapper_call(info->kind, 
+            (info->operation == NULL) ? 0 : info->operation->get_unique_op_id(),
+            info->start_time, stop_time); 
       }
       info->resume = UserEvent::NO_USER_EVENT;
       info->operation = NULL;
       info->acquired_instances = NULL;
+      info->start_time = 0;
       available_infos.push_back(info);
     }
 

@@ -277,6 +277,21 @@ namespace Legion {
       info.proc = proc;
     }
 
+    //--------------------------------------------------------------------------
+    void LegionProfInstance::record_mapper_call(Processor proc, 
+                              MappingCallKind kind, UniqueID uid,
+                              unsigned long long start, unsigned long long stop)
+    //--------------------------------------------------------------------------
+    {
+      mapper_call_infos.push_back(MapperCallInfo());
+      MapperCallInfo &info = mapper_call_infos.back();
+      info.kind = kind;
+      info.op_id = uid;
+      info.start = start;
+      info.stop = stop;
+      info.proc = proc;
+    }
+
 #ifdef LEGION_PROF_SELF_PROFILE
     //--------------------------------------------------------------------------
     void LegionProfInstance::record_proftask(Processor proc, UniqueID op_id,
@@ -381,6 +396,12 @@ namespace Legion {
         log_prof.info("Prof Message Info %u " IDFMT " %llu %llu",
                       it->kind, it->proc.id, it->start, it->stop);
       }
+      for (std::deque<MapperCallInfo>::const_iterator it = 
+            mapper_call_infos.begin(); it != mapper_call_infos.end(); it++)
+      {
+        log_prof.info("Prof Mapper Call Info %u " IDFMT " %llu %llu %llu",
+            it->kind, it->proc.id, it->op_id, it->start, it->stop);
+      }
 #ifdef LEGION_PROF_SELF_PROFILE
       for (std::deque<ProfTaskInfo>::const_iterator it = prof_task_infos.begin();
             it != prof_task_infos.end(); it++)
@@ -398,6 +419,7 @@ namespace Legion {
       copy_infos.clear();
       inst_infos.clear();
       message_infos.clear();
+      mapper_call_infos.clear();
     }
 
     //--------------------------------------------------------------------------
@@ -912,6 +934,32 @@ namespace Legion {
       if (instances[local_id] == NULL)
         instances[local_id] = new LegionProfInstance(this);
       instances[local_id]->record_message(current, kind, start, stop);
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfiler::record_mapper_call_kinds(const char *const *const
+                               mapper_call_names, unsigned int num_mapper_calls)
+    //--------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < num_mapper_calls; idx++)
+      {
+        log_prof.info("Prof Mapper Call Desc %u %s",idx,mapper_call_names[idx]);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfiler::record_mapper_call(MappingCallKind kind, UniqueID uid,
+                              unsigned long long start, unsigned long long stop)
+    //--------------------------------------------------------------------------
+    {
+      Processor current = Processor::get_executing_processor();
+      size_t local_id = current.local_id();
+#ifdef DEBUG_HIGH_LEVEL
+      assert(local_id < MAX_NUM_PROCS);
+#endif
+      if (instances[local_id] == NULL)
+        instances[local_id] = new LegionProfInstance(this);
+      instances[local_id]->record_mapper_call(current, kind, uid, start, stop);
     }
 
   }; // namespace Internal
