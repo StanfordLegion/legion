@@ -43,6 +43,9 @@ mem_desc_pat = re.compile(prefix + r'Prof Mem Desc (?P<mid>[a-f0-9]+) (?P<kind>[
 # Extensions for messages
 message_desc_pat = re.compile(prefix + r'Prof Message Desc (?P<mid>[0-9]+) (?P<desc>[a-zA-Z0-9_ ]+)')
 message_info_pat = re.compile(prefix + r'Prof Message Info (?P<mid>[0-9]+) (?P<pid>[a-f0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)')
+# Extensions for mapper calls
+mapper_call_desc_pat = re.compile(prefix + r'Prof Mapper Call Desc (?P<mid>[0-9]+) (?P<desc>[a-zA-Z0-9_ ]+)')
+mapper_call_info_pat = re.compile(prefix + r'Prof Mapper Call Info (?P<mid>[0-9]+) (?P<pid>[a-f0-9]+) (?P<uid>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)')
 # Self-profiling
 proftask_info_pat = re.compile(prefix + r'Prof ProfTask Info (?P<pid>[a-f0-9]+) (?P<opid>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)')
 
@@ -384,6 +387,47 @@ class MessageRange(TimeRange):
             assert total >= 0
         return total
 
+class MapperCallRange(TimeRange):
+    def __init__(self, call):
+        TimeRange.__init__(self, call.start, call.stop)
+        self.call = call 
+
+    def emit_svg(self, printer, level):
+        title = repr(self.call)
+        title += (' '+self.call.get_timing())
+        printer.emit_timing_range(self.call.kind.color, level,
+                                  self.start_time, self.stop_time, title)
+        for subrange in self.subranges:
+            subrange.emit_svg(printer, level+1)
+
+    def emit_tsv(self, tsv_file, base_level, max_levels, level):
+        title = repr(self.call)
+        title += (' '+self.call.get_timing())
+        tsv_file.write("%d\t%ld\t%ld\t%s\t1.0\t%s\n" % \
+                (base_level + (max_levels - level),
+                 self.start_time, self.stop_time,
+                 self.call.kind.color,title))
+        for subrange in self.subranges:
+            subrange.emit_tsv(tsv_file, base_level, max_levels, level + 1)
+
+    def update_task_stats(self, stat):
+        for subrange in self.subranges:
+            subrange.update_task_stats(stat)
+
+    def active_time(self):
+        return self.total_time()
+
+    def application_time(self):
+        return 0
+
+    def meta_time(self):
+        total = self.total_time()
+        for subrange in self.subranges:
+            total += subrange.meta_time()
+            total -= subrange.application_time()
+            assert total >= 0
+        return total
+
 class Processor(object):
     def __init__(self, proc_id, kind):
         self.proc_id = proc_id
@@ -400,6 +444,9 @@ class Processor(object):
     def add_message(self, message):
         # treating messages like any other task
         self.tasks.append(MessageRange(message))
+
+    def add_mapper_call(self, call):
+        self.tasks.append(MapperCallRange(call))
 
     def init_time_range(self, last_time):
         self.full_range = BaseRange(0L, last_time, self)
@@ -848,7 +895,10 @@ class Operation(object):
             return title+' '+self.get_info()
         elif self.is_multi:
             assert self.task_kind is not None
-            return self.task_kind.name+' '+self.get_info()
+            if self.task_kind.name is not None:
+                return self.task_kind.name+' '+self.get_info()
+            else:
+                return 'Task '+str(self.task_kind.task_id)+' '+self.get_info()
         elif self.is_proftask:
             return 'ProfTask' + (' <{:d}>'.format(self.op_id) if self.op_id > 0 else '')
         else:
@@ -991,6 +1041,29 @@ class Message(object):
 
     def __repr__(self):
         return 'Message '+self.kind.desc
+
+class MapperCallKind(object):
+    def __init__(self, mapper_call_kind, desc):
+        self.mapper_call_kind = mapper_call_kind
+        self.desc = desc
+        self.color = None
+
+class MapperCall(object):
+    def __init__(self, kind, op, start, stop):
+        self.kind = kind
+        self.op = op
+        self.start = start
+        self.stop = stop
+
+    def get_timing(self):
+        return 'total='+str(self.stop - self.start)+' us start='+ \
+                str(self.start)+' us stop='+str(self.stop)+' us'
+
+    def __repr__(self):
+        if self.op.op_id == 0:
+            return 'Mapper Call '+self.kind.desc
+        else:
+            return 'Mapper Call '+self.kind.desc+' for '+repr(self.op) 
 
 class SVGPrinter(object):
     def __init__(self, file_name, html_file):
@@ -1163,6 +1236,8 @@ class State(object):
         self.last_time = 0L
         self.message_kinds = {}
         self.messages = {}
+        self.mapper_call_kinds = {}
+        self.mapper_calls = {}
 
     def parse_log_file(self, file_name):
         with open(file_name, 'rb') as log:  
@@ -1317,6 +1392,19 @@ class State(object):
                                           int(m.group('pid'),16),
                                           long(m.group('start')),
                                           long(m.group('stop')))
+                    continue
+                m = mapper_call_desc_pat.match(line)
+                if m is not None:
+                    self.log_mapper_call_desc(int(m.group('mid')),
+                                              m.group('desc'))
+                    continue
+                m = mapper_call_info_pat.match(line)
+                if m is not None:
+                    self.log_mapper_call_info(int(m.group('mid')),
+                                              int(m.group('pid'),16),
+                                              int(m.group('uid')),
+                                              int(m.group('start')),
+                                              int(m.group('stop')))
                     continue
                 m = proftask_info_pat.match(line)
                 if m is not None:
@@ -1505,6 +1593,20 @@ class State(object):
         message = Message(self.message_kinds[kind], start, stop)
         proc = self.find_processor(proc_id)
         proc.add_message(message)
+
+    def log_mapper_call_desc(self, kind, desc):
+        if kind not in self.mapper_call_kinds:
+            self.mapper_call_kinds[kind] = MapperCallKind(kind, desc)
+
+    def log_mapper_call_info(self, kind, proc_id, op_id, start, stop):
+        assert start <= stop
+        assert kind in self.mapper_call_kinds
+        if stop > self.last_time:
+            self.last_time = stop
+        call = MapperCall(self.mapper_call_kinds[kind], 
+            self.find_op(op_id), start, stop)
+        proc = self.find_processor(proc_id)
+        proc.add_mapper_call(call)
 
     def log_proftask_info(self, proc_id, op_id, start, stop):
         assert start <= stop
