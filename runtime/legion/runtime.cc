@@ -13859,7 +13859,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, DISTRIBUTED_REMOTE_REGISTRATION,
-                                    DISTRIBUTED_VIRTUAL_CHANNEL, true/*flush*/);
+                                    DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13868,7 +13868,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, DISTRIBUTED_VALID_UPDATE,
-                                    DISTRIBUTED_VIRTUAL_CHANNEL, true/*flush*/);
+                                    DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13877,7 +13877,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, DISTRIBUTED_GC_UPDATE,
-                                    DISTRIBUTED_VIRTUAL_CHANNEL, true/*flush*/);
+                                    DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13886,7 +13886,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, DISTRIBUTED_RESOURCE_UPDATE,
-                                    DISTRIBUTED_VIRTUAL_CHANNEL, true/*flush*/);
+                                    DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13895,7 +13895,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, DISTRIBUTED_CREATE_ADD,
-                                    DISTRIBUTED_VIRTUAL_CHANNEL, true/*flush*/);
+                                    DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13904,7 +13904,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, DISTRIBUTED_CREATE_REMOVE,
-                                           DISTRIBUTED_VIRTUAL_CHANNEL, flush);
+                                           DEFAULT_VIRTUAL_CHANNEL, flush);
     }
 
     //--------------------------------------------------------------------------
