@@ -184,11 +184,9 @@ namespace Legion {
     protected:
       void mark_sampled(void);
       void broadcast_result(void);
-      void send_future(AddressSpaceID sid);
       void register_waiter(AddressSpaceID sid);
+      void record_future_registered(void);
     public:
-      static void handle_future_send(Deserializer &derez, Runtime *rt, 
-                                     AddressSpaceID source);
       static void handle_future_result(Deserializer &derez, Runtime *rt);
       static void handle_future_subscription(Deserializer &derez, Runtime *rt);
     public:
@@ -1869,7 +1867,6 @@ namespace Legion {
       void send_create_top_view_response(AddressSpaceID target,Serializer &rez);
       void send_subview_did_request(AddressSpaceID target, Serializer &rez);
       void send_subview_did_response(AddressSpaceID target, Serializer &rez);
-      void send_future(AddressSpaceID target, Serializer &rez);
       void send_future_result(AddressSpaceID target, Serializer &rez);
       void send_future_subscription(AddressSpaceID target, Serializer &rez);
       void send_mapper_message(AddressSpaceID target, Serializer &rez);
@@ -2003,7 +2000,6 @@ namespace Legion {
       void handle_subview_did_response(Deserializer &derez);
       void handle_view_request(Deserializer &derez, AddressSpaceID source);
       void handle_manager_request(Deserializer &derez, AddressSpaceID source);
-      void handle_future_send(Deserializer &derez, AddressSpaceID source);
       void handle_future_result(Deserializer &derez);
       void handle_future_subscription(Deserializer &derez);
       void handle_mapper_message(Deserializer &derez);
@@ -2153,12 +2149,7 @@ namespace Legion {
       DistributedCollectable* find_or_request_distributed_collectable(
                                             DistributedID did, Event &ready);
     public:
-      void register_future(DistributedID did, FutureImpl *impl);
-      void unregister_future(DistributedID did);
-      bool has_future(DistributedID did);
-      FutureImpl* find_future(DistributedID did);
-      FutureImpl* find_or_create_future(DistributedID did,
-                                          AddressSpaceID owner_space);
+      FutureImpl* find_or_create_future(DistributedID did);
     public:
       void defer_collect_user(LogicalView *view, Event term_event);
       void complete_gc_epoch(GarbageCollectionEpoch *epoch);
@@ -2459,11 +2450,6 @@ namespace Legion {
       LegionSet<GarbageCollectionEpoch*,
                 RUNTIME_GC_EPOCH_ALLOC>::tracked  pending_gc_epochs;
       unsigned gc_epoch_counter;
-    protected:
-      // Keep track of futures
-      Reservation future_lock;
-      LegionMap<DistributedID,FutureImpl*,
-                RUNTIME_FUTURE_ALLOC>::tracked local_futures;
     protected:
       // The runtime keeps track of remote contexts so they
       // can be re-used by multiple tasks that get sent remotely

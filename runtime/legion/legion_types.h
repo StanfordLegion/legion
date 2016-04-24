@@ -412,7 +412,6 @@ namespace Legion {
       SEND_SUBVIEW_DID_RESPONSE,
       SEND_VIEW_REQUEST,
       SEND_MANAGER_REQUEST,
-      SEND_FUTURE,
       SEND_FUTURE_RESULT,
       SEND_FUTURE_SUBSCRIPTION,
       SEND_MAPPER_MESSAGE,
@@ -515,7 +514,6 @@ namespace Legion {
         "Send Subview DID Response",                                  \
         "Send View Request",                                          \
         "Send Manager Request",                                       \
-        "Send Future",                                                \
         "Send Future Result",                                         \
         "Send Future Subscription",                                   \
         "Send Mapper Message",                                        \

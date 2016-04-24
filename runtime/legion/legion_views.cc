@@ -172,8 +172,9 @@ namespace Legion {
           add_base_resource_ref(REMOTE_DID_REF);
       }
 #ifdef LEGION_GC
-      log_garbage.info("GC Materialized View %ld %ld", 
-          LEGION_DISTRIBUTED_ID_FILTER(did), manager->did); 
+      if (is_owner())
+        log_garbage.info("GC Materialized View %ld %ld", 
+            LEGION_DISTRIBUTED_ID_FILTER(did), manager->did); 
 #endif
     }
 
@@ -241,7 +242,8 @@ namespace Legion {
       assert(outstanding_gc_events.empty());
 #endif
 #ifdef LEGION_GC
-      log_garbage.info("GC Deletion %ld", LEGION_DISTRIBUTED_ID_FILTER(did));
+      if (is_owner())
+        log_garbage.info("GC Deletion %ld", LEGION_DISTRIBUTED_ID_FILTER(did));
 #endif
     }
 
@@ -2855,8 +2857,9 @@ namespace Legion {
         send_remote_registration();
       }
 #ifdef LEGION_GC
-      log_garbage.info("GC Composite View %ld", 
-          LEGION_DISTRIBUTED_ID_FILTER(did));
+      if (is_owner())
+        log_garbage.info("GC Composite View %ld", 
+            LEGION_DISTRIBUTED_ID_FILTER(did));
 #endif
     }
 
@@ -2884,7 +2887,8 @@ namespace Legion {
       if (version_info->remove_reference())
         delete version_info;
 #ifdef LEGION_GC
-      log_garbage.info("GC Deletion %ld", LEGION_DISTRIBUTED_ID_FILTER(did));
+      if (is_owner())
+        log_garbage.info("GC Deletion %ld", LEGION_DISTRIBUTED_ID_FILTER(did));
 #endif
     }
 
@@ -4138,7 +4142,8 @@ namespace Legion {
         send_remote_registration();
       }
 #ifdef LEGION_GC
-      log_garbage.info("GC Fill View %ld", LEGION_DISTRIBUTED_ID_FILTER(did));
+      if (is_owner())
+        log_garbage.info("GC Fill View %ld", LEGION_DISTRIBUTED_ID_FILTER(did));
 #endif
     }
 
@@ -4163,7 +4168,8 @@ namespace Legion {
         map_over_remote_instances(functor);
       }
 #ifdef LEGION_GC
-      log_garbage.info("GC Deletion %ld", LEGION_DISTRIBUTED_ID_FILTER(did));
+      if (is_owner())
+        log_garbage.info("GC Deletion %ld", LEGION_DISTRIBUTED_ID_FILTER(did));
 #endif
     }
 
@@ -4348,8 +4354,9 @@ namespace Legion {
         send_remote_registration();
       }
 #ifdef LEGION_GC
-      log_garbage.info("GC Reduction View %ld %ld", did, 
-          LEGION_DISTRIBUTED_ID_FILTER(manager->did));
+      if (is_owner())
+        log_garbage.info("GC Reduction View %ld %ld", did, 
+            LEGION_DISTRIBUTED_ID_FILTER(manager->did));
 #endif
     }
 
@@ -4395,7 +4402,8 @@ namespace Legion {
       assert(outstanding_gc_events.empty());
 #endif
 #ifdef LEGION_GC
-      log_garbage.info("GC Deletion %ld", LEGION_DISTRIBUTED_ID_FILTER(did));
+      if (is_owner())
+        log_garbage.info("GC Deletion %ld", LEGION_DISTRIBUTED_ID_FILTER(did));
 #endif
     }
 

@@ -249,11 +249,9 @@ namespace Legion {
       for (unsigned idx = 0; idx < regions.size(); idx++)
         pack_region_requirement(regions[idx], rez);
       rez.serialize(futures.size());
+      // If we are remote we can just do the normal pack
       for (unsigned idx = 0; idx < futures.size(); idx++)
-      {
-        futures[idx].impl->send_future(target);
         rez.serialize(futures[idx].impl->did);
-      }
       rez.serialize(grants.size());
       for (unsigned idx = 0; idx < grants.size(); idx++)
         pack_grant(grants[idx], rez);
@@ -304,7 +302,8 @@ namespace Legion {
       {
         DistributedID future_did;
         derez.deserialize(future_did);
-        futures[idx] = Future(runtime->find_future(future_did));
+        futures[idx] = Future(
+            runtime->find_or_create_future(future_did));
       }
       size_t num_grants;
       derez.deserialize(num_grants);
