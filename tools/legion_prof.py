@@ -46,6 +46,9 @@ message_info_pat = re.compile(prefix + r'Prof Message Info (?P<mid>[0-9]+) (?P<p
 # Extensions for mapper calls
 mapper_call_desc_pat = re.compile(prefix + r'Prof Mapper Call Desc (?P<mid>[0-9]+) (?P<desc>[a-zA-Z0-9_ ]+)')
 mapper_call_info_pat = re.compile(prefix + r'Prof Mapper Call Info (?P<mid>[0-9]+) (?P<pid>[a-f0-9]+) (?P<uid>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)')
+# Extensions for runtime calls
+runtime_call_desc_pat = re.compile(prefix + r'Prof Runtime Call Desc (?P<rid>[0-9]+) (?P<desc>[a-zA-Z0-9_ ]+)')
+runtime_call_info_pat = re.compile(prefix + r'Prof Runtime Call Info (?P<rid>[0-9]+) (?P<pid>[a-f0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)')
 # Self-profiling
 proftask_info_pat = re.compile(prefix + r'Prof ProfTask Info (?P<pid>[a-f0-9]+) (?P<opid>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)')
 
@@ -446,7 +449,12 @@ class Processor(object):
         self.tasks.append(MessageRange(message))
 
     def add_mapper_call(self, call):
+        # treating mapper calls like any other task
         self.tasks.append(MapperCallRange(call))
+
+    def add_runtime_call(self, call):
+        # treating runtime calls like any other task
+        self.tasks.append(RuntimeCallRange(call))
 
     def init_time_range(self, last_time):
         self.full_range = BaseRange(0L, last_time, self)
@@ -1077,6 +1085,25 @@ class MapperCall(object):
         else:
             return 'Mapper Call '+self.kind.desc+' for '+repr(self.op) 
 
+class RuntimeCallKind(object):
+    def __init__(self, runtime_call_kind, desc):
+        self.runtime_call_kind = runtime_call_kind
+        self.desc = desc
+        self.color = None
+
+class RuntimeCall(object):
+    def __init__(self, kind, start, stop):
+        self.kind = kind
+        self.start = start
+        self.stop = stop
+
+    def get_timing(self):
+        return 'total='+str(self.stop - self.start)+' us start='+ \
+                str(self.start)+' us stop='+str(self.stop)+' us'
+
+    def __repr__(self):
+        return 'Runtime Call '+self.kind.desc
+
 class SVGPrinter(object):
     def __init__(self, file_name, html_file):
         self.target = open(file_name,'w')
@@ -1250,6 +1277,8 @@ class State(object):
         self.messages = {}
         self.mapper_call_kinds = {}
         self.mapper_calls = {}
+        self.runtime_call_kinds = {}
+        self.runtime_calls = {}
 
     def parse_log_file(self, file_name):
         with open(file_name, 'rb') as log:  
@@ -1417,6 +1446,18 @@ class State(object):
                                               int(m.group('uid')),
                                               read_time(m.group('start')),
                                               read_time(m.group('stop')))
+                    continue
+                m = runtime_call_desc_pat.match(line)
+                if m is not None:
+                    self.log_runtime_call_desc(int(m.group('rid')),
+                                               m.group('desc'))
+                    continue
+                m = runtime_call_info_pat.match(line)
+                if m is not None:
+                    self.log_runtime_call_info(int(m.group('rid')),
+                                               int(m.group('pid'),16),
+                                               read_time(m.group('start')),
+                                               read_time(m.group('stop')))
                     continue
                 m = proftask_info_pat.match(line)
                 if m is not None:
@@ -1619,14 +1660,28 @@ class State(object):
     def log_mapper_call_info(self, kind, proc_id, op_id, start, stop):
         assert start <= stop
         assert kind in self.mapper_call_kinds
+        # For now we'll only add very expensive mapper calls (more than 100 us)
+        if (stop - start) < 100:
+            return 
         if stop > self.last_time:
             self.last_time = stop
         call = MapperCall(self.mapper_call_kinds[kind], 
-            self.find_op(op_id), start, stop)
-        # For now we'll only add very expensive mapper calls (more than 100 us)
-        if (stop - start) > 100:
-            proc = self.find_processor(proc_id)
-            proc.add_mapper_call(call)
+        self.find_op(op_id), start, stop)
+        proc = self.find_processor(proc_id)
+        proc.add_mapper_call(call)
+
+    def log_runtime_call_desc(self, kind, desc):
+        if kind not in self.runtime_call_kinds:
+            self.runtime_call_kinds[kind] = RuntimeCallKind(kind, desc)
+
+    def log_runtime_call_info(self, kind, proc_id, start, stop):
+        assert start <= stop 
+        assert kind in self.runtime_call_kinds
+        if stop > self.last_time:
+            self.last_time = stop
+        call = RuntimeCall(self.runtime_call_kinds[kind], start, stop)
+        proc = self.find_processor(proc_id)
+        proc.add_runtime_call(call)
 
     def log_proftask_info(self, proc_id, op_id, start, stop):
         assert start <= stop

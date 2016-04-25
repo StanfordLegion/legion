@@ -754,6 +754,8 @@ namespace Legion {
       "Individual Trigger Complete",                                  \
       "Individual Trigger Commit",                                    \
       "Individual Post Mapped",                                       \
+      "Individual Pack Task",                                         \
+      "Individual Unpack Task",                                       \
       "Individual Pack Remote Complete",                              \
       "Individual Unpack Remote Complete",                            \
       "Activate Point",                                               \
@@ -762,6 +764,7 @@ namespace Legion {
       "Point Task Commit",                                            \
       "Point Task Pack",                                              \
       "Point Task Unpack",                                            \
+      "Point Task Post Mapped",                                       \
       "Remote Task Activate",                                         \
       "Remote Task Deactivate",                                       \
       "Remote Unpack Context",                                        \
