@@ -310,6 +310,19 @@ namespace Legion {
       info.proc = proc;
     }
 
+    //--------------------------------------------------------------------------
+    void LegionProfInstance::record_runtime_call(Processor proc, 
+        RuntimeCallKind kind, unsigned long long start, unsigned long long stop)
+    //--------------------------------------------------------------------------
+    {
+      runtime_call_infos.push_back(RuntimeCallInfo());
+      RuntimeCallInfo &info = runtime_call_infos.back();
+      info.kind = kind;
+      info.start = start;
+      info.stop = stop;
+      info.proc = proc;
+    }
+
 #ifdef LEGION_PROF_SELF_PROFILE
     //--------------------------------------------------------------------------
     void LegionProfInstance::record_proftask(Processor proc, UniqueID op_id,
@@ -419,6 +432,12 @@ namespace Legion {
       {
         log_prof.info("Prof Mapper Call Info %u " IDFMT " %llu %llu %llu",
             it->kind, it->proc.id, it->op_id, it->start, it->stop);
+      }
+      for (std::deque<RuntimeCallInfo>::const_iterator it = 
+            runtime_call_infos.begin(); it != runtime_call_infos.end(); it++)
+      {
+        log_prof.info("Prof Runtime Call Info %u " IDFMT " %llu %llu",
+            it->kind, it->proc.id, it->start, it->stop);
       }
 #ifdef LEGION_PROF_SELF_PROFILE
       for (std::deque<ProfTaskInfo>::const_iterator it = prof_task_infos.begin();
@@ -993,6 +1012,72 @@ namespace Legion {
       if (instances[local_id] == NULL)
         instances[local_id] = new LegionProfInstance(this);
       instances[local_id]->record_mapper_call(current, kind, uid, start, stop);
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfiler::record_runtime_call_kinds(const char *const *const
+                             runtime_call_names, unsigned int num_runtime_calls)
+    //--------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < num_runtime_calls; idx++)
+      {
+        log_prof.info("Prof Runtime Call Desc %u %s", 
+                      idx, runtime_call_names[idx]);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfiler::record_runtime_call(RuntimeCallKind kind,
+                              unsigned long long start, unsigned long long stop)
+    //--------------------------------------------------------------------------
+    {
+      Processor current = Processor::get_executing_processor();
+      size_t local_id = current.local_id();
+#ifdef DEBUG_HIGH_LEVEL
+      assert(local_id < MAX_NUM_PROCS);
+#endif
+      if (instances[local_id] == NULL)
+        instances[local_id] = new LegionProfInstance(this);
+      instances[local_id]->record_runtime_call(current, kind, start, stop);
+    }
+
+    //--------------------------------------------------------------------------
+    DetailedProfiler::DetailedProfiler(Runtime *runtime, RuntimeCallKind call)
+      : profiler(runtime->profiler), call_kind(call), start_time(0)
+    //--------------------------------------------------------------------------
+    {
+      if (profiler != NULL)
+        start_time = Realm::Clock::current_time_in_nanoseconds();
+    }
+
+    //--------------------------------------------------------------------------
+    DetailedProfiler::DetailedProfiler(const DetailedProfiler &rhs)
+      : profiler(rhs.profiler), call_kind(rhs.call_kind)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    DetailedProfiler::~DetailedProfiler(void)
+    //--------------------------------------------------------------------------
+    {
+      if (profiler != NULL)
+      {
+        unsigned long long stop_time = 
+          Realm::Clock::current_time_in_nanoseconds();
+        profiler->record_runtime_call(call_kind, start_time, stop_time);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    DetailedProfiler& DetailedProfiler::operator=(const DetailedProfiler &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
     }
 
   }; // namespace Internal

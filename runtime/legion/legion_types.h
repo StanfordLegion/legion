@@ -642,6 +642,131 @@ namespace Legion {
         "Send Shutdown Response",                                     \
       };
 
+    enum RuntimeCallKind {
+      PACK_BASE_TASK_CALL, 
+      UNPACK_BASE_TASK_CALL,
+      TASK_PRIVILEGE_CHECK_CALL,
+      CLONE_TASK_CALL,
+      COMPUTE_POINT_REQUIREMENTS_CALL,
+      EARLY_MAP_REGIONS_CALL,
+      RECORD_ALIASED_REQUIREMENTS_CALL,
+      ACTIVATE_SINGLE_CALL,
+      DEACTIVATE_SINGLE_CALL,
+      SELECT_INLINE_VARIANT_CALL,
+      INLINE_CHILD_TASK_CALL,
+      PACK_SINGLE_TASK_CALL,
+      UNPACK_SINGLE_TASK_CALL,
+      PACK_REMOTE_CONTEXT_CALL,
+      HAS_CONFLICTING_INTERNAL_CALL,
+      FIND_CONFLICTING_CALL,
+      FIND_CONFLICTING_INTERNAL_CALL,
+      CHECK_REGION_DEPENDENCE_CALL,
+      FIND_PARENT_REGION_REQ_CALL,
+      FIND_PARENT_REGION_CALL,
+      CHECK_PRIVILEGE_CALL,
+      TRIGGER_SINGLE_CALL,
+      INITIALIZE_MAP_TASK_CALL,
+      FINALIZE_MAP_TASK_CALL,
+      VALIDATE_VARIANT_SELECTION_CALL,
+      MAP_ALL_REGIONS_CALL,
+      INITIALIZE_REGION_TREE_CONTEXTS_CALL,
+      INVALIDATE_REGION_TREE_CONTEXTS_CALL,
+      CREATE_INSTANCE_TOP_VIEW_CALL,
+      CONVERT_VIRTUAL_INSTANCE_TOP_VIEW_CALL,
+      LAUNCH_TASK_CALL,
+      ACTIVATE_MULTI_CALL,
+      DEACTIVATE_MULTI_CALL,
+      SLICE_INDEX_SPACE_CALL,
+      CLONE_MULTI_CALL,
+      MULTI_TRIGGER_EXECUTION_CALL,
+      PACK_MULTI_CALL,
+      UNPACK_MULTI_CALL,
+      ACTIVATE_INDIVIDUAL_CALL,
+      DEACTIVATE_INDIVIDUAL_CALL,
+      INDIVIDUAL_REMOTE_STATE_ANALYSIS_CALL,
+      INDIVIDUAL_PERFORM_MAPPING_CALL,
+      INDIVIDUAL_RETURN_VIRTUAL_CALL,
+      INDIVIDUAL_TRIGGER_COMPLETE_CALL,
+      INDIVIDUAL_TRIGGER_COMMIT_CALL,
+      INDIVIDUAL_POST_MAPPED_CALL,
+      INDIVIDUAL_PACK_TASK_CALL,
+      INDIVIDUAL_UNPACK_TASK_CALL,
+      INDIVIDUAL_PACK_REMOTE_COMPLETE_CALL,
+      INDIVIDUAL_UNPACK_REMOTE_COMPLETE_CALL,
+      POINT_ACTIVATE_CALL,
+      POINT_DEACTIVATE_CALL,
+      POINT_TASK_COMPLETE_CALL,
+      POINT_TASK_COMMIT_CALL,
+      POINT_PACK_TASK_CALL,
+      POINT_UNPACK_TASK_CALL,
+      POINT_TASK_POST_MAPPED_CALL,
+      REMOTE_TASK_ACTIVATE_CALL,
+      REMOTE_TASK_DEACTIVATE_CALL,
+      REMOTE_UNPACK_CONTEXT_CALL,
+      LAST_RUNTIME_CALL_KIND, // This one must be last
+    };
+
+#define RUNTIME_CALL_DESCRIPTIONS(name)                               \
+    const char *name[LAST_RUNTIME_CALL_KIND] = {                      \
+      "Pack Base Task",                                               \
+      "Unpack Base Task",                                             \
+      "Task Privilege Check",                                         \
+      "Clone Base Task",                                              \
+      "Compute Point Requirements",                                   \
+      "Early Map Regions",                                            \
+      "Record Early Requirements",                                    \
+      "Activate Single",                                              \
+      "Deactivate Single",                                            \
+      "Select Inline Variant",                                        \
+      "Inline Child Task",                                            \
+      "Pack Single Task",                                             \
+      "Unpack Single Task",                                           \
+      "Pack Remote Context",                                          \
+      "Has Conflicting Internal",                                     \
+      "Find Conflicting",                                             \
+      "Find Conflicting Internal",                                    \
+      "Check Region Dependence",                                      \
+      "Find Parent Region Requirement",                               \
+      "Find Parent Region",                                           \
+      "Check Privilege",                                              \
+      "Trigger Single",                                               \
+      "Initialize Map Task",                                          \
+      "Finalized Map Task",                                           \
+      "Validate Variant Selection",                                   \
+      "Map All Regions",                                              \
+      "Initialize Region Tree Contexts",                              \
+      "Invalidate Region Tree Contexts",                              \
+      "Create Instance Top View",                                     \
+      "Convert Virtual Instance Top View",                            \
+      "Launch Task",                                                  \
+      "Activate Multi",                                               \
+      "Deactivate Multi",                                             \
+      "Slice Index Space",                                            \
+      "Clone Multi Call",                                             \
+      "Multi Trigger Execution",                                      \
+      "Pack Multi",                                                   \
+      "Unpack Multi",                                                 \
+      "Activate Individual",                                          \
+      "Deactivate Individual",                                        \
+      "Individual Remote State Analysis",                             \
+      "Individual Perform Mapping",                                   \
+      "Individual Return Virtual",                                    \
+      "Individual Trigger Complete",                                  \
+      "Individual Trigger Commit",                                    \
+      "Individual Post Mapped",                                       \
+      "Individual Pack Remote Complete",                              \
+      "Individual Unpack Remote Complete",                            \
+      "Activate Point",                                               \
+      "Deactivate Point",                                             \
+      "Point Task Complete",                                          \
+      "Point Task Commit",                                            \
+      "Point Task Pack",                                              \
+      "Point Task Unpack",                                            \
+      "Remote Task Activate",                                         \
+      "Remote Task Deactivate",                                       \
+      "Remote Unpack Context",                                        \
+    };
+
     enum SemanticInfoKind {
       INDEX_SPACE_SEMANTIC,
       INDEX_PARTITION_SEMANTIC,
