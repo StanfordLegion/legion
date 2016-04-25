@@ -4566,7 +4566,7 @@ namespace Legion {
           assert(message_size == arglen);
 #endif
         if (profile_messages)
-          start = Realm::Clock::current_time_in_microseconds();
+          start = Realm::Clock::current_time_in_nanoseconds();
         // Build the deserializer
         Deserializer derez(args,message_size);
         switch (kind)
@@ -5093,7 +5093,7 @@ namespace Legion {
         }
         if (profile_messages)
         {
-          stop = Realm::Clock::current_time_in_microseconds();
+          stop = Realm::Clock::current_time_in_nanoseconds();
 #ifdef DEBUG_HIGH_LEVEL
           assert(runtime->profiler != NULL);
 #endif

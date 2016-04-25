@@ -166,6 +166,8 @@ namespace Legion {
                   Realm::ProfilingMeasurements::InstanceTimeline *timeline,
                   Realm::ProfilingMeasurements::InstanceMemoryUsage *usage);
     public:
+      void record_instance_creation(PhysicalInstance inst, Memory memory,
+                                    UniqueID op_id, unsigned long long create);
       void record_message(Processor proc, MessageKind kind, 
                           unsigned long long start,
                           unsigned long long stop);
@@ -272,6 +274,9 @@ namespace Legion {
     public:
       // Dump all the results
       void finalize(void);
+    public:
+      void record_instance_creation(PhysicalInstance inst, Memory memory,
+                                    UniqueID op_id, unsigned long long create);
     public:
       void record_message_kinds(const char *const *const message_names,
                                 unsigned int num_message_kinds);

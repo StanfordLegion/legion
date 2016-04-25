@@ -2560,12 +2560,12 @@ namespace Legion {
         if (op != NULL)
           result->acquired_instances = op->get_acquired_instances_ref();
         if (runtime->profiler != NULL)
-          result->start_time = Realm::Clock::current_time_in_microseconds();
+          result->start_time = Realm::Clock::current_time_in_nanoseconds();
         return result;
       }
       MappingCallInfo *result = new MappingCallInfo(this, kind, op);
       if (runtime->profiler != NULL)
-        result->start_time = Realm::Clock::current_time_in_microseconds();
+        result->start_time = Realm::Clock::current_time_in_nanoseconds();
       return result;
     }
 
@@ -2582,7 +2582,7 @@ namespace Legion {
       if (runtime->profiler != NULL)
       {
         unsigned long long stop_time = 
-          Realm::Clock::current_time_in_microseconds();
+          Realm::Clock::current_time_in_nanoseconds();
         runtime->profiler->record_mapper_call(info->kind, 
             (info->operation == NULL) ? 0 : info->operation->get_unique_op_id(),
             info->start_time, stop_time); 

@@ -264,6 +264,24 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void LegionProfInstance::record_instance_creation(PhysicalInstance instance,
+                       Memory memory, UniqueID op_id, unsigned long long create)
+    //--------------------------------------------------------------------------
+    {
+      // A special kind of instance info that legion prof will know how
+      // to interpret as an instance that was create but never destroyed
+      // unless it sees a later logging output for the same instance
+      inst_infos.push_back(InstInfo());
+      InstInfo &info = inst_infos.back();
+      info.op_id = op_id;
+      info.inst = instance;
+      info.mem = memory;
+      info.total_bytes = 0;
+      info.create = create;
+      info.destroy = 0;
+    }
+
+    //--------------------------------------------------------------------------
     void LegionProfInstance::record_message(Processor proc, MessageKind kind, 
                                             unsigned long long start,
                                             unsigned long long stop)
@@ -907,6 +925,21 @@ namespace Legion {
         if (instances[idx] != NULL)
           instances[idx]->dump_state();
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfiler::record_instance_creation(PhysicalInstance inst,
+                       Memory memory, UniqueID op_id, unsigned long long create)
+    //--------------------------------------------------------------------------
+    {
+      Processor current = Processor::get_executing_processor();
+      size_t local_id = current.local_id();
+#ifdef DEBUG_HIGH_LEVEL
+      assert(local_id < MAX_NUM_PROCS);
+#endif
+      if (instances[local_id] == NULL)
+        instances[local_id] = new LegionProfInstance(this);
+      instances[local_id]->record_instance_creation(inst, memory, op_id,create);
     }
 
     //--------------------------------------------------------------------------

@@ -4161,8 +4161,18 @@ namespace Legion {
       {
         Realm::ProfilingRequestSet reqs;
         runtime->profiler->add_inst_request(reqs, op_id);
-        return dom.create_instance(target, field_sizes, 
-                                   blocking_factor, reqs, redop);
+        PhysicalInstance result = dom.create_instance(target, field_sizes, 
+                                            blocking_factor, reqs, redop);
+        // If the result exists tell the profiler about it in case
+        // it never gets deleted and we never see the profiling feedback
+        if (result.exists())
+        {
+          unsigned long long creation_time = 
+            Realm::Clock::current_time_in_nanoseconds();
+          runtime->profiler->record_instance_creation(result, target, op_id,
+                                                      creation_time);
+        }
+        return result;
       }
       else
         return dom.create_instance(target, field_sizes, 
