@@ -472,8 +472,9 @@ namespace Realm {
   LoggerMessage& LoggerMessage::vprintf(const char *fmt, va_list args)
   {
     if(active) {
-      char msg[256];
-      vsnprintf(msg, 256, fmt, args);
+      static const int MAXLEN = 4096;
+      char msg[MAXLEN];
+      vsnprintf(msg, MAXLEN, fmt, args);
       (*oss) << msg;
     }
     return *this;

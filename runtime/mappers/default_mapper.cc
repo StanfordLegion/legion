@@ -1754,10 +1754,10 @@ namespace Legion {
       // as soon as possible, otherwise we are ambivalent
       // Only have higher priority for things we cache
       if (meets_fill_constraints && (kind == TASK_MAPPING))
-        return INT_MAX;
+        return GC_NEVER_PRIORITY;
       if (reduction)
-        return INT_MIN;
-      return 0;
+        return GC_FIRST_PRIORITY;
+      return GC_DEFAULT_PRIORITY;
     }
 
     //--------------------------------------------------------------------------
