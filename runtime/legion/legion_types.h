@@ -703,6 +703,86 @@ namespace Legion {
       REMOTE_TASK_ACTIVATE_CALL,
       REMOTE_TASK_DEACTIVATE_CALL,
       REMOTE_UNPACK_CONTEXT_CALL,
+      INDEX_ACTIVATE_CALL,
+      INDEX_DEACTIVATE_CALL,
+      INDEX_REMOTE_STATE_ANALYSIS_CALL,
+      INDEX_COMPUTE_FAT_PATH_CALL,
+      INDEX_EARLY_MAP_TASK_CALL,
+      INDEX_DISTRIBUTE_CALL,
+      INDEX_PERFORM_MAPPING_CALL,
+      INDEX_COMPLETE_CALL,
+      INDEX_COMMIT_CALL,
+      INDEX_PERFORM_INLINING_CALL,
+      INDEX_CLONE_AS_SLICE_CALL,
+      INDEX_HANDLE_FUTURE,
+      INDEX_ENUMERATE_POINTS_CALL,
+      INDEX_RETURN_SLICE_MAPPED_CALL,
+      INDEX_RETURN_SLICE_COMPLETE_CALL,
+      INDEX_RETURN_SLICE_COMMIT_CALL,
+      SLICE_ACTIVATE_CALL,
+      SLICE_DEACTIVATE_CALL,
+      SLICE_REMOTE_STATE_ANALYSIS_CALL,
+      SLICE_PREWALK_CALL,
+      SLICE_APPLY_VERSION_INFO_CALL,
+      SLICE_DISTRIBUTE_CALL,
+      SLICE_PERFORM_MAPPING_CALL,
+      SLICE_LAUNCH_CALL,
+      SLICE_MAP_AND_LAUNCH_CALL,
+      SLICE_PACK_TASK_CALL,
+      SLICE_UNPACK_TASK_CALL,
+      SLICE_CLONE_AS_SLICE_CALL,
+      SLICE_HANDLE_FUTURE_CALL,
+      SLICE_CLONE_AS_POINT_CALL,
+      SLICE_ENUMERATE_POINTS_CALL,
+      SLICE_RETURN_VIRTUAL_CALL,
+      SLICE_MAPPED_CALL,
+      SLICE_COMPLETE_CALL,
+      SLICE_COMMIT_CALL,
+      REALM_SPAWN_META_CALL,
+      REALM_SPAWN_TASK_CALL,
+      REALM_CREATE_INSTANCE_CALL,
+      REALM_ISSUE_COPY_CALL,
+      REALM_ISSUE_FILL_CALL,
+      REGION_TREE_LOGICAL_ANALYSIS_CALL,
+      REGION_TREE_LOGICAL_FENCE_CALL,
+      REGION_TREE_INITIALIZE_CONTEXT_CALL,
+      REGION_TREE_INVALIDATE_CONTEXT_CALL,
+      REGION_TREE_PHYSICAL_TRAVERSE_CALL,
+      REGION_TREE_PHYSICAL_TRAVERSE_AND_REGISTER_CALL,
+      REGION_TREE_MAP_VIRTUAL_CALL,
+      REGION_TREE_PHYSICAL_REGISTER_ONLY_CALL,
+      REGION_TREE_PHYSICAL_REGISTER_USERS_CALL,
+      REGION_TREE_PHYSICAL_PERFORM_CLOSE_CALL,
+      REGION_TREE_PHYSICAL_CLOSE_CONTEXT_CALL,
+      REGION_TREE_PHYSICAL_COPY_ACROSS_CALL,
+      REGION_TREE_PHYSICAL_REDUCE_ACROSS_CALL,
+      REGION_TREE_PHYSICAL_CONVERT_VIEWS_INTO_CALL,
+      REGION_TREE_PHYSICAL_CONVERT_VIEWS_FROM_CALL,
+      REGION_TREE_PHYSICAL_CONVERT_MAPPING_CALL,
+      REGION_TREE_PHYSICAL_FILL_FIELDS_CALL,
+      REGION_TREE_PHYSICAL_ATTACH_FILE_CALL,
+      REGION_TREE_PHYSICAL_DETACH_FILE_CALL,
+      REGION_NODE_REGISTER_LOGICAL_NODE_CALL,
+      REGION_NODE_OPEN_LOGICAL_NODE_CALL,
+      REGION_NODE_REGISTER_LOGICAL_FAT_PATH_CALL,
+      REGION_NODE_OPEN_LOGICAL_FAT_PATH_CALL,
+      REGION_NODE_CLOSE_LOGICAL_NODE_CALL,
+      REGION_NODE_SIPHON_LOGICAL_CHILDREN_CALL,
+      REGION_NODE_PERFORM_LOGICAL_CLOSES_CALL,
+      REGION_NODE_CLOSE_PHYSICAL_NODE_CALL,
+      REGION_NODE_SIPHON_PHYSICAL_CHILDREN_CALL,
+      REGION_NODE_CLOSE_COMPOSITE_NODE_CALL,
+      REGION_NODE_SIPHON_COMPOSITE_CHILDREN_CALL,
+      REGION_NODE_FIND_VALID_INSTANCE_VIEWS_CALL,
+      REGION_NODE_FIND_VALID_REDUCTION_VIEWS_CALL,
+      REGION_NODE_ISSUE_UPDATE_COPIES_CALL,
+      REGION_NODE_SORT_COPY_INSTANCES_CALL,
+      REGION_NODE_ISSUE_GROUPED_COPIES_CALL,
+      REGION_NODE_ISSUE_UPDATE_REDUCTIONS_CALL,
+      REGION_NODE_FLUSH_REDUCTIONS_CALL,
+      REGION_NODE_MAP_VIRTUAL_CALL,
+      REGION_NODE_REGISTER_REGION_CALL,
+      REGION_NODE_CLOSE_STATE_CALL,
       LAST_RUNTIME_CALL_KIND, // This one must be last
     };
 
@@ -768,6 +848,86 @@ namespace Legion {
       "Remote Task Activate",                                         \
       "Remote Task Deactivate",                                       \
       "Remote Unpack Context",                                        \
+      "Index Activate",                                               \
+      "Index Deactivate",                                             \
+      "Index Remote State Analysis",                                  \
+      "Index Compute Fat Path",                                       \
+      "Index Early Map Task",                                         \
+      "Index Distribute",                                             \
+      "Index Perform Mapping",                                        \
+      "Index Complete",                                               \
+      "Index Commit",                                                 \
+      "Index Perform Inlining",                                       \
+      "Index Clone As Slice",                                         \
+      "Index Handle Future",                                          \
+      "Index Enumerate Points",                                       \
+      "Index Return Slice Mapped",                                    \
+      "Index Return Slice Complete",                                  \
+      "Index Return Slice Commit",                                    \
+      "Slice Activate",                                               \
+      "Slice Deactivate",                                             \
+      "Slice Remote State Analysis",                                  \
+      "Slice Prewalk",                                                \
+      "Slice Apply Version Info",                                     \
+      "Slice Distribute",                                             \
+      "Slice Perform Mapping",                                        \
+      "Slice Launch",                                                 \
+      "Slice Map and Launch",                                         \
+      "Slice Pack Task",                                              \
+      "Slice Unpack Task",                                            \
+      "Slice Clone As Slice",                                         \
+      "Slice Handle Future",                                          \
+      "Slice Cone as Point",                                          \
+      "Slice Enumerate Points",                                       \
+      "Slice Return Virtual",                                         \
+      "Slice Mapped",                                                 \
+      "Slice Complete",                                               \
+      "Slice Commit",                                                 \
+      "Realm Spawn Meta",                                             \
+      "Realm Spawn Task",                                             \
+      "Realm Create Instance",                                        \
+      "Realm Issue Copy",                                             \
+      "Realm Issue Fill",                                             \
+      "Region Tree Logical Analysis",                                 \
+      "Region Tree Logical Fence",                                    \
+      "Region Tree Initialize Context",                               \
+      "Region Tree Invalidate Context",                               \
+      "Region Tree Physical Traverse",                                \
+      "Region Tree Physical Traverse and Register",                   \
+      "Region Tree Map Virtual",                                      \
+      "Region Tree Physical Register Only",                           \
+      "Region Tree Physical Register Users",                          \
+      "Region Tree Physical Perform Close",                           \
+      "Region Tree Physical Close Context",                           \
+      "Region Tree Physical Copy Across",                             \
+      "Region Tree Physical Reduce Across",                           \
+      "Region Tree Physical Convert View Into Context",               \
+      "Region Tree Physical Convert View From Context",               \
+      "Region Tree Physical Convert Mapping",                         \
+      "Region Tree Physical Fill Fields",                             \
+      "Region Tree Physical Attach File",                             \
+      "Region Tree Physical Detach File",                             \
+      "Region Node Register Logical Node",                            \
+      "Region Node Open Logical Node",                                \
+      "Region Node Register Logical Fat Path",                        \
+      "Region Node Open Logical Fat Path",                            \
+      "Region Node Close Logical Node",                               \
+      "Region Node Siphon Logical Node",                              \
+      "Region Node Perform Logical Closes",                           \
+      "Region Node Close Physical Node",                              \
+      "Region Node Siphon Physical Children",                         \
+      "Region Node Close Composite Node",                             \
+      "Region Node Siphon Composite Children",                        \
+      "Region Node Find Valid Instance Views",                        \
+      "Region Node Find Valid Reduction Views",                       \
+      "Region Node Issue Update Copies",                              \
+      "Region Node Sort Copy Instances",                              \
+      "Region Node Issue Grouped Copies",                             \
+      "Region Node Issue Update Reductions",                          \
+      "Region Node Flush Reductions",                                 \
+      "Region Node Map Virtual",                                      \
+      "Region Node Register Region",                                  \
+      "Region Node Close State",                                      \
     };
 
     enum SemanticInfoKind {

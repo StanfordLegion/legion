@@ -28,6 +28,12 @@
 
 #define LEGION_PROF_SELF_PROFILE
 
+#ifdef DETAILED_LEGION_PROF
+#define DETAILED_PROFILER(runtime, call) DetailedProfiler(runtime, call)
+#else
+#define DETAILED_PROFILER(runtime, call) // Nothing
+#endif
+
 namespace Legion {
   namespace Internal { 
 

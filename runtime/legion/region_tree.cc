@@ -1354,6 +1354,7 @@ namespace Legion {
                                                   RegionTreePath &path)
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(runtime, REGION_TREE_LOGICAL_ANALYSIS_CALL);
       // If this is a NO_ACCESS, then we'll have no dependences so we're done
       if (IS_NO_ACCESS(req))
         return;
@@ -1456,6 +1457,7 @@ namespace Legion {
                                                   bool dominate)
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(runtime, REGION_TREE_LOGICAL_FENCE_CALL);
       // Register dependences for this fence on all users in the tree
       RegionNode *top_node = get_node(handle);
       LogicalRegistrar registrar(ctx.get_id(), fence, 
@@ -1640,6 +1642,7 @@ namespace Legion {
                     std::map<PhysicalManager*,InstanceView*> &top_views)
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(runtime, REGION_TREE_INITIALIZE_CONTEXT_CALL);
 #ifdef DEBUG_HIGH_LEVEL
       assert(req.handle_type == SINGULAR);
 #endif
@@ -1721,6 +1724,7 @@ namespace Legion {
                                                   CompositeView *composite_view)
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(runtime, REGION_TREE_INITIALIZE_CONTEXT_CALL);
 #ifdef DEBUG_HIGH_LEVEL
       assert(req.handle_type == SINGULAR);
       assert(sources.size() == 1);
@@ -1741,6 +1745,7 @@ namespace Legion {
                                                       bool logical_users_only)
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(runtime, REGION_TREE_INVALIDATE_CONTEXT_CALL);
       RegionNode *top_node = get_node(handle);
       CurrentInvalidator invalidator(ctx.get_id(), logical_users_only);
       top_node->visit_node(&invalidator);
@@ -1832,6 +1837,7 @@ namespace Legion {
                                                   )
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_TRAVERSE_CALL);
       // If we are a NO_ACCESS, then we are already done 
       if (IS_NO_ACCESS(req))
         return;
@@ -1891,6 +1897,8 @@ namespace Legion {
                                                  )
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(runtime, 
+                        REGION_TREE_PHYSICAL_TRAVERSE_AND_REGISTER_CALL);
       // Just call physical traverse path with an empty InstanceSet
       InstanceSet empty_targets;
       physical_traverse_path(ctx, path, req, version_info, 
@@ -1923,6 +1931,7 @@ namespace Legion {
                                               )
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(runtime, REGION_TREE_MAP_VIRTUAL_CALL);
 #ifdef DEBUG_HIGH_LEVEL
       assert(composite_ref.is_composite_ref() || 
               composite_ref.get_manager()->is_virtual_instance());
@@ -1961,6 +1970,7 @@ namespace Legion {
                                                   )
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_REGISTER_ONLY_CALL);
 #ifdef DEBUG_HIGH_LEVEL
       assert(ctx.exists());
       assert(req.handle_type == SINGULAR);
@@ -2009,6 +2019,7 @@ namespace Legion {
                                   std::deque<InstanceSet> &target_sets)
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_REGISTER_USERS_CALL);
 #ifdef DEBUG_HIGH_LEVEL
       assert(regions.size() == to_skip.size());
       assert(regions.size() == version_infos.size());
@@ -2074,6 +2085,7 @@ namespace Legion {
                       )
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_PERFORM_CLOSE_CALL);
       RegionNode *top_node = get_node(req.parent);
       FieldMask closing_mask = 
         top_node->column_source->get_field_mask(req.privilege_fields);
@@ -2138,6 +2150,7 @@ namespace Legion {
                                                    )
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_CLOSE_CONTEXT_CALL);
 #ifdef DEBUG_HIGH_LEVEL
       assert(!targets.empty());
       assert(req.handle_type == SINGULAR);
@@ -2186,6 +2199,7 @@ namespace Legion {
                                         Event precondition)
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_COPY_ACROSS_CALL);
 #ifdef DEBUG_HIGH_LEVEL
       assert(src_req.handle_type == SINGULAR);
       assert(dst_req.handle_type == SINGULAR);
@@ -2320,6 +2334,7 @@ namespace Legion {
                                           Operation *op, Event precondition)
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_REDUCE_ACROSS_CALL);
 #ifdef DEBUG_HIGH_LEVEL
       assert(src_req.handle_type == SINGULAR);
       assert(dst_req.handle_type == SINGULAR);
@@ -2449,6 +2464,7 @@ namespace Legion {
                                         const std::vector<ColorPoint> &path)
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_CONVERT_VIEWS_INTO_CALL);
       if (IS_NO_ACCESS(req))
         return;
       PhysicalManager *manager = src_view->get_manager();
@@ -2506,6 +2522,7 @@ namespace Legion {
                                             Event ready_event, bool init)
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_CONVERT_VIEWS_FROM_CALL);
       if (IS_NO_ACCESS(req))
         return;
       PhysicalManager *manager = dst_view->get_manager();
@@ -2560,6 +2577,7 @@ namespace Legion {
                                   const bool do_acquire_checks)
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_CONVERT_MAPPING_CALL);
 #ifdef DEBUG_HIGH_LEVEL
       assert(req.handle_type == SINGULAR);
 #endif
@@ -2862,6 +2880,7 @@ namespace Legion {
                                         Event precondition)
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_FILL_FIELDS_CALL);
 #ifdef DEBUG_HIGH_LEVEL
       assert(req.handle_type == SINGULAR);
 #endif
@@ -2911,6 +2930,7 @@ namespace Legion {
                                               VersionInfo &version_info)
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_ATTACH_FILE_CALL);
 #ifdef DEBUG_HIGH_LEVEL
       assert(req.handle_type == SINGULAR);
 #endif
@@ -2930,6 +2950,7 @@ namespace Legion {
                                         const InstanceRef &ref)
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_DETACH_FILE_CALL);
 #ifdef DEBUG_HIGH_LEVEL
       assert(req.handle_type == SINGULAR);
 #endif
@@ -4157,6 +4178,7 @@ namespace Legion {
                     size_t blocking_factor, ReductionOpID redop, UniqueID op_id)
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(runtime, REALM_CREATE_INSTANCE_CALL);
       if (runtime->profiler != NULL)
       {
         Realm::ProfilingRequestSet reqs;
@@ -9997,6 +10019,8 @@ namespace Legion {
                                                const bool report_uninitialized)
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(context->runtime, 
+                        REGION_NODE_REGISTER_LOGICAL_NODE_CALL);
       CurrentState &state = get_current_state(ctx);
 #ifdef DEBUG_HIGH_LEVEL
       sanity_check_logical_state(state);
@@ -10282,6 +10306,7 @@ namespace Legion {
                                              const bool projecting)
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(context->runtime, REGION_NODE_OPEN_LOGICAL_NODE_CALL);
       CurrentState &state = get_current_state(ctx);
 #ifdef DEBUG_HIGH_LEVEL
       sanity_check_logical_state(state);
@@ -10385,6 +10410,8 @@ namespace Legion {
                                                const bool report_uninitialized)
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(context->runtime, 
+                        REGION_NODE_REGISTER_LOGICAL_FAT_PATH_CALL);
       CurrentState &state = get_current_state(ctx);
 #ifdef DEBUG_HIGH_LEVEL
       sanity_check_logical_state(state);
@@ -10650,6 +10677,8 @@ namespace Legion {
                                                RestrictInfo &restrict_info)
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(context->runtime,
+                        REGION_NODE_OPEN_LOGICAL_FAT_PATH_CALL);
       CurrentState &state = get_current_state(ctx); 
 #ifdef DEBUG_HIGH_LEVEL
       sanity_check_logical_state(state);
@@ -10810,8 +10839,8 @@ namespace Legion {
                                             bool read_only_close)
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(context->runtime, REGION_NODE_CLOSE_LOGICAL_NODE_CALL);
       CurrentState &state = get_current_state(closer.ctx);
-
       // Perform closing checks on both the current epoch users
       // as well as the previous epoch users
       perform_closing_checks<CURR_LOGICAL_ALLOC>(closer, 
@@ -10882,6 +10911,8 @@ namespace Legion {
                                                  FieldMask &open_below)
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(context->runtime, 
+                        REGION_NODE_SIPHON_LOGICAL_CHILDREN_CALL);
 #ifdef DEBUG_HIGH_LEVEL
       sanity_check_logical_state(state);
 #endif
@@ -11236,6 +11267,8 @@ namespace Legion {
                                             FieldMask &output_mask)
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(context->runtime, 
+                        REGION_NODE_PERFORM_LOGICAL_CLOSES_CALL);
 #ifdef DEBUG_HIGH_LEVEL
       // These two things have to be mutually exclusive because
       // they cannot both share the output_mask
@@ -12036,6 +12069,7 @@ namespace Legion {
                                              const FieldMask &closing_mask)
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(context->runtime, REGION_NODE_CLOSE_PHYSICAL_NODE_CALL);
       // Acquire the physical state of the node to close
       ContextID ctx = closer.info.ctx;
       // Figure out if we have dirty data.  If we do, issue copies back to
@@ -12126,6 +12160,8 @@ namespace Legion {
                                       const std::set<ColorPoint> &next_children)
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(context->runtime,   
+                        REGION_NODE_SIPHON_PHYSICAL_CHILDREN_CALL);
 #ifdef DEBUG_HIGH_LEVEL
       assert(state->node == this);
 #endif
@@ -12244,6 +12280,7 @@ namespace Legion {
                                              FieldMask &complete_below)
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(context->runtime,REGION_NODE_CLOSE_COMPOSITE_NODE_CALL);
       PhysicalState *state = get_physical_state(closer.ctx,closer.version_info);
       // Close down the tree and then determine if we have to capture locally 
       // We don't need to capture data for any fields that are complete below
@@ -12296,6 +12333,8 @@ namespace Legion {
                                                   FieldMask &complete_mask)
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(context->runtime,   
+                        REGION_NODE_SIPHON_COMPOSITE_CHILDREN_CALL);
 #ifdef DEBUG_HIGH_LEVEL
       assert(state->node == this);
 #endif
@@ -12468,6 +12507,8 @@ namespace Legion {
                         LegionMap<LogicalView*,FieldMask>::aligned &valid_views)
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(context->runtime, 
+                        REGION_NODE_FIND_VALID_INSTANCE_VIEWS_CALL);
 #ifdef DEBUG_HIGH_LEVEL
       assert(state->node == this);
 #endif
@@ -12538,6 +12579,8 @@ namespace Legion {
                                           std::set<ReductionView*> &valid_views)
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(context->runtime, 
+                        REGION_NODE_FIND_VALID_REDUCTION_VIEWS_CALL);
 #ifdef DEBUG_HIGH_LEVEL
       assert(state->node == this);
 #endif
@@ -12620,6 +12663,7 @@ namespace Legion {
                                              CopyTracker *tracker /*= NULL*/)
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(context->runtime, REGION_NODE_ISSUE_UPDATE_COPIES_CALL);
 #ifdef DEBUG_HIGH_LEVEL
       assert(!!copy_mask);
       assert(dst->logical_node == this);
@@ -12711,6 +12755,7 @@ namespace Legion {
                 LegionMap<DeferredView*,FieldMask>::aligned &deferred_instances)
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(context->runtime, REGION_NODE_SORT_COPY_INSTANCES_CALL);
       // No need to call the mapper if there is only one valid instance
       if (copy_instances.size() == 1)
       {
@@ -12930,6 +12975,7 @@ namespace Legion {
                                              RegionTreeNode *intersect/*=NULL*/)
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(context->runtime,REGION_NODE_ISSUE_GROUPED_COPIES_CALL);
       // Now let's build maximal sets of fields which have
       // identical event preconditions. Use a list so our
       // iterators remain valid under insertion and push back
@@ -13076,6 +13122,8 @@ namespace Legion {
                                                  CopyTracker *tracker/*= NULL*/)
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(context->runtime, 
+                        REGION_NODE_ISSUE_UPDATE_REDUCTIONS_CALL);
       // We should never get a deferred view in here, this function
       // should only be called when the targets are guaranteed to all
       // be actual physical instances
@@ -13347,6 +13395,7 @@ namespace Legion {
                                           CopyTracker *tracker /*= NULL*/)
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(context->runtime, REGION_NODE_FLUSH_REDUCTIONS_CALL);
       // Go through the list of reduction views and see if there are
       // any that don't mesh with the current user and therefore need
       // to be flushed.
@@ -14239,6 +14288,7 @@ namespace Legion {
                         ReductionOpID redop /*=0*/,bool reduction_fold/*=true*/)
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(context->runtime, REALM_ISSUE_COPY_CALL);
       Realm::ProfilingRequestSet requests;
       if (context->runtime->profiler != NULL)
         context->runtime->profiler->add_fill_request(requests, op);
@@ -14334,6 +14384,7 @@ namespace Legion {
                         Event precondition, RegionTreeNode *intersect)
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(context->runtime, REALM_ISSUE_FILL_CALL);
       Realm::ProfilingRequestSet requests;
       if (context->runtime->profiler != NULL)
         context->runtime->profiler->add_fill_request(requests, op);
@@ -14822,6 +14873,7 @@ namespace Legion {
                                                  SingleTask *target_ctx)
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(context->runtime, REGION_NODE_MAP_VIRTUAL_CALL);
       PhysicalState *state = get_physical_state(ctx_id, version_info);
       // Figure out which children we need to close
       LegionMap<ColorPoint,FieldMask>::aligned targets;
@@ -14848,6 +14900,7 @@ namespace Legion {
                                      bool defer_add_users, InstanceSet &targets)
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(context->runtime, REGION_NODE_REGISTER_REGION_CALL);
       PhysicalState *state = get_physical_state(info.ctx, info.version_info);
       if (IS_REDUCE(info.req))
       {
@@ -15095,6 +15148,7 @@ namespace Legion {
                                  InstanceSet &targets)
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(context->runtime, REGION_NODE_CLOSE_STATE_CALL);
       if (IS_REDUCE(info.req))
       {
         PhysicalState *state = get_physical_state(info.ctx,info.version_info);

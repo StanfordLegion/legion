@@ -6330,6 +6330,7 @@ namespace Legion {
         runtime->profiler->add_task_request(requests, vid, task);
       // Increment the number of outstanding tasks
       runtime->increment_total_outstanding_tasks();
+      DETAILED_PROFILER(runtime, REALM_SPAWN_TASK_CALL);
       // If our ready event hasn't triggered, include it in the precondition
       if (!ready_event.has_triggered())
         return target.spawn(vid, &task, sizeof(task), requests,
@@ -15599,6 +15600,7 @@ namespace Legion {
 #ifdef DEBUG_HIGH_LEVEL
       assert(target.exists());
 #endif
+      DETAILED_PROFILER(this, REALM_SPAWN_META_CALL);
       if (profiler != NULL && tid < HLR_MESSAGE_ID)
       {
         Realm::ProfilingRequestSet requests;
