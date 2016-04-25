@@ -4786,12 +4786,6 @@ namespace Legion {
                                                      remote_address_space);
               break;
             }
-          case SEND_MATERIALIZED_UPDATE:
-            {
-              runtime->handle_send_materialized_update(derez,
-                                                       remote_address_space);
-              break;
-            }
           case SEND_COMPOSITE_VIEW:
             {
               runtime->handle_send_composite_view(derez, remote_address_space);
@@ -4805,12 +4799,6 @@ namespace Legion {
           case SEND_REDUCTION_VIEW:
             {
               runtime->handle_send_reduction_view(derez, remote_address_space);
-              break;
-            }
-          case SEND_REDUCTION_UPDATE:
-            {
-              runtime->handle_send_reduction_update(derez, 
-                                                    remote_address_space);
               break;
             }
           case SEND_INSTANCE_MANAGER:
@@ -4849,6 +4837,21 @@ namespace Legion {
           case SEND_VIEW_REQUEST:
             {
               runtime->handle_view_request(derez, remote_address_space);
+              break;
+            }
+          case SEND_VIEW_UPDATE_REQUEST:
+            {
+              runtime->handle_view_update_request(derez, remote_address_space);
+              break;
+            }
+          case SEND_VIEW_UPDATE_RESPONSE:
+            {
+              runtime->handle_view_update_response(derez);
+              break;
+            }
+          case SEND_VIEW_REMOTE_UPDATE:
+            {
+              runtime->handle_view_remote_update(derez);
               break;
             }
           case SEND_MANAGER_REQUEST:
@@ -13934,15 +13937,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_materialized_update(AddressSpaceID target, 
-                                           Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(rez, SEND_MATERIALIZED_UPDATE,
-                                       VIEW_VIRTUAL_CHANNEL, true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::send_composite_view(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -13963,14 +13957,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_REDUCTION_VIEW,
-                                       VIEW_VIRTUAL_CHANNEL, true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_reduction_update(AddressSpaceID target, Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(rez, SEND_REDUCTION_UPDATE,
                                        VIEW_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
@@ -14023,6 +14009,33 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_SUBVIEW_DID_RESPONSE,
+                                        VIEW_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_view_update_request(AddressSpaceID target,
+                                           Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_VIEW_UPDATE_REQUEST,
+                                        VIEW_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_view_update_response(AddressSpaceID target,
+                                            Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_VIEW_UPDATE_RESPONSE,
+                                        VIEW_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_view_remote_update(AddressSpaceID target, 
+                                          Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_VIEW_REMOTE_UPDATE,
                                         VIEW_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
@@ -14720,14 +14733,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_send_materialized_update(Deserializer &derez,
-                                                  AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      MaterializedView::handle_send_update(this, derez, source);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::handle_send_composite_view(Deserializer &derez,
                                              AddressSpaceID source)
     //--------------------------------------------------------------------------
@@ -14749,14 +14754,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       ReductionView::handle_send_reduction_view(this, derez, source);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_send_reduction_update(Deserializer &derez,
-                                               AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      ReductionView::handle_send_update(this, derez, source);
     }
 
     //--------------------------------------------------------------------------
@@ -14811,6 +14808,28 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       LogicalView::handle_view_request(derez, this, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_view_update_request(Deserializer &derez,
+                                             AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      InstanceView::handle_view_update_request(derez, this, source);
+    }
+    
+    //--------------------------------------------------------------------------
+    void Runtime::handle_view_update_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      InstanceView::handle_view_update_response(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_view_remote_update(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      InstanceView::handle_view_remote_update(derez, this);
     }
 
     //--------------------------------------------------------------------------

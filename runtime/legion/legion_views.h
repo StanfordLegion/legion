@@ -68,8 +68,6 @@ namespace Legion {
       virtual void notify_invalid(void) = 0;
     public:
       virtual void send_view(AddressSpaceID target) = 0; 
-      virtual void send_view_updates(AddressSpaceID target, 
-                                     const FieldMask &update_mask) = 0;
       static void handle_view_request(Deserializer &derez, Runtime *runtime,
                                       AddressSpaceID source);
     public:
@@ -159,8 +157,6 @@ namespace Legion {
       virtual void notify_invalid(void) = 0;
     public:
       virtual void send_view(AddressSpaceID target) = 0; 
-      virtual void send_view_updates(AddressSpaceID target, 
-                                     const FieldMask &update_mask) = 0;
     public:
       // Instance recycling
       virtual void collect_users(const std::set<Event> &term_events) = 0;
@@ -182,6 +178,11 @@ namespace Legion {
     public:
       inline InstanceView* get_instance_subview(const ColorPoint &c) 
         { return get_subview(c)->as_instance_view(); }
+    public:
+      static void handle_view_update_request(Deserializer &derez, 
+          Runtime *runtime, AddressSpaceID source); 
+      static void handle_view_update_response(Deserializer &derez, Runtime *rt);
+      static void handle_view_remote_update(Deserializer &derez, Runtime *rt);
     public:
       SingleTask *const owner_context;
     };
@@ -293,13 +294,15 @@ namespace Legion {
       virtual void collect_users(const std::set<Event> &term_users);
     public:
       virtual void send_view(AddressSpaceID target); 
-      virtual void send_view_updates(AddressSpaceID target, 
-                                     const FieldMask &update_mask);
-      void process_update(Deserializer &derez, AddressSpaceID source);
       void update_gc_events(const std::deque<Event> &gc_events);
     protected:
-      //void update_versions(const VersionInfo &version_info,
-      //                     const FieldMask &user_mask);
+      // Return whether we need the check above
+      bool update_versions(const VersionInfo &version_info,
+                           const FieldMask &user_mask,
+                           std::set<Event> &wait_on);
+#ifdef DEBUG_HIGH_LEVEL
+      void sanity_check_versions(void);
+#endif
       void find_local_user_preconditions(const RegionUsage &usage,
                                          Event term_event,
                                          const ColorPoint &child_color,
@@ -402,6 +405,7 @@ namespace Legion {
     protected:
       void filter_previous_users(
                     const LegionMap<Event,FieldMask>::aligned &filter_previous);
+      void filter_previous_users(const FieldMask &dominated);
       void filter_current_users(const FieldMask &dominated);
       void filter_local_users(Event term_event);
       void add_current_user(PhysicalUser *user, Event term_event,
@@ -435,8 +439,6 @@ namespace Legion {
     public:
       static void handle_send_materialized_view(Runtime *runtime,
                               Deserializer &derez, AddressSpaceID source);
-      static void handle_send_update(Runtime *runtime, Deserializer &derez,
-                                     AddressSpaceID source);
     public:
       InstanceManager *const manager;
       MaterializedView *const parent;
@@ -469,8 +471,9 @@ namespace Legion {
       // This will allow us to detect when physical instances are no
       // longer valid from a particular view when doing rollbacks for
       // resilience or mis-speculation.
-      //LegionMap<VersionID,FieldMask,
-      //          PHYSICAL_VERSION_ALLOC>::track_aligned current_versions;
+      LegionMap<VersionID,FieldMask,
+                PHYSICAL_VERSION_ALLOC>::track_aligned current_versions;
+      LegionMap<Event,FieldMask>::aligned pending_update_requests;
     protected:
       // Useful for pruning the initial users at cleanup time
       std::set<Event> initial_user_events;
@@ -595,17 +598,12 @@ namespace Legion {
       virtual void collect_users(const std::set<Event> &term_events);
     public:
       virtual void send_view(AddressSpaceID target); 
-      virtual void send_view_updates(AddressSpaceID target, 
-                                     const FieldMask &update_mask);
-      void process_update(Deserializer &derez, AddressSpaceID source);
     protected:
       void add_physical_user(PhysicalUser *user, bool reading,
                              Event term_event, const FieldMask &user_mask);
       void filter_local_users(Event term_event);
     public:
       static void handle_send_reduction_view(Runtime *runtime,
-                              Deserializer &derez, AddressSpaceID source);
-      static void handle_send_update(Runtime *runtime,
                               Deserializer &derez, AddressSpaceID source);
     public:
       ReductionOpID get_redop(void) const;
@@ -653,8 +651,6 @@ namespace Legion {
       virtual void notify_invalid(void) = 0;
     public:
       virtual void send_view(AddressSpaceID target) = 0; 
-      virtual void send_view_updates(AddressSpaceID target, 
-                                     const FieldMask &update_mask) = 0;
     public:
       // Should never be called
       virtual void collect_users(const std::set<Event> &term_events)
@@ -741,8 +737,6 @@ namespace Legion {
       virtual void notify_invalid(void);
     public:
       virtual void send_view(AddressSpaceID target); 
-      virtual void send_view_updates(AddressSpaceID target, 
-                                     const FieldMask &update_mask);
       void make_local(std::set<Event> &preconditions);
     public:
       virtual DeferredView* simplify(CompositeCloser &closer, 
@@ -892,8 +886,6 @@ namespace Legion {
       virtual void notify_invalid(void);
     public:
       virtual void send_view(AddressSpaceID target); 
-      virtual void send_view_updates(AddressSpaceID target, 
-                                     const FieldMask &update_mask);
     public:
       virtual DeferredView* simplify(CompositeCloser &closer, 
                                      const FieldMask &capture_mask);

@@ -480,11 +480,9 @@ namespace Legion {
       SEND_ATOMIC_RESERVATION_REQUEST,
       SEND_ATOMIC_RESERVATION_RESPONSE,
       SEND_MATERIALIZED_VIEW,
-      SEND_MATERIALIZED_UPDATE,
       SEND_COMPOSITE_VIEW,
       SEND_FILL_VIEW,
       SEND_REDUCTION_VIEW,
-      SEND_REDUCTION_UPDATE,
       SEND_INSTANCE_MANAGER,
       SEND_REDUCTION_MANAGER,
       SEND_CREATE_TOP_VIEW_REQUEST,
@@ -492,6 +490,9 @@ namespace Legion {
       SEND_SUBVIEW_DID_REQUEST,
       SEND_SUBVIEW_DID_RESPONSE,
       SEND_VIEW_REQUEST,
+      SEND_VIEW_UPDATE_REQUEST,
+      SEND_VIEW_UPDATE_RESPONSE,
+      SEND_VIEW_REMOTE_UPDATE,
       SEND_MANAGER_REQUEST,
       SEND_FUTURE_RESULT,
       SEND_FUTURE_SUBSCRIPTION,
@@ -582,11 +583,9 @@ namespace Legion {
         "Send Atomic Reservation Request",                            \
         "Send Atomic Reservation Response",                           \
         "Send Materialized View",                                     \
-        "Send Materialized Update",                                   \
         "Send Composite View",                                        \
         "Send Fill View",                                             \
         "Send Reduction View",                                        \
-        "Send Reduction Update",                                      \
         "Send Instance Manager",                                      \
         "Send Reduction Manager",                                     \
         "Send Create Top View Request",                               \
@@ -594,6 +593,9 @@ namespace Legion {
         "Send Subview DID Request",                                   \
         "Send Subview DID Response",                                  \
         "Send View Request",                                          \
+        "Send View Update Request",                                   \
+        "Send View Update Response",                                  \
+        "Send View Remote Update",                                    \
         "Send Manager Request",                                       \
         "Send Future Result",                                         \
         "Send Future Subscription",                                   \

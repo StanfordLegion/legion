@@ -1856,17 +1856,18 @@ namespace Legion {
       void send_atomic_reservation_response(AddressSpaceID target, 
                                             Serializer &rez);
       void send_materialized_view(AddressSpaceID target, Serializer &rez);
-      void send_materialized_update(AddressSpaceID target, Serializer &rez);
       void send_composite_view(AddressSpaceID target, Serializer &rez);
       void send_fill_view(AddressSpaceID target, Serializer &rez);
       void send_reduction_view(AddressSpaceID target, Serializer &rez);
-      void send_reduction_update(AddressSpaceID target, Serializer &rez);
       void send_instance_manager(AddressSpaceID target, Serializer &rez);
       void send_reduction_manager(AddressSpaceID target, Serializer &rez);
       void send_create_top_view_request(AddressSpaceID target, Serializer &rez);
       void send_create_top_view_response(AddressSpaceID target,Serializer &rez);
       void send_subview_did_request(AddressSpaceID target, Serializer &rez);
       void send_subview_did_response(AddressSpaceID target, Serializer &rez);
+      void send_view_update_request(AddressSpaceID target, Serializer &rez);
+      void send_view_update_response(AddressSpaceID target, Serializer &rez);
+      void send_view_remote_update(AddressSpaceID target, Serializer &rez);
       void send_future_result(AddressSpaceID target, Serializer &rez);
       void send_future_subscription(AddressSpaceID target, Serializer &rez);
       void send_mapper_message(AddressSpaceID target, Serializer &rez);
@@ -1979,15 +1980,11 @@ namespace Legion {
       void handle_send_atomic_reservation_response(Deserializer &derez);
       void handle_send_materialized_view(Deserializer &derez, 
                                          AddressSpaceID source);
-      void handle_send_materialized_update(Deserializer &derez,
-                                           AddressSpaceID source);
       void handle_send_composite_view(Deserializer &derez,
                                       AddressSpaceID source);
       void handle_send_fill_view(Deserializer &derez, AddressSpaceID source);
       void handle_send_reduction_view(Deserializer &derez,
                                       AddressSpaceID source);
-      void handle_send_reduction_update(Deserializer &derez,
-                                        AddressSpaceID source);
       void handle_send_instance_manager(Deserializer &derez,
                                         AddressSpaceID source);
       void handle_send_reduction_manager(Deserializer &derez,
@@ -1999,6 +1996,10 @@ namespace Legion {
                                       AddressSpaceID source);
       void handle_subview_did_response(Deserializer &derez);
       void handle_view_request(Deserializer &derez, AddressSpaceID source);
+      void handle_view_update_request(Deserializer &derez, 
+                                      AddressSpaceID source);
+      void handle_view_update_response(Deserializer &derez);
+      void handle_view_remote_update(Deserializer &derez);
       void handle_manager_request(Deserializer &derez, AddressSpaceID source);
       void handle_future_result(Deserializer &derez);
       void handle_future_subscription(Deserializer &derez);
