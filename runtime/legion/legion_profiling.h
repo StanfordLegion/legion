@@ -29,18 +29,18 @@
 #define LEGION_PROF_SELF_PROFILE
 
 namespace Legion {
-  namespace Internal {
+  namespace Internal { 
 
     class LegionProfMarker {
-      public:
-        LegionProfMarker(const char* name);
-        ~LegionProfMarker();
-        void mark_stop();
-      private:
-        const char* name;
-        bool stopped;
-        Processor proc;
-        unsigned long long start, stop;
+    public:
+      LegionProfMarker(const char* name);
+      ~LegionProfMarker();
+      void mark_stop();
+    private:
+      const char* name;
+      bool stopped;
+      Processor proc;
+      unsigned long long start, stop;
     };
 
     class LegionProfInstance {
@@ -118,6 +118,19 @@ namespace Legion {
         unsigned long long start, stop;
         Processor proc;
       };
+      struct MapperCallInfo {
+      public:
+        MappingCallKind kind;
+        UniqueID op_id;
+        unsigned long long start, stop;
+        Processor proc;
+      };
+      struct RuntimeCallInfo {
+      public:
+        RuntimeCallKind kind;
+        unsigned long long start, stop;
+        Processor proc;
+      };
 #ifdef LEGION_PROF_SELF_PROFILE
       struct ProfTaskInfo {
       public:
@@ -159,9 +172,16 @@ namespace Legion {
                   Realm::ProfilingMeasurements::InstanceTimeline *timeline,
                   Realm::ProfilingMeasurements::InstanceMemoryUsage *usage);
     public:
+      void record_instance_creation(PhysicalInstance inst, Memory memory,
+                                    UniqueID op_id, unsigned long long create);
       void record_message(Processor proc, MessageKind kind, 
                           unsigned long long start,
                           unsigned long long stop);
+      void record_mapper_call(Processor proc, MappingCallKind kind, 
+                          UniqueID uid, unsigned long long start,
+                          unsigned long long stop);
+      void record_runtime_call(Processor proc, RuntimeCallKind kind,
+                          unsigned long long start, unsigned long long stop);
 #ifdef LEGION_PROF_SELF_PROFILE
     public:
       void record_proftask(Processor p, UniqueID op_id,
@@ -185,6 +205,8 @@ namespace Legion {
       std::deque<InstInfo> inst_infos;
     private:
       std::deque<MessageInfo> message_infos;
+      std::deque<MapperCallInfo> mapper_call_infos;
+      std::deque<RuntimeCallInfo> runtime_call_infos;
 #ifdef LEGION_PROF_SELF_PROFILE
     private:
       std::deque<ProfTaskInfo> prof_task_infos;
@@ -262,10 +284,23 @@ namespace Legion {
       // Dump all the results
       void finalize(void);
     public:
+      void record_instance_creation(PhysicalInstance inst, Memory memory,
+                                    UniqueID op_id, unsigned long long create);
+    public:
       void record_message_kinds(const char *const *const message_names,
                                 unsigned int num_message_kinds);
       void record_message(MessageKind kind, unsigned long long start,
                           unsigned long long stop);
+    public:
+      void record_mapper_call_kinds(const char *const *const mapper_call_names,
+                                    unsigned int num_mapper_call_kinds);
+      void record_mapper_call(MappingCallKind kind, UniqueID uid,
+                            unsigned long long start, unsigned long long stop);
+    public:
+      void record_runtime_call_kinds(const char *const *const runtime_calls,
+                                     unsigned int num_runtime_call_kinds);
+      void record_runtime_call(RuntimeCallKind kind,
+                           unsigned long long start, unsigned long long stop);
     public:
       const Processor target_proc;
       inline bool has_outstanding_requests(void)
@@ -279,6 +314,20 @@ namespace Legion {
       LegionProfInstance **const instances;
       unsigned total_outstanding_requests;
     };
+
+    class DetailedProfiler {
+    public:
+      DetailedProfiler(Runtime *runtime, RuntimeCallKind call);
+      DetailedProfiler(const DetailedProfiler &rhs);
+      ~DetailedProfiler(void);
+    public:
+      DetailedProfiler& operator=(const DetailedProfiler &rhs);
+    private:
+      LegionProfiler *const profiler;
+      const RuntimeCallKind call_kind;
+      unsigned long long start_time;
+    };
+
   }; // namespace Internal
 }; // namespace Legion
 

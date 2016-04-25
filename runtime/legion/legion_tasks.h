@@ -67,8 +67,7 @@ namespace Legion {
       void pack_base_task(Serializer &rez, AddressSpaceID target);
       void unpack_base_task(Deserializer &derez, std::set<Event> &ready_events);
       void pack_base_external_task(Serializer &rez, AddressSpaceID target);
-      void unpack_base_external_task(Deserializer &derez, 
-                                     std::set<Event> &ready_events);
+      void unpack_base_external_task(Deserializer &derez); 
     public:
       void mark_stolen(void);
       void initialize_base_task(SingleTask *ctx, bool track, 
@@ -182,7 +181,7 @@ namespace Legion {
       bool early_map_regions(std::set<Event> &applied_conditions,
                              const std::vector<unsigned> &must_premap);
       bool prepare_steal(void);
-    protected:
+    public:
       void compute_parent_indexes(void);
       void record_aliased_region_requirements(LegionTrace *trace);
     protected:
@@ -369,7 +368,6 @@ namespace Legion {
     public:
       PhysicalRegion get_physical_region(unsigned idx);
       void get_physical_references(unsigned idx, InstanceSet &refs);
-      void add_inline_task(InlineTask *inline_task);
     public:
       // The following set of operations correspond directly
       // to the complete_mapping, complete_operation, and
@@ -658,7 +656,6 @@ namespace Legion {
       LegionDeque<Reservation,TASK_RESERVATION_ALLOC>::tracked context_locks;
       LegionDeque<Barrier,TASK_BARRIER_ALLOC>::tracked context_barriers;
       LegionDeque<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::tracked local_fields;
-      LegionDeque<InlineTask*,TASK_INLINE_ALLOC>::tracked inline_tasks;
     protected:
       // Some help for performing fast safe casts
       std::map<IndexSpace,Domain> safe_cast_domains;
@@ -859,7 +856,6 @@ namespace Legion {
       UniqueID remote_unique_id;
       RegionTreeContext remote_outermost_context;
       UniqueID remote_owner_uid;
-      SingleTask *remote_parent_ctx; // Not a valid pointer when remote
     protected:
       Future predicate_false_future;
       void *predicate_false_result;
@@ -1365,7 +1361,6 @@ namespace Legion {
       RegionTreeContext remote_outermost_context;
       bool locally_mapped;
       UniqueID remote_owner_uid;
-      SingleTask *remote_parent_ctx; // Not a valid pointer when remote
     protected:
       // Temporary storage for future results
       std::map<DomainPoint,std::pair<void*,size_t> > temporary_futures;

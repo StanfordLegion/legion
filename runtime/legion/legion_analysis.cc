@@ -3331,7 +3331,7 @@ namespace Legion {
       CompositeView *composite_view = legion_new<CompositeView>(node->context, 
                                    did, node->context->runtime->address_space,
                                    node, node->context->runtime->address_space, 
-                                   root, composite_info);
+                                   root, composite_info, true/*register now*/);
       // Now update the state of the node
       // Note that if we are permitted to leave the subregions
       // open then we don't make the view dirty
@@ -4155,8 +4155,9 @@ namespace Legion {
         add_base_resource_ref(REMOTE_DID_REF);
       }
 #ifdef LEGION_GC
-      log_garbage.info("GC Version State %ld", 
-          LEGION_DISTRIBUTED_ID_FILTER(did));
+      if (is_owner())
+        log_garbage.info("GC Version State %ld", 
+            LEGION_DISTRIBUTED_ID_FILTER(did));
 #endif
     }
 
@@ -4188,7 +4189,8 @@ namespace Legion {
         map_over_remote_instances(functor);
       }
 #ifdef LEGION_GC
-      log_garbage.info("GC Deletion %ld", LEGION_DISTRIBUTED_ID_FILTER(did));
+      if (is_owner())
+        log_garbage.info("GC Deletion %ld", LEGION_DISTRIBUTED_ID_FILTER(did));
 #endif
     }
 
@@ -5815,7 +5817,7 @@ namespace Legion {
               view->add_nested_valid_ref(did);
             }
             // Check for composite view
-            if (view->as_composite_view())
+            if (view->is_composite_view())
               composite_views.push_back(view->as_composite_view());
           }
           size_t num_reduction_views;

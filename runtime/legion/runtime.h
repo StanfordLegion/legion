@@ -184,11 +184,9 @@ namespace Legion {
     protected:
       void mark_sampled(void);
       void broadcast_result(void);
-      void send_future(AddressSpaceID sid);
       void register_waiter(AddressSpaceID sid);
+      void record_future_registered(void);
     public:
-      static void handle_future_send(Deserializer &derez, Runtime *rt, 
-                                     AddressSpaceID source);
       static void handle_future_result(Deserializer &derez, Runtime *rt);
       static void handle_future_subscription(Deserializer &derez, Runtime *rt);
     public:
@@ -1140,7 +1138,7 @@ namespace Legion {
      * variout places so we make it a distributed collectable
      */
     class LayoutConstraints : 
-      public LayoutConstraintSet, public DistributedCollectable {
+      public LayoutConstraintSet, public Collectable {
     public:
       static const AllocationType alloc_type = LAYOUT_CONSTRAINTS_ALLOC; 
     protected:
@@ -1156,12 +1154,11 @@ namespace Legion {
       };
     public:
       LayoutConstraints(LayoutConstraintID layout_id, FieldSpace handle, 
-                        DistributedID did, Runtime *runtime, 
+                        Runtime *runtime, 
                         AddressSpace owner_space, AddressSpaceID local_space);
-      LayoutConstraints(LayoutConstraintID layout_id, 
-                        DistributedID did, Runtime *runtime, 
+      LayoutConstraints(LayoutConstraintID layout_id, Runtime *runtime, 
                         const LayoutConstraintRegistrar &registrar);
-      LayoutConstraints(LayoutConstraintID layout_id, DistributedID did,
+      LayoutConstraints(LayoutConstraintID layout_id,
                         Runtime *runtime, const LayoutConstraintSet &cons,
                         FieldSpace handle);
       LayoutConstraints(const LayoutConstraints &rhs);
@@ -1169,17 +1166,13 @@ namespace Legion {
     public:
       LayoutConstraints& operator=(const LayoutConstraints &rhs);
     public:
-      virtual void notify_active(void);
-      virtual void notify_valid(void);
-      virtual void notify_invalid(void);
-      virtual void notify_inactive(void);
-    public:
       inline FieldSpace get_field_space(void) const { return handle; }
       inline const char* get_name(void) const { return constraints_name; }
+      inline bool is_owner(void) const { return (owner_space == local_space); }
     public:
-      DistributedID send_constraints(AddressSpaceID source);
       void send_constraint_response(AddressSpaceID source,UserEvent done_event);
       void update_constraints(Deserializer &derez);
+      void release_remote_instances(void);
     public:
       bool entails(LayoutConstraints *other_constraints);
       bool entails(const LayoutConstraintSet &other) const;
@@ -1191,8 +1184,6 @@ namespace Legion {
       static AddressSpaceID get_owner_space(LayoutConstraintID layout_id,
                                             Runtime *runtime);
     public:
-      static void process_send(Runtime *runtime, Deserializer &derez,
-                               AddressSpaceID source);
       static void process_request(Runtime *runtime, Deserializer &derez,
                                   AddressSpaceID source);
       static LayoutConstraintID process_response(Runtime *runtime, 
@@ -1200,12 +1191,18 @@ namespace Legion {
     public:
       const LayoutConstraintID layout_id;
       const FieldSpace handle;
+      const AddressSpace owner_space;
+      const AddressSpace local_space;
+      Runtime *const runtime;
     protected:
       char *constraints_name;
+      Reservation layout_lock;
     protected:
       std::map<LayoutConstraintID,bool> conflict_cache;
       std::map<LayoutConstraintID,bool> entailment_cache;
       std::map<LayoutConstraintID,bool> no_pointer_entailment_cache;
+    protected:
+      NodeSet remote_instances;
     };
 
     /**
@@ -1236,6 +1233,12 @@ namespace Legion {
         FutureImpl *result;
         Domain domain;
         TaskOp *task_op;
+      };
+      struct DeferredEnqueueArgs {
+        HLRTaskID hlr_id;
+        ProcessorManager *manager;
+        TaskOp *task;
+        bool prev_fail;
       };
       struct MPIRankArgs {
         HLRTaskID hlr_id;
@@ -1853,18 +1856,18 @@ namespace Legion {
       void send_atomic_reservation_response(AddressSpaceID target, 
                                             Serializer &rez);
       void send_materialized_view(AddressSpaceID target, Serializer &rez);
-      void send_materialized_update(AddressSpaceID target, Serializer &rez);
       void send_composite_view(AddressSpaceID target, Serializer &rez);
       void send_fill_view(AddressSpaceID target, Serializer &rez);
       void send_reduction_view(AddressSpaceID target, Serializer &rez);
-      void send_reduction_update(AddressSpaceID target, Serializer &rez);
       void send_instance_manager(AddressSpaceID target, Serializer &rez);
       void send_reduction_manager(AddressSpaceID target, Serializer &rez);
       void send_create_top_view_request(AddressSpaceID target, Serializer &rez);
       void send_create_top_view_response(AddressSpaceID target,Serializer &rez);
       void send_subview_did_request(AddressSpaceID target, Serializer &rez);
       void send_subview_did_response(AddressSpaceID target, Serializer &rez);
-      void send_future(AddressSpaceID target, Serializer &rez);
+      void send_view_update_request(AddressSpaceID target, Serializer &rez);
+      void send_view_update_response(AddressSpaceID target, Serializer &rez);
+      void send_view_remote_update(AddressSpaceID target, Serializer &rez);
       void send_future_result(AddressSpaceID target, Serializer &rez);
       void send_future_subscription(AddressSpaceID target, Serializer &rez);
       void send_mapper_message(AddressSpaceID target, Serializer &rez);
@@ -1914,7 +1917,6 @@ namespace Legion {
       void send_back_logical_state(AddressSpaceID target, Serializer &rez);
       void send_variant_request(AddressSpaceID target, Serializer &rez);
       void send_variant_response(AddressSpaceID target, Serializer &rez);
-      void send_constraints(AddressSpaceID target, Serializer &rez);
       void send_constraint_request(AddressSpaceID target, Serializer &rez);
       void send_constraint_response(AddressSpaceID target, Serializer &rez);
       void send_constraint_release(AddressSpaceID target, Serializer &rez);
@@ -1978,15 +1980,11 @@ namespace Legion {
       void handle_send_atomic_reservation_response(Deserializer &derez);
       void handle_send_materialized_view(Deserializer &derez, 
                                          AddressSpaceID source);
-      void handle_send_materialized_update(Deserializer &derez,
-                                           AddressSpaceID source);
       void handle_send_composite_view(Deserializer &derez,
                                       AddressSpaceID source);
       void handle_send_fill_view(Deserializer &derez, AddressSpaceID source);
       void handle_send_reduction_view(Deserializer &derez,
                                       AddressSpaceID source);
-      void handle_send_reduction_update(Deserializer &derez,
-                                        AddressSpaceID source);
       void handle_send_instance_manager(Deserializer &derez,
                                         AddressSpaceID source);
       void handle_send_reduction_manager(Deserializer &derez,
@@ -1998,8 +1996,11 @@ namespace Legion {
                                       AddressSpaceID source);
       void handle_subview_did_response(Deserializer &derez);
       void handle_view_request(Deserializer &derez, AddressSpaceID source);
+      void handle_view_update_request(Deserializer &derez, 
+                                      AddressSpaceID source);
+      void handle_view_update_response(Deserializer &derez);
+      void handle_view_remote_update(Deserializer &derez);
       void handle_manager_request(Deserializer &derez, AddressSpaceID source);
-      void handle_future_send(Deserializer &derez, AddressSpaceID source);
       void handle_future_result(Deserializer &derez);
       void handle_future_subscription(Deserializer &derez);
       void handle_mapper_message(Deserializer &derez);
@@ -2054,7 +2055,6 @@ namespace Legion {
                                        AddressSpaceID source);
       void handle_variant_request(Deserializer &derez, AddressSpaceID source);
       void handle_variant_response(Deserializer &derez);
-      void handle_constraint_send(Deserializer &derez, AddressSpaceID source);
       void handle_constraint_request(Deserializer &derez,AddressSpaceID source);
       void handle_constraint_response(Deserializer &derez,AddressSpaceID src);
       void handle_constraint_release(Deserializer &derez);
@@ -2114,7 +2114,8 @@ namespace Legion {
     public:
       void execute_task_launch(Context ctx, TaskOp *task_op);
       void add_to_dependence_queue(Processor p, Operation *op);
-      void add_to_ready_queue(Processor p, TaskOp *task_op, bool prev_fail);
+      void add_to_ready_queue(Processor p, TaskOp *task_op, 
+                              bool prev_fail, Event wait_on = Event::NO_EVENT);
       void add_to_local_queue(Processor p, Operation *op, bool prev_fail);
     public:
       inline Processor find_utility_group(void) { return utility_group; }
@@ -2149,12 +2150,7 @@ namespace Legion {
       DistributedCollectable* find_or_request_distributed_collectable(
                                             DistributedID did, Event &ready);
     public:
-      void register_future(DistributedID did, FutureImpl *impl);
-      void unregister_future(DistributedID did);
-      bool has_future(DistributedID did);
-      FutureImpl* find_future(DistributedID did);
-      FutureImpl* find_or_create_future(DistributedID did,
-                                          AddressSpaceID owner_space);
+      FutureImpl* find_or_create_future(DistributedID did);
     public:
       void defer_collect_user(LogicalView *view, Event term_event);
       void complete_gc_epoch(GarbageCollectionEpoch *epoch);
@@ -2168,10 +2164,15 @@ namespace Legion {
       void finalize_runtime_shutdown(void);
     public:
       bool has_outstanding_tasks(void);
+#ifdef DEBUG_HIGH_LEVEL
+      void increment_total_outstanding_tasks(void);
+      void decrement_total_outstanding_tasks(void);
+#else
       inline void increment_total_outstanding_tasks(void)
         { __sync_fetch_and_add(&total_outstanding_tasks,1); }
       inline void decrement_total_outstanding_tasks(void)
         { __sync_fetch_and_sub(&total_outstanding_tasks,1); }
+#endif
     public:
       template<typename T>
       inline T* get_available(Reservation reservation,
@@ -2354,6 +2355,9 @@ namespace Legion {
       Processor utility_group;
       const bool has_explicit_utility_procs;
     protected:
+#ifdef DEBUG_HIGH_LEVEL
+      Reservation outstanding_task_lock;
+#endif
       unsigned total_outstanding_tasks;
       unsigned outstanding_top_level_tasks;
       ShutdownManager *shutdown_manager;
@@ -2447,11 +2451,6 @@ namespace Legion {
       LegionSet<GarbageCollectionEpoch*,
                 RUNTIME_GC_EPOCH_ALLOC>::tracked  pending_gc_epochs;
       unsigned gc_epoch_counter;
-    protected:
-      // Keep track of futures
-      Reservation future_lock;
-      LegionMap<DistributedID,FutureImpl*,
-                RUNTIME_FUTURE_ALLOC>::tracked local_futures;
     protected:
       // The runtime keeps track of remote contexts so they
       // can be re-used by multiple tasks that get sent remotely

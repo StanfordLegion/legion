@@ -80,7 +80,6 @@ namespace Legion {
       void set_descriptor(FieldDataDescriptor &desc, FieldID fid) const;
     public:
       void pack_layout_description(Serializer &rez, AddressSpaceID target);
-      void unpack_layout_description(Deserializer &derez);
       void update_known_nodes(AddressSpaceID target);
       static LayoutDescription* handle_unpack_layout_description(
           Deserializer &derez, AddressSpaceID source, RegionNode *node);
@@ -116,7 +115,7 @@ namespace Legion {
                       DistributedID did, AddressSpaceID owner_space, 
                       AddressSpaceID local_space, RegionNode *node,
                       PhysicalInstance inst, const Domain &intance_domain,
-                      bool own_domain);
+                      bool own_domain, bool register_now);
       virtual ~PhysicalManager(void);
     public:
       virtual LegionRuntime::Accessor::RegionAccessor<
@@ -242,7 +241,8 @@ namespace Legion {
                       const Domain &instance_domain, bool own_domain,
                       RegionNode *node, LayoutDescription *desc, 
                       const PointerConstraint &constraint,
-                      Event use_event, InstanceFlag flag = NO_INSTANCE_FLAG);
+                      bool register_now, Event use_event, 
+                      InstanceFlag flag = NO_INSTANCE_FLAG);
       InstanceManager(const InstanceManager &rhs);
       virtual ~InstanceManager(void);
     public:
@@ -313,7 +313,7 @@ namespace Legion {
                        const PointerConstraint &constraint,
                        const Domain &inst_domain, bool own_domain,
                        RegionNode *region_node, ReductionOpID redop, 
-                       const ReductionOp *op);
+                       const ReductionOp *op, bool register_now);
       virtual ~ReductionManager(void);
     public:
       virtual LegionRuntime::Accessor::RegionAccessor<
@@ -371,7 +371,8 @@ namespace Legion {
                            const PointerConstraint &constraint,
                            const Domain &inst_domain, bool own_domain,
                            RegionNode *node, ReductionOpID redop, 
-                           const ReductionOp *op, Domain dom);
+                           const ReductionOp *op, Domain dom,
+                           bool register_now);
       ListReductionManager(const ListReductionManager &rhs);
       virtual ~ListReductionManager(void);
     public:
@@ -416,7 +417,8 @@ namespace Legion {
                            const PointerConstraint &constraint,
                            const Domain &inst_dom, bool own_dom,
                            RegionNode *node, ReductionOpID redop, 
-                           const ReductionOp *op, Event use_event);
+                           const ReductionOp *op, Event use_event,
+                           bool register_now);
       FoldReductionManager(const FoldReductionManager &rhs);
       virtual ~FoldReductionManager(void);
     public:

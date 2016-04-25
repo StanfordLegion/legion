@@ -36,7 +36,7 @@ namespace Legion {
     public:
       LogicalView(RegionTreeForest *ctx, DistributedID did,
                   AddressSpaceID owner_proc, AddressSpaceID local_space,
-                  RegionTreeNode *node);
+                  RegionTreeNode *node, bool register_now);
       virtual ~LogicalView(void);
     public:
       static void delete_logical_view(LogicalView *view);
@@ -68,8 +68,6 @@ namespace Legion {
       virtual void notify_invalid(void) = 0;
     public:
       virtual void send_view(AddressSpaceID target) = 0; 
-      virtual void send_view_updates(AddressSpaceID target, 
-                                     const FieldMask &update_mask) = 0;
       static void handle_view_request(Deserializer &derez, Runtime *runtime,
                                       AddressSpaceID source);
     public:
@@ -108,7 +106,8 @@ namespace Legion {
     public:
       InstanceView(RegionTreeForest *ctx, DistributedID did,
                    AddressSpaceID owner_proc, AddressSpaceID local_space,
-                   RegionTreeNode *node, SingleTask *owner_context); 
+                   RegionTreeNode *node, SingleTask *owner_context,
+                   bool register_now); 
       virtual ~InstanceView(void);
     public:
       virtual bool has_manager(void) const = 0;
@@ -158,8 +157,6 @@ namespace Legion {
       virtual void notify_invalid(void) = 0;
     public:
       virtual void send_view(AddressSpaceID target) = 0; 
-      virtual void send_view_updates(AddressSpaceID target, 
-                                     const FieldMask &update_mask) = 0;
     public:
       // Instance recycling
       virtual void collect_users(const std::set<Event> &term_events) = 0;
@@ -181,6 +178,11 @@ namespace Legion {
     public:
       inline InstanceView* get_instance_subview(const ColorPoint &c) 
         { return get_subview(c)->as_instance_view(); }
+    public:
+      static void handle_view_update_request(Deserializer &derez, 
+          Runtime *runtime, AddressSpaceID source); 
+      static void handle_view_update_response(Deserializer &derez, Runtime *rt);
+      static void handle_view_remote_update(Deserializer &derez, Runtime *rt);
     public:
       SingleTask *const owner_context;
     };
@@ -210,7 +212,8 @@ namespace Legion {
       MaterializedView(RegionTreeForest *ctx, DistributedID did,
                        AddressSpaceID owner_proc, AddressSpaceID local_proc,
                        RegionTreeNode *node, InstanceManager *manager,
-                       MaterializedView *parent, SingleTask *owner_context);
+                       MaterializedView *parent, SingleTask *owner_context,
+                       bool register_now);
       MaterializedView(const MaterializedView &rhs);
       virtual ~MaterializedView(void);
     public:
@@ -291,11 +294,15 @@ namespace Legion {
       virtual void collect_users(const std::set<Event> &term_users);
     public:
       virtual void send_view(AddressSpaceID target); 
-      virtual void send_view_updates(AddressSpaceID target, 
-                                     const FieldMask &update_mask);
-      void process_update(Deserializer &derez, AddressSpaceID source);
       void update_gc_events(const std::deque<Event> &gc_events);
     protected:
+      // Return whether we need the check above
+      bool update_versions(const VersionInfo &version_info,
+                           const FieldMask &user_mask,
+                           std::set<Event> &wait_on);
+#ifdef DEBUG_HIGH_LEVEL
+      void sanity_check_versions(void);
+#endif
       void find_local_user_preconditions(const RegionUsage &usage,
                                          Event term_event,
                                          const ColorPoint &child_color,
@@ -398,6 +405,7 @@ namespace Legion {
     protected:
       void filter_previous_users(
                     const LegionMap<Event,FieldMask>::aligned &filter_previous);
+      void filter_previous_users(const FieldMask &dominated);
       void filter_current_users(const FieldMask &dominated);
       void filter_local_users(Event term_event);
       void add_current_user(PhysicalUser *user, Event term_event,
@@ -431,8 +439,6 @@ namespace Legion {
     public:
       static void handle_send_materialized_view(Runtime *runtime,
                               Deserializer &derez, AddressSpaceID source);
-      static void handle_send_update(Runtime *runtime, Deserializer &derez,
-                                     AddressSpaceID source);
     public:
       InstanceManager *const manager;
       MaterializedView *const parent;
@@ -461,12 +467,13 @@ namespace Legion {
       // an event might be filtered out for some fields, so we can't rely
       // on it to detect when we have outstanding gc meta-tasks
       std::set<Event> outstanding_gc_events;
-      // TODO: Keep track of the current version numbers for each field
+      // Keep track of the current version numbers for each field
       // This will allow us to detect when physical instances are no
       // longer valid from a particular view when doing rollbacks for
       // resilience or mis-speculation.
-      //LegionMap<VersionID,FieldMask,
-      //          PHYSICAL_VERSION_ALLOC>::track_aligned current_versions;
+      LegionMap<VersionID,FieldMask,
+                PHYSICAL_VERSION_ALLOC>::track_aligned current_versions;
+      LegionMap<Event,FieldMask>::aligned pending_update_requests;
     protected:
       // Useful for pruning the initial users at cleanup time
       std::set<Event> initial_user_events;
@@ -497,7 +504,7 @@ namespace Legion {
       ReductionView(RegionTreeForest *ctx, DistributedID did,
                     AddressSpaceID owner_proc, AddressSpaceID local_proc,
                     RegionTreeNode *node, ReductionManager *manager,
-                    SingleTask *owner_context);
+                    SingleTask *owner_context, bool register_now);
       ReductionView(const ReductionView &rhs);
       virtual ~ReductionView(void);
     public:
@@ -591,17 +598,12 @@ namespace Legion {
       virtual void collect_users(const std::set<Event> &term_events);
     public:
       virtual void send_view(AddressSpaceID target); 
-      virtual void send_view_updates(AddressSpaceID target, 
-                                     const FieldMask &update_mask);
-      void process_update(Deserializer &derez, AddressSpaceID source);
     protected:
       void add_physical_user(PhysicalUser *user, bool reading,
                              Event term_event, const FieldMask &user_mask);
       void filter_local_users(Event term_event);
     public:
       static void handle_send_reduction_view(Runtime *runtime,
-                              Deserializer &derez, AddressSpaceID source);
-      static void handle_send_update(Runtime *runtime,
                               Deserializer &derez, AddressSpaceID source);
     public:
       ReductionOpID get_redop(void) const;
@@ -630,7 +632,7 @@ namespace Legion {
     public:
       DeferredView(RegionTreeForest *ctx, DistributedID did,
                    AddressSpaceID owner_space, AddressSpaceID local_space,
-                   RegionTreeNode *node);
+                   RegionTreeNode *node, bool register_now);
       virtual ~DeferredView(void);
     public:
       // Deferred views never have managers
@@ -649,8 +651,6 @@ namespace Legion {
       virtual void notify_invalid(void) = 0;
     public:
       virtual void send_view(AddressSpaceID target) = 0; 
-      virtual void send_view_updates(AddressSpaceID target, 
-                                     const FieldMask &update_mask) = 0;
     public:
       // Should never be called
       virtual void collect_users(const std::set<Event> &term_events)
@@ -718,7 +718,7 @@ namespace Legion {
       CompositeView(RegionTreeForest *ctx, DistributedID did,
                     AddressSpaceID owner_proc, RegionTreeNode *node, 
                     AddressSpaceID local_proc, CompositeNode *root,
-                    CompositeVersionInfo *version_info);
+                    CompositeVersionInfo *version_info, bool register_now);
       CompositeView(const CompositeView &rhs);
       virtual ~CompositeView(void);
     public:
@@ -737,8 +737,6 @@ namespace Legion {
       virtual void notify_invalid(void);
     public:
       virtual void send_view(AddressSpaceID target); 
-      virtual void send_view_updates(AddressSpaceID target, 
-                                     const FieldMask &update_mask);
       void make_local(std::set<Event> &preconditions);
     public:
       virtual DeferredView* simplify(CompositeCloser &closer, 
@@ -870,7 +868,8 @@ namespace Legion {
     public:
       FillView(RegionTreeForest *ctx, DistributedID did,
                AddressSpaceID owner_proc, AddressSpaceID local_proc,
-               RegionTreeNode *node, FillViewValue *value);
+               RegionTreeNode *node, FillViewValue *value,
+               bool register_now);
       FillView(const FillView &rhs);
       virtual ~FillView(void);
     public:
@@ -887,8 +886,6 @@ namespace Legion {
       virtual void notify_invalid(void);
     public:
       virtual void send_view(AddressSpaceID target); 
-      virtual void send_view_updates(AddressSpaceID target, 
-                                     const FieldMask &update_mask);
     public:
       virtual DeferredView* simplify(CompositeCloser &closer, 
                                      const FieldMask &capture_mask);

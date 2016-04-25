@@ -269,6 +269,7 @@ namespace Legion {
       HLR_REGION_SEMANTIC_INFO_REQ_TASK_ID,
       HLR_PARTITION_SEMANTIC_INFO_REQ_TASK_ID,
       HLR_SELECT_TUNABLE_TASK_ID,
+      HLR_DEFERRED_ENQUEUE_TASK_ID,
       HLR_MESSAGE_ID, // These four must be last (see issue_runtime_meta_task)
       HLR_SHUTDOWN_ATTEMPT_TASK_ID,
       HLR_SHUTDOWN_NOTIFICATION_TASK_ID,
@@ -328,11 +329,94 @@ namespace Legion {
         "Region Semantic Request",                                \
         "Partition Semantic Request",                             \
         "Select Tunable",                                         \
+        "Deferred Task Enqueue",                                  \
         "Remote Message",                                         \
         "Shutdown Attempt",                                       \
         "Shutdown Notification",                                  \
         "Shutdown Response",                                      \
       };
+
+    enum MappingCallKind {
+      GET_MAPPER_NAME_CALL,
+      GET_MAPER_SYNC_MODEL_CALL,
+      SELECT_TASK_OPTIONS_CALL,
+      PREMAP_TASK_CALL,
+      SLICE_TASK_CALL,
+      MAP_TASK_CALL,
+      SELECT_VARIANT_CALL,
+      POSTMAP_TASK_CALL,
+      TASK_SELECT_SOURCES_CALL,
+      TASK_SPECULATE_CALL,
+      TASK_REPORT_PROFILING_CALL,
+      MAP_INLINE_CALL,
+      INLINE_SELECT_SOURCES_CALL,
+      INLINE_REPORT_PROFILING_CALL,
+      MAP_COPY_CALL,
+      COPY_SELECT_SOURCES_CALL,
+      COPY_SPECULATE_CALL,
+      COPY_REPORT_PROFILING_CALL,
+      MAP_CLOSE_CALL,
+      CLOSE_SELECT_SOURCES_CALL,
+      CLOSE_REPORT_PROFILING_CALL,
+      MAP_ACQUIRE_CALL,
+      ACQUIRE_SPECULATE_CALL,
+      ACQUIRE_REPORT_PROFILING_CALL,
+      MAP_RELEASE_CALL,
+      RELEASE_SELECT_SOURCES_CALL,
+      RELEASE_SPECULATE_CALL,
+      RELEASE_REPORT_PROFILING_CALL,
+      CONFIGURE_CONTEXT_CALL,
+      SELECT_TUNABLE_VALUE_CALL,
+      MAP_MUST_EPOCH_CALL,
+      MAP_DATAFLOW_GRAPH_CALL,
+      SELECT_TASKS_TO_MAP_CALL,
+      SELECT_STEAL_TARGETS_CALL,
+      PERMIT_STEAL_REQUEST_CALL,
+      HANDLE_MESSAGE_CALL,
+      HANDLE_TASK_RESULT_CALL,
+      LAST_MAPPER_CALL,
+    };
+
+#define MAPPER_CALL_NAMES(name)                     \
+    const char *name[LAST_MAPPER_CALL] = {          \
+      "get_mapper_name",                            \
+      "get_mapper_sync_model",                      \
+      "select_task_options",                        \
+      "premap_task",                                \
+      "slice_task",                                 \
+      "map_task",                                   \
+      "select_task_variant",                        \
+      "postmap_task",                               \
+      "select_task_sources",                        \
+      "speculate (for task)",                       \
+      "report profiling (for task)",                \
+      "map_inline",                                 \
+      "select_inline_sources",                      \
+      "report profiling (for inline)",              \
+      "map_copy",                                   \
+      "select_copy_sources",                        \
+      "speculate (for copy)",                       \
+      "report_profiling (for copy)",                \
+      "map_close",                                  \
+      "select_close_sources",                       \
+      "report_profiling (for close)",               \
+      "map_acquire",                                \
+      "speculate (for acquire)",                    \
+      "report_profiling (for acquire)",             \
+      "map_release",                                \
+      "select_release_sources",                     \
+      "speculate (for release)",                    \
+      "report_profiling (for release)",             \
+      "configure_context",                          \
+      "select_tunable_value",                       \
+      "map_must_epoch",                             \
+      "map_dataflow_graph",                         \
+      "select_tasks_to_map",                        \
+      "select_steal_targets",                       \
+      "permit_steal_request",                       \
+      "handle_message",                             \
+      "handle_task_result",                         \
+    }
 
     enum HLRPriority {
       HLR_THROUGHPUT_PRIORITY = 0, // don't care so much
@@ -344,15 +428,14 @@ namespace Legion {
       DEFAULT_VIRTUAL_CHANNEL = 0,
       INDEX_AND_FIELD_VIRTUAL_CHANNEL = 1,
       LOGICAL_TREE_VIRTUAL_CHANNEL = 2,
-      DISTRIBUTED_VIRTUAL_CHANNEL = 3,
-      MAPPER_VIRTUAL_CHANNEL = 4,
-      SEMANTIC_INFO_VIRTUAL_CHANNEL = 5,
-      LAYOUT_CONSTRAINT_VIRTUAL_CHANNEL = 6,
-      CONTEXT_VIRTUAL_CHANNEL = 7,
-      MANAGER_VIRTUAL_CHANNEL = 8,
-      VIEW_VIRTUAL_CHANNEL = 9,
-      VARIANT_VIRTUAL_CHANNEL = 10,
-      MAX_NUM_VIRTUAL_CHANNELS = 11, // this one must be last
+      MAPPER_VIRTUAL_CHANNEL = 3,
+      SEMANTIC_INFO_VIRTUAL_CHANNEL = 4,
+      LAYOUT_CONSTRAINT_VIRTUAL_CHANNEL = 5,
+      CONTEXT_VIRTUAL_CHANNEL = 6,
+      MANAGER_VIRTUAL_CHANNEL = 7,
+      VIEW_VIRTUAL_CHANNEL = 8,
+      VARIANT_VIRTUAL_CHANNEL = 9,
+      MAX_NUM_VIRTUAL_CHANNELS = 10, // this one must be last
     };
 
     enum MessageKind {
@@ -397,11 +480,9 @@ namespace Legion {
       SEND_ATOMIC_RESERVATION_REQUEST,
       SEND_ATOMIC_RESERVATION_RESPONSE,
       SEND_MATERIALIZED_VIEW,
-      SEND_MATERIALIZED_UPDATE,
       SEND_COMPOSITE_VIEW,
       SEND_FILL_VIEW,
       SEND_REDUCTION_VIEW,
-      SEND_REDUCTION_UPDATE,
       SEND_INSTANCE_MANAGER,
       SEND_REDUCTION_MANAGER,
       SEND_CREATE_TOP_VIEW_REQUEST,
@@ -409,8 +490,10 @@ namespace Legion {
       SEND_SUBVIEW_DID_REQUEST,
       SEND_SUBVIEW_DID_RESPONSE,
       SEND_VIEW_REQUEST,
+      SEND_VIEW_UPDATE_REQUEST,
+      SEND_VIEW_UPDATE_RESPONSE,
+      SEND_VIEW_REMOTE_UPDATE,
       SEND_MANAGER_REQUEST,
-      SEND_FUTURE,
       SEND_FUTURE_RESULT,
       SEND_FUTURE_SUBSCRIPTION,
       SEND_MAPPER_MESSAGE,
@@ -446,7 +529,6 @@ namespace Legion {
       SEND_BACK_LOGICAL_STATE,
       SEND_VARIANT_REQUEST,
       SEND_VARIANT_RESPONSE,
-      SEND_CONSTRAINTS,
       SEND_CONSTRAINT_REQUEST,
       SEND_CONSTRAINT_RESPONSE,
       SEND_CONSTRAINT_RELEASE,
@@ -501,11 +583,9 @@ namespace Legion {
         "Send Atomic Reservation Request",                            \
         "Send Atomic Reservation Response",                           \
         "Send Materialized View",                                     \
-        "Send Materialized Update",                                   \
         "Send Composite View",                                        \
         "Send Fill View",                                             \
         "Send Reduction View",                                        \
-        "Send Reduction Update",                                      \
         "Send Instance Manager",                                      \
         "Send Reduction Manager",                                     \
         "Send Create Top View Request",                               \
@@ -513,8 +593,10 @@ namespace Legion {
         "Send Subview DID Request",                                   \
         "Send Subview DID Response",                                  \
         "Send View Request",                                          \
+        "Send View Update Request",                                   \
+        "Send View Update Response",                                  \
+        "Send View Remote Update",                                    \
         "Send Manager Request",                                       \
-        "Send Future",                                                \
         "Send Future Result",                                         \
         "Send Future Subscription",                                   \
         "Send Mapper Message",                                        \
@@ -550,7 +632,6 @@ namespace Legion {
         "Send Back Logical State",                                    \
         "Send Task Variant Request",                                  \
         "Send Task Variant Response",                                 \
-        "Send Constraints",                                           \
         "Send Constraint Request",                                    \
         "Send Constraint Response",                                   \
         "Send Constraint Release",                                    \
@@ -560,6 +641,131 @@ namespace Legion {
         "Send Shutdown Notification",                                 \
         "Send Shutdown Response",                                     \
       };
+
+    enum RuntimeCallKind {
+      PACK_BASE_TASK_CALL, 
+      UNPACK_BASE_TASK_CALL,
+      TASK_PRIVILEGE_CHECK_CALL,
+      CLONE_TASK_CALL,
+      COMPUTE_POINT_REQUIREMENTS_CALL,
+      EARLY_MAP_REGIONS_CALL,
+      RECORD_ALIASED_REQUIREMENTS_CALL,
+      ACTIVATE_SINGLE_CALL,
+      DEACTIVATE_SINGLE_CALL,
+      SELECT_INLINE_VARIANT_CALL,
+      INLINE_CHILD_TASK_CALL,
+      PACK_SINGLE_TASK_CALL,
+      UNPACK_SINGLE_TASK_CALL,
+      PACK_REMOTE_CONTEXT_CALL,
+      HAS_CONFLICTING_INTERNAL_CALL,
+      FIND_CONFLICTING_CALL,
+      FIND_CONFLICTING_INTERNAL_CALL,
+      CHECK_REGION_DEPENDENCE_CALL,
+      FIND_PARENT_REGION_REQ_CALL,
+      FIND_PARENT_REGION_CALL,
+      CHECK_PRIVILEGE_CALL,
+      TRIGGER_SINGLE_CALL,
+      INITIALIZE_MAP_TASK_CALL,
+      FINALIZE_MAP_TASK_CALL,
+      VALIDATE_VARIANT_SELECTION_CALL,
+      MAP_ALL_REGIONS_CALL,
+      INITIALIZE_REGION_TREE_CONTEXTS_CALL,
+      INVALIDATE_REGION_TREE_CONTEXTS_CALL,
+      CREATE_INSTANCE_TOP_VIEW_CALL,
+      CONVERT_VIRTUAL_INSTANCE_TOP_VIEW_CALL,
+      LAUNCH_TASK_CALL,
+      ACTIVATE_MULTI_CALL,
+      DEACTIVATE_MULTI_CALL,
+      SLICE_INDEX_SPACE_CALL,
+      CLONE_MULTI_CALL,
+      MULTI_TRIGGER_EXECUTION_CALL,
+      PACK_MULTI_CALL,
+      UNPACK_MULTI_CALL,
+      ACTIVATE_INDIVIDUAL_CALL,
+      DEACTIVATE_INDIVIDUAL_CALL,
+      INDIVIDUAL_REMOTE_STATE_ANALYSIS_CALL,
+      INDIVIDUAL_PERFORM_MAPPING_CALL,
+      INDIVIDUAL_RETURN_VIRTUAL_CALL,
+      INDIVIDUAL_TRIGGER_COMPLETE_CALL,
+      INDIVIDUAL_TRIGGER_COMMIT_CALL,
+      INDIVIDUAL_POST_MAPPED_CALL,
+      INDIVIDUAL_PACK_TASK_CALL,
+      INDIVIDUAL_UNPACK_TASK_CALL,
+      INDIVIDUAL_PACK_REMOTE_COMPLETE_CALL,
+      INDIVIDUAL_UNPACK_REMOTE_COMPLETE_CALL,
+      POINT_ACTIVATE_CALL,
+      POINT_DEACTIVATE_CALL,
+      POINT_TASK_COMPLETE_CALL,
+      POINT_TASK_COMMIT_CALL,
+      POINT_PACK_TASK_CALL,
+      POINT_UNPACK_TASK_CALL,
+      POINT_TASK_POST_MAPPED_CALL,
+      REMOTE_TASK_ACTIVATE_CALL,
+      REMOTE_TASK_DEACTIVATE_CALL,
+      REMOTE_UNPACK_CONTEXT_CALL,
+      LAST_RUNTIME_CALL_KIND, // This one must be last
+    };
+
+#define RUNTIME_CALL_DESCRIPTIONS(name)                               \
+    const char *name[LAST_RUNTIME_CALL_KIND] = {                      \
+      "Pack Base Task",                                               \
+      "Unpack Base Task",                                             \
+      "Task Privilege Check",                                         \
+      "Clone Base Task",                                              \
+      "Compute Point Requirements",                                   \
+      "Early Map Regions",                                            \
+      "Record Early Requirements",                                    \
+      "Activate Single",                                              \
+      "Deactivate Single",                                            \
+      "Select Inline Variant",                                        \
+      "Inline Child Task",                                            \
+      "Pack Single Task",                                             \
+      "Unpack Single Task",                                           \
+      "Pack Remote Context",                                          \
+      "Has Conflicting Internal",                                     \
+      "Find Conflicting",                                             \
+      "Find Conflicting Internal",                                    \
+      "Check Region Dependence",                                      \
+      "Find Parent Region Requirement",                               \
+      "Find Parent Region",                                           \
+      "Check Privilege",                                              \
+      "Trigger Single",                                               \
+      "Initialize Map Task",                                          \
+      "Finalized Map Task",                                           \
+      "Validate Variant Selection",                                   \
+      "Map All Regions",                                              \
+      "Initialize Region Tree Contexts",                              \
+      "Invalidate Region Tree Contexts",                              \
+      "Create Instance Top View",                                     \
+      "Convert Virtual Instance Top View",                            \
+      "Launch Task",                                                  \
+      "Activate Multi",                                               \
+      "Deactivate Multi",                                             \
+      "Slice Index Space",                                            \
+      "Clone Multi Call",                                             \
+      "Multi Trigger Execution",                                      \
+      "Pack Multi",                                                   \
+      "Unpack Multi",                                                 \
+      "Activate Individual",                                          \
+      "Deactivate Individual",                                        \
+      "Individual Remote State Analysis",                             \
+      "Individual Perform Mapping",                                   \
+      "Individual Return Virtual",                                    \
+      "Individual Trigger Complete",                                  \
+      "Individual Trigger Commit",                                    \
+      "Individual Post Mapped",                                       \
+      "Individual Pack Remote Complete",                              \
+      "Individual Unpack Remote Complete",                            \
+      "Activate Point",                                               \
+      "Deactivate Point",                                             \
+      "Point Task Complete",                                          \
+      "Point Task Commit",                                            \
+      "Point Task Pack",                                              \
+      "Point Task Unpack",                                            \
+      "Remote Task Activate",                                         \
+      "Remote Task Deactivate",                                       \
+      "Remote Unpack Context",                                        \
+    };
 
     enum SemanticInfoKind {
       INDEX_SPACE_SEMANTIC,
