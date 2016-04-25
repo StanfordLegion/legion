@@ -5074,7 +5074,7 @@ namespace Legion {
                             "mapper %s. Mapper specified instance that does "
                             "not meet region requirement %d for task %s "
                             "(ID %lld). The index space for the instance has "
-                            "insufficiently space for the requested logical "
+                            "insufficient space for the requested logical "
                             "region.", "map_task", mapper->get_mapper_name(),
                             idx, get_task_name(), get_unique_id());
 #ifdef DEBUG_HIGH_LEVEL
