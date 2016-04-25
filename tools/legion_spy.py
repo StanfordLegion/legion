@@ -3351,10 +3351,10 @@ class Task(object):
         return self.depth
 
     def merge(self, other):
-        if self.task_id == -1:
-            self.task_id = other.task_id
-        elif other.task_id <> -1:
-            assert self.task_id == other.task_id
+        if self.op.task_id == -1:
+            self.op.task_id = other.op.task_id
+        elif other.op.task_id <> -1:
+            assert self.op.task_id == other.op.task_id
         if self.point.dim == 0:
             self.point = other.point
         elif other.point.dim <> 0:
@@ -6197,8 +6197,6 @@ def main(temp_dir):
         print "ERROR: "+str(err)
         sys.exit(1)
     opts = dict(opts)
-    if len(args) <> 1:
-        usage()
     file_names = args
 
     logical_checks = False
