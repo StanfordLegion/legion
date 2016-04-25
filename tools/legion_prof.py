@@ -530,6 +530,10 @@ class Memory(object):
         self.instances.add(inst)
 
     def init_time_range(self, last_time):
+        # Fill in any of our instances that are not complete with the last time
+        for inst in self.instances:
+            if not inst.complete:
+                inst.destroy = last_time
         self.last_time = last_time 
 
     def sort_time_range(self):
@@ -998,26 +1002,34 @@ class Instance(object):
         self.create = None
         self.destroy = None
         self.level = None
+        self.complete = False
 
     def get_color(self):
         # Get the color from the operation
         return self.op.get_color()
 
     def __repr__(self):
-        unit = 'B'
-        unit_size = self.size;
-        if self.size > (1024*1024*1024):
-            unit = 'GB'
-            unit_size /= (1024*1024*1024)
-        elif self.size > (1024*1024):
-            unit = 'MB'
-            unit_size /= (1024*1024)
-        elif self.size > 1024:
-            unit = 'KB'
-            unit_size /= 1024
-        return 'Instance '+str(hex(self.inst_id))+' Size='+str(unit_size)+unit+ \
+        # Check to see if we got a profiling callback
+        if self.complete:
+            unit = 'B'
+            unit_size = self.size;
+            if self.size > (1024*1024*1024):
+                unit = 'GB'
+                unit_size /= (1024*1024*1024)
+            elif self.size > (1024*1024):
+                unit = 'MB'
+                unit_size /= (1024*1024)
+            elif self.size > 1024:
+                unit = 'KB'
+                unit_size /= 1024
+            return 'Instance '+str(hex(self.inst_id))+' Size='+str(unit_size)+unit+ \
                 ' Created by="'+repr(self.op)+'" total='+str(self.destroy-self.create)+ \
                 ' us created='+str(self.create)+' us destroyed='+str(self.destroy)+' us'
+        else:
+            # if we never got a callback we don't know how big it is
+            return 'Instance '+str(hex(self.inst_id))+' Size=Unknown'+ \
+                ' Created by="'+repr(self.op)+'" total='+str(self.destroy-self.create)+ \
+                ' us created='+str(self.create)+' us destroyed=Never'
 
 class MessageKind(object):
     def __init__(self, message_id, desc):
@@ -1390,8 +1402,8 @@ class State(object):
                 if m is not None:
                     self.log_message_info(int(m.group('mid')),
                                           int(m.group('pid'),16),
-                                          long(m.group('start')),
-                                          long(m.group('stop')))
+                                          read_time(m.group('start')),
+                                          read_time(m.group('stop')))
                     continue
                 m = mapper_call_desc_pat.match(line)
                 if m is not None:
@@ -1403,8 +1415,8 @@ class State(object):
                     self.log_mapper_call_info(int(m.group('mid')),
                                               int(m.group('pid'),16),
                                               int(m.group('uid')),
-                                              int(m.group('start')),
-                                              int(m.group('stop')))
+                                              read_time(m.group('start')),
+                                              read_time(m.group('stop')))
                     continue
                 m = proftask_info_pat.match(line)
                 if m is not None:
@@ -1493,10 +1505,16 @@ class State(object):
         mem = self.find_memory(mem_id)
         inst = self.create_instance(inst_id, mem, op, size)
         inst.create = create
-        assert create <= destroy
-        inst.destroy = destroy
-        if destroy > self.last_time:
-            self.last_time = destroy 
+        if destroy == 0:
+            # Only overwrite if we haven't seen it before
+            if inst.destroy is None:
+                inst.destroy = 0
+        else:
+            assert create <= destroy
+            inst.destroy = destroy
+            inst.complete = True
+            if destroy > self.last_time:
+                self.last_time = destroy 
         mem.add_instance(inst)
 
     def log_user_info(self, proc_id, start, stop, name):
@@ -1605,8 +1623,10 @@ class State(object):
             self.last_time = stop
         call = MapperCall(self.mapper_call_kinds[kind], 
             self.find_op(op_id), start, stop)
-        proc = self.find_processor(proc_id)
-        proc.add_mapper_call(call)
+        # For now we'll only add very expensive mapper calls (more than 100 us)
+        if (stop - start) > 100:
+            proc = self.find_processor(proc_id)
+            proc.add_mapper_call(call)
 
     def log_proftask_info(self, proc_id, op_id, start, stop):
         assert start <= stop
