@@ -175,7 +175,8 @@ namespace Legion {
                                MaterializedView *par, SingleTask *own_ctx,
                                bool register_now)
       : InstanceView(ctx, encode_materialized_did(did, par == NULL), own_addr, 
-               loc_addr, node, own_ctx, register_now), manager(man), parent(par)
+         loc_addr, node, own_ctx, register_now), manager(man), parent(par),
+         disjoint_children(node->are_all_children_disjoint())
     //--------------------------------------------------------------------------
     {
       // Otherwise the instance lock will get filled in when we are unpacked
@@ -205,7 +206,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     MaterializedView::MaterializedView(const MaterializedView &rhs)
       : InstanceView(NULL, 0, 0, 0, NULL, NULL, false),
-        manager(NULL), parent(NULL)
+        manager(NULL), parent(NULL), disjoint_children(false)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -1290,9 +1291,9 @@ namespace Legion {
           return false;
         }
         // Disjoint children, keep going
-        if (prev_user->child.is_valid() &&
+        if (prev_user->child.is_valid() && (disjoint_children ||
             logical_node->are_children_disjoint(child_color,
-                                                prev_user->child))
+                                                prev_user->child)))
         {
           non_dominated |= overlap;
           return false;
@@ -1348,9 +1349,9 @@ namespace Legion {
         // Same child: did analysis below
         if (child_color == prev_user->child)
           return false;
-        if (prev_user->child.is_valid() &&
+        if (prev_user->child.is_valid() && (disjoint_children ||
             logical_node->are_children_disjoint(child_color,
-                                          prev_user->child))
+                                          prev_user->child)))
           return false;
       }
       FieldMask overlap = prev_mask & next_mask;
@@ -1628,9 +1629,9 @@ namespace Legion {
           return;
         }
         // Disjoint children, keep going
-        if (user->child.is_valid() &&
+        if (user->child.is_valid() && (disjoint_children ||
             logical_node->are_children_disjoint(child_color,
-                                                user->child))
+                                                user->child)))
         {
           non_dominated |= overlap;
           return;
@@ -1688,9 +1689,9 @@ namespace Legion {
         // Same child: did analysis below
         if (child_color == user->child)
           return;
-        if (user->child.is_valid() &&
+        if (user->child.is_valid() && (disjoint_children ||
             logical_node->are_children_disjoint(child_color,
-                                                user->child))
+                                                user->child)))
           return;
       }
       FieldMask overlap = user_mask & copy_mask;

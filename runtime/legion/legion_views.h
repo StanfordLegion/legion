@@ -442,6 +442,7 @@ namespace Legion {
     public:
       InstanceManager *const manager;
       MaterializedView *const parent;
+      const bool disjoint_children;
     protected:
       // Keep track of the locks used for managing atomic coherence
       // on individual fields of this materialized view. Only the
