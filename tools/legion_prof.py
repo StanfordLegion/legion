@@ -431,6 +431,47 @@ class MapperCallRange(TimeRange):
             assert total >= 0
         return total
 
+class RuntimeCallRange(TimeRange):
+    def __init__(self, call):
+        TimeRange.__init__(self, call.start, call.stop)
+        self.call = call 
+
+    def emit_svg(self, printer, level):
+        title = repr(self.call)
+        title += (' '+self.call.get_timing())
+        printer.emit_timing_range(self.call.kind.color, level,
+                                  self.start_time, self.stop_time, title)
+        for subrange in self.subranges:
+            subrange.emit_svg(printer, level+1)
+
+    def emit_tsv(self, tsv_file, base_level, max_levels, level):
+        title = repr(self.call)
+        title += (' '+self.call.get_timing())
+        tsv_file.write("%d\t%ld\t%ld\t%s\t1.0\t%s\n" % \
+                (base_level + (max_levels - level),
+                 self.start_time, self.stop_time,
+                 self.call.kind.color,title))
+        for subrange in self.subranges:
+            subrange.emit_tsv(tsv_file, base_level, max_levels, level + 1)
+
+    def update_task_stats(self, stat):
+        for subrange in self.subranges:
+            subrange.update_task_stats(stat)
+
+    def active_time(self):
+        return self.total_time()
+
+    def application_time(self):
+        return 0
+
+    def meta_time(self):
+        total = self.total_time()
+        for subrange in self.subranges:
+            total += subrange.meta_time()
+            total -= subrange.application_time()
+            assert total >= 0
+        return total
+
 class Processor(object):
     def __init__(self, proc_id, kind):
         self.proc_id = proc_id
