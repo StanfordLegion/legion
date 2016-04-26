@@ -5763,6 +5763,8 @@ namespace Legion {
         all_idempotent  = impl->is_idempotent();
       }
       variants[impl->vid] = impl;
+      // Erase the outstanding request if there is one
+      outstanding_requests.erase(impl->vid);
     }
 
     //--------------------------------------------------------------------------
@@ -5791,17 +5793,40 @@ namespace Legion {
 #endif
         exit(ERROR_UNREGISTERED_VARIANT);
       }
-      // Send a request to the owner node for the variant
-      UserEvent wait_on = UserEvent::create_user_event(); 
-      Serializer rez;
+      // Retake the lock and see if we can send a request
+      Event wait_on = Event::NO_EVENT;
+      UserEvent request_event = UserEvent::NO_USER_EVENT;
       {
-        RezCheck z(rez);
-        rez.serialize(task_id);
-        rez.serialize(variant_id);
-        rez.serialize(wait_on);
-        rez.serialize(can_fail);
+        AutoLock t_lock(task_lock);
+        // Check to see if we lost the race
+        std::map<VariantID,VariantImpl*>::const_iterator finder = 
+          variants.find(variant_id);
+        if (finder != variants.end())
+          return finder->second;
+        std::map<VariantID,Event>::const_iterator out_finder = 
+          outstanding_requests.find(variant_id);
+        if (out_finder == outstanding_requests.end())
+        {
+          request_event = UserEvent::create_user_event();
+          outstanding_requests[variant_id] = request_event;
+          wait_on = request_event;
+        }
+        else
+          wait_on = out_finder->second;
       }
-      runtime->send_variant_request(owner_space, rez);
+      if (request_event.exists())
+      {
+        // Send a request to the owner node for the variant
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(task_id);
+          rez.serialize(variant_id);
+          rez.serialize(wait_on);
+          rez.serialize(can_fail);
+        }
+        runtime->send_variant_request(owner_space, rez);
+      }
       // Wait for the results
       wait_on.wait();
       // Now we can re-take the lock and find our variant

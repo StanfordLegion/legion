@@ -1062,6 +1062,7 @@ namespace Legion {
     private:
       Reservation task_lock;
       std::map<VariantID,VariantImpl*> variants;
+      std::map<VariantID,Event> outstanding_requests;
       std::map<SemanticTag,SemanticInfo> semantic_infos;
       // Track whether all these variants have a return type or not
       bool has_return_type;
