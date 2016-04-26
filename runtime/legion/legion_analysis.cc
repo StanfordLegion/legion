@@ -1904,6 +1904,8 @@ namespace Legion {
                                               bool split_node)
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(owner->context->runtime, 
+                        CURRENT_STATE_RECORD_VERSION_NUMBERS_CALL);
 #ifdef DEBUG_HIGH_LEVEL
       sanity_check();
       version_info.sanity_check(owner);
@@ -2082,6 +2084,8 @@ namespace Legion {
     void CurrentState::advance_version_numbers(const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(owner->context->runtime, 
+                        CURRENT_STATE_ADVANCE_VERSION_NUMBERS_CALL);
 #ifdef DEBUG_HIGH_LEVEL
       sanity_check();
 #endif
@@ -3000,6 +3004,8 @@ namespace Legion {
                                                bool leave_open)
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(node->context->runtime, 
+                        LOGICAL_CLOSER_RECORD_VERSION_NUMBERS_CALL);
 #ifdef DEBUG_HIGH_LEVEL
       assert(!!local_mask);
 #endif
@@ -3040,6 +3046,8 @@ namespace Legion {
                                                    CurrentState &state)
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(node->context->runtime, 
+                        LOGICAL_CLOSER_RECORD_TOP_VERSION_NUMBERS_CALL);
       // If we have any flush only fields, see if we need to bump their
       // version numbers before generating our close operations
       if (!!flush_only_fields)
@@ -3531,6 +3539,8 @@ namespace Legion {
     void PhysicalState::capture_state(bool path_only, bool split_node)
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(manager->owner->context->runtime,
+                        PHYSICAL_STATE_CAPTURE_STATE_CALL);
       if (split_node)
       {
 #ifdef DEBUG_HIGH_LEVEL
@@ -3594,6 +3604,8 @@ namespace Legion {
                AddressSpaceID target, std::set<Event> &applied_conditions) const
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(manager->owner->context->runtime,
+                        PHYSICAL_STATE_APPLY_PATH_ONLY_CALL);
       if (!advance_states.empty())
       {
         FieldMask non_advance_mask = adv_mask;
@@ -3654,6 +3666,8 @@ namespace Legion {
                      AddressSpaceID target, std::set<Event> &applied_conditions)
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(manager->owner->context->runtime,
+                        PHYSICAL_STATE_APPLY_STATE_CALL);
       if (!advance_states.empty())
       {
 #ifdef DEBUG_HIGH_LEVEL
@@ -3722,6 +3736,8 @@ namespace Legion {
                                    std::set<Event> &applied_conditions)
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(manager->owner->context->runtime,
+                        PHYSICAL_STATE_FILTER_AND_APPLY_STATE_CALL);
       if (!advance_states.empty())
       {
 #ifdef DEBUG_HIGH_LEVEL
@@ -3960,6 +3976,8 @@ namespace Legion {
                                    bool needs_final, bool needs_advance)
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(manager->owner->context->runtime,
+                        PHYSICAL_STATE_MAKE_LOCAL_CALL);
       if (needs_final)
       {
         // If we are either advancing or closing, then we need the final
@@ -4305,6 +4323,8 @@ namespace Legion {
                                              const FieldMask &update_mask) const
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(manager->owner->context->runtime,
+                        VERSION_STATE_UPDATE_SPLIT_PREVIOUS_CALL);
       // We're reading so we only the need the lock in read-only mode
       AutoLock s_lock(state_lock,1,false/*exclusive*/);
       if (!!dirty_mask)
@@ -4351,6 +4371,8 @@ namespace Legion {
                                              const FieldMask &update_mask) const
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(manager->owner->context->runtime,
+                        VERSION_STATE_UPDATE_SPLIT_ADVANCE_CALL);
       // We're reading so we only the need the lock in read-only mode
       AutoLock s_lock(state_lock,1,false/*exclusive*/);
       if (!(update_mask * children.valid_fields))
@@ -4378,6 +4400,8 @@ namespace Legion {
                                              const FieldMask &update_mask) const
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(manager->owner->context->runtime,
+                        VERSION_STATE_UPDATE_PATH_ONLY_CALL);
       // We're reading so we only the need the lock in read-only mode
       AutoLock s_lock(state_lock,1,false/*exclusive*/);
       // If we are premapping, we only need to update the dirty bits
@@ -4405,6 +4429,8 @@ namespace Legion {
                                              const FieldMask &update_mask) const
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(manager->owner->context->runtime,
+                        VERSION_STATE_UPDATE_PATH_ONLY_CALL);
       // We're reading so we only the need the lock in read-only mode
       AutoLock s_lock(state_lock,1,false/*exclusive*/);
       if (!!dirty_mask)
@@ -4472,6 +4498,8 @@ namespace Legion {
                                             std::set<Event> &applied_conditions)
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(manager->owner->context->runtime,
+                        VERSION_STATE_MERGE_PATH_ONLY_CALL);
       // We're writing so we need the lock in exclusive mode
       AutoLock s_lock(state_lock);
       // For premapping, all we need to merge is the open children
@@ -4531,6 +4559,8 @@ namespace Legion {
                                             bool need_lock /* = true*/)
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(manager->owner->context->runtime,
+                        VERSION_STATE_MERGE_PHYSICAL_STATE_CALL);
       if (need_lock)
       {
         // We're writing so we need the lock in exclusive mode
@@ -4642,6 +4672,8 @@ namespace Legion {
                         std::set<Event> &applied_conditions)
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(manager->owner->context->runtime,
+                        VERSION_STATE_FILTER_AND_MERGE_PHYSICAL_STATE_CALL);
       // We're writing so we need the lock in exclusive mode
       AutoLock s_lock(state_lock);
 #ifdef DEBUG_HIGH_LEVEL
@@ -4886,6 +4918,8 @@ namespace Legion {
                   const FieldMask &request_mask, std::set<Event> &preconditions)
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(manager->owner->context->runtime,
+                        VERSION_STATE_REQUEST_INITIAL_CALL);
       UserEvent ready_event = UserEvent::NO_USER_EVENT;
       FieldMask remaining_mask = request_mask;
       LegionDeque<RequestInfo>::aligned targets;
@@ -4981,6 +5015,8 @@ namespace Legion {
                                                  std::set<Event> &preconditions)
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(manager->owner->context->runtime,
+                        VERSION_STATE_REQUEST_FINAL_CALL);
       UserEvent ready_event;
       FieldMask remaining_mask = req_mask;
       LegionDeque<RequestInfo>::aligned targets;
@@ -5202,6 +5238,8 @@ namespace Legion {
                                           UserEvent to_trigger)
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(manager->owner->context->runtime,
+                        VERSION_STATE_SEND_STATE_CALL);
       Serializer rez;
       if (request_kind == PATH_ONLY_VERSION_REQUEST)
       {
@@ -5414,6 +5452,8 @@ namespace Legion {
                                                     FieldMask &request_mask)
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(manager->owner->context->runtime,
+                        VERSION_STATE_HANDLE_REQUEST_CALL);
       if (!is_owner())
       {
         // If we are not the owner, we should definitely be able to handle this
@@ -5628,6 +5668,8 @@ namespace Legion {
      UserEvent to_trigger, VersionRequestKind request_kind, Deserializer &derez)
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(manager->owner->context->runtime,
+                        VERSION_STATE_HANDLE_RESPONSE_CALL);
       // Special case for path only response
       if (request_kind == PATH_ONLY_VERSION_REQUEST)
       {

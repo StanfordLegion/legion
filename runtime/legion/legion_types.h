@@ -783,6 +783,44 @@ namespace Legion {
       REGION_NODE_MAP_VIRTUAL_CALL,
       REGION_NODE_REGISTER_REGION_CALL,
       REGION_NODE_CLOSE_STATE_CALL,
+      CURRENT_STATE_RECORD_VERSION_NUMBERS_CALL,
+      CURRENT_STATE_ADVANCE_VERSION_NUMBERS_CALL,
+      LOGICAL_CLOSER_RECORD_VERSION_NUMBERS_CALL,
+      LOGICAL_CLOSER_RECORD_TOP_VERSION_NUMBERS_CALL,
+      PHYSICAL_STATE_CAPTURE_STATE_CALL,
+      PHYSICAL_STATE_APPLY_PATH_ONLY_CALL,
+      PHYSICAL_STATE_APPLY_STATE_CALL,
+      PHYSICAL_STATE_FILTER_AND_APPLY_STATE_CALL,
+      PHYSICAL_STATE_MAKE_LOCAL_CALL,
+      VERSION_STATE_UPDATE_SPLIT_PREVIOUS_CALL,
+      VERSION_STATE_UPDATE_SPLIT_ADVANCE_CALL,
+      VERSION_STATE_UPDATE_PATH_ONLY_CALL,
+      VERSION_STATE_MERGE_PATH_ONLY_CALL,
+      VERSION_STATE_MERGE_PHYSICAL_STATE_CALL,
+      VERSION_STATE_FILTER_AND_MERGE_PHYSICAL_STATE_CALL,
+      VERSION_STATE_REQUEST_INITIAL_CALL,
+      VERSION_STATE_REQUEST_FINAL_CALL,
+      VERSION_STATE_SEND_STATE_CALL,
+      VERSION_STATE_HANDLE_REQUEST_CALL,
+      VERSION_STATE_HANDLE_RESPONSE_CALL,
+      MATERIALIZED_VIEW_FIND_LOCAL_PRECONDITIONS_CALL,
+      MATERIALIZED_VIEW_FIND_LOCAL_COPY_PRECONDITIONS_CALL,
+      MATERIALIZED_VIEW_FILTER_PREVIOUS_USERS_CALL,
+      MATERIALIZED_VIEW_FILTER_CURRENT_USERS_CALL,
+      MATERIALIZED_VIEW_FILTER_LOCAL_USERS_CALL,
+      COMPOSITE_VIEW_SIMPLIFY_CALL,
+      COMPOSITE_VIEW_ISSUE_DEFERRED_COPIES_CALL,
+      COMPOSITE_NODE_CAPTURE_PHYSICAL_STATE_CALL,
+      COMPOSITE_NODE_SIMPLIFY_CALL,
+      COMPOSITE_NODE_ISSUE_DEFERRED_COPIES_CALL,
+      COMPOSITE_NODE_ISSUE_UPDATE_COPIES_CALL,
+      COMPOSITE_NODE_ISSUE_UPDATE_REDUCTIONS_CALL,
+      REDUCTION_VIEW_PERFORM_REDUCTION_CALL,
+      REDUCTION_VIEW_PERFORM_DEFERRED_REDUCTION_CALL,
+      REDUCTION_VIEW_PERFORM_DEFERRED_REDUCTION_ACROSS_CALL,
+      REDUCTION_VIEW_FIND_COPY_PRECONDITIONS_CALL,
+      REDUCTION_VIEW_FIND_USER_PRECONDITIONS_CALL,
+      REDUCTION_VIEW_FILTER_LOCAL_USERS_CALL,
       LAST_RUNTIME_CALL_KIND, // This one must be last
     };
 
@@ -928,6 +966,44 @@ namespace Legion {
       "Region Node Map Virtual",                                      \
       "Region Node Register Region",                                  \
       "Region Node Close State",                                      \
+      "Current State Record Verison Numbers",                         \
+      "Current State Advance Version Numbers",                        \
+      "Logical Closer Record Version Numbers",                        \
+      "Logical Closer Record Top Version Numbers",                    \
+      "Physical State Capture State",                                 \
+      "Physical State Apply Path Only",                               \
+      "Physical State Apply State",                                   \
+      "Physical State Filter and Apply",                              \
+      "Physical State Make Local",                                    \
+      "Version State Update Split Previous",                          \
+      "Version State Update Split Advance",                           \
+      "Version State Update Path Only",                               \
+      "Version State Merge Path Only",                                \
+      "Version State Merge Physical State",                           \
+      "Version State Filter and Merge Physical State",                \
+      "Version State Request Initial",                                \
+      "Version State Request Final",                                  \
+      "Version State Send State",                                     \
+      "Version State Handle Request",                                 \
+      "Version State Handle Response",                                \
+      "Materialized View Find Local Preconditions",                   \
+      "Materialized View Find Local Copy Preconditions",              \
+      "Materialized View Filter Previous Users",                      \
+      "Materialized View Filter Current Users",                       \
+      "Materialized View Filter Local Users",                         \
+      "Composite View Simplify",                                      \
+      "Composite View Issue Deferred Copies",                         \
+      "Composite Node Capture Physical State",                        \
+      "Composite Node Simplify",                                      \
+      "Composite Node Issue Deferred Copies",                         \
+      "Composite Node Issue Update Copies",                           \
+      "Composite Node Issue Update Reductions",                       \
+      "Reduction View Perform Reduction",                             \
+      "Reduction View Perform Deferred Reduction",                    \
+      "Reduction View Perform Deferred Reduction Across",             \
+      "Reduction View Find Copy Preconditions",                       \
+      "Reduction View Find User Preconditions",                       \
+      "Reduction View Filter Local Users",                            \
     };
 
     enum SemanticInfoKind {

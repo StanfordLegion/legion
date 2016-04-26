@@ -7463,9 +7463,11 @@ namespace Legion {
       profiler->record_message_kinds(hlr_message_descriptions, LAST_SEND_KIND);
       MAPPER_CALL_NAMES(hlr_mapper_calls);
       profiler->record_mapper_call_kinds(hlr_mapper_calls, LAST_MAPPER_CALL);
+#ifdef DETAILED_LEGION_PROF
       RUNTIME_CALL_DESCRIPTIONS(hlr_runtime_calls);
       profiler->record_runtime_call_kinds(hlr_runtime_calls, 
                                           LAST_RUNTIME_CALL_KIND);
+#endif
     }
 
     //--------------------------------------------------------------------------

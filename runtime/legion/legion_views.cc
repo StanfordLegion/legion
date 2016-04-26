@@ -1083,6 +1083,8 @@ namespace Legion {
                                                 std::set<Event> &preconditions)
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(context->runtime, 
+                        MATERIALIZED_VIEW_FIND_LOCAL_PRECONDITIONS_CALL);
       std::set<Event> dead_events;
       LegionMap<Event,FieldMask>::aligned filter_previous;
       // Hold the lock in exclusive mode since we might mutate things
@@ -1440,6 +1442,8 @@ namespace Legion {
                              LegionMap<Event,FieldMask>::aligned &preconditions)
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(context->runtime, 
+                        MATERIALIZED_VIEW_FIND_LOCAL_COPY_PRECONDITIONS_CALL);
       // First get our set of version data in case we need it, it's really
       // only safe to do this if we are at the bottom of our set of versions
       std::set<Event> dead_events;
@@ -1710,6 +1714,8 @@ namespace Legion {
                      const LegionMap<Event,FieldMask>::aligned &filter_previous)
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(context->runtime,
+                        MATERIALIZED_VIEW_FILTER_PREVIOUS_USERS_CALL);
       for (LegionMap<Event,FieldMask>::aligned::const_iterator fit = 
             filter_previous.begin(); fit != filter_previous.end(); fit++)
       {
@@ -1787,6 +1793,8 @@ namespace Legion {
     void MaterializedView::filter_previous_users(const FieldMask &dominated)
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(context->runtime,
+                        MATERIALIZED_VIEW_FILTER_PREVIOUS_USERS_CALL);
       std::vector<Event> events_to_delete;
       for (LegionMap<Event,EventUsers>::aligned::iterator pit = 
             previous_epoch_users.begin(); pit !=
@@ -1898,6 +1906,8 @@ namespace Legion {
     void MaterializedView::filter_current_users(const FieldMask &dominated)
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(context->runtime, 
+                        MATERIALIZED_VIEW_FILTER_CURRENT_USERS_CALL);
       std::vector<Event> events_to_delete;
       for (LegionMap<Event,EventUsers>::aligned::iterator cit = 
             current_epoch_users.begin(); cit !=
@@ -2346,6 +2356,8 @@ namespace Legion {
     void MaterializedView::filter_local_users(Event term_event) 
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(context->runtime, 
+                        MATERIALIZED_VIEW_FILTER_LOCAL_USERS_CALL);
       // Don't do this if we are in Legion Spy since we want to see
       // all of the dependences on an instance
 #if !defined(LEGION_SPY) && !defined(EVENT_GRAPH_TRACE)
@@ -2964,6 +2976,7 @@ namespace Legion {
                                           const FieldMask &capture_mask)
     //-------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(context->runtime, COMPOSITE_VIEW_SIMPLIFY_CALL);
       CompositeNode *new_root = legion_new<CompositeNode>(logical_node, 
                                                           (CompositeNode*)NULL);
       FieldMask captured_mask = capture_mask;
@@ -2996,6 +3009,8 @@ namespace Legion {
                                               CopyAcrossHelper *across_helper)
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(context->runtime, 
+                        COMPOSITE_VIEW_ISSUE_DEFERRED_COPIES_CALL);
       LegionMap<Event,FieldMask>::aligned postreductions;
       root->issue_deferred_copies(info, dst, copy_mask, 
                                   version_info->get_version_info(), 
@@ -3222,6 +3237,8 @@ namespace Legion {
                                                const FieldMask &capture_reduc)
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(logical_node->context->runtime,
+                        COMPOSITE_NODE_CAPTURE_PHYSICAL_STATE_CALL);
       // Check to see if this is the root, if it is, we need to pull
       // the valid instance views from the state
       if (parent == NULL)
@@ -3396,6 +3413,8 @@ namespace Legion {
                                  CompositeNode *new_parent)
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(logical_node->context->runtime,
+                        COMPOSITE_NODE_SIMPLIFY_CALL);
       // Filter the capture mask
       bool changed = closer.filter_capture_mask(logical_node, capture_mask);
       // If the set of captured nodes changed then we changed
@@ -3440,6 +3459,8 @@ namespace Legion {
                                               bool check_root) const
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(logical_node->context->runtime, 
+                        COMPOSITE_NODE_ISSUE_DEFERRED_COPIES_CALL);
       // The invariant that we want to maintain for this function is that
       // it places no more than one event in the postconditions data structure
       // for any field.
@@ -3748,6 +3769,8 @@ namespace Legion {
                     CopyTracker *tracker, CopyAcrossHelper *across_helper) const
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(logical_node->context->runtime,
+                        COMPOSITE_NODE_ISSUE_UPDATE_COPIES_CALL);
       // This is similar to the version of this call in RegionTreeNode
       // but different in that it knows how to deal with intersections
       // See if the target manager is already valid at this level for any fields
@@ -3833,6 +3856,8 @@ namespace Legion {
                     CopyTracker *tracker, CopyAcrossHelper *across_helper) const
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(logical_node->context->runtime,
+                        COMPOSITE_NODE_ISSUE_UPDATE_REDUCTIONS_CALL);
       FieldMask reduce_mask = copy_mask & reduction_mask;
       if (!reduce_mask)
         return;
@@ -4381,6 +4406,7 @@ namespace Legion {
                                           CopyTracker *tracker /*= NULL*/)
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(context->runtime,REDUCTION_VIEW_PERFORM_REDUCTION_CALL);
       std::vector<Domain::CopySrcDstField> src_fields;
       std::vector<Domain::CopySrcDstField> dst_fields;
       bool fold = target->reduce_to(manager->redop, reduce_mask, dst_fields);
@@ -4421,6 +4447,8 @@ namespace Legion {
                                                     RegionTreeNode *intersect)
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(context->runtime, 
+                        REDUCTION_VIEW_PERFORM_DEFERRED_REDUCTION_CALL);
       std::vector<Domain::CopySrcDstField> src_fields;
       std::vector<Domain::CopySrcDstField> dst_fields;
       bool fold = target->reduce_to(manager->redop, red_mask, 
@@ -4460,6 +4488,8 @@ namespace Legion {
                               RegionTreeNode *intersect)
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(context->runtime, 
+                        REDUCTION_VIEW_PERFORM_DEFERRED_REDUCTION_ACROSS_CALL);
       std::vector<Domain::CopySrcDstField> src_fields;
       std::vector<Domain::CopySrcDstField> dst_fields;
       const bool fold = false;
@@ -4515,6 +4545,8 @@ namespace Legion {
                              LegionMap<Event,FieldMask>::aligned &preconditions)
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(context->runtime, 
+                        REDUCTION_VIEW_FIND_COPY_PRECONDITIONS_CALL);
       Event use_event = manager->get_use_event();
       if (use_event.exists())
       {
@@ -4621,7 +4653,6 @@ namespace Legion {
 #ifdef DEBUG_HIGH_LEVEL
       assert(redop == manager->redop);
 #endif
-      
       // Quick test: only need to do this if copy term exists
       bool issue_collect = false;
       if (copy_term.exists())
@@ -4665,6 +4696,8 @@ namespace Legion {
                                                 const VersionInfo &version_info)
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(context->runtime, 
+                        REDUCTION_VIEW_FIND_USER_PRECONDITIONS_CALL);
 #ifdef DEBUG_HIGH_LEVEL
       if (IS_REDUCE(usage))
         assert(usage.redop == manager->redop);
@@ -4896,6 +4929,8 @@ namespace Legion {
     void ReductionView::filter_local_users(Event term_event)
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(context->runtime, 
+                        REDUCTION_VIEW_FILTER_LOCAL_USERS_CALL);
       // Better be holding the lock before calling this
       std::set<Event>::iterator event_finder = 
         outstanding_gc_events.find(term_event);
