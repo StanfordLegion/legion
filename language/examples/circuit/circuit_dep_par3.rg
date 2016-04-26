@@ -140,6 +140,12 @@ do
   end
 end
 
+terra f()
+  var x : Wire(wild, wild, wild)
+  return x.in_ptr
+end
+f:compile()
+
 task toplevel()
   var conf : CktConfig
   conf:initialize_from_command()

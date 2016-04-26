@@ -38,9 +38,9 @@ public:
 #ifdef __CUDACC__
   __host__ __device__
 #endif
-  ptr_t(unsigned v) : value(v) { }
+  ptr_t(long long int v) : value(v) { }
 public:
-  unsigned value; 
+  long long int value; 
 public: 
 #ifdef __CUDACC__
   __host__ __device__ 
@@ -61,11 +61,11 @@ public:
 #ifdef __CUDACC__
   __host__ __device__ 
 #endif
-  inline operator bool(void) const { return (value != (unsigned)-1); }
+  inline operator bool(void) const { return (value != -1LL); }
 #ifdef __CUDACC__
   __host__ __device__ 
 #endif
-  inline bool operator!(void) const { return (value == (unsigned)-1); }
+  inline bool operator!(void) const { return (value == -1LL); }
 
   // Addition operation on pointers
 #ifdef __CUDACC__
@@ -116,21 +116,17 @@ public:
 #ifdef __CUDACC__
   __host__ __device__ 
 #endif
-  inline operator unsigned(void) const { return value; } 
-#ifdef __CUDACC__
-  __host__ __device__ 
-#endif
-  inline operator int(void) const { return int(value); }
+  inline operator long long int(void) const { return value; }
 
 #ifdef __CUDACC__
   __host__ __device__
 #endif
-  inline bool is_null(void) const { return (value == ((unsigned)-1)); }
+  inline bool is_null(void) const { return (value == -1LL); }
 
 #ifdef __CUDACC__
   __host__ __device__ 
 #endif
-  static inline ptr_t nil(void) { ptr_t p; p.value = (unsigned)-1; return p; }
+  static inline ptr_t nil(void) { ptr_t p; p.value = -1LL; return p; }
 };
 
 #else // TYPED_POINTERS

@@ -670,8 +670,9 @@ namespace Legion {
 #ifdef DEBUG_HIGH_LEVEL
       assert(phase_barrier.exists());
 #endif
-      if (!phase_barrier.has_triggered())
-        phase_barrier.wait();
+      Event e = phase_barrier.get_previous_phase();
+      if (!e.has_triggered())
+        e.wait();
     }
 
     //--------------------------------------------------------------------------

@@ -52,6 +52,7 @@ namespace Realm {
       virtual ~EventWaiter(void) {}
       virtual bool event_triggered(Event e, bool poisoned) = 0;
       virtual void print(std::ostream& os) const = 0;
+      virtual Event get_finish_event(void) const = 0;
     };
 
     // parent class of GenEventImpl and BarrierImpl
@@ -68,6 +69,8 @@ namespace Realm {
       virtual bool add_waiter(Event::gen_t needed_gen, EventWaiter *waiter/*, bool pre_subscribed = false*/) = 0;
 
       static bool add_waiter(Event needed, EventWaiter *waiter);
+
+      static bool detect_event_chain(Event search_from, Event target, int max_depth, bool print_chain);
     };
 
     class GenEventImpl : public EventImpl {
@@ -190,6 +193,7 @@ namespace Realm {
       // if delta < 0, timestamp says which positive adjustment this arrival must wait for
       void adjust_arrival(Event::gen_t barrier_gen, int delta, 
 			  Barrier::timestamp_t timestamp, Event wait_on,
+			  gasnet_node_t sender, bool forwarded,
 			  const void *reduce_value, size_t reduce_value_size);
 
       bool get_result(Event::gen_t result_gen, void *value, size_t value_size);
@@ -198,7 +202,7 @@ namespace Realm {
       ID me;
       unsigned owner;
       Event::gen_t generation, gen_subscribed;
-      Event::gen_t first_generation, free_generation;
+      Event::gen_t first_generation;
       BarrierImpl *next_free;
 
       GASNetHSL mutex; // controls which local thread has access to internal data (not runtime-visible event)
@@ -297,8 +301,10 @@ namespace Realm {
 
     struct BarrierAdjustMessage {
       struct RequestArgs : public BaseMedium {
-	Barrier barrier;
+	int sender;
+	//bool forwarded;  no room to store this, so encoded as: sender < 0
 	int delta;
+	Barrier barrier;
         Event wait_on;
       };
 
@@ -309,14 +315,16 @@ namespace Realm {
 					 handle_request> Message;
 
       static void send_request(gasnet_node_t target, Barrier barrier, int delta, Event wait_on,
+			       gasnet_node_t sender, bool forwarded,
 			       const void *data, size_t datalen);
     };
 
     struct BarrierSubscribeMessage {
       struct RequestArgs {
-	gasnet_node_t node;
+	gasnet_node_t subscriber;
 	ID::IDType barrier_id;
 	Event::gen_t subscribe_gen;
+	bool forwarded;
       };
 
       static void handle_request(RequestArgs args);
@@ -325,7 +333,9 @@ namespace Realm {
 					RequestArgs,
 					handle_request> Message;
 
-      static void send_request(gasnet_node_t target, ID::IDType barrier_id, Event::gen_t subscribe_gen);
+      static void send_request(gasnet_node_t target, ID::IDType barrier_id,
+			       Event::gen_t subscribe_gen,
+			       gasnet_node_t subscriber, bool forwarded);
     };
 
     struct BarrierTriggerMessage {
@@ -336,6 +346,8 @@ namespace Realm {
 	Event::gen_t previous_gen;
 	Event::gen_t first_generation;
 	ReductionOpID redop_id;
+	gasnet_node_t migration_target;
+	unsigned base_arrival_count;
       };
 
       static void handle_request(RequestArgs args, const void *data, size_t datalen);
@@ -347,9 +359,24 @@ namespace Realm {
       static void send_request(gasnet_node_t target, ID::IDType barrier_id,
 			       Event::gen_t trigger_gen, Event::gen_t previous_gen,
 			       Event::gen_t first_generation, ReductionOpID redop_id,
+			       gasnet_node_t migration_target, unsigned base_arrival_count,
 			       const void *data, size_t datalen);
     };
 
+    struct BarrierMigrationMessage {
+      struct RequestArgs {
+	Barrier barrier;
+	gasnet_node_t current_owner;
+      };
+
+      static void handle_request(RequestArgs args);
+
+      typedef ActiveMessageShortNoReply<BARRIER_MIGRATE_MSGID,
+					RequestArgs,
+					handle_request> Message;
+
+      static void send_request(gasnet_node_t target, Barrier barrier, gasnet_node_t owner);
+    };
 	
 }; // namespace Realm
 

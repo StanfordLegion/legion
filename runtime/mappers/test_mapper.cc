@@ -122,7 +122,8 @@ namespace Legion {
         output.initial_proc = select_random_processor(kind);
         output.inline_task = false;
         output.stealable = true;
-        output.map_locally = ((generate_random_integer() % 2) == 0);
+        output.map_locally = true;
+        //output.map_locally = ((generate_random_integer() % 2) == 0);
       }
     }
 
@@ -368,8 +369,8 @@ namespace Legion {
           if (target.capacity() == 0)
             continue;
           if (default_make_instance(ctx, target, layout_constraints,
-                chosen_instances[output_idx], mapping_kind, true/*force new*/,
-                false/*meets*/, req.privilege == REDUCE, req))
+                chosen_instances[output_idx], mapping_kind, 
+                true/*force new*/, false/*meets*/, req))
           {
             made_instance = true;
             break;
@@ -422,7 +423,7 @@ namespace Legion {
             continue;
           // TODO: put in arbitrary constraints to mess with the DMA system
           LayoutConstraintSet constraints;
-          default_policy_fill_constraints(ctx, constraints, target, req);
+          default_policy_select_constraints(ctx, constraints, target, req);
           // Overwrite the field constraints 
           constraints.field_constraint = FieldConstraint(field, false);
           // Try to make the instance, we always make new instances to

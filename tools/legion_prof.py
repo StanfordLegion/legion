@@ -43,6 +43,14 @@ mem_desc_pat = re.compile(prefix + r'Prof Mem Desc (?P<mid>[a-f0-9]+) (?P<kind>[
 # Extensions for messages
 message_desc_pat = re.compile(prefix + r'Prof Message Desc (?P<mid>[0-9]+) (?P<desc>[a-zA-Z0-9_ ]+)')
 message_info_pat = re.compile(prefix + r'Prof Message Info (?P<mid>[0-9]+) (?P<pid>[a-f0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)')
+# Extensions for mapper calls
+mapper_call_desc_pat = re.compile(prefix + r'Prof Mapper Call Desc (?P<mid>[0-9]+) (?P<desc>[a-zA-Z0-9_ ]+)')
+mapper_call_info_pat = re.compile(prefix + r'Prof Mapper Call Info (?P<mid>[0-9]+) (?P<pid>[a-f0-9]+) (?P<uid>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)')
+# Extensions for runtime calls
+runtime_call_desc_pat = re.compile(prefix + r'Prof Runtime Call Desc (?P<rid>[0-9]+) (?P<desc>[a-zA-Z0-9_ ]+)')
+runtime_call_info_pat = re.compile(prefix + r'Prof Runtime Call Info (?P<rid>[0-9]+) (?P<pid>[a-f0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)')
+# Self-profiling
+proftask_info_pat = re.compile(prefix + r'Prof ProfTask Info (?P<pid>[a-f0-9]+) (?P<opid>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)')
 
 # Make sure this is up to date with lowlevel.h
 processor_kinds = {
@@ -261,7 +269,7 @@ class TaskRange(TimeRange):
             title += (' '+self.task.get_initiation())
         title += (' '+self.task.get_timing())
         if not self.task.is_task:
-            color = "#555555"
+            color = self.task.color or "#555555"
         else:
             color = self.task.variant.color
         if len(self.task.wait_intervals) > 0:
@@ -382,6 +390,88 @@ class MessageRange(TimeRange):
             assert total >= 0
         return total
 
+class MapperCallRange(TimeRange):
+    def __init__(self, call):
+        TimeRange.__init__(self, call.start, call.stop)
+        self.call = call 
+
+    def emit_svg(self, printer, level):
+        title = repr(self.call)
+        title += (' '+self.call.get_timing())
+        printer.emit_timing_range(self.call.kind.color, level,
+                                  self.start_time, self.stop_time, title)
+        for subrange in self.subranges:
+            subrange.emit_svg(printer, level+1)
+
+    def emit_tsv(self, tsv_file, base_level, max_levels, level):
+        title = repr(self.call)
+        title += (' '+self.call.get_timing())
+        tsv_file.write("%d\t%ld\t%ld\t%s\t1.0\t%s\n" % \
+                (base_level + (max_levels - level),
+                 self.start_time, self.stop_time,
+                 self.call.kind.color,title))
+        for subrange in self.subranges:
+            subrange.emit_tsv(tsv_file, base_level, max_levels, level + 1)
+
+    def update_task_stats(self, stat):
+        for subrange in self.subranges:
+            subrange.update_task_stats(stat)
+
+    def active_time(self):
+        return self.total_time()
+
+    def application_time(self):
+        return 0
+
+    def meta_time(self):
+        total = self.total_time()
+        for subrange in self.subranges:
+            total += subrange.meta_time()
+            total -= subrange.application_time()
+            assert total >= 0
+        return total
+
+class RuntimeCallRange(TimeRange):
+    def __init__(self, call):
+        TimeRange.__init__(self, call.start, call.stop)
+        self.call = call 
+
+    def emit_svg(self, printer, level):
+        title = repr(self.call)
+        title += (' '+self.call.get_timing())
+        printer.emit_timing_range(self.call.kind.color, level,
+                                  self.start_time, self.stop_time, title)
+        for subrange in self.subranges:
+            subrange.emit_svg(printer, level+1)
+
+    def emit_tsv(self, tsv_file, base_level, max_levels, level):
+        title = repr(self.call)
+        title += (' '+self.call.get_timing())
+        tsv_file.write("%d\t%ld\t%ld\t%s\t1.0\t%s\n" % \
+                (base_level + (max_levels - level),
+                 self.start_time, self.stop_time,
+                 self.call.kind.color,title))
+        for subrange in self.subranges:
+            subrange.emit_tsv(tsv_file, base_level, max_levels, level + 1)
+
+    def update_task_stats(self, stat):
+        for subrange in self.subranges:
+            subrange.update_task_stats(stat)
+
+    def active_time(self):
+        return self.total_time()
+
+    def application_time(self):
+        return 0
+
+    def meta_time(self):
+        total = self.total_time()
+        for subrange in self.subranges:
+            total += subrange.meta_time()
+            total -= subrange.application_time()
+            assert total >= 0
+        return total
+
 class Processor(object):
     def __init__(self, proc_id, kind):
         self.proc_id = proc_id
@@ -398,6 +488,14 @@ class Processor(object):
     def add_message(self, message):
         # treating messages like any other task
         self.tasks.append(MessageRange(message))
+
+    def add_mapper_call(self, call):
+        # treating mapper calls like any other task
+        self.tasks.append(MapperCallRange(call))
+
+    def add_runtime_call(self, call):
+        # treating runtime calls like any other task
+        self.tasks.append(RuntimeCallRange(call))
 
     def init_time_range(self, last_time):
         self.full_range = BaseRange(0L, last_time, self)
@@ -481,6 +579,10 @@ class Memory(object):
         self.instances.add(inst)
 
     def init_time_range(self, last_time):
+        # Fill in any of our instances that are not complete with the last time
+        for inst in self.instances:
+            if not inst.complete:
+                inst.destroy = last_time
         self.last_time = last_time 
 
     def sort_time_range(self):
@@ -786,6 +888,7 @@ class Operation(object):
         self.is_task = False
         self.is_meta = False
         self.is_multi = False
+        self.is_proftask = False
         self.name = 'Operation '+str(op_id)
         self.variant = None
         self.task_kind = None
@@ -805,12 +908,13 @@ class Operation(object):
         if self.is_task:
             assert self.variant is not None
             self.color = self.variant.color
+        elif self.is_proftask:
+            self.color = '#FFCOCB' # Pink
+        elif self.kind is None:
+            self.color = '#000000' # Black
         else:
-            if self.kind is None:
-                self.color = '#000000' # Black
-            else:
-                assert self.kind_num in color_map
-                self.color = color_map[self.kind_num]
+            assert self.kind_num in color_map
+            self.color = color_map[self.kind_num]
 
     def get_color(self):
         assert self.color is not None
@@ -838,13 +942,18 @@ class Operation(object):
     def __repr__(self):
         if self.is_task:
             assert self.variant is not None
-            title = self.variant.task.name
+            title = self.variant.task.name if self.variant.task is not None else 'unnamed'
             if self.variant.name <> None and self.variant.name.find("unnamed") > 0:
                 title += ' ['+self.variant.name+']'
             return title+' '+self.get_info()
         elif self.is_multi:
             assert self.task_kind is not None
-            return self.task_kind.name+' '+self.get_info()
+            if self.task_kind.name is not None:
+                return self.task_kind.name+' '+self.get_info()
+            else:
+                return 'Task '+str(self.task_kind.task_id)+' '+self.get_info()
+        elif self.is_proftask:
+            return 'ProfTask' + (' <{:d}>'.format(self.op_id) if self.op_id > 0 else '')
         else:
             if self.kind is None:
                 return 'Operation '+self.get_info()
@@ -942,26 +1051,34 @@ class Instance(object):
         self.create = None
         self.destroy = None
         self.level = None
+        self.complete = False
 
     def get_color(self):
         # Get the color from the operation
         return self.op.get_color()
 
     def __repr__(self):
-        unit = 'B'
-        unit_size = self.size;
-        if self.size > (1024*1024*1024):
-            unit = 'GB'
-            unit_size /= (1024*1024*1024)
-        elif self.size > (1024*1024):
-            unit = 'MB'
-            unit_size /= (1024*1024)
-        elif self.size > 1024:
-            unit = 'KB'
-            unit_size /= 1024
-        return 'Instance '+str(hex(self.inst_id))+' Size='+str(unit_size)+unit+ \
+        # Check to see if we got a profiling callback
+        if self.complete:
+            unit = 'B'
+            unit_size = self.size;
+            if self.size > (1024*1024*1024):
+                unit = 'GB'
+                unit_size /= (1024*1024*1024)
+            elif self.size > (1024*1024):
+                unit = 'MB'
+                unit_size /= (1024*1024)
+            elif self.size > 1024:
+                unit = 'KB'
+                unit_size /= 1024
+            return 'Instance '+str(hex(self.inst_id))+' Size='+str(unit_size)+unit+ \
                 ' Created by="'+repr(self.op)+'" total='+str(self.destroy-self.create)+ \
                 ' us created='+str(self.create)+' us destroyed='+str(self.destroy)+' us'
+        else:
+            # if we never got a callback we don't know how big it is
+            return 'Instance '+str(hex(self.inst_id))+' Size=Unknown'+ \
+                ' Created by="'+repr(self.op)+'" total='+str(self.destroy-self.create)+ \
+                ' us created='+str(self.create)+' us destroyed=Never'
 
 class MessageKind(object):
     def __init__(self, message_id, desc):
@@ -985,6 +1102,48 @@ class Message(object):
 
     def __repr__(self):
         return 'Message '+self.kind.desc
+
+class MapperCallKind(object):
+    def __init__(self, mapper_call_kind, desc):
+        self.mapper_call_kind = mapper_call_kind
+        self.desc = desc
+        self.color = None
+
+class MapperCall(object):
+    def __init__(self, kind, op, start, stop):
+        self.kind = kind
+        self.op = op
+        self.start = start
+        self.stop = stop
+
+    def get_timing(self):
+        return 'total='+str(self.stop - self.start)+' us start='+ \
+                str(self.start)+' us stop='+str(self.stop)+' us'
+
+    def __repr__(self):
+        if self.op.op_id == 0:
+            return 'Mapper Call '+self.kind.desc
+        else:
+            return 'Mapper Call '+self.kind.desc+' for '+repr(self.op) 
+
+class RuntimeCallKind(object):
+    def __init__(self, runtime_call_kind, desc):
+        self.runtime_call_kind = runtime_call_kind
+        self.desc = desc
+        self.color = None
+
+class RuntimeCall(object):
+    def __init__(self, kind, start, stop):
+        self.kind = kind
+        self.start = start
+        self.stop = stop
+
+    def get_timing(self):
+        return 'total='+str(self.stop - self.start)+' us start='+ \
+                str(self.start)+' us stop='+str(self.stop)+' us'
+
+    def __repr__(self):
+        return 'Runtime Call '+self.kind.desc
 
 class SVGPrinter(object):
     def __init__(self, file_name, html_file):
@@ -1157,6 +1316,10 @@ class State(object):
         self.last_time = 0L
         self.message_kinds = {}
         self.messages = {}
+        self.mapper_call_kinds = {}
+        self.mapper_calls = {}
+        self.runtime_call_kinds = {}
+        self.runtime_calls = {}
 
     def parse_log_file(self, file_name):
         with open(file_name, 'rb') as log:  
@@ -1309,8 +1472,40 @@ class State(object):
                 if m is not None:
                     self.log_message_info(int(m.group('mid')),
                                           int(m.group('pid'),16),
-                                          long(m.group('start')),
-                                          long(m.group('stop')))
+                                          read_time(m.group('start')),
+                                          read_time(m.group('stop')))
+                    continue
+                m = mapper_call_desc_pat.match(line)
+                if m is not None:
+                    self.log_mapper_call_desc(int(m.group('mid')),
+                                              m.group('desc'))
+                    continue
+                m = mapper_call_info_pat.match(line)
+                if m is not None:
+                    self.log_mapper_call_info(int(m.group('mid')),
+                                              int(m.group('pid'),16),
+                                              int(m.group('uid')),
+                                              read_time(m.group('start')),
+                                              read_time(m.group('stop')))
+                    continue
+                m = runtime_call_desc_pat.match(line)
+                if m is not None:
+                    self.log_runtime_call_desc(int(m.group('rid')),
+                                               m.group('desc'))
+                    continue
+                m = runtime_call_info_pat.match(line)
+                if m is not None:
+                    self.log_runtime_call_info(int(m.group('rid')),
+                                               int(m.group('pid'),16),
+                                               read_time(m.group('start')),
+                                               read_time(m.group('stop')))
+                    continue
+                m = proftask_info_pat.match(line)
+                if m is not None:
+                    self.log_proftask_info(int(m.group('pid'),16),
+                                           long(m.group('opid')),
+                                           read_time(m.group('start')),
+                                           read_time(m.group('stop')))
                     continue
                 # If we made it here then we failed to match
                 matches -= 1 
@@ -1392,10 +1587,16 @@ class State(object):
         mem = self.find_memory(mem_id)
         inst = self.create_instance(inst_id, mem, op, size)
         inst.create = create
-        assert create <= destroy
-        inst.destroy = destroy
-        if destroy > self.last_time:
-            self.last_time = destroy 
+        if destroy == 0:
+            # Only overwrite if we haven't seen it before
+            if inst.destroy is None:
+                inst.destroy = 0
+        else:
+            assert create <= destroy
+            inst.destroy = destroy
+            inst.complete = True
+            if destroy > self.last_time:
+                self.last_time = destroy 
         mem.add_instance(inst)
 
     def log_user_info(self, proc_id, start, stop, name):
@@ -1492,6 +1693,50 @@ class State(object):
         message = Message(self.message_kinds[kind], start, stop)
         proc = self.find_processor(proc_id)
         proc.add_message(message)
+
+    def log_mapper_call_desc(self, kind, desc):
+        if kind not in self.mapper_call_kinds:
+            self.mapper_call_kinds[kind] = MapperCallKind(kind, desc)
+
+    def log_mapper_call_info(self, kind, proc_id, op_id, start, stop):
+        assert start <= stop
+        assert kind in self.mapper_call_kinds
+        # For now we'll only add very expensive mapper calls (more than 100 us)
+        if (stop - start) < 100:
+            return 
+        if stop > self.last_time:
+            self.last_time = stop
+        call = MapperCall(self.mapper_call_kinds[kind], 
+        self.find_op(op_id), start, stop)
+        proc = self.find_processor(proc_id)
+        proc.add_mapper_call(call)
+
+    def log_runtime_call_desc(self, kind, desc):
+        if kind not in self.runtime_call_kinds:
+            self.runtime_call_kinds[kind] = RuntimeCallKind(kind, desc)
+
+    def log_runtime_call_info(self, kind, proc_id, start, stop):
+        assert start <= stop 
+        assert kind in self.runtime_call_kinds
+        if stop > self.last_time:
+            self.last_time = stop
+        call = RuntimeCall(self.runtime_call_kinds[kind], start, stop)
+        proc = self.find_processor(proc_id)
+        proc.add_runtime_call(call)
+
+    def log_proftask_info(self, proc_id, op_id, start, stop):
+        assert start <= stop
+        task = Operation(op_id)
+        # we don't have a unique op_id for the profiling task itself, so we don't add to
+        #  self.operations, but that means we have to pick a color here
+        task.color = '#FFC0CB'  # Pink
+        task.is_proftask = True
+        task.create = start
+        task.ready = start
+        task.start = start
+        task.stop = stop
+        proc = self.find_processor(proc_id)
+        proc.add_task(task)
 
     def find_processor(self, proc_id):
         if proc_id not in self.processors:

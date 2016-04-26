@@ -82,14 +82,10 @@ extern "C" {
    * @see ptr_t
    */
   typedef struct legion_ptr_t {
-    unsigned value;
+    long long int value;
   } legion_ptr_t;
 
-#ifdef POINTS_ARE_64BIT
-typedef ptrdiff_t coord_t;
-#else
-typedef int coord_t;
-#endif
+typedef long long int coord_t;
 
 #define NEW_POINT_TYPE(T, DIM) typedef struct T { coord_t x[DIM]; } T
   NEW_POINT_TYPE(legion_point_1d_t, 1);
@@ -362,7 +358,7 @@ typedef int coord_t;
   legion_ptr_nil(void)
   {
     legion_ptr_t ptr;
-    ptr.value = (unsigned)-1;
+    ptr.value = -1LL;
     return ptr;
   }
 
@@ -372,7 +368,7 @@ typedef int coord_t;
   inline bool
   legion_ptr_is_null(legion_ptr_t ptr)
   {
-    return ptr.value == (unsigned)-1;
+    return ptr.value == -1LL;
   }
 
   /**
@@ -910,6 +906,22 @@ typedef int coord_t;
     bool allocable /* = false */);
 
   /**
+   * @see LegionRuntime::HighLevel::Runtime::is_index_partition_disjoint()
+   */
+  bool
+  legion_index_partition_is_disjoint(legion_runtime_t runtime,
+                                     legion_context_t ctx,
+                                     legion_index_partition_t handle);
+
+  /**
+   * @see LegionRuntime::HighLevel::Runtime::is_index_partition_complete()
+   */
+  bool
+  legion_index_partition_is_complete(legion_runtime_t runtime,
+                                     legion_context_t ctx,
+                                     legion_index_partition_t handle);
+
+  /**
    * @return Caller does **NOT** take ownership of return value.
    *
    * @see Legion::Runtime::get_index_subspace()
@@ -1399,7 +1411,7 @@ typedef int coord_t;
    */
   legion_ptr_t
   legion_index_allocator_alloc(legion_index_allocator_t allocator,
-                               unsigned num_elements /* = 1 */);
+                               size_t num_elements /* = 1 */);
 
   /**
    * @see Legion::IndexAllocator::free()
@@ -1407,7 +1419,7 @@ typedef int coord_t;
   void
   legion_index_allocator_free(legion_index_allocator_t allocator,
                               legion_ptr_t ptr,
-                              unsigned num_elements /* = 1 */);
+                              size_t num_elements /* = 1 */);
 
   /**
    * @return Caller takes ownership of return value.
@@ -1522,12 +1534,29 @@ typedef int coord_t;
   /**
    * @param handle Caller must have ownership of parameter `handle`.
    *
-   * @see Legion::PhaseBarrier::destroy_phase_barrier()
+   * @see Legion::Runtime::destroy_phase_barrier()
    */
   void
   legion_phase_barrier_destroy(legion_runtime_t runtime,
                                legion_context_t ctx,
                                legion_phase_barrier_t handle);
+
+  /**
+   * @see LegionRuntime::HighLevel::PhaseBarrier::arrive()
+   */
+  void
+  legion_phase_barrier_arrive(legion_runtime_t runtime,
+                              legion_context_t ctx,
+                              legion_phase_barrier_t handle,
+                              size_t count /* = 1 */);
+
+  /**
+   * @see LegionRuntime::HighLevel::PhaseBarrier::wait()
+   */
+  void
+  legion_phase_barrier_wait(legion_runtime_t runtime,
+                            legion_context_t ctx,
+                            legion_phase_barrier_t handle);
 
   /**
    * @return Caller does **NOT** take ownership of return value.
@@ -3090,9 +3119,6 @@ typedef int coord_t;
   /**
    * @return Caller takes ownership of return value.
    *
-<<<<<<< HEAD
-   * @see Legion::MappingUtilities::MachineQueryInterface()
-=======
    * @see Realm::Machine::MemoryQuery::MemoryQuery()
    */
   legion_memory_query_t
@@ -3102,7 +3128,6 @@ typedef int coord_t;
    * @return Caller takes ownership of return value.
    *
    * @see Realm::Machine::MemoryQuery::MemoryQuery()
->>>>>>> master
    */
   legion_memory_query_t
   legion_memory_query_create_copy(legion_memory_query_t query);
@@ -3110,9 +3135,6 @@ typedef int coord_t;
   /**
    * @param handle Caller must have ownership of parameter `handle`.
    *
-<<<<<<< HEAD
-   * @see Legion::MappingUtilities::~MachineQueryInterface()
-=======
    * @see Realm::Machine::MemoryQuery::~MemoryQuery()
    */
   void
@@ -3148,7 +3170,6 @@ typedef int coord_t;
    * Note: Mutates `query`.
    *
    * @see Realm::Machine::MemoryQuery::same_address_space_as()
->>>>>>> master
    */
   void
   legion_memory_query_same_address_space_as_memory(legion_memory_query_t query,
@@ -3218,12 +3239,7 @@ typedef int coord_t;
                            legion_memory_t after);
 
   /**
-<<<<<<< HEAD
-   * @see Legion::MappingUtilities
-   *                   ::MachineQueryInterface::find_memory_kind()
-=======
    * @see Realm::Machine::MemoryQuery::random()
->>>>>>> master
    */
   legion_memory_t
   legion_memory_query_random(legion_memory_query_t query);

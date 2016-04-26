@@ -261,16 +261,20 @@ namespace Legion {
                                     MappingKind mapping_kind,
                                     bool needs_field_constraint_check,
                                     bool &force_new_instances);
-      virtual void default_policy_fill_constraints(MapperContext ctx,
+      virtual void default_policy_select_constraints(MapperContext ctx,
                                     LayoutConstraintSet &constraints,
                                     Memory target_memory,
                                     const RegionRequirement &req);
+      virtual void default_policy_select_constraint_fields(
+                                    MapperContext ctx,
+                                    const RegionRequirement &req,
+                                    std::vector<FieldID> &fields);
       virtual LogicalRegion default_policy_select_instance_region(
                                     MapperContext ctx, Memory target_memory,
                                     const RegionRequirement &req,
                                     const LayoutConstraintSet &constraints,
                                     bool force_new_instances, 
-                                    bool meets_constraints, bool reduction);
+                                    bool meets_constraints);
       virtual int default_policy_select_garbage_collection_priority(
                                     MapperContext ctx, 
                                     MappingKind kind, Memory memory, 
@@ -280,6 +284,8 @@ namespace Legion {
                                     const PhysicalInstance &target,
                                     const std::vector<PhysicalInstance> &source,
                                     std::deque<PhysicalInstance> &ranking);
+      virtual bool default_policy_select_close_virtual(const MapperContext,
+                                                       const Close &);
     protected: // help for generating random numbers
       long default_generate_random_integer(void) const;
       double default_generate_random_real(void) const;
@@ -305,7 +311,7 @@ namespace Legion {
       bool default_make_instance(MapperContext ctx, Memory target_memory,
                               const LayoutConstraintSet &constraints, 
                               PhysicalInstance &result, MappingKind kind,
-                              bool force_new, bool meets, bool reduction,
+                              bool force_new, bool meets,
                               const RegionRequirement &req);
       void default_report_failed_instance_creation(const Task &task, 
                               unsigned index, Processor target_proc, 
@@ -330,8 +336,8 @@ namespace Legion {
                               std::vector<TaskSlice> &slices);
       template<int DIM>
       static LegionRuntime::Arrays::Point<DIM> default_select_blocking_factor(
-                              int factor, const LegionRuntime::Arrays::
-                              Rect<DIM> &rect_to_factor);
+                            long long int factor, const LegionRuntime::Arrays::
+                            Rect<DIM> &rect_to_factor);
       static unsigned long long compute_task_hash(const Task &task);
       static inline bool physical_sort_func(
                          const std::pair<PhysicalInstance,unsigned> &left,

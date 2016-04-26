@@ -306,6 +306,10 @@ function pretty.expr_static_cast(cx, node)
   return join({"static_cast(", commas({tostring(node.expr_type), pretty.expr(cx, node.value)}), ")"})
 end
 
+function pretty.expr_unsafe_cast(cx, node)
+  return join({"unsafe_cast(", commas({tostring(node.expr_type), pretty.expr(cx, node.value)}), ")"})
+end
+
 function pretty.expr_ispace(cx, node)
   return join({
       "ispace(",
@@ -363,6 +367,15 @@ end
 function pretty.expr_cross_product(cx, node)
   return join({
       "cross_product(", commas({pretty.expr_list(cx, node.args)}), ")"})
+end
+
+function pretty.expr_cross_product_array(cx, node)
+  return join({
+      "cross_product_array(",
+      commas({pretty.expr(cx, node.lhs),
+              tostring(node.disjointness),
+              pretty.expr(cx, node.colorings)}),
+      ")"})
 end
 
 function pretty.expr_list_slice_partition(cx, node)
@@ -455,8 +468,12 @@ end
 function pretty.expr_arrive(cx, node)
   return join({
       "arrive(",
-      commas({pretty.expr(cx, node.barrier), pretty.expr(cx, node.value)}),
+      commas({pretty.expr(cx, node.barrier), node.value and pretty.expr(cx, node.value)}),
       ")"})
+end
+
+function pretty.expr_await(cx, node)
+  return join({"await(", pretty.expr(cx, node.barrier), ")"})
 end
 
 function pretty.expr_copy(cx, node)
@@ -574,6 +591,9 @@ function pretty.expr(cx, node)
   elseif node:is(ast.typed.expr.StaticCast) then
     return pretty.expr_static_cast(cx, node)
 
+  elseif node:is(ast.typed.expr.UnsafeCast) then
+    return pretty.expr_unsafe_cast(cx, node)
+
   elseif node:is(ast.typed.expr.Ispace) then
     return pretty.expr_ispace(cx, node)
 
@@ -597,6 +617,9 @@ function pretty.expr(cx, node)
 
   elseif node:is(ast.typed.expr.CrossProduct) then
     return pretty.expr_cross_product(cx, node)
+
+  elseif node:is(ast.typed.expr.CrossProductArray) then
+    return pretty.expr_cross_product_array(cx, node)
 
   elseif node:is(ast.typed.expr.ListSlicePartition) then
     return pretty.expr_list_slice_partition(cx, node)
@@ -636,6 +659,9 @@ function pretty.expr(cx, node)
 
   elseif node:is(ast.typed.expr.Arrive) then
     return pretty.expr_arrive(cx, node)
+
+  elseif node:is(ast.typed.expr.Await) then
+    return pretty.expr_await(cx, node)
 
   elseif node:is(ast.typed.expr.Copy) then
     return pretty.expr_copy(cx, node)

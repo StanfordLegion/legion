@@ -238,13 +238,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void Operation::release_acquired_instances(
-                        std::map<PhysicalManager*,unsigned> &acquired_instances)
+       std::map<PhysicalManager*,std::pair<unsigned,bool> > &acquired_instances)
     //--------------------------------------------------------------------------
     {
-      for (std::map<PhysicalManager*,unsigned>::iterator it = 
+      for (std::map<PhysicalManager*,std::pair<unsigned,bool> >::iterator it = 
             acquired_instances.begin(); it != acquired_instances.end(); it++)
       {
-        if (it->first->remove_base_valid_ref(MAPPING_ACQUIRE_REF, it->second))
+        if (it->first->remove_base_valid_ref(MAPPING_ACQUIRE_REF, 
+                                             it->second.first))
           PhysicalManager::delete_physical_manager(it->first);
       }
       acquired_instances.clear();
@@ -399,7 +400,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    std::map<PhysicalManager*,unsigned>* 
+    std::map<PhysicalManager*,std::pair<unsigned,bool> >* 
                                      Operation::get_acquired_instances_ref(void)
     //--------------------------------------------------------------------------
     {
@@ -1836,12 +1837,13 @@ namespace Legion {
       {
         parent_ctx->get_physical_references(parent_req_index, mapped_instances);
         runtime->forest->traverse_and_register(physical_ctx, privilege_path,
-                                               requirement, parent_req_index,
-                                               version_info, this, 
+                                               requirement, version_info, 
+                                               this, 0/*idx*/, 
                                                termination_event, 
+                                               false/*defer add users*/,
                                                mapped_instances
 #ifdef DEBUG_HIGH_LEVEL
-                                               , 0/*idx*/, get_logging_name()
+                                               , get_logging_name()
                                                , unique_op_id
 #endif
                                                );
@@ -1851,12 +1853,13 @@ namespace Legion {
       {
         region.impl->get_references(mapped_instances);
         runtime->forest->traverse_and_register(physical_ctx, privilege_path,
-                                               requirement, parent_req_index,
-                                               version_info,
-                                               this, termination_event,
+                                               requirement, version_info,
+                                               this, 0/*idx*/, 
+                                               termination_event,
+                                               false/*defer add users*/,
                                                mapped_instances
 #ifdef DEBUG_HIGH_LEVEL
-                                               , 0/*idx*/, get_logging_name()
+                                               , get_logging_name()
                                                , unique_op_id
 #endif
                                                );
@@ -1867,12 +1870,12 @@ namespace Legion {
         // instances as part of our traversal
         InstanceSet valid_instances;
         runtime->forest->physical_traverse_path(physical_ctx, privilege_path,
-                                                requirement, parent_req_index,
-                                                version_info, this, 
+                                                requirement, version_info, 
+                                                this, 0/*idx*/,
                                                 true/*find valid*/,
                                                 valid_instances
 #ifdef DEBUG_HIGH_LEVEL
-                                                , 0/*idx*/, get_logging_name()
+                                                , get_logging_name()
                                                 , unique_op_id
 #endif
                                                 );
@@ -1880,12 +1883,12 @@ namespace Legion {
         invoke_mapper(valid_instances, mapped_instances);
         // Then we can register our mapped instances
         runtime->forest->physical_register_only(physical_ctx, requirement,
-                                                parent_req_index,
-                                                version_info, this, 
+                                                version_info, this, 0/*idx*/,
                                                 termination_event, 
+                                                false/*defer add users*/,
                                                 mapped_instances
 #ifdef DEBUG_HIGH_LEVEL
-                                                , 0/*idx*/, get_logging_name()
+                                                , get_logging_name()
                                                 , unique_op_id
 #endif
                                                 );
@@ -2023,7 +2026,8 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    std::map<PhysicalManager*,unsigned>* MapOp::get_acquired_instances_ref(void)
+    std::map<PhysicalManager*,std::pair<unsigned,bool> >* 
+                                         MapOp::get_acquired_instances_ref(void)
     //--------------------------------------------------------------------------
     {
       return &acquired_instances;
@@ -2411,6 +2415,27 @@ namespace Legion {
 #endif
             exit(ERROR_INVALID_MAPPER_OUTPUT);
           }
+          std::map<PhysicalManager*,std::pair<unsigned,bool> >::const_iterator 
+            finder = acquired_instances.find(
+                chosen_instances[idx].get_manager());
+#ifdef DEBUG_HIGH_LEVEL
+          assert(finder != acquired_instances.end());
+#endif
+          if (!finder->second.second)
+          {
+            log_run.error("Invalid mapper output from invocatino of "
+                          "'map_inline' on mapper %s. Mapper made an illegal "
+                          "decision to re-use a reduction instance for an "
+                          "inline mapping in task %s (ID %lld). Reduction "
+                          "instances are not currently permitted to be "
+                          "recycled.", mapper->get_mapper_name(),
+                          parent_ctx->get_task_name(), 
+                          parent_ctx->get_unique_id());
+#ifdef DEBUG_HIGH_LEVEL
+            assert(false);
+#endif
+            exit(ERROR_INVALID_MAPPER_OUTPUT);
+          }
         }
       }
       else
@@ -2552,6 +2577,10 @@ namespace Legion {
         }
         dst_requirements[idx] = launcher.dst_requirements[idx];
         dst_requirements[idx].flags |= NO_ACCESS_FLAG;
+        // If our privilege is not reduce, then shift it to write discard
+        // since we are going to write all over the region
+        if (dst_requirements[idx].privilege != REDUCE)
+          dst_requirements[idx].privilege = WRITE_DISCARD;
       }
       grants = launcher.grants;
       // Register ourselves with all the grants
@@ -2835,11 +2864,19 @@ namespace Legion {
       {
         unsigned index = src_requirements.size()+idx;
         RestrictInfo restrict_info;
+        // Perform this dependence analysis as if it was READ_WRITE
+        // so that we can get the version numbers correct
+        const bool is_reduce_req = IS_REDUCE(dst_requirements[idx]);
+        if (is_reduce_req)
+          dst_requirements[idx].privilege = READ_WRITE;
         runtime->forest->perform_dependence_analysis(this, index, 
                                                      dst_requirements[idx],
                                                      dst_versions[idx],
                                                      restrict_info,
                                                      dst_privilege_paths[idx]);
+        // Switch the privileges back when we are done
+        if (is_reduce_req)
+          dst_requirements[idx].privilege = REDUCE;
       }
       end_dependence_analysis();
     }
@@ -2937,12 +2974,11 @@ namespace Legion {
         runtime->forest->physical_traverse_path(src_contexts[idx],
                                                 src_privilege_paths[idx],
                                                 src_requirements[idx],
-                                                src_parent_indexes[idx],
                                                 src_versions[idx],
-                                                this, true/*find valid*/,
+                                                this, idx, true/*find valid*/,
                                                 valid_instances
 #ifdef DEBUG_HIGH_LEVEL
-                                                , idx, get_logging_name()
+                                                , get_logging_name()
                                                 , unique_op_id
 #endif
                                                 );
@@ -2961,12 +2997,10 @@ namespace Legion {
         runtime->forest->physical_traverse_path(dst_contexts[idx],
                                                 dst_privilege_paths[idx],
                                                 dst_requirements[idx],
-                                                dst_parent_indexes[idx],
                                                 dst_versions[idx],
-                                                this, true/*find valid*/,
+                                                this, idx, true/*find valid*/,
                                                 valid_instances
 #ifdef DEBUG_HIGH_LEVEL
-                                                , src_requirements.size()+idx
                                                 , get_logging_name()
                                                 , unique_op_id
 #endif
@@ -3023,26 +3057,31 @@ namespace Legion {
           // If we have a compsite reference, we need to map it
           // as a virtual region
           if (src_composite >= 0)
+          {
             runtime->forest->map_virtual_region(src_contexts[idx],
                                                 src_requirements[idx],
                                                 src_targets[src_composite],
                                                 src_versions[idx],
+                                                parent_ctx,
                                                 false/*needs fields*/
 #ifdef DEBUG_HIGH_LEVEL
                                                 , idx, get_logging_name()
                                                 , unique_op_id
 #endif
                                                 );
+            // No need to do the registration here
+            continue;
+          }
           // Now do the registration
           set_mapping_state(idx, true/*src*/);
           runtime->forest->physical_register_only(src_contexts[idx],
                                                   src_requirements[idx],
-                                                  src_parent_indexes[idx],
                                                   src_versions[idx],
-                                                  this, local_completion,
+                                                  this, idx, local_completion,
+                                                  false/*defer add users*/,
                                                   src_targets
 #ifdef DEBUG_HIGH_LEVEL
-                                                  , idx, get_logging_name()
+                                                  , get_logging_name()
                                                   , unique_op_id
 #endif
                                                   );
@@ -3056,11 +3095,12 @@ namespace Legion {
           runtime->forest->traverse_and_register(src_contexts[idx],
                                                  src_privilege_paths[idx],
                                                  src_requirements[idx],
-                                                 src_parent_indexes[idx],
-                                                 src_versions[idx], this,
-                                                 local_completion, src_targets
+                                                 src_versions[idx], this, idx,
+                                                 local_completion, 
+                                                 false/*defer add users*/,
+                                                 src_targets
 #ifdef DEBUG_HIGH_LEVEL
-                                                 , idx, get_logging_name()
+                                                 , get_logging_name()
                                                  , unique_op_id
 #endif
                                                  );
@@ -3085,12 +3125,12 @@ namespace Legion {
           set_mapping_state(idx, false/*src*/);
           runtime->forest->physical_register_only(dst_contexts[idx],
                                                   dst_requirements[idx],
-                                                  dst_parent_indexes[idx],
                                                   dst_versions[idx],
-                                                  this, local_completion,
+                                                  this, idx, local_completion,
+                                                  false/*defer add users*/,
                                                   dst_targets
 #ifdef DEBUG_HIGH_LEVEL
-                                                  , idx, get_logging_name()
+                                                  , get_logging_name()
                                                   , unique_op_id
 #endif
                                                   );
@@ -3104,11 +3144,12 @@ namespace Legion {
           runtime->forest->traverse_and_register(dst_contexts[idx],
                                                  dst_privilege_paths[idx],
                                                  dst_requirements[idx],
-                                                 dst_parent_indexes[idx],
-                                                 dst_versions[idx], this,
-                                                 local_completion, dst_targets
+                                                 dst_versions[idx], this, idx,
+                                                 local_completion, 
+                                                 false/*defer add users*/, 
+                                                 dst_targets
 #ifdef DEBUG_HIGH_LEVEL
-                                                 , idx, get_logging_name()
+                                                 , get_logging_name()
                                                  , unique_op_id
 #endif
                                                  );
@@ -3146,8 +3187,8 @@ namespace Legion {
             runtime->forest->copy_across(src_contexts[idx], dst_contexts[idx], 
                                   src_requirements[idx], dst_requirements[idx],
                                   src_targets, dst_targets, src_versions[idx], 
-                                  src_composite, src_parent_indexes[idx],
-                                  this, local_sync_precondition);
+                                  src_composite, this, idx, 
+                                  local_sync_precondition);
           Runtime::trigger_event<false>(local_completion, across_done);
         }
         else
@@ -3288,7 +3329,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    std::map<PhysicalManager*,unsigned>* 
+    std::map<PhysicalManager*,std::pair<unsigned,bool> >* 
                                         CopyOp::get_acquired_instances_ref(void)
     //--------------------------------------------------------------------------
     {
@@ -4669,12 +4710,12 @@ namespace Legion {
       {
         InstanceSet valid_instances;
         runtime->forest->physical_traverse_path(physical_ctx, privilege_path,
-                                                requirement, parent_req_index,
-                                                version_info,
-                                                this, true/*find valid*/,
+                                                requirement, version_info,
+                                                this, 0/*idx*/, 
+                                                true/*find valid*/,
                                                 valid_instances
 #ifdef DEBUG_HIGH_LEVEL
-                                                , 0/*idx*/, get_logging_name()
+                                                , get_logging_name()
                                                 , unique_op_id
 #endif
                                                 );
@@ -4688,12 +4729,11 @@ namespace Legion {
       // Now we can perform our close operation
       Event close_event = 
         runtime->forest->physical_perform_close(physical_ctx, requirement,
-                                                parent_req_index, version_info, 
-                                                this, composite_idx, 
-                                                target_children, next_children,
-                                                chosen_instances
+                                                version_info, this, 0/*idx*/, 
+                                                composite_idx, target_children,
+                                                next_children, chosen_instances
 #ifdef DEBUG_HIGH_LEVEL
-                                                , 0/*idx*/, get_logging_name()
+                                                , get_logging_name()
                                                 , unique_op_id
 #endif
                                                 );
@@ -4761,7 +4801,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    std::map<PhysicalManager*,unsigned>* 
+    std::map<PhysicalManager*,std::pair<unsigned,bool> >* 
                                   InterCloseOp::get_acquired_instances_ref(void)
     //--------------------------------------------------------------------------
     {
@@ -5128,10 +5168,10 @@ namespace Legion {
       parent_ctx->get_physical_references(parent_idx, chosen_instances);
       Event close_event = 
         runtime->forest->physical_close_context(physical_ctx, requirement,
-                                                parent_idx, version_info, this,
+                                                version_info, this, 0/*idx*/,
                                                 chosen_instances
 #ifdef DEBUG_HIGH_LEVEL
-                                                , 0/*idx*/, get_logging_name()
+                                                , get_logging_name()
                                                 , unique_op_id
 #endif
                                                 );
@@ -5195,7 +5235,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    std::map<PhysicalManager*,unsigned>* 
+    std::map<PhysicalManager*,std::pair<unsigned,bool> >* 
                                    PostCloseOp::get_acquired_instances_ref(void)
     //--------------------------------------------------------------------------
     {
@@ -5258,13 +5298,18 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       initialize_close(ctx, index, true/*track*/);
-      // If it was write-discard from the task's perspective, make it
-      // read-write within the task's context
+      // Make this read-write to pick up the earlier changes
       if (requirement.privilege == WRITE_DISCARD)
         requirement.privilege = READ_WRITE;
       parent_idx = index;
       localize_region_requirement(requirement);
-      // We don't log virtual close operations for now
+      if (Runtime::legion_spy_enabled)
+      {
+        perform_logging(false/*intermediate close op*/, false/*read only*/);
+        LegionSpy::log_close_op_creator(unique_op_id,
+                                        ctx->get_unique_op_id(),
+                                        parent_idx);
+      }
     }
     
     //--------------------------------------------------------------------------
@@ -5326,8 +5371,11 @@ namespace Legion {
 #endif
       InstanceSet composite_refs(1);
       composite_refs[0] = InstanceRef(true/*composite*/);
+      // Always eagerly translate composite instances back out into
+      // the parent context
       runtime->forest->map_virtual_region(physical_ctx, requirement,
                                           composite_refs[0], version_info,
+                                          parent_ctx->get_parent(),
                                           true/*needs fields*/
 #ifdef DEBUG_HIGH_LEVEL
                                           , 0/*idx*/, get_logging_name()
@@ -5646,11 +5694,12 @@ namespace Legion {
       invoke_mapper();
       // Now we can map the operation
       runtime->forest->traverse_and_register(physical_ctx, privilege_path,
-                                             requirement, parent_req_index,
-                                             version_info, this, 
-                                             completion_event, mapped_instances
+                                             requirement, version_info, 
+                                             this, 0/*idx*/, completion_event, 
+                                             false/*defer add users*/,
+                                             mapped_instances
 #ifdef DEBUG_HIGH_LEVEL
-                                             , 0/*idx*/, get_logging_name()
+                                             , get_logging_name()
                                              , unique_op_id
 #endif
                                              );
@@ -5736,7 +5785,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    std::map<PhysicalManager*,unsigned>* 
+    std::map<PhysicalManager*,std::pair<unsigned,bool> >* 
                                      AcquireOp::get_acquired_instances_ref(void)
     //--------------------------------------------------------------------------
     {
@@ -6210,11 +6259,12 @@ namespace Legion {
       invoke_mapper();
       // Now we can map the operation
       runtime->forest->traverse_and_register(physical_ctx, privilege_path,
-                                             requirement, parent_req_index,
-                                             version_info, this, 
-                                             completion_event, mapped_instances
+                                             requirement, version_info, 
+                                             this, 0/*idx*/, completion_event, 
+                                             false/*defer add users*/,
+                                             mapped_instances
 #ifdef DEBUG_HIGH_LEVEL
-                                             , 0/*idx*/, get_logging_name()
+                                             , get_logging_name()
                                              , unique_op_id
 #endif
                                              );
@@ -6317,7 +6367,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    std::map<PhysicalManager*,unsigned>* 
+    std::map<PhysicalManager*,std::pair<unsigned,bool> >* 
                                      ReleaseOp::get_acquired_instances_ref(void)
     //--------------------------------------------------------------------------
     {
@@ -7951,7 +8001,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    std::map<PhysicalManager*,unsigned>*
+    std::map<PhysicalManager*,std::pair<unsigned,bool> >*
                                    MustEpochOp::get_acquired_instances_ref(void)
     //--------------------------------------------------------------------------
     {
@@ -8966,12 +9016,12 @@ namespace Legion {
       // We still have to do the traversal to flush any reductions
       InstanceSet empty_instances;
       runtime->forest->physical_traverse_path(physical_ctx, privilege_path,
-                                              requirement, parent_req_index,
-                                              version_info, this, 
+                                              requirement, version_info, 
+                                              this, 0/*idx*/, 
                                               false/*find valid*/,
                                               empty_instances
 #ifdef DEBUG_HIGH_LEVEL
-                                              , 0/*idx*/, get_logging_name()
+                                              , get_logging_name()
                                               , unique_op_id
 #endif
                                               );
@@ -8981,7 +9031,8 @@ namespace Legion {
         case BY_FIELD:
           {
             ready_event = 
-              runtime->forest->create_partition_by_field(physical_ctx, this,
+              runtime->forest->create_partition_by_field(physical_ctx, 
+                                                         this, 0/*idx*/,
                                                          requirement,
                                                          partition_handle,
                                                          color_space,
@@ -8992,7 +9043,8 @@ namespace Legion {
         case BY_IMAGE:
           {
             ready_event = 
-              runtime->forest->create_partition_by_image(physical_ctx, this,
+              runtime->forest->create_partition_by_image(physical_ctx, 
+                                                         this, 0/*idx*/,
                                                          requirement,
                                                          partition_handle,
                                                          color_space,
@@ -9003,7 +9055,8 @@ namespace Legion {
         case BY_PREIMAGE:
           {
             ready_event = 
-              runtime->forest->create_partition_by_preimage(physical_ctx, this,
+              runtime->forest->create_partition_by_preimage(physical_ctx, 
+                                                            this, 0/*idx*/,
                                                             requirement,
                                                             projection,
                                                             partition_handle,
@@ -9493,12 +9546,12 @@ namespace Legion {
       // Still have to walk the path
       InstanceSet empty_instances;
       runtime->forest->physical_traverse_path(physical_ctx, privilege_path,
-                                              requirement, parent_req_index,
-                                              version_info, this, 
+                                              requirement, version_info, 
+                                              this, 0/*idx*/, 
                                               false/*find valid*/,
                                               empty_instances
 #ifdef DEBUG_HIGH_LEVEL
-                                              , 0/*idx*/, get_logging_name()
+                                              , get_logging_name()
                                               , unique_op_id
 #endif
                                               );
@@ -9515,12 +9568,13 @@ namespace Legion {
           parent_ctx->get_physical_references(parent_req_index, 
                                               mapped_instances);
           runtime->forest->traverse_and_register(physical_ctx, privilege_path,
-                                                 requirement, parent_req_index,
-                                                 version_info, this, 
-                                                 Event::NO_EVENT, 
+                                                 requirement, version_info, 
+                                                 this, 0/*idx*/, 
+                                                 Event::NO_EVENT,
+                                                 false/*defer add users*/,
                                                  mapped_instances
 #ifdef DEBUG_HIGH_LEVEL
-                                                 , 0/*idx*/, get_logging_name()
+                                                 , get_logging_name()
                                                  , unique_op_id
 #endif
                                                  );
@@ -9528,10 +9582,9 @@ namespace Legion {
         Event sync_precondition = compute_sync_precondition();
         Event done_event = 
           runtime->forest->fill_fields(physical_ctx, this, requirement, 
-                                       parent_req_index,
-                                       value, value_size, version_info, 
-                                       restrict_info, mapped_instances, 
-                                       sync_precondition);
+                                       0/*idx*/, value, value_size, 
+                                       version_info, restrict_info, 
+                                       mapped_instances, sync_precondition);
         if (!mapped_instances.empty() && Runtime::legion_spy_enabled)
         {
           runtime->forest->log_mapping_decision(unique_op_id, 0/*idx*/,
@@ -9604,11 +9657,13 @@ namespace Legion {
       {
         parent_ctx->get_physical_references(parent_req_index, mapped_instances);
         runtime->forest->traverse_and_register(physical_ctx, privilege_path,
-                                               requirement, parent_req_index,
-                                               version_info, this, 
-                                               Event::NO_EVENT, mapped_instances
+                                               requirement, version_info, 
+                                               this, 0/*idx*/, 
+                                               Event::NO_EVENT, 
+                                               false/*defer add users*/,
+                                               mapped_instances
 #ifdef DEBUG_HIGH_LEVEL
-                                               , 0/*idx*/, get_logging_name()
+                                               , get_logging_name()
                                                , unique_op_id
 #endif
                                                );
@@ -9616,10 +9671,9 @@ namespace Legion {
       Event sync_precondition = compute_sync_precondition();
       Event done_event = 
           runtime->forest->fill_fields(physical_ctx, this, requirement, 
-                                       parent_req_index,
-                                       value, value_size, version_info, 
-                                       restrict_info, mapped_instances, 
-                                       sync_precondition);
+                                       0/*idx*/, value, value_size, 
+                                       version_info, restrict_info, 
+                                       mapped_instances, sync_precondition);
       if (!mapped_instances.empty() && Runtime::legion_spy_enabled)
       {
         runtime->forest->log_mapping_decision(unique_op_id, 0/*idx*/,
@@ -10078,18 +10132,17 @@ namespace Legion {
       // We still have to do a traversal to make sure everything is open
       InstanceSet empty_instances;
       runtime->forest->physical_traverse_path(physical_ctx, privilege_path,
-                                              requirement, parent_req_index,
-                                              version_info, this, 
+                                              requirement, version_info, 
+                                              this, 0/*idx*/,
                                               false/*find valid*/,
                                               empty_instances
 #ifdef DEBUG_HIGH_LEVEL
-                                              , 0/*idx*/, get_logging_name()
+                                              , get_logging_name()
                                               , unique_op_id
 #endif
                                               );
       InstanceRef result = runtime->forest->attach_file(physical_ctx,
-                                                        requirement, 
-                                                        parent_req_index, this,
+                                                        requirement, this,
                                                         version_info);
 #ifdef DEBUG_HIGH_LEVEL
       assert(result.has_ref());
@@ -10468,7 +10521,7 @@ namespace Legion {
         parent_ctx->find_enclosing_context(parent_req_index);
       Event detach_event = 
         runtime->forest->detach_file(physical_ctx, requirement, 
-            parent_req_index, this, version_info, reference);
+                                     this, version_info, reference);
       std::set<Event> applied_conditions;
       version_info.apply_mapping(physical_ctx.get_id(),
                                  runtime->address_space, applied_conditions);

@@ -94,13 +94,15 @@ terra vec2.metamethods.__sub(a : vec2, b : vec2) : vec2
   return vec2 { x = a.x - b.x, y = a.y - b.y }
 end
 
-terra vec2.metamethods.__mul(a : double, b : vec2) : vec2
-  return vec2 { x = a * b.x, y = a * b.y }
-end
-
-terra vec2.metamethods.__mul(a : vec2, b : double) : vec2
-  return vec2 { x = a.x * b, y = a.y * b }
-end
+vec2.metamethods.__mul = terralib.overloadedfunction(
+  "__mul", {
+    terra(a : double, b : vec2) : vec2
+      return vec2 { x = a * b.x, y = a * b.y }
+    end,
+    terra(a : vec2, b : double) : vec2
+      return vec2 { x = a.x * b, y = a.y * b }
+    end
+  })
 
 terra dot(a : vec2, b : vec2) : double
   return a.x*b.x + a.y*b.y
@@ -183,6 +185,8 @@ local config_fields_cmd = terralib.newlist({
   {field = "enable", type = bool, default_value = true},
   {field = "warmup", type = bool, default_value = true},
   {field = "compact", type = bool, default_value = true},
+  {field = "internal", type = bool, default_value = true},
+  {field = "interior", type = bool, default_value = true},
   {field = "stripsize", type = int64, default_value = 128},
   {field = "spansize", type = int64, default_value = 2048},
   {field = "nspans_zones", type = int64, default_value = 0},
@@ -285,6 +289,12 @@ fspace side(rz : region(zone),
   ccos :   double,       -- corner cosine
   cqe1 :   vec2,         -- ??????????
   cqe2 :   vec2,         -- ??????????
+}
+
+fspace span {
+  start : int64,
+  stop  : int64,
+  internal : bool,
 }
 
 --
@@ -549,6 +559,16 @@ terra read_config()
     conf.compact = [bool](c.atoll(compact))
   end
 
+  var internal = get_optional_arg("-internal")
+  if internal ~= nil then
+    conf.internal = [bool](c.atoll(internal))
+  end
+
+  var interior = get_optional_arg("-interior")
+  if interior ~= nil then
+    conf.interior = [bool](c.atoll(interior))
+  end
+
   var stripsize = get_optional_arg("-stripsize")
   if stripsize ~= nil then
     conf.stripsize = c.atoll(stripsize)
@@ -557,6 +577,11 @@ terra read_config()
   var spansize = get_optional_arg("-spansize")
   if spansize ~= nil then
     conf.spansize = c.atoll(spansize)
+  end
+
+  var print_ts = get_optional_arg("-print_ts")
+  if print_ts ~= nil then
+    conf.print_ts = [bool](c.atoll(print_ts))
   end
 
   -- Read parameters from input file.
@@ -968,7 +993,7 @@ end
 
 local terra all_ghost_p(conf : config)
   var num_ghost = get_num_ghost(conf)
-  var first_ghost = 0
+  var first_ghost : int64 = 0
   var last_ghost = num_ghost -- exclusive
   return first_ghost, last_ghost
 end
@@ -1127,9 +1152,10 @@ end
 
 terra read_partitions(conf : config) : mesh_colorings
   regentlib.assert(conf.npieces > 0, "npieces must be > 0")
+  regentlib.assert(conf.compact, "parallel initialization requires compact")
   regentlib.assert(
     conf.meshtype == MESH_RECT,
-    "distributed initialization only works on rectangular meshes")
+    "parallel initialization only works on rectangular meshes")
   var znump = 4
 
   -- Create colorings.
@@ -1250,44 +1276,25 @@ terra read_partitions(conf : config) : mesh_colorings
       c.legion_coloring_add_range(
         result.rp_all_shared_c, piece, ptr_t(bottom_right._0), ptr_t(bottom_right._1 - 1)) -- inclusive
 
+      var first_p : int64, last_p : int64 = -1, -1
+      if right._0 < right._1 then
+        first_p = right._0
+        last_p = right._1
+      end
+      if bottom._0 < bottom._1 then
+        if first_p < 0 then first_p = bottom._0 end
+        last_p = bottom._1
+      end
+      if bottom_right._0 < bottom_right._1 then
+        if first_p < 0 then first_p = bottom_right._0 end
+        last_p = bottom_right._1
+      end
+
       var span = 0
-      var leftover = 0
-      for p = right._0, right._1, conf.spansize do
+      for p = first_p, last_p, conf.spansize do
         c.legion_coloring_add_range(
           result.rp_spans_c, span,
-          ptr_t(p), ptr_t(min(p + conf.spansize, right._1) - 1)) -- inclusive
-        if p + conf.spansize >= right._1 then
-          leftover = p + conf.spansize - right._1
-        else
-          span = span + 1
-        end
-      end
-
-      c.legion_coloring_add_range(
-        result.rp_spans_c, span,
-        ptr_t(bottom._0), ptr_t(min(bottom._0 + leftover, bottom._1) - 1)) -- inclusive
-
-      var leftover2 = max(leftover - (bottom._1 - bottom._0), 0)
-      if leftover2 == 0 and leftover > 0 then
-        span = span + 1
-      end
-      for p = bottom._0 + leftover, bottom._1, conf.spansize do
-        c.legion_coloring_add_range(
-          result.rp_spans_c, span,
-          ptr_t(p), ptr_t(min(p + conf.spansize, bottom._1) - 1)) -- inclusive
-        if p + conf.spansize >= bottom._1 then
-          leftover2 = p + conf.spansize - bottom._1
-        else
-          span = span + 1
-        end
-      end
-
-      c.legion_coloring_add_range(
-        result.rp_spans_c, span,
-        ptr_t(bottom_right._0), ptr_t(bottom_right._1 - 1)) -- inclusive
-
-      var leftover3 = max(leftover2 - (bottom_right._1 - bottom_right._0), 0)
-      if (leftover3 == 0 and leftover2 > 0) or conf.spansize == 1 then
+          ptr_t(p), ptr_t(min(p + conf.spansize, last_p) - 1)) -- inclusive
         span = span + 1
       end
       result.nspans_points = max(result.nspans_points, span)
@@ -1297,6 +1304,160 @@ terra read_partitions(conf : config) : mesh_colorings
   return result
 end
 read_partitions:compile()
+
+local terra get_zone_position(conf : config, pcx : int64, pcy : int64, z : int64)
+  var first_zx, last_zx, stride_zx = block_zx(conf, pcx)
+  var first_zy, last_zy, stride_zy = block_zy(conf, pcy)
+  var first_z, last_z = block_z(conf, pcx, pcy)
+
+  var zstripsize = conf.stripsize
+  if zstripsize <= 0 then
+    zstripsize = stride_zx
+  end
+
+  var z_strip_num = (z - first_z) / (zstripsize * stride_zy)
+  var z_strip_elt = (z - first_z) % (zstripsize * stride_zy)
+  var leftover = stride_zx - zstripsize * z_strip_num
+  if leftover == 0 then leftover = zstripsize end
+  var z_strip_width = min(zstripsize, leftover)
+  regentlib.assert(z_strip_width > 0, "zero width strip")
+  var z_strip_x = z_strip_elt % z_strip_width
+  var z_strip_y = z_strip_elt / z_strip_width
+  var z_x = z_strip_num * zstripsize + z_strip_x
+  var z_y = z_strip_y
+  return z_x, z_y
+end
+
+task initialize_spans(conf : config,
+                      piece : int64,
+                      rz_spans : region(span),
+                      rp_spans_private : region(span),
+                      rp_spans_shared : region(span),
+                      rs_spans : region(span))
+where
+  reads writes(rz_spans, rp_spans_private, rp_spans_shared, rs_spans),
+  rz_spans * rp_spans_private, rz_spans * rp_spans_shared, rz_spans * rs_spans,
+  rp_spans_private * rp_spans_shared, rp_spans_private * rs_spans,
+  rp_spans_shared * rs_spans
+do
+  -- Unfortunately, this duplicates a lot of functionality in read_partitions.
+
+  regentlib.assert(conf.compact, "parallel initialization requires compact")
+  regentlib.assert(
+    conf.meshtype == MESH_RECT,
+    "parallel initialization only works on rectangular meshes")
+  var znump = 4
+  var zspansize = conf.spansize/znump
+
+  var pcx, pcy = piece % conf.numpcx, piece / conf.numpcx
+
+  -- Zones and sides.
+  do
+    var { first_zx = _0, last_zx = _1, stride_zx = _2 } = block_zx(conf, pcx)
+    var { first_zy = _0, last_zy = _1, stride_zy = _2 } = block_zy(conf, pcy)
+    var { first_z = _0, last_z = _1} = block_z(conf, pcx, pcy)
+
+    var num_external = 0
+    var span_i = 0
+    for z = first_z, last_z, zspansize do
+      var external = true
+      if conf.internal then
+        if conf.interior then
+          var interior_zx = stride_zx - [int64](pcx > 0) - [int64](pcx < conf.numpcx - 1)
+          var interior_zy = stride_zy - [int64](pcy > 0) - [int64](pcy < conf.numpcy - 1)
+          var interior = interior_zx * interior_zy
+          external = min(z + zspansize, last_z) - first_z > interior
+        else
+          var { z0_x = _0, z0_y = _1 } = get_zone_position(conf, pcx, pcy, z)
+          var { zn_x = _0, zn_y = _1 } = get_zone_position(conf, pcx, pcy, min(z + zspansize, last_z) - 1)
+
+          var external = (zn_y > z0_y and conf.numpcx > 1) or
+            (z0_x == 0 and pcx > 0) or (z0_x == stride_zx - 1 and pcx < conf.numpcx - 1) or
+            (zn_x == 0 and pcx > 0) or (zn_x == stride_zx - 1 and pcx < conf.numpcx - 1) or
+            (z0_y == 0 and pcy > 0) or (z0_y == stride_zy - 1 and pcy < conf.numpcy - 1) or
+            (zn_y == 0 and pcy > 0) or (zn_y == stride_zy - 1 and pcy < conf.numpcy - 1)
+        end
+      end
+      num_external += int(external)
+
+      var zs = unsafe_cast(ptr(span, rz_spans), piece * conf.nspans_zones + span_i)
+      var ss = unsafe_cast(ptr(span, rs_spans), piece * conf.nspans_zones + span_i)
+
+      var z_span = {
+        start = z,
+        stop = min(z + zspansize, last_z), -- exclusive
+        internal = not external,
+      }
+      var s_span = {
+        start = z * znump,
+        stop = min(z + zspansize, last_z) * znump, -- exclusive
+        internal = not external,
+      }
+      if conf.seq_init then regentlib.assert(zs.start == z_span.start and zs.stop == z_span.stop, "bad value: zone span") end
+      if conf.seq_init then regentlib.assert(ss.start == s_span.start and ss.stop == s_span.stop, "bad value: side span") end
+
+      @zs = z_span
+      @ss = s_span
+      span_i = span_i + 1
+    end
+    regentlib.assert(span_i <= conf.nspans_zones, "zone span overflow")
+    c.printf("Spans: total %ld external %ld percent external %f\n",
+             span_i, num_external, double(num_external*100)/span_i)
+  end
+
+  -- Points: private spans.
+  do
+    var piece = pcy * conf.numpcx + pcx
+    var { first_p = _0, last_p = _1 } = block_p(conf, pcx, pcy)
+
+    var span_i = 0
+    for p = first_p, last_p, conf.spansize do
+      var ps = unsafe_cast(ptr(span, rp_spans_private), piece * conf.nspans_points + span_i)
+
+      var p_span = { start = p, stop = min(p + conf.spansize, last_p), internal = false } -- exclusive
+      if conf.seq_init then regentlib.assert(ps.start == p_span.start and ps.stop == p_span.stop, "bad value: private point span") end
+
+      @ps = p_span
+
+      span_i = span_i + 1
+    end
+  end
+
+  -- Points: shared spans.
+  do
+    var piece = pcy * conf.numpcx + pcx
+
+    var right = ghost_right_p(conf, pcx, pcy)
+    var bottom = ghost_bottom_p(conf, pcx, pcy)
+    var bottom_right = ghost_bottom_right_p(conf, pcx, pcy)
+
+    var first_p, last_p = -1, -1
+    if right._0 < right._1 then
+      first_p = right._0
+      last_p = right._1
+    end
+    if bottom._0 < bottom._1 then
+      if first_p < 0 then first_p = bottom._0 end
+      last_p = bottom._1
+    end
+    if bottom_right._0 < bottom_right._1 then
+      if first_p < 0 then first_p = bottom_right._0 end
+      last_p = bottom_right._1
+    end
+
+    var span_i = 0
+    for p = first_p, last_p, conf.spansize do
+      var ps = unsafe_cast(ptr(span, rp_spans_shared), piece * conf.nspans_points + span_i)
+
+      var p_span = { start = p, stop = min(p + conf.spansize, last_p), internal = false } -- exclusive
+      if conf.seq_init then regentlib.assert(ps.start == p_span.start and ps.stop == p_span.stop, "bad value: private point span") end
+
+      @ps = p_span
+
+      span_i = span_i + 1
+    end
+  end
+end
 
 task initialize_topology(conf : config,
                          piece : int64,
@@ -1308,7 +1469,8 @@ task initialize_topology(conf : config,
 where reads writes(rz.znump,
                    rpp.{px, has_bcx, has_bcy},
                    rps.{px, has_bcx, has_bcy},
-                   rs.{mapsz, mapsp1, mapsp2, mapss3, mapss4})
+                   rs.{mapsz, mapsp1, mapsp2, mapss3, mapss4}),
+  reads(rpg.{px0}) -- Hack: Work around runtime bug with no-acccess regions.
 do
   regentlib.assert(
     conf.meshtype == MESH_RECT,
@@ -1439,115 +1601,131 @@ do
     var {first_z = _0, last_z = _1} = block_z(conf, pcx, pcy)
     var {first_p = _0, last_p = _1} = block_p(conf, pcx, pcy)
 
-    -- var p_ = first_p
+    var zstripsize = conf.stripsize
+    if zstripsize <= 0 then
+      zstripsize = stride_zx
+    end
+
     var z_ = first_z
-    for y = 0, stride_zy do
-      for x = 0, stride_zx do
-        var z = dynamic_cast(ptr(zone, rz), [ptr](z_))
-        regentlib.assert(not isnull(z), "bad pointer")
+    var passes = 1 + [int64](conf.interior)
+    for pass = 0, passes do
+      for x0 = 0, stride_zx, conf.stripsize do
+        for y = 0, stride_zy do
+          for x = x0, min(x0 + conf.stripsize, stride_zx) do
+            if not conf.interior or
+              (pass == 0) ~=
+                 ((y == 0 and pcy > 0) or (x == 0 and pcx > 0) or
+                  (y == stride_zy - 1 and pcy < conf.numpcy - 1) or
+                  (x == stride_zx - 1 and pcx < conf.numpcx - 1))
+            then
+              var z = dynamic_cast(ptr(zone, rz), [ptr](z_))
+              regentlib.assert(not isnull(z), "bad pointer")
 
-        var top_left = ghost_top_left_p(conf, pcx, pcy)
-        var top_right = ghost_top_right_p(conf, pcx, pcy)
-        var bottom_left = ghost_bottom_left_p(conf, pcx, pcy)
-        var bottom_right = ghost_bottom_right_p(conf, pcx, pcy)
-        var top = ghost_top_p(conf, pcx, pcy)
-        var bottom = ghost_bottom_p(conf, pcx, pcy)
-        var left = ghost_left_p(conf, pcx, pcy)
-        var right = ghost_right_p(conf, pcx, pcy)
+              var top_left = ghost_top_left_p(conf, pcx, pcy)
+              var top_right = ghost_top_right_p(conf, pcx, pcy)
+              var bottom_left = ghost_bottom_left_p(conf, pcx, pcy)
+              var bottom_right = ghost_bottom_right_p(conf, pcx, pcy)
+              var top = ghost_top_p(conf, pcx, pcy)
+              var bottom = ghost_bottom_p(conf, pcx, pcy)
+              var left = ghost_left_p(conf, pcx, pcy)
+              var right = ghost_right_p(conf, pcx, pcy)
 
-        var inner_x = x - [int64](pcx > 0)
-        var inner_y = y - [int64](pcy > 0)
-        var inner_stride_x = stride_zx - 1 + [int64](pcx == 0) + [int64](pcx == conf.numpcx - 1)
-        var pp : ptr(point, rpp, rpg)[4]
-        do
-          var p_ : int64 = -1
-          if y == 0 and x == 0 and pcy > 0 and pcx > 0 then
-            p_ = top_left._0
-          elseif y == 0 and pcy > 0 then
-            p_ = top._0 + inner_x
-          elseif x == 0 and pcx > 0 then
-            p_ = left._0 + inner_y
-          else -- private
-            p_ = first_p + inner_y * inner_stride_x + inner_x
+              var inner_x = x - [int64](pcx > 0)
+              var inner_y = y - [int64](pcy > 0)
+              var inner_stride_x = stride_zx - 1 + [int64](pcx == 0) + [int64](pcx == conf.numpcx - 1)
+              var pp : ptr(point, rpp, rpg)[4]
+              do
+                var p_ : int64 = -1
+                if y == 0 and x == 0 and pcy > 0 and pcx > 0 then
+                  p_ = top_left._0
+                elseif y == 0 and pcy > 0 then
+                  p_ = top._0 + inner_x
+                elseif x == 0 and pcx > 0 then
+                  p_ = left._0 + inner_y
+                else -- private
+                  p_ = first_p + inner_y * inner_stride_x + inner_x
+                end
+                var p = dynamic_cast(ptr(point, rpp, rpg), [ptr](p_))
+                regentlib.assert(not isnull(p), "bad pointer")
+                pp[0] = p
+              end
+              do
+                var p_ : int64 = -1
+                if y == 0 and x == stride_zx - 1 and pcy > 0 and pcx < conf.numpcx - 1 then
+                  p_ = top_right._0
+                elseif y == 0 and pcy > 0 then
+                  p_ = top._0 + (inner_x + 1)
+                elseif x == stride_zx - 1 and pcx < conf.numpcx - 1 then
+                  p_ = right._0 + inner_y
+                else -- private
+                  p_ = first_p + inner_y * inner_stride_x + (inner_x + 1)
+                end
+                var p = dynamic_cast(ptr(point, rpp, rpg), [ptr](p_))
+                regentlib.assert(not isnull(p), "bad pointer")
+                pp[1] = p
+              end
+              do
+                var p_ : int64 = -1
+                if y == stride_zy - 1 and x == stride_zx - 1 and pcy < conf.numpcy - 1 and pcx < conf.numpcx - 1 then
+                  p_ = bottom_right._0
+                elseif y == stride_zy - 1 and pcy < conf.numpcy - 1 then
+                  p_ = bottom._0 + (inner_x + 1)
+                elseif x == stride_zx - 1 and pcx < conf.numpcx - 1 then
+                  p_ = right._0 + (inner_y + 1)
+                else -- private
+                  p_ = first_p + (inner_y + 1) * inner_stride_x + (inner_x + 1)
+                end
+                var p = dynamic_cast(ptr(point, rpp, rpg), [ptr](p_))
+                regentlib.assert(not isnull(p), "bad pointer")
+                pp[2] = p
+              end
+              do
+                var p_ : int64 = -1
+                if y == stride_zy - 1 and x == 0 and pcy < conf.numpcy - 1 and pcx > 0 then
+                  p_ = bottom_left._0
+                elseif y == stride_zy - 1 and pcy < conf.numpcy - 1 then
+                  p_ = bottom._0 + inner_x
+                elseif x == 0 and pcx > 0 then
+                  p_ = left._0 + (inner_y + 1)
+                else -- private
+                  p_ = first_p + (inner_y + 1) * inner_stride_x + inner_x
+                end
+                var p = dynamic_cast(ptr(point, rpp, rpg), [ptr](p_))
+                regentlib.assert(not isnull(p), "bad pointer")
+                pp[3] = p
+              end
+
+              var ss : ptr(side(rz, rpp, rpg, rs), rs)[4]
+              for i = 0, znump do
+                var s_ = z_ * znump + i
+                var s = dynamic_cast(ptr(side(rz, rpp, rpg, rs), rs), [ptr](s_))
+                regentlib.assert(not isnull(s), "bad pointer")
+                ss[i] = s
+              end
+
+              for i = 0, znump do
+                var prev_i = (i + znump - 1) % znump
+                var next_i = (i + 1) % znump
+
+                var s = ss[i]
+                if conf.seq_init then regentlib.assert(s.mapsz == z, "bad value: mapsz") end
+                s.mapsz = z
+
+                if conf.seq_init then regentlib.assert(s.mapsp1 == pp[i], "bad value: mapsp1") end
+                if conf.seq_init then regentlib.assert(s.mapsp2 == pp[next_i], "bad value: mapsp2") end
+                s.mapsp1 = pp[i]
+                s.mapsp2 = pp[next_i]
+
+                if conf.seq_init then regentlib.assert(s.mapss3 == ss[prev_i], "bad value: mapss3") end
+                if conf.seq_init then regentlib.assert(s.mapss4 == ss[next_i], "bad value: mapss4") end
+                s.mapss3 = ss[prev_i]
+                s.mapss4 = ss[next_i]
+              end
+
+              z_ += 1
+            end
           end
-          var p = dynamic_cast(ptr(point, rpp, rpg), [ptr](p_))
-          regentlib.assert(not isnull(p), "bad pointer")
-          pp[0] = p
         end
-        do
-          var p_ : int64 = -1
-          if y == 0 and x == stride_zx - 1 and pcy > 0 and pcx < conf.numpcx - 1 then
-            p_ = top_right._0
-          elseif y == 0 and pcy > 0 then
-            p_ = top._0 + (inner_x + 1)
-          elseif x == stride_zx - 1 and pcx < conf.numpcx - 1 then
-            p_ = right._0 + inner_y
-          else -- private
-            p_ = first_p + inner_y * inner_stride_x + (inner_x + 1)
-          end
-          var p = dynamic_cast(ptr(point, rpp, rpg), [ptr](p_))
-          regentlib.assert(not isnull(p), "bad pointer")
-          pp[1] = p
-        end
-        do
-          var p_ : int64 = -1
-          if y == stride_zy - 1 and x == stride_zx - 1 and pcy < conf.numpcy - 1 and pcx < conf.numpcx - 1 then
-            p_ = bottom_right._0
-          elseif y == stride_zy - 1 and pcy < conf.numpcy - 1 then
-            p_ = bottom._0 + (inner_x + 1)
-          elseif x == stride_zx - 1 and pcx < conf.numpcx - 1 then
-            p_ = right._0 + (inner_y + 1)
-          else -- private
-            p_ = first_p + (inner_y + 1) * inner_stride_x + (inner_x + 1)
-          end
-          var p = dynamic_cast(ptr(point, rpp, rpg), [ptr](p_))
-          regentlib.assert(not isnull(p), "bad pointer")
-          pp[2] = p
-        end
-        do
-          var p_ : int64 = -1
-          if y == stride_zy - 1 and x == 0 and pcy < conf.numpcy - 1 and pcx > 0 then
-            p_ = bottom_left._0
-          elseif y == stride_zy - 1 and pcy < conf.numpcy - 1 then
-            p_ = bottom._0 + inner_x
-          elseif x == 0 and pcx > 0 then
-            p_ = left._0 + (inner_y + 1)
-          else -- private
-            p_ = first_p + (inner_y + 1) * inner_stride_x + inner_x
-          end
-          var p = dynamic_cast(ptr(point, rpp, rpg), [ptr](p_))
-          regentlib.assert(not isnull(p), "bad pointer")
-          pp[3] = p
-        end
-
-        var ss : ptr(side(rz, rpp, rpg, rs), rs)[4]
-        for i = 0, znump do
-          var s_ = z_ * znump + i
-          var s = dynamic_cast(ptr(side(rz, rpp, rpg, rs), rs), [ptr](s_))
-          regentlib.assert(not isnull(s), "bad pointer")
-          ss[i] = s
-        end
-
-        for i = 0, znump do
-          var prev_i = (i + znump - 1) % znump
-          var next_i = (i + 1) % znump
-
-          var s = ss[i]
-          if conf.seq_init then regentlib.assert(s.mapsz == z, "bad value: mapsz") end
-          s.mapsz = z
-
-          if conf.seq_init then regentlib.assert(s.mapsp1 == pp[i], "bad value: mapsp1") end
-          if conf.seq_init then regentlib.assert(s.mapsp2 == pp[next_i], "bad value: mapsp2") end
-          s.mapsp1 = pp[i]
-          s.mapsp2 = pp[next_i]
-
-          if conf.seq_init then regentlib.assert(s.mapss3 == ss[prev_i], "bad value: mapss3") end
-          if conf.seq_init then regentlib.assert(s.mapss4 == ss[next_i], "bad value: mapss4") end
-          s.mapss3 = ss[prev_i]
-          s.mapss4 = ss[next_i]
-        end
-
-        z_ += 1
       end
     end
     regentlib.assert(z_ == last_z, "zone underflow")

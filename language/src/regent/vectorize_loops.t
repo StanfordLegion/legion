@@ -25,6 +25,8 @@ local symbol_table = require("regent/symbol_table")
 
 local min = math.min
 
+local bounds_checks = std.config["bounds-checks"]
+
 -- vectorizer
 
 local SIMD_REG_SIZE
@@ -249,6 +251,11 @@ function flip_types.expr(cx, simd_width, symbol, node)
       }
     end
 
+  elseif node:is(ast.typed.expr.UnsafeCast) then
+    if cx:lookup_expr_type(node) == V then
+      new_node.value = flip_types.expr(cx, simd_width, symbol, node.value)
+    end
+
   elseif node:is(ast.typed.expr.Deref) then
 
   elseif node:is(ast.typed.expr.ID) then
@@ -406,6 +413,9 @@ function min_simd_width.expr(cx, reg_size, node)
 
   elseif node:is(ast.typed.expr.Cast) then
     simd_width = min(simd_width, min_simd_width.expr(cx, reg_size, node.arg))
+
+  elseif node:is(ast.typed.expr.UnsafeCast) then
+    simd_width = min(simd_width, min_simd_width.expr(cx, reg_size, node.value))
 
   elseif node:is(ast.typed.expr.Deref) then
     simd_width = min(simd_width, min_simd_width.expr(cx, reg_size, node.value))
@@ -761,6 +771,11 @@ function check_vectorizability.expr(cx, node)
     cx:assign_expr_type(node, cx:lookup_expr_type(node.arg))
     return true
 
+  elseif node:is(ast.typed.expr.UnsafeCast) then
+    if not check_vectorizability.expr(cx, node.value) then return false end
+    cx:assign_expr_type(node, cx:lookup_expr_type(node.value))
+    return true
+
   elseif node:is(ast.typed.expr.Deref) then
     if not check_vectorizability.expr(cx, node.value) then return false end
     cx:assign_expr_type(node, cx:lookup_expr_type(node.value))
@@ -912,7 +927,7 @@ function vectorize_loops.stat_for_list(node)
   cx.demanded = node.options.vectorize:is(ast.options.Demand)
 
   local vectorizable = check_vectorizability.block(cx, node.block)
-  if vectorizable then
+  if vectorizable and not bounds_checks then
     return vectorize.stat_for_list(cx, node)
   else
     return node { block = node.block }
@@ -942,7 +957,7 @@ function vectorize_loops.stat(node)
     return vectorize_loops.stat_for_num(node)
 
   elseif node:is(ast.typed.stat.ForList) then
-    if std.is_bounded_type(node.symbol.type) and node.symbol.type.dim <= 1 then
+    if std.is_bounded_type(node.symbol:gettype()) and node.symbol:gettype().dim <= 1 then
       return vectorize_loops.stat_for_list(node)
     else
       return node { block = vectorize_loops.block(node.block) }

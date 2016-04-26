@@ -38,7 +38,9 @@ namespace Realm {
 
     AddressSpace Memory::address_space(void) const
     {
-      return ID(id).node();
+      // limitations in the current newmap implementation require that all memories
+      //  be managed by the HLR instance on the first node
+      return 0; //ID(id).node();
     }
 
     ID::IDType Memory::local_id(void) const
@@ -1583,7 +1585,7 @@ namespace Realm {
 	  args.sequence_id = sequence_id;
 
 	  int count = 1;
-	  while(datalen > max_xfer_size) {
+	  while(lines > max_lines_per_xfer) {
 	    RemoteWriteMessage::Message::request(ID(mem).node(), args,
 						 pos, datalen,
 						 stride, max_lines_per_xfer,

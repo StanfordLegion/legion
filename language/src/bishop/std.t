@@ -111,8 +111,8 @@ end
 function std.register_bishop_mappers()
   local mapper = __bishop_jit_mappers__()
 
-  local task_rules = terralib.newsymbol(&c.bishop_task_rule_t)
-  local region_rules = terralib.newsymbol(&c.bishop_region_rule_t)
+  local task_rules = terralib.newsymbol(c.bishop_task_rule_t[ #mapper.task_rules ])
+  local region_rules = terralib.newsymbol(c.bishop_region_rule_t[ #mapper.region_rules ])
   local register_body = quote end
 
   for i = 1, #mapper.task_rules do
@@ -148,8 +148,8 @@ function std.register_bishop_mappers()
   local terra register()
     var num_task_rules = [#mapper.task_rules]
     var num_region_rules = [#mapper.region_rules]
-    var [task_rules] : c.bishop_task_rule_t[ #mapper.task_rules ]
-    var [region_rules] : c.bishop_region_rule_t[ #mapper.region_rules ]
+    var [task_rules]
+    var [region_rules]
     [register_body]
     c.register_bishop_mappers([task_rules], num_task_rules,
                               [region_rules], num_region_rules,

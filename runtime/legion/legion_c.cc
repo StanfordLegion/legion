@@ -931,7 +931,7 @@ PartitionByIntersectionShim::task(const Task *task,
     for (IndexIterator it(runtime, ctx, rhs); it.has_next();) {
       size_t count = 0;
       ptr_t start = it.next_span(count);
-      for (ptr_t p(start); p.value - start.value < count; p++) {
+      for (ptr_t p(start); p.value - start.value < (off_t)count; p++) {
         rhs_points.insert(p);
       }
     }
@@ -939,7 +939,7 @@ PartitionByIntersectionShim::task(const Task *task,
     for (IndexIterator it(runtime, ctx, lhs); it.has_next();) {
       size_t count = 0;
       ptr_t start = it.next_span(count);
-      for (ptr_t p(start); p.value - start.value < count; p++) {
+      for (ptr_t p(start); p.value - start.value < (off_t)count; p++) {
         if (rhs_points.count(p)) {
           coloring[c.p].points.insert(p);
         }
@@ -1065,7 +1065,7 @@ PartitionByDifferenceShim::task(const Task *task,
     for (IndexIterator it(runtime, ctx, rhs); it.has_next();) {
       size_t count = 0;
       ptr_t start = it.next_span(count);
-      for (ptr_t p(start); p.value - start.value < count; p++) {
+      for (ptr_t p(start); p.value - start.value < (off_t)count; p++) {
         rhs_points.insert(p);
       }
     }
@@ -1073,7 +1073,7 @@ PartitionByDifferenceShim::task(const Task *task,
     for (IndexIterator it(runtime, ctx, lhs); it.has_next();) {
       size_t count = 0;
       ptr_t start = it.next_span(count);
-      for (ptr_t p(start); p.value - start.value < count; p++) {
+      for (ptr_t p(start); p.value - start.value < (off_t)count; p++) {
         if (!rhs_points.count(p)) {
           coloring[c.p].points.insert(p);
         }
@@ -1201,7 +1201,7 @@ PartitionByFieldShim::task(const Task *task,
        it.has_next();) {
     size_t count = 0;
     ptr_t start = it.next_span(count);
-    for (ptr_t p(start); p.value - start.value < count; p++) {
+    for (ptr_t p(start); p.value - start.value < (off_t)count; p++) {
       Color c = accessor.read(p);
       coloring[DomainPoint::from_point<1>(Point<1>(c))].points.insert(p);
     }
@@ -1335,7 +1335,7 @@ PartitionByImageShim::task(const Task *task,
     for (IndexIterator it(runtime, ctx, r); it.has_next();) {
       size_t count = 0;
       ptr_t start = it.next_span(count);
-      for (ptr_t p(start); p.value - start.value < count; p++) {
+      for (ptr_t p(start); p.value - start.value < (off_t)count; p++) {
         coloring[upgrade_point(c.p)].points.insert(accessor.read(p));
       }
     }
@@ -1475,7 +1475,7 @@ PartitionByPreimageShim::task(const Task *task,
     for (IndexIterator it(runtime, ctx, target); it.has_next();) {
       size_t count = 0;
       ptr_t start = it.next_span(count);
-      for (ptr_t p(start); p.value - start.value < count; p++) {
+      for (ptr_t p(start); p.value - start.value < (off_t)count; p++) {
         points.insert(p);
       }
     }
@@ -1483,7 +1483,7 @@ PartitionByPreimageShim::task(const Task *task,
     for (IndexIterator it(runtime, ctx, args.handle); it.has_next();) {
       size_t count = 0;
       ptr_t start = it.next_span(count);
-      for (ptr_t p(start); p.value - start.value < count; p++) {
+      for (ptr_t p(start); p.value - start.value < (off_t)count; p++) {
         if (points.count(accessor.read(p))) {
           coloring[upgrade_point(c.p)].points.insert(p);
         }
@@ -1534,6 +1534,30 @@ legion_index_partition_create_by_preimage(
 #endif
 
   return CObjectWrapper::wrap(ip);
+}
+
+bool
+legion_index_partition_is_disjoint(legion_runtime_t runtime_,
+                                   legion_context_t ctx_,
+                                   legion_index_partition_t handle_)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  IndexPartition handle = CObjectWrapper::unwrap(handle_);
+
+  return runtime->is_index_partition_disjoint(ctx, handle);
+}
+
+bool
+legion_index_partition_is_complete(legion_runtime_t runtime_,
+                                   legion_context_t ctx_,
+                                   legion_index_partition_t handle_)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  IndexPartition handle = CObjectWrapper::unwrap(handle_);
+
+  return runtime->is_index_partition_complete(ctx, handle);
 }
 
 legion_index_space_t
@@ -2170,7 +2194,7 @@ legion_index_allocator_destroy(legion_index_allocator_t handle_)
 
 legion_ptr_t
 legion_index_allocator_alloc(legion_index_allocator_t allocator_,
-                             unsigned num_elements)
+                             size_t num_elements)
 {
   IndexAllocator allocator = CObjectWrapper::unwrap(allocator_);
   ptr_t ptr = allocator.alloc(num_elements);
@@ -2180,7 +2204,7 @@ legion_index_allocator_alloc(legion_index_allocator_t allocator_,
 void
 legion_index_allocator_free(legion_index_allocator_t allocator_,
                             legion_ptr_t ptr_,
-                            unsigned num_elements)
+                            size_t num_elements)
 {
   IndexAllocator allocator = CObjectWrapper::unwrap(allocator_);
   ptr_t ptr = CObjectWrapper::unwrap(ptr_);
@@ -2311,6 +2335,27 @@ legion_phase_barrier_destroy(legion_runtime_t runtime_,
   PhaseBarrier handle = CObjectWrapper::unwrap(handle_);
 
   runtime->destroy_phase_barrier(ctx, handle);
+}
+
+void
+legion_phase_barrier_arrive(legion_runtime_t runtime_,
+                            legion_context_t ctx_,
+                            legion_phase_barrier_t handle_,
+                            size_t count /* = 1 */)
+{
+  PhaseBarrier handle = CObjectWrapper::unwrap(handle_);
+
+  handle.arrive(count);
+}
+
+void
+legion_phase_barrier_wait(legion_runtime_t runtime_,
+                          legion_context_t ctx_,
+                          legion_phase_barrier_t handle_)
+{
+  PhaseBarrier handle = CObjectWrapper::unwrap(handle_);
+
+  handle.wait();
 }
 
 legion_phase_barrier_t

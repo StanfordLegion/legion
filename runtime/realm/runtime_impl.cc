@@ -202,6 +202,7 @@ namespace Realm {
 
       virtual bool event_triggered(Event e, bool poisoned);
       virtual void print(std::ostream& os) const;
+      virtual Event get_finish_event(void) const;
 
     protected:
       RuntimeImpl *runtime;
@@ -229,6 +230,11 @@ namespace Realm {
     void DeferredShutdown::print(std::ostream& os) const
     {
       os << "deferred shutdown";
+    }
+
+    Event DeferredShutdown::get_finish_event(void) const
+    {
+      return Event::NO_EVENT;
     }
 
     void Runtime::shutdown(Event wait_on /*= Event::NO_EVENT*/)
@@ -525,8 +531,11 @@ namespace Realm {
 	setenv("PMI_GNI_COOKIE", new_pmi_gni_cookie, 1 /*overwrite*/);
       }
       // SJT: another GASNET workaround - if we don't have GASNET_IB_SPAWNER set, assume it was MPI
-      if(!getenv("GASNET_IB_SPAWNER"))
+      // (This is called GASNET_IB_SPAWNER for versions <= 1.24 and GASNET_SPAWNER for versions >= 1.26)
+      if(!getenv("GASNET_IB_SPAWNER") && !getenv("GASNET_SPAWNER")) {
 	setenv("GASNET_IB_SPAWNER", "mpi", 0 /*no overwrite*/);
+	setenv("GASNET_SPAWNER", "mpi", 0 /*no overwrite*/);
+      }
 
       // and one more... disable GASNet's probing of pinnable memory - it's
       //  painfully slow on most systems (the gemini conduit doesn't probe
@@ -653,6 +662,8 @@ namespace Realm {
       cp.add_option_string("-ll:prefix", dummy_prefix);
 #endif
 
+      cp.add_option_int("-realm:eventloopcheck", Config::event_loop_detection_limit);
+
       // these are actually parsed in activemsg.cc, but consume them here for now
       size_t dummy = 0;
       cp.add_option_int("-ll:numlmbs", dummy)
@@ -748,6 +759,7 @@ namespace Realm {
       hcount += BarrierAdjustMessage::Message::add_handler_entries(&handlers[hcount], "Barrier Adjust AM");
       hcount += BarrierSubscribeMessage::Message::add_handler_entries(&handlers[hcount], "Barrier Subscribe AM");
       hcount += BarrierTriggerMessage::Message::add_handler_entries(&handlers[hcount], "Barrier Trigger AM");
+      hcount += BarrierMigrationMessage::Message::add_handler_entries(&handlers[hcount], "Barrier Migration AM");
       hcount += MetadataRequestMessage::Message::add_handler_entries(&handlers[hcount], "Metadata Request AM");
       hcount += MetadataResponseMessage::Message::add_handler_entries(&handlers[hcount], "Metadata Response AM");
       hcount += MetadataInvalidateMessage::Message::add_handler_entries(&handlers[hcount], "Metadata Invalidate AM");

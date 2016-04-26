@@ -16,7 +16,7 @@ import "regent"
 
 local c = regentlib.c
 
-task f()
+task main()
   var t = region(ispace(ptr, 5), int)
   var colors = c.legion_coloring_create()
   c.legion_coloring_ensure_color(colors, 0)
@@ -32,4 +32,4 @@ task f()
 
   c.legion_coloring_destroy(colors)
 end
-f:compile()
+regentlib.start(main)

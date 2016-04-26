@@ -370,7 +370,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ShimMapper::ShimMapper(Machine m, Runtime *rt, 
                            Processor local, const char *name/*=NULL*/)
-      : DefaultMapper(m, local, name),
+      : DefaultMapper(m, local,(name == NULL) ? create_shim_name(local) : name),
         local_kind(local.kind()), machine(m), runtime(rt),
         max_steals_per_theft(STATIC_MAX_PERMITTED_STEALS),
         max_steal_count(STATIC_MAX_STEAL_COUNT),
@@ -446,6 +446,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    /*static*/ const char* ShimMapper::create_shim_name(Processor p)
+    //--------------------------------------------------------------------------
+    {
+      const size_t buffer_size = 64;
+      char *result = (char*)malloc(buffer_size*sizeof(char));
+      snprintf(result, buffer_size-1,
+                "Shim Mapper on Processor " IDFMT "", p.id);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     Mapper::MapperSyncModel ShimMapper::get_mapper_sync_model(void) const
     //--------------------------------------------------------------------------
     {
@@ -469,6 +480,8 @@ namespace Legion {
       local_task.map_locally = output.map_locally;
       local_task.spawn_task = output.stealable;
       local_task.profile_task = false;
+      // Save the current context before doing any old calls
+      current_ctx = ctx;
       // Invoke the old mapper call
       this->select_task_options(&local_task);
       // Copy the results back
@@ -1158,7 +1171,7 @@ namespace Legion {
       std::set<FieldID> fields = req.privilege_fields;
       GCPriority gc_priority = 0;
       if (req.make_persistent)
-        gc_priority = MAX_GC_PRIORITY; 
+        gc_priority = GC_NEVER_PRIORITY; 
       if (!req.additional_fields.empty())
         fields.insert(req.additional_fields.begin(),
                       req.additional_fields.end());
@@ -1269,6 +1282,6 @@ namespace Legion {
       }
     }
 
-  };
-};
+  }; // namespace Mapping
+}; // namespace Legion
 

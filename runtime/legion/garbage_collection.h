@@ -54,7 +54,7 @@ namespace Legion {
       INSTANCE_MAPPER_REF = 15,
       APPLICATION_REF = 16,
       MAPPING_ACQUIRE_REF = 17,
-      MAX_GC_REF = 18,
+      NEVER_GC_REF = 18,
       CONTEXT_REF = 19,
       LAST_SOURCE_REF = 20,
     };
@@ -85,7 +85,7 @@ namespace Legion {
       "Instance Mapper Reference",                  \
       "Application Reference",                      \
       "Mapping Acquire Reference",                  \
-      "Maximum GC Priority Reference",              \
+      "Never GC Reference",                         \
       "Context Reference",                          \
     }
 

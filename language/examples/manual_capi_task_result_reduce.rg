@@ -62,11 +62,11 @@ local FID               = 2
 local REDID             = 3
 
 local Pt1dexplicit = macro(function(val)
-  return `Lg.legion_point_1d_t { x = array(val) }
+  return `Lg.legion_point_1d_t { x = array([int64](val)) }
 end) 
 local Pt1d = macro(function(val)
   return `Lg.legion_domain_point_from_point_1d(
-            Lg.legion_point_1d_t { x = array(val) })
+            Lg.legion_point_1d_t { x = array([int64](val)) })
 end)
 
 -- define the tasks
@@ -126,9 +126,15 @@ terra future_task(
   runtime   : Lg.legion_runtime_t
 )
   var index_point = Lg.legion_task_get_index_point(task)
-  assert(index_point.dim == 1)
+  if index_point.dim ~= 1 then
+    C.printf("abort\n")
+    C.abort()
+  end
   C.printf("Executing task %d!\n", index_point.point_data[0])
-  assert(Lg.legion_task_get_local_arglen(task) == sizeof(int))
+  if Lg.legion_task_get_local_arglen(task) ~= sizeof(int) then
+    C.printf("abort\n")
+    C.abort()
+  end
   var input  = @[&int](Lg.legion_task_get_local_args(task))
   var output = 2 * input
   C.printf("Sizes %d, %d\n", sizeof(Lg.legion_task_result_t), sizeof(int))

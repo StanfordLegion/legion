@@ -73,7 +73,7 @@ terra sub_task(task : c.legion_task_t,
 
   -- Sanity check with generic API.
   for global_i0 = rect.lo.x[0], rect.hi.x[0]+1 do
-    var p = c.legion_domain_point_t { dim = 1, point_data = arrayof(int, global_i0, 0, 0) }
+    var p = c.legion_domain_point_t { dim = 1, point_data = arrayof(int64, global_i0, 0, 0) }
     var value : int
     c.legion_accessor_generic_read_domain_point(a1, p, &value, sizeof(int))
     c.printf("read value %2d at global %2d\n", value, global_i0)
@@ -94,8 +94,8 @@ terra top_level_task(task : c.legion_task_t,
 
   var d = c.legion_domain_from_rect_1d(
     c.legion_rect_1d_t {
-      lo = c.legion_point_1d_t { x = arrayof(int, 0) },
-      hi = c.legion_point_1d_t { x = arrayof(int, 15) },
+      lo = c.legion_point_1d_t { x = arrayof(int64, 0) },
+      hi = c.legion_point_1d_t { x = arrayof(int64, 15) },
     })
   var is = c.legion_index_space_create_domain(runtime, ctx, d)
   var fs = c.legion_field_space_create(runtime, ctx)

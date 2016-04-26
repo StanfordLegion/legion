@@ -42,7 +42,7 @@ use_llvm = legion_has_llvm_support()
 
 function legion_task_wrapper(body)
   -- look at the return type of the task we're wrapping to emit the right postamble code
-  local ft = body:gettype(false)
+  local ft = body:gettype()
   local rt = ft.returntype
   local wrapper = nil
   if terralib.sizeof(rt) > 0 then
@@ -197,7 +197,10 @@ terra top_level_task(task : c.legion_task_t,
   var rv : uint32 = 99
   c.legion_future_get_result_bytes(f, [&opaque](&rv), terralib.sizeof(uint32))
   c.printf("back in parent (rv = %d)\n", rv)
-  assert(rv == 43)
+  if rv ~= 43 then
+    c.printf("abort\n")
+    c.abort()
+  end
 end
 
 terra main()

@@ -254,6 +254,8 @@ namespace Legion {
     public:
       ShimMapper& operator=(const ShimMapper &rhs);
     public:
+      static const char* create_shim_name(Processor p);
+    public:
       // New mapper calls
       virtual MapperSyncModel get_mapper_sync_model(void) const;
       virtual void select_task_options(const MapperContext    ctx,

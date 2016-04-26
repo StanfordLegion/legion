@@ -14,6 +14,7 @@
 
 -- Regent Compiler Passes
 
+local ast = require("regent/ast")
 local codegen = require("regent/codegen")
 local optimize_config_options = require("regent/optimize_config_options")
 local optimize_divergence = require("regent/optimize_divergence")
@@ -31,27 +32,33 @@ local inline_tasks = require("regent/inline_tasks")
 
 local passes = {}
 
-function passes.optimize(ast)
-  if std.config["task-inlines"] then ast = inline_tasks.entry(ast) end
-  if std.config["index-launches"] then ast = optimize_loops.entry(ast) end
-  if std.config["futures"] then ast = optimize_futures.entry(ast) end
-  if std.config["leaf"] then ast = optimize_config_options.entry(ast) end
-  if std.config["inlines"] then ast = optimize_inlines.entry(ast) end
-  if std.config["trace"] then ast = optimize_traces.entry(ast) end
-  if std.config["no-dynamic-branches"] then ast = optimize_divergence.entry(ast) end
-  if std.config["vectorize"] then ast = vectorize_loops.entry(ast) end
-  return ast
+function passes.optimize(node)
+  if std.config["task-inlines"] then node = inline_tasks.entry(node) end
+  if std.config["index-launches"] then node = optimize_loops.entry(node) end
+  if std.config["futures"] then node = optimize_futures.entry(node) end
+  if std.config["leaf"] then node = optimize_config_options.entry(node) end
+  if std.config["inlines"] then node = optimize_inlines.entry(node) end
+  if std.config["trace"] then node = optimize_traces.entry(node) end
+  if std.config["no-dynamic-branches"] then node = optimize_divergence.entry(node) end
+  if std.config["vectorize"] then node = vectorize_loops.entry(node) end
+  return node
 end
 
 function passes.compile(lex)
   local node = parser:parse(lex)
   local function ctor(environment_function)
     local env = environment_function()
-    local ast = specialize.entry(env, node)
-    ast = type_check.entry(ast)
-    ast = passes.optimize(ast)
-    if std.config["pretty"] then print(pretty.entry(ast)) end
-    return codegen.entry(ast)
+    local node = specialize.entry(env, node)
+    node = type_check.entry(node)
+    node = passes.optimize(node)
+    if std.config["pretty"] then print(pretty.entry(node)) end
+    if std.config["task-inlines"] and node:is(ast.typed.stat.Task) and
+      node.options.inline:is(ast.options.Demand)
+    then
+      return node.prototype
+    else
+      return codegen.entry(node)
+    end
   end
   return ctor, {node.name}
 end

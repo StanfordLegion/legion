@@ -472,9 +472,20 @@ namespace Realm {
   LoggerMessage& LoggerMessage::vprintf(const char *fmt, va_list args)
   {
     if(active) {
-      char msg[256];
-      vsnprintf(msg, 256, fmt, args);
-      (*oss) << msg;
+      static const int MAXLEN = 4096;
+      char msg[MAXLEN];
+      int full = vsnprintf(msg, MAXLEN, fmt, args);
+      // If this is an error or a warning, print out the full string
+      // no matter what
+      if((full >= MAXLEN) && ((level == Logger::LEVEL_FATAL) || 
+          (level == Logger::LEVEL_ERROR) || (level == Logger::LEVEL_WARNING))) {
+        char *full_msg = (char*)malloc(full+1);
+        vsnprintf(full_msg, full+1, fmt, args);
+        (*oss) << full_msg;
+        free(full_msg);
+      } else {
+        (*oss) << msg;
+      }
     }
     return *this;
   }

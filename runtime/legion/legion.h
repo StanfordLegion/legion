@@ -1572,14 +1572,14 @@ namespace Legion {
        * count of contiguous points in 'act_count'.
        */
       inline ptr_t next_span(size_t& act_count, 
-                             size_t req_count = (size_t)-1);
+                             size_t req_count = (size_t)-1LL);
     public:
       IndexIterator& operator=(const IndexIterator &rhs);
     private:
       Enumerator *enumerator;
       bool finished;
-      int current_pointer;
-      int remaining_elmts;
+      coord_t current_pointer;
+      size_t remaining_elmts;
     };
 
  
@@ -4341,10 +4341,10 @@ namespace Legion {
        * -hl:width <int> Scheduling granularity when handling dependence
        *              analysis and issuing operations.  Effectively the
        *              Legion runtime superscalar width.
-       * -hl:outorder Execute operations out-of-order when the runtime
-       *              has been compiled with the macro INORDER_EXECUTION.
-       *              By default when compiling with INORDER_EXECUTION
-       *              all applications will run in program order.
+       * -hl:inorder  Execute operations in strict propgram order. This
+       *              flag will actually run the entire operation through
+       *              the pipeline and wait for it to complete before
+       *              permitting the next operation to start.
        * -------------
        *  Messaging
        * -------------

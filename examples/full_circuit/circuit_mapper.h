@@ -17,12 +17,12 @@
 #define __CIRCUIT_MAPPER_H__
 
 #include "legion.h"
-#include "default_mapper.h"
+#include "shim_mapper.h"
 #include "circuit.h"
 
 using namespace LegionRuntime::HighLevel;
 
-class CircuitMapper : public DefaultMapper {
+class CircuitMapper : public ShimMapper {
 public:
   CircuitMapper(Machine machine, HighLevelRuntime *runtime, Processor local);
 public:
