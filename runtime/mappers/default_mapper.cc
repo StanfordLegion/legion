@@ -1064,47 +1064,8 @@ namespace Legion {
       output.task_priority = 0;
       output.postmap_task = false;
       // Figure out our target processors
-      if (task.target_proc.address_space() == node_id)
-      {
-        switch (task.target_proc.kind())
-        {
-          case Processor::TOC_PROC:
-            {
-              // GPUs have their own memories so they only get one
-              output.target_procs.push_back(task.target_proc);
-              break;
-            }
-          case Processor::LOC_PROC:
-            {
-              // Put any of our local cpus on here
-              // TODO: NUMA-ness needs to go here
-              // If we're part of a must epoch launch, our 
-              // target proc will be sufficient
-              if (!task.must_epoch_task)
-                output.target_procs.insert(output.target_procs.end(),
-                    local_cpus.begin(), local_cpus.end());
-              else
-                output.target_procs.push_back(task.target_proc);
-              break;
-            }
-          case Processor::IO_PROC:
-            {
-              // Put any of our I/O procs here
-              // If we're part of a must epoch launch, our
-              // target proc will be sufficient
-              if (!task.must_epoch_task)
-                output.target_procs.insert(output.target_procs.end(),
-                    local_ios.begin(), local_ios.end());
-              else
-                output.target_procs.push_back(task.target_proc);
-              break;
-            }
-          default:
-            assert(false); // unrecognized processor kind
-        }
-      }
-      else
-        output.target_procs.push_back(task.target_proc);
+      default_policy_select_target_processors(ctx, task, output.target_procs);
+
       // See if we have an inner variant, if we do virtually map all the regions
       // We don't even both caching these since they are so simple
       if (chosen.is_inner)
@@ -1285,6 +1246,56 @@ namespace Legion {
           cached_result.mapping[idx].clear();
         }
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void DefaultMapper::default_policy_select_target_processors(
+                                    MapperContext ctx,
+                                    const Task &task,
+                                    std::vector<Processor> &target_procs)
+    //--------------------------------------------------------------------------
+    {
+      if (task.target_proc.address_space() == node_id)
+      {
+        switch (task.target_proc.kind())
+        {
+          case Processor::TOC_PROC:
+            {
+              // GPUs have their own memories so they only get one
+              target_procs.push_back(task.target_proc);
+              break;
+            }
+          case Processor::LOC_PROC:
+            {
+              // Put any of our local cpus on here
+              // TODO: NUMA-ness needs to go here
+              // If we're part of a must epoch launch, our 
+              // target proc will be sufficient
+              if (!task.must_epoch_task)
+                target_procs.insert(target_procs.end(),
+                    local_cpus.begin(), local_cpus.end());
+              else
+                target_procs.push_back(task.target_proc);
+              break;
+            }
+          case Processor::IO_PROC:
+            {
+              // Put any of our I/O procs here
+              // If we're part of a must epoch launch, our
+              // target proc will be sufficient
+              if (!task.must_epoch_task)
+                target_procs.insert(target_procs.end(),
+                    local_ios.begin(), local_ios.end());
+              else
+                target_procs.push_back(task.target_proc);
+              break;
+            }
+          default:
+            assert(false); // unrecognized processor kind
+        }
+      }
+      else
+        target_procs.push_back(task.target_proc);
     }
 
     //--------------------------------------------------------------------------
