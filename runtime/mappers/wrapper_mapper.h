@@ -35,7 +35,8 @@ namespace Legion {
 			WrapperMapper(Mapper* dmapper, Machine machine, Processor local);
 			~WrapperMapper(void);
 			void get_input();
-			void get_select_task_options_input(const Task& task, TaskOptions& output);
+			void get_input(const MapperContext ctx);
+			void get_select_task_options_input(const MapperContext ctx, const Task& task, TaskOptions& output);
 			void get_map_task_input(Task *task);
 			bool InputNumberCheck(std::string strUserInput);
 public:
