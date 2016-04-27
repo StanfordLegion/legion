@@ -3900,11 +3900,11 @@ class FillInstance(object):
         # Find the destination preconditions
         if self.region is not region:
             preconditions = dst.find_copy_dependences(depth=dst_depth, 
-                field=dst_field, op=op, region=region, reading=False, 
+                field=dst_field, op=op, index=index, region=region, reading=False, 
                 redop=0, precise=perform_checks, intersect=self.region)
         else:
             preconditions = dst.find_copy_dependences(depth=dst_depth, 
-                field=dst_field, op=op, region=region, reading=False, 
+                field=dst_field, op=op, index=index, region=region, reading=False, 
                 redop=0, precise=perform_checks)
         if perform_checks:
             if self.region is not region:
