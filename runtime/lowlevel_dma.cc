@@ -4178,10 +4178,10 @@ namespace LegionRuntime {
       int fill_elmts = 1;
       // Optimize our buffer for the target instance
       size_t fill_elmts_size = optimize_fill_buffer(inst_impl, fill_elmts);
-      for (typename Arrays::Mapping<DIM, 1>::LinearSubrectIterator lso(rect, 
-            *dst_linearization); lso; lso++) {
-        int dst_index = lso.image_lo[0];
-        int elem_count = lso.subrect.volume();
+      for (typename Arrays::Mapping<DIM, 1>::DenseSubrectIterator dso(rect, 
+            *dst_linearization); dso; dso++) {
+        int dst_index = dso.image.lo[0];
+        int elem_count = dso.subrect.volume();
         int done = 0; 
         while (done < elem_count) {
           int dst_in_this_block = inst_impl->metadata.block_size - 
