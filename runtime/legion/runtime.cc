@@ -6448,7 +6448,7 @@ namespace Legion {
                                                            Runtime *runtime)
     //--------------------------------------------------------------------------
     {
-      return (vid % runtime->address_space);
+      return (vid % runtime->runtime_stride);
     }
 
     //--------------------------------------------------------------------------
