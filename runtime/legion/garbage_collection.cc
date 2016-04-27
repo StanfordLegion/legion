@@ -36,8 +36,9 @@ namespace Legion {
                                                    bool do_registration)
       : runtime(rt), did(id), owner_space(own_space), 
         local_space(loc_space), gc_lock(Reservation::create_reservation()),
-        current_state(INACTIVE_STATE), gc_references(0), 
-        valid_references(0), resource_references(0), 
+        current_state(INACTIVE_STATE), has_gc_references(false),
+        has_valid_references(false), has_resource_references(false), 
+        gc_references(0), valid_references(0), resource_references(0), 
         destruction_event(UserEvent::create_user_event()),
         registered_with_runtime(do_registration)
     //--------------------------------------------------------------------------
@@ -80,7 +81,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DistributedCollectable::add_gc_reference(unsigned cnt /*=1*/)
+    void DistributedCollectable::add_gc_reference(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -106,7 +107,10 @@ namespace Legion {
         AutoLock gc(gc_lock);
         if (first)
         {
-          gc_references += cnt;
+#ifdef DEBUG_HIGH_LEVEL
+          assert(!has_gc_references);
+#endif
+          has_gc_references = true;
           first = false;
         }
         done = update_state(need_activate, need_validate,
@@ -122,7 +126,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool DistributedCollectable::remove_gc_reference(unsigned cnt /*=1*/)
+    bool DistributedCollectable::remove_gc_reference(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -149,9 +153,9 @@ namespace Legion {
         if (first)
         {
 #ifdef DEBUG_HIGH_LEVEL
-          assert(gc_references >= cnt);
+          assert(has_gc_references);
 #endif
-          gc_references -= cnt;
+          has_gc_references = false;
           first = false;
         }
         done = update_state(need_activate, need_validate,
@@ -161,7 +165,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DistributedCollectable::add_valid_reference(unsigned cnt /*=1*/)
+    void DistributedCollectable::add_valid_reference(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -191,7 +195,10 @@ namespace Legion {
         AutoLock gc(gc_lock);
         if (first)
         {
-          valid_references += cnt;
+#ifdef DEBUG_HIGH_LEVEL
+          assert(!has_valid_references);
+#endif
+          has_valid_references = true;
           first = false;
         }
         done = update_state(need_activate, need_validate,
@@ -206,7 +213,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool DistributedCollectable::remove_valid_reference(unsigned cnt /*=1*/)
+    bool DistributedCollectable::remove_valid_reference(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -237,9 +244,9 @@ namespace Legion {
         if (first)
         {
 #ifdef DEBUG_HIGH_LEVEL
-          assert(valid_references >= cnt);
+          assert(has_valid_references);
 #endif
-          valid_references -= cnt;
+          has_valid_references = false;
           first = false;
         }
         done = update_state(need_activate, need_validate,
@@ -250,7 +257,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool DistributedCollectable::try_add_valid_reference(bool must_be_valid,
-                                                        unsigned cnt /*=1*/)
+                                                         int cnt /*=1*/)
     //--------------------------------------------------------------------------
     {
       bool need_activate = false;
@@ -283,7 +290,10 @@ namespace Legion {
           return false;
         if (first)
         {
-          valid_references += cnt;
+          // Still have to use an atomic here
+          unsigned previous = __sync_fetch_and_add(&valid_references, cnt);
+          if (previous == 0)
+            has_valid_references = true;
           first = false;
         }
         done = update_state(need_activate, need_validate,
@@ -334,18 +344,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DistributedCollectable::add_resource_reference(unsigned cnt /*=1*/)
+    void DistributedCollectable::add_resource_reference(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
       assert(current_state != DELETED_STATE);
 #endif
       AutoLock gc(gc_lock);
-      resource_references += cnt;
+#ifdef DEBUG_HIGH_LEVEL
+      assert(!has_resource_references);
+#endif
+      has_resource_references = true;
     }
 
     //--------------------------------------------------------------------------
-    bool DistributedCollectable::remove_resource_reference(unsigned cnt /*=1*/)
+    bool DistributedCollectable::remove_resource_reference(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -353,9 +366,9 @@ namespace Legion {
 #endif
       AutoLock gc(gc_lock);
 #ifdef DEBUG_HIGH_LEVEL
-      assert(resource_references >= cnt);
+      assert(has_resource_references);
 #endif
-      resource_references -= cnt;
+      has_resource_references = false;
       return can_delete();
     }
 
@@ -856,18 +869,18 @@ namespace Legion {
           {
             // See if we have any reason to be active
 #ifdef USE_REMOTE_REFERENCES
-            if ((valid_references > 0) || (!create_valid_refs.empty()))
+            if (has_valid_references || (!create_valid_refs.empty()))
 #else
-            if (valid_references > 0)
+            if (has_valid_references)
 #endif
             {
               current_state = PENDING_ACTIVE_VALID_STATE;
               need_activate = true;
             }
 #ifdef USE_REMOTE_REFERENCES
-            else if ((gc_references > 0) || !create_gc_refs.empty())
+            else if (has_gc_references || !create_gc_refs.empty())
 #else
-            else if (gc_references > 0)  
+            else if (has_gc_references)
 #endif
             {
               current_state = PENDING_ACTIVE_STATE;
@@ -882,9 +895,9 @@ namespace Legion {
           {
             // See if we have a reason to be valid
 #ifdef USE_REMOTE_REFERENCES
-            if ((valid_references > 0) || !create_valid_refs.empty())
+            if (has_valid_references || !create_valid_refs.empty())
 #else
-            if (valid_references > 0)
+            if (has_valid_references)
 #endif
             {
               // Move to a pending valid state
@@ -894,9 +907,9 @@ namespace Legion {
             }
             // See if we have a reason to be inactive
 #ifdef USE_REMOTE_REFERENCES
-            else if ((gc_references == 0) && create_gc_refs.empty())
+            else if (!has_gc_references  && create_gc_refs.empty())
 #else
-            else if (gc_references == 0)
+            else if (!has_gc_references)
 #endif
             {
               current_state = PENDING_INACTIVE_STATE;
@@ -916,16 +929,16 @@ namespace Legion {
           {
             // We should never move to a valid state from here
 #ifdef USE_REMOTE_REFERENCES
-            if ((valid_references > 0) || !create_valid_refs.empty())
+            if (has_valid_references || !create_valid_refs.empty())
 #else
-            if (valid_references > 0)
+            if (has_valid_references)
 #endif           
               assert(false);
             // See if we have a reason to move towards deletion
 #ifdef USE_REMOTE_REFERENCES
-            else if ((gc_references == 0) && create_gc_refs.empty())
+            else if (!has_gc_references && create_gc_refs.empty())
 #else
-            else if (gc_references == 0)
+            else if (!has_gc_references)
 #endif
             {
               current_state = PENDING_INACTIVE_DELETED_STATE;
@@ -942,9 +955,9 @@ namespace Legion {
           {
             // See if we have a reason to be invalid
 #ifdef USE_REMOTE_REFERENCES
-            if ((valid_references == 0) && create_valid_refs.empty())
+            if (!has_valid_references && create_valid_refs.empty())
 #else
-            if (valid_references == 0)
+            if (!has_valid_references)
 #endif
             {
               current_state = PENDING_INVALID_STATE;
@@ -970,9 +983,9 @@ namespace Legion {
             {
               // See if we are still active
 #ifdef USE_REMOTE_REFERENCES
-              if ((valid_references > 0) || !create_valid_refs.empty())
+              if (has_valid_references || !create_valid_refs.empty())
 #else
-              if (valid_references > 0)
+              if (has_valid_references)
 #endif
               {
                 // Now we need a validate
@@ -981,9 +994,9 @@ namespace Legion {
                 need_deactivate = false;
               }
 #ifdef USE_REMOTE_REFERENCES
-              else if ((gc_references > 0) || !create_gc_refs.empty())
+              else if (has_gc_references || !create_gc_refs.empty())
 #else
-              else if (gc_references > 0)
+              else if (has_gc_references)
 #endif
               {
                 // Nothing more to do
@@ -1017,18 +1030,18 @@ namespace Legion {
             {
               // See if we are still inactive
 #ifdef USE_REMOTE_REFERENCES
-              if ((valid_references > 0) || !create_valid_refs.empty())
+              if (has_valid_references || !create_valid_refs.empty())
 #else
-              if (valid_references > 0)
+              if (has_valid_references)
 #endif
               {
                 current_state = PENDING_ACTIVE_VALID_STATE;
                 need_activate = true;
               }
 #ifdef USE_REMOTE_REFERENCES
-              else if ((gc_references == 0) && create_gc_refs.empty())
+              else if (!has_gc_references && create_gc_refs.empty())
 #else
-              else if (gc_references == 0)
+              else if (!has_gc_references)
 #endif
               {
                 current_state = INACTIVE_STATE;
@@ -1058,9 +1071,9 @@ namespace Legion {
             {
               // Check to see if we are still valid
 #ifdef USE_REMOTE_REFERENCES
-              if ((valid_references > 0) || !create_valid_refs.empty())
+              if (has_valid_references || !create_valid_refs.empty())
 #else
-              if (valid_references > 0)
+              if (has_valid_references)
 #endif
               {
                 current_state = VALID_STATE;
@@ -1090,9 +1103,9 @@ namespace Legion {
             {
               // Check to see if we are still valid
 #ifdef USE_REMOTE_REFERENCES
-              if ((valid_references > 0) || !create_valid_refs.empty())
+              if (has_valid_references || !create_valid_refs.empty())
 #else
-              if (valid_references > 0)
+              if (has_valid_references)
 #endif
               {
                 // Now we are valid again
@@ -1101,9 +1114,9 @@ namespace Legion {
                 need_deactivate = false;
               }
 #ifdef USE_REMOTE_REFERENCES
-              else if ((gc_references == 0) && create_gc_refs.empty())
+              else if (!has_gc_references && create_gc_refs.empty())
 #else
-              else if (gc_references == 0)
+              else if (!has_gc_references)
 #endif
               {
                 // No longer active either
@@ -1135,9 +1148,9 @@ namespace Legion {
             if (need_activate)
             {
 #ifdef USE_REMOTE_REFERENCES
-              if ((valid_references > 0) || !create_valid_refs.empty())
+              if (has_valid_references || !create_valid_refs.empty())
 #else
-              if (valid_references > 0)
+              if (has_valid_references)
 #endif
               {
                 // Still going to valid
@@ -1146,9 +1159,9 @@ namespace Legion {
                 need_deactivate = false;
               }
 #ifdef USE_REMOTE_REFERENCES
-              else if ((gc_references == 0) && create_gc_refs.empty())
+              else if (!has_gc_references && create_gc_refs.empty())
 #else
-              else if (gc_references == 0)
+              else if (!has_gc_references)
 #endif
               {
                 // all our references disappeared
@@ -1182,18 +1195,18 @@ namespace Legion {
             {
 // See if we are still active
 #ifdef USE_REMOTE_REFERENCES
-              if ((valid_references > 0) || !create_valid_refs.empty())
+              if (has_valid_references || !create_valid_refs.empty())
 #else
-              if (valid_references > 0)
+              if (has_valid_references)
 #endif
               {
                 // This is really bad if it happens
                 assert(false);
               }
 #ifdef USE_REMOTE_REFERENCES
-              else if ((gc_references > 0) || !create_gc_refs.empty())
+              else if (has_gc_references || !create_gc_refs.empty())
 #else
-              else if (gc_references > 0)
+              else if (has_gc_references)
 #endif
               {
                 // Nothing more to do
@@ -1225,18 +1238,18 @@ namespace Legion {
             {
               // Check to see if we are still valid
 #ifdef USE_REMOTE_REFERENCES
-              if ((valid_references > 0) || !create_valid_refs.empty())
+              if (has_valid_references || !create_valid_refs.empty())
 #else
-              if (valid_references > 0)
+              if (has_valid_references)
 #endif
               {
                 // Really bad if this happens
                 assert(false);
               }
 #ifdef USE_REMOTE_REFERENCES
-              else if ((gc_references == 0) && create_gc_refs.empty())
+              else if (!has_gc_references  && create_gc_refs.empty())
 #else
-              else if (gc_references == 0)
+              else if (!has_gc_references)
 #endif
               {
                 // No longer active either
@@ -1267,18 +1280,18 @@ namespace Legion {
             {
               // See if we are still inactive
 #ifdef USE_REMOTE_REFERENCES
-              if ((valid_references > 0) || !create_valid_refs.empty())
+              if (has_valid_references || !create_valid_refs.empty())
 #else
-              if (valid_references > 0)
+              if (has_valid_references)
 #endif
               {
                 // This is really bad if it happens
                 assert(false);
               }
 #ifdef USE_REMOTE_REFERENCES
-              else if ((gc_references == 0) && create_gc_refs.empty())
+              else if (!has_gc_references && create_gc_refs.empty())
 #else
-              else if (gc_references == 0)
+              else if (!has_gc_references)
 #endif
               {
                 current_state = DELETED_STATE;
@@ -1319,14 +1332,14 @@ namespace Legion {
     {
       // Better be called while holding the lock
 #ifdef USE_REMOTE_REFERENCES
-      bool result = ((resource_references == 0) && (gc_references == 0) &&
-              (valid_references == 0) && create_gc_refs.empty() && 
+      bool result = (!has_resource_references && !has_gc_references &&
+              !has_valid_references && create_gc_refs.empty() && 
               create_valid_refs.empty() && 
               ((current_state == INACTIVE_STATE) || 
                (current_state == DELETED_STATE)));
 #else
-      bool result = ((resource_references == 0) && (gc_references == 0) &&
-              (valid_references == 0) && 
+      bool result = (!has_resource_references && !has_gc_references &&
+              !has_valid_references && 
               ((current_state == INACTIVE_STATE) || 
                (current_state == DELETED_STATE)));
 #endif
