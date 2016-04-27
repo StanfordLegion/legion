@@ -270,9 +270,14 @@ namespace Legion {
       const DistributedID did;
       const AddressSpaceID owner_space;
       const AddressSpaceID local_space;
-    protected:
-      State current_state;
+    protected: // derived users can get the gc lock
       Reservation gc_lock;
+    private: // derived users can't see the state information
+      State current_state;
+      //bool has_gc_references;
+      //bool has_valid_references;
+      //bool has_resource_references;
+    private: // derived users can't see the references
       unsigned gc_references;
       unsigned valid_references;
       unsigned resource_references;

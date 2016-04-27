@@ -35,8 +35,8 @@ namespace Legion {
                                                    AddressSpaceID loc_space,
                                                    bool do_registration)
       : runtime(rt), did(id), owner_space(own_space), 
-        local_space(loc_space), current_state(INACTIVE_STATE),
-        gc_lock(Reservation::create_reservation()), gc_references(0), 
+        local_space(loc_space), gc_lock(Reservation::create_reservation()),
+        current_state(INACTIVE_STATE), gc_references(0), 
         valid_references(0), resource_references(0), 
         destruction_event(UserEvent::create_user_event()),
         registered_with_runtime(do_registration)

@@ -356,6 +356,7 @@ namespace Legion {
       bool is_inner(void) const;
       bool has_virtual_instances(void) const;
       bool is_created_region(unsigned index) const;
+      void update_no_access_regions(void);
     public:
       void assign_context(RegionTreeContext ctx);
       RegionTreeContext release_context(void);
@@ -585,6 +586,8 @@ namespace Legion {
     protected:
       // Boolean for each region saying if it is virtual mapped
       std::vector<bool> virtual_mapped;
+      // Regions which are NO_ACCESS or have no privilege fields
+      std::vector<bool> no_access_regions;
       Processor executing_processor;
     protected:
       std::vector<Processor> target_processors;

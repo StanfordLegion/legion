@@ -2032,6 +2032,9 @@ namespace Legion {
       {
         if (to_skip[idx1])
           continue;
+        if (IS_NO_ACCESS(regions[idx1]) || 
+            regions[idx1].privilege_fields.empty())
+          continue;
         const RegionRequirement &req = regions[idx1];
         const VersionInfo &info = version_infos[idx1];
         InstanceSet &targets = target_sets[idx1];

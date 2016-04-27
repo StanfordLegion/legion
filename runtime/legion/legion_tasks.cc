@@ -2367,6 +2367,7 @@ namespace Legion {
       created_requirements.clear();
       inline_regions.clear();
       virtual_mapped.clear();
+      no_access_regions.clear();
       executing_children.clear();
       executed_children.clear();
       complete_children.clear();
@@ -2466,6 +2467,16 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return (index >= regions.size());
+    }
+
+    //--------------------------------------------------------------------------
+    void SingleTask::update_no_access_regions(void)
+    //--------------------------------------------------------------------------
+    {
+      no_access_regions.resize(regions.size());
+      for (unsigned idx = 0; idx < regions.size(); idx++)
+        no_access_regions[idx] = IS_NO_ACCESS(regions[idx]) || 
+                                  regions[idx].privilege_fields.empty();
     }
 
     //--------------------------------------------------------------------------
@@ -2757,6 +2768,7 @@ namespace Legion {
       virtual_mapped.resize(regions.size());
       for (unsigned idx = 0; idx < num_phy; idx++)
         virtual_mapped[idx] = physical_instances[idx].has_composite_ref();
+      update_no_access_regions();
     }
 
     //--------------------------------------------------------------------------
@@ -4874,11 +4886,8 @@ namespace Legion {
           continue;
         }
         // Skip any NO_ACCESS or empty privilege field regions
-        if (IS_NO_ACCESS(regions[idx]) || regions[idx].privilege_fields.empty())
-        {
-          virtual_mapped[idx] = true;
+        if (no_access_regions[idx])
           continue;
-        }
         // Do the conversion
         InstanceSet &result = physical_instances[idx];
         RegionTreeID bad_tree = 0;
@@ -5386,12 +5395,11 @@ namespace Legion {
       {
         if (early_mapped_regions.find(idx) != early_mapped_regions.end())
           continue;
+        if (no_access_regions[idx])
+          continue;
         // See if we have to do any virtual mapping before registering
         if (virtual_mapped[idx])
         {
-          if (IS_NO_ACCESS(regions[idx]) || 
-              regions[idx].privilege_fields.empty())
-            continue;
 #ifdef DEBUG_HIGH_LEVEL
           assert(physical_instances[idx].size() == 1);
           assert(physical_instances[idx][0].get_manager()->
@@ -5441,7 +5449,7 @@ namespace Legion {
         // C++ type system suckiness
         std::deque<InstanceSet> &phy_inst_ref = 
           *(reinterpret_cast<std::deque<InstanceSet>*>(&physical_instances));
-        runtime->forest->physical_register_users(this, local_termination_event,
+        runtime->forest->physical_register_users(this,local_termination_event,
             regions, virtual_mapped, *get_version_infos(), phy_inst_ref);
       }
       if (perform_postmap)
@@ -5634,6 +5642,7 @@ namespace Legion {
 #ifdef DEBUG_HIGH_LEVEL
       assert(regions.size() == physical_instances.size());
       assert(regions.size() == virtual_mapped.size());
+      assert(regions.size() == no_access_regions.size());
 #endif
       // Initialize all of the logical contexts no matter what
       //
@@ -5648,7 +5657,7 @@ namespace Legion {
         assert(regions[idx].handle_type == SINGULAR);
 #endif
         // If this is a NO_ACCESS or had no privilege fields we can skip this
-        if (IS_NO_ACCESS(regions[idx]) || regions[idx].privilege_fields.empty())
+        if (no_access_regions[idx])
           continue;
         // Only need to initialize the context if this is
         // not a leaf and it wasn't virtual mapped
@@ -5796,7 +5805,7 @@ namespace Legion {
         for (unsigned idx = 0; idx < regions.size(); idx++)
         {
           // If it's not virtual mapped we can keep going
-          if (!virtual_mapped[idx])
+          if (!virtual_mapped[idx] || no_access_regions[idx])
             continue;
           // Different tree IDs then we can keep going
           if (regions[idx].region.get_tree_id() != handle.get_tree_id())
@@ -6053,23 +6062,21 @@ namespace Legion {
 #ifdef DEBUG_HIGH_LEVEL
       assert(regions.size() == physical_instances.size());
       assert(regions.size() == virtual_mapped.size());
+      assert(regions.size() == no_access_regions.size());
       assert(physical_regions.empty());
 #endif 
       VariantImpl *variant = 
         runtime->find_variant_impl(task_id, selected_variant);
       // STEP 1: Compute the precondition for the task launch
       std::set<Event> wait_on_events;
-      // If we're debugging do one last check to make sure
-      // that all the memories are visible on this processor
-      for (unsigned idx = 0; idx < regions.size(); idx++)
+      // Get the event to wait on unless we are 
+      // doing the inner task optimization
+      if (!variant->is_inner())
       {
-        if (!virtual_mapped[idx])
+        for (unsigned idx = 0; idx < regions.size(); idx++)
         {
-          InstanceSet &instances = physical_instances[idx];
-          // Get the event to wait on unless we are doing the inner
-          // task optimization
-          if (!variant->is_inner())
-            instances.update_wait_on_events(wait_on_events);
+          if (!virtual_mapped[idx] && !no_access_regions[idx])
+            physical_instances[idx].update_wait_on_events(wait_on_events);
         }
       }
       // Now add get all the other preconditions for the launch
@@ -6106,7 +6113,7 @@ namespace Legion {
           if (regions[idx].privilege == WRITE_DISCARD)
             regions[idx].privilege = READ_WRITE;
           // If it was virtual mapper so it doesn't matter anyway.
-          if (virtual_mapped[idx])
+          if (virtual_mapped[idx] || no_access_regions[idx])
           {
             clone_requirements[idx] = regions[idx];
             localize_region_requirement(clone_requirements[idx]);
@@ -6163,7 +6170,7 @@ namespace Legion {
             // back the local instance references
           }
           // Make sure you have the metadata for the region with no access priv
-          if (IS_NO_ACCESS(clone_requirements[idx]))
+          if (no_access_regions[idx])
             runtime->forest->get_node(clone_requirements[idx].region);
         }
 
@@ -6220,7 +6227,7 @@ namespace Legion {
           {
             for (unsigned idx = 0; idx < physical_regions.size(); idx++)
             {
-              if (!virtual_mapped[idx])
+              if (!virtual_mapped[idx] && !no_access_regions[idx])
               {
                 physical_regions[idx].impl->reset_references(
                     physical_instances[idx], unmap_events[idx]);
@@ -6234,7 +6241,7 @@ namespace Legion {
           // Mark that all the local instances are empty
           for (unsigned idx = 0; idx < physical_regions.size(); idx++)
           {
-            if (!virtual_mapped[idx])
+            if (!virtual_mapped[idx] && !no_access_regions[idx])
             {
               physical_regions[idx].impl->reset_references(
                   physical_instances[idx], unmap_events[idx]);
@@ -6340,6 +6347,7 @@ namespace Legion {
       assert(regions.size() == physical_regions.size());
       assert(regions.size() == physical_instances.size());
       assert(regions.size() == virtual_mapped.size());
+      assert(regions.size() == no_access_regions.size());
 #endif
       // Issue a utility task to decrement the number of outstanding
       // tasks now that this task has started running
@@ -6410,7 +6418,8 @@ namespace Legion {
         // Note that this loop doesn't handle create regions
         for (unsigned idx = 0; idx < physical_instances.size(); idx++)
         {
-          if (IS_READ_ONLY(regions[idx]) || IS_NO_ACCESS(regions[idx]))
+          // We also don't need to close up read-only instances
+          if (no_access_regions[idx] || IS_READ_ONLY(regions[idx]))
             continue;
           if (!virtual_mapped[idx])
           {
@@ -7318,6 +7327,7 @@ namespace Legion {
             runtime->get_available_distributed_id(!top_level_task), 
             runtime->address_space, runtime->address_space, this));
       check_empty_field_requirements();
+      update_no_access_regions();
       if (Runtime::legion_spy_enabled)
       {
         LegionSpy::log_individual_task(parent_ctx->get_unique_id(),
@@ -7369,6 +7379,7 @@ namespace Legion {
             runtime->get_available_distributed_id(!top_level_task), 
             runtime->address_space, runtime->address_space, this));
       check_empty_field_requirements();
+      update_no_access_regions();
       if (Runtime::legion_spy_enabled)
       {
         LegionSpy::log_individual_task(parent_ctx->get_unique_id(),
@@ -7695,14 +7706,14 @@ namespace Legion {
         {
           AddressSpaceID owner_space = runtime->find_address_space(orig_proc);
           for (unsigned idx = 0; idx < version_infos.size(); idx++)
-            if (!virtual_mapped[idx])
+            if (!virtual_mapped[idx] && !no_access_regions[idx])
               version_infos[idx].apply_mapping(get_parent_context(idx).get_id(),
                                            owner_space, map_applied_conditions);
         }
         else
         {
           for (unsigned idx = 0; idx < version_infos.size(); idx++)
-            if (!virtual_mapped[idx])
+            if (!virtual_mapped[idx] && !no_access_regions[idx])
               version_infos[idx].apply_mapping(get_parent_context(idx).get_id(),
                                 runtime->address_space, map_applied_conditions);
         }
@@ -8811,6 +8822,7 @@ namespace Legion {
     {
       slice_owner = owner;
       compute_point_region_requirements(mp);
+      update_no_access_regions();
       // Get our argument
       mp->assign_argument(local_args, local_arglen);
       // Make a new termination event for this point
@@ -9254,6 +9266,7 @@ namespace Legion {
         derez.deserialize(index);
         virtual_mapped[index] = true;
       }
+      update_no_access_regions();
       size_t num_local;
       derez.deserialize(num_local);
       local_fields.resize(num_local);
