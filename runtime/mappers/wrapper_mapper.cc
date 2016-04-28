@@ -53,6 +53,7 @@ namespace Legion {
 	struct select_task_options_message{
 	const Task& task;
 	Mapper::TaskOptions& output;
+	std::string tag;
 	};
 
 	struct get_input_message{
@@ -795,9 +796,9 @@ namespace Legion {
 				
 				else if (strValue.compare("exit")==0){
 
-					get_input_message message = {WrapperMapper::ownerprocessor, WrapperMapper::procs_map, WrapperMapper::tasks_map, WrapperMapper::mems_map, "get_input_message"};
+					/*get_input_message message = {WrapperMapper::ownerprocessor, WrapperMapper::procs_map, WrapperMapper::tasks_map, WrapperMapper::mems_map, "get_input_message"};
 					void *message_point = &message;
-				WrapperMapper::mapper_rt_broadcast(ctx, message_point, sizeof(get_input_message));
+				WrapperMapper::mapper_rt_broadcast(ctx, message_point, sizeof(get_input_message));*/
 					break;
 }
 				
@@ -947,7 +948,7 @@ void WrapperMapper::select_task_options(const MapperContext    ctx,
                                        const Task&            task,
                                              TaskOptions&     output){
 
-std::cout<<"node id "<<node_id<<" local "<<local_proc.id;
+//std::cout<<"node id "<<node_id<<" local "<<local_proc.id;
 			dmapper->select_task_options(ctx, task, output);
 std::map<std::string, int>::iterator itt = WrapperMapper::tasks_map.find(task.get_task_name());
 			std::map<int, int>::iterator itm = WrapperMapper::methods_map.find(1);
@@ -965,7 +966,7 @@ std::map<std::string, int>::iterator itt = WrapperMapper::tasks_map.find(task.ge
 				}
 			else{
 
-				select_task_options_message message ={task,output};
+				select_task_options_message message ={task,output,"select_task_options_message"};
 				void *message_point = &message;
 				WrapperMapper::mapevent = mapper_rt_create_mapper_event(ctx);
 				WrapperMapper::mapper_rt_send_message(ctx,WrapperMapper::ownerprocessor, message_point, sizeof(select_task_options_message));
@@ -1184,10 +1185,11 @@ void WrapperMapper::permit_steal_request(const MapperContext         ctx,
 
 void WrapperMapper::handle_message(const MapperContext           ctx,
                                   const MapperMessage&          message){
-			if (local_proc==WrapperMapper::ownerprocessor){
+			if (local_proc==WrapperMapper::ownerprocessor /*&& (select_task_options_message)*message.message->tag=="select_task_options_message"*/){
 select_task_options_message *rec_message = (select_task_options_message*)message.message;
 const Task& task = rec_message->task;
 TaskOptions& output = rec_message->output;
+std::string tag = rec_message->tag;
 
 std::map<std::string, int>::iterator itt = WrapperMapper::tasks_map.find(task.get_task_name());
 			std::map<int, int>::iterator itm = WrapperMapper::methods_map.find(1);
@@ -1208,9 +1210,9 @@ void *mess_point;
 mess_point=&message1;
 WrapperMapper::mapper_rt_send_message(ctx,message.sender, mess_point, sizeof(int));
 }
-else{
-mapper_rt_trigger_mapper_event(ctx, WrapperMapper::mapevent);
-}
+/*else if ((get_input_message)*message.message->tag="get_input_message"){
+}*/
+else mapper_rt_trigger_mapper_event(ctx, WrapperMapper::mapevent);
 }
 
 void WrapperMapper::handle_task_result(const MapperContext           ctx,
