@@ -141,7 +141,7 @@ namespace LegionRuntime{
       // std::vector<size_t> dim_size;
       off_t alloc_offset;
       bool is_ib;
-      int block_size, elmt_size;
+      size_t block_size, elmt_size;
       //int inner_stride[3], outer_stride[3], inner_dim_size[3];
 
       //MemoryKind memory_kind;
@@ -389,13 +389,14 @@ namespace LegionRuntime{
 
       bool simple_get_mask_request(off_t &src_start, off_t &dst_start, size_t &nbytes,
                                    MaskEnumerator* me,
-                                   int &offset_idx, int available_slots);
+                                   coord_t &offset_idx, coord_t available_slots);
 
       template<unsigned DIM>
       bool simple_get_request(off_t &src_start, off_t &dst_start, size_t &nbytes,
                               Layouts::GenericLayoutIterator<DIM>* li,
-                              int &offset_idx, int available_slots);
+                              coord_t &offset_idx, coord_t available_slots);
 
+#ifdef DEADCODE_USE_GENERIC_ITERATOR
       template<unsigned DIM>
       bool simple_get_request(off_t &src_start, off_t &dst_start, size_t &nbytes,
                               Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> >* &dsi,
@@ -403,6 +404,7 @@ namespace LegionRuntime{
                               Rect<1> &irect, Rect<1> &orect,
                               int &done, int &offset_idx, int &block_start, int &total, int available_slots,
                               bool disable_batch = false);
+#endif
       void simple_update_bytes_read(int64_t offset, uint64_t size);
       void simple_update_bytes_write(int64_t offset, uint64_t size);
 
@@ -642,7 +644,7 @@ namespace LegionRuntime{
       //std::map<int64_t, uint64_t> segments_read, segments_write;
       Layouts::GenericLayoutIterator<DIM>* li;
       MaskEnumerator* me;
-      int offset_idx;
+      coord_t offset_idx;
       const char *src_buf_base, *dst_buf_base;
     };
 
@@ -689,7 +691,7 @@ namespace LegionRuntime{
       //std::map<int64_t, uint64_t> segments_read, segments_write;
       Layouts::GenericLayoutIterator<DIM>* li;
       MaskEnumerator* me;
-      int offset_idx;
+      coord_t offset_idx;
       const char *buf_base;
     };
 
@@ -735,7 +737,7 @@ namespace LegionRuntime{
       //std::map<int64_t, uint64_t> segments_read, segments_write;
       Layouts::GenericLayoutIterator<DIM>* li;
       MaskEnumerator* me;
-      int offset_idx;
+      coord_t offset_idx;
       const char *src_buf_base, *dst_buf_base;
       MemoryImpl *dst_mem_impl;
     };
@@ -784,7 +786,7 @@ namespace LegionRuntime{
       //std::map<int64_t, uint64_t> segments_read, segments_write;
       Layouts::GenericLayoutIterator<DIM>* li;
       MaskEnumerator* me;
-      int offset_idx;
+      coord_t offset_idx;
       const char *buf_base;
     };
 #endif /*USE_DISK*/
@@ -833,7 +835,7 @@ namespace LegionRuntime{
       //std::map<int64_t, uint64_t> segments_read, segments_write;
       Layouts::GenericLayoutIterator<DIM>* li;
       MaskEnumerator* me;
-      int offset_idx;
+      coord_t offset_idx;
       char *src_buf_base;
       char *dst_buf_base;
       GPU *dst_gpu, *src_gpu;

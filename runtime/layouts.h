@@ -37,6 +37,7 @@ namespace LegionRuntime {
     };
 
     static inline int min(int a, int b) { return (a < b) ? a : b; }
+    static inline coord_t min(coord_t a, coord_t b) { return (a < b) ? a : b; }
 
     template <unsigned DIM>
     class SplitDimLinearization {
@@ -64,7 +65,7 @@ namespace LegionRuntime {
 
       Point<ODIM> image(const Point<IDIM> p) const
       {
-        int index = 0, subtotal = 1;
+        coord_t index = 0, subtotal = 1;
         Point<IDIM> local_p = p - lo_in;
         unsigned x_idx = 0, y_idx = 1, z_idx = 2;
         for (unsigned i = 0; i < dim_sum; i++) {
@@ -114,7 +115,7 @@ namespace LegionRuntime {
         Rect<IDIM> local_subrect(local_r.lo, local_r.lo);
         for (unsigned i = 0; i < IDIM; i++)
           strides[i] = Point<ODIM>::ZEROES();
-        int subtotal = 1;
+        coord_t subtotal = 1;
         unsigned x_idx = 0, y_idx = 1, z_idx = 2;
         for (unsigned i = 0; i < dim_sum; i++) {
           switch (dim_kind[i]) {
@@ -150,7 +151,7 @@ namespace LegionRuntime {
       Rect<IDIM> preimage(const Point<ODIM> p) const
       {
         assert(ODIM == 1);
-        int index = p.x[0] - lo_out.x[0];
+        coord_t index = p.x[0] - lo_out.x[0];
         Point<IDIM> ret = Point<IDIM>::ZEROES(), dim_base = Point<IDIM>::ONES();
         unsigned x_idx = 0, y_idx = 1, z_idx = 2;
         for (unsigned i = 0; i < dim_sum; i++) {
@@ -183,7 +184,7 @@ namespace LegionRuntime {
         return false;
       }
 #ifdef CONTINUOUS_STEPS
-      int continuous_steps(const Point<IDIM> p, int &direction) const
+      coord_t continuous_steps(const Point<IDIM> p, int &direction) const
       {
         switch (dim_kind[0]) {
           case DIM_X:
@@ -208,7 +209,7 @@ namespace LegionRuntime {
 
     struct OffsetsAndSize {
       off_t src_offset, dst_offset;
-      int size;
+      coord_t size;
     };
 
     template<unsigned DIM>
@@ -248,11 +249,11 @@ namespace LegionRuntime {
         return cur_idx < rect_size;
       }
 
-      int continuous_steps(int &src_idx, int &dst_idx)
+      coord_t continuous_steps(coord_t &src_idx, coord_t &dst_idx)
       {
         Rect<DIM> r, src_subrect, dst_subrect;
         Point<1> src_strides[DIM], dst_strides[DIM];
-        int subtotal = 1;
+        coord_t subtotal = 1;
         switch(iter_order) {
           case XferOrder::SRC_FIFO:
             r = src_mapping->preimage(make_point(cur_idx + idx_offset));
@@ -293,7 +294,7 @@ namespace LegionRuntime {
       Mapping<DIM, 1> *src_mapping, *dst_mapping;
       XferOrder::Type iter_order;
       size_t cur_idx, rect_size;
-      int idx_offset;
+      coord_t idx_offset;
     };
 
 #ifdef USE_HDF
@@ -347,7 +348,7 @@ namespace LegionRuntime {
        r.hi = orig_rect.hi;
        mapping->image_linear_subrect(r, temp_rect, strides);
        sub_rect = Rect<DIM>(temp_rect.lo, temp_rect.lo);
-       int subtotal = 1;
+       coord_t subtotal = 1;
        for (int j = 0; j < DIM; j++) {
          if (strides[j][0] == subtotal && subtotal * temp_rect.dim_size(j) <= left_over) {
            sub_rect.hi.x[j] = temp_rect.hi[j];

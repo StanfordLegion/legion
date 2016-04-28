@@ -81,13 +81,13 @@ namespace LegionRuntime {
           delete e;
         }
 
-        int continuous_steps(int &src_idx, int &dst_idx) {
+        coord_t continuous_steps(coord_t &src_idx, coord_t &dst_idx) {
           if (rleft == 0) {
             e->get_next(rstart, rlen);
             rleft = rlen;
           }
-          src_idx = src_mapping->image(rstart + rlen - rleft);
-          dst_idx = dst_mapping->image(rstart + rlen - rleft);
+          src_idx = src_mapping->image(rstart + (coord_t) rlen - (coord_t) rleft);
+          dst_idx = dst_mapping->image(rstart + (coord_t) rlen - (coord_t) rleft);
           return rleft;
         }
 
@@ -98,11 +98,12 @@ namespace LegionRuntime {
         };
 
         bool any_left() {
-          int rstart2, rlen2;
+          coord_t rstart2;
+          size_t rlen2;
           return (e->peek_next(rstart2, rlen2) || (rleft > 0));
         };
 
-        void move(int steps) {
+        void move(size_t steps) {
           assert(steps < rleft);
           rleft -= steps;
         };
@@ -111,21 +112,22 @@ namespace LegionRuntime {
         ElementMask::Enumerator* e;
         Mapping<1, 1> *src_mapping, *dst_mapping;
         XferOrder::Type iter_order;
-        int rstart, rlen, rleft;
+        coord_t rstart;
+        size_t rlen, rleft;
       };
 
       bool XferDes::simple_get_mask_request(off_t &src_start, off_t &dst_start, size_t &nbytes,
                                             MaskEnumerator* me,
-                                            int &offset_idx, int available_slots)
+                                            coord_t &offset_idx, coord_t available_slots)
       {
         assert((size_t) offset_idx < oas_vec.size());
         assert(me->any_left());
         nbytes = 0;
-        int src_idx, dst_idx;
+        coord_t src_idx, dst_idx;
         // cannot exceed the max_req_size
-        int todo = min(max_req_size / oas_vec[offset_idx].size, me->continuous_steps(src_idx, dst_idx));
-        int src_in_block = src_buf.block_size - src_idx % src_buf.block_size;
-        int dst_in_block = dst_buf.block_size - dst_idx % dst_buf.block_size;
+        coord_t todo = min(max_req_size / oas_vec[offset_idx].size, me->continuous_steps(src_idx, dst_idx));
+        coord_t src_in_block = src_buf.block_size - src_idx % src_buf.block_size;
+        coord_t dst_in_block = dst_buf.block_size - dst_idx % dst_buf.block_size;
         todo = min(todo, min(src_in_block, dst_in_block));
         src_start = calc_mem_loc(0, oas_vec[offset_idx].src_offset, oas_vec[offset_idx].size,
                                  src_buf.elmt_size, src_buf.block_size, src_idx);
@@ -158,16 +160,16 @@ namespace LegionRuntime {
       template<unsigned DIM>
       bool XferDes::simple_get_request(off_t &src_start, off_t &dst_start, size_t &nbytes,
                               Layouts::GenericLayoutIterator<DIM>* li,
-                              int &offset_idx, int available_slots)
+                              coord_t &offset_idx, coord_t available_slots)
       {
         assert(offset_idx < oas_vec.size());
         assert(li->any_left());
         nbytes = 0;
-        int src_idx, dst_idx;
+        coord_t src_idx, dst_idx;
         // cannot exceed the max_req_size
-        int todo = min(max_req_size / oas_vec[offset_idx].size, li->continuous_steps(src_idx, dst_idx));
-        int src_in_block = src_buf.block_size - src_idx % src_buf.block_size;
-        int dst_in_block = dst_buf.block_size - dst_idx % dst_buf.block_size;
+        coord_t todo = min(max_req_size / oas_vec[offset_idx].size, li->continuous_steps(src_idx, dst_idx));
+        coord_t src_in_block = src_buf.block_size - src_idx % src_buf.block_size;
+        coord_t dst_in_block = dst_buf.block_size - dst_idx % dst_buf.block_size;
         todo = min(todo, min(src_in_block, dst_in_block));
         src_start = calc_mem_loc(0, oas_vec[offset_idx].src_offset, oas_vec[offset_idx].size,
                                  src_buf.elmt_size, src_buf.block_size, src_idx);
@@ -197,6 +199,7 @@ namespace LegionRuntime {
         return true;
       }
 
+#ifdef DEADCODE_OLD_GENERIC_ITERATOR
       template<unsigned DIM>
       bool XferDes::simple_get_request(
                     off_t &src_start, off_t &dst_start, size_t &nbytes,
@@ -326,6 +329,7 @@ namespace LegionRuntime {
         }
         return (nbytes > 0);
       }
+#endif
 
       inline void XferDes::simple_update_bytes_read(int64_t offset, uint64_t size)
       {
@@ -1649,7 +1653,7 @@ namespace LegionRuntime {
       {
         switch (kind) {
           case XferDes::XFER_GASNET_READ:
-            for (int i = 0; i < nr; i++) {
+            for (long i = 0; i < nr; i++) {
               GASNetReadRequest* read_req = (GASNetReadRequest*) requests[i];
               get_runtime()->global_memory->get_bytes(read_req->src_offset, read_req->dst_buf, read_req->nbytes);
               read_req->xd->notify_request_read_done(read_req);
@@ -1657,7 +1661,7 @@ namespace LegionRuntime {
             }
             break;
           case XferDes::XFER_GASNET_WRITE:
-            for (int i = 0; i < nr; i++) {
+            for (long i = 0; i < nr; i++) {
               GASNetWriteRequest* write_req = (GASNetWriteRequest*) requests[i];
               get_runtime()->global_memory->put_bytes(write_req->dst_offset, write_req->src_buf, write_req->nbytes);
               write_req->xd->notify_request_read_done(write_req);
@@ -1689,7 +1693,7 @@ namespace LegionRuntime {
       long RemoteWriteChannel::submit(Request** requests, long nr)
       {
         assert(nr <= capacity);
-        for (int i = 0; i < nr; i ++) {
+        for (long i = 0; i < nr; i ++) {
           RemoteWriteRequest* req = (RemoteWriteRequest*) requests[i];
           XferDesRemoteWriteMessage::send_request(req->dst_node, req->dst_buf, req->src_buf, req->nbytes, req);
           capacity--;
@@ -1733,14 +1737,14 @@ namespace LegionRuntime {
         events = (struct io_event*) calloc(max_nr, sizeof(struct io_event));
         switch (kind) {
           case XferDes::XFER_DISK_READ:
-            for (int i = 0; i < max_nr; i++) {
+            for (long i = 0; i < max_nr; i++) {
               memset(&cb[i], 0, sizeof(cb[i]));
               cb[i].aio_lio_opcode = IOCB_CMD_PREAD;
               available_cb.push_back(&cb[i]);
             }
             break;
           case XferDes::XFER_DISK_WRITE:
-            for (int i = 0; i < max_nr; i++) {
+            for (long i = 0; i < max_nr; i++) {
               memset(&cb[i], 0, sizeof(cb[i]));
               cb[i].aio_lio_opcode = IOCB_CMD_PWRITE;
               available_cb.push_back(&cb[i]);
@@ -1839,7 +1843,7 @@ namespace LegionRuntime {
           case XferDes::XFER_GPU_TO_FB:
           {
             GPUtoFBRequest** gpu_to_fb_reqs = (GPUtoFBRequest**) requests;
-            for (int i = 0; i < nr; i++) {
+            for (long i = 0; i < nr; i++) {
               //gpu_to_fb_reqs[i]->complete_event = GenEventImpl::create_genevent()->current_event();
               src_gpu->copy_to_fb(gpu_to_fb_reqs[i]->dst_offset,
                                   gpu_to_fb_reqs[i]->src,
@@ -1854,7 +1858,7 @@ namespace LegionRuntime {
           case XferDes::XFER_GPU_FROM_FB:
           {
             GPUfromFBRequest** gpu_from_fb_reqs = (GPUfromFBRequest**) requests;
-            for (int i = 0; i < nr; i++) {
+            for (long i = 0; i < nr; i++) {
               //gpu_from_fb_reqs[i]->complete_event = GenEventImpl::create_genevent()->current_event();
               src_gpu->copy_from_fb(gpu_from_fb_reqs[i]->dst,
                                     gpu_from_fb_reqs[i]->src_offset,
@@ -1869,7 +1873,7 @@ namespace LegionRuntime {
           case XferDes::XFER_GPU_IN_FB:
           {
             GPUinFBRequest** gpu_in_fb_reqs = (GPUinFBRequest**) requests;
-            for (int i = 0; i < nr; i++) {
+            for (long i = 0; i < nr; i++) {
               //gpu_in_fb_reqs[i]->complete_event = GenEventImpl::create_genevent()->current_event();
               src_gpu->copy_within_fb(gpu_in_fb_reqs[i]->dst_offset,
                                       gpu_in_fb_reqs[i]->src_offset,
@@ -1884,7 +1888,7 @@ namespace LegionRuntime {
           case XferDes::XFER_GPU_PEER_FB:
           {
             GPUpeerFBRequest** gpu_peer_fb_reqs = (GPUpeerFBRequest**) requests;
-            for (int i = 0; i < nr; i++) {
+            for (long i = 0; i < nr; i++) {
               //gpu_peer_fb_reqs[i]->complete_event = GenEventImpl::create_genevent()->current_event();
               src_gpu->copy_to_peer(gpu_peer_fb_reqs[i]->dst_gpu,
                                     gpu_peer_fb_reqs[i]->dst_offset,
@@ -1980,7 +1984,7 @@ namespace LegionRuntime {
           case XferDes::XFER_HDF_READ:
           {
             HDFReadRequest** hdf_read_reqs = (HDFReadRequest**) requests;
-            for (int i = 0; i < nr; i++) {
+            for (long i = 0; i < nr; i++) {
               HDFReadRequest* request = hdf_read_reqs[i];
               pthread_rwlock_rdlock(request->rwlock);
 //              std::cout << "in HDFChannel::submit reading dataset_id: " << request->dataset_id << std::endl;
@@ -1994,7 +1998,7 @@ namespace LegionRuntime {
           case XferDes::XFER_HDF_WRITE:
           {
             HDFWriteRequest** hdf_read_reqs = (HDFWriteRequest**) requests;
-            for (int i = 0; i < nr; i++) {
+            for (long i = 0; i < nr; i++) {
               HDFWriteRequest* request = hdf_read_reqs[i];
               pthread_rwlock_wrlock(request->rwlock);
 //              std::cout << "in HDFChannel::submit writing dataset_id: " << request->dataset_id << std::endl;
@@ -2255,10 +2259,10 @@ namespace LegionRuntime {
         for(int i = 0; i < num_threads; i++) {
           log_new_dma.info("Create a DMA worker thread");
           Realm::Thread *t = Realm::Thread::create_kernel_thread<DMAThread,
-  	                                        &DMAThread::dma_thread_loop>(dma_threads[i],
-  										                                 tlp,
-  										                                 core_rsrv,
-  										                                 0 /* default scheduler*/);
+                                            &DMAThread::dma_thread_loop>(dma_threads[i],
+  						                         tlp,
+  					                                 core_rsrv,
+  					                                 0 /* default scheduler*/);
           worker_threads.push_back(t);
         }
 
