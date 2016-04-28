@@ -2887,7 +2887,7 @@ namespace Legion {
           args.info = info;
           runtime->issue_runtime_meta_task(&args, sizeof(args),
               HLR_FINISH_MAPPER_CONTINUATION_TASK_ID, HLR_RESOURCE_PRIORITY,
-              NULL/*op*/, precondition);
+              info->operation, precondition);
           // No need to wait, we know the mapper call is done
           // This is all just clean up and can be done asynchronously
           return;
@@ -3132,7 +3132,7 @@ namespace Legion {
           args.info = info;
           runtime->issue_runtime_meta_task(&args, sizeof(args),
               HLR_FINISH_MAPPER_CONTINUATION_TASK_ID, HLR_RESOURCE_PRIORITY,
-              NULL/*op*/, precondition);
+              info->operation, precondition);
           // No need to wait, we know the mapper call is done
           // This is all just clean up and can be done asynchronously
           return;
