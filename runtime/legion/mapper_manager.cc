@@ -71,880 +71,926 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_select_task_options(TaskOp *task, 
-                            Mapper::TaskOptions *options, bool first_invocation)
+     Mapper::TaskOptions *options, bool first_invocation, MappingCallInfo *info)
     //--------------------------------------------------------------------------
     {
-      Event continuation_precondition = Event::NO_EVENT;
-      MappingCallInfo *info = begin_mapper_call(SELECT_TASK_OPTIONS_CALL,
-                            NULL, first_invocation, continuation_precondition);
-      if (info != NULL)
+      if (info == NULL)
       {
-        mapper->select_task_options(info, *task, *options);
-        finish_mapper_call(info);
-        return;
+        Event continuation_precondition = Event::NO_EVENT;
+        info = begin_mapper_call(SELECT_TASK_OPTIONS_CALL,
+                            NULL, first_invocation, continuation_precondition);
+        // If we need to build a continuation do that now
+        if (continuation_precondition.exists())
+        {
+          MapperContinuation2<TaskOp, Mapper::TaskOptions,
+                              &MapperManager::invoke_select_task_options>
+                                continuation(this, task, options, info);
+          continuation.defer(runtime, continuation_precondition, task);
+          return;
+        }
       }
-#ifdef DEBUG_HIGH_LEVEL
-      assert(first_invocation); // better only get here the first time
-#endif
-      // Otherwise make a continuation and launch it
-      MapperContinuation2<TaskOp, Mapper::TaskOptions,
-                          &MapperManager::invoke_select_task_options>
-                            continuation(this, task, options);
-      continuation.defer(runtime, continuation_precondition, task);
+      // If we have an info, we know we are good to go
+      mapper->select_task_options(info, *task, *options);
+      finish_mapper_call(info);
     }
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_premap_task(TaskOp *task, 
                                            Mapper::PremapTaskInput *input,
                                            Mapper::PremapTaskOutput *output, 
-                                           bool first_invocation)
+                                           bool first_invocation,
+                                           MappingCallInfo *info)
     //--------------------------------------------------------------------------
     {
-      Event continuation_precondition = Event::NO_EVENT;
-      MappingCallInfo *info = begin_mapper_call(PREMAP_TASK_CALL,
-                            task, first_invocation, continuation_precondition);
-      if (info != NULL)
+      if (info == NULL)
       {
-        mapper->premap_task(info, *task, *input, *output);
-        finish_mapper_call(info);
-        return;
+        Event continuation_precondition = Event::NO_EVENT;
+        info = begin_mapper_call(PREMAP_TASK_CALL,
+                             task, first_invocation, continuation_precondition);
+        // Build a continuation if necessary
+        if (continuation_precondition.exists())
+        {
+          MapperContinuation3<TaskOp, Mapper::PremapTaskInput, 
+            Mapper::PremapTaskOutput, &MapperManager::invoke_premap_task>
+              continuation(this, task, input, output, info);
+          continuation.defer(runtime, continuation_precondition, task);
+          return;
+        }
       }
-#ifdef DEBUG_HIGH_LEVEL
-      assert(first_invocation);
-#endif
-      MapperContinuation3<TaskOp, Mapper::PremapTaskInput, 
-        Mapper::PremapTaskOutput, &MapperManager::invoke_premap_task>
-          continuation(this, task, input, output);
-      continuation.defer(runtime, continuation_precondition, task);
+      mapper->premap_task(info, *task, *input, *output);
+      finish_mapper_call(info);
     }
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_slice_task(TaskOp *task, 
                                           Mapper::SliceTaskInput *input,
                                           Mapper::SliceTaskOutput *output, 
-                                          bool first_invocation)
+                                          bool first_invocation,
+                                          MappingCallInfo *info)
     //--------------------------------------------------------------------------
     {
-      Event continuation_precondition = Event::NO_EVENT;
-      MappingCallInfo *info = begin_mapper_call(SLICE_TASK_CALL,
-                            NULL, first_invocation, continuation_precondition);
-      if (info != NULL)
+      if (info == NULL)
       {
-        mapper->slice_task(info, *task, *input, *output);
-        finish_mapper_call(info);
-        return;
+        Event continuation_precondition = Event::NO_EVENT;
+        info = begin_mapper_call(SLICE_TASK_CALL,
+                             NULL, first_invocation, continuation_precondition);
+        // Build a continuation if necessary
+        if (continuation_precondition.exists())
+        {
+          MapperContinuation3<TaskOp, Mapper::SliceTaskInput,
+            Mapper::SliceTaskOutput, &MapperManager::invoke_slice_task>
+              continuation(this, task, input, output, info);
+          continuation.defer(runtime, continuation_precondition, task);
+          return;
+        }
       }
-#ifdef DEBUG_HIGH_LEVEL
-      assert(first_invocation);
-#endif
-      MapperContinuation3<TaskOp, Mapper::SliceTaskInput,
-        Mapper::SliceTaskOutput, &MapperManager::invoke_slice_task>
-          continuation(this, task, input, output);
-      continuation.defer(runtime, continuation_precondition, task);
+      mapper->slice_task(info, *task, *input, *output);
+      finish_mapper_call(info);
     }
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_map_task(TaskOp *task, 
                                         Mapper::MapTaskInput *input,
                                         Mapper::MapTaskOutput *output, 
-                                        bool first_invocation)
+                                        bool first_invocation,
+                                        MappingCallInfo *info)
     //--------------------------------------------------------------------------
     {
-      Event continuation_precondition = Event::NO_EVENT;
-      MappingCallInfo *info = begin_mapper_call(MAP_TASK_CALL,
-                            task, first_invocation, continuation_precondition);
-      if (info != NULL)
+      if (info == NULL)
       {
-        mapper->map_task(info, *task, *input, *output);
-        finish_mapper_call(info);
-        return;
+        Event continuation_precondition = Event::NO_EVENT;
+        info = begin_mapper_call(MAP_TASK_CALL,
+                             task, first_invocation, continuation_precondition);
+        // Build a continuation if necessary
+        if (continuation_precondition.exists())
+        {
+          MapperContinuation3<TaskOp,Mapper::MapTaskInput,Mapper::MapTaskOutput,
+                              &MapperManager::invoke_map_task>
+                                continuation(this, task, input, output, info);
+          continuation.defer(runtime, continuation_precondition, task);
+          return;
+        }
       }
-#ifdef DEBUG_HIGH_LEVEL
-      assert(first_invocation);
-#endif
-      MapperContinuation3<TaskOp, Mapper::MapTaskInput, Mapper::MapTaskOutput,
-                          &MapperManager::invoke_map_task>
-                            continuation(this, task, input, output);
-      continuation.defer(runtime, continuation_precondition, task);
+      mapper->map_task(info, *task, *input, *output);
+      finish_mapper_call(info);
     }
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_select_task_variant(TaskOp *task,
                                             Mapper::SelectVariantInput *input,
                                             Mapper::SelectVariantOutput *output,
-                                            bool first_invocation)
+                                            bool first_invocation,
+                                            MappingCallInfo *info)
     //--------------------------------------------------------------------------
     {
-      Event continuation_precondition = Event::NO_EVENT;
-      MappingCallInfo *info = begin_mapper_call(SELECT_VARIANT_CALL,
-                            NULL, first_invocation, continuation_precondition);
-      if (info != NULL)
+      if (info == NULL)
       {
-        mapper->select_task_variant(info, *task, *input, *output);
-        finish_mapper_call(info);
-        return;
+        Event continuation_precondition = Event::NO_EVENT;
+        info = begin_mapper_call(SELECT_VARIANT_CALL,
+                             NULL, first_invocation, continuation_precondition);
+        if (continuation_precondition.exists())
+        {
+          MapperContinuation3<TaskOp, Mapper::SelectVariantInput, 
+            Mapper::SelectVariantOutput, 
+            &MapperManager::invoke_select_task_variant>
+              continuation(this, task, input, output, info);
+          continuation.defer(runtime, continuation_precondition, task);
+          return;
+        }
       }
-#ifdef DEBUG_HIGH_LEVEL
-      assert(first_invocation);
-#endif
-      MapperContinuation3<TaskOp, Mapper::SelectVariantInput, 
-        Mapper::SelectVariantOutput, &MapperManager::invoke_select_task_variant>
-          continuation(this, task, input, output);
-      continuation.defer(runtime, continuation_precondition, task);
+      mapper->select_task_variant(info, *task, *input, *output);
+      finish_mapper_call(info);
     }
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_post_map_task(TaskOp *task, 
                                              Mapper::PostMapInput *input,
                                              Mapper::PostMapOutput *output,
-                                             bool first_invocation)
+                                             bool first_invocation,
+                                             MappingCallInfo *info)
     //--------------------------------------------------------------------------
     {
-      Event continuation_precondition = Event::NO_EVENT;
-      MappingCallInfo *info = begin_mapper_call(POSTMAP_TASK_CALL,
-                            task, first_invocation, continuation_precondition);
-      if (info != NULL)
+      if (info == NULL)
       {
-        mapper->postmap_task(info, *task, *input, *output);
-        finish_mapper_call(info);
-        return;
+        Event continuation_precondition = Event::NO_EVENT;
+        info = begin_mapper_call(POSTMAP_TASK_CALL,
+                             task, first_invocation, continuation_precondition);
+        if (continuation_precondition.exists())
+        {
+          MapperContinuation3<TaskOp,Mapper::PostMapInput,Mapper::PostMapOutput,
+                              &MapperManager::invoke_post_map_task>
+                                continuation(this, task, input, output, info);
+          continuation.defer(runtime, continuation_precondition, task);
+          return;
+        }
       }
-#ifdef DEBUG_HIGH_LEVEL
-      assert(first_invocation);
-#endif
-      MapperContinuation3<TaskOp, Mapper::PostMapInput, Mapper::PostMapOutput,
-                          &MapperManager::invoke_post_map_task>
-                            continuation(this, task, input, output);
-      continuation.defer(runtime, continuation_precondition, task);
+      mapper->postmap_task(info, *task, *input, *output);
+      finish_mapper_call(info);
     }
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_select_task_sources(TaskOp *task, 
                                     Mapper::SelectTaskSrcInput *input,
                                     Mapper::SelectTaskSrcOutput *output,
-                                    bool first_invocation)
+                                    bool first_invocation,
+                                    MappingCallInfo *info)
     //--------------------------------------------------------------------------
     {
-      Event continuation_precondition = Event::NO_EVENT;
-      MappingCallInfo *info = begin_mapper_call(TASK_SELECT_SOURCES_CALL,
-                            task, first_invocation, continuation_precondition);
-      if (info != NULL)
+      if (info == NULL)
       {
-        mapper->select_task_sources(info, *task, *input, *output);
-        finish_mapper_call(info);
-        return;
+        Event continuation_precondition = Event::NO_EVENT;
+        info = begin_mapper_call(TASK_SELECT_SOURCES_CALL,
+                             task, first_invocation, continuation_precondition);
+        if (continuation_precondition.exists())
+        {
+          MapperContinuation3<TaskOp, Mapper::SelectTaskSrcInput,
+            Mapper::SelectTaskSrcOutput, 
+            &MapperManager::invoke_select_task_sources>
+              continuation(this, task, input, output, info);
+          continuation.defer(runtime, continuation_precondition, task);
+          return;
+        }
       }
-#ifdef DEBUG_HIGH_LEVEL
-      assert(first_invocation);
-#endif
-      MapperContinuation3<TaskOp, Mapper::SelectTaskSrcInput,
-        Mapper::SelectTaskSrcOutput, &MapperManager::invoke_select_task_sources>
-          continuation(this, task, input, output);
-      continuation.defer(runtime, continuation_precondition, task);
+      mapper->select_task_sources(info, *task, *input, *output);
+      finish_mapper_call(info);
     }
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_task_speculate(TaskOp *task,
                                               Mapper::SpeculativeOutput *output,
-                                              bool first_invocation)
+                                              bool first_invocation,
+                                              MappingCallInfo *info)
     //--------------------------------------------------------------------------
     {
-      Event continuation_precondition = Event::NO_EVENT;
-      MappingCallInfo *info = begin_mapper_call(TASK_SPECULATE_CALL,
-                            NULL, first_invocation, continuation_precondition);
-      if (info != NULL)
+      if (info == NULL)
       {
-        mapper->speculate(info, *task, *output);
-        finish_mapper_call(info);
-        return;
+        Event continuation_precondition = Event::NO_EVENT;
+        info = begin_mapper_call(TASK_SPECULATE_CALL,
+                             NULL, first_invocation, continuation_precondition);
+        if (continuation_precondition.exists())
+        {
+          MapperContinuation2<TaskOp, Mapper::SpeculativeOutput,
+                              &MapperManager::invoke_task_speculate>
+                                continuation(this, task, output, info);
+          continuation.defer(runtime, continuation_precondition, task);
+          return;
+        }
       }
-#ifdef DEBUG_HIGH_LEVEL
-      assert(first_invocation);
-#endif
-      MapperContinuation2<TaskOp, Mapper::SpeculativeOutput,
-                          &MapperManager::invoke_task_speculate>
-                            continuation(this, task, output);
-      continuation.defer(runtime, continuation_precondition, task);
+      mapper->speculate(info, *task, *output);
+      finish_mapper_call(info);
     }
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_task_report_profiling(TaskOp *task, 
                                               Mapper::TaskProfilingInfo *input,
-                                              bool first_invocation)
+                                              bool first_invocation,
+                                              MappingCallInfo *info)
     //--------------------------------------------------------------------------
     {
-      Event continuation_precondition = Event::NO_EVENT;
-      MappingCallInfo *info = begin_mapper_call(TASK_REPORT_PROFILING_CALL,
-                            NULL, first_invocation, continuation_precondition);
-      if (info != NULL)
+      if (info == NULL)
       {
-        mapper->report_profiling(info, *task, *input);
-        finish_mapper_call(info);
-        return;
+        Event continuation_precondition = Event::NO_EVENT;
+        info = begin_mapper_call(TASK_REPORT_PROFILING_CALL,
+                             NULL, first_invocation, continuation_precondition);
+        if (continuation_precondition.exists())
+        {
+          MapperContinuation2<TaskOp, Mapper::TaskProfilingInfo,
+                              &MapperManager::invoke_task_report_profiling>
+                                continuation(this, task, input, info);
+          continuation.defer(runtime, continuation_precondition, task);
+          return;
+        }
       }
-#ifdef DEBUG_HIGH_LEVEL
-      assert(first_invocation);
-#endif
-      MapperContinuation2<TaskOp, Mapper::TaskProfilingInfo,
-                          &MapperManager::invoke_task_report_profiling>
-                            continuation(this, task, input);
-      continuation.defer(runtime, continuation_precondition, task);
+      mapper->report_profiling(info, *task, *input);
+      finish_mapper_call(info);
     }
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_map_inline(MapOp *op, 
                                           Mapper::MapInlineInput *input,
                                           Mapper::MapInlineOutput *output, 
-                                          bool first_invocation)
+                                          bool first_invocation,
+                                          MappingCallInfo *info)
     //--------------------------------------------------------------------------
     {
-      Event continuation_precondition = Event::NO_EVENT;
-      MappingCallInfo *info = begin_mapper_call(MAP_INLINE_CALL,
-                            op, first_invocation, continuation_precondition);
-      if (info != NULL)
+      if (info == NULL)
       {
-        mapper->map_inline(info, *op, *input, *output);
-        finish_mapper_call(info);
-        return;
+        Event continuation_precondition = Event::NO_EVENT;
+        info = begin_mapper_call(MAP_INLINE_CALL,
+                              op, first_invocation, continuation_precondition);
+        if (continuation_precondition.exists())
+        {
+          MapperContinuation3<MapOp, 
+                  Mapper::MapInlineInput,Mapper::MapInlineOutput,
+                              &MapperManager::invoke_map_inline>
+                                continuation(this, op, input, output, info);
+          continuation.defer(runtime, continuation_precondition, op);
+          return;
+        }
       }
-#ifdef DEBUG_HIGH_LEVEL
-      assert(first_invocation);
-#endif
-      MapperContinuation3<MapOp, Mapper::MapInlineInput,Mapper::MapInlineOutput,
-                          &MapperManager::invoke_map_inline>
-                            continuation(this, op, input, output);
-      continuation.defer(runtime, continuation_precondition, op);
+      mapper->map_inline(info, *op, *input, *output);
+      finish_mapper_call(info);
     }
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_select_inline_sources(MapOp *op, 
                                       Mapper::SelectInlineSrcInput *input,
                                       Mapper::SelectInlineSrcOutput *output,
-                                      bool first_invocation)
+                                      bool first_invocation,
+                                      MappingCallInfo *info)
     //--------------------------------------------------------------------------
     {
-      Event continuation_precondition = Event::NO_EVENT;
-      MappingCallInfo *info = begin_mapper_call(INLINE_SELECT_SOURCES_CALL,
-                            op, first_invocation, continuation_precondition);
-      if (info != NULL)
+      if (info == NULL)
       {
-        mapper->select_inline_sources(info, *op, *input, *output);
-        finish_mapper_call(info);
-        return;
+        Event continuation_precondition = Event::NO_EVENT;
+        info = begin_mapper_call(INLINE_SELECT_SOURCES_CALL,
+                              op, first_invocation, continuation_precondition);
+        if (continuation_precondition.exists())
+        {
+          MapperContinuation3<MapOp, Mapper::SelectInlineSrcInput,
+                              Mapper::SelectInlineSrcOutput, 
+                              &MapperManager::invoke_select_inline_sources>
+                                continuation(this, op, input, output, info);
+          continuation.defer(runtime, continuation_precondition, op);
+          return;
+        }
       }
-#ifdef DEBUG_HIGH_LEVEL
-      assert(first_invocation);
-#endif
-      MapperContinuation3<MapOp, Mapper::SelectInlineSrcInput,
-                          Mapper::SelectInlineSrcOutput, 
-                          &MapperManager::invoke_select_inline_sources>
-                            continuation(this, op, input, output);
-      continuation.defer(runtime, continuation_precondition, op);
+      mapper->select_inline_sources(info, *op, *input, *output);
+      finish_mapper_call(info);
     }
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_inline_report_profiling(MapOp *op, 
                                      Mapper::InlineProfilingInfo *input,
-                                     bool first_invocation)
+                                     bool first_invocation,
+                                     MappingCallInfo *info)
     //--------------------------------------------------------------------------
     {
-      Event continuation_precondition = Event::NO_EVENT;
-      MappingCallInfo *info = begin_mapper_call(INLINE_REPORT_PROFILING_CALL,
-                            NULL, first_invocation, continuation_precondition);
-      if (info != NULL)
+      if (info == NULL)
       {
-        mapper->report_profiling(info, *op, *input);
-        finish_mapper_call(info);
-        return;
+        Event continuation_precondition = Event::NO_EVENT;
+        info = begin_mapper_call(INLINE_REPORT_PROFILING_CALL,
+                             NULL, first_invocation, continuation_precondition);
+        if (continuation_precondition.exists())
+        {
+          MapperContinuation2<MapOp, Mapper::InlineProfilingInfo,
+                              &MapperManager::invoke_inline_report_profiling>
+                                continuation(this, op, input, info);
+          continuation.defer(runtime, continuation_precondition, op);
+          return;
+        }
       }
-#ifdef DEBUG_HIGH_LEVEL
-      assert(first_invocation);
-#endif
-      MapperContinuation2<MapOp, Mapper::InlineProfilingInfo,
-                          &MapperManager::invoke_inline_report_profiling>
-                            continuation(this, op, input);
-      continuation.defer(runtime, continuation_precondition, op);
+      mapper->report_profiling(info, *op, *input);
+      finish_mapper_call(info);
     }
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_map_copy(CopyOp *op,
                                         Mapper::MapCopyInput *input,
                                         Mapper::MapCopyOutput *output,
-                                        bool first_invocation)
+                                        bool first_invocation,
+                                        MappingCallInfo *info)
     //--------------------------------------------------------------------------
     {
-      Event continuation_precondition = Event::NO_EVENT;
-      MappingCallInfo *info = begin_mapper_call(MAP_COPY_CALL,
-                            op, first_invocation, continuation_precondition);
-      if (info != NULL)
+      if (info == NULL)
       {
-        mapper->map_copy(info, *op, *input, *output);
-        finish_mapper_call(info);
-        return;
+        Event continuation_precondition = Event::NO_EVENT;
+        info = begin_mapper_call(MAP_COPY_CALL,
+                              op, first_invocation, continuation_precondition);
+        if (continuation_precondition.exists())
+        {
+          MapperContinuation3<CopyOp,Mapper::MapCopyInput,Mapper::MapCopyOutput,
+                              &MapperManager::invoke_map_copy>
+                                continuation(this, op, input, output, info);
+          continuation.defer(runtime, continuation_precondition, op);
+          return;
+        }
       }
-#ifdef DEBUG_HIGH_LEVEL
-      assert(first_invocation);
-#endif
-      MapperContinuation3<CopyOp, Mapper::MapCopyInput, Mapper::MapCopyOutput,
-                          &MapperManager::invoke_map_copy>
-                            continuation(this, op, input, output);
-      continuation.defer(runtime, continuation_precondition, op);
+      mapper->map_copy(info, *op, *input, *output);
+      finish_mapper_call(info);
     }
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_select_copy_sources(CopyOp *op,
                                     Mapper::SelectCopySrcInput *input,
                                     Mapper::SelectCopySrcOutput *output,
-                                    bool first_invocation)
+                                    bool first_invocation,
+                                    MappingCallInfo *info)
     //--------------------------------------------------------------------------
     {
-      Event continuation_precondition = Event::NO_EVENT;
-      MappingCallInfo *info = begin_mapper_call(COPY_SELECT_SOURCES_CALL,
-                            op, first_invocation, continuation_precondition);
-      if (info != NULL)
+      if (info == NULL)
       {
-        mapper->select_copy_sources(info, *op, *input, *output);
-        finish_mapper_call(info);
-        return;
+        Event continuation_precondition = Event::NO_EVENT;
+        info = begin_mapper_call(COPY_SELECT_SOURCES_CALL,
+                              op, first_invocation, continuation_precondition);
+        if (continuation_precondition.exists())
+        {
+          MapperContinuation3<CopyOp, Mapper::SelectCopySrcInput,
+            Mapper::SelectCopySrcOutput, 
+            &MapperManager::invoke_select_copy_sources>
+              continuation(this, op, input, output, info);
+          continuation.defer(runtime, continuation_precondition, op);
+          return;
+        }
       }
-#ifdef DEBUG_HIGH_LEVEL
-      assert(first_invocation);
-#endif
-      MapperContinuation3<CopyOp, Mapper::SelectCopySrcInput,
-        Mapper::SelectCopySrcOutput, &MapperManager::invoke_select_copy_sources>
-          continuation(this, op, input, output);
-      continuation.defer(runtime, continuation_precondition, op);
+      mapper->select_copy_sources(info, *op, *input, *output);
+      finish_mapper_call(info);
     }
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_copy_speculate(CopyOp *op, 
                                               Mapper::SpeculativeOutput *output,
-                                              bool first_invocation)
+                                              bool first_invocation,
+                                              MappingCallInfo *info)
     //--------------------------------------------------------------------------
     {
-      Event continuation_precondition = Event::NO_EVENT;
-      MappingCallInfo *info = begin_mapper_call(COPY_SPECULATE_CALL,
-                            NULL, first_invocation, continuation_precondition);
-      if (info != NULL)
+      if (info == NULL)
       {
-        mapper->speculate(info, *op, *output);
-        finish_mapper_call(info);
-        return;
+        Event continuation_precondition = Event::NO_EVENT;
+        info = begin_mapper_call(COPY_SPECULATE_CALL,
+                             NULL, first_invocation, continuation_precondition);
+        if (continuation_precondition.exists())
+        {
+          MapperContinuation2<CopyOp, Mapper::SpeculativeOutput,
+                              &MapperManager::invoke_copy_speculate>
+                                continuation(this, op, output, info);
+          continuation.defer(runtime, continuation_precondition, op);
+          return;
+        }
       }
-#ifdef DEBUG_HIGH_LEVEL
-      assert(first_invocation);
-#endif
-      MapperContinuation2<CopyOp, Mapper::SpeculativeOutput,
-                          &MapperManager::invoke_copy_speculate>
-                            continuation(this, op, output);
-      continuation.defer(runtime, continuation_precondition, op);
+      mapper->speculate(info, *op, *output);
+      finish_mapper_call(info);
     }
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_copy_report_profiling(CopyOp *op,
                                              Mapper::CopyProfilingInfo *input,
-                                             bool first_invocation)
+                                             bool first_invocation,
+                                             MappingCallInfo *info)
     //--------------------------------------------------------------------------
     {
-      Event continuation_precondition = Event::NO_EVENT;
-      MappingCallInfo *info = begin_mapper_call(COPY_REPORT_PROFILING_CALL,
-                            NULL, first_invocation, continuation_precondition);
-      if (info != NULL)
+      if (info == NULL)
       {
-        mapper->report_profiling(info, *op, *input);
-        finish_mapper_call(info);
-        return;
+        Event continuation_precondition = Event::NO_EVENT;
+        info = begin_mapper_call(COPY_REPORT_PROFILING_CALL,
+                             NULL, first_invocation, continuation_precondition);
+        if (continuation_precondition.exists())
+        {
+          MapperContinuation2<CopyOp, Mapper::CopyProfilingInfo,
+                              &MapperManager::invoke_copy_report_profiling>
+                                continuation(this, op, input, info);
+          continuation.defer(runtime, continuation_precondition, op);
+          return;
+        }
       }
-#ifdef DEBUG_HIGH_LEVEL
-      assert(first_invocation);
-#endif
-      MapperContinuation2<CopyOp, Mapper::CopyProfilingInfo,
-                          &MapperManager::invoke_copy_report_profiling>
-                            continuation(this, op, input);
-      continuation.defer(runtime, continuation_precondition, op);
+      mapper->report_profiling(info, *op, *input);
+      finish_mapper_call(info);
     }
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_map_close(CloseOp *op,
                                          Mapper::MapCloseInput *input,
                                          Mapper::MapCloseOutput *output,
-                                         bool first_invocation)
+                                         bool first_invocation,
+                                         MappingCallInfo *info)
     //--------------------------------------------------------------------------
     {
-      Event continuation_precondition = Event::NO_EVENT;
-      MappingCallInfo *info = begin_mapper_call(MAP_CLOSE_CALL,
-                            op, first_invocation, continuation_precondition);
-      if (info != NULL)
+      if (info == NULL)
       {
-        mapper->map_close(info, *op, *input, *output);
-        finish_mapper_call(info);
-        return;
+        Event continuation_precondition = Event::NO_EVENT;
+        info = begin_mapper_call(MAP_CLOSE_CALL,
+                              op, first_invocation, continuation_precondition);
+        if (continuation_precondition.exists())
+        {
+          MapperContinuation3<CloseOp, Mapper::MapCloseInput, 
+                  Mapper::MapCloseOutput, &MapperManager::invoke_map_close>
+                    continuation(this, op, input, output, info);
+          continuation.defer(runtime, continuation_precondition, op);
+          return;
+        }
       }
-#ifdef DEBUG_HIGH_LEVEL
-      assert(first_invocation);
-#endif
-      MapperContinuation3<CloseOp, Mapper::MapCloseInput, 
-              Mapper::MapCloseOutput, &MapperManager::invoke_map_close>
-                continuation(this, op, input, output);
-      continuation.defer(runtime, continuation_precondition, op);
+      mapper->map_close(info, *op, *input, *output);
+      finish_mapper_call(info);
     }
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_select_close_sources(CloseOp *op,
                                          Mapper::SelectCloseSrcInput *input,
                                          Mapper::SelectCloseSrcOutput *output,
-                                         bool first_invocation)
+                                         bool first_invocation,
+                                         MappingCallInfo *info)
     //--------------------------------------------------------------------------
     {
-      Event continuation_precondition = Event::NO_EVENT;
-      MappingCallInfo *info = begin_mapper_call(CLOSE_SELECT_SOURCES_CALL,
-                            op, first_invocation, continuation_precondition);
-      if (info != NULL)
+      if (info == NULL)
       {
-        mapper->select_close_sources(info, *op, *input, *output);
-        finish_mapper_call(info);
-        return;
+        Event continuation_precondition = Event::NO_EVENT;
+        info = begin_mapper_call(CLOSE_SELECT_SOURCES_CALL,
+                              op, first_invocation, continuation_precondition);
+        if (continuation_precondition.exists())
+        {
+          MapperContinuation3<CloseOp, Mapper::SelectCloseSrcInput,
+            Mapper::SelectCloseSrcOutput, 
+            &MapperManager::invoke_select_close_sources>
+              continuation(this, op, input, output, info);
+          continuation.defer(runtime, continuation_precondition, op);
+          return;
+        }
       }
-#ifdef DEBUG_HIGH_LEVEL
-      assert(first_invocation);
-#endif
-      MapperContinuation3<CloseOp, Mapper::SelectCloseSrcInput,
-        Mapper::SelectCloseSrcOutput, 
-        &MapperManager::invoke_select_close_sources>
-          continuation(this, op, input, output);
-      continuation.defer(runtime, continuation_precondition, op);
+      mapper->select_close_sources(info, *op, *input, *output);
+      finish_mapper_call(info);
     }
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_close_report_profiling(CloseOp *op,
                                           Mapper::CloseProfilingInfo *input,
-                                          bool first_invocation)
+                                          bool first_invocation,
+                                          MappingCallInfo *info)
     //--------------------------------------------------------------------------
     {
-      Event continuation_precondition = Event::NO_EVENT;
-      MappingCallInfo *info = begin_mapper_call(CLOSE_REPORT_PROFILING_CALL,
-                            NULL, first_invocation, continuation_precondition);
-      if (info != NULL)
+      if (info == NULL)
       {
-        mapper->report_profiling(info, *op, *input);
-        finish_mapper_call(info);
-        return;
+        Event continuation_precondition = Event::NO_EVENT;
+        info = begin_mapper_call(CLOSE_REPORT_PROFILING_CALL,
+                             NULL, first_invocation, continuation_precondition);
+        if (continuation_precondition.exists())
+        {
+          MapperContinuation2<CloseOp, Mapper::CloseProfilingInfo,
+                              &MapperManager::invoke_close_report_profiling>
+                                continuation(this, op, input, info);
+          continuation.defer(runtime, continuation_precondition, op);
+          return;
+        }
       }
-#ifdef DEBUG_HIGH_LEVEL
-      assert(first_invocation);
-#endif
-      MapperContinuation2<CloseOp, Mapper::CloseProfilingInfo,
-                          &MapperManager::invoke_close_report_profiling>
-                            continuation(this, op, input);
-      continuation.defer(runtime, continuation_precondition, op);
+      mapper->report_profiling(info, *op, *input);
+      finish_mapper_call(info);
     }
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_map_acquire(AcquireOp *op,
                                            Mapper::MapAcquireInput *input,
                                            Mapper::MapAcquireOutput *output,
-                                           bool first_invocation)
+                                           bool first_invocation,
+                                           MappingCallInfo *info)
     //--------------------------------------------------------------------------
     {
-      Event continuation_precondition = Event::NO_EVENT;
-      MappingCallInfo *info = begin_mapper_call(MAP_ACQUIRE_CALL,
-                            op, first_invocation, continuation_precondition);
-      if (info != NULL)
+      if (info == NULL)
       {
-        mapper->map_acquire(info, *op, *input, *output);
-        finish_mapper_call(info);
-        return;
+        Event continuation_precondition = Event::NO_EVENT;
+        info = begin_mapper_call(MAP_ACQUIRE_CALL,
+                              op, first_invocation, continuation_precondition);
+        if (continuation_precondition.exists())
+        {
+          MapperContinuation3<AcquireOp, Mapper::MapAcquireInput,
+            Mapper::MapAcquireOutput, &MapperManager::invoke_map_acquire>
+              continuation(this, op, input, output, info);
+          continuation.defer(runtime, continuation_precondition, op);
+          return;
+        }
       }
-#ifdef DEBUG_HIGH_LEVEL
-      assert(first_invocation);
-#endif
-      MapperContinuation3<AcquireOp, Mapper::MapAcquireInput,
-        Mapper::MapAcquireOutput, &MapperManager::invoke_map_acquire>
-          continuation(this, op, input, output);
-      continuation.defer(runtime, continuation_precondition, op);
+      mapper->map_acquire(info, *op, *input, *output);
+      finish_mapper_call(info);
     }
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_acquire_speculate(AcquireOp *op,
                                              Mapper::SpeculativeOutput *output,
-                                             bool first_invocation)
+                                             bool first_invocation,
+                                             MappingCallInfo *info)
     //--------------------------------------------------------------------------
     {
-      Event continuation_precondition = Event::NO_EVENT;
-      MappingCallInfo *info = begin_mapper_call(ACQUIRE_SPECULATE_CALL,
-                            NULL, first_invocation, continuation_precondition);
-      if (info != NULL)
+      if (info == NULL)
       {
-        mapper->speculate(info, *op, *output);
-        finish_mapper_call(info);
-        return;
+        Event continuation_precondition = Event::NO_EVENT;
+        info = begin_mapper_call(ACQUIRE_SPECULATE_CALL,
+                             NULL, first_invocation, continuation_precondition);
+        if (continuation_precondition.exists())
+        {
+          MapperContinuation2<AcquireOp, Mapper::SpeculativeOutput,
+                              &MapperManager::invoke_acquire_speculate>
+                                continuation(this, op, output, info);
+          continuation.defer(runtime, continuation_precondition, op);
+          return;
+        }
       }
-#ifdef DEBUG_HIGH_LEVEL
-      assert(first_invocation);
-#endif
-      MapperContinuation2<AcquireOp, Mapper::SpeculativeOutput,
-                          &MapperManager::invoke_acquire_speculate>
-                            continuation(this, op, output);
-      continuation.defer(runtime, continuation_precondition, op);
+      mapper->speculate(info, *op, *output);
+      finish_mapper_call(info);
     }
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_acquire_report_profiling(AcquireOp *op,
                                          Mapper::AcquireProfilingInfo *input,
-                                         bool first_invocation)
+                                         bool first_invocation,
+                                         MappingCallInfo *info)
     //--------------------------------------------------------------------------
     {
-      Event continuation_precondition = Event::NO_EVENT;
-      MappingCallInfo *info = begin_mapper_call(ACQUIRE_REPORT_PROFILING_CALL,
-                            NULL, first_invocation, continuation_precondition);
-      if (info != NULL)
+      if (info == NULL)
       {
-        mapper->report_profiling(info, *op, *input);
-        finish_mapper_call(info);
-        return;
+        Event continuation_precondition = Event::NO_EVENT;
+        info = begin_mapper_call(ACQUIRE_REPORT_PROFILING_CALL,
+                             NULL, first_invocation, continuation_precondition);
+        if (continuation_precondition.exists())
+        {
+          MapperContinuation2<AcquireOp, Mapper::AcquireProfilingInfo,
+                              &MapperManager::invoke_acquire_report_profiling>
+                                continuation(this, op, input, info);
+          continuation.defer(runtime, continuation_precondition, op);
+          return;
+        }
       }
-#ifdef DEBUG_HIGH_LEVEL
-      assert(first_invocation);
-#endif
-      MapperContinuation2<AcquireOp, Mapper::AcquireProfilingInfo,
-                          &MapperManager::invoke_acquire_report_profiling>
-                            continuation(this, op, input);
-      continuation.defer(runtime, continuation_precondition, op);
+      mapper->report_profiling(info, *op, *input);
+      finish_mapper_call(info);
     }
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_map_release(ReleaseOp *op,
                                            Mapper::MapReleaseInput *input,
                                            Mapper::MapReleaseOutput *output,
-                                           bool first_invocation)
+                                           bool first_invocation,
+                                           MappingCallInfo *info)
     //--------------------------------------------------------------------------
     {
-      Event continuation_precondition = Event::NO_EVENT;
-      MappingCallInfo *info = begin_mapper_call(MAP_RELEASE_CALL,
-                            op, first_invocation, continuation_precondition);
-      if (info != NULL)
+      if (info == NULL)
       {
-        mapper->map_release(info, *op, *input, *output);
-        finish_mapper_call(info);
-        return;
+        Event continuation_precondition = Event::NO_EVENT;
+        info = begin_mapper_call(MAP_RELEASE_CALL,
+                              op, first_invocation, continuation_precondition);
+        if (continuation_precondition.exists())
+        {
+          MapperContinuation3<ReleaseOp, Mapper::MapReleaseInput,
+            Mapper::MapReleaseOutput, &MapperManager::invoke_map_release>
+              continuation(this, op, input, output, info);
+          continuation.defer(runtime, continuation_precondition, op);
+          return;
+        }
       }
-#ifdef DEBUG_HIGH_LEVEL
-      assert(first_invocation);
-#endif
-      MapperContinuation3<ReleaseOp, Mapper::MapReleaseInput,
-        Mapper::MapReleaseOutput, &MapperManager::invoke_map_release>
-          continuation(this, op, input, output);
-      continuation.defer(runtime, continuation_precondition, op);
+      mapper->map_release(info, *op, *input, *output);
+      finish_mapper_call(info);
     }
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_select_release_sources(ReleaseOp *op,
                                        Mapper::SelectReleaseSrcInput *input,
                                        Mapper::SelectReleaseSrcOutput *output,
-                                       bool first_invocation)
+                                       bool first_invocation,
+                                       MappingCallInfo *info)
     //--------------------------------------------------------------------------
     {
-      Event continuation_precondition = Event::NO_EVENT;
-      MappingCallInfo *info = begin_mapper_call(RELEASE_SELECT_SOURCES_CALL,
-                            op, first_invocation, continuation_precondition);
-      if (info != NULL)
+      if (info == NULL)
       {
-        mapper->select_release_sources(info, *op, *input, *output);
-        finish_mapper_call(info);
-        return;
+        Event continuation_precondition = Event::NO_EVENT;
+        info = begin_mapper_call(RELEASE_SELECT_SOURCES_CALL,
+                              op, first_invocation, continuation_precondition);
+        if (continuation_precondition.exists())
+        {
+          MapperContinuation3<ReleaseOp, Mapper::SelectReleaseSrcInput,
+                              Mapper::SelectReleaseSrcOutput, 
+                              &MapperManager::invoke_select_release_sources>
+                                continuation(this, op, input, output, info);
+          continuation.defer(runtime, continuation_precondition, op);
+          return;
+        }
       }
-#ifdef DEBUG_HIGH_LEVEL
-      assert(first_invocation);
-#endif
-      MapperContinuation3<ReleaseOp, Mapper::SelectReleaseSrcInput,
-                          Mapper::SelectReleaseSrcOutput, 
-                          &MapperManager::invoke_select_release_sources>
-                            continuation(this, op, input, output);
-      continuation.defer(runtime, continuation_precondition, op);
+      mapper->select_release_sources(info, *op, *input, *output);
+      finish_mapper_call(info);
     }
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_release_speculate(ReleaseOp *op,
                                              Mapper::SpeculativeOutput *output,
-                                             bool first_invocation)
+                                             bool first_invocation,
+                                             MappingCallInfo *info)
     //--------------------------------------------------------------------------
     {
-      Event continuation_precondition = Event::NO_EVENT;
-      MappingCallInfo *info = begin_mapper_call(RELEASE_SPECULATE_CALL,
-                            NULL, first_invocation, continuation_precondition);
-      if (info != NULL)
+      if (info == NULL)
       {
-        mapper->speculate(info, *op, *output);
-        finish_mapper_call(info);
-        return;
+        Event continuation_precondition = Event::NO_EVENT;
+        info = begin_mapper_call(RELEASE_SPECULATE_CALL,
+                             NULL, first_invocation, continuation_precondition);
+        if (continuation_precondition.exists())
+        {
+          MapperContinuation2<ReleaseOp, Mapper::SpeculativeOutput,
+                              &MapperManager::invoke_release_speculate>
+                                continuation(this, op, output, info);
+          continuation.defer(runtime, continuation_precondition, op);
+          return;
+        }
       }
-#ifdef DEBUG_HIGH_LEVEL
-      assert(first_invocation);
-#endif
-      MapperContinuation2<ReleaseOp, Mapper::SpeculativeOutput,
-                          &MapperManager::invoke_release_speculate>
-                            continuation(this, op, output);
-      continuation.defer(runtime, continuation_precondition, op);
+      mapper->speculate(info, *op, *output);
+      finish_mapper_call(info);
     }
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_release_report_profiling(ReleaseOp *op,
                                          Mapper::ReleaseProfilingInfo *input,
-                                         bool first_invocation)
+                                         bool first_invocation,
+                                         MappingCallInfo *info)
     //--------------------------------------------------------------------------
     {
-      Event continuation_precondition = Event::NO_EVENT;
-      MappingCallInfo *info = begin_mapper_call(RELEASE_REPORT_PROFILING_CALL,
-                            NULL, first_invocation, continuation_precondition);
-      if (info != NULL)
+      if (info == NULL)
       {
-        mapper->report_profiling(info, *op, *input);
-        finish_mapper_call(info);
-        return;
+        Event continuation_precondition = Event::NO_EVENT;
+        info = begin_mapper_call(RELEASE_REPORT_PROFILING_CALL,
+                             NULL, first_invocation, continuation_precondition);
+        if (continuation_precondition.exists())
+        {
+          MapperContinuation2<ReleaseOp, Mapper::ReleaseProfilingInfo,
+                              &MapperManager::invoke_release_report_profiling>
+                                continuation(this, op, input, info);
+          continuation.defer(runtime, continuation_precondition, op);  
+          return;
+        }
       }
-#ifdef DEBUG_HIGH_LEVEL
-      assert(first_invocation);
-#endif
-      MapperContinuation2<ReleaseOp, Mapper::ReleaseProfilingInfo,
-                          &MapperManager::invoke_release_report_profiling>
-                            continuation(this, op, input);
-      continuation.defer(runtime, continuation_precondition, op);
+      mapper->report_profiling(info, *op, *input);
+      finish_mapper_call(info);
     }
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_configure_context(TaskOp *task,
                                          Mapper::ContextConfigOutput *output,
-                                         bool first_invocation)
+                                         bool first_invocation,
+                                         MappingCallInfo *info)
     //--------------------------------------------------------------------------
     {
-      Event continuation_precondition = Event::NO_EVENT;
-      MappingCallInfo *info = begin_mapper_call(CONFIGURE_CONTEXT_CALL,
-                            NULL, first_invocation, continuation_precondition);
-      if (info != NULL)
+      if (info == NULL)
       {
-        mapper->configure_context(info, *task, *output);
-        finish_mapper_call(info);
-        return;
+        Event continuation_precondition = Event::NO_EVENT;
+        info = begin_mapper_call(CONFIGURE_CONTEXT_CALL,
+                             NULL, first_invocation, continuation_precondition);
+        if (continuation_precondition.exists())
+        {
+          MapperContinuation2<TaskOp, Mapper::ContextConfigOutput,
+                              &MapperManager::invoke_configure_context>
+                                continuation(this, task, output, info);
+          continuation.defer(runtime, continuation_precondition, task);
+          return;
+        }
       }
-#ifdef DEBUG_HIGH_LEVEL
-      assert(first_invocation);
-#endif
-      MapperContinuation2<TaskOp, Mapper::ContextConfigOutput,
-                          &MapperManager::invoke_configure_context>
-                            continuation(this, task, output);
-      continuation.defer(runtime, continuation_precondition, task);
+      mapper->configure_context(info, *task, *output);
+      finish_mapper_call(info);
     }
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_select_tunable_value(TaskOp *task,
                                      Mapper::SelectTunableInput *input,
                                      Mapper::SelectTunableOutput *output,
-                                     bool first_invocation)
+                                     bool first_invocation,
+                                     MappingCallInfo *info)
     //--------------------------------------------------------------------------
     {
-      Event continuation_precondition = Event::NO_EVENT;
-      MappingCallInfo *info = begin_mapper_call(SELECT_TUNABLE_VALUE_CALL,
-                            NULL, first_invocation, continuation_precondition);
-      if (info != NULL)
+      if (info == NULL)
       {
-        mapper->select_tunable_value(info, *task, *input, *output);
-        finish_mapper_call(info);
-        return;
+        Event continuation_precondition = Event::NO_EVENT;
+        info = begin_mapper_call(SELECT_TUNABLE_VALUE_CALL,
+                             NULL, first_invocation, continuation_precondition);
+        if (continuation_precondition.exists())
+        {
+          MapperContinuation3<TaskOp, Mapper::SelectTunableInput,
+                              Mapper::SelectTunableOutput, 
+                              &MapperManager::invoke_select_tunable_value>
+                                continuation(this, task, input, output, info);
+          continuation.defer(runtime, continuation_precondition, task);
+          return;
+        }
       }
-#ifdef DEBUG_HIGH_LEVEL
-      assert(first_invocation);
-#endif
-      MapperContinuation3<TaskOp, Mapper::SelectTunableInput,
-                          Mapper::SelectTunableOutput, 
-                          &MapperManager::invoke_select_tunable_value>
-                            continuation(this, task, input, output);
-      continuation.defer(runtime, continuation_precondition, task);
+      mapper->select_tunable_value(info, *task, *input, *output);
+      finish_mapper_call(info);
     }
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_map_must_epoch(MustEpochOp *op,
                                             Mapper::MapMustEpochInput *input,
                                             Mapper::MapMustEpochOutput *output,
-                                            bool first_invocation)
+                                            bool first_invocation,
+                                            MappingCallInfo *info)
     //--------------------------------------------------------------------------
     {
-      Event continuation_precondition = Event::NO_EVENT;
-      MappingCallInfo *info = begin_mapper_call(MAP_MUST_EPOCH_CALL,
-                            op, first_invocation, continuation_precondition);
-      if (info != NULL)
+      if (info == NULL)
       {
-        mapper->map_must_epoch(info, *input, *output);
-        finish_mapper_call(info);
-        return;
+        Event continuation_precondition = Event::NO_EVENT;
+        info = begin_mapper_call(MAP_MUST_EPOCH_CALL,
+                              op, first_invocation, continuation_precondition);
+        if (continuation_precondition.exists())
+        {
+          MapperContinuation3<MustEpochOp, Mapper::MapMustEpochInput, 
+                              Mapper::MapMustEpochOutput,
+                              &MapperManager::invoke_map_must_epoch>
+                                continuation(this, op, input, output, info);
+          continuation.defer(runtime, continuation_precondition, op);
+          return;
+        }
       }
-#ifdef DEBUG_HIGH_LEVEL
-      assert(first_invocation);
-#endif
-      MapperContinuation3<MustEpochOp, Mapper::MapMustEpochInput, 
-                          Mapper::MapMustEpochOutput,
-                          &MapperManager::invoke_map_must_epoch>
-                            continuation(this, op, input, output);
-      continuation.defer(runtime, continuation_precondition, op);
+      mapper->map_must_epoch(info, *input, *output);
+      finish_mapper_call(info);
     }
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_map_dataflow_graph(
                                    Mapper::MapDataflowGraphInput *input,
                                    Mapper::MapDataflowGraphOutput *output,
-                                   bool first_invocation)
+                                   bool first_invocation,
+                                   MappingCallInfo *info)
     //--------------------------------------------------------------------------
     {
-      Event continuation_precondition = Event::NO_EVENT;
-      MappingCallInfo *info = begin_mapper_call(MAP_DATAFLOW_GRAPH_CALL,
-                            NULL, first_invocation, continuation_precondition);
-      if (info != NULL)
+      if (info == NULL)
       {
-        mapper->map_dataflow_graph(info, *input, *output);
-        finish_mapper_call(info);
-        return;
+        Event continuation_precondition = Event::NO_EVENT;
+        info = begin_mapper_call(MAP_DATAFLOW_GRAPH_CALL,
+                             NULL, first_invocation, continuation_precondition);
+        if (continuation_precondition.exists())
+        {
+          MapperContinuation2<Mapper::MapDataflowGraphInput, 
+                              Mapper::MapDataflowGraphOutput,
+                              &MapperManager::invoke_map_dataflow_graph>
+                                continuation(this, input, output, info);
+          continuation.defer(runtime, continuation_precondition);
+          return;
+        }
       }
-#ifdef DEBUG_HIGH_LEVEL
-      assert(first_invocation);
-#endif
-      MapperContinuation2<Mapper::MapDataflowGraphInput, 
-                          Mapper::MapDataflowGraphOutput,
-                          &MapperManager::invoke_map_dataflow_graph>
-                            continuation(this, input, output);
-      continuation.defer(runtime, continuation_precondition);
+      mapper->map_dataflow_graph(info, *input, *output);
+      finish_mapper_call(info);
     }
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_select_tasks_to_map(
                                     Mapper::SelectMappingInput *input,
                                     Mapper::SelectMappingOutput *output,
-                                    bool first_invocation)
+                                    bool first_invocation,
+                                    MappingCallInfo *info)
     //--------------------------------------------------------------------------
     {
-      Event continuation_precondition = Event::NO_EVENT;
-      MappingCallInfo *info = begin_mapper_call(SELECT_TASKS_TO_MAP_CALL,
-                            NULL, first_invocation, continuation_precondition);
-      if (info != NULL)
+      if (info == NULL)
       {
-        mapper->select_tasks_to_map(info, *input, *output);
-        finish_mapper_call(info);
-        return;
+        Event continuation_precondition = Event::NO_EVENT;
+        info = begin_mapper_call(SELECT_TASKS_TO_MAP_CALL,
+                             NULL, first_invocation, continuation_precondition);
+        if (continuation_precondition.exists())
+        {
+          MapperContinuation2<Mapper::SelectMappingInput,
+                              Mapper::SelectMappingOutput,
+                              &MapperManager::invoke_select_tasks_to_map>
+                                continuation(this, input, output, info);
+          continuation.defer(runtime, continuation_precondition);
+          return;
+        }
       }
-#ifdef DEBUG_HIGH_LEVEL
-      assert(first_invocation);
-#endif
-      MapperContinuation2<Mapper::SelectMappingInput,
-                          Mapper::SelectMappingOutput,
-                          &MapperManager::invoke_select_tasks_to_map>
-                            continuation(this, input, output);
-      continuation.defer(runtime, continuation_precondition);
+      mapper->select_tasks_to_map(info, *input, *output);
+      finish_mapper_call(info);
     }
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_select_steal_targets(
                                      Mapper::SelectStealingInput *input,
                                      Mapper::SelectStealingOutput *output,
-                                     bool first_invocation)
+                                     bool first_invocation,
+                                     MappingCallInfo *info)
     //--------------------------------------------------------------------------
     {
-      Event continuation_precondition = Event::NO_EVENT;
-      MappingCallInfo *info = begin_mapper_call(SELECT_STEAL_TARGETS_CALL,
-                            NULL, first_invocation, continuation_precondition);
-      if (info != NULL)
+      if (info == NULL)
       {
-        mapper->select_steal_targets(info, *input, *output);
-        finish_mapper_call(info);
-        return;
+        Event continuation_precondition = Event::NO_EVENT;
+        info = begin_mapper_call(SELECT_STEAL_TARGETS_CALL,
+                             NULL, first_invocation, continuation_precondition);
+        if (continuation_precondition.exists())
+        {
+          MapperContinuation2<Mapper::SelectStealingInput,
+                              Mapper::SelectStealingOutput,
+                              &MapperManager::invoke_select_steal_targets>
+                                continuation(this, input, output, info);
+          continuation.defer(runtime, continuation_precondition);
+          return;
+        }
       }
-#ifdef DEBUG_HIGH_LEVEL
-      assert(first_invocation);
-#endif
-      MapperContinuation2<Mapper::SelectStealingInput,
-                          Mapper::SelectStealingOutput,
-                          &MapperManager::invoke_select_steal_targets>
-                            continuation(this, input, output);
-      continuation.defer(runtime, continuation_precondition);
+      mapper->select_steal_targets(info, *input, *output);
+      finish_mapper_call(info);
     }
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_permit_steal_request(
                                      Mapper::StealRequestInput *input,
                                      Mapper::StealRequestOutput *output,
-                                     bool first_invocation)
+                                     bool first_invocation,
+                                     MappingCallInfo *info)
     //--------------------------------------------------------------------------
     {
-      Event continuation_precondition = Event::NO_EVENT;
-      MappingCallInfo *info = begin_mapper_call(PERMIT_STEAL_REQUEST_CALL,
-                            NULL, first_invocation, continuation_precondition);
-      if (info != NULL)
+      if (info == NULL)
       {
-        mapper->permit_steal_request(info, *input, *output);
-        finish_mapper_call(info);
-        return;
+        Event continuation_precondition = Event::NO_EVENT;
+        info = begin_mapper_call(PERMIT_STEAL_REQUEST_CALL,
+                             NULL, first_invocation, continuation_precondition);
+        if (continuation_precondition.exists())
+        {
+          MapperContinuation2<Mapper::StealRequestInput,
+                              Mapper::StealRequestOutput,
+                              &MapperManager::invoke_permit_steal_request>
+                                continuation(this, input, output, info);
+          continuation.defer(runtime, continuation_precondition);
+          return;
+        }
       }
-#ifdef DEBUG_HIGH_LEVEL
-      assert(first_invocation);
-#endif
-      MapperContinuation2<Mapper::StealRequestInput,
-                          Mapper::StealRequestOutput,
-                          &MapperManager::invoke_permit_steal_request>
-                            continuation(this, input, output);
-      continuation.defer(runtime, continuation_precondition);
+      mapper->permit_steal_request(info, *input, *output);
+      finish_mapper_call(info);
     }
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_handle_message(Mapper::MapperMessage *message,
-                                              bool first_invocation)
+                                              bool first_invocation,
+                                              MappingCallInfo *info)
     //--------------------------------------------------------------------------
     {
-      Event continuation_precondition = Event::NO_EVENT;
-      // Special case for handle message, always defer it if we are also
-      // the sender in order to avoid deadlocks
-      if (first_invocation && (message->sender == processor))
+      if (info == NULL)
       {
-        continuation_precondition = mapper_lock.acquire(0, true/*exclusive*/);
-      }
-      else
-      {
-        MappingCallInfo *info = begin_mapper_call(HANDLE_MESSAGE_CALL,
-                          NULL, first_invocation, continuation_precondition);
-        if (info != NULL)
+        Event continuation_precondition = Event::NO_EVENT;
+        // Special case for handle message, always defer it if we are also
+        // the sender in order to avoid deadlocks
+        if (first_invocation && (message->sender == processor))
+          continuation_precondition = mapper_lock.acquire(0, true/*exclusive*/);
+        else
+          info = begin_mapper_call(HANDLE_MESSAGE_CALL,
+                            NULL, first_invocation, continuation_precondition);
+        if (continuation_precondition.exists())
         {
-          mapper->handle_message(info, *message);
-          finish_mapper_call(info);
+          MapperContinuation1<Mapper::MapperMessage,
+                              &MapperManager::invoke_handle_message>
+                                continuation(this, message, info);
+          continuation.defer(runtime, continuation_precondition);
           return;
         }
       }
-#ifdef DEBUG_HIGH_LEVEL
-      assert(first_invocation);
-#endif
-      MapperContinuation1<Mapper::MapperMessage,
-                          &MapperManager::invoke_handle_message>
-                            continuation(this, message);
-      continuation.defer(runtime, continuation_precondition);
+      mapper->handle_message(info, *message);
+      finish_mapper_call(info);
     }
 
     //--------------------------------------------------------------------------
     void MapperManager::invoke_handle_task_result(
                                    Mapper::MapperTaskResult *result,
-                                   bool first_invocation)
+                                   bool first_invocation,
+                                   MappingCallInfo *info)
     //--------------------------------------------------------------------------
     {
-      Event continuation_precondition = Event::NO_EVENT;
-      MappingCallInfo *info = begin_mapper_call(HANDLE_TASK_RESULT_CALL,
-                            NULL, first_invocation, continuation_precondition);
-      if (info != NULL)
+      if (info == NULL)
       {
-        mapper->handle_task_result(info, *result);
-        finish_mapper_call(info);
-        return;
+        Event continuation_precondition = Event::NO_EVENT;
+        info = begin_mapper_call(HANDLE_TASK_RESULT_CALL,
+                             NULL, first_invocation, continuation_precondition);
+        if (continuation_precondition.exists())
+        {
+          MapperContinuation1<Mapper::MapperTaskResult,
+                              &MapperManager::invoke_handle_task_result>
+                                continuation(this, result, info);
+          continuation.defer(runtime, continuation_precondition);
+          return;
+        }
       }
-#ifdef DEBUG_HIGH_LEVEL
-      assert(first_invocation);
-#endif
-      MapperContinuation1<Mapper::MapperTaskResult,
-                          &MapperManager::invoke_handle_task_result>
-                            continuation(this, result);
-      continuation.defer(runtime, continuation_precondition);
+      mapper->handle_task_result(info, *result);
+      finish_mapper_call(info);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void MapperManager::finish_mapper_call(
+                                   const FinishMapperCallContinuationArgs *args)
+    //--------------------------------------------------------------------------
+    {
+      args->manager->finish_mapper_call(args->info, false/*first invocation*/);
     }
 
     //--------------------------------------------------------------------------
@@ -2724,7 +2770,6 @@ namespace Legion {
                       Operation *op, bool first_invocation, Event &precondition)
     //--------------------------------------------------------------------------
     {
-      Event wait_on = Event::NO_EVENT;  
       MappingCallInfo *result = NULL;
       // If this is the first invocation we have to ask for the lock
       // otherwise we know we already have it
@@ -2741,15 +2786,12 @@ namespace Legion {
       {
         // Put this on the list of pending calls
         result->resume = UserEvent::create_user_event();
-        wait_on = result->resume;
+        precondition = result->resume;
         pending_calls.push_back(result);
       }
       else
         executing_call = result;
       mapper_lock.release();
-      // If we have an event to wait on, then wait until we can execute
-      if (wait_on.exists())
-        wait_on.wait();
       return result;
     }
 
@@ -2827,42 +2869,58 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SerializingManager::finish_mapper_call(MappingCallInfo *info)
+    void SerializingManager::finish_mapper_call(MappingCallInfo *info,
+                                                bool first_invocation)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
       assert(executing_call == info);
 #endif
-      UserEvent to_trigger = UserEvent::NO_USER_EVENT;
+      if (first_invocation)
       {
-        AutoLock m_lock(mapper_lock);
-        // See if can start a non-reentrant task
-        if (!non_reentrant_calls.empty() && (paused_calls == 0) && 
-            ready_calls.empty())
+        Event precondition = mapper_lock.acquire();
+        if (!precondition.has_triggered())
         {
-          // Mark that we are now not permitting re-entrant
-          permit_reentrant = false;
-          executing_call = non_reentrant_calls.front();
-          non_reentrant_calls.pop_front();
-          to_trigger = executing_call->resume;
+          FinishMapperCallContinuationArgs args;
+          args.hlr_id = HLR_FINISH_MAPPER_CONTINUATION_TASK_ID;
+          args.manager = this;
+          args.info = info;
+          runtime->issue_runtime_meta_task(&args, sizeof(args),
+              HLR_FINISH_MAPPER_CONTINUATION_TASK_ID, HLR_RESOURCE_PRIORITY,
+              NULL/*op*/, precondition);
+          // No need to wait, we know the mapper call is done
+          // This is all just clean up and can be done asynchronously
+          return;
         }
-        else if (!ready_calls.empty())
-        {
-          executing_call = ready_calls.front();
-          ready_calls.pop_front();
-          to_trigger = executing_call->resume;
-        }
-        else if (!pending_calls.empty())
-        {
-          executing_call = pending_calls.front();
-          pending_calls.pop_front();
-          to_trigger = executing_call->resume;
-        }
-        else
-          executing_call = NULL;
-        // Return our call info
-        free_call_info(info, false/*need lock*/);
       }
+      UserEvent to_trigger = UserEvent::NO_USER_EVENT;
+      // See if can start a non-reentrant task
+      if (!non_reentrant_calls.empty() && 
+          (paused_calls == 0) && ready_calls.empty())
+      {
+        // Mark that we are now not permitting re-entrant
+        permit_reentrant = false;
+        executing_call = non_reentrant_calls.front();
+        non_reentrant_calls.pop_front();
+        to_trigger = executing_call->resume;
+      }
+      else if (!ready_calls.empty())
+      {
+        executing_call = ready_calls.front();
+        ready_calls.pop_front();
+        to_trigger = executing_call->resume;
+      }
+      else if (!pending_calls.empty())
+      {
+        executing_call = pending_calls.front();
+        pending_calls.pop_front();
+        to_trigger = executing_call->resume;
+      }
+      else
+        executing_call = NULL;
+      // Return our call info
+      free_call_info(info, false/*need lock*/);
+      mapper_lock.release();
       // Wake up the next task if necessary
       if (to_trigger.exists())
         to_trigger.trigger();
@@ -3059,22 +3117,38 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ConcurrentManager::finish_mapper_call(MappingCallInfo *info)
+    void ConcurrentManager::finish_mapper_call(MappingCallInfo *info,
+                                               bool first_invocation)
     //--------------------------------------------------------------------------
     {
-      std::vector<UserEvent> to_trigger;
+      if (first_invocation)
       {
-        AutoLock m_lock(mapper_lock);
-        // Check to see if we need to release the lock for the mapper call
-        std::set<MappingCallInfo*>::iterator finder = 
-            current_holders.find(info);     
-        if (finder != current_holders.end())
+        Event precondition = mapper_lock.acquire();
+        if (!precondition.has_triggered())
         {
-          current_holders.erase(finder);
-          release_lock(to_trigger);
+          FinishMapperCallContinuationArgs args;
+          args.hlr_id = HLR_FINISH_MAPPER_CONTINUATION_TASK_ID;
+          args.manager = this;
+          args.info = info;
+          runtime->issue_runtime_meta_task(&args, sizeof(args),
+              HLR_FINISH_MAPPER_CONTINUATION_TASK_ID, HLR_RESOURCE_PRIORITY,
+              NULL/*op*/, precondition);
+          // No need to wait, we know the mapper call is done
+          // This is all just clean up and can be done asynchronously
+          return;
         }
-        free_call_info(info, false/*need lock*/);
       }
+      std::vector<UserEvent> to_trigger;
+      // Check to see if we need to release the lock for the mapper call
+      std::set<MappingCallInfo*>::iterator finder = 
+          current_holders.find(info);     
+      if (finder != current_holders.end())
+      {
+        current_holders.erase(finder);
+        release_lock(to_trigger);
+      }
+      free_call_info(info, false/*need lock*/);
+      mapper_lock.release();
       if (!to_trigger.empty())
       {
         for (std::vector<UserEvent>::const_iterator it = 
@@ -3126,8 +3200,9 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    MapperContinuation::MapperContinuation(MapperManager *man)
-      : manager(man)
+    MapperContinuation::MapperContinuation(MapperManager *man,
+                                           MappingCallInfo *i)
+      : manager(man), info(i)
     //--------------------------------------------------------------------------
     {
     }

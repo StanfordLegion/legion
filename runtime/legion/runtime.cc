@@ -19816,6 +19816,13 @@ namespace Legion {
             MapperContinuation::handle_continuation(args);
             break;
           }
+        case HLR_FINISH_MAPPER_CONTINUATION_TASK_ID:
+          {
+            const MapperManager::FinishMapperCallContinuationArgs *finish_args =
+              (const MapperManager::FinishMapperCallContinuationArgs*)args;
+            MapperManager::finish_mapper_call(finish_args);
+            break;
+          }
         case HLR_TASK_IMPL_SEMANTIC_INFO_REQ_TASK_ID:
           {
             TaskImpl::SemanticRequestArgs *req_args = 

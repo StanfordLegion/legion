@@ -261,6 +261,7 @@ namespace Legion {
       HLR_ISSUE_FRAME_TASK_ID,
       HLR_CONTINUATION_TASK_ID,
       HLR_MAPPER_CONTINUATION_TASK_ID,
+      HLR_FINISH_MAPPER_CONTINUATION_TASK_ID,
       HLR_TASK_IMPL_SEMANTIC_INFO_REQ_TASK_ID,
       HLR_INDEX_SPACE_SEMANTIC_INFO_REQ_TASK_ID,
       HLR_INDEX_PART_SEMANTIC_INFO_REQ_TASK_ID,
@@ -321,6 +322,7 @@ namespace Legion {
         "Issue Frame",                                            \
         "Legion Continuation",                                    \
         "Mapper Continuation",                                    \
+        "Finish Mapper Continuation",                             \
         "Task Impl Semantic Request",                             \
         "Index Space Semantic Request",                           \
         "Index Partition Semantic Request",                       \
