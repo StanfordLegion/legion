@@ -1329,7 +1329,8 @@ class State(object):
         self.runtime_call_kinds = {}
         self.runtime_calls = {}
 
-    def parse_log_file(self, file_name):
+    def parse_log_file(self, file_name, verbose):
+        skipped = 0
         with open(file_name, 'rb') as log:  
             matches = 0
             # Keep track of the first and last times
@@ -1517,7 +1518,11 @@ class State(object):
                     continue
                 # If we made it here then we failed to match
                 matches -= 1 
-                print 'Skipping line: %s' % line.strip()
+                skipped += 1
+                if verbose:
+                    print 'Skipping line: %s' % line.strip()
+        if skipped > 0:
+            print 'WARNING: Skipped %d lines in %s' % (skipped, file_name)
         return matches
 
     def log_task_info(self, op_id, variant_id, proc_id,
@@ -2087,7 +2092,7 @@ def main():
     has_matches = False
     for file_name in file_names:
         print 'Reading log file %s...' % file_name
-        total_matches = state.parse_log_file(file_name)
+        total_matches = state.parse_log_file(file_name, verbose)
         print 'Matched %s lines' % total_matches
         if total_matches > 0:
             has_matches = True

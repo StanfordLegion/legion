@@ -2042,8 +2042,8 @@ class PhysicalState(object):
                 reading=True, redop=0, precise=perform_checks)
             # Make a realm copy from the source to the dst for this field
             copy = dst.state.create_copy(op)
-            copy.add_field(self.field.fid, src, self.field.fid, dst, 0) 
             copy.set_region(self.node)
+            copy.add_field(self.field.fid, src, self.field.fid, dst, 0) 
             # Add the preconditions to the physical graph
             for src_op in src_preconditions:
                 src_op.physical_outgoing.add(copy)
@@ -3968,6 +3968,8 @@ class FillInstance(object):
                 return False
         else:
             fill = self.state.create_fill(op)
+            fill.set_region(region)
+            fill.set_intersect(self.region)
             fill.add_field(dst_field.fid, dst)    
             for pre in preconditions:
                 pre.physical_outgoing.add(fill)
@@ -5801,16 +5803,21 @@ class State(object):
             print 'Legion Spy will now exit'
             sys.exit(1)
         matches = 0
+        skipped = 0
         for line in log:
             if parse_legion_spy_line(line, self):
                 matches += 1
-            elif self.verbose:
-                print 'Skipping line: ' + line
+            else:
+                skipped += 1
+                if self.verbose:
+                    print 'Skipping line: ' + line
         log.close()
         if matches == 0:
             print 'WARNING: file %s contained no valid lines!' % file_name
         if self.verbose:
             print 'Matched %d lines in %s' % (matches,file_name)
+        if skipped > 0:
+            print 'WARNING: Skipped %d lines' % skipped
         return matches
 
     def post_parse(self, simplify_graphs, need_physical):
