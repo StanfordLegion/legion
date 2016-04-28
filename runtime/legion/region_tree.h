@@ -127,21 +127,27 @@ namespace LegionRuntime {
                                            Event domain_ready);
       Event create_partition_by_field(RegionTreeContext ctx,
                                       Processor local_proc,
+                                      Operation *op,
                                       const RegionRequirement &req,
+                                      const unsigned index,
                                       IndexPartition pending,
                                       const Domain &color_space,
                                       Event term_event,
                                       VersionInfo &version_info);
       Event create_partition_by_image(RegionTreeContext ctx,
                                       Processor local_proc,
+                                      Operation *op,
                                       const RegionRequirement &req,
+                                      const unsigned index,
                                       IndexPartition pending,
                                       const Domain &color_space,
                                       Event term_event,
                                       VersionInfo &version_info);
       Event create_partition_by_preimage(RegionTreeContext ctx,
                                       Processor local_proc,
+                                      Operation *op,
                                       const RegionRequirement &req,
+                                      const unsigned index,
                                       IndexPartition projection,
                                       IndexPartition pending,
                                       const Domain &color_space,
@@ -264,11 +270,14 @@ namespace LegionRuntime {
                             const std::set<FieldID> &fields);
     public:
       InstanceRef initialize_current_context(RegionTreeContext ctx,
-                    const RegionRequirement &req, PhysicalManager *manager,
+                    const RegionRequirement &req, const UniqueID init_op_id,
+                    unsigned init_index, PhysicalManager *manager, 
                     Event term_event, unsigned depth,
                     std::map<PhysicalManager*,InstanceView*> &top_views);
       void initialize_current_context(RegionTreeContext ctx,
                                       const RegionRequirement &req,
+                                      const UniqueID init_op_id,
+                                      const unsigned init_index,
                                       CompositeView *composite_view);
       void invalidate_current_context(RegionTreeContext ctx,
                                       LogicalRegion handle,
@@ -281,9 +290,9 @@ namespace LegionRuntime {
                                   VersionInfo &version_info,
                                   Operation *op,
                                   SingleTask *parent_ctx,
-                                  Processor local_proc
+                                  Processor local_proc,
+                                  unsigned index
 #ifdef DEBUG_HIGH_LEVEL
-                                  , unsigned index
                                   , const char *log_name
                                   , UniqueID uid
 #endif
@@ -363,9 +372,9 @@ namespace LegionRuntime {
                                    Event &closed,
                                    const MappingRef &target,
                                    VersionInfo &version_info,
-                                   bool force_composite
+                                   bool force_composite,
+                                   unsigned index
 #ifdef DEBUG_HIGH_LEVEL
-                                   , unsigned index
                                    , const char *log_name
                                    , UniqueID uid
 #endif
@@ -377,9 +386,9 @@ namespace LegionRuntime {
                                    VersionInfo &version_info,
                                    Operation *op,
                                    Processor local_proc,
-                                   const InstanceRef &ref
+                                   const InstanceRef &ref,
+                                   unsigned index
 #ifdef DEBUG_HIGH_LEVEL
-                                   , unsigned index
                                    , const char *log_name
                                    , UniqueID uid
 #endif
@@ -392,7 +401,7 @@ namespace LegionRuntime {
                         VersionInfo &src_version_info,
                         const RegionRequirement &dst_req,
                         const InstanceRef &dst_ref,
-                        Event precondition);
+                        Event precondition, unsigned index);
       Event copy_across(Operation *op,
                         RegionTreeContext src_ctx, 
                         RegionTreeContext dst_ctx,
@@ -421,6 +430,7 @@ namespace LegionRuntime {
       // This takes ownership of the value buffer
       Event fill_fields(RegionTreeContext ctx, Operation *op,
                         const RegionRequirement &req,
+                        const unsigned index,
                         const void *value, size_t value_size,
                         VersionInfo &version_info,
                         RestrictInfo &restrict_info,
@@ -1628,7 +1638,7 @@ namespace LegionRuntime {
                                    const VersionInfo &version_info,
                                    Processor local_proc,
           const LegionMap<ReductionView*,FieldMask>::aligned &valid_reductions,
-                                   Operation *op,
+                                   Operation *op, unsigned index,
                                    CopyTracker *tracker = NULL);
       void invalidate_instance_views(PhysicalState *state,
                                      const FieldMask &invalid_mask); 
@@ -1927,13 +1937,17 @@ namespace LegionRuntime {
       void seed_state(ContextID ctx, Event term_event,
                              const RegionUsage &usage,
                              const FieldMask &user_mask,
+                             const UniqueID init_op_id,
+                             const unsigned init_index,
                              LogicalView *new_view);
       Event close_state(const MappableInfo &info, Event term_event,
                         RegionUsage &usage, const FieldMask &user_mask,
-                        const InstanceRef &target);
+                        const InstanceRef &target, const unsigned index);
       void find_field_descriptors(ContextID ctx, Event term_event,
                                   const RegionUsage &usage,
                                   const FieldMask &user_mask,
+                                  const UniqueID reading_op_id,
+                                  const unsigned index,
                                   unsigned fid_idx, Processor proc, 
                                   std::vector<FieldDataDescriptor> &field_data,
                                   std::set<Event> &preconditions,
@@ -1942,6 +1956,7 @@ namespace LegionRuntime {
                        const void *value, size_t value_size, 
                        VersionInfo &version_info);
       Event eager_fill_fields(ContextID ctx, Operation *op,
+                              const unsigned index,
                               const FieldMask &fill_mask,
                               const void *value, size_t value_size,
                               VersionInfo &version_info, InstanceView *target,

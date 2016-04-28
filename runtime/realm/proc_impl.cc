@@ -515,6 +515,11 @@ namespace Realm {
       os << "deferred task: func=" << task->func_id << " proc=" << task->proc << " finish=" << task->get_finish_event();
     }
 
+    Event DeferredTaskSpawn::get_finish_event(void) const
+    {
+      return task->get_finish_event();
+    }
+
 
   ////////////////////////////////////////////////////////////////////////
   //

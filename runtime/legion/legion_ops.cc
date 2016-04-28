@@ -1692,9 +1692,9 @@ namespace LegionRuntime {
       {
         requirement.premapped = runtime->forest->premap_physical_region(
                   physical_ctx, privilege_path, requirement, version_info, 
-                  this, parent_ctx, local_proc
+                  this, parent_ctx, local_proc, 0/*idx*/
 #ifdef DEBUG_HIGH_LEVEL
-                  , 0/*idx*/, get_logging_name(), unique_op_id
+                  , get_logging_name(), unique_op_id
 #endif
                   );
 #ifdef DEBUG_HIGH_LEVEL
@@ -2544,9 +2544,9 @@ namespace LegionRuntime {
             runtime->forest->premap_physical_region(
                   src_contexts[idx],src_privilege_paths[idx],
                   src_requirements[idx], src_versions[idx],
-                  this, parent_ctx, local_proc
+                  this, parent_ctx, local_proc, idx
 #ifdef DEBUG_HIGH_LEVEL
-                  , idx, get_logging_name(), unique_op_id
+                  , get_logging_name(), unique_op_id
 #endif
                   );
 #ifdef DEBUG_HIGH_LEVEL
@@ -2564,9 +2564,8 @@ namespace LegionRuntime {
             runtime->forest->premap_physical_region(
                   dst_contexts[idx],dst_privilege_paths[idx],
                   dst_requirements[idx], dst_versions[idx],
-                  this, parent_ctx, local_proc
+                  this, parent_ctx, local_proc, src_requirements.size()+idx
 #ifdef DEBUG_HIGH_LEVEL
-                  , src_requirements.size()+idx
                   , get_logging_name(), unique_op_id
 #endif
                   );
@@ -2779,7 +2778,8 @@ namespace LegionRuntime {
                                                    src_requirements[idx],
                                                    src_versions[idx],
                                                    dst_requirements[idx],
-                                                   dst_ref, sync_precondition));
+                                                   dst_ref, 
+                                                   sync_precondition, idx));
             else
               copy_complete_events.insert(runtime->forest->reduce_across(this,
                                           parent_ctx->get_executing_processor(),
@@ -4165,9 +4165,9 @@ namespace LegionRuntime {
                                               local_proc, target_children,
                                               next_children, 
                                               close_event, target,
-                                              version_info, force_composite
+                                              version_info, 
+                                              force_composite, 0/*idx*/
 #ifdef DEBUG_HIGH_LEVEL
-                                              , 0 /*idx*/ 
                                               , get_logging_name()
                                               , unique_op_id
 #endif
@@ -4426,9 +4426,8 @@ namespace LegionRuntime {
       // worrying about failing.
       Event close_event = runtime->forest->close_physical_context(physical_ctx,
                                             requirement, version_info, this,
-                                            local_proc, reference
+                                            local_proc, reference, 0 /*idx*/ 
 #ifdef DEBUG_HIGH_LEVEL
-                                            , 0 /*idx*/ 
                                             , get_logging_name()
                                             , unique_op_id
 #endif
@@ -4866,9 +4865,9 @@ namespace LegionRuntime {
         // because we've marked ourselves as being restricted.
         requirement.premapped = runtime->forest->premap_physical_region(
                   physical_ctx, privilege_path, requirement, version_info,
-                  this, parent_ctx, local_proc
+                  this, parent_ctx, local_proc, 0/*idx*/
 #ifdef DEBUG_HIGH_LEVEL
-                  , 0/*idx*/, get_logging_name(), unique_op_id
+                  , get_logging_name(), unique_op_id
 #endif
                   );
 #ifdef DEBUG_HIGH_LEVEL
@@ -5470,9 +5469,9 @@ namespace LegionRuntime {
         // because we've marked ourselves as being restricted.
         requirement.premapped = runtime->forest->premap_physical_region(
                   physical_ctx, privilege_path, requirement, version_info, 
-                  this, parent_ctx, local_proc
+                  this, parent_ctx, local_proc, 0/*idx*/
 #ifdef DEBUG_HIGH_LEVEL
-                  , 0/*idx*/, get_logging_name(), unique_op_id
+                  , get_logging_name(), unique_op_id
 #endif
                   );
 #ifdef DEBUG_HIGH_LEVEL
@@ -8198,9 +8197,9 @@ namespace LegionRuntime {
       {
         requirement.premapped = runtime->forest->premap_physical_region(
                   physical_ctx, privilege_path, requirement, version_info,
-                  this, parent_ctx, local_proc
+                  this, parent_ctx, local_proc, 0/*idx*/
 #ifdef DEBUG_HIGH_LEVEL
-                  , 0/*idx*/, get_logging_name(), unique_op_id
+                  , get_logging_name(), unique_op_id
 #endif
                   );
 #ifdef DEBUG_HIGH_LEVEL
@@ -8215,8 +8214,8 @@ namespace LegionRuntime {
           {
             ready_event = 
               runtime->forest->create_partition_by_field(physical_ctx,
-                                                         local_proc,
-                                                         requirement,
+                                                         local_proc, this,
+                                                         requirement, 0/*idx*/,
                                                          partition_handle,
                                                          color_space,
                                                          completion_event,
@@ -8227,8 +8226,8 @@ namespace LegionRuntime {
           {
             ready_event = 
               runtime->forest->create_partition_by_image(physical_ctx,
-                                                         local_proc,
-                                                         requirement,
+                                                         local_proc, this,
+                                                         requirement, 0/*idx*/,
                                                          partition_handle,
                                                          color_space,
                                                          completion_event,
@@ -8239,8 +8238,9 @@ namespace LegionRuntime {
           {
             ready_event = 
               runtime->forest->create_partition_by_preimage(physical_ctx,
-                                                            local_proc,
-                                                            requirement,
+                                                            local_proc, this,
+                                                            requirement, 
+                                                            0/*idx*/,
                                                             projection,
                                                             partition_handle,
                                                             color_space,
@@ -8743,9 +8743,9 @@ namespace LegionRuntime {
         Processor local_proc = parent_ctx->get_executing_processor();
         requirement.premapped = runtime->forest->premap_physical_region(
                   physical_ctx, privilege_path, requirement, version_info,
-                  this, parent_ctx, local_proc
+                  this, parent_ctx, local_proc, 0/*idx*/
 #ifdef DEBUG_HIGH_LEVEL
-                  , 0/*idx*/, get_logging_name(), unique_op_id
+                  , get_logging_name(), unique_op_id
 #endif
                   );
 #ifdef DEBUG_HIGH_LEVEL
@@ -8783,8 +8783,9 @@ namespace LegionRuntime {
         }
         Event sync_precondition = compute_sync_precondition();
         Event done_event = 
-          runtime->forest->fill_fields(physical_ctx, this, requirement, value,
-           value_size, version_info, restrict_info, map_ref, sync_precondition);
+          runtime->forest->fill_fields(physical_ctx, this, requirement, 
+              0/*idx*/, value, value_size, version_info, restrict_info, 
+              map_ref, sync_precondition);
         std::set<Event> applied_conditions;
         version_info.apply_mapping(physical_ctx.get_id(),
                                    runtime->address_space, applied_conditions);
@@ -8863,8 +8864,9 @@ namespace LegionRuntime {
       }
       Event sync_precondition = compute_sync_precondition();
       Event done_event = 
-        runtime->forest->fill_fields(physical_ctx, this, requirement, result,
-          result_size, version_info, restrict_info, map_ref, sync_precondition);
+        runtime->forest->fill_fields(physical_ctx, this, requirement, 0/*idx*/,
+            result, result_size, version_info, restrict_info, 
+            map_ref, sync_precondition);
       std::set<Event> applied_conditions;
       version_info.apply_mapping(physical_ctx.get_id(),
                                  runtime->address_space, applied_conditions);
@@ -9315,9 +9317,9 @@ namespace LegionRuntime {
         Processor local_proc = parent_ctx->get_executing_processor();
         requirement.premapped = runtime->forest->premap_physical_region(
                   physical_ctx, privilege_path, requirement, version_info,
-                  this, parent_ctx, local_proc
+                  this, parent_ctx, local_proc, 0/*idx*/
 #ifdef DEBUG_HIGH_LEVEL
-                  , 0/*idx*/, get_logging_name(), unique_op_id
+                  , get_logging_name(), unique_op_id
 #endif
                   );
 #ifdef DEBUG_HIGH_LEVEL
@@ -9698,9 +9700,9 @@ namespace LegionRuntime {
         Processor local_proc = parent_ctx->get_executing_processor();
         requirement.premapped = runtime->forest->premap_physical_region(
                   physical_ctx, privilege_path, requirement, version_info,
-                  this, parent_ctx, local_proc
+                  this, parent_ctx, local_proc, 0/*idx*/
 #ifdef DEBUG_HIGH_LEVEL
-                  , 0/*idx*/, get_logging_name(), unique_op_id
+                  , get_logging_name(), unique_op_id
 #endif
                   );
 #ifdef DEBUG_HIGH_LEVEL

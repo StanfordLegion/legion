@@ -214,6 +214,7 @@ namespace Realm {
 
       virtual bool event_triggered(Event e, bool poisoned);
       virtual void print(std::ostream& os) const;
+      virtual Event get_finish_event(void) const;
 
     protected:
       RuntimeImpl *runtime;
@@ -241,6 +242,11 @@ namespace Realm {
     void DeferredShutdown::print(std::ostream& os) const
     {
       os << "deferred shutdown";
+    }
+
+    Event DeferredShutdown::get_finish_event(void) const
+    {
+      return Event::NO_EVENT;
     }
 
     void Runtime::shutdown(Event wait_on /*= Event::NO_EVENT*/)
@@ -672,6 +678,8 @@ namespace Realm {
       std::string dummy_prefix;
       cp.add_option_string("-ll:prefix", dummy_prefix);
 #endif
+
+      cp.add_option_int("-realm:eventloopcheck", Config::event_loop_detection_limit);
 
       // these are actually parsed in activemsg.cc, but consume them here for now
       size_t dummy = 0;

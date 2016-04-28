@@ -54,25 +54,23 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     {
     }
+
+    //--------------------------------------------------------------------------
+    PhysicalUser::PhysicalUser(void)
+    //--------------------------------------------------------------------------
+    {
+    }
     
     //--------------------------------------------------------------------------
     PhysicalUser::PhysicalUser(const RegionUsage &u, const ColorPoint &c,
-                               FieldVersions *v)
-      : usage(u), child(c), versions(v)
+                               UniqueID id, unsigned idx, bool cp)
+      : usage(u), child(c), op_id(id), index(idx), copy(cp)
     //--------------------------------------------------------------------------
     {
-      // Can be NULL in some cases
-      if (versions != NULL)
-        versions->add_reference();
-#ifdef DEBUG_HIGH_LEVEL
-      if (usage.redop > 0) // Use this property in pack and unpack
-        assert(versions == NULL);
-#endif
     }
 
     //--------------------------------------------------------------------------
     PhysicalUser::PhysicalUser(const PhysicalUser &rhs)
-      : versions(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -83,8 +81,6 @@ namespace LegionRuntime {
     PhysicalUser::~PhysicalUser(void)
     //--------------------------------------------------------------------------
     {
-      if ((versions != NULL) && versions->remove_reference())
-        delete versions;
     }
 
     //--------------------------------------------------------------------------
@@ -97,64 +93,16 @@ namespace LegionRuntime {
     }
 
     //--------------------------------------------------------------------------
-    bool PhysicalUser::same_versions(const FieldMask &test_mask,
-                                     const FieldVersions *other) const
-    //--------------------------------------------------------------------------
-    {
-      if ((other == NULL) || (versions == NULL))
-        return false;
-      const LegionMap<VersionID,FieldMask>::aligned &local_versions = 
-        versions->get_field_versions();
-      const LegionMap<VersionID,FieldMask>::aligned &other_versions = 
-        other->get_field_versions();
-      for (LegionMap<VersionID,FieldMask>::aligned::const_iterator vit = 
-            local_versions.begin(); vit != local_versions.end(); vit++)
-      {
-        FieldMask overlap = vit->second & test_mask;
-        if (!overlap)
-          continue;
-        for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
-              other_versions.begin(); it != other_versions.end(); it++)
-        {
-          FieldMask overlap2 = overlap & it->second;
-          if (!overlap2)
-            continue;
-          if (vit->first != it->first)
-            return false;
-        }
-      }
-      return true;
-    }
-
-    //--------------------------------------------------------------------------
     void PhysicalUser::pack_user(Serializer &rez)
     //--------------------------------------------------------------------------
     {
       rez.serialize(child);
       rez.serialize(usage.privilege);
       rez.serialize(usage.prop);
-      if (versions != NULL)
-      {
-#ifdef DEBUG_HIGH_LEVEL
-        assert(usage.redop == 0);
-#endif
-        const LegionMap<VersionID,FieldMask>::aligned &field_versions =
-          versions->get_field_versions();
-        int count = field_versions.size();
-        count = -count; // negate for disambiguation
-        rez.serialize(count);
-        for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
-              field_versions.begin(); it != field_versions.end(); it++)
-        {
-          rez.serialize(it->first);
-          rez.serialize(it->second);
-        }
-      }
-      else
-      {
-        int redop = usage.redop;
-        rez.serialize(redop);
-      }
+      rez.serialize(usage.redop);
+      rez.serialize(op_id);
+      rez.serialize(index);
+      rez.serialize(copy);
     }
 
     //--------------------------------------------------------------------------
@@ -164,38 +112,14 @@ namespace LegionRuntime {
                                                        bool add_reference)
     //--------------------------------------------------------------------------
     {
-      ColorPoint child;
-      derez.deserialize(child);
-      RegionUsage usage;
-      derez.deserialize(usage.privilege);
-      derez.deserialize(usage.prop);
-      int redop;
-      derez.deserialize(redop);
-      PhysicalUser *result = NULL;
-      if (redop <= 0)
-      {
-        usage.redop = 0;
-        FieldVersions *versions = NULL;
-        if (redop < 0)
-        {
-          int count = -redop;
-          versions = new FieldVersions();
-          for (int idx = 0; idx < count; idx++)
-          {
-            VersionID vid;
-            derez.deserialize(vid);
-            FieldMask version_mask;
-            derez.deserialize(version_mask);
-            versions->add_field_version(vid, version_mask);
-          }
-        }
-        result = legion_new<PhysicalUser>(usage, child, versions);
-      }
-      else
-      {
-        usage.redop = redop;
-        result = legion_new<PhysicalUser>(usage, child);
-      }
+      PhysicalUser *result = legion_new<PhysicalUser>();
+      derez.deserialize(result->child);
+      derez.deserialize(result->usage.privilege);
+      derez.deserialize(result->usage.prop);
+      derez.deserialize(result->usage.redop);
+      derez.deserialize(result->op_id);
+      derez.deserialize(result->index);
+      derez.deserialize(result->copy);
 #ifdef DEBUG_HIGH_LEVEL
       assert(result != NULL);
 #endif
@@ -206,9 +130,9 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     MappableInfo::MappableInfo(ContextID c, Operation *o, Processor p,
-                               RegionRequirement &r, VersionInfo &info,
-                               const FieldMask &k)
-      : ctx(c), op(o), local_proc(p), req(r), 
+                               RegionRequirement &r, unsigned idx,
+                               VersionInfo &info, const FieldMask &k)
+      : ctx(c), op(o), local_proc(p), req(r), index(idx),
         version_info(info), traversal_mask(k)
     //--------------------------------------------------------------------------
     {
@@ -1541,9 +1465,9 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     ReductionCloser::ReductionCloser(ContextID c, ReductionView *t,
                                      const FieldMask &m, VersionInfo &info, 
-                                     Processor local, Operation *o)
+                                     Processor local, Operation *o, unsigned i)
       : ctx(c), target(t), close_mask(m), version_info(info), 
-        local_proc(local), op(o)
+        local_proc(local), op(o), index(i)
     //--------------------------------------------------------------------------
     {
     }
@@ -1551,7 +1475,8 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     ReductionCloser::ReductionCloser(const ReductionCloser &rhs)
       : ctx(0), target(NULL), close_mask(FieldMask()), 
-        version_info(rhs.version_info), local_proc(Processor::NO_PROC), op(NULL)
+        version_info(rhs.version_info), 
+        local_proc(Processor::NO_PROC), op(NULL), index(0)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -1597,7 +1522,7 @@ namespace LegionRuntime {
       }
       if (!valid_reductions.empty())
         node->issue_update_reductions(target, close_mask, version_info,
-                                      local_proc, valid_reductions, op);
+                                      local_proc, valid_reductions, op, index);
     }
 
     /////////////////////////////////////////////////////////////
@@ -2411,7 +2336,9 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     void CurrentState::initialize_state(LogicalView *view, Event term_event,
                                         const RegionUsage &usage,
-                                        const FieldMask &user_mask)
+                                        const FieldMask &user_mask,
+                                        const UniqueID init_op_id,
+                                        const unsigned init_index)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -2424,7 +2351,8 @@ namespace LegionRuntime {
       {
         VersionState *init_state = create_new_version_state(init_version);
         init_state->add_base_valid_ref(VERSION_MANAGER_REF);
-        init_state->initialize(view, term_event, usage, user_mask);
+        init_state->initialize(view, term_event, usage, user_mask, 
+                               init_op_id, init_index);
         current_version_infos[init_version].valid_fields = user_mask;
         current_version_infos[init_version].states[init_state] = user_mask;
       }
@@ -2441,7 +2369,8 @@ namespace LegionRuntime {
 #endif
         LegionMap<VersionState*,FieldMask>::aligned::iterator it = 
           finder->second.states.begin();
-        it->first->initialize(view, term_event, usage, user_mask);
+        it->first->initialize(view, term_event, usage, user_mask, 
+                              init_op_id, init_index);
         it->second |= user_mask;
       }
 #ifdef DEBUG_HIGH_LEVEL
@@ -4852,7 +4781,9 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     void VersionState::initialize(LogicalView *new_view, Event term_event,
                                   const RegionUsage &usage,
-                                  const FieldMask &user_mask)
+                                  const FieldMask &user_mask,
+                                  const UniqueID init_op_id,
+                                  const unsigned init_index)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -4873,7 +4804,8 @@ namespace LegionRuntime {
           else
             finder->second |= user_mask;
           reduction_mask |= user_mask;
-          inst_view->add_initial_user(term_event, usage, user_mask);
+          inst_view->add_initial_user(term_event, usage, user_mask, 
+                                      init_op_id, init_index);
         }
         else
         {
@@ -4885,7 +4817,8 @@ namespace LegionRuntime {
             finder->second |= user_mask;
           if (HAS_WRITE(usage))
             dirty_mask |= user_mask;
-          inst_view->add_initial_user(term_event, usage, user_mask);
+          inst_view->add_initial_user(term_event, usage, user_mask, 
+                                      init_op_id, init_index);
         }
       }
       else

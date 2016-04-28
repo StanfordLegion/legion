@@ -577,8 +577,9 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     Event RegionTreeForest::create_partition_by_field(RegionTreeContext ctx,
-                                                  Processor proc,
+                                                  Processor proc, Operation *op,
                                                   const RegionRequirement &req,
+                                                  const unsigned index,
                                                   IndexPartition pending,
                                                   const Domain &color_space,
                                                   Event term_event,
@@ -604,8 +605,9 @@ namespace LegionRuntime {
         user_mask.set_bit(fid_idx);
         RegionUsage usage(req);
         top_node->find_field_descriptors(ctx.get_id(), term_event, usage,
-                                       user_mask, fid_idx, proc,
-                                       field_data, preconditions, version_info);
+                                       user_mask, op->get_unique_op_id(),
+                                       index, fid_idx, proc, field_data, 
+                                       preconditions, version_info);
       }
       // Enumerate the color space so we can get back a different index
       // for each color in the color space
@@ -633,8 +635,9 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     Event RegionTreeForest::create_partition_by_image(RegionTreeContext ctx,
-                                                  Processor proc,
+                                                  Processor proc, Operation *op,
                                                   const RegionRequirement &req,
+                                                  const unsigned index,
                                                   IndexPartition pending,
                                                   const Domain &color_space,
                                                   Event term_event,
@@ -669,8 +672,9 @@ namespace LegionRuntime {
         // Get the field data on this child node
         RegionUsage usage(req);
         child_node->find_field_descriptors(ctx.get_id(), term_event, usage,
-                                            user_mask, fid_idx, proc,
-                                       field_data, preconditions, version_info);
+                                           user_mask, op->get_unique_op_id(),
+                                           index, fid_idx, proc, field_data, 
+                                           preconditions, version_info);
         Event child_pre;
         const Domain &child_dom = 
                         child_node->row_source->get_domain(child_pre);
@@ -700,8 +704,9 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     Event RegionTreeForest::create_partition_by_preimage(RegionTreeContext ctx,
-                                                  Processor proc,
+                                                  Processor proc, Operation *op,
                                                   const RegionRequirement &req,
+                                                  const unsigned index,
                                                   IndexPartition projection,
                                                   IndexPartition pending,
                                                   const Domain &color_space,
@@ -729,8 +734,9 @@ namespace LegionRuntime {
         user_mask.set_bit(fid_idx);
         RegionUsage usage(req);
         top_node->find_field_descriptors(ctx.get_id(), term_event, usage,
-                                         user_mask, fid_idx, proc,
-                                       field_data, preconditions, version_info);
+                                         user_mask, op->get_unique_op_id(),
+                                         index, fid_idx, proc, field_data,
+                                         preconditions, version_info);
       }
       // Get all the index spaces from the color space in the projection
       std::map<Realm::IndexSpace,Realm::IndexSpace> subspaces;
@@ -1671,9 +1677,9 @@ namespace LegionRuntime {
                                                   VersionInfo &version_info,
                                                   Operation *op,
                                                   SingleTask *parent_ctx,
-                                                  Processor local_proc
+                                                  Processor local_proc,
+                                                  unsigned index
 #ifdef DEBUG_HIGH_LEVEL
-                                                  , unsigned index
                                                   , const char *log_name
                                                   , UniqueID uid
 #endif
@@ -1696,7 +1702,7 @@ namespace LegionRuntime {
       FieldMask user_mask = 
         parent_node->column_source->get_field_mask(req.privilege_fields);
       MappableInfo info(ctx.get_id(), op, local_proc, 
-                        req, version_info, user_mask); 
+                        req, index, version_info, user_mask); 
       // Get the start node
       RegionTreeNode *start_node;
       if (req.handle_type == PART_PROJECTION)
@@ -1763,7 +1769,7 @@ namespace LegionRuntime {
         child_node->column_source->get_field_mask(req.privilege_fields);
       // Construct the mappable info
       MappableInfo info(ctx.get_id(), op, local_proc, 
-                        req, version_info, user_mask);
+                        req, index, version_info, user_mask);
       // Get the start node
       RegionTreeNode *start_node = child_node;
       // Construct the traverser
@@ -1863,7 +1869,7 @@ namespace LegionRuntime {
       single_path.initialize(child_node->get_depth(), child_node->get_depth());
       // Construct a dummy mappable info
       MappableInfo info(ctx.get_id(), NULL, Processor::NO_PROC, 
-                        req, version_info, user_mask);
+                        req, index, version_info, user_mask);
       MappingTraverser traverser(single_path, info, RegionUsage(req), 
                              user_mask, target_proc, index, 
                              target.get_instance_view());
@@ -1945,7 +1951,7 @@ namespace LegionRuntime {
         child_node->column_source->get_field_mask(req.privilege_fields);
       // Construct the mappable info
       MappableInfo info(ctx.get_id(), op, local_proc, 
-                        req, version_info, user_mask);
+                        req, index, version_info, user_mask);
       // Construct the user
       RegionUsage usage(req);
       LogicalView *view = ref.get_view();
@@ -2014,6 +2020,8 @@ namespace LegionRuntime {
     InstanceRef RegionTreeForest::initialize_current_context(
                                                 RegionTreeContext ctx,
                                                 const RegionRequirement &req,
+                                                const UniqueID init_op_id,
+                                                const unsigned init_index,
                                                 PhysicalManager *manager,
                                                 Event term_event,
                                                 unsigned depth,
@@ -2091,13 +2099,15 @@ namespace LegionRuntime {
       // that overlap with each other.
       // Now seed the top node
       top_node->seed_state(ctx.get_id(), term_event, usage,
-                           user_mask, new_view);
+                           user_mask, init_op_id, init_index, new_view);
       return InstanceRef(Event::NO_EVENT, new_view);
     }
 
     //--------------------------------------------------------------------------
     void RegionTreeForest::initialize_current_context(RegionTreeContext ctx,
                                                   const RegionRequirement &req,
+                                                  const UniqueID init_op_id,
+                                                  const unsigned init_index,
                                                   CompositeView *composite_view)
     //--------------------------------------------------------------------------
     {
@@ -2109,7 +2119,7 @@ namespace LegionRuntime {
       FieldMask user_mask = 
         top_node->column_source->get_field_mask(req.privilege_fields);
       top_node->seed_state(ctx.get_id(), Event::NO_EVENT, usage,
-                           user_mask, composite_view);
+                           user_mask, init_op_id, init_index, composite_view);
     }
     
     //--------------------------------------------------------------------------
@@ -2133,9 +2143,9 @@ namespace LegionRuntime {
                                                    Event &closed,
                                                    const MappingRef &target,
                                                    VersionInfo &version_info,
-                                                   bool force_composite
+                                                   bool force_composite,
+                                                   unsigned index
 #ifdef DEBUG_HIGH_LEVEL
-                                                   , unsigned index
                                                    , const char *log_name
                                                    , UniqueID uid
 #endif
@@ -2149,7 +2159,7 @@ namespace LegionRuntime {
       FieldMask closing_mask = 
         top_node->column_source->get_field_mask(req.privilege_fields);
       MappableInfo info(ctx.get_id(), parent_ctx, 
-                        local_proc, req, version_info, closing_mask);
+                        local_proc, req, index, version_info, closing_mask);
 #ifdef DEBUG_HIGH_LEVEL
       TreeStateLogger::capture_state(runtime, &req, index, log_name, uid,
                                      top_node, ctx.get_id(), 
@@ -2201,9 +2211,9 @@ namespace LegionRuntime {
                                                   VersionInfo &version_info,
                                                   Operation *op,
                                                   Processor local_proc,
-                                                  const InstanceRef &ref 
+                                                  const InstanceRef &ref,
+                                                  unsigned index
 #ifdef DEBUG_HIGH_LEVEL
-                                                  , unsigned index
                                                   , const char *log_name
                                                   , UniqueID uid
 #endif
@@ -2218,7 +2228,7 @@ namespace LegionRuntime {
         top_node->column_source->get_field_mask(req.privilege_fields);
       RegionUsage usage(req);
       MappableInfo info(ctx.get_id(), op, local_proc, 
-                        req, version_info, user_mask);
+                        req, index, version_info, user_mask);
 #ifdef DEBUG_HIGH_LEVEL
       TreeStateLogger::capture_state(runtime, &req, index, log_name, uid,
                                      top_node, ctx.get_id(), 
@@ -2227,7 +2237,7 @@ namespace LegionRuntime {
                  FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES), user_mask);
 #endif
       Event result = top_node->close_state(info, Event::NO_EVENT, usage,
-                                           user_mask, ref);
+                                           user_mask, ref, index);
 #ifdef DEBUG_HIGH_LEVEL
       TreeStateLogger::capture_state(runtime, &req, index, log_name, uid,
                                      top_node, ctx.get_id(), 
@@ -2247,7 +2257,7 @@ namespace LegionRuntime {
                                         VersionInfo &src_version_info,
                                         const RegionRequirement &dst_req,
                                         const InstanceRef &dst_ref,
-                                        Event pre)
+                                        Event pre, unsigned index)
     //--------------------------------------------------------------------------
     {
  #ifdef DEBUG_PERF
@@ -2271,8 +2281,8 @@ namespace LegionRuntime {
       FieldMask dst_mask = 
         dst_node->column_source->get_field_mask(dst_req.privilege_fields);
       // Very important we pass the source version info here!
-      MappableInfo info(src_ctx.get_id(), op, 
-                        local_proc, src_req, src_version_info, src_mask);
+      MappableInfo info(src_ctx.get_id(), op, local_proc, 
+                        src_req, index, src_version_info, src_mask);
       src_node->find_copy_across_instances(info, dst_view,
                                            src_instances, deferred_instances);
       // Now is where things get tricky, since we don't have any correspondence
@@ -2293,7 +2303,8 @@ namespace LegionRuntime {
                                           src_preconditions[it->first];
         it->first->find_copy_preconditions(0/*redop*/, true/*reading*/,
                                            it->second, src_version_info,
-                                           preconditions);
+                                           op->get_unique_op_id(),
+                                           index, preconditions);
       }
       for (unsigned idx = 0; idx < src_req.instance_fields.size(); idx++)
       {
@@ -2359,6 +2370,7 @@ namespace LegionRuntime {
             FieldMask local_src; local_src.set_bit(src_index);
             sit->first->add_copy_user(0/*redop*/, copy_post,
                                       src_version_info,
+                                      op->get_unique_op_id(), index,
                                       local_src, true/*reading*/);
             // No need to register a user for the destination because
             // we've already mapped it.
@@ -2629,6 +2641,7 @@ namespace LegionRuntime {
     //--------------------------------------------------------------------------
     Event RegionTreeForest::fill_fields(RegionTreeContext ctx, Operation *op,
                                         const RegionRequirement &req,
+                                        const unsigned index,
                                         const void *value, size_t value_size,
                                         VersionInfo &version_info,
                                         RestrictInfo &restrict_info,
@@ -2657,8 +2670,8 @@ namespace LegionRuntime {
 #endif
         InstanceView *inst_view = view->as_instance_view();
         Event done_event = fill_node->eager_fill_fields(ctx.get_id(), op, 
-                           eager_fields, value, value_size, version_info, 
-                           inst_view, precondition);
+                           index, eager_fields, value, value_size, 
+                           version_info, inst_view, precondition);
         // Remove these fields from the fill set
         fill_mask -= eager_fields;
         // If we still have fields to fill, do that now
@@ -12703,7 +12716,8 @@ namespace LegionRuntime {
         {
           issue_update_reductions(*it, reduc_fields, closer.info.version_info,
                                   closer.info.local_proc, 
-                                  valid_reductions, closer.info.op, &closer);
+                                  valid_reductions, closer.info.op, 
+                                  closer.info.index, &closer);
         }
       }
       // If we are leaving this state open, we have to do some clean-up
@@ -13569,13 +13583,15 @@ namespace LegionRuntime {
 #endif
           it->first->find_copy_preconditions(0/*redop*/, true/*reading*/,
                                              it->second, info.version_info,
-                                             preconditions);
+                                             info.op->get_unique_op_id(),
+                                             info.index, preconditions);
           update_mask |= it->second;
         }
         // Now do the destination
         dst->find_copy_preconditions(0/*redop*/, false/*reading*/,
                                      update_mask, info.version_info,
-                                     preconditions);
+                                     info.op->get_unique_op_id(),
+                                     info.index, preconditions);
 
         LegionMap<Event,FieldMask>::aligned postconditions;
         if (!has_component_domains())
@@ -13602,6 +13618,7 @@ namespace LegionRuntime {
               postconditions.begin(); it != postconditions.end(); it++)
         {
           dst->add_copy_user(0/*redop*/, it->first, info.version_info, 
+                             info.op->get_unique_op_id(), info.index,
                              it->second, false/*reading*/);
         }
       }
@@ -13911,6 +13928,7 @@ namespace LegionRuntime {
                 it = update_views.begin(); it != update_views.end(); it++)
           {
             it->first->add_copy_user(0/*redop*/, copy_post, src_version_info,
+                                     info.op->get_unique_op_id(), info.index,
                                      it->second, true/*reading*/);
           }
           postconditions[copy_post] = pre_set.set_mask;
@@ -14062,7 +14080,7 @@ namespace LegionRuntime {
                                                 const VersionInfo &version_info,
                                                  Processor local_proc,
            const LegionMap<ReductionView*,FieldMask>::aligned &valid_reductions,
-                                                 Operation *op,
+                                                 Operation *op, unsigned index,
                                                  CopyTracker *tracker/*= NULL*/)
     //--------------------------------------------------------------------------
     {
@@ -14106,7 +14124,7 @@ namespace LegionRuntime {
 #endif
           // Then we have a reduction to perform
           it->first->perform_reduction(inst_target, copy_mask, version_info,
-                                       local_proc, op, tracker);
+                                       local_proc, op, index, tracker);
         }
       }
     }
@@ -14375,7 +14393,7 @@ namespace LegionRuntime {
         {
           FieldMask overlap = flush_mask & it->second; 
           issue_update_reductions(it->first, overlap, info.version_info,
-                    info.local_proc, reduction_views, info.op, tracker);
+            info.local_proc, reduction_views, info.op, info.index, tracker);
           // Save the overlap fields
           it->second = overlap;
 #ifdef DEBUG_HIGH_LEVEL
@@ -15759,8 +15777,8 @@ namespace LegionRuntime {
                              false/*dirty*/, new_view);
         }
         // Now add ourselves as a user of this region
-        return new_view->add_user(usage, term_event,
-                                  user_mask, info.version_info);
+        return new_view->add_user(usage, term_event, user_mask, 
+              info.version_info, info.op->get_unique_op_id(), info.index);
       }
       else
       {
@@ -15776,8 +15794,8 @@ namespace LegionRuntime {
         // it was performed as part of the premapping operation
         update_reduction_views(state, user_mask, new_view);
         // Now we can add ourselves as a user of this region
-        return new_view->add_user(usage, term_event,
-                                  user_mask, info.version_info);
+        return new_view->add_user(usage, term_event, user_mask, 
+              info.version_info, info.op->get_unique_op_id(), info.index);
       }
     }
 
@@ -15794,18 +15812,21 @@ namespace LegionRuntime {
     void RegionNode::seed_state(ContextID ctx, Event term_event,
                                 const RegionUsage &usage,
                                 const FieldMask &user_mask,
+                                const UniqueID init_op_id,
+                                const unsigned init_index,
                                 LogicalView *new_view)
     //--------------------------------------------------------------------------
     {
       get_current_state(ctx).initialize_state(new_view, term_event, 
-                                              usage, user_mask);
+                                  usage, user_mask, init_op_id, init_index);
     } 
 
     //--------------------------------------------------------------------------
     Event RegionNode::close_state(const MappableInfo &info, 
                                   Event term_event, RegionUsage &usage, 
                                   const FieldMask &user_mask,
-                                  const InstanceRef &target)
+                                  const InstanceRef &target,
+                                  const unsigned index)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_PERF
@@ -15819,14 +15840,14 @@ namespace LegionRuntime {
         // from farther down in the tree
         PhysicalState *state = get_physical_state(info.ctx, info.version_info);
         ReductionCloser closer(info.ctx, target_view, user_mask, 
-                               info.version_info, info.local_proc, info.op);
+                           info.version_info, info.local_proc, info.op, index);
         closer.issue_close_reductions(this, state);
         siphon_physical_children(closer, state);
         // Important trick: switch the user to read-only so it picks
         // up dependences on all the reductions applied ot this instance
         usage.privilege = READ_ONLY;
         InstanceRef result = target_view->add_user(usage, term_event,
-                                                  user_mask, info.version_info);
+            user_mask, info.version_info, info.op->get_unique_op_id(), index);
 #ifdef DEBUG_HIGH_LEVEL
         assert(result.has_ref());
 #endif
@@ -15859,6 +15880,8 @@ namespace LegionRuntime {
     void RegionNode::find_field_descriptors(ContextID ctx, Event term_event,
                                             const RegionUsage &usage,
                                             const FieldMask &user_mask,
+                                            const UniqueID reading_op_id,
+                                            const unsigned index,
                                             unsigned fid_idx, Processor proc,
                                   std::vector<FieldDataDescriptor> &field_data,
                                             std::set<Event> &preconditions,
@@ -15892,7 +15915,7 @@ namespace LegionRuntime {
             view->set_descriptor(field_data.back(), fid_idx);
             // Register ourselves as user of this instance
             InstanceRef ref = view->add_user(usage, term_event,
-                                             user_mask, version_info);  
+                                 user_mask, version_info, reading_op_id, index);
             Event ready_event = ref.get_ready_event();
             if (ready_event.exists())
               preconditions.insert(ready_event);
@@ -15918,9 +15941,9 @@ namespace LegionRuntime {
         // instance or apply it to all the existing physical instances
         if (!deferred_view->is_composite_view())
           assert(false); // TODO: implement this
-        deferred_view->find_field_descriptors(term_event, usage, 
-                                              user_mask, fid_idx, proc, 
-                                              field_data, preconditions);
+        deferred_view->find_field_descriptors(term_event, usage, user_mask, 
+                                              reading_op_id, index, fid_idx, 
+                                              proc, field_data, preconditions);
       }
     }
 
@@ -15950,6 +15973,7 @@ namespace LegionRuntime {
 
     //--------------------------------------------------------------------------
     Event RegionNode::eager_fill_fields(ContextID ctx, Operation *op,
+                                        const unsigned index,
                                         const FieldMask &fill_mask,
                                         const void *value, size_t value_size,
                                 VersionInfo &version_info, InstanceView *target,
@@ -15959,8 +15983,8 @@ namespace LegionRuntime {
       // Effectively a fill is a special kind of copy so we can analyze
       // it the same way to figure out how to issue the fill
       LegionMap<Event,FieldMask>::aligned preconditions;
-      target->find_copy_preconditions(0/*redop*/, false/*reading*/,
-                                      fill_mask, version_info, preconditions);
+      target->find_copy_preconditions(0/*redop*/, false/*reading*/, fill_mask, 
+                  version_info, op->get_unique_op_id(), index, preconditions);
       // Get the domains we need for this copy 
       std::set<Domain> fill_domains;
       Event dom_pre = Event::NO_EVENT;
@@ -15994,8 +16018,8 @@ namespace LegionRuntime {
         }
       }
       // Add user to make record when everyone is done writing
-      target->add_copy_user(0/*redop*/, op->get_completion_event(),
-                            version_info, fill_mask, false/*reading*/);
+      target->add_copy_user(0/*redop*/, op->get_completion_event(),version_info,
+                    op->get_unique_op_id(), index, fill_mask, false/*reading*/);
       // Finally do the update to the physical state like a normal fill
       PhysicalState *state = get_physical_state(ctx, version_info);
       // Invalidate any open children and any reductions
