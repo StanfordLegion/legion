@@ -584,6 +584,11 @@ class IndexSpace(object):
 
     __repr__ = __str__
 
+    def check_partition_properties(self):
+        # Check all the partitions
+        for child in self.children.itervalues():
+            child.check_partition_properties()
+
     def are_all_children_disjoint(self):
         return False
 
@@ -709,6 +714,26 @@ class IndexPartition(object):
             return self.name + ' ('+str(self.uid)+')'
 
     __repr__ = __str__
+
+    def check_partition_properties(self):
+        # Check for dominance of children by parent
+        for child in self.children.itervalues():
+            if not self.parent.dominates(child):
+                print 'WARNING: child '+str(child)+' is not dominated by parent '+\
+                        str(self.parent)+' in '+str(self)+'. This is definitely '+\
+                        'an application bug.'
+        # Check disjointness
+        if self.disjoint:
+            previous = Shape()
+            for child in self.children.itervalues():
+                child_shape = child.get_shape()
+                if not (child_shape & previous).empty():
+                    print 'WARNING: '+str(self)+' was logged disjoint '+\
+                            'but there are overlapping children. This '+\
+                            'is definitely an application bug.'
+                    break
+                previous |= child_shape
+        # TODO: Check completeness
 
     def are_all_children_disjoint(self):
         return self.disjoint
@@ -3272,7 +3297,7 @@ class Operation(object):
             for fill in self.realm_fills:
                 if fill not in elevate:
                     #elevate[fill] = fill.get_event_context()
-                    elevate[copy] = copy.get_context()
+                    elevate[fill] = fill.get_context()
         if self.is_physical_operation():
             # Finally put ourselves in the set if we are a physical operation
             assert self.context is not None
@@ -3900,11 +3925,11 @@ class FillInstance(object):
         # Find the destination preconditions
         if self.region is not region:
             preconditions = dst.find_copy_dependences(depth=dst_depth, 
-                field=dst_field, op=op, region=region, reading=False, 
+                field=dst_field, op=op, index=index, region=region, reading=False, 
                 redop=0, precise=perform_checks, intersect=self.region)
         else:
             preconditions = dst.find_copy_dependences(depth=dst_depth, 
-                field=dst_field, op=op, region=region, reading=False, 
+                field=dst_field, op=op, index=index, region=region, reading=False, 
                 redop=0, precise=perform_checks)
         if perform_checks:
             if self.region is not region:
@@ -5795,6 +5820,8 @@ class State(object):
             if space.parent is None:
                 self.top_spaces[num_index_trees] = space
                 num_index_trees += 1
+                # Check for the dominance property
+                space.check_partition_properties()
         # Find the top-level regions
         for region in self.regions.itervalues():
             if region.parent is None:
