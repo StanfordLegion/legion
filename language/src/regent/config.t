@@ -53,6 +53,10 @@ function config.parse_args()
 
   local args = terralib.newlist()
 
+  if not rawargs then
+    return setmetatable(options, option), args
+  end
+
   local i = 0
   local arg_i = 1
   while rawargs[i] do
