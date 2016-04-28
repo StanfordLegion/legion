@@ -14294,7 +14294,7 @@ namespace Legion {
       DETAILED_PROFILER(context->runtime, REALM_ISSUE_COPY_CALL);
       Realm::ProfilingRequestSet requests;
       if (context->runtime->profiler != NULL)
-        context->runtime->profiler->add_fill_request(requests, op);
+        context->runtime->profiler->add_copy_request(requests, op);
       Event result;
       if (intersect == NULL)
       {
