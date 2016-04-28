@@ -173,8 +173,6 @@ namespace Legion {
                              CopyAcrossHelper *across_helper = NULL) = 0;
       virtual void reduce_from(ReductionOpID redop,const FieldMask &reduce_mask,
                        std::vector<Domain::CopySrcDstField> &src_fields) = 0;
-      virtual bool has_war_dependence(const RegionUsage &usage, 
-                                      const FieldMask &user_mask) = 0;
     public:
       inline InstanceView* get_instance_subview(const ColorPoint &c) 
         { return get_subview(c)->as_instance_view(); }
@@ -244,8 +242,6 @@ namespace Legion {
                              CopyAcrossHelper *across_helper = NULL);
       virtual void reduce_from(ReductionOpID redop,const FieldMask &reduce_mask,
                        std::vector<Domain::CopySrcDstField> &src_fields);
-      virtual bool has_war_dependence(const RegionUsage &usage, 
-                              const FieldMask &user_mask);
     public:
       void accumulate_events(std::set<Event> &all_events);
     public:
@@ -262,25 +258,92 @@ namespace Legion {
                                            const UniqueID creator_op_id,
                                            const unsigned index,
                          LegionMap<Event,FieldMask>::aligned &preconditions);
+    protected: 
+      void find_copy_preconditions_above(ReductionOpID redop, bool reading,
+                                         const FieldMask &copy_mask,
+                                         const ColorPoint &child_color,
+                                         const VersionInfo &version_info,
+                                         const UniqueID creator_op_id,
+                                         const unsigned index,
+                       LegionMap<Event,FieldMask>::aligned &preconditions);
+      void find_local_copy_preconditions(ReductionOpID redop, bool reading,
+                                         const FieldMask &copy_mask,
+                                         const ColorPoint &child_color,
+                                         const UniqueID creator_op_id,
+                                         const unsigned index,
+                           LegionMap<Event,FieldMask>::aligned &preconditions);
+    public:
       virtual void add_copy_user(ReductionOpID redop, Event copy_term,
                                  const VersionInfo &version_info,
                                  const UniqueID creator_op_id,
                                  const unsigned index,
                                  const FieldMask &mask, bool reading);
+    protected:
+      void add_copy_user_above(const RegionUsage &usage, Event copy_term,
+                               const ColorPoint &child_color,
+                               const VersionInfo &version_info,
+                               const UniqueID creator_op_id,
+                               const unsigned index,
+                               const FieldMask &copy_mask);
+      void add_local_copy_user(const RegionUsage &usage, 
+                               Event copy_term, bool base_user,
+                               const ColorPoint &child_color,
+                               const VersionInfo &version_info,
+                               const UniqueID creator_op_id,
+                               const unsigned index,
+                               const FieldMask &copy_mask);
+    public:
       virtual Event find_user_precondition(const RegionUsage &user,
                                            Event term_event,
                                            const FieldMask &user_mask,
                                            Operation *op, const unsigned index,
                                            const VersionInfo &version_info);
+    protected:
+      void find_user_preconditions_above(const RegionUsage &usage,
+                                         Event term_event,
+                                         const ColorPoint &child_color,
+                                         const VersionInfo &version_info,
+                                         const UniqueID op_id,
+                                         const unsigned index,
+                                         const FieldMask &user_mask,
+                                         std::set<Event> &preconditions);
+      void find_local_user_preconditions(const RegionUsage &usage,
+                                         Event term_event,
+                                         const ColorPoint &child_color,
+                                         const UniqueID op_id,
+                                         const unsigned index,
+                                         const FieldMask &user_mask,
+                                         std::set<Event> &preconditions);
+    public:
       virtual void add_user(const RegionUsage &user, Event term_event,
                             const FieldMask &user_mask, Operation *op,
                             const unsigned index,
                             const VersionInfo &version_info);
-      // This is a fused version of the above two methods
+    protected:
+      void add_user_above(const RegionUsage &usage, Event term_event,
+                          const ColorPoint &child_color, 
+                          const VersionInfo &version_info,
+                          const UniqueID op_id, const unsigned index,
+                          const FieldMask &user_mask);
+      bool add_local_user(const RegionUsage &usage, Event term_event,
+                          const ColorPoint &child_color, 
+                          const UniqueID op_id, const unsigned index,
+                          const FieldMask &user_mask);
+    public:
+      // This is a fused version of the above two virtual methods
       virtual Event add_user_fused(const RegionUsage &user, Event term_event,
                                    const FieldMask &user_mask, 
                                    Operation *op, const unsigned index,
                                    const VersionInfo &version_info);
+    protected:
+      void add_user_above_fused(const RegionUsage &usage, Event term_event,
+                                const ColorPoint &child_color,
+                                const VersionInfo &version_info,
+                                const UniqueID op_id,
+                                const unsigned index,
+                                const FieldMask &user_mask,
+                                std::set<Event> &preconditions);
+    public:
       virtual void add_initial_user(Event term_event,
                                     const RegionUsage &usage,
                                     const FieldMask &user_mask,
@@ -303,123 +366,57 @@ namespace Legion {
 #ifdef DEBUG_HIGH_LEVEL
       void sanity_check_versions(void);
 #endif
-      void find_local_user_preconditions(const RegionUsage &usage,
-                                         Event term_event,
-                                         const ColorPoint &child_color,
-                                         const UniqueID op_id,
-                                         const unsigned index,
-                                         const FieldMask &user_mask,
-                                         std::set<Event> &preconditions);
-      bool add_local_user(const RegionUsage &usage, Event term_event,
-                          const ColorPoint &child_color, 
-                          const UniqueID op_id, const unsigned index,
-                          const FieldMask &user_mask);
-      void find_user_preconditions_above(const RegionUsage &usage,
-                                         Event term_event,
-                                         const ColorPoint &child_color,
-                                         const VersionInfo &version_info,
-                                         const UniqueID op_id,
-                                         const unsigned index,
-                                         const FieldMask &user_mask,
-                                         std::set<Event> &preconditions);
-      void add_user_above(const RegionUsage &usage, Event term_event,
-                          const ColorPoint &child_color, 
-                          const VersionInfo &version_info,
-                          const UniqueID op_id, const unsigned index,
-                          const FieldMask &user_mask);
-      void add_user_above_fused(const RegionUsage &usage, Event term_event,
-                                const ColorPoint &child_color,
-                                const VersionInfo &version_info,
-                                const UniqueID op_id,
-                                const unsigned index,
-                                const FieldMask &user_mask,
-                                std::set<Event> &preconditions);
     protected:
-      void add_copy_user_above(const RegionUsage &usage, Event copy_term,
-                               const ColorPoint &child_color,
-                               const VersionInfo &version_info,
-                               const UniqueID creator_op_id,
-                               const unsigned index,
-                               const FieldMask &copy_mask);
-      void add_local_copy_user(const RegionUsage &usage, 
-                               Event copy_term, bool base_user,
-                               const ColorPoint &child_color,
-                               const VersionInfo &version_info,
-                               const UniqueID creator_op_id,
-                               const unsigned index,
-                               const FieldMask &copy_mask);
-      bool find_current_preconditions(Event test_event,
-                                      const PhysicalUser *prev_user,
-                                      const FieldMask &prev_mask,
-                                      const RegionUsage &next_user,
-                                      const FieldMask &next_mask,
+      void add_current_user(PhysicalUser *user, Event term_event,
+                            const FieldMask &user_mask);
+      void filter_local_users(Event term_event);
+      void filter_current_user(Event user_event, const FieldMask &filter_mask);
+      void filter_previous_user(Event user_event, const FieldMask &filter_mask);
+    protected:
+      void find_current_preconditions(const FieldMask &user_mask,
+                                      const RegionUsage &usage,
                                       const ColorPoint &child_color,
+                                      Event term_event,
                                       const UniqueID op_id,
                                       const unsigned index,
                                       std::set<Event> &preconditions,
-                                      FieldMask &observed,
+                                      std::set<Event> &dead_events,
+                  LegionMap<Event,FieldMask>::aligned &filter_events,
+                                      FieldMask &observed, 
                                       FieldMask &non_dominated);
-      bool find_previous_preconditions(Event test_event,
-                                       const PhysicalUser *prev_user,
-                                       const FieldMask &prev_mask,
-                                       const RegionUsage &next_user,
-                                       const FieldMask &next_mask,
-                                       const ColorPoint &child_color,
-                                       const UniqueID op_id,
-                                       const unsigned index,
-                                       std::set<Event> &preconditions);
-    protected: 
-      void find_copy_preconditions_above(ReductionOpID redop, bool reading,
-                                         const FieldMask &copy_mask,
-                                         const ColorPoint &child_color,
-                                         const VersionInfo &version_info,
-                                         const UniqueID creator_op_id,
-                                         const unsigned index,
-                       LegionMap<Event,FieldMask>::aligned &preconditions);
-      void find_local_copy_preconditions(ReductionOpID redop, bool reading,
-                                         const FieldMask &copy_mask,
-                                         const ColorPoint &child_color,
-                                         const UniqueID creator_op_id,
-                                         const unsigned index,
-                           LegionMap<Event,FieldMask>::aligned &preconditions);
-      void find_current_copy_preconditions(Event test_event,
-                                           const PhysicalUser *user, 
-                                           const FieldMask &user_mask,
-                                           ReductionOpID redop, bool reading,
-                                           const FieldMask &copy_mask,
-                                           const ColorPoint &child_color,
-                                           const UniqueID creator_op_id,
-                                           const unsigned index,
-                        LegionMap<Event,FieldMask>::aligned &preconditions,
-                                           FieldMask &observed,
-                                           FieldMask &non_dominated);
-      void find_previous_copy_preconditions(Event test_event,
-                                            const PhysicalUser *user,
-                                            const FieldMask &user_Mask,
-                                            ReductionOpID redop, bool reading,
-                                            const FieldMask &copy_mask,
-                                            const ColorPoint &child_dolor,
-                                            const UniqueID creator_op_id,
-                                            const unsigned index,
-                        LegionMap<Event,FieldMask>::aligned &preconditions);
-    protected:
-      void filter_previous_users(
-                    const LegionMap<Event,FieldMask>::aligned &filter_previous);
-      void filter_previous_users(const FieldMask &dominated);
-      void filter_current_users(const FieldMask &dominated);
-      void filter_local_users(Event term_event);
-      void add_current_user(PhysicalUser *user, Event term_event,
-                            const FieldMask &user_mask);
-      void add_previous_user(PhysicalUser *user, Event term_event,
-                             const FieldMask &user_mask);
-    protected:
-      bool has_war_dependence_above(const RegionUsage &usage,
-                                    const FieldMask &user_mask,
-                                    const ColorPoint &child_color);
-      bool has_local_war_dependence(const RegionUsage &usage,
-                                    const FieldMask &user_mask,
-                                    const ColorPoint &child_color,
-                                    const ColorPoint &local_color);
+      void find_previous_preconditions(const FieldMask &user_mask,
+                                      const RegionUsage &usage,
+                                      const ColorPoint &child_color,
+                                      Event term_event,
+                                      const UniqueID op_id,
+                                      const unsigned index,
+                                      std::set<Event> &preconditions,
+                                      std::set<Event> &dead_events);
+      // Overloaded versions for being precise about copy preconditions
+      void find_current_preconditions(const FieldMask &user_mask,
+                                      const RegionUsage &usage,
+                                      const ColorPoint &child_color,
+                                      const UniqueID op_id,
+                                      const unsigned index,
+                  LegionMap<Event,FieldMask>::aligned &preconditions,
+                                      std::set<Event> &dead_events,
+                  LegionMap<Event,FieldMask>::aligned &filter_events,
+                                      FieldMask &observed, 
+                                      FieldMask &non_dominated);
+      void find_previous_preconditions(const FieldMask &user_mask,
+                                      const RegionUsage &usage,
+                                      const ColorPoint &child_color,
+                                      const UniqueID op_id,
+                                      const unsigned index,
+                  LegionMap<Event,FieldMask>::aligned &preconditions,
+                                      std::set<Event> &dead_events);
+      void find_previous_filter_users(const FieldMask &dominated_mask,
+                  LegionMap<Event,FieldMask>::aligned &filter_events);
+      inline bool has_local_precondition(PhysicalUser *prev_user,
+                                     const RegionUsage &next_user,
+                                     const ColorPoint &child_color,
+                                     const UniqueID op_id,
+                                     const unsigned index);
     public:
       //void update_versions(const FieldMask &update_mask);
       void find_atomic_reservations(const FieldMask &mask, 
@@ -459,7 +456,14 @@ namespace Legion {
       // Therefore we store the current and previous sets as maps to
       // users indexed by events. Iterating over the maps are no worse
       // that iterating over lists (for arbitrary insertion and deletion)
-      // and will provide fast indexing for removing items.
+      // and will provide fast indexing for removing items. We used to
+      // store users in current and previous epochs similar to logical
+      // analysis, but have since switched over to storing readers and
+      // writers that are not filtered as part of analysis. This let's
+      // us perform more analysis in parallel since we'll only need to
+      // hold locks in read-only mode prevent user fragmentation. It also
+      // deals better with the common case which are higher views in
+      // the view tree that less frequently filter their sub-users.
       LegionMap<Event,EventUsers>::aligned current_epoch_users;
       LegionMap<Event,EventUsers>::aligned previous_epoch_users;
       // Also keep a set of events for which we have outstanding
@@ -586,8 +590,6 @@ namespace Legion {
                            CopyAcrossHelper *across_helper = NULL);
       virtual void copy_from(const FieldMask &copy_mask, 
                    std::vector<Domain::CopySrcDstField> &src_fields);
-      virtual bool has_war_dependence(const RegionUsage &usage, 
-                                      const FieldMask &user_mask);
     public:
       void reduce_from(ReductionOpID redop, const FieldMask &reduce_mask,
                        std::vector<Domain::CopySrcDstField> &src_fields);
@@ -1075,6 +1077,48 @@ namespace Legion {
       assert(is_composite_view());
 #endif
       return static_cast<CompositeView*>(const_cast<LogicalView*>(this));
+    }
+
+    //--------------------------------------------------------------------------
+    inline bool MaterializedView::has_local_precondition(PhysicalUser *user,
+                                                 const RegionUsage &next_user,
+                                                 const ColorPoint &child_color,
+                                                 const UniqueID op_id,
+                                                 const unsigned index)
+    //--------------------------------------------------------------------------
+    {
+      // Different region requirements of the same operation 
+      // We just need to wait on any copies generated for this region
+      // requirement, we'll implicitly wait for all other copies to 
+      // finish anyway as the region requirements that generated those
+      // copies will catch dependences
+      if ((op_id == user->op_id) && (index != user->index))
+        return false;
+      if (child_color.is_valid())
+      {
+        // Same child, already done the analysis
+        if (child_color == user->child)
+          return false;
+        // Disjoint children means we can skip it
+        if (user->child.is_valid() && (disjoint_children || 
+              logical_node->are_children_disjoint(child_color, user->child)))
+          return false;
+      }
+      // Now do a dependence test for coherence non-interference
+      DependenceType dt = check_dependence_type(user->usage, next_user);
+      switch (dt)
+      {
+        case NO_DEPENDENCE:
+        case ATOMIC_DEPENDENCE:
+        case SIMULTANEOUS_DEPENDENCE:
+          return false;
+        case TRUE_DEPENDENCE:
+        case ANTI_DEPENDENCE:
+          break;
+        default:
+          assert(false); // should never get here
+      }
+      return true;
     }
 
   }; // namespace Internal 
