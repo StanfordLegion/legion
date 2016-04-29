@@ -4992,7 +4992,37 @@ class EventGraphTraverser(object):
                 self.visit_event(node.start_event)
         if self.post_copy_fn is not None:
             self.post_copy_fn(node, self)
-        
+
+class PhysicalTraverser(object):
+    def __init__(self, forwards, use_gen, generation,
+                 node_fn = None, post_node_fn = None):
+        self.forwards = forwards
+        self.use_gen = use_gen
+        self.generation = generation
+        self.node_fn = node_fn
+        self.post_node_fn = post_node_fn
+
+    def visit_node(self, node):
+        if self.use_gen:
+            if node.generation == self.generation:
+                return
+            else:
+                node.generation = self.generation
+        do_next = True
+        if self.node_fn is not None:
+            do_next = self.node_fn(node, self)
+        if not do_next:
+            return
+        if self.forwards:
+            if node.physical_outgoing is not None:
+                for next_node in node.physical_outgoing:
+                    self.visit_node(next_node)
+        else:
+            if node.physical_incoming is not None:
+                for next_node in node.physical_incoming:
+                    self.visit_node(next_node)
+        if self.post_node_fn is not None:
+            self.post_node_fn(node, self)
 
 class GraphPrinter(object):
     __slots__ = ['name', 'filename', 'out', 'depth', 'next_cluster_id']
@@ -5847,15 +5877,6 @@ class State(object):
         op = self.get_operation(self.top_level_uid)
         assert op.context is not None
         op.context.depth = 0
-        # Compute the physical reachable
-        for op in self.ops.itervalues():
-            op.compute_physical_reachable()
-        for copy in self.copies.itervalues():
-            copy.compute_physical_reachable()
-        for fill in self.fills.itervalues():
-            fill.compute_physical_reachable()
-        if need_physical and simplify_graphs:
-            self.simplify_physical_graph() 
         # Check to see if we have any unknown operations
         unknown = None
         for op in self.ops.itervalues():
@@ -5874,6 +5895,18 @@ class State(object):
         self.slice_index = None
         self.slice_slice = None
         self.point_slice = None
+        logical_enabled = self.has_mapping_deps
+        physical_enabled = not not self.events
+        if physical_enabled:
+            # Compute the physical reachable
+            for op in self.ops.itervalues():
+                op.compute_physical_reachable()
+            for copy in self.copies.itervalues():
+                copy.compute_physical_reachable()
+            for fill in self.fills.itervalues():
+                fill.compute_physical_reachable()
+            if need_physical and simplify_graphs:
+                self.simplify_physical_graph()
         if self.verbose:
             print "Found %d processors" % len(self.processors)
             print "Found %d memories" % len(self.memories)
@@ -5889,15 +5922,13 @@ class State(object):
             print "Found %d events" % len(self.events)
             print "Found %d copies" % len(self.copies)
             print "Found %d fills" % len(self.fills)
-        logical_enabled = self.has_mapping_deps
-        physical_enabled = not not self.events
         return logical_enabled,physical_enabled
 
-    def simplify_physical_graph(self):
+    def simplify_physical_graph(self, need_cycle_check=True):
         print "Simplifying event graph..."
         # Check for cycles first, if there are any, then we disable
         # the transitive reduction and print a warning
-        if self.perform_cycle_checks(print_result=False):
+        if need_cycle_check and self.perform_cycle_checks(print_result=False):
             print "WARNING: CYCLE DETECTED IN PHYSICAL EVENT GRAPH!!!"
             print "  This usually indicates a runtime bug and should be reported."
             print "WARNING: DISABLING TRANSITIVE REDUCTION!!!"
@@ -5907,23 +5938,26 @@ class State(object):
                 traverser.order.append(node)
             return True
         # Build a topological order of everything 
-        topological_sorter = EventGraphTraverser(False, True,
-            self.get_next_traversal_generation(), None,
-            traverse_node, traverse_node, traverse_node)
+        topological_sorter = PhysicalTraverser(False, True,
+            self.get_next_traversal_generation(), traverse_node)
         topological_sorter.order = list()
         # Traverse all the sinks
         for op in self.ops.itervalues():
             if not op.physical_outgoing:
-                topological_sorter.visit_op(op)
+                topological_sorter.visit_node(op)
         for copy in self.ops.itervalues():
             if not copy.physical_outgoing:
-                topological_sorter.visit_copy(op)
+                topological_sorter.visit_node(op)
         for fill in self.fills.itervalues():
             if not fill.physical_outgoing:
-                toplogical_sorter.visit_fill(fill)
+                topological_sorter.visit_node(fill)
         # Now that we have everything sorter based on topology
         # Do the simplification in reverse order
+        count = 0;
         for src in topological_sorter.order:
+            if self.verbose:
+                print 'Simplifying node %d of %d' % (count, len(topological_sorter.order))
+                count += 1
             if src.physical_outgoing is None:
                 continue
             actual_out = src.physical_outgoing.copy()
@@ -6338,6 +6372,9 @@ def main(temp_dir):
                   "should compute. This is not the actual event graph computed."
         print "Performing physical analysis..."
         state.perform_physical_analysis(physical_checks, sanity_checks)
+        # If we generated the graph for printing, then simplify it 
+        if need_physical:
+            state.simplify_physical_graph(need_cycle_check=False)
     if cycle_checks:
         print "Performing cycle checks..."
         state.perform_cycle_checks()
