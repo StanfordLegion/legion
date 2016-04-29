@@ -3223,6 +3223,29 @@ class Operation(object):
                     if not fill.analyzed:
                         print '    '+str(fill)+' was unnecessary'
 
+    def print_op_mapping_decisions(self, depth):
+        # If we are an index task just do our points and return
+        if self.kind == INDEX_TASK_KIND:
+            assert self.points is not None
+            for point in self.points.itervalues():
+                point.print_op_mapping_decisions(depth)
+        # Print our mapping decisions
+        if self.mappings is not None:
+            prefix = ''
+            for idx in range(depth):
+                prefix += '  '
+            print prefix+'-------------------------------------------------'
+            print prefix+' Mapping Decisions for '+str(self)
+            for index,mappings in self.mappings.iteritems():
+                print prefix+'  Region Requirement '+str(index)
+                for fid,inst in mappings.iteritems():
+                    field = inst.region.field_space.get_field(fid)
+                    print prefix+'    '+str(field)+': '+str(inst)
+            print prefix+'-------------------------------------------------'
+        # If we are a single task recurse
+        if self.kind == SINGLE_TASK_KIND and self.task is not None:
+            self.task.print_task_mapping_decisions()
+
     def get_color(self):
         return {
             NO_OP_KIND : "white",
@@ -3549,6 +3572,11 @@ class Task(object):
         self.op.state.reset_physical_state(depth)
         return success
 
+    def print_task_mapping_decisions(self):
+        depth = self.get_depth()
+        for op in self.operations:
+            op.print_op_mapping_decisions(depth)
+
     def print_dataflow_graph(self, path, simplify_graphs):
         if len(self.operations) < 2:
             return 0
@@ -3607,7 +3635,7 @@ class Task(object):
                 op.print_incoming_dataflow_edges(printer, previous_pairs)
         printer.print_pdf_after_close(False)
         # We printed our dataflow graph
-        return 1
+        return 1   
 
     def print_event_graph_context(self, printer, elevate, all_nodes, top):
         if not self.operations:
@@ -6086,6 +6114,26 @@ class State(object):
             node.print_incoming_event_edges(printer) 
         printer.print_pdf_after_close(False)
 
+    def print_instance_descriptions(self):
+        for inst in self.instances.itervalues():
+            # Skip the virtual instance
+            if inst.is_virtual():
+                continue
+            if inst.redop > 0:
+                print str(inst)+' (Reduction Op '+str(inst.redop)+')'
+            else:
+                print str(inst)
+            print '  Memory '+str(inst.memory)
+            print '  '+str(inst.region)
+            print '  Fields:'
+            for field in inst.fields:
+                print '    '+str(field)
+
+    def print_mapping_decisions(self):
+        assert self.top_level_uid is not None
+        top_task = self.get_task(self.top_level_uid) 
+        top_task.print_task_mapping_decisions()
+
     def get_processor(self, proc_id):
         if proc_id in self.processors:
             return self.processors[proc_id]
@@ -6240,7 +6288,8 @@ class State(object):
         gc.collect()
 
 def usage():
-    print "Usage: "+sys.argv[0]+" [-l -p -c -r -m -d -e -z -s -k -u -v -a] <file_name(s)>+"
+    print "Usage: "+sys.argv[0]+" [-l -p -c -r -m -d -e -i -q -z -s -k -u -v -a] "+\
+          "<file_name(s)>+"
     print "  -l : perform logical checks"
     print "  -p : perform physical checks"
     print "  -c : check for cycles"
@@ -6248,6 +6297,8 @@ def usage():
     print "  -m : make machine graphs"
     print "  -d : make dataflow graphs"
     print "  -e : make event graphs"
+    print "  -i : print instance descriptions"
+    print "  -q : print mapping decisions"
     print "  -z : add extra detail to graphs"
     print "  -s : perform sanity checking analysis (old Legion Spy analysis)"
     print "  -k : keep temporary files"
@@ -6260,7 +6311,7 @@ def main(temp_dir):
     if len(sys.argv) < 2:
         usage()
     try:
-        opts, args = getopt(sys.argv[1:],'lpcrmdeszkuva')
+        opts, args = getopt(sys.argv[1:],'lpcrmdeiqszkuva')
     except GetoptError as err:
         print "ERROR: "+str(err)
         sys.exit(1)
@@ -6274,6 +6325,8 @@ def main(temp_dir):
     machine_graphs = False
     dataflow_graphs = False
     event_graphs = False
+    instance_descriptions = False
+    mapping_decisions = False
     detailed_graphs = False
     sanity_checks = False
     keep_temp_files = False
@@ -6301,6 +6354,12 @@ def main(temp_dir):
         if opt == '-e':
             event_graphs = True
             continue;
+        if opt == '-i':
+            instance_descriptions = True
+            continue
+        if opt == '-q':
+            mapping_decisions = True
+            continue
         if opt == '-z':
             detailed_graphs = True
             continue
@@ -6390,6 +6449,10 @@ def main(temp_dir):
     if event_graphs:
         print "Making event graphs..."
         state.make_event_graph(temp_dir)
+    if instance_descriptions:
+        state.print_instance_descriptions()
+    if mapping_decisions:
+        state.print_mapping_decisions()
 
     print 'Legion Spy analysis complete.  Exiting...'
     if keep_temp_files:
