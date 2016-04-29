@@ -347,9 +347,6 @@ namespace Legion {
     void DistributedCollectable::add_resource_reference(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(current_state != DELETED_STATE);
-#endif
       AutoLock gc(gc_lock);
 #ifdef DEBUG_HIGH_LEVEL
       assert(!has_resource_references);
@@ -361,9 +358,6 @@ namespace Legion {
     bool DistributedCollectable::remove_resource_reference(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_HIGH_LEVEL
-      assert(current_state != DELETED_STATE);
-#endif
       AutoLock gc(gc_lock);
 #ifdef DEBUG_HIGH_LEVEL
       assert(has_resource_references);
@@ -447,7 +441,6 @@ namespace Legion {
 #ifdef DEBUG_HIGH_LEVEL
       assert(is_owner());
       assert(source != owner_space);
-      assert(current_state != DELETED_STATE);
       assert((kind == GC_REF_KIND) || (kind == VALID_REF_KIND));
 #endif
       bool need_activate = false;

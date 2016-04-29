@@ -2377,30 +2377,44 @@ namespace Legion {
     void MemoryManager::deactivate_instance(PhysicalManager *manager)
     //--------------------------------------------------------------------------
     {
-      AutoLock m_lock(manager_lock);
-      std::map<PhysicalManager*,InstanceInfo>::iterator finder =
-        current_instances.find(manager);
-#ifdef DEBUG_HIGH_LEVEL
-      assert(finder != current_instances.end());
-      assert((finder->second.current_state == ACTIVE_STATE) ||
-             (finder->second.current_state == ACTIVE_COLLECTED_STATE));
-#endif
-      InstanceInfo &info = finder->second;
-      // See if we deleted this yet
-      if (finder->second.current_state == ACTIVE_COLLECTED_STATE)
       {
-        // already deferred collected this, so we can trigger 
-        // the deletion now this should only happen on the owner node
+        AutoLock m_lock(manager_lock);
+        std::map<PhysicalManager*,InstanceInfo>::iterator finder =
+          current_instances.find(manager);
 #ifdef DEBUG_HIGH_LEVEL
-        assert(is_owner);
-        assert(info.deferred_collect.exists());
+        assert(finder != current_instances.end());
+        assert((finder->second.current_state == ACTIVE_STATE) ||
+               (finder->second.current_state == ACTIVE_COLLECTED_STATE));
 #endif
-        info.deferred_collect.trigger();
-        // Now we can delete our entry because it has been deleted
-        current_instances.erase(finder);
+        InstanceInfo &info = finder->second;
+        // See if we deleted this yet
+        if (finder->second.current_state == ACTIVE_COLLECTED_STATE)
+        {
+          // already deferred collected this, so we can trigger 
+          // the deletion now this should only happen on the owner node
+#ifdef DEBUG_HIGH_LEVEL
+          assert(is_owner);
+          assert(info.deferred_collect.exists());
+#endif
+          info.deferred_collect.trigger();
+          // Now we can delete our entry because it has been deleted
+          current_instances.erase(finder);
+        }
+        else // didn't collect it yet
+          info.current_state = COLLECTABLE_STATE;
       }
-      else // didn't collect it yet
-        info.current_state = COLLECTABLE_STATE;
+      // If we are the owner and this is a reduction instance
+      // then let's just delete it now
+      if (is_owner && manager->is_reduction_manager() && 
+          manager->try_active_deletion())
+      {
+        // Add a reference to this instance before doing the next call 
+        manager->add_base_resource_ref(MEMORY_MANAGER_REF);
+        Event deferred_delete = record_deleted_instance(manager);
+        manager->perform_deletion(deferred_delete);
+        if (manager->remove_base_resource_ref(MEMORY_MANAGER_REF))
+          PhysicalManager::delete_physical_manager(manager);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -4311,8 +4325,13 @@ namespace Legion {
         PhysicalManager *target_manager = it->manager;
         if (target_manager->try_active_deletion())
         {
+          // Add a resource reference to it before doing this call
+          target_manager->add_base_resource_ref(MEMORY_MANAGER_REF);
           Event deferred_delete = record_deleted_instance(target_manager);
           target_manager->perform_deletion(deferred_delete);
+          // Remove our reference
+          if (target_manager->remove_base_resource_ref(MEMORY_MANAGER_REF))
+            PhysicalManager::delete_physical_manager(target_manager);
           total_bytes_deleted += it->instance_size;
           // Only need to do the test if we're smaller
           if (!SMALLER || (total_bytes_deleted >= needed_size))
@@ -4340,6 +4359,7 @@ namespace Legion {
         sending_buffer_size(max_message_size), 
         observed_recent(false), profile_messages(profile)
     //--------------------------------------------------------------------------
+    //
     {
       send_lock = Reservation::create_reservation();
       receiving_buffer_size = max_message_size;

@@ -125,10 +125,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     InstanceView::InstanceView(RegionTreeForest *ctx, DistributedID did,
                                AddressSpaceID owner_sp, AddressSpaceID local_sp,
-                               RegionTreeNode *node, SingleTask *own_ctx,
-                               bool register_now)
+                               AddressSpaceID log_own, RegionTreeNode *node, 
+                               SingleTask *own_ctx, bool register_now)
       : LogicalView(ctx, did, owner_sp, local_sp, node, register_now),
-        owner_context(own_ctx)
+        owner_context(own_ctx), logical_owner(log_own)
     //--------------------------------------------------------------------------
     {
     }
@@ -171,12 +171,12 @@ namespace Legion {
     MaterializedView::MaterializedView(
                                RegionTreeForest *ctx, DistributedID did,
                                AddressSpaceID own_addr, AddressSpaceID loc_addr,
-                               RegionTreeNode *node, InstanceManager *man,
-                               MaterializedView *par, SingleTask *own_ctx,
-                               bool register_now)
+                               AddressSpaceID log_own, RegionTreeNode *node, 
+                               InstanceManager *man, MaterializedView *par, 
+                               SingleTask *own_ctx, bool register_now)
       : InstanceView(ctx, encode_materialized_did(did, par == NULL), own_addr, 
-         loc_addr, node, own_ctx, register_now), manager(man), parent(par),
-         disjoint_children(node->are_all_children_disjoint())
+         loc_addr, log_own, node, own_ctx, register_now), manager(man), 
+         parent(par), disjoint_children(node->are_all_children_disjoint())
     //--------------------------------------------------------------------------
     {
       // Otherwise the instance lock will get filled in when we are unpacked
@@ -205,7 +205,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     MaterializedView::MaterializedView(const MaterializedView &rhs)
-      : InstanceView(NULL, 0, 0, 0, NULL, NULL, false),
+      : InstanceView(NULL, 0, 0, 0, 0, NULL, NULL, false),
         manager(NULL), parent(NULL), disjoint_children(false)
     //--------------------------------------------------------------------------
     {
@@ -346,8 +346,9 @@ namespace Legion {
             // Otherwise we get to make it
             child_view = legion_new<MaterializedView>(context, child_did, 
                                               owner_space, local_space,
-                                              child_node, manager, this,
-                                              owner_context, true/*reg now*/);
+                                              logical_owner, child_node, 
+                                              manager, this, owner_context,
+                                              true/*reg now*/);
             children[c] = child_view;
           }
           if (free_child_did)
@@ -1073,6 +1074,7 @@ namespace Legion {
           rez.serialize(logical_node->as_partition_node()->handle);
         }
         rez.serialize(owner_space);
+        rez.serialize(logical_owner);
         rez.serialize<UniqueID>(owner_context->get_context_uid());
       }
       runtime->send_materialized_view(target, rez);
@@ -2286,6 +2288,8 @@ namespace Legion {
       }
       AddressSpaceID owner_space;
       derez.deserialize(owner_space);
+      AddressSpaceID logical_owner;
+      derez.deserialize(logical_owner);
       UniqueID context_uid;
       derez.deserialize(context_uid);
       Event man_ready = Event::NO_EVENT;
@@ -2317,14 +2321,15 @@ namespace Legion {
         view = legion_new_in_place<MaterializedView>(location, runtime->forest,
                                               did, owner_space, 
                                               runtime->address_space,
+                                              logical_owner, 
                                               target_node, inst_manager,
                                               parent, owner_context,
                                               false/*register now*/);
       else
         view = legion_new<MaterializedView>(runtime->forest, did, owner_space,
-                                     runtime->address_space, target_node,
-                                     inst_manager, parent, owner_context,
-                                     false/*register now*/);
+                                     runtime->address_space, logical_owner,
+                                     target_node, inst_manager, parent, 
+                                     owner_context, false/*register now*/);
       // Register only after construction
       view->register_with_runtime();
     }
@@ -3968,10 +3973,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ReductionView::ReductionView(RegionTreeForest *ctx, DistributedID did,
                                  AddressSpaceID own_sp, AddressSpaceID loc_sp,
-                                 RegionTreeNode *node, ReductionManager *man,
-                                 SingleTask *own_ctx, bool register_now)
+                                 AddressSpaceID log_own, RegionTreeNode *node, 
+                                 ReductionManager *man, SingleTask *own_ctx, 
+                                 bool register_now)
       : InstanceView(ctx, encode_reduction_did(did), 
-                     own_sp, loc_sp, node, own_ctx, register_now), manager(man)
+             own_sp, loc_sp, log_own, node, own_ctx, register_now), manager(man)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -3993,7 +3999,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ReductionView::ReductionView(const ReductionView &rhs)
-      : InstanceView(NULL, 0, 0, 0, NULL, NULL, false), manager(NULL)
+      : InstanceView(NULL, 0, 0, 0, 0, NULL, NULL, false), manager(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -4760,6 +4766,7 @@ namespace Legion {
         rez.serialize(manager->did);
         rez.serialize(logical_node->as_region_node()->handle);
         rez.serialize(owner_space);
+        rez.serialize(logical_owner);
         rez.serialize<UniqueID>(owner_context->get_context_uid());
       }
       runtime->send_reduction_view(target, rez);
@@ -4794,6 +4801,8 @@ namespace Legion {
       derez.deserialize(handle);
       AddressSpaceID owner_space;
       derez.deserialize(owner_space);
+      AddressSpaceID logical_owner;
+      derez.deserialize(logical_owner);
       UniqueID context_uid;
       derez.deserialize(context_uid);
 
@@ -4814,12 +4823,13 @@ namespace Legion {
         view = legion_new_in_place<ReductionView>(location, runtime->forest,
                                            did, owner_space,
                                            runtime->address_space,
+                                           logical_owner,
                                            target_node, red_manager,
                                            owner_context,false/*register now*/);
       else
         view = legion_new<ReductionView>(runtime->forest, did, owner_space,
-                                  runtime->address_space, target_node,
-                                  red_manager, owner_context,
+                                  runtime->address_space, logical_owner,
+                                  target_node, red_manager, owner_context,
                                   false/*register now*/);
       // Only register after construction
       view->register_with_runtime();

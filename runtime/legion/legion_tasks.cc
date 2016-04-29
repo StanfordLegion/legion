@@ -5725,7 +5725,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    InstanceView* SingleTask::create_instance_top_view(PhysicalManager *manager)
+    InstanceView* SingleTask::create_instance_top_view(PhysicalManager *manager,
+                                                  AddressSpaceID request_source)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, CREATE_INSTANCE_TOP_VIEW_CALL);
@@ -5788,7 +5789,8 @@ namespace Legion {
 #endif
         return finder->second;
       }
-      InstanceView *result = manager->create_instance_top_view(this);
+      InstanceView *result = 
+        manager->create_instance_top_view(this, request_source);
       result->add_base_resource_ref(CONTEXT_REF);
       // We've got the results, if we have any virtual mappings we have
       // to see if this instance can be used to satisfy a virtual mapping
@@ -5838,7 +5840,7 @@ namespace Legion {
             // virtual mappings correctly
             SingleTask *parent_context = find_parent_context();
             parent_context_view = 
-              parent_context->create_instance_top_view(manager);
+              parent_context->create_instance_top_view(manager, request_source);
           }
           // Now we clone across for the given region requirement
           VersionInfo &info = get_version_info(idx); 
@@ -5950,6 +5952,7 @@ namespace Legion {
         // if we have any interfering users for those requirements
         if (!created_requirements.empty())
         {
+          const AddressSpaceID local_space = runtime->address_space;
           for (unsigned idx = 0; idx < created_requirements.size(); idx++)
           {
             if (created_requirements[idx].region.get_tree_id() != 
@@ -5975,7 +5978,7 @@ namespace Legion {
             {
               SingleTask *parent_context = find_parent_context();
               parent_context_view = 
-                parent_context->create_instance_top_view(*it);
+                parent_context->create_instance_top_view(*it, local_space);
             }
             // Do the conversion back out
             VersionInfo dummy_info;
@@ -6020,7 +6023,7 @@ namespace Legion {
 #else
       PhysicalManager *manager = static_cast<PhysicalManager*>(dc);
 #endif
-      InstanceView *result = context->create_instance_top_view(manager);
+      InstanceView *result = context->create_instance_top_view(manager, source);
       Serializer rez;
       {
         RezCheck z(rez);

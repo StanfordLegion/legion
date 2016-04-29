@@ -656,20 +656,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    InstanceView* PhysicalManager::create_instance_top_view(SingleTask *context)
+    void PhysicalManager::register_active_context(SingleTask *context)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
       assert(is_owner()); // should always be on the owner node
 #endif
-      // Make the view first
-      InstanceView *result = create_top_view(context);
       // Save the context to be notified when we deleted
       GenerationID gen = context->get_generation();
       AutoLock gc(gc_lock);
       // Perfectly alright to overwrite earlier generations
       active_contexts[context] = gen;
-      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -1002,7 +999,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    InstanceView* InstanceManager::create_top_view(SingleTask *own_ctx) const
+    InstanceView* InstanceManager::create_instance_top_view(SingleTask *own_ctx,
+                                                   AddressSpaceID logical_owner)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -1010,11 +1008,15 @@ namespace Legion {
 #endif
       DistributedID view_did = 
         context->runtime->get_available_distributed_id(false);
-      return legion_new<MaterializedView>(context, view_did, owner_space,
-                                          owner_space, region_node,
-                                          const_cast<InstanceManager*>(this),
-                                          (MaterializedView*)NULL/*parent*/, 
-                                          own_ctx, true/*register now*/);
+      InstanceView* result = 
+              legion_new<MaterializedView>(context, view_did, 
+                                           owner_space, owner_space, 
+                                           logical_owner, region_node,
+                                           const_cast<InstanceManager*>(this),
+                                           (MaterializedView*)NULL/*parent*/, 
+                                           own_ctx, true/*register now*/);
+      register_active_context(own_ctx);
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -1366,7 +1368,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    InstanceView* ReductionManager::create_top_view(SingleTask *own_ctx) const
+    InstanceView* ReductionManager::create_instance_top_view(
+                              SingleTask *own_ctx, AddressSpaceID logical_owner)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
@@ -1374,10 +1377,14 @@ namespace Legion {
 #endif
       DistributedID view_did = 
         context->runtime->get_available_distributed_id(false);
-      return legion_new<ReductionView>(context, view_did, owner_space,
-                                       owner_space, region_node, 
+      InstanceView *result = 
+             legion_new<ReductionView>(context, view_did, 
+                                       owner_space, owner_space, 
+                                       logical_owner, region_node, 
                                        const_cast<ReductionManager*>(this),
                                        own_ctx, true/*register now*/);
+      register_active_context(own_ctx);
+      return result;
     }
 
     /////////////////////////////////////////////////////////////
@@ -1807,7 +1814,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    InstanceView* VirtualManager::create_top_view(SingleTask *context) const
+    InstanceView* VirtualManager::create_instance_top_view(SingleTask *context,
+                                                   AddressSpaceID logical_owner)
     //--------------------------------------------------------------------------
     {
       // should never be called

@@ -506,7 +506,8 @@ namespace Legion {
           std::set<Event> &preconditions);
       void invalidate_region_tree_contexts(void);
     public:
-      InstanceView* create_instance_top_view(PhysicalManager *manager); 
+      InstanceView* create_instance_top_view(PhysicalManager *manager,
+                                             AddressSpaceID source); 
       void notify_instance_deletion(PhysicalManager *deleted, 
                                     GenerationID old_gen);
       void convert_virtual_instance_top_views(
