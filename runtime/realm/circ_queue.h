@@ -18,25 +18,26 @@
 #ifndef REALM_CIRC_QUEUE_H
 #define REALM_CIRC_QUEUE_H
 
-#include <vector>
+#include <iterator>
 
 namespace Realm {
 
   // a circular queue is similar to a deque, except that it tries to avoid
-  //  new/delete during normal operation by reusing entries - allocation is
-  //  only needed if the current capacity is exhausted
-  //
-  // currently this used a std::vector for the internal storage, which only works
-  //  properly if T is a POD type
-  // TODO: switch to "raw" storage and call constructors/destructors of T appropriately
-  template <typename T>
+  //  new/delete during construction and in normal operation by reusing
+  //  entries - allocation is only needed if the current capacity is exhausted
+
+  template <typename T, unsigned INTSIZE>
+  class CircularQueueIterator;
+
+  template <typename T, unsigned INTSIZE = 4>
   class CircularQueue {
   public:
     // default is to allocate just a few entries and then double whenever space runs out
-    CircularQueue(size_t init_capacity = 16, int _growth_factor = -2);
+    CircularQueue(size_t init_capacity = 0, int _growth_factor = -2);
     ~CircularQueue(void);
 
     typedef T ITEMTYPE;
+    static const size_t ITEMSIZE = sizeof(T);
 
     // using the standard STL contain methoder names and semantics
     bool empty(void) const;
@@ -56,7 +57,29 @@ namespace Realm {
     void push_back(const T& val);
     void pop_back(void);
 
+    void swap(CircularQueue<T, INTSIZE>& swap_with);
+
+    template <unsigned INTSIZE2>
+    void swap(CircularQueue<T, INTSIZE2>& swap_with);
+
+    typedef CircularQueueIterator<T,INTSIZE> iterator;
+    typedef CircularQueueIterator<T const,INTSIZE> const_iterator;
+
+    iterator begin(void);
+    iterator end(void);
+
+    const_iterator begin(void) const;
+    const_iterator end(void) const;
+
   protected:
+    friend class CircularQueueIterator<T,INTSIZE>;
+
+    T *item_ptr(char *base, size_t idx) const;
+    const T *item_ptr(const char *base, size_t idx) const;
+
+    // put this first for alignment goodness
+    char   internal_buffer[ITEMSIZE * INTSIZE];
+    char  *external_buffer;
     size_t current_size;  // number of elements currently in queue
     size_t max_size;      // size of underlying storage
     size_t head;          // index of first valid element (i.e. front)
@@ -65,8 +88,34 @@ namespace Realm {
     int growth_factor;    // how to grow when more space is needed
                           // if > 0, an additive increase on current capacity
                           // if < 0, a multiplicative increase (i.e. new_cap = cap * abs(growth) )
+  };
 
-    std::vector<T> storage;
+  template <typename T, unsigned INTSIZE>
+  class CircularQueueIterator : public std::iterator<std::forward_iterator_tag, T> {
+  protected:
+    friend class CircularQueue<T,INTSIZE>;
+
+    CircularQueueIterator(CircularQueue<T,INTSIZE> *_cq, size_t _pos, bool _at_end);
+
+  public:
+    CircularQueueIterator(void);
+    CircularQueueIterator(const CircularQueueIterator<T,INTSIZE>& copy_from);
+
+    CircularQueueIterator<T,INTSIZE>& operator=(const CircularQueueIterator<T,INTSIZE>& copy_from);
+
+    bool operator==(const CircularQueueIterator<T,INTSIZE>& compare_to) const;
+    bool operator!=(const CircularQueueIterator<T,INTSIZE>& compare_to) const;
+
+    T operator*(void);
+    const T *operator->(void);
+
+    CircularQueueIterator<T,INTSIZE>& operator++(/*prefix*/);
+    CircularQueueIterator<T,INTSIZE> operator++(int /*postfix*/);
+
+  protected:
+    CircularQueue<T,INTSIZE> *cq;
+    size_t pos;
+    bool at_end;
   };
 
 }; // namespace Realm
