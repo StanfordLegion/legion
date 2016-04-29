@@ -312,21 +312,25 @@ namespace Legion {
                                     const LayoutConstraintSet &constraints, 
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, bool &created, 
-                                    bool acquire, GCPriority priority);
+                                    bool acquire, GCPriority priority,
+                                    bool tight_region_bounds);
       bool find_or_create_physical_instance(
                                     MappingCallInfo *ctx, Memory target_memory,
                                     LayoutConstraintID layout_id,
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, bool &created, 
-                                    bool acquire, GCPriority priority);
+                                    bool acquire, GCPriority priority,
+                                    bool tight_region_bounds);
       bool find_physical_instance(  MappingCallInfo *ctx, Memory target_memory,
                                     const LayoutConstraintSet &constraints,
                                     const std::vector<LogicalRegion> &regions,
-                                    MappingInstance &result, bool acquire);
+                                    MappingInstance &result, bool acquire,
+                                    bool tight_region_bounds);
       bool find_physical_instance(  MappingCallInfo *ctx, Memory target_memory,
                                     LayoutConstraintID layout_id,
                                     const std::vector<LogicalRegion> &regions,
-                                    MappingInstance &result, bool acquire);
+                                    MappingInstance &result, bool acquire,
+                                    bool tight_region_bounds);
       void set_garbage_collection_priority(MappingCallInfo *ctx, 
                                     const MappingInstance &instance, 
                                     GCPriority priority);

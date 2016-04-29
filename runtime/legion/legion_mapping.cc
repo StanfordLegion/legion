@@ -456,11 +456,12 @@ namespace Legion {
                                     const LayoutConstraintSet &constraints, 
                                     const std::vector<LogicalRegion> &regions, 
                                     PhysicalInstance &result, bool &created, 
-                                    bool acquire, GCPriority priority) const
+                                    bool acquire, GCPriority priority,
+                                    bool tight_bounds) const
     //--------------------------------------------------------------------------
     {
       return ctx->manager->find_or_create_physical_instance(ctx, target_memory, 
-                     constraints, regions, result, created, acquire, priority);
+       constraints, regions, result, created, acquire, priority, tight_bounds);
     }
 
     //--------------------------------------------------------------------------
@@ -469,11 +470,12 @@ namespace Legion {
                                     LayoutConstraintID layout_id,
                                     const std::vector<LogicalRegion> &regions,
                                     PhysicalInstance &result, bool &created, 
-                                    bool acquire, GCPriority priority) const
+                                    bool acquire, GCPriority priority,
+                                    bool tight_bounds) const
     //--------------------------------------------------------------------------
     {
       return ctx->manager->find_or_create_physical_instance(ctx, target_memory,
-                       layout_id, regions, result, created, acquire, priority);
+         layout_id, regions, result, created, acquire, priority, tight_bounds);
     }
 
     //--------------------------------------------------------------------------
@@ -482,11 +484,11 @@ namespace Legion {
                                     const LayoutConstraintSet &constraints,
                                     const std::vector<LogicalRegion> &regions,
                                     PhysicalInstance &result,
-                                    bool acquire) const
+                                    bool acquire, bool tight_bounds) const
     //--------------------------------------------------------------------------
     {
       return ctx->manager->find_physical_instance(ctx, target_memory, 
-                              constraints, regions, result, acquire);
+                  constraints, regions, result, acquire, tight_bounds);
     }
 
     //--------------------------------------------------------------------------
@@ -495,11 +497,11 @@ namespace Legion {
                                     LayoutConstraintID layout_id,
                                     const std::vector<LogicalRegion> &regions, 
                                     PhysicalInstance &result,
-                                    bool acquire) const
+                                    bool acquire, bool tight_bounds) const
     //--------------------------------------------------------------------------
     {
       return ctx->manager->find_physical_instance(ctx, target_memory,
-                                layout_id, regions, result, acquire);
+                  layout_id, regions, result, acquire, tight_bounds);
     }
 
     //--------------------------------------------------------------------------

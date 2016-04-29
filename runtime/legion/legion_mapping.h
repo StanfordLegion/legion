@@ -1297,27 +1297,27 @@ namespace Legion {
                                     const LayoutConstraintSet &constraints, 
                                     const std::vector<LogicalRegion> &regions,
                                     PhysicalInstance &result, bool &created, 
-                                    bool acquire = true, 
-                                    GCPriority priority = 0) const;
+                                    bool acquire = true,GCPriority priority = 0,
+                                    bool tight_region_bounds = false) const;
       bool mapper_rt_find_or_create_physical_instance(
                                     MapperContext ctx, Memory target_memory,
                                     LayoutConstraintID layout_id,
                                     const std::vector<LogicalRegion> &regions,
                                     PhysicalInstance &result, bool &created, 
-                                    bool acquire = true,
-                                    GCPriority priority = 0) const;
+                                    bool acquire = true,GCPriority priority = 0,
+                                    bool tight_region_bounds = false) const;
       bool mapper_rt_find_physical_instance(
                                     MapperContext ctx, Memory target_memory,
                                     const LayoutConstraintSet &constraints,
                                     const std::vector<LogicalRegion> &regions,
-                                    PhysicalInstance &result,
-                                    bool acquire = true) const;
+                                    PhysicalInstance &result, bool acquire=true,
+                                    bool tight_region_bounds = false) const;
       bool mapper_rt_find_physical_instance(
                                     MapperContext ctx, Memory target_memory,
                                     LayoutConstraintID layout_id,
                                     const std::vector<LogicalRegion> &regions,
-                                    PhysicalInstance &result,
-                                    bool acquire = true) const;
+                                    PhysicalInstance &result, bool acquire=true,
+                                    bool tight_region_bounds = false) const;
       void mapper_rt_set_garbage_collection_priority(MapperContext ctx, 
                 const PhysicalInstance &instance, GCPriority priority) const;
       // These methods will atomically check to make sure that these instances

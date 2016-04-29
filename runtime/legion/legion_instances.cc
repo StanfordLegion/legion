@@ -697,13 +697,67 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool PhysicalManager::meets_regions(
-                                const std::vector<LogicalRegion> &regions) const
+      const std::vector<LogicalRegion> &regions, bool tight_region_bounds) const
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL
       assert(region_node != NULL); // only happens with VirtualManager
 #endif
       RegionTreeID tree_id = region_node->handle.get_tree_id();
+      // Special case for tight bounds 
+      if (tight_region_bounds && (regions.size() > 1))
+      {
+        // If ever are at the local depth and not the same, we fail
+        const unsigned local_depth = region_node->get_depth();
+        // Tight region bounds for multiple regions is defined
+        // as being exactly the common ancestor of the set of regions
+        RegionNode *common_ancestor = NULL;
+        for (std::vector<LogicalRegion>::const_iterator it = 
+              regions.begin(); it != regions.end(); it++)
+        {
+          // If they are not the same tree ID that is really bad
+          if (tree_id != it->get_tree_id())
+            return false;
+          RegionNode *handle_node = context->get_node(*it);
+          if (common_ancestor == NULL)
+          {
+            common_ancestor = handle_node;
+            continue;
+          }
+          if (common_ancestor == handle_node)
+            continue;
+          // Get both nodes at the same depth
+          unsigned ancestor_depth = common_ancestor->get_depth();
+          unsigned handle_depth = handle_node->get_depth();
+          while (ancestor_depth > handle_depth)
+          {
+            common_ancestor = common_ancestor->parent->parent;
+            ancestor_depth -= 2;
+            if ((ancestor_depth <= local_depth) && 
+                (common_ancestor != region_node))
+              return false;
+          }
+          while (handle_depth > ancestor_depth)
+          {
+            handle_node = handle_node->parent->parent;
+            handle_depth -= 2;
+          }
+          // Walk up until they are the same 
+          while (common_ancestor != handle_node)
+          {
+            common_ancestor = common_ancestor->parent->parent;
+            handle_node = handle_node->parent->parent;
+            ancestor_depth -= 2;
+            if ((ancestor_depth <= local_depth) &&
+                (common_ancestor != region_node))
+              return false;
+          }
+        }
+#ifdef DEBUG_HIGH_LEVEL
+        assert(common_ancestor != NULL);
+#endif
+        return (common_ancestor == region_node);
+      }
       for (std::vector<LogicalRegion>::const_iterator it = 
             regions.begin(); it != regions.end(); it++)
       {
@@ -711,6 +765,12 @@ namespace Legion {
         if (tree_id != it->get_tree_id())
           return false;
         RegionNode *handle_node = context->get_node(*it);
+        // If we want tight bounds and there is only one region, if
+        // this instance is not of the right size then we fail
+        // Note we already handled tight_region_bounds for multiple
+        // regions above so this check is only if there is a single region
+        if (tight_region_bounds && (handle_node != region_node))
+          return false;
         // For now this instance must be a sub-region of the 
         // ancestor logical region.
         if (handle_node != region_node)
@@ -721,6 +781,8 @@ namespace Legion {
           if (up_node != region_node)
             return false;
         }
+        else // we can just continue in this case since we know we are good
+          continue;
         // Now check to see if our instance domain dominates the region
         IndexSpaceNode *index_node = handle_node->row_source; 
         std::vector<Domain> to_check;

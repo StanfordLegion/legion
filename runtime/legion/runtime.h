@@ -638,6 +638,7 @@ namespace Legion {
                                     MappingInstance &result, bool &created, 
                                     MapperID mapper_id, Processor processor,
                                     bool acquire, GCPriority priority, 
+                                    bool tight_region_bounds,
                                     UniqueID creator_id, bool remote = false);
       bool find_or_create_physical_instance(
                                     LayoutConstraints *constraints,
@@ -645,15 +646,16 @@ namespace Legion {
                                     MappingInstance &result, bool &created, 
                                     MapperID mapper_id, Processor processor,
                                     bool acquire, GCPriority priority, 
+                                    bool tight_region_bounds,
                                     UniqueID creator_id, bool remote = false);
       bool find_physical_instance(  const LayoutConstraintSet &constraints,
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, bool acquire,
-                                    bool remote = false);
+                                    bool tight_bounds, bool remote = false);
       bool find_physical_instance(  LayoutConstraints *constraints,
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, bool acquire,
-                                    bool remote = false);
+                                    bool tight_bounds, bool remote = false);
       void set_garbage_collection_priority(PhysicalManager *manager,
                                     MapperID mapper_id, Processor proc,
                                     GCPriority priority);
@@ -669,30 +671,30 @@ namespace Legion {
     protected:
       bool find_satisfying_instance(const LayoutConstraintSet &constraints,
                                     const std::vector<LogicalRegion> &regions,
-                                    MappingInstance &result, 
-                                    bool acquire, bool remote);
+                                    MappingInstance &result, bool acquire, 
+                                    bool tight_region_bounds, bool remote);
       bool find_satisfying_instance(LayoutConstraints *constraints,
                                     const std::vector<LogicalRegion> &regions,
-                                    MappingInstance &result, 
-                                    bool acquire, bool remote);
+                                    MappingInstance &result, bool acquire, 
+                                    bool tight_region_bounds, bool remote);
       bool find_satisfying_instance(const LayoutConstraintSet &constraints,
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, 
                                     std::set<PhysicalManager*> &candidates,
-                                    bool acquire, bool remote);
+                                    bool acquire,bool tight_bounds,bool remote);
       bool find_satisfying_instance(LayoutConstraints *constraints,
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, 
                                     std::set<PhysicalManager*> &candidates,
-                                    bool acquire, bool remote);
+                                    bool acquire,bool tight_bounds,bool remote);
       bool find_valid_instance(     const LayoutConstraintSet &constraints,
                                     const std::vector<LogicalRegion> &regions,
-                                    MappingInstance &result, 
-                                    bool acquire, bool remote);
+                                    MappingInstance &result, bool acquire, 
+                                    bool tight_region_bounds, bool remote);
       bool find_valid_instance(     LayoutConstraints *constraints,
                                     const std::vector<LogicalRegion> &regions,
-                                    MappingInstance &result, 
-                                    bool acquire, bool remote);
+                                    MappingInstance &result, bool acquire, 
+                                    bool tight_region_bounds, bool remote);
     protected:
       PhysicalManager* allocate_physical_instance(
                                     const LayoutConstraintSet &constraints,
@@ -704,14 +706,14 @@ namespace Legion {
                                     const std::set<PhysicalManager*> &cands,
                                     bool acquire, MapperID mapper_id, 
                                     Processor proc, GCPriority priority,
-                                    bool remote);
+                                    bool tight_region_bounds, bool remote);
       PhysicalManager* find_and_record(PhysicalManager *manager, 
                                     LayoutConstraints *constraints,
                                     const std::vector<LogicalRegion> &regions,
                                     const std::set<PhysicalManager*> &cands,
                                     bool acquire, MapperID mapper_id, 
                                     Processor proc, GCPriority priority,
-                                    bool remote);
+                                    bool tight_region_bounds, bool remote);
       void record_created_instance( PhysicalManager *manager, bool acquire,
                                     MapperID mapper_id, Processor proc,
                                     GCPriority priority, bool remote);
@@ -2083,22 +2085,24 @@ namespace Legion {
                                     MappingInstance &result, bool &created, 
                                     MapperID mapper_id, Processor processor,
                                     bool acquire, GCPriority priority,
-                                    UniqueID creator_id);
+                                    bool tight_bounds, UniqueID creator_id);
       bool find_or_create_physical_instance(Memory target_memory,
                                     LayoutConstraintID layout_id,
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, bool &created, 
                                     MapperID mapper_id, Processor processor,
                                     bool acquire, GCPriority priority,
-                                    UniqueID creator_id);
+                                    bool tight_bounds, UniqueID creator_id);
       bool find_physical_instance(Memory target_memory,
                                     const LayoutConstraintSet &constraints,
                                     const std::vector<LogicalRegion> &regions,
-                                    MappingInstance &result, bool acquire);
+                                    MappingInstance &result, bool acquire,
+                                    bool tight_region_bounds);
       bool find_physical_instance(Memory target_memory,
                                     LayoutConstraintID layout_id,
                                     const std::vector<LogicalRegion> &regions,
-                                    MappingInstance &result, bool acquire);
+                                    MappingInstance &result, bool acquire,
+                                    bool tight_region_bounds);
     public:
       // Helper methods for the RegionTreeForest
       inline unsigned get_context_count(void) { return total_contexts; }
