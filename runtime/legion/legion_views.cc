@@ -525,14 +525,14 @@ namespace Legion {
         else
           finder->second |= copy_mask;
       }
+      find_local_copy_preconditions(redop, reading, copy_mask, ColorPoint(), 
+                          version_info, creator_op_id, index, preconditions);
       if ((parent != NULL) && !version_info.is_upper_bound_node(logical_node))
       {
         const ColorPoint &local_point = logical_node->get_color();
         parent->find_copy_preconditions_above(redop, reading, copy_mask,
-               local_point, version_info, creator_op_id, index, preconditions);
+             local_point, version_info, creator_op_id, index, preconditions);
       }
-      find_local_copy_preconditions(redop, reading, copy_mask, 
-                            ColorPoint(), creator_op_id, index, preconditions);
     }
 
     //--------------------------------------------------------------------------
@@ -546,14 +546,14 @@ namespace Legion {
                              LegionMap<Event,FieldMask>::aligned &preconditions)
     //--------------------------------------------------------------------------
     {
+      find_local_copy_preconditions(redop, reading, copy_mask, child_color, 
+                        version_info, creator_op_id, index, preconditions);
       if ((parent != NULL) && !version_info.is_upper_bound_node(logical_node))
       {
         const ColorPoint &local_point = logical_node->get_color();
         parent->find_copy_preconditions_above(redop, reading, copy_mask,
-              local_point, version_info, creator_op_id, index, preconditions);
+            local_point, version_info, creator_op_id, index, preconditions);
       }
-      find_local_copy_preconditions(redop, reading, copy_mask, 
-                            child_color, creator_op_id, index, preconditions);
     }
     
     //--------------------------------------------------------------------------
@@ -561,6 +561,7 @@ namespace Legion {
                                                          bool reading,
                                                      const FieldMask &copy_mask,
                                                   const ColorPoint &child_color,
+                                                const VersionInfo &version_info,
                                                   const UniqueID creator_op_id,
                                                   const unsigned index,
                              LegionMap<Event,FieldMask>::aligned &preconditions)
@@ -568,14 +569,16 @@ namespace Legion {
     {
       DETAILED_PROFILER(context->runtime, 
                         MATERIALIZED_VIEW_FIND_LOCAL_COPY_PRECONDITIONS_CALL);
+      FieldMask filter_mask;
       std::set<Event> dead_events;
       LegionMap<Event,FieldMask>::aligned filter_current_users, 
                                           filter_previous_users;
+      LegionMap<VersionID,FieldMask>::aligned advance_versions, add_versions;
       if (reading)
       {
         RegionUsage usage(READ_ONLY, EXCLUSIVE, 0);
-        AutoLock v_lock(view_lock,1,false/*exclusive*/);
         FieldMask observed, non_dominated;
+        AutoLock v_lock(view_lock,1,false/*exclusive*/);
         find_current_preconditions(copy_mask, usage, child_color, 
                                    creator_op_id, index, preconditions,
                                    dead_events, filter_current_users,
@@ -592,12 +595,27 @@ namespace Legion {
       else
       {
         RegionUsage usage((redop > 0) ? REDUCE : WRITE_DISCARD,EXCLUSIVE,redop);
+        FieldMask observed, non_dominated, write_skip_mask;
         AutoLock v_lock(view_lock,1,false/*exclusive*/);
-        FieldMask observed, non_dominated;
-        find_current_preconditions(copy_mask, usage, child_color, 
-                                   creator_op_id, index, preconditions,
-                                   dead_events, filter_current_users,
-                                   observed, non_dominated);
+        // Find any version updates as well our write skip mask
+        find_version_updates(copy_mask, version_info, write_skip_mask,
+                             filter_mask, advance_versions, add_versions);
+        if (!!write_skip_mask)
+        {
+          // If we have a write skip mask we know we won't interfere with
+          // any users in the list of current users so we can skip them
+          const FieldMask current_mask = copy_mask - write_skip_mask;
+          if (!!current_mask)
+            find_current_preconditions(current_mask, usage, child_color,
+                                       creator_op_id, index, preconditions,
+                                       dead_events, filter_current_users,
+                                       observed, non_dominated);
+        }
+        else // the normal case with no write-skip
+          find_current_preconditions(copy_mask, usage, child_color, 
+                                     creator_op_id, index, preconditions,
+                                     dead_events, filter_current_users,
+                                     observed, non_dominated);
         const FieldMask dominated = observed - non_dominated;
         if (!!dominated)
           find_previous_filter_users(dominated, filter_previous_users);
@@ -608,7 +626,8 @@ namespace Legion {
                                       dead_events);
       }
       if (!dead_events.empty() || 
-          !filter_previous_users.empty() || !filter_current_users.empty())
+          !filter_previous_users.empty() || !filter_current_users.empty() ||
+          !advance_versions.empty() || !add_versions.empty())
       {
         // Need exclusive permissions to modify data structures
         AutoLock v_lock(view_lock);
@@ -626,6 +645,8 @@ namespace Legion {
                 filter_current_users.begin(); it !=
                 filter_current_users.end(); it++)
             filter_current_user(it->first, it->second);
+        if (!advance_versions.empty() || !add_versions.empty())
+          apply_version_updates(filter_mask, advance_versions, add_versions);
       }
     }
 
@@ -836,12 +857,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       UniqueID op_id = op->get_unique_op_id();
+      bool need_version_update = false;
+      if (IS_WRITE(usage))
+        need_version_update = update_version_numbers(user_mask, version_info);
       // Go up the tree if necessary 
       if ((parent != NULL) && !version_info.is_upper_bound_node(logical_node))
       {
         const ColorPoint &local_color = logical_node->get_color();
         parent->add_user_above(usage, term_event, local_color, version_info, 
-                               op_id, index, user_mask);
+                               op_id, index, user_mask, need_version_update);
       }
       // Add our local user
       const bool issue_collect = add_local_user(usage, term_event, 
@@ -861,15 +885,19 @@ namespace Legion {
                                           const VersionInfo &version_info,
                                           const UniqueID op_id,
                                           const unsigned index,
-                                          const FieldMask &user_mask)
+                                          const FieldMask &user_mask,
+                                          const bool need_version_update)
     //--------------------------------------------------------------------------
     {
+      bool need_update_above = false;
+      if (need_version_update)
+        need_update_above = update_version_numbers(user_mask, version_info);
       // Go up the tree if we have to
       if ((parent != NULL) && !version_info.is_upper_bound_node(logical_node))
       {
         const ColorPoint &local_color = logical_node->get_color();
         parent->add_user_above(usage, term_event, local_color, version_info,
-                               op_id, index, user_mask);
+                               op_id, index, user_mask, need_update_above);
       }
       add_local_user(usage, term_event, child_color, op_id, index, user_mask);
     }
@@ -918,12 +946,16 @@ namespace Legion {
       // Find our local preconditions
       find_local_user_preconditions(usage, term_event, ColorPoint(), op_id, 
                                     index, user_mask, wait_on_events);
+      bool need_version_update = false;
+      if (IS_WRITE(usage))
+        need_version_update = update_version_numbers(user_mask, version_info);
       // Go up the tree if necessary
       if ((parent != NULL) && !version_info.is_upper_bound_node(logical_node))
       {
         const ColorPoint &local_color = logical_node->get_color();
-        parent->add_user_above_fused(usage, term_event, local_color,
-                       version_info, op_id, index, user_mask, wait_on_events);
+        parent->add_user_above_fused(usage, term_event, local_color, 
+                              version_info, op_id, index, user_mask, 
+                              wait_on_events, need_version_update);
       }
       // Add our local user
       const bool issue_collect = add_local_user(usage, term_event, 
@@ -951,18 +983,23 @@ namespace Legion {
                                                 const UniqueID op_id,
                                                 const unsigned index,
                                                 const FieldMask &user_mask,
-                                                std::set<Event> &preconditions)
+                                                std::set<Event> &preconditions,
+                                                const bool need_version_update)
     //--------------------------------------------------------------------------
     {
       // Do the precondition analysis on the way up
       find_local_user_preconditions(usage, term_event, child_color, op_id, 
                                     index, user_mask, preconditions);
+      bool need_update_above = false;
+      if (need_version_update)
+        need_update_above = update_version_numbers(user_mask, version_info);
       // Go up the tree if we have to
       if ((parent != NULL) && !version_info.is_upper_bound_node(logical_node))
       {
         const ColorPoint &local_color = logical_node->get_color();
         parent->add_user_above_fused(usage, term_event, local_color,
-                       version_info, op_id, index, user_mask, preconditions);
+                              version_info, op_id, index, user_mask, 
+                              preconditions, need_update_above);
       }
       // Add the user on the way back down
       add_local_user(usage, term_event, child_color, op_id, index, user_mask);
@@ -1095,11 +1132,150 @@ namespace Legion {
       }
     }    
 
-#if 0
     //--------------------------------------------------------------------------
-    bool MaterializedView::update_versions(const VersionInfo &version_info,
-                                           const FieldMask &user_mask, 
-                                           std::set<Event> &wait_on)
+    void MaterializedView::find_version_updates(const FieldMask &user_mask,
+                                                const VersionInfo &version_info,
+                                                FieldMask &write_skip_mask,
+                                                FieldMask &filter_mask,
+                              LegionMap<VersionID,FieldMask>::aligned &advance,
+                              LegionMap<VersionID,FieldMask>::aligned &add_only)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      sanity_check_versions();
+#endif
+      FieldVersions *versions = version_info.get_versions(logical_node); 
+#ifdef DEBUG_HIGH_LEVEL
+      assert(versions != NULL);
+#endif
+      const LegionMap<VersionID,FieldMask>::aligned &field_versions = 
+        versions->get_field_versions();
+      for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
+            field_versions.begin(); it != field_versions.end(); it++)
+      {
+        FieldMask overlap = it->second & user_mask;
+        if (!overlap)
+          continue;
+        // Special case for the zero version number
+        if (it->first == 0)
+        {
+          filter_mask |= overlap;
+          add_only[it->first] = overlap;
+          continue;
+        }
+        // We're trying to get this to current version number, check to
+        // see if we're already at one of the most common values of
+        // either the previous version number or the current one
+        // otherwise we will have to add this to the set to filter later
+        const VersionID previous_number = it->first - 1;
+        const VersionID next_number = it->first;
+        LegionMap<VersionID,FieldMask>::aligned::const_iterator finder = 
+          current_versions.find(previous_number);
+        if (finder != current_versions.end())
+        {
+          FieldMask intersect = overlap & finder->second;
+          if (!!intersect)
+          {
+            advance[previous_number] = intersect;
+            overlap -= intersect;
+            if (!overlap)
+              continue;
+          }
+          // Bump the iterator to the next entry, hopefully 
+          // it is the next version number, but if not we'll figure it out
+          finder++;
+        }
+        else
+          finder = current_versions.find(next_number);
+        // Check if the finder is good and the right version number
+        if ((finder != current_versions.end()) && 
+            (finder->first == next_number))
+        {
+          FieldMask intersect = overlap & finder->second;
+          if (!!intersect)
+          {
+            // This is a write skip field since we're already
+            // at the version number at this view
+            write_skip_mask |= intersect;
+            overlap -= intersect;
+            if (!overlap)
+              continue;
+          }
+        }
+        // If we still have fields, then record we need to filter them
+        filter_mask |= overlap;
+        // Record the version number and fields to add after the filter
+        add_only[next_number] = overlap;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void MaterializedView::apply_version_updates(FieldMask &filter_mask,
+                        const LegionMap<VersionID,FieldMask>::aligned &advance,
+                        const LegionMap<VersionID,FieldMask>::aligned &add_only)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_HIGH_LEVEL
+      sanity_check_versions();
+#endif
+      if (!!filter_mask)
+        filter_and_add(filter_mask, add_only);
+      if (!advance.empty())
+      {
+        for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
+              advance.begin(); it != advance.end(); it++)
+        {
+          LegionMap<VersionID,FieldMask>::aligned::iterator finder = 
+            current_versions.find(it->first);
+          // Someone else could already have advanced this
+          if (finder == current_versions.end())
+            continue;
+          finder->second -= it->second;
+          if (!finder->second)
+            current_versions.erase(finder);
+          current_versions[it->first+1] |= it->second;
+        }
+      }
+#ifdef DEBUG_HIGH_LEVEL
+      sanity_check_versions();
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void MaterializedView::filter_and_add(FieldMask &filter_mask,
+                    const LegionMap<VersionID,FieldMask>::aligned &add_versions)
+    //--------------------------------------------------------------------------
+    {
+      std::vector<VersionID> to_delete; 
+      for (LegionMap<VersionID,FieldMask>::aligned::iterator it = 
+            current_versions.begin(); it != current_versions.end(); it++)
+      {
+        FieldMask overlap = it->second & filter_mask;
+        if (!overlap)
+          continue;
+        it->second -= overlap;
+        if (!it->second)
+          to_delete.push_back(it->first);
+        filter_mask -= overlap;
+        if (!filter_mask)
+          break;
+      }
+      // Delete the old entries
+      if (!to_delete.empty())
+      {
+        for (std::vector<VersionID>::const_iterator it = to_delete.begin();
+              it != to_delete.end(); it++)
+          current_versions.erase(*it);
+      }
+      // Then add the new entries
+      for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
+            add_versions.begin(); it != add_versions.end(); it++)
+        current_versions[it->first] |= it->second;
+    }
+
+    //--------------------------------------------------------------------------
+    bool MaterializedView::update_version_numbers(const FieldMask &user_mask,
+                                                const VersionInfo &version_info)
     //--------------------------------------------------------------------------
     {
       FieldVersions *versions = version_info.get_versions(logical_node); 
@@ -1108,167 +1284,101 @@ namespace Legion {
 #endif
       const LegionMap<VersionID,FieldMask>::aligned &field_versions = 
         versions->get_field_versions();
-      // The set of fields we need to update
-      FieldMask update_mask;
+      FieldMask filter_mask;
       LegionMap<VersionID,FieldMask>::aligned update_versions;
-      // Take the lock in exclusive mode and update the versions
-      // Any version numbers that we advance are ones that we can filter
-      do
-      {
-        AutoLock v_lock(view_lock);  
+      bool need_check_above = false;
+      // Need the lock in exclusive mode to do the update
+      AutoLock v_lock(view_lock);
 #ifdef DEBUG_HIGH_LEVEL
-        sanity_check_versions();
+      sanity_check_versions();
 #endif
-        // Check to see which fields need to be brought up to date
-        for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
-              field_versions.begin(); it != field_versions.end(); it++)
+      for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
+            field_versions.begin(); it != field_versions.end(); it++)
+      {
+        FieldMask overlap = it->second & user_mask;
+        if (!overlap)
+          continue;
+        // Special case for the zero version number
+        if (it->first == 0)
         {
-          FieldMask overlap = it->second & user_mask;
-          if (!overlap)
-            continue;
-          // Check to see if we are at this version number for these fields
-          LegionMap<VersionID,FieldMask>::aligned::iterator finder = 
-            current_versions.find(it->first);
-          if (finder != current_versions.end())
-          {
-            overlap -= finder->second;
-            if (!!overlap)
-            {
-              update_versions[it->first] = overlap;
-              update_mask |= overlap;
-            }
-          }
-          else
-          {
-            update_versions[it->first] = overlap;
-            update_mask |= overlap;
-          }
+          filter_mask |= overlap;
+          update_versions[1] = overlap;
+          continue;
         }
-        // If we don't have any fields to update then we are done
-        if (!update_mask)
+        // We are always trying to advance the version numbers here
+        // since these are writing users and are therefore going from
+        // the current version number to the next one. We'll check for
+        // the most common cases here, and only filter if we don't find them.
+        const VersionID previous_number = it->first; 
+        const VersionID next_number = it->first + 1; 
+        LegionMap<VersionID,FieldMask>::aligned::iterator finder = 
+          current_versions.find(previous_number);
+        if (finder != current_versions.end())
         {
-          // If we are remote we still need to check for pending
-          // requests that we might need to wait on
-          if (!is_owner() && !pending_update_requests.empty())
+          FieldMask intersect = overlap & finder->second;
+          if (!!intersect)
           {
-            bool local_updates = false;
-            for (LegionMap<Event,FieldMask>::aligned::const_iterator it = 
-                  pending_update_requests.begin(); it != 
-                  pending_update_requests.end(); it++)
+            need_check_above = true;
+            finder->second -= intersect;
+            if (!finder->second)
             {
-              if (it->second * user_mask)
-                continue;
-              wait_on.insert(it->first);
-              local_updates = true;
+              current_versions.erase(finder);
+              // We just deleted the iterator so we need a new one
+              finder = current_versions.find(next_number);
             }
-            // If we had local requests we need to keep going up,
-            // otherwise we know our ancestors are up to date too
-            if (local_updates)
-              break; // break out so we keep going up the tree
-            else
-              return false;
-          }
-          else // if our versions are up to data we know are ancestors are too
-            return false; // need check above
-        }
-        // We have update fields
-        // First send the request for any that haven't been sent yet
-        if (!is_owner())
-        {
-          // Figure out which fields we need to request
-          // also check for pending requests for our other fields
-          if (!pending_update_requests.empty())
-          {
-            FieldMask request_mask = update_mask;
-            for (LegionMap<Event,FieldMask>::aligned::const_iterator it = 
-                  pending_update_requests.begin(); it != 
-                  pending_update_requests.end(); it++)
+            else // We didn't delete the iterator so trying bumping it
+              finder++;
+            if (finder != current_versions.end())
             {
-              if (it->second * user_mask)
-                continue;
-              wait_on.insert(it->first);
-              request_mask -= it->second;
-            }
-            if (!!request_mask)
-            {
-              UserEvent request_event = UserEvent::create_user_event();
-              Serializer rez;
+              if (finder->first != next_number) 
               {
-                RezCheck z(rez);
-                rez.serialize(did);
-                rez.serialize(request_mask);
-                rez.serialize(request_event);
+                current_versions[next_number] = intersect;
+                // Set it to end since we know there is no point in checking
+                finder = current_versions.end();
               }
-              runtime->send_view_update_request(owner_space, rez);
-              pending_update_requests[request_event] = request_mask;
+              else // finder points to the right place
+                finder->second |= intersect;
             }
+            else // no valid iterator so just put in the value
+              current_versions[next_number] = intersect;
+            overlap -= intersect;
+            if (!overlap)
+              continue;
           }
-          else
+          else // Try the next element, hopefully it is version number+1
+            finder++;
+        }
+        else
+          finder = current_versions.find(next_number);
+        // Check if the finder is good and the right version number
+        if ((finder != current_versions.end()) && 
+            (finder->first == next_number))
+        {
+          FieldMask intersect = overlap & finder->second;
+          if (!!intersect)
           {
-            UserEvent update_event = UserEvent::create_user_event();
-            Serializer rez;
-            {
-              RezCheck z(rez);
-              rez.serialize(did);
-              rez.serialize(update_mask);
-              rez.serialize(update_event);
-            }
-            runtime->send_view_update_request(owner_space, rez);
-            pending_update_requests[update_event] = update_mask;
+            finder->second |= intersect;
+            overlap -= intersect;
+            if (!overlap)
+              continue;
           }
         }
-        // Filter any users for the fields being updated 
-        filter_previous_users(update_mask);
-        filter_current_users(update_mask);
-        // Filter the old version numbers
-        std::vector<VersionID> to_delete;
-        for (LegionMap<VersionID,FieldMask>::aligned::iterator it = 
-              current_versions.begin(); it != current_versions.end(); it++)
-        {
-          FieldMask overlap = it->second & update_mask;
-          if (!overlap)
-            continue;
-          it->second -= overlap;
-          if (!it->second)
-            to_delete.push_back(it->first);
-          update_mask -= overlap;
-          if (!update_mask)
-            break;
-        }
-        if (!to_delete.empty())
-        {
-          for (std::vector<VersionID>::const_iterator it = to_delete.begin();
-                it != to_delete.end(); it++)
-            current_versions.erase(*it);
-        }
-        // Insert our new version numbers
-        for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
-              update_versions.begin(); it != update_versions.end(); it++)
-        {
-          LegionMap<VersionID,FieldMask>::aligned::iterator finder = 
-            current_versions.find(it->first);
-          if (finder == current_versions.end())
-            current_versions.insert(*it);
-          else
-            finder->second |= it->second;
-        }
-#ifdef DEBUG_HIGH_LEVEL
-        sanity_check_versions();
-#endif
-      } while (false);  // release the lock
-      // If we're not the owner then we are here because we have update
-      // requests that have been sent, so we might as well keep going
-      // up the tree and find them all now
-      if (!is_owner())
-      {
-        if (parent != NULL)
-          return parent->update_versions(version_info, user_mask, wait_on);
-        // Once we've got them all we are done
-        return false;
+        // If we still have fields, then record we need to filter them
+        filter_mask |= overlap;
+        // Record the version number and fields to add after the filter
+        update_versions[next_number] = overlap;
       }
-      return true; 
-    }
+      // If we need to filter, let's do that now
+      if (!!filter_mask)
+      {
+        need_check_above = true;
+        filter_and_add(filter_mask, update_versions);  
+      }
+#ifdef DEBUG_HIGH_LEVEL
+      sanity_check_versions();
 #endif
+      return need_check_above;
+    }
 
 #ifdef DEBUG_HIGH_LEVEL
     //--------------------------------------------------------------------------

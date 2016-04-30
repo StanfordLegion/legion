@@ -271,6 +271,7 @@ namespace Legion {
       void find_local_copy_preconditions(ReductionOpID redop, bool reading,
                                          const FieldMask &copy_mask,
                                          const ColorPoint &child_color,
+                                         const VersionInfo &version_info,
                                          const UniqueID creator_op_id,
                                          const unsigned index,
                            LegionMap<Event,FieldMask>::aligned &preconditions);
@@ -326,7 +327,8 @@ namespace Legion {
                           const ColorPoint &child_color, 
                           const VersionInfo &version_info,
                           const UniqueID op_id, const unsigned index,
-                          const FieldMask &user_mask);
+                          const FieldMask &user_mask,
+                          const bool need_version_update);
       bool add_local_user(const RegionUsage &usage, Event term_event,
                           const ColorPoint &child_color, 
                           const UniqueID op_id, const unsigned index,
@@ -344,7 +346,8 @@ namespace Legion {
                                 const UniqueID op_id,
                                 const unsigned index,
                                 const FieldMask &user_mask,
-                                std::set<Event> &preconditions);
+                                std::set<Event> &preconditions,
+                                const bool need_version_update);
     public:
       virtual void add_initial_user(Event term_event,
                                     const RegionUsage &usage,
@@ -361,10 +364,26 @@ namespace Legion {
       virtual void send_view(AddressSpaceID target); 
       void update_gc_events(const std::deque<Event> &gc_events);
     protected:
-      // Return whether we need the check above
-      bool update_versions(const VersionInfo &version_info,
-                           const FieldMask &user_mask,
-                           std::set<Event> &wait_on);
+      // Update the version numbers
+      // These first two methods do two-phase updates for copies
+      // These methods must be called while holding the lock
+      // in non-exclusive and exclusive mode respectively
+      void find_version_updates(const FieldMask &user_mask,
+                                const VersionInfo &version_info,
+                                FieldMask &write_skip_mask,
+                                FieldMask &filter_mask,
+                            LegionMap<VersionID,FieldMask>::aligned &advance,
+                            LegionMap<VersionID,FieldMask>::aligned &add_only);
+      void apply_version_updates(FieldMask &filter_mask,
+                      const LegionMap<VersionID,FieldMask>::aligned &advance,
+                      const LegionMap<VersionID,FieldMask>::aligned &add_only);
+      // This method does one phase update and advance for users
+      // This one will take it's own lock
+      bool update_version_numbers(const FieldMask &user_mask,
+                                  const VersionInfo &version_info);
+    protected:
+      void filter_and_add(FieldMask &filter_mask,
+                const LegionMap<VersionID,FieldMask>::aligned &add_versions);
 #ifdef DEBUG_HIGH_LEVEL
       void sanity_check_versions(void);
 #endif
@@ -480,7 +499,6 @@ namespace Legion {
       // resilience or mis-speculation.
       LegionMap<VersionID,FieldMask,
                 PHYSICAL_VERSION_ALLOC>::track_aligned current_versions;
-      LegionMap<Event,FieldMask>::aligned pending_update_requests;
     protected:
       // Useful for pruning the initial users at cleanup time
       std::set<Event> initial_user_events;
