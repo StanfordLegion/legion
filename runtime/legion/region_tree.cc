@@ -2083,7 +2083,7 @@ namespace Legion {
                       Operation *op, unsigned index, int composite_idx,
                       const LegionMap<ColorPoint,FieldMask>::aligned &to_close,
                       const std::set<ColorPoint> &next_children,
-                      const InstanceSet &targets
+                      Event term_event, const InstanceSet &targets
 #ifdef DEBUG_HIGH_LEVEL
                       , const char *log_name
                       , UniqueID uid
@@ -2128,10 +2128,8 @@ namespace Legion {
 #ifdef DEBUG_HIGH_LEVEL
         assert(!targets.empty());
 #endif
-        closed = close_node->perform_close_operation(info, closing_mask,
-                                                     to_close, targets,
-                                                     version_info,
-                                                     next_children);
+        closed = close_node->perform_close_operation(info, closing_mask, 
+              to_close, targets, version_info, term_event, next_children);
       }
 #ifdef DEBUG_HIGH_LEVEL
       TreeStateLogger::capture_state(runtime, &req, index, log_name, uid,
@@ -12665,8 +12663,7 @@ namespace Legion {
     void RegionTreeNode::issue_update_copies(const TraversalInfo &info,
                                              MaterializedView *dst,
                                              FieldMask copy_mask,
-             const LegionMap<LogicalView*,FieldMask>::aligned &valid_instances,
-                                             CopyTracker *tracker /*= NULL*/)
+             const LegionMap<LogicalView*,FieldMask>::aligned &valid_instances)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime, REGION_NODE_ISSUE_UPDATE_COPIES_CALL);
@@ -12729,7 +12726,7 @@ namespace Legion {
 
         LegionMap<Event,FieldMask>::aligned postconditions;
         issue_grouped_copies(info, dst, preconditions, update_mask,
-                 src_instances, info.version_info, postconditions, tracker);
+                 src_instances, info.version_info, postconditions);
         // Tell the destination about all of the copies that were done
         for (LegionMap<Event,FieldMask>::aligned::const_iterator it = 
               postconditions.begin(); it != postconditions.end(); it++)
@@ -12747,7 +12744,7 @@ namespace Legion {
         for (LegionMap<DeferredView*,FieldMask>::aligned::const_iterator it =
               deferred_instances.begin(); it != deferred_instances.end(); it++)
         {
-          it->first->issue_deferred_copies(info, dst, it->second, tracker);
+          it->first->issue_deferred_copies(info, dst, it->second);
         }
       }
     }
@@ -12976,7 +12973,6 @@ namespace Legion {
            const LegionMap<MaterializedView*,FieldMask>::aligned &src_instances,
                                        const VersionInfo &src_version_info,
                             LegionMap<Event,FieldMask>::aligned &postconditions,
-                                             CopyTracker *tracker /*= NULL*/,
                                              CopyAcrossHelper *helper/*= NULL*/,
                                              RegionTreeNode *intersect/*=NULL*/)
     //--------------------------------------------------------------------------
@@ -13023,8 +13019,6 @@ namespace Legion {
         // Save the copy post in the post conditions
         if (copy_post.exists())
         {
-          if (tracker != NULL)
-            tracker->add_copy_event(copy_post);
           // Register copy post with the source views
           // Note it is up to the caller to make sure the event
           // gets registered with the destination
@@ -13124,8 +13118,7 @@ namespace Legion {
                                                  const FieldMask &mask,
                                                 const VersionInfo &version_info,
            const LegionMap<ReductionView*,FieldMask>::aligned &valid_reductions,
-                                                 Operation *op, unsigned index,
-                                                 CopyTracker *tracker/*= NULL*/)
+                                                 Operation *op, unsigned index)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime, 
@@ -13154,7 +13147,7 @@ namespace Legion {
 #endif
           // Then we have a reduction to perform
           it->first->perform_reduction(inst_target, copy_mask, 
-                                       version_info, op, index, tracker);
+                                       version_info, op, index);
         }
       }
     }
@@ -13397,8 +13390,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void RegionTreeNode::flush_reductions(const FieldMask &valid_mask,
                                           ReductionOpID redop,
-                                          const TraversalInfo &info,
-                                          CopyTracker *tracker /*= NULL*/)
+                                          const TraversalInfo &info)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime, REGION_NODE_FLUSH_REDUCTIONS_CALL);
@@ -13440,7 +13432,7 @@ namespace Legion {
             continue;
           FieldMask overlap = flush_mask & it->second; 
           issue_update_reductions(it->first, overlap, info.version_info,
-                          reduction_views, info.op, info.index, tracker);
+                                  reduction_views, info.op, info.index);
           // Save the overlap fields
           it->second = overlap;
           update_mask |= overlap;
@@ -14714,6 +14706,7 @@ namespace Legion {
                 const LegionMap<ColorPoint,FieldMask>::aligned &target_children,
                                               const InstanceSet &targets,
                                               VersionInfo &version_info,
+                                              Event term_event, 
                                       const std::set<ColorPoint> &next_children)
     //--------------------------------------------------------------------------
     {
@@ -14762,9 +14755,32 @@ namespace Legion {
       {
         FieldMask flush_reduction_mask = state->reduction_mask & closing_mask;
         if (!!flush_reduction_mask)
-          flush_reductions(flush_reduction_mask, 0/*redop*/, info, &closer);
+          flush_reductions(flush_reduction_mask, 0/*redop*/, info);
       }
-      return closer.get_termination_event();
+      // Register this as a user of the instance
+      RegionUsage usage(READ_WRITE, EXCLUSIVE, 0);
+      if (targets.size() == 1)
+      {
+        const InstanceRef &ref = targets[0];  
+#ifdef DEBUG_HIGH_LEVEL
+        assert(!ref.is_composite_ref());
+#endif
+        const FieldMask &close_mask = ref.get_valid_fields();
+        return target_views[0]->add_user_fused(usage, term_event, close_mask,
+                                          info.op, info.index, version_info);
+      }
+      std::set<Event> closed_events;
+      for (unsigned idx = 0; idx < targets.size(); idx++)
+      {
+        const InstanceRef &ref = targets[idx];
+#ifdef DEBUG_HIGH_LEVEL
+        assert(!ref.is_composite_ref());
+#endif
+        const FieldMask &close_mask = ref.get_valid_fields();
+        closed_events.insert(target_views[idx]->add_user_fused(usage, 
+              term_event, close_mask, info.op, info.index, version_info));
+      }
+      return Runtime::merge_events<false/*meta*/>(closed_events);
     }
 
     //--------------------------------------------------------------------------
@@ -16402,6 +16418,7 @@ namespace Legion {
                 const LegionMap<ColorPoint,FieldMask>::aligned &target_children,
                                                  const InstanceSet &targets,
                                                  VersionInfo &version_info,
+                                                 Event term_event,
                                       const std::set<ColorPoint> &next_children)
     //--------------------------------------------------------------------------
     {
@@ -16424,7 +16441,6 @@ namespace Legion {
       }
       if (!!leave_open_all && !targets.empty() && row_source->is_disjoint())
       {
-        std::set<Event> closed_event_set;
         for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it = 
               target_children.begin(); it != target_children.end(); it++)
         {
@@ -16446,7 +16462,6 @@ namespace Legion {
                                                child_state, leave_open_all,
                                                empty_next_children);
           child_closer.update_node_views(child_node, child_state);
-          closed_event_set.insert(child_closer.get_termination_event());
         }
         // See if we have any fields we haven't closed yet
         FieldMask unclosed = closing_mask - leave_open_all; 
@@ -16486,10 +16501,7 @@ namespace Legion {
             state->children.valid_fields = next_valid;
           }   
           closer.update_node_views(this, state);
-          closed_event_set.insert(closer.get_termination_event());
         }
-        // Finally merge our closed events
-        return Runtime::merge_events<false>(closed_event_set);
       }
       else
       {
@@ -16530,8 +16542,31 @@ namespace Legion {
         closer.update_node_views(this, state);
         // No need to check for flushed reductions, nobody can be
         // reducing directly to a partition object anyway
-        return closer.get_termination_event();
       }
+      // Register this as a user of the instance
+      RegionUsage usage(READ_WRITE, EXCLUSIVE, 0);
+      if (targets.size() == 1)
+      {
+        const InstanceRef &ref = targets[0];  
+#ifdef DEBUG_HIGH_LEVEL
+        assert(!ref.is_composite_ref());
+#endif
+        const FieldMask &close_mask = ref.get_valid_fields();
+        return target_views[0]->add_user_fused(usage, term_event, close_mask,
+                                          info.op, info.index, version_info);
+      }
+      std::set<Event> closed_events;
+      for (unsigned idx = 0; idx < targets.size(); idx++)
+      {
+        const InstanceRef &ref = targets[idx];
+#ifdef DEBUG_HIGH_LEVEL
+        assert(!ref.is_composite_ref());
+#endif
+        const FieldMask &close_mask = ref.get_valid_fields();
+        closed_events.insert(target_views[idx]->add_user_fused(usage, 
+              term_event, close_mask, info.op, info.index, version_info));
+      }
+      return Runtime::merge_events<false/*meta*/>(closed_events);
     }
 
     //--------------------------------------------------------------------------

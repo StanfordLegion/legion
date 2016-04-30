@@ -2624,19 +2624,6 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    CopyTracker::CopyTracker(void)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    Event CopyTracker::get_termination_event(void) const
-    //--------------------------------------------------------------------------
-    {
-      return Runtime::merge_events<false>(copy_events);
-    }
-
-    //--------------------------------------------------------------------------
     LogicalCloser::LogicalCloser(ContextID c, const LogicalUser &u, 
                                  bool val, bool capture)
       : ctx(c), user(u), validates(val), capture_users(capture)
@@ -3157,12 +3144,10 @@ namespace Legion {
           // We can skip fields for which we are already valid
           FieldMask invalid_mask = space_mask - finder->second;
           if (!!invalid_mask)
-            origin->issue_update_copies(info, *it, invalid_mask,
-                                        valid_views, this);
+            origin->issue_update_copies(info, *it, invalid_mask, valid_views);
         }
         else // update all the incomplete fields we have
-          origin->issue_update_copies(info, *it, space_mask,
-                                      valid_views, this);
+          origin->issue_update_copies(info, *it, space_mask, valid_views);
       }
       // Then we can record the targets
       upper_targets = targets;
@@ -3217,8 +3202,7 @@ namespace Legion {
             continue;
         }
         // Now we need to issue update copies for the valid fields
-        node->issue_update_copies(info, target, needed_fields,
-                                  valid_instances, this);
+        node->issue_update_copies(info, target, needed_fields, valid_instances);
       }
     }
 
@@ -3238,7 +3222,7 @@ namespace Legion {
         if (!needed_fields)
           continue;
         node->issue_update_reductions(lower_targets[idx], needed_fields,
-              info.version_info, valid_reductions, info.op, info.index, this);
+              info.version_info, valid_reductions, info.op, info.index);
       }
     }
 

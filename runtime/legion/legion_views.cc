@@ -2466,8 +2466,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void DeferredView::issue_deferred_copies(const TraversalInfo &info,
                                               MaterializedView *dst,
-                                              const FieldMask &copy_mask,
-                                              CopyTracker *tracker)
+                                              const FieldMask &copy_mask)
     //--------------------------------------------------------------------------
     {
       // Find the destination preconditions first 
@@ -2477,8 +2476,8 @@ namespace Legion {
                                    info.op->get_unique_op_id(),
                                    info.index, preconditions);
       LegionMap<Event,FieldMask>::aligned postconditions;
-      issue_deferred_copies(info, dst, copy_mask, preconditions, 
-                            postconditions, tracker);
+      issue_deferred_copies(info, dst, copy_mask, 
+                            preconditions, postconditions);
       // Register the resulting events as users of the destination
       for (LegionMap<Event,FieldMask>::aligned::const_iterator it = 
             postconditions.begin(); it != postconditions.end(); it++)
@@ -2526,7 +2525,7 @@ namespace Legion {
         dst->manager->initialize_across_helper(&across_helper, dst_mask, 
                                                src_indexes, dst_indexes);
         issue_deferred_copies(info, dst, src_mask, preconditions, 
-                              local_postconditions, NULL, &across_helper);
+                              local_postconditions, &across_helper);
       }
       // Put the local postconditions in the result
       for (LegionMap<Event,FieldMask>::aligned::const_iterator it = 
@@ -2769,7 +2768,6 @@ namespace Legion {
                                               const FieldMask &copy_mask,
                       const LegionMap<Event,FieldMask>::aligned &preconditions,
                             LegionMap<Event,FieldMask>::aligned &postconditions,
-                                              CopyTracker *tracker,
                                               CopyAcrossHelper *across_helper)
     //--------------------------------------------------------------------------
     {
@@ -2779,7 +2777,7 @@ namespace Legion {
       root->issue_deferred_copies(info, dst, copy_mask, 
                                   version_info->get_version_info(), 
                                   preconditions, postconditions, 
-                                  postreductions, tracker, across_helper);
+                                  postreductions, across_helper);
       if (!postreductions.empty())
       {
         // We need to merge the two post sets
@@ -3218,7 +3216,6 @@ namespace Legion {
                       const LegionMap<Event,FieldMask>::aligned &preconditions,
                             LegionMap<Event,FieldMask>::aligned &postconditions,
                             LegionMap<Event,FieldMask>::aligned &postreductions,
-                                              CopyTracker *tracker, 
                                               CopyAcrossHelper *across_helper,
                                               bool check_root) const
     //--------------------------------------------------------------------------
@@ -3244,7 +3241,7 @@ namespace Legion {
             // but don't traverse the children since we're already doing it
             child->issue_deferred_copies(info, dst, copy_mask, src_version_info,
                                   preconditions, local_postconditions, 
-                                  postreductions, tracker, across_helper,
+                                  postreductions, across_helper,
                                   true/*check root*/);
             traverse_children = false;
           }
@@ -3252,7 +3249,7 @@ namespace Legion {
           {
             child->issue_deferred_copies(info, dst, copy_mask, src_version_info,
                                   preconditions, postconditions, postreductions,
-                                  tracker, across_helper, true/*check root*/);
+                                  across_helper, true/*check root*/);
             return;
           }
         }
@@ -3272,13 +3269,13 @@ namespace Legion {
             {
               issue_update_copies(info, dst, copy_mask, src_version_info,
                           preconditions, postconditions, all_valid_views, 
-                          tracker, across_helper);
+                          across_helper);
               return;
             }
             else
               issue_update_copies(info, dst, copy_mask, src_version_info,
                     preconditions, local_postconditions, all_valid_views, 
-                    tracker, across_helper);
+                    across_helper);
           }
         }
       }
@@ -3296,14 +3293,12 @@ namespace Legion {
             if (children.empty() && reduction_views.empty())
             {
               issue_update_copies(info, dst, update_mask, src_version_info,
-                                preconditions, postconditions, valid_views, 
-                                tracker, across_helper);
+                  preconditions, postconditions, valid_views, across_helper);
               return;
             }
             else
               issue_update_copies(info, dst, update_mask, src_version_info,
-                          preconditions, local_postconditions, valid_views, 
-                          tracker, across_helper);
+               preconditions, local_postconditions, valid_views, across_helper);
           }
         }
       }
@@ -3365,8 +3360,7 @@ namespace Legion {
           // Now traverse the child
           it->first->issue_deferred_copies(info, dst, overlap, src_version_info,
                             *local_preconditions, local_postconditions, 
-                            postreductions, tracker, across_helper, 
-                            false/*check root*/);
+                            postreductions, across_helper, false/*check root*/);
         }
       }
       // Handle any reductions we might have
@@ -3374,18 +3368,18 @@ namespace Legion {
       {
         if (local_preconditions != NULL)
           issue_update_reductions(info, dst, copy_mask, src_version_info,
-              *local_preconditions, postreductions, tracker, across_helper);
+              *local_preconditions, postreductions, across_helper);
         else if (!local_postconditions.empty())
         {
           temp_preconditions = local_postconditions;
           temp_preconditions.insert(preconditions.begin(),
                                     preconditions.end());
           issue_update_reductions(info, dst, copy_mask, src_version_info,
-              temp_preconditions, postreductions, tracker, across_helper);
+              temp_preconditions, postreductions, across_helper);
         }
         else
           issue_update_reductions(info, dst, copy_mask, src_version_info,
-              preconditions, postreductions, tracker, across_helper);
+              preconditions, postreductions, across_helper);
       }
       // Quick out if we don't have any postconditions
       if (local_postconditions.empty())
@@ -3530,7 +3524,7 @@ namespace Legion {
                   const LegionMap<Event,FieldMask>::aligned &preconditions,
                         LegionMap<Event,FieldMask>::aligned &postconditions,
                   const LegionMap<LogicalView*,FieldMask>::aligned &views,
-                    CopyTracker *tracker, CopyAcrossHelper *across_helper) const
+                        CopyAcrossHelper *across_helper) const
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(logical_node->context->runtime,
@@ -3595,7 +3589,7 @@ namespace Legion {
         // We are the intersect
         dst->logical_node->issue_grouped_copies(info, dst, src_preconditions,
                                  actual_copy_mask, src_instances, 
-                                 src_version_info, postconditions, tracker, 
+                                 src_version_info, postconditions, 
                                  across_helper, logical_node);
       }
       if (!deferred_instances.empty())
@@ -3605,7 +3599,7 @@ namespace Legion {
               deferred_instances.begin(); it != deferred_instances.end(); it++)
         {
           it->first->issue_deferred_copies(info, dst, it->second,
-                        preconditions, postconditions, tracker, across_helper);
+                        preconditions, postconditions, across_helper);
         }
       }
     }
@@ -3617,7 +3611,7 @@ namespace Legion {
                                             const VersionInfo &src_version_info,
                       const LegionMap<Event,FieldMask>::aligned &preconditions,
                             LegionMap<Event,FieldMask>::aligned &postreductions,
-                    CopyTracker *tracker, CopyAcrossHelper *across_helper) const
+                            CopyAcrossHelper *across_helper) const
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(logical_node->context->runtime,
@@ -3646,11 +3640,7 @@ namespace Legion {
             (dst->logical_node == it->first->logical_node) ?
               NULL : it->first->logical_node);
         if (reduce_event.exists())
-        {
           postreductions[reduce_event] = overlap;
-          if (tracker != NULL)
-            tracker->add_copy_event(reduce_event);
-        }
       }
     }
 
@@ -4009,7 +3999,6 @@ namespace Legion {
                                          const FieldMask &copy_mask,
                       const LegionMap<Event,FieldMask>::aligned &preconditions,
                             LegionMap<Event,FieldMask>::aligned &postconditions,
-                                         CopyTracker *tracker,
                                          CopyAcrossHelper *across_helper)
     //--------------------------------------------------------------------------
     {
@@ -4034,11 +4023,7 @@ namespace Legion {
                                   value->value, value->value_size, fill_pre, 
                   (logical_node == dst->logical_node) ? NULL : logical_node);
         if (fill_post.exists())
-        {
-          if (tracker != NULL)
-            tracker->add_copy_event(fill_post);
           postconditions[fill_post] = pre_set.set_mask;
-        }
       }
     }
 
@@ -4167,8 +4152,7 @@ namespace Legion {
     void ReductionView::perform_reduction(InstanceView *target,
                                           const FieldMask &reduce_mask,
                                           const VersionInfo &version_info,
-                                          Operation *op, unsigned index,
-                                          CopyTracker *tracker /*= NULL*/)
+                                          Operation *op, unsigned index)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime,REDUCTION_VIEW_PERFORM_REDUCTION_CALL);
@@ -4198,8 +4182,6 @@ namespace Legion {
              op->get_unique_op_id(), index, reduce_mask, false/*reading*/);
       this->add_copy_user(manager->redop, reduce_post, version_info,
              op->get_unique_op_id(), index, reduce_mask, true/*reading*/);
-      if (tracker != NULL)
-        tracker->add_copy_event(reduce_post);
     } 
 
     //--------------------------------------------------------------------------

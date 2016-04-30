@@ -537,8 +537,8 @@ namespace Legion {
       ReductionView& operator=(const ReductionView&rhs);
     public:
       void perform_reduction(InstanceView *target, const FieldMask &copy_mask, 
-                             const VersionInfo &version_info, Operation *op, 
-                             unsigned index, CopyTracker *tracker = NULL);
+                             const VersionInfo &version_info, 
+                             Operation *op, unsigned index);
       Event perform_deferred_reduction(MaterializedView *target,
                                         const FieldMask &copy_mask,
                                         const VersionInfo &version_info,
@@ -685,8 +685,7 @@ namespace Legion {
     public:
       void issue_deferred_copies(const TraversalInfo &info,
                                  MaterializedView *dst,
-                                 const FieldMask &copy_mask,
-                                 CopyTracker *tracker = NULL);
+                                 const FieldMask &copy_mask);
       void issue_deferred_copies_across(const TraversalInfo &info,
                                         MaterializedView *dst,
                                   const std::vector<unsigned> &src_indexes,
@@ -706,7 +705,6 @@ namespace Legion {
                                          const FieldMask &copy_mask,
                     const LegionMap<Event,FieldMask>::aligned &preconditions,
                           LegionMap<Event,FieldMask>::aligned &postconditions,
-                                         CopyTracker *tracker = NULL,
                                          CopyAcrossHelper *helper = NULL) = 0; 
     };
 
@@ -771,7 +769,6 @@ namespace Legion {
                                          const FieldMask &copy_mask,
                     const LegionMap<Event,FieldMask>::aligned &preconditions,
                           LegionMap<Event,FieldMask>::aligned &postconditions,
-                                         CopyTracker *tracker = NULL,
                                          CopyAcrossHelper *helper = NULL);
     public:
       static void handle_send_composite_view(Runtime *runtime, 
@@ -824,8 +821,7 @@ namespace Legion {
               const LegionMap<Event,FieldMask>::aligned &preconditions,
                     LegionMap<Event,FieldMask>::aligned &postconditions,
                     LegionMap<Event,FieldMask>::aligned &postreductions,
-                           CopyTracker *tracker, CopyAcrossHelper *helper,
-                           bool check_root = true) const;
+                    CopyAcrossHelper *helper, bool check_root = true) const;
       CompositeNode* find_next_root(RegionTreeNode *target) const;
       void find_valid_views(const FieldMask &search_mask,
                       LegionMap<LogicalView*,FieldMask>::aligned &valid) const;
@@ -834,14 +830,14 @@ namespace Legion {
                       const LegionMap<Event,FieldMask>::aligned &preconditions,
                             LegionMap<Event,FieldMask>::aligned &postconditions,
                       const LegionMap<LogicalView*,FieldMask>::aligned &views,
-                         CopyTracker *tracker, CopyAcrossHelper *helper) const;
+                            CopyAcrossHelper *helper) const;
       void issue_update_reductions(const TraversalInfo &info, 
                                    MaterializedView *dst, 
                                    const FieldMask &copy_mask,
                                    const VersionInfo &src_version_info,
                       const LegionMap<Event,FieldMask>::aligned &preconditions,
                             LegionMap<Event,FieldMask>::aligned &postconditions,
-                         CopyTracker *tracker, CopyAcrossHelper *helper) const;
+                            CopyAcrossHelper *helper) const;
     public:
       void pack_composite_tree(Serializer &rez, AddressSpaceID target);
       void unpack_composite_tree(Deserializer &derez, AddressSpaceID source,
@@ -919,7 +915,6 @@ namespace Legion {
                                          const FieldMask &copy_mask,
                     const LegionMap<Event,FieldMask>::aligned &preconditions,
                           LegionMap<Event,FieldMask>::aligned &postconditions,
-                                         CopyTracker *tracker = NULL,
                                          CopyAcrossHelper *helper = NULL);
     public:
       static void handle_send_fill_view(Runtime *runtime, Deserializer &derez,

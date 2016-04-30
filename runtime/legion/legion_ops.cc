@@ -4731,7 +4731,8 @@ namespace Legion {
         runtime->forest->physical_perform_close(physical_ctx, requirement,
                                                 version_info, this, 0/*idx*/, 
                                                 composite_idx, target_children,
-                                                next_children, chosen_instances
+                                                next_children, completion_event,
+                                                chosen_instances
 #ifdef DEBUG_HIGH_LEVEL
                                                 , get_logging_name()
                                                 , unique_op_id

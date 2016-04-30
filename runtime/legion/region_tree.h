@@ -343,7 +343,7 @@ namespace Legion {
                                    int composite_index,
                     const LegionMap<ColorPoint,FieldMask>::aligned &to_close,
                     const std::set<ColorPoint> &next_children,
-                    const InstanceSet &targets
+                    Event term_event, const InstanceSet &targets
 #ifdef DEBUG_HIGH_LEVEL
                                   , const char *log_name
                                   , UniqueID uid
@@ -1506,8 +1506,7 @@ namespace Legion {
       void issue_update_copies(const TraversalInfo &info,
                                MaterializedView *target, 
                                FieldMask copy_mask,
-            const LegionMap<LogicalView*,FieldMask>::aligned &valid_instances,
-                               CopyTracker *tracker = NULL);
+            const LegionMap<LogicalView*,FieldMask>::aligned &valid_instances);
       void sort_copy_instances(const TraversalInfo &info,
                                MaterializedView *target,
                                FieldMask &copy_mask,
@@ -1522,7 +1521,6 @@ namespace Legion {
            const LegionMap<MaterializedView*,FieldMask>::aligned &src_instances,
                                 const VersionInfo &src_version_info,
                       LegionMap<Event,FieldMask>::aligned &postconditions,
-                                CopyTracker *tracker = NULL,
                                 CopyAcrossHelper *across_helper = NULL,
                                 RegionTreeNode *intersect = NULL);
       static void compute_event_sets(FieldMask update_mask,
@@ -1532,8 +1530,7 @@ namespace Legion {
                                    const FieldMask &update_mask,
                                    const VersionInfo &version_info,
           const LegionMap<ReductionView*,FieldMask>::aligned &valid_reductions,
-                                   Operation *op, unsigned index,
-                                   CopyTracker *tracker = NULL);
+                                   Operation *op, unsigned index);
       void invalidate_instance_views(PhysicalState *state,
                                      const FieldMask &invalid_mask); 
       void invalidate_reduction_views(PhysicalState *state,
@@ -1557,8 +1554,7 @@ namespace Legion {
                                   const FieldMask &valid_mask,
                                   ReductionView *new_view);
       void flush_reductions(const FieldMask &flush_mask, ReductionOpID redop, 
-                            const TraversalInfo &info,
-                            CopyTracker *tracker = NULL);
+                            const TraversalInfo &info);
     public: // Help for physical analysis
       void find_complete_fields(const FieldMask &scope_fields,
           const LegionMap<ColorPoint,FieldMask>::aligned &children,
@@ -1641,6 +1637,7 @@ namespace Legion {
                 const LegionMap<ColorPoint,FieldMask>::aligned &target_children,
                                             const InstanceSet &targets, 
                                             VersionInfo &version_info,
+                                            Event term_event,
                                  const std::set<ColorPoint> &next_children) = 0;
       virtual void send_node(AddressSpaceID target) = 0;
       virtual InstanceView* find_context_view(PhysicalManager *manager, 
@@ -1782,6 +1779,7 @@ namespace Legion {
                 const LegionMap<ColorPoint,FieldMask>::aligned &target_children,
                                             const InstanceSet &targets,
                                             VersionInfo &version_info,
+                                            Event term_event,
                                      const std::set<ColorPoint> &next_children);
       virtual void send_node(AddressSpaceID target);
       static void handle_node_creation(RegionTreeForest *context,
@@ -1967,6 +1965,7 @@ namespace Legion {
                 const LegionMap<ColorPoint,FieldMask>::aligned &target_children,
                                             const InstanceSet &targets,
                                             VersionInfo &version_info,
+                                            Event term_event,
                                      const std::set<ColorPoint> &next_children);
       virtual void send_node(AddressSpaceID target);
     public:

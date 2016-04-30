@@ -1221,21 +1221,11 @@ namespace Legion {
       InstanceSet *const targets;
     };
 
-    struct CopyTracker {
-    public:
-      CopyTracker(void);
-    public:
-      inline void add_copy_event(Event e) { copy_events.insert(e); } 
-      Event get_termination_event(void) const;
-    protected:
-      std::set<Event> copy_events;
-    };
-
     /**
      * \struct PhysicalCloser
      * Class for helping with the closing of physical region trees
      */
-    class PhysicalCloser : public CopyTracker {
+    class PhysicalCloser {
     public:
       PhysicalCloser(const TraversalInfo &info,
                      LogicalRegion closing_handle);
@@ -1276,7 +1266,6 @@ namespace Legion {
       std::vector<MaterializedView*> upper_targets;
       std::vector<MaterializedView*> lower_targets;
       InstanceSet                    close_targets;
-      std::set<Event>                 close_events;
     }; 
 
     /**
