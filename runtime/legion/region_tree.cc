@@ -132,8 +132,13 @@ namespace LegionRuntime {
     {
       IndexSpaceNode *parent_node = get_node(parent);
       if (!part_color.is_valid())
+      {
         part_color = ColorPoint(DomainPoint::from_point<1>(
                               Arrays::Point<1>(parent_node->generate_color())));
+        printf("Index Partition (%d, %d) assigned color %d parent (%d, %d)\n",
+            pid.id, pid.tid, part_color[0],
+            parent.get_id(), parent.get_tree_id());
+      }
       IndexPartNode *new_part;
       UserEvent disjointness_event = UserEvent::NO_USER_EVENT;
       if (part_kind == COMPUTE_KIND)
@@ -6094,7 +6099,11 @@ namespace LegionRuntime {
         assert(rlast->first.get_dim() == 1);
 #endif
         // We know all colors for index spaces are 0-D
-        result = rlast->first[0] + stride;
+        Color new_color =
+          (rlast->first[0] + (stride - 1)) / stride * stride +
+          context->runtime->get_start_color();
+        if (new_color == (Color)rlast->first[0]) new_color += stride;
+        result = new_color;
       }
       else
         result = context->runtime->get_start_color();
