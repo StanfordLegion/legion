@@ -1998,7 +1998,8 @@ namespace Legion {
             node_info.field_versions = new FieldVersions();
             node_info.field_versions->add_reference();
           }
-          node_info.field_versions->add_field_version(init_version,unversioned);
+          // The field version we record should be field zero
+          node_info.field_versions->add_field_version(0,unversioned);
           VersionStateInfo &info = current_version_infos[init_version];
           // See if we have any fields to test
           if (!(info.valid_fields * unversioned))
@@ -2066,7 +2067,7 @@ namespace Legion {
             node_info.field_versions = new FieldVersions();
             node_info.field_versions->add_reference();
           }
-          node_info.field_versions->add_field_version(init_version,unversioned);
+          node_info.field_versions->add_field_version(0,unversioned);
           VersionStateInfo &info = current_version_infos[init_version];
           VersionState *init_state = create_new_version_state(init_version);
           init_state->add_base_valid_ref(CURRENT_STATE_REF);

@@ -935,7 +935,8 @@ namespace Legion {
                                            Event term_event,
                                            const FieldMask &user_mask, 
                                            Operation *op, const unsigned index,
-                                           const VersionInfo &version_info)
+                                           const VersionInfo &version_info,
+                                           bool update_versions/*=true*/)
     //--------------------------------------------------------------------------
     {
       std::set<Event> wait_on_events;
@@ -947,7 +948,7 @@ namespace Legion {
       find_local_user_preconditions(usage, term_event, ColorPoint(), op_id, 
                                     index, user_mask, wait_on_events);
       bool need_version_update = false;
-      if (IS_WRITE(usage))
+      if (IS_WRITE(usage) && update_versions)
         need_version_update = update_version_numbers(user_mask, version_info);
       // Go up the tree if necessary
       if ((parent != NULL) && !version_info.is_upper_bound_node(logical_node))
@@ -4507,7 +4508,8 @@ namespace Legion {
                                         Event term_event,
                                         const FieldMask &user_mask, 
                                         Operation *op, const unsigned index,
-                                        const VersionInfo &version_info)
+                                        const VersionInfo &version_info,
+                                        bool update_versions/*=true*/)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_HIGH_LEVEL

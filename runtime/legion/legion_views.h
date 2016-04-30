@@ -143,7 +143,8 @@ namespace Legion {
       virtual Event add_user_fused(const RegionUsage &user, Event term_event,
                                    const FieldMask &user_mask, 
                                    Operation *op, const unsigned index,
-                                   const VersionInfo &version_info) = 0;
+                                   const VersionInfo &version_info,
+                                   bool update_versions = true) = 0;
       virtual void add_initial_user(Event term_event,
                                     const RegionUsage &usage,
                                     const FieldMask &user_mask,
@@ -338,7 +339,8 @@ namespace Legion {
       virtual Event add_user_fused(const RegionUsage &user, Event term_event,
                                    const FieldMask &user_mask, 
                                    Operation *op, const unsigned index,
-                                   const VersionInfo &version_info);
+                                   const VersionInfo &version_info,
+                                   bool update_versions = true);
     protected:
       void add_user_above_fused(const RegionUsage &usage, Event term_event,
                                 const ColorPoint &child_color,
@@ -589,7 +591,8 @@ namespace Legion {
       virtual Event add_user_fused(const RegionUsage &user, Event term_event,
                                    const FieldMask &user_mask, 
                                    Operation *op, const unsigned index,
-                                   const VersionInfo &version_info);
+                                   const VersionInfo &version_info,
+                                   bool update_versions = true);
       virtual void add_initial_user(Event term_event,
                                     const RegionUsage &usage,
                                     const FieldMask &user_mask,

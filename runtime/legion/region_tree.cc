@@ -2505,7 +2505,7 @@ namespace Legion {
       // Add the user to the source view and then record the resulting
       // event as a the intial user for the destination view
       Event init_event = src_view->add_user_fused(usage, ready_event, user_mask,
-                                                  context, index, version_info);
+                        context, index, version_info, false/*update versions*/);
       if (init_event.exists())
       {
         dst_view->add_initial_user(init_event, usage, user_mask,
