@@ -135,9 +135,6 @@ namespace LegionRuntime {
       {
         part_color = ColorPoint(DomainPoint::from_point<1>(
                               Arrays::Point<1>(parent_node->generate_color())));
-        printf("Index Partition (%d, %d) assigned color %d parent (%d, %d)\n",
-            pid.id, pid.tid, part_color[0],
-            parent.get_id(), parent.get_tree_id());
       }
       IndexPartNode *new_part;
       UserEvent disjointness_event = UserEvent::NO_USER_EVENT;
