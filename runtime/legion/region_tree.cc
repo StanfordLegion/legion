@@ -2293,6 +2293,16 @@ namespace LegionRuntime {
       std::vector<Domain::CopySrcDstField> dst_fields;
       Event dst_pre = dst_ref.get_ready_event(); 
       Event precondition = Event::merge_events(pre, dst_pre);
+#ifdef LEGION_SPY
+      if (!precondition.exists())
+      {
+        UserEvent new_precondition = UserEvent::create_user_event();
+        new_precondition.trigger();
+        precondition = new_precondition;
+      }
+      LegionSpy::log_event_dependence(pre, precondition);
+      LegionSpy::log_event_dependence(dst_pre, precondition);
+#endif
       // Also compute all of the source preconditions for each instance
       std::map<MaterializedView*,
         LegionMap<Event,FieldMask>::aligned > src_preconditions;
@@ -2347,8 +2357,8 @@ namespace LegionRuntime {
                 UserEvent new_copy_pre = UserEvent::create_user_event();
                 new_copy_pre.trigger();
                 copy_pre = new_copy_pre;
-                LegionSpy::log_event_dependences(preconditions, copy_pre);
               }
+              LegionSpy::log_event_dependences(preconditions, copy_pre);
               if (!copy_post.exists())
               {
                 UserEvent new_copy_post = UserEvent::create_user_event();
@@ -2480,16 +2490,17 @@ namespace LegionRuntime {
           UserEvent new_copy_pre = UserEvent::create_user_event();
           new_copy_pre.trigger();
           copy_pre = new_copy_pre;
-          LegionSpy::log_event_dependence(src_ref.get_ready_event(), copy_pre);
-          LegionSpy::log_event_dependence(dst_ref.get_ready_event(), copy_pre);
-          LegionSpy::log_event_dependence(precondition, copy_pre);
-          LegionSpy::log_event_dependence(dom_precondition, copy_pre);
         }
+        LegionSpy::log_event_dependence(src_ref.get_ready_event(), copy_pre);
+        LegionSpy::log_event_dependence(dst_ref.get_ready_event(), copy_pre);
+        LegionSpy::log_event_dependence(precondition, copy_pre);
+        LegionSpy::log_event_dependence(dom_precondition, copy_pre);
         if (!copy_result.exists())
         {
           UserEvent new_copy_result = UserEvent::create_user_event();
           new_copy_result.trigger();
           copy_result = new_copy_result;
+          result_events.insert(copy_result);
         }
         LegionSpy::log_copy_across_events(op->get_unique_op_id(),
             copy_pre, copy_result,
@@ -2506,8 +2517,8 @@ namespace LegionRuntime {
         UserEvent new_result = UserEvent::create_user_event();
         new_result.trigger();
         result = new_result;
-        LegionSpy::log_event_dependences(result_events, result);
       }
+      LegionSpy::log_event_dependences(result_events, result);
 #endif
       // Note we don't need to add the copy users because
       // we already mapped these regions as part of the CopyOp.
@@ -2606,16 +2617,17 @@ namespace LegionRuntime {
           UserEvent new_copy_pre = UserEvent::create_user_event();
           new_copy_pre.trigger();
           copy_pre = new_copy_pre;
-          LegionSpy::log_event_dependence(src_ref.get_ready_event(), copy_pre);
-          LegionSpy::log_event_dependence(dst_ref.get_ready_event(), copy_pre);
-          LegionSpy::log_event_dependence(precondition, copy_pre);
-          LegionSpy::log_event_dependence(dom_precondition, copy_pre);
         }
+        LegionSpy::log_event_dependence(src_ref.get_ready_event(), copy_pre);
+        LegionSpy::log_event_dependence(dst_ref.get_ready_event(), copy_pre);
+        LegionSpy::log_event_dependence(precondition, copy_pre);
+        LegionSpy::log_event_dependence(dom_precondition, copy_pre);
         if (!copy_result.exists())
         {
           UserEvent new_copy_result = UserEvent::create_user_event();
           new_copy_result.trigger();
           copy_result = new_copy_result;
+          result_events.insert(copy_result);
         }
         LegionSpy::log_copy_across_events(op->get_unique_op_id(),
             copy_pre, copy_result,
