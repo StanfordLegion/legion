@@ -12688,8 +12688,9 @@ namespace Legion {
     void Runtime::replace_default_mapper(Mapper *mapper, Processor proc)
     //--------------------------------------------------------------------------
     {
+	    Mapper *wrapper_mapper = new Mapping::WrapperMapper(mapper, machine, proc);
       // First, wrap this mapper in a mapper manager
-      MapperManager *manager = wrap_mapper(this, mapper, 0, proc); 
+      MapperManager *manager = wrap_mapper(this, wrapper_mapper, 0, proc); 
       if (!proc.exists())
       {
         bool own = true;

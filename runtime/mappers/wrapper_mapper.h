@@ -29,6 +29,7 @@ namespace Legion {
 			static std::map<Memory, int> mems_map;
 			static std::map<int, std::string> task_names_map;
 			static bool inputtaken;
+			static bool databroadcasted;
 			static Processor ownerprocessor;
 			static int messagecount;
 			static MapperEvent mapevent;
